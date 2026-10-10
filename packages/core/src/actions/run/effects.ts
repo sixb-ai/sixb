@@ -1,91 +1,103 @@
 import { reportActionPhaseFailure } from "../../error-reporting/capability"
-import type { JsonValue } from "../../json"
-import type { ActionRunRecord } from "../../storage"
+import type { Logger } from "../../logging"
+import { resolveLoggingService } from "../../logging/service"
+import type { RecordActionEffectsInput } from "../../storage"
 import type { ActionEditCommitResult } from "../commit-edits"
+import type { ActionDefinition } from "../types"
 import { isObjectActionDefinition } from "../validation"
-import { type BasePhaseContext, requireObjectSubject, toActionRuntimeFacade } from "./context"
+import { createBasePhaseContext, requireObjectSubject, toActionRuntimeFacade } from "./context"
 import { toActionRunFailure, translateActionPhaseError } from "./normalize"
-import type { PhaseExecutionBase, UpdateActiveRun } from "./phase-types"
+import type { ActionDeadline } from "./signals"
+import type { ActionRunState } from "./state"
+import type { ActionRunContext } from "./types"
 
-export async function runEffectsPhase(
-  input: PhaseExecutionBase & {
-    readonly run: ActionRunRecord
-    readonly baseContext: BasePhaseContext
-    readonly writeback: JsonValue | undefined
-    readonly commit: ActionEditCommitResult
-    readonly updateActiveRun: UpdateActiveRun
-  }
-): Promise<ActionRunRecord> {
-  if (!input.action.phases.effects) {
-    return input.run
-  }
+export interface RunActionEffectsInput {
+  readonly runtime: ActionRunContext
+  readonly action: ActionDefinition
+  /** The run, recorded as succeeded with the commit its effects receive. */
+  readonly state: ActionRunState
+  readonly commit: ActionEditCommitResult
+  /** Starts the effects' deadline. */
+  readonly startDeadline: () => ActionDeadline
+}
 
-  let run = await input.runtime.actionRunsStorage.enterPhase({
-    projectId: input.runtime.id,
-    id: input.run.id,
-    phase: "effects",
+/**
+ * Run a recorded run's effects and record their outcome on it.
+ *
+ * Effects run after the run's record is returned, and nothing waits for them but a stopping
+ * process. They are best-effort: their failure does not reject this, it is recorded on the run and
+ * reported to `onError`, and the run stays succeeded.
+ */
+export async function runActionEffects(input: RunActionEffectsInput): Promise<void> {
+  const { runtime, action, state } = input
+  const ids = { actionId: action.id, runId: state.run.id }
+  const logSession = resolveLoggingService(runtime.id, runtime.logging).startExecution({
+    kind: "action",
+    id: state.run.id,
   })
-  input.updateActiveRun(run)
+  const deadline = input.startDeadline()
 
   try {
-    if (isObjectActionDefinition(input.action)) {
-      const effects = input.action.phases.effects
-      await effects({
-        ...input.baseContext,
-        signal: input.signal,
-        subject: requireObjectSubject(input.run.subject, {
-          actionId: input.action.id,
-          runId: input.run.id,
-        }),
-        sixb: toActionRuntimeFacade(input.runtime),
-        writeback: input.writeback,
-        commit: input.commit,
+    const outcome = await callEffects(
+      input,
+      deadline.signal,
+      logSession.withContext({ phase: "effects" })
+    )
+    try {
+      await runtime.actionRunsStorage.recordEffects(outcome)
+    } catch (error) {
+      console.error(
+        `[Sixb] Action run '${ids.runId}' ran its effects, but their outcome could not be recorded:`,
+        error
+      )
+    }
+  } finally {
+    deadline.dispose()
+    await logSession.flush()
+  }
+}
+
+/** Call the effects handler, and describe how it ended. A failure is reported here, once. */
+async function callEffects(
+  input: RunActionEffectsInput,
+  signal: AbortSignal,
+  logger: Logger
+): Promise<RecordActionEffectsInput> {
+  const { runtime, action, state } = input
+  const ids = { actionId: action.id, runId: state.run.id }
+  const effects = { id: state.run.id, projectId: runtime.id }
+
+  try {
+    const context = {
+      ...createBasePhaseContext({ runtime, action, state, logger }),
+      signal,
+      sixb: toActionRuntimeFacade(runtime),
+      writeback: state.writebackValue,
+      commit: input.commit,
+    }
+    if (isObjectActionDefinition(action)) {
+      await action.phases.effects?.({
+        ...context,
+        subject: requireObjectSubject(state.run.subject, ids),
       })
     } else {
-      const effects = input.action.phases.effects
-      await effects({
-        ...input.baseContext,
-        signal: input.signal,
-        sixb: toActionRuntimeFacade(input.runtime),
-        writeback: input.writeback,
-        commit: input.commit,
-      })
+      await action.phases.effects?.(context)
     }
   } catch (error) {
     const completedAt = new Date()
-    const phaseError = translateActionPhaseError(error, "effects", {
-      actionId: input.action.id,
-      runId: input.run.id,
-      signal: input.signal,
-    })
-    const failure = toActionRunFailure(phaseError, "effects", {
-      actionId: input.action.id,
-      runId: input.run.id,
-      at: completedAt,
-    })
-    run = await input.runtime.actionRunsStorage.recordEffects({
-      projectId: input.runtime.id,
-      id: input.run.id,
-      status: "failed",
-      completedAt,
-      error: failure,
-    })
-    input.updateActiveRun(run)
-    reportActionPhaseFailure(input.runtime.errorReporterHost, error, {
-      projectId: input.runtime.id,
-      actionId: input.action.id,
-      runId: input.run.id,
+    const failure = toActionRunFailure(
+      translateActionPhaseError(error, "effects", { ...ids, signal }),
+      "effects",
+      { ...ids, at: completedAt }
+    )
+    reportActionPhaseFailure(runtime.errorReporterHost, error, {
+      projectId: runtime.id,
+      ...ids,
       phase: "effects",
       failure,
     })
-    return run
+    return { ...effects, status: "failed", completedAt, error: failure }
   }
 
-  run = await input.runtime.actionRunsStorage.recordEffects({
-    projectId: input.runtime.id,
-    id: input.run.id,
-    status: "succeeded",
-  })
-  input.updateActiveRun(run)
-  return run
+  return { ...effects, status: "succeeded", completedAt: new Date() }
 }

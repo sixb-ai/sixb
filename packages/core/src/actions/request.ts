@@ -22,7 +22,8 @@ import {
 import { admitDelegatedObjectAction, assertDelegatedActionTarget } from "./delegated-admission"
 import { getActionRunExecutor } from "./run/executor"
 import { actionRunBelongsToShareGrant } from "./run-authorization"
-import { persistActionRun } from "./run-persistence"
+import { createActionRunId } from "./run-id"
+import { type ExistingActionRun, persistActionRun } from "./run-persistence"
 import type { ActionDefinition, ActionSubject } from "./types"
 import {
   isObjectActionDefinition,
@@ -44,7 +45,7 @@ export interface RequestActionInput extends RequestActionOptions {
   readonly actionId: string
   readonly subject?: ActionSubject
   readonly params?: Record<string, unknown>
-  /** Called once the run is durable, before it executes. A throw fails the run unexecuted. */
+  /** Called once the run's execution exists, before the run executes. A throw starts nothing. */
   readonly onRequested?: (runId: string) => void | Promise<void>
 }
 
@@ -59,8 +60,8 @@ function getActionDefinition(runtime: SixbRuntimeContext, actionId: string): Act
 /**
  * Request an Action run and execute it in this process, returning its terminal record.
  *
- * Admission, authorization and params are checked before anything is persisted. A run id that was
- * already requested returns that run's record once it is terminal, without running it again.
+ * Admission, authorization and params are checked before anything is persisted. A run id that is
+ * already recorded returns that run's record, without running it again.
  */
 export async function requestAction(
   runtime: SixbRuntimeContext,
@@ -129,22 +130,25 @@ export async function requestAction(
   }
 
   const actionParams = normalizeActionParams(runtime, action.params, rawParams, pathPrefix)
+  const runId = createActionRunId(request.runId)
 
   // `persistActionRun` checks an existing run id before creating its durable execution. Keep
   // process-local delegation outside that oracle unless it carries durable grant provenance.
   void getAuthorizationRef(runtimeAuthorization)
-  // A run is persisted only if it can start; an aborted caller gets its abort, not a cancelled run.
+  // A run starts only while its caller still waits for it; an aborted caller gets its abort.
   const executor = getActionRunExecutor(runtime)
   request.signal?.throwIfAborted()
 
+  const payload = { actionId, subject, params: actionParams }
+  const assertCanReuse = (run: ExistingActionRun) =>
+    assertCallerMayHaveRun({ storage: runtime.storage, projectId, authorization, run })
   const persist = () =>
     persistActionRun({
       projectId,
       storage: runtime.storage,
-      actionId,
-      subject,
-      params: actionParams,
-      runId: request.runId,
+      runId,
+      payload,
+      assertCanReuse,
       assertNewRun: () =>
         assertParamUsersActive({
           auth: runtime.storage.auth,
@@ -157,29 +161,6 @@ export async function requestAction(
           describe: (paramId) => `Action param '${pathPrefix}.${paramId}'`,
           invalid: (message) => new OntologyValidationError(message),
         }),
-      ...(authorization.type === "delegated"
-        ? {
-            assertCanReuseExisting: async (
-              storage: SixbRuntimeContext["storage"],
-              existing: ActionRunRecord
-            ) => {
-              if (
-                !authorization.delegation ||
-                !(await actionRunBelongsToShareGrant({
-                  storage,
-                  projectId,
-                  run: existing,
-                  grantId: authorization.delegation.grantId,
-                }))
-              ) {
-                throw new AuthorizationError(
-                  `apply:action:${actionId}`,
-                  "[Sixb] Delegated authority cannot reuse this Action run."
-                )
-              }
-            },
-          }
-        : {}),
       createExecution: async (executionId, runId) => {
         const caller = await ensureExecutionRecord(
           runtime.storage.executions,
@@ -196,32 +177,49 @@ export async function requestAction(
       },
     })
 
-  const requested = await executor.request({
+  const run = await executor.request({
+    runId,
+    payload,
     persist,
+    assertCanReuse,
     signal: request.signal,
     onRequested: request.onRequested,
   })
-
-  if (requested.replayed) {
-    assertCanViewReplayedRun(authorization, requested.run)
-  }
-  return enforceDelegatedOutputBudget(authorization, requested.run)
+  return enforceDelegatedOutputBudget(authorization, run)
 }
 
 /**
- * A replayed run answers this request but was persisted by another one, so it stays under the
- * visibility rules `actions.runs.getById` applies. Admission already requires the grants those
- * rules check, on the same Action and subject; this keeps the record from depending on it. A
- * delegated reuse was already checked against its grant.
+ * A run that already exists under the requested run id, recorded or executing, answers this request
+ * only under the rules that would let its caller read it.
+ *
+ * A principal gets it under the visibility rules `actions.runs.getById` applies; admission already
+ * requires the grants those rules check for the request's own Action and subject, and this keeps a
+ * run that carries another request from depending on it. A delegated caller gets it only when it was
+ * requested under the same Share grant.
  */
-function assertCanViewReplayedRun(
-  authorization: ResolvedRuntimeAuthorization,
-  run: ActionRunRecord
-): void {
-  if (authorization.type === "principal" && !canViewActionRun(authorization.context, run)) {
+async function assertCallerMayHaveRun(input: {
+  readonly storage: SixbRuntimeContext["storage"]
+  readonly projectId: string
+  readonly authorization: ResolvedRuntimeAuthorization
+  readonly run: ExistingActionRun
+}): Promise<void> {
+  const { authorization, run } = input
+  const visible =
+    authorization.type === "delegated"
+      ? authorization.delegation !== undefined &&
+        (await actionRunBelongsToShareGrant({
+          storage: input.storage,
+          projectId: input.projectId,
+          run,
+          grantId: authorization.delegation.grantId,
+        }))
+      : authorization.type !== "principal" || canViewActionRun(authorization.context, run)
+  if (!visible) {
     throw new AuthorizationError(
       `apply:action:${run.actionId}`,
-      `[Sixb] Action run '${run.id}' is not visible to this principal.`
+      authorization.type === "delegated"
+        ? "[Sixb] Delegated authority cannot reuse this Action run."
+        : `[Sixb] Action run '${run.id}' is not visible to this principal.`
     )
   }
 }

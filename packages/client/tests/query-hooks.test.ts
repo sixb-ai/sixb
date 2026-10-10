@@ -67,7 +67,6 @@ function createActionRun(overrides: Partial<ActionRunDetail> = {}): ActionRunDet
     subject: { kind: "object", objectTypeId: "Project", primaryId: "p_1" },
     status: "succeeded",
     phase: "commit",
-    queuedAt: "2026-06-29T12:00:00.000Z",
     startedAt: "2026-06-29T12:00:00.000Z",
     finishedAt: "2026-06-29T12:00:02.000Z",
     params: {},
@@ -75,13 +74,16 @@ function createActionRun(overrides: Partial<ActionRunDetail> = {}): ActionRunDet
   }
 }
 
-function actionFailure(message: string): NonNullable<ActionRunDetail["error"]> {
+function actionFailure(
+  message: string,
+  phase: "writeback" | "commit" = "writeback"
+): NonNullable<ActionRunDetail["error"]> {
   return {
     code: "action.phase_failed",
     message,
     retryable: false,
     at: "2026-06-29T12:00:02.000Z",
-    details: { actionId: "approveQuote", runId: "act_1", phase: "writeback" },
+    details: { actionId: "approveQuote", runId: "act_1", phase },
   }
 }
 
@@ -297,27 +299,23 @@ describe("actionRunMutationOptions", () => {
     expect(requests).toEqual([expectedRequest])
   })
 
-  test("rejects with ActionRunFailedError when the run failed or was cancelled", async () => {
-    for (const status of ["failed", "cancelled"] as const) {
-      const finished = createActionRun({
-        status,
-        phase: "writeback",
-        error: actionFailure("Writeback failed"),
-      })
-      const { client } = createActionTestClient(() => Response.json(finished))
-      const options = actionRunMutationOptions<{ note: string }>({
-        client,
-        actionId: "approveQuote",
-      })
+  test("rejects with ActionRunFailedError when the run failed", async () => {
+    const finished = createActionRun({
+      status: "failed",
+      phase: "writeback",
+      error: actionFailure("Writeback failed"),
+    })
+    const { client } = createActionTestClient(() => Response.json(finished))
+    const options = actionRunMutationOptions<{ note: string }>({
+      client,
+      actionId: "approveQuote",
+    })
 
-      const mutationFn = options.mutationFn as (params: {
-        note: string
-      }) => Promise<ActionRunDetail>
-      const error = await mutationFn({ note: "Approved" }).catch((caught: unknown) => caught)
+    const mutationFn = options.mutationFn as (params: { note: string }) => Promise<ActionRunDetail>
+    const error = await mutationFn({ note: "Approved" }).catch((caught: unknown) => caught)
 
-      expect(error).toBeInstanceOf(ActionRunFailedError)
-      expect(error).toMatchObject({ status, message: "Writeback failed", run: finished })
-    }
+    expect(error).toBeInstanceOf(ActionRunFailedError)
+    expect(error).toMatchObject({ status: "failed", message: "Writeback failed", run: finished })
   })
 
   test("rejects with the API error when the request did not become a run", async () => {
@@ -340,7 +338,8 @@ describe("actionRunMutationOptions", () => {
   test("invalidateOnCommit invalidates action run and object query caches", async () => {
     const queryClient = new QueryClient()
     const query = activeProjects()
-    const run = createActionRun({ phase: "effects" })
+    // A run with edits is returned in its commit phase: its effects run after the response.
+    const run = createActionRun({ phase: "commit" })
     const actionRunKey = getActionRunQueryKey({ path: { runId: "act_1" } })
     const actionRunsKey = listActionRunsQueryKey()
     const actionRunsInfiniteKey = listActionRunsInfiniteQueryKey()
@@ -381,11 +380,14 @@ describe("actionRunMutationOptions", () => {
     queryClient.clear()
   })
 
+  // Guard proof: drop the status check from `invalidateActionRunMutationCaches`
+  // (`src/query-hooks.ts`), and the run that failed in its commit phase invalidates object reads.
   test("terminal failure errors invalidate action run caches without object commit invalidation", async () => {
     const queryClient = new QueryClient()
     const query = activeProjects()
+    // A run that fails in its commit phase committed nothing: its record and edits land together.
     const failed = {
-      ...createActionRun({ phase: "writeback", error: actionFailure("Writeback failed") }),
+      ...createActionRun({ phase: "commit", error: actionFailure("Commit failed", "commit") }),
       status: "failed" as const,
     }
     const actionRunKey = getActionRunQueryKey({ path: { runId: "act_1" } })

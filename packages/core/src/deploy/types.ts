@@ -88,8 +88,8 @@ export interface DeployProcessDefinition {
 
 export interface DeployProcessOptions {
   /**
-   * How long a stopping process may take before it is killed. Defaults to 10000, and to 40000 for
-   * the API, which first lets the Actions it is running finish.
+   * How long a stopping process may take before it is killed. Defaults to 10000, and to 70000 for
+   * the API, which first lets the Actions it is running and their effects finish.
    */
   readonly killTimeoutMs?: number
   /** Wait before restarting a process that exited, growing with each restart. Defaults to 1000. */

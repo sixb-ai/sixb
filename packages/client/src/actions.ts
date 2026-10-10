@@ -1,11 +1,9 @@
 import type { GetActionRunResponse } from "./generated/types.gen"
 
-/** An Action run as the API returns it: finished from `requestAction`, as stored otherwise. */
+/** An Action run as the API returns it: recorded once, when it ended. */
 export type ActionRunDetail = GetActionRunResponse
-export type ActionRunTerminalFailureStatus = Extract<
-  ActionRunDetail["status"],
-  "failed" | "cancelled"
->
+
+type FailedActionRunDetail = ActionRunDetail & { readonly status: "failed" }
 
 /** An Action run that finished without succeeding. `run` is its terminal record. */
 export class ActionRunFailedError extends Error {
@@ -13,12 +11,12 @@ export class ActionRunFailedError extends Error {
   readonly run: ActionRunDetail
   readonly runId: string
   readonly actionId: string
-  readonly status: ActionRunTerminalFailureStatus
+  readonly status: "failed"
   readonly subject: ActionRunDetail["subject"]
   readonly error: ActionRunDetail["error"]
 
-  constructor(run: ActionRunDetail & { readonly status: ActionRunTerminalFailureStatus }) {
-    super(run.error?.message ?? `Action run '${run.id}' finished with status '${run.status}'.`)
+  constructor(run: FailedActionRunDetail) {
+    super(run.error?.message ?? `Action run '${run.id}' failed.`)
     this.run = run
     this.runId = run.id
     this.actionId = run.actionId
@@ -28,8 +26,6 @@ export class ActionRunFailedError extends Error {
   }
 }
 
-export function isFailedActionRun(
-  run: ActionRunDetail
-): run is ActionRunDetail & { readonly status: ActionRunTerminalFailureStatus } {
-  return run.status === "failed" || run.status === "cancelled"
+export function isFailedActionRun(run: ActionRunDetail): run is FailedActionRunDetail {
+  return run.status === "failed"
 }

@@ -284,17 +284,6 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
     })
   }
 
-  const source =
-    input.source.kind === "action"
-      ? Object.freeze({
-          kind: "action" as const,
-          actionId: normalizeNonblank(input.source.actionId, "Action id"),
-          runId: normalizeNonblank(input.source.runId, "Action run id"),
-        })
-      : Object.freeze({
-          kind: "runtime" as const,
-          requestId: normalizeNonblank(input.source.requestId, "Runtime request id"),
-        })
   if (input.vectorWrites?.length && (operations.length || input.source.kind !== "runtime")) {
     throw new MaterializationValidationError(
       "Vector writes require a dedicated atomic runtime commit."
@@ -305,12 +294,11 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
   const expectedLinks = input.expectedLinks.map(normalizeExpectedLink)
   const expectedLinkScopes = input.expectedLinkScopes.map(normalizeExpectedLinkScope)
 
-  return Object.freeze({
-    mode: "atomic",
+  const atomic = {
+    mode: "atomic" as const,
     ...(input.vectorWrites === undefined
       ? {}
       : { vectorWrites: structuredClone(input.vectorWrites) }),
-    source,
     operations: Object.freeze(operations),
     expectedObjects: deduplicateExpectations(
       expectedObjects,
@@ -327,6 +315,29 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
       (value) => linkScopeKey(value.source, value.linkId),
       "Expected link scopes"
     ),
+  }
+
+  if (input.source.kind === "action") {
+    if (!("run" in input) || input.run === undefined) {
+      throw new MaterializationValidationError("An Action commit must carry its run's record.")
+    }
+    return Object.freeze({
+      ...atomic,
+      source: Object.freeze({
+        kind: "action" as const,
+        actionId: normalizeNonblank(input.source.actionId, "Action id"),
+        runId: normalizeNonblank(input.source.runId, "Action run id"),
+      }),
+      // Validated by the Action run storage when the commit inserts it.
+      run: structuredClone(input.run),
+    })
+  }
+  return Object.freeze({
+    ...atomic,
+    source: Object.freeze({
+      kind: "runtime" as const,
+      requestId: normalizeNonblank(input.source.requestId, "Runtime request id"),
+    }),
   })
 }
 

@@ -35,7 +35,7 @@ export async function canDelegationAccessActionRun(input: {
 export async function actionRunBelongsToShareGrant(input: {
   readonly storage: Storage
   readonly projectId: string
-  readonly run: ActionRunRecord
+  readonly run: Pick<ActionRunRecord, "id" | "actionId" | "executionId">
   readonly grantId: string
 }): Promise<boolean> {
   const parent = await findPrimitiveParentRequestExecution({

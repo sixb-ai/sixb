@@ -22,7 +22,11 @@ import {
 import { getInMemoryStorageTestingAdapter } from "../src/storage/in-memory/testing"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import type { MaterializationPlanChunk } from "../src/storage/ontology/provider-work"
-import { claimTestProjectionRun, queueTestActionRun, startTestProjectionRun } from "../src/testing"
+import {
+  claimTestProjectionRun,
+  createTestActionRunRecord,
+  startTestProjectionRun,
+} from "../src/testing"
 import {
   atomic,
   createMaterializerFixture,
@@ -53,18 +57,17 @@ describe("in-memory ontology storage", () => {
     expect(replacementCommit?.id).toBe(replacementResult.commitId)
     await expectLogicalOriginDuplicateRejected(storage, replacementCommit)
 
-    await queueTestActionRun(storage, {
-      id: "origin-action-run",
-      projectId: "project",
-      actionId: "noop",
-      subject: { kind: "none" },
-      params: {},
-      idempotencyKey: "action:origin-action-run",
-    })
-    await storage.actionRuns.start({ id: "origin-action-run", projectId: "project" })
     const actionResult = await materializer.edits.commit({
       mode: "atomic",
       source: { kind: "action", actionId: "noop", runId: "origin-action-run" },
+      run: await createTestActionRunRecord(storage.executions, {
+        id: "origin-action-run",
+        projectId: "project",
+        actionId: "noop",
+        subject: { kind: "none" },
+        params: {},
+        idempotencyKey: "action:origin-action-run",
+      }),
       operations: [],
       expectedObjects: [],
       expectedLinks: [],
@@ -929,15 +932,6 @@ describe("in-memory ontology storage", () => {
   test("keeps Action materialization history exclusively in ontology commits", async () => {
     const storage = new InMemoryStorage()
     const { materializer } = createMaterializerFixture({ storage })
-    await queueTestActionRun(storage, {
-      id: "action-materialization-run",
-      projectId: "project",
-      actionId: "createDevice",
-      subject: { kind: "object", objectTypeId: "Device", primaryId: "one" },
-      params: {},
-      idempotencyKey: "action:project:action-materialization-run",
-    })
-    await storage.actionRuns.start({ id: "action-materialization-run", projectId: "project" })
     const input = {
       mode: "atomic" as const,
       source: {
@@ -945,6 +939,14 @@ describe("in-memory ontology storage", () => {
         actionId: "createDevice",
         runId: "action-materialization-run",
       },
+      run: await createTestActionRunRecord(storage.executions, {
+        id: "action-materialization-run",
+        projectId: "project",
+        actionId: "createDevice",
+        subject: { kind: "object", objectTypeId: "Device", primaryId: "one" },
+        params: {},
+        idempotencyKey: "action:project:action-materialization-run",
+      }),
       operations: [
         {
           id: "create",
@@ -1777,15 +1779,6 @@ describe("in-memory ontology storage", () => {
 
   test("rejects a result whose event count differs from the applied outbox, with rollback", async () => {
     const storage = new InMemoryStorage()
-    await queueTestActionRun(storage, {
-      id: "run",
-      projectId: "project",
-      actionId: "action",
-      subject: { kind: "object", objectTypeId: "Device", primaryId: "one" },
-      params: {},
-      idempotencyKey: "action:project:run",
-    })
-    await storage.actionRuns.start({ id: "run", projectId: "project" })
     const committedAt = "2026-01-01T00:00:00.000Z"
     const header = (id: string, operationCount = 0): MaterializationPlanHeader => ({
       commit: {

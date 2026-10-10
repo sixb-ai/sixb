@@ -54,7 +54,7 @@ curl https://api.example.com/api/actions/markPaid \
   }'
 ```
 
-The response is the finished action run. A run that failed is still a `200` response, with `status: "failed"` and its `error`. An error status usually means no run was requested, but a `500` can follow a run that started: send the request again with the same `runId` to get that run's record. A request that reuses the `runId` of a run still in progress gets `409`, and a server that is shutting down answers `503` without starting anything. See [Actions](../actions/overview.md#request-an-action).
+The response is the finished action run. A run that failed is still a `200` response, with `status: "failed"` and its `error`. The response does not wait for the action's effects, which run after it. An error status usually means no run was requested, but a `500` can follow a run that started: send the request again with the same `runId` to get that run's record, or to run it again when it was never recorded. A request that reuses the `runId` of a run this server is still running gets `409`, and a server that is shutting down answers `503` without starting anything. See [Actions](../actions/overview.md#request-an-action).
 
 Sync, pipeline, and workflow run requests instead answer with a `runId` once the run is queued. Read the matching run endpoint, such as `/api/workflow-runs/:runId`, to check completion.
 

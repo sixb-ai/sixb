@@ -17,9 +17,9 @@ import {
   SixbHost,
 } from "../src"
 import { type ActionRunHost, executeActionRun } from "../src/actions/run/execute"
-import { runAction } from "../src/actions/run/run-action"
+import { runAction, UnrecordedActionRunError } from "../src/actions/run/run-action"
 import { ActionRunSignals } from "../src/actions/run/signals"
-import type { ActionRunContext } from "../src/actions/run/types"
+import type { ActionRunContext, PendingActionRun } from "../src/actions/run/types"
 import { attachSixbErrorReporter } from "../src/error-reporting/internal"
 import { bindDurablePrimitiveExecution } from "../src/execution/primitive"
 import { LOGS_STREAM } from "../src/logging/stream"
@@ -32,7 +32,7 @@ import {
 } from "../src/models"
 import type { ActionRunParams, ActionRunRecord } from "../src/storage"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
-import { createTestSixb, queueTestActionRun } from "../src/testing"
+import { createTestActionExecution, createTestSixb, recordTestActionRun } from "../src/testing"
 
 const Device = defineObjectType({
   id: "Device",
@@ -84,7 +84,10 @@ function createSixb(
   return { host, sixb: createTestSixb(host) }
 }
 
-async function createContext(host: ActionRunHost, run: ActionRunRecord): Promise<ActionRunContext> {
+async function createContext(
+  host: ActionRunHost,
+  run: PendingActionRun
+): Promise<ActionRunContext> {
   const durableExecution = await host.storage.executions.getById({
     projectId: host.id,
     id: run.executionId,
@@ -119,7 +122,11 @@ async function createContext(host: ActionRunHost, run: ActionRunRecord): Promise
   }
 }
 
-async function queueActionRun(
+/** The runs prepared on each host, as the request that created their execution holds them. */
+const preparedRuns = new WeakMap<ActionRunHost, Map<string, PendingActionRun>>()
+
+/** Create a run's execution, as the request that executes the run does first. */
+async function prepareActionRun(
   host: ActionRunHost,
   input: {
     readonly id: string
@@ -127,39 +134,52 @@ async function queueActionRun(
     readonly subject: ActionSubject
     readonly params: ActionRunParams
   }
-): Promise<ActionRunRecord> {
-  return queueTestActionRun(host.storage, {
+): Promise<PendingActionRun> {
+  const run: PendingActionRun = {
+    ...input,
     projectId: host.id,
-    id: input.id,
-    actionId: input.actionId,
-    subject: input.subject,
-    params: input.params,
+    executionId: await createTestActionExecution(host.storage.executions, {
+      projectId: host.id,
+      actionId: input.actionId,
+      runId: input.id,
+    }),
     idempotencyKey: `action:${host.id}:${input.id}`,
-  })
+  }
+  const runs = preparedRuns.get(host) ?? new Map<string, PendingActionRun>()
+  runs.set(run.id, run)
+  preparedRuns.set(host, runs)
+  return run
 }
 
-/** Execute a stored run as the request that persisted it would. */
-async function runStoredAction(input: {
+/**
+ * Execute a prepared run as its request would, then run its effects to their end, and return the
+ * run's stored record.
+ */
+async function executePreparedRun(input: {
   readonly host: ActionRunHost
   readonly runId: string
   readonly signal?: AbortSignal
   readonly timeoutMs?: number
-}) {
+}): Promise<ActionRunRecord> {
   const { host } = input
-  const run = await host.storage.actionRuns?.getById({ projectId: host.id, id: input.runId })
-  if (!run) throw new Error(`Action run '${input.runId}' was not stored.`)
+  const run = preparedRuns.get(host)?.get(input.runId)
+  if (!run) throw new Error(`Action run '${input.runId}' was not prepared.`)
   const execution = await host.storage.executions.getById({
     projectId: host.id,
     id: run.executionId,
   })
   if (!execution) throw new Error(`Action run '${run.id}' has no execution.`)
 
-  return executeActionRun(host, {
+  const outcome = await executeActionRun(host, {
     run,
     execution,
     signal: input.signal,
     timeoutMs: input.timeoutMs,
   })
+  await outcome.effects?.()
+  const stored = await host.storage.actionRuns?.getById({ projectId: host.id, id: run.id })
+  if (!stored) throw new Error(`Action run '${run.id}' was not recorded.`)
+  return stored
 }
 
 /** The edit commit a run produced, or `null` when it committed nothing. */
@@ -202,13 +222,13 @@ describe("runAction", () => {
         } as unknown as { id: string; name: string })
       })
     const { host } = createSixb([invalid])
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "invalid-edit",
       actionId: invalid.id,
       subject: { kind: "none" },
       params: {},
     })
-    await runStoredAction({ host, runId: "invalid-edit" })
+    await executePreparedRun({ host, runId: "invalid-edit" })
     const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "invalid-edit" })
     expect(run?.status).toBe("failed")
     expect(run?.error?.message).toBe(
@@ -224,7 +244,7 @@ describe("runAction", () => {
       .params({})
       .writeback(() => {})
     const { host } = createSixb([count])
-    const run = await queueActionRun(host, {
+    const run = await prepareActionRun(host, {
       id: "act_stored",
       actionId: "count",
       subject: { kind: "none" },
@@ -259,14 +279,14 @@ describe("runAction", () => {
         received = params.reviewedAt
       })
     const { host } = createSixb([captureNullable])
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_nullable",
       actionId: "captureNullable",
       subject: { kind: "none" },
       params: { reviewedAt: null },
     })
 
-    const result = await runStoredAction({
+    const result = await executePreparedRun({
       host,
       runId: "act_nullable",
     })
@@ -289,14 +309,14 @@ describe("runAction", () => {
       id: "device-1",
       name: "Device 1",
     })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_1",
       actionId: "setStatus",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: { status: "ready" },
     })
 
-    const result = await runStoredAction({
+    const result = await executePreparedRun({
       host,
       runId: "act_1",
     })
@@ -332,20 +352,20 @@ describe("runAction", () => {
       name: "Device 1",
       status: "old",
     })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_1",
       actionId: "failWriteback",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
 
-    const result = await runStoredAction({
+    const result = await executePreparedRun({
       host,
       runId: "act_1",
     })
 
     expect(result.status).toBe("failed")
-    if ("error" in result) {
+    if (result.status === "failed") {
       expect(result.error).toMatchObject({
         code: "action.phase_failed",
         message: "Action execution failed.",
@@ -362,40 +382,124 @@ describe("runAction", () => {
     expect(updated?.properties.status).toBe("old")
   })
 
-  test("keeps run finalization failures out of the phase-failed vocabulary", async () => {
+  // Guard proof: return the succeeded record from `recordRun` (`actions/run/run-action.ts`) when
+  // writing it fails, and the run resolves as if it had been recorded.
+  test("rejects with the record it could not write", async () => {
     const complete = defineAction("complete")
       .params({})
       .writeback(() => ({ ok: true }))
     const { host } = createSixb([complete])
-    await queueActionRun(host, {
-      id: "act_finalize",
+    await prepareActionRun(host, {
+      id: "act_unrecorded",
       actionId: "complete",
       subject: { kind: "none" },
       params: {},
     })
-
-    const actionRuns = host.storage.actionRuns!
-    const finish = actionRuns.finish.bind(actionRuns)
-    actionRuns.finish = async (input) => {
-      if (input.status === "succeeded") {
-        throw new Error("finish exploded")
+    const restore = decorateOperationScopedMethodForTesting(
+      host.storage.actionRuns!,
+      "record",
+      () => async () => {
+        throw new Error("record exploded")
       }
-      return finish(input)
-    }
+    )
 
-    const result = await runStoredAction({
-      host,
-      runId: "act_finalize",
-    })
-
-    expect(result.status).toBe("failed")
-    if ("error" in result) {
-      expect(result.error).toMatchObject({
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
-        details: { actionId: "complete", runId: "act_finalize", phase: "writeback" },
+    try {
+      const failure = await executePreparedRun({ host, runId: "act_unrecorded" }).then(
+        () => undefined,
+        (error: unknown) => error
+      )
+      expect(failure).toBeInstanceOf(UnrecordedActionRunError)
+      expect(failure).toMatchObject({
+        record: { status: "succeeded", phase: "writeback", writeback: { result: { ok: true } } },
+        cause: { message: "record exploded" },
       })
+    } finally {
+      restore()
     }
+  })
+
+  // Guard proof: refuse every `ActionRunError` from `record` in `recordRun`
+  // (`actions/run/run-action.ts`), and this run rejects instead of answering with the record a
+  // concurrent request wrote.
+  test("answers with the record of a concurrent request that recorded the run first", async () => {
+    let writebacks = 0
+    const complete = defineAction("complete")
+      .params({})
+      .writeback(() => {
+        writebacks += 1
+        return { attempt: writebacks }
+      })
+    const { host } = createSixb([complete])
+    const run = await prepareActionRun(host, {
+      id: "act_raced",
+      actionId: "complete",
+      subject: { kind: "none" },
+      params: {},
+    })
+    // Another process ran the same run id, under an execution of its own, and recorded it first.
+    const winner = await recordTestActionRun(host.storage, {
+      id: run.id,
+      projectId: run.projectId,
+      actionId: run.actionId,
+      subject: run.subject,
+      params: run.params,
+      idempotencyKey: run.idempotencyKey,
+      phase: "writeback",
+      writeback: {
+        status: "succeeded",
+        completedAt: new Date("2026-01-01T00:00:00.000Z"),
+        result: { attempt: 0 },
+      },
+    })
+    // This request runs it again, under the execution it created for it.
+    const executionId = await createTestActionExecution(host.storage.executions, {
+      projectId: host.id,
+      actionId: run.actionId,
+      runId: run.id,
+      executionId: "exec_second_request",
+    })
+    const execution = await host.storage.executions.getById({ projectId: host.id, id: executionId })
+    if (!execution) throw new Error("The second request's execution is missing.")
+
+    const outcome = await executeActionRun(host, { run: { ...run, executionId }, execution })
+
+    expect(writebacks).toBe(1)
+    expect(outcome).toEqual({ record: winner, recorded: false })
+  })
+
+  // The request that receives the record checks it, caller first: see `ActionRunExecutor`.
+  test("leaves a concurrent record that carries another request to its request to check", async () => {
+    const complete = defineAction("complete")
+      .params({ amount: param("double") })
+      .writeback(() => {})
+    const { host } = createSixb([complete])
+    const run = await prepareActionRun(host, {
+      id: "act_taken",
+      actionId: "complete",
+      subject: { kind: "none" },
+      params: { amount: 1 },
+    })
+    const winner = await recordTestActionRun(host.storage, {
+      id: run.id,
+      projectId: run.projectId,
+      actionId: run.actionId,
+      subject: run.subject,
+      params: { amount: 2 },
+      idempotencyKey: run.idempotencyKey,
+      phase: "writeback",
+    })
+    const executionId = await createTestActionExecution(host.storage.executions, {
+      projectId: host.id,
+      actionId: run.actionId,
+      runId: run.id,
+      executionId: "exec_taken_second",
+    })
+    const execution = await host.storage.executions.getById({ projectId: host.id, id: executionId })
+    if (!execution) throw new Error("The second request's execution is missing.")
+
+    await expect(
+      executeActionRun(host, { run: { ...run, executionId }, execution })
+    ).resolves.toEqual({ record: winner, recorded: false })
   })
 
   test("exposes immutable blob operations inside action writeback", async () => {
@@ -416,14 +520,14 @@ describe("runAction", () => {
       })
 
     const { host } = createSixb([persistPayload])
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_blob",
       actionId: "persistPayload",
       subject: { kind: "none" },
       params: {},
     })
 
-    const result = await runStoredAction({
+    const result = await executePreparedRun({
       host,
       runId: "act_blob",
     })
@@ -446,34 +550,6 @@ describe("runAction", () => {
     })
   })
 
-  // Guard proof: drop the `queued` check from `runAction`, and this run is finished as failed
-  // under the execution that owns it.
-  test("leaves a run that is no longer queued to the execution that owns it", async () => {
-    let invoked = 0
-    const count = defineAction("count")
-      .params({})
-      .writeback(() => {
-        invoked += 1
-      })
-    const { host } = createSixb([count])
-    await queueActionRun(host, {
-      id: "act_running",
-      actionId: "count",
-      subject: { kind: "none" },
-      params: {},
-    })
-    await host.storage.actionRuns!.start({ projectId: host.id, id: "act_running" })
-
-    await expect(runStoredAction({ host, runId: "act_running" })).rejects.toMatchObject({
-      code: "internal.unexpected",
-      message: "[Sixb] Action run 'act_running' cannot execute from status 'running'.",
-    })
-    expect(invoked).toBe(0)
-    expect(
-      await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_running" })
-    ).toMatchObject({ status: "running" })
-  })
-
   test("commits global action edits without loading a target", async () => {
     const createDevice = defineAction("createDevice")
       .params({ id: param("string") })
@@ -487,13 +563,13 @@ describe("runAction", () => {
       })
 
     const { host, sixb } = createSixb([createDevice])
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_1",
       actionId: "createDevice",
       subject: { kind: "none" },
       params: { id: "device-1" },
     })
-    const result = await runStoredAction({
+    const result = await executePreparedRun({
       host,
       runId: "act_1",
     })
@@ -522,24 +598,24 @@ describe("runAction", () => {
       renameDevice as ActionDefinition,
     ])
 
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_create",
       actionId: "createDevice",
       subject: { kind: "none" },
       params: { id: "device-1", name: "Device 1" },
     })
-    const created = await runStoredAction({
+    const created = await executePreparedRun({
       host,
       runId: "act_create",
     })
 
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_rename",
       actionId: "renameDevice",
       subject: { kind: "none" },
       params: { id: "device-1", name: "Renamed Device" },
     })
-    const updated = await runStoredAction({
+    const updated = await executePreparedRun({
       host,
       runId: "act_rename",
     })
@@ -621,7 +697,7 @@ describe("runAction", () => {
       .byId("device-1")
       .link(Device.l.sensor, { objectTypeId: "Sensor", primaryId: "sensor-1" })
 
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_assign_sensor",
       actionId: "assignSensor",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
@@ -629,7 +705,7 @@ describe("runAction", () => {
     })
     expect(
       (
-        await runStoredAction({
+        await executePreparedRun({
           host,
           runId: "act_assign_sensor",
         })
@@ -652,7 +728,7 @@ describe("runAction", () => {
       "link.deleted",
     ])
 
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_clear_sensor",
       actionId: "clearSensor",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
@@ -660,7 +736,7 @@ describe("runAction", () => {
     })
     expect(
       (
-        await runStoredAction({
+        await executePreparedRun({
           host,
           runId: "act_clear_sensor",
         })
@@ -719,14 +795,14 @@ describe("runAction", () => {
       .objects(Device)
       .byId("device-1")
       .link(Device.l.sensor, { objectTypeId: "Sensor", primaryId: "sensor-1" })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_1",
       actionId: "detachSensor",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
 
-    const result = await runStoredAction({
+    const result = await executePreparedRun({
       host,
       runId: "act_1",
     })
@@ -782,14 +858,14 @@ describe("runAction", () => {
       .objects(Device)
       .byId("device-1")
       .link(Device.l.sensor, { objectTypeId: "Sensor", primaryId: "sensor-1" })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_1",
       actionId: "captureSensorName",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
 
-    const result = await runStoredAction({
+    const result = await executePreparedRun({
       host,
       runId: "act_1",
     })
@@ -861,20 +937,20 @@ describe("runAction", () => {
         at: new Date("2099-05-01T08:00:00.000Z"),
       },
     ])
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_report",
       actionId: "generateReport",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
 
-    const result = await runStoredAction({
+    const result = await executePreparedRun({
       host,
       runId: "act_report",
     })
 
     expect(result.status).toBe("succeeded")
-    expect(result.record.writeback?.result).toEqual({
+    expect(result.writeback?.result).toEqual({
       series: [
         {
           objectId: "device-2",
@@ -949,14 +1025,14 @@ describe("runAction", () => {
       await sixb.objects.upsert("Sensor", { id: "sensor-1", name: "Renamed mid-run" })
     }
 
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_1",
       actionId: "captureSensorName",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
 
-    const result = await runStoredAction({ host, runId: "act_1" })
+    const result = await executePreparedRun({ host, runId: "act_1" })
 
     expect(result.status).toBe("succeeded")
     expect(validations).toBe(1)
@@ -995,13 +1071,13 @@ describe("runAction", () => {
       await sixb.objects.upsert("Device", { id: "device-1", name: "Renamed mid-run" })
     }
 
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_1",
       actionId: "summarize",
       subject: { kind: "none" },
       params: {},
     })
-    const result = await runStoredAction({ host, runId: "act_1" })
+    const result = await executePreparedRun({ host, runId: "act_1" })
 
     expect(result.status).toBe("succeeded")
     expect(validations).toBe(2)
@@ -1023,16 +1099,16 @@ describe("runAction", () => {
 
     const { host, sixb } = createSixb([contested], [Device, Sensor])
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_1",
       actionId: "contested",
       subject: { kind: "none" },
       params: {},
     })
-    const result = await runStoredAction({ host, runId: "act_1" })
+    const result = await executePreparedRun({ host, runId: "act_1" })
 
     expect(result.status).toBe("failed")
-    if ("error" in result) {
+    if (result.status === "failed") {
       expect(result.error).toMatchObject({
         code: "action.read_conflict",
         message: "Data the Action read changed before its commit.",
@@ -1062,48 +1138,49 @@ describe("runAction", () => {
 
     const { host, sixb } = createSixb([contested], [Device, Sensor])
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_1",
       actionId: "contested",
       subject: { kind: "none" },
       params: {},
     })
+    // The commit records the run first: hold it there until the deadline passed.
     const restore = decorateOperationScopedMethodForTesting(
       host.storage.actionRuns!,
-      "enterPhase",
-      (enterPhase) => async (input) => {
-        if (input.phase === "commit" && deadline) await aborted(deadline)
-        return enterPhase(input)
+      "record",
+      (record) => async (input) => {
+        if (deadline) await aborted(deadline)
+        return record(input)
       }
     )
 
     try {
-      const result = await runStoredAction({ host, runId: "act_1", timeoutMs: DEADLINE_MS })
+      const result = await executePreparedRun({ host, runId: "act_1", timeoutMs: DEADLINE_MS })
 
       expect(result.status).toBe("failed")
-      if ("error" in result) expect(result.error.code).toBe("action.read_conflict")
+      if (result.status === "failed") expect(result.error.code).toBe("action.read_conflict")
       expect(edits).toBe(1)
     } finally {
       restore()
     }
   })
 
-  test("marks queued runs failed when the action definition is missing", async () => {
+  test("records a failed run when the action definition is missing", async () => {
     const { host } = createSixb([])
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_1",
       actionId: "missingAction",
       subject: { kind: "none" },
       params: {},
     })
 
-    const result = await runStoredAction({
+    const result = await executePreparedRun({
       host,
       runId: "act_1",
     })
 
     expect(result.status).toBe("failed")
-    if ("error" in result) {
+    if (result.status === "failed") {
       expect(result.error).toMatchObject({
         code: "internal.unexpected",
         message: "An unexpected internal error occurred.",
@@ -1137,14 +1214,14 @@ describe("runAction", () => {
       id: "device-1",
       name: "Device 1",
     })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_1",
       actionId: "setStatus",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
 
-    const result = await runStoredAction({
+    const result = await executePreparedRun({
       host,
       runId: "act_1",
     })
@@ -1175,7 +1252,7 @@ describe("runAction", () => {
     expect(reports[0]?.context.occurredAt).toBe(run?.effects?.error?.at ?? "")
   })
 
-  test("does not report cancelled runs", async () => {
+  test("records a run its caller cancelled as failed, without reporting it", async () => {
     let enteredWriteback: (() => void) | undefined
     const entered = new Promise<void>((resolve) => {
       enteredWriteback = resolve
@@ -1198,7 +1275,7 @@ describe("runAction", () => {
     const reporter = attachSixbErrorReporter(sixb, () => {
       reportCount += 1
     })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_cancelled",
       actionId: "waitForCancel",
       subject: { kind: "none" },
@@ -1206,7 +1283,7 @@ describe("runAction", () => {
     })
     const controller = new AbortController()
 
-    const execution = runStoredAction({
+    const execution = executePreparedRun({
       host,
       runId: "act_cancelled",
       signal: controller.signal,
@@ -1215,19 +1292,16 @@ describe("runAction", () => {
     controller.abort(new Error("caller went away"))
     const result = await execution
 
-    expect(result.status).toBe("cancelled")
-    if ("error" in result) {
-      expect(result.error).toMatchObject({
+    expect(result).toMatchObject({
+      status: "failed",
+      phase: "writeback",
+      error: {
         code: "runtime.cancelled",
         message: "Execution was cancelled.",
         retryable: false,
-        details: {
-          actionId: "waitForCancel",
-          runId: "act_cancelled",
-          phase: "cancelled",
-        },
-      })
-    }
+        details: { actionId: "waitForCancel", runId: "act_cancelled", phase: "writeback" },
+      },
+    })
     await reporter.flush()
     expect(reportCount).toBe(0)
   })
@@ -1246,20 +1320,20 @@ describe("runAction", () => {
       id: "sensor-1",
       name: "Sensor 1",
     })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_1",
       actionId: "setStatus",
       subject: { kind: "object", objectTypeId: "Sensor", primaryId: "sensor-1" },
       params: {},
     })
 
-    const result = await runStoredAction({
+    const result = await executePreparedRun({
       host,
       runId: "act_1",
     })
 
     expect(result.status).toBe("failed")
-    if ("error" in result) {
+    if (result.status === "failed") {
       expect(result.error).toMatchObject({
         code: "internal.unexpected",
         message: "An unexpected internal error occurred.",
@@ -1284,22 +1358,22 @@ describe("runAction", () => {
       reports.push({ error, context })
     })
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_fail",
       actionId: "fail",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
 
-    const result = await runStoredAction({ host, runId: "act_fail" })
+    const result = await executePreparedRun({ host, runId: "act_fail" })
     await reporter.flush()
 
-    if (!("error" in result)) throw new Error(`Expected a failed run, got ${result.status}.`)
+    if (result.status !== "failed") throw new Error(`Expected a failed run, got ${result.status}.`)
     expect(result.error).toMatchObject({
       code: "action.phase_failed",
       details: { actionId: "fail", runId: "act_fail", phase: "writeback" },
     })
-    expect(result.record.error).toEqual(result.error)
+    expect(result.error).toEqual(result.error)
     expect(reports).toHaveLength(1)
     expect(reports[0]?.error).toBe(originalError)
     expect(reports[0]?.context).toEqual({
@@ -1322,14 +1396,14 @@ describe("runAction", () => {
       })
     const { host, sixb } = createSixb([noteStatus])
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_log",
       actionId: "noteStatus",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: { status: "active" },
     })
 
-    await runStoredAction({ host, runId: "act_log" })
+    await executePreparedRun({ host, runId: "act_log" })
 
     const { records } = await host.broker.read({
       projectId: host.id,
@@ -1360,14 +1434,14 @@ describe("runAction", () => {
     const { host, sixb } = createSixb([setDue])
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
     // Stored params are JSON, as a request normalized them.
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_due",
       actionId: "setDue",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: { dueDate: "2026-06-20T12:34:56.000Z", day: "2026-06-20" },
     })
 
-    const result = await runStoredAction({ host, runId: "act_due" })
+    const result = await executePreparedRun({ host, runId: "act_due" })
 
     expect(result.status).toBe("succeeded")
     const seen = observed[0]
@@ -1412,14 +1486,14 @@ describe("runAction model accounting", () => {
       })
     const { host, sixb } = createSixb([decideStatus])
     await sixb.objects.upsert("Device", { id: "decision-device", name: "Device" })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_decide",
       actionId: decideStatus.id,
       subject: { kind: "object", objectTypeId: "Device", primaryId: "decision-device" },
       params: {},
     })
 
-    const { record: run } = await runStoredAction({ host, runId: "act_decide" })
+    const run = await executePreparedRun({ host, runId: "act_decide" })
 
     expect(run.status).toBe("succeeded")
     expect(run.writeback).toMatchObject({
@@ -1477,14 +1551,14 @@ describe("runAction model accounting", () => {
       })
     const { host, sixb } = createSixb([extractStatus])
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device" })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_extract",
       actionId: extractStatus.id,
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
 
-    const { record: run } = await runStoredAction({ host, runId: "act_extract" })
+    const run = await executePreparedRun({ host, runId: "act_extract" })
 
     expect(run.status).toBe("succeeded")
     expect(run.writeback).toMatchObject({ status: "succeeded", result: { status: "ready" } })
@@ -1520,17 +1594,17 @@ describe("runAction deadline and boundary", () => {
       reports.push(context)
     })
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1", status: "old" })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_slow",
       actionId: "slowWriteback",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
 
-    const result = await runStoredAction({ host, runId: "act_slow", timeoutMs: DEADLINE_MS })
+    const result = await executePreparedRun({ host, runId: "act_slow", timeoutMs: DEADLINE_MS })
 
     expect(result.status).toBe("failed")
-    if ("error" in result) {
+    if (result.status === "failed") {
       expect(result.error).toMatchObject({
         code: "action.timeout",
         message: "The Action exceeded its 30-second time limit.",
@@ -1538,7 +1612,7 @@ describe("runAction deadline and boundary", () => {
         details: { actionId: "slowWriteback", runId: "act_slow", phase: "writeback" },
       })
     }
-    expect(result.record.writeback).toMatchObject({
+    expect(result.writeback).toMatchObject({
       status: "failed",
       error: { code: "action.timeout" },
     })
@@ -1567,14 +1641,14 @@ describe("runAction deadline and boundary", () => {
       })
     const { host, sixb } = createSixb([lateEdits])
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_late",
       actionId: "lateEdits",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
 
-    const result = await runStoredAction({ host, runId: "act_late", timeoutMs: DEADLINE_MS })
+    const result = await executePreparedRun({ host, runId: "act_late", timeoutMs: DEADLINE_MS })
 
     expect(result.status).toBe("succeeded")
     expect(deadline?.aborted).toBe(true)
@@ -1596,14 +1670,18 @@ describe("runAction deadline and boundary", () => {
     const { host, sixb } = createSixb([slowEdits])
     attachSixbErrorReporter(host, () => {})
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1", status: "old" })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_slow_edits",
       actionId: "slowEdits",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
 
-    const result = await runStoredAction({ host, runId: "act_slow_edits", timeoutMs: DEADLINE_MS })
+    const result = await executePreparedRun({
+      host,
+      runId: "act_slow_edits",
+      timeoutMs: DEADLINE_MS,
+    })
 
     expect(result).toMatchObject({
       status: "failed",
@@ -1629,13 +1707,13 @@ describe("runAction deadline and boundary", () => {
     const { host, sixb } = createSixb([written])
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
     for (const id of ["act_first", "act_second"]) {
-      await queueActionRun(host, {
+      await prepareActionRun(host, {
         id,
         actionId: "written",
         subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
         params: {},
       })
-      expect((await runStoredAction({ host, runId: id })).status).toBe("succeeded")
+      expect((await executePreparedRun({ host, runId: id })).status).toBe("succeeded")
     }
 
     expect(editsSignals).toHaveLength(2)
@@ -1658,14 +1736,14 @@ describe("runAction deadline and boundary", () => {
       })
     const { host, sixb } = createSixb([lateWriteback])
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_late",
       actionId: "lateWriteback",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
 
-    const result = await runStoredAction({ host, runId: "act_late", timeoutMs: DEADLINE_MS })
+    const result = await executePreparedRun({ host, runId: "act_late", timeoutMs: DEADLINE_MS })
 
     expect(result.status).toBe("succeeded")
     expect((await deviceObjects(sixb).get("device-1"))?.properties.status).toBe("written late")
@@ -1685,14 +1763,14 @@ describe("runAction deadline and boundary", () => {
       })
     const { host, sixb } = createSixb([abortedByCaller])
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_abandoned",
       actionId: "abortedByCaller",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
 
-    const result = await runStoredAction({
+    const result = await executePreparedRun({
       host,
       runId: "act_abandoned",
       signal: controller.signal,
@@ -1702,8 +1780,8 @@ describe("runAction deadline and boundary", () => {
     expect((await deviceObjects(sixb).get("device-1"))?.properties.status).toBe("written")
   })
 
-  // Guard proof: run effects under `signals.uninterruptible` in `executeActionPhases`
-  // (`actions/run/phases.ts`) and this effects handler never returns.
+  // Guard proof: run effects under `signals.uninterruptible` in `runActionEffects`
+  // (`actions/run/effects.ts`) and this effects handler never returns.
   test("records effects that outlast their own deadline without failing the run", async () => {
     const slowEffects = defineAction("slowEffects")
       .on(Device)
@@ -1718,17 +1796,17 @@ describe("runAction deadline and boundary", () => {
     const { host, sixb } = createSixb([slowEffects])
     attachSixbErrorReporter(host, () => {})
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
-    await queueActionRun(host, {
+    await prepareActionRun(host, {
       id: "act_effects",
       actionId: "slowEffects",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
 
-    const result = await runStoredAction({ host, runId: "act_effects", timeoutMs: DEADLINE_MS })
+    const result = await executePreparedRun({ host, runId: "act_effects", timeoutMs: DEADLINE_MS })
 
     expect(result.status).toBe("succeeded")
-    expect(result.record.effects).toMatchObject({
+    expect(result.effects).toMatchObject({
       status: "failed",
       error: { code: "action.timeout", details: { phase: "effects" } },
     })

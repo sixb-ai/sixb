@@ -99,8 +99,9 @@ export async function checkRuntimeLakeDefinitions(sixb: LoadedSixbHost): Promise
 
 export async function stopSixbProviders(sixb: LoadedSixbHost): Promise<void> {
   // Actions run inside the request that asked for them, and a client that disconnects does not stop
-  // them: refuse new ones and give those in flight time to finish before closing what they use, so
-  // a retry under the same run id finds a terminal run instead of one left in progress.
+  // them: refuse new ones and give those in flight, and the effects they start, time to finish
+  // before closing what they use. A run is recorded only when it ends, so one cut short leaves no
+  // record, and a retry under the same run id runs it again.
   await stopQuietly(() => drainActionRuns(sixb, ACTION_RUN_DRAIN_TIMEOUT_MS))
   await stopQuietly(() => flushSixbErrors(sixb))
   await stopQuietly(() => sixb.closeConnectors())

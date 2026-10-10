@@ -5,7 +5,11 @@ import { createEventId, MaterializationConflictError } from "../src/materializer
 import { InMemoryStorage, type Storage, type StoredLinkSlotOverride } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
-import { queueTestActionRun } from "../src/testing"
+import {
+  createTestActionRunRecord,
+  recordTestActionRun,
+  type TestActionRunInput,
+} from "../src/testing"
 import {
   atomic,
   createMaterializerFixture,
@@ -16,6 +20,23 @@ import {
 } from "./materializer-fixture"
 
 const ref = (primaryId: string) => ({ objectTypeId: "Device", primaryId })
+
+/** The record of a run of `approve` that commits its edits, with the execution it names. */
+function approveRun(
+  storage: InMemoryStorage,
+  id: string,
+  overrides: Partial<Pick<TestActionRunInput, "actionId" | "requestedBy">> = {}
+) {
+  return createTestActionRunRecord(storage.executions, {
+    id,
+    projectId: "project",
+    actionId: "approve",
+    subject: { kind: "none" },
+    params: {},
+    idempotencyKey: `action:${id}`,
+    ...overrides,
+  })
+}
 
 describe("ontology materializer edits", () => {
   test("derives durable provenance and event attribution from the bound principal scope", async () => {
@@ -78,21 +99,15 @@ describe("ontology materializer edits", () => {
     // Reproduce by dropping `requestedBy` from `eventAttribution` in `materialization/event-envelopes.ts`.
     const storage = new InMemoryStorage()
     await storage.auth.users.create({ projectId: "project", id: "alice", email: "a@example.com" })
-    await queueTestActionRun(storage, {
-      id: "run-attributed",
-      projectId: "project",
-      actionId: "approve",
-      subject: { kind: "none" },
-      params: {},
-      idempotencyKey: "action:run-attributed",
+    const run = await approveRun(storage, "run-attributed", {
       requestedBy: { type: "user", id: "alice" },
     })
-    await storage.actionRuns.start({ id: "run-attributed", projectId: "project" })
     const { materializer } = createMaterializerFixture({ storage })
 
     const result = await materializer.edits.commit({
       mode: "atomic",
       source: { kind: "action", actionId: "approve", runId: "run-attributed" },
+      run,
       operations: [
         { id: "create", kind: "object.create", ref: ref("approved"), properties: { name: "a" } },
       ],
@@ -189,6 +204,7 @@ describe("ontology materializer edits", () => {
       materializer.edits.commit({
         mode: "atomic",
         source: { kind: "action", actionId: "approve", runId: "run-1" },
+        run: await approveRun(storage, "run-1"),
         operations: [],
         expectedObjects: [],
         expectedLinks: [],
@@ -198,31 +214,62 @@ describe("ontology materializer edits", () => {
   })
 
   test("rejects invalid Action runs before ontology reads, staging, or mutation", async () => {
-    const scenarios = [
-      { kind: "absent", storedActionId: null, start: false, error: "not found" },
+    type RunRecord = Awaited<ReturnType<typeof approveRun>>
+    const scenarios: readonly {
+      readonly kind: string
+      readonly run: (storage: InMemoryStorage, runId: string) => Promise<RunRecord>
+      readonly error: string
+    }[] = [
       {
-        kind: "wrong-action",
-        storedActionId: "other",
-        start: true,
-        error: "does not authorize",
+        kind: "recorded",
+        async run(storage, runId) {
+          await recordTestActionRun(storage, {
+            id: runId,
+            projectId: "project",
+            actionId: "approve",
+            subject: { kind: "none" },
+            params: {},
+            idempotencyKey: `action:${runId}`,
+            phase: "validation",
+          })
+          return approveRun(storage, runId)
+        },
+        error: "already recorded",
       },
-      { kind: "not-running", storedActionId: "approve", start: false, error: "status 'queued'" },
-    ] as const
+      {
+        kind: "other-run",
+        run: async (storage, runId) => ({ ...(await approveRun(storage, runId)), id: "other" }),
+        error: "belongs to another run",
+      },
+      {
+        kind: "other-action",
+        run: async (storage, runId) => ({
+          ...(await approveRun(storage, runId)),
+          actionId: "other",
+        }),
+        error: "does not belong to action 'approve'",
+      },
+      {
+        kind: "failed",
+        run: async (storage, runId) => ({
+          ...(await approveRun(storage, runId)),
+          status: "failed",
+          error: {
+            code: "action.phase_failed",
+            message: "Edits failed.",
+            retryable: false,
+            at: "2026-01-01T00:00:00.000Z",
+            details: { actionId: "approve", runId, phase: "commit" },
+          },
+        }),
+        error: "only as a succeeded run in its commit phase",
+      },
+    ]
 
     for (const scenario of scenarios) {
       const storage = new InMemoryStorage()
       const runId = `run-${scenario.kind}`
-      if (scenario.storedActionId) {
-        await queueTestActionRun(storage, {
-          id: runId,
-          projectId: "project",
-          actionId: scenario.storedActionId,
-          subject: { kind: "none" },
-          params: {},
-          idempotencyKey: `action:${runId}`,
-        })
-        if (scenario.start) await storage.actionRuns.start({ id: runId, projectId: "project" })
-      }
+      const run = await scenario.run(storage, runId)
       const { materializer } = createMaterializerFixture({ storage })
       const adapter = getInMemoryOntologyStorageTestingAdapter(storage.ontology)
       const before = adapter.snapshot()
@@ -243,6 +290,7 @@ describe("ontology materializer edits", () => {
         materializer.edits.commit({
           mode: "atomic",
           source: { kind: "action", actionId: "approve", runId },
+          run,
           operations: [
             {
               id: "create",
@@ -270,22 +318,15 @@ describe("ontology materializer edits", () => {
     }
   })
 
-  test("materializes a valid running Action without duplicating its ontology commit", async () => {
+  test("records the Action run with the commit of its edits", async () => {
     const storage = new InMemoryStorage()
-    await queueTestActionRun(storage, {
-      id: "run-valid",
-      projectId: "project",
-      actionId: "approve",
-      subject: { kind: "none" },
-      params: {},
-      idempotencyKey: "action:run-valid",
-    })
-    await storage.actionRuns.start({ id: "run-valid", projectId: "project" })
+    const run = await approveRun(storage, "run-valid")
     const { materializer } = createMaterializerFixture({ storage })
 
     const result = await materializer.edits.commit({
       mode: "atomic",
       source: { kind: "action", actionId: "approve", runId: "run-valid" },
+      run,
       operations: [
         {
           id: "create",
@@ -300,9 +341,9 @@ describe("ontology materializer edits", () => {
     })
 
     expect(result.created).toBe(true)
-    expect(
-      await storage.actionRuns.getById({ projectId: "project", id: "run-valid" })
-    ).not.toHaveProperty("commitId")
+    await expect(
+      storage.actionRuns.getById({ projectId: "project", id: "run-valid" })
+    ).resolves.toEqual(run)
     await expect(
       storage.ontology.commits.list({
         projectId: "project",
@@ -315,21 +356,17 @@ describe("ontology materializer edits", () => {
     })
   })
 
-  test("replays an exact Action commit after the run becomes terminal", async () => {
+  // Removal proof: hash the whole normalized commit in `prepareEditCommit`
+  // (`materializer/edits/commit.ts`), run record included, and the replay below, whose record
+  // finished later, is refused as different intent.
+  test("replays an exact Action commit without recording its run again", async () => {
     const storage = new InMemoryStorage()
-    await queueTestActionRun(storage, {
-      id: "run-replay",
-      projectId: "project",
-      actionId: "approve",
-      subject: { kind: "none" },
-      params: {},
-      idempotencyKey: "action:run-replay",
-    })
-    await storage.actionRuns.start({ id: "run-replay", projectId: "project" })
+    const run = await approveRun(storage, "run-replay")
     const { materializer } = createMaterializerFixture({ storage })
     const input = {
       mode: "atomic" as const,
       source: { kind: "action" as const, actionId: "approve", runId: "run-replay" },
+      run,
       operations: [
         {
           id: "create",
@@ -344,16 +381,18 @@ describe("ontology materializer edits", () => {
     }
 
     const first = await materializer.edits.commit(input)
-    await storage.actionRuns.finish({
-      projectId: "project",
-      id: "run-replay",
-      status: "succeeded",
-    })
+    const replayed = {
+      ...input,
+      run: { ...run, finishedAt: new Date(run.finishedAt.getTime() + 1) },
+    }
 
-    await expect(materializer.edits.commit(input)).resolves.toMatchObject({
+    await expect(materializer.edits.commit(replayed)).resolves.toMatchObject({
       commitId: first.commitId,
       created: false,
     })
+    await expect(
+      storage.actionRuns.getById({ projectId: "project", id: "run-replay" })
+    ).resolves.toEqual(run)
     await expect(
       materializer.edits.commit({
         ...input,
@@ -362,26 +401,16 @@ describe("ontology materializer edits", () => {
     ).rejects.toMatchObject({ kind: "idempotency" })
   })
 
-  test("rechecks the Action run inside the transaction before ontology work", async () => {
+  // Removal proof: drop `recordActionRun` from `executeEditTransaction`
+  // (`materializer/edits/commit.ts`), and the edits commit without their run.
+  test("commits no edits when the run cannot be recorded", async () => {
     const storage = new InMemoryStorage()
-    await queueTestActionRun(storage, {
-      id: "run-recheck",
-      projectId: "project",
-      actionId: "approve",
-      subject: { kind: "none" },
-      params: {},
-      idempotencyKey: "action:run-recheck",
+    const run = await approveRun(storage, "run-unrecorded")
+    let records = 0
+    decorateOperationScopedMethodForTesting(storage.actionRuns, "record", () => async () => {
+      records += 1
+      throw new Error("injected Action run record failure")
     })
-    await storage.actionRuns.start({ id: "run-recheck", projectId: "project" })
-    let locks = 0
-    decorateOperationScopedMethodForTesting(
-      storage.actionRuns,
-      "lockForMaterialization",
-      () => async () => {
-        locks += 1
-        throw new Error("injected transactional Action lock failure")
-      }
-    )
     const { materializer } = createMaterializerFixture({ storage })
     const adapter = getInMemoryOntologyStorageTestingAdapter(storage.ontology)
     const before = adapter.snapshot()
@@ -401,12 +430,13 @@ describe("ontology materializer edits", () => {
     await expect(
       materializer.edits.commit({
         mode: "atomic",
-        source: { kind: "action", actionId: "approve", runId: "run-recheck" },
+        source: { kind: "action", actionId: "approve", runId: "run-unrecorded" },
+        run,
         operations: [
           {
             id: "create",
             kind: "object.create",
-            ref: ref("transaction-recheck"),
+            ref: ref("unrecorded-run"),
             properties: { name: "must-not-exist" },
           },
         ],
@@ -414,11 +444,48 @@ describe("ontology materializer edits", () => {
         expectedLinks: [],
         expectedLinkScopes: [],
       })
-    ).rejects.toThrow("injected transactional Action lock failure")
+    ).rejects.toThrow("injected Action run record failure")
 
-    expect(locks).toBe(1)
+    expect(records).toBe(1)
     expect(ontologyActivity).toEqual([])
     expect(adapter.snapshot()).toEqual(before)
+  })
+
+  // Removal proof: record the run in a transaction of its own before the commit's opens, in
+  // `executeEditCommit` (`materializer/edits/commit.ts`), and it stays recorded although its edits
+  // rolled back.
+  test("records no run when its edits fail to commit", async () => {
+    const storage = new InMemoryStorage()
+    const run = await approveRun(storage, "run-rolled-back")
+    const { materializer } = createMaterializerFixture({ storage })
+    getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
+      beforeWrite() {
+        throw new Error("injected ontology write failure")
+      },
+    })
+
+    await expect(
+      materializer.edits.commit({
+        mode: "atomic",
+        source: { kind: "action", actionId: "approve", runId: "run-rolled-back" },
+        run,
+        operations: [
+          {
+            id: "create",
+            kind: "object.create",
+            ref: ref("rolled-back-run"),
+            properties: { name: "must-not-exist" },
+          },
+        ],
+        expectedObjects: [],
+        expectedLinks: [],
+        expectedLinkScopes: [],
+      })
+    ).rejects.toThrow("injected ontology write failure")
+
+    await expect(
+      storage.actionRuns.getById({ projectId: "project", id: "run-rolled-back" })
+    ).resolves.toBeNull()
   })
 
   test("skips incident hubs for presence-preserving patches and pages them for deletion", async () => {

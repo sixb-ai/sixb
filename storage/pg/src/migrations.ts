@@ -431,6 +431,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("058-reranking-model-kind", rerankingModelKindSql),
     pgSql("059-file-download-grants", fileDownloadGrantsSql),
     pgSql("060-drained-source-versions", drainedSourceVersionsSql),
+    pgSql("061-terminal-action-runs", terminalActionRunsSql),
   ],
 })
 
@@ -459,3 +460,4 @@ import fileDownloadGrantsSql from "./migrations/059-file-download-grants.sql" wi
 import drainedSourceVersionsSql from "./migrations/060-drained-source-versions.sql" with {
   type: "text",
 }
+import terminalActionRunsSql from "./migrations/061-terminal-action-runs.sql" with { type: "text" }

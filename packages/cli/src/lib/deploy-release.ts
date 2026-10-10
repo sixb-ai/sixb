@@ -66,11 +66,11 @@ const DEFAULT_KILL_TIMEOUT_MS = 10_000
 const DEFAULT_RESTART_DELAY_MS = 1_000
 
 /**
- * A stopping API first waits up to 35 s for the Actions it is running (`ACTION_RUN_DRAIN_TIMEOUT_MS`
- * in core), so a graceful restart must not kill it before. A literal keeps the runtime out of the
- * deploy command; `deploy.test.ts` holds the two together.
+ * A stopping API first waits up to 65 s for the Actions it is running and their effects
+ * (`ACTION_RUN_DRAIN_TIMEOUT_MS` in core), so a graceful restart must not kill it before. A literal
+ * keeps the runtime out of the deploy command; `deploy.test.ts` holds the two together.
  */
-const API_KILL_TIMEOUT_MS = 40_000
+const API_KILL_TIMEOUT_MS = 70_000
 
 export interface DeployReleaseOptions {
   /** The Bun version the project runs on, from its `packageManager` or the running Bun. */

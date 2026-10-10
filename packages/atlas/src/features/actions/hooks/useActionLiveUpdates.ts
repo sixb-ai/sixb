@@ -8,18 +8,10 @@ import {
 
 const debounceMs = 100
 
-export function useActionLiveUpdates(
-  options: { enabled?: boolean; runId?: string; actionId?: string } = {}
-) {
-  const enabled = options.enabled ?? true
-  const builder = options.runId
-    ? events.actions().run(options.runId)
-    : options.actionId
-      ? events.actions().action(options.actionId)
-      : events.actions()
-
+/** Refresh action runs, and the objects they edited, as runs are requested and recorded. */
+export function useActionLiveUpdates() {
   useInvalidateOnEvent(
-    builder,
+    events.actions(),
     (event) => {
       const keys: InvalidationKey[] = [
         queryKey("listActionRuns"),
@@ -34,6 +26,6 @@ export function useActionLiveUpdates(
 
       return keys
     },
-    { enabled, debounceMs }
+    { debounceMs }
   )
 }

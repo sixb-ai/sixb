@@ -1,117 +1,105 @@
 import { randomUUID } from "node:crypto"
-import { createSixbError } from "../errors/internal"
 import type { ActionRunParams, ActionRunRecord, CreateExecutionInput, Storage } from "../storage"
-import { ActionRunError, isTerminalActionRun } from "../storage"
-import { actionRunParamsEqual, actionSubjectsEqual } from "../storage/action-runs/idempotency"
+import { ActionRunError } from "../storage"
+import { actionRunRequestsEqual } from "../storage/action-runs/idempotency"
 import type { ExecutionRecord } from "../storage/executions"
-import { createActionRunId, createActionRunIdempotencyKey } from "./run-id"
+import type { PendingActionRun } from "./run/types"
+import { createActionRunIdempotencyKey } from "./run-id"
 import type { ActionSubject } from "./types"
+
+/** What a request asks its run id to run. */
+export interface ActionRunRequestPayload {
+  readonly actionId: string
+  readonly subject: ActionSubject
+  readonly params: ActionRunParams
+}
+
+/** A run that already exists under a requested run id, recorded or still executing. */
+export type ExistingActionRun = Pick<
+  ActionRunRecord,
+  "id" | "executionId" | "actionId" | "subject" | "params"
+>
+
+/** Refuses an existing run the requesting caller may not have. */
+export type AssertCanReuseActionRun = (run: ExistingActionRun) => void | Promise<void>
+
+/**
+ * Answer a request with the run that already exists under its run id only when its caller may have
+ * that run, and only for the same request.
+ *
+ * The caller's right to the run is checked first, so that a refused caller learns nothing about it,
+ * not even whether it carries the same request.
+ */
+export async function assertCanReuseActionRun(
+  run: ExistingActionRun,
+  request: {
+    readonly payload: ActionRunRequestPayload
+    readonly assertCanReuse: AssertCanReuseActionRun
+  }
+): Promise<void> {
+  await request.assertCanReuse(run)
+  if (!actionRunRequestsEqual(run, request.payload)) {
+    throw new ActionRunError(
+      `[Sixb] Action run '${run.id}' already exists with a different request payload.`
+    )
+  }
+}
 
 interface PersistActionRunInput {
   readonly projectId: string
   readonly storage: Storage
-  readonly actionId: string
-  readonly subject: ActionSubject
-  readonly params: ActionRunParams
-  readonly runId?: string
+  readonly runId: string
+  readonly payload: ActionRunRequestPayload
   readonly createExecution: (executionId: string, runId: string) => Promise<CreateExecutionInput>
-  /** Runs before payload comparison so an existing run cannot cross authority owners. */
-  readonly assertCanReuseExisting?: (storage: Storage, run: ActionRunRecord) => void | Promise<void>
+  readonly assertCanReuse: AssertCanReuseActionRun
   /** Checks that hold only for a run this call creates; a replayed run keeps its accepted params. */
   readonly assertNewRun?: () => Promise<void>
 }
 
-/** A run this request created, or the outcome of an earlier request with the same run id. */
+/** A run this request is to execute, or the record of an earlier request with the same run id. */
 export type PersistedActionRun =
   | {
-      readonly kind: "created"
-      readonly run: ActionRunRecord
+      readonly kind: "new"
+      readonly run: PendingActionRun
       readonly execution: ExecutionRecord
     }
-  | { readonly kind: "finished"; readonly run: ActionRunRecord }
+  | { readonly kind: "recorded"; readonly run: ActionRunRecord }
 
 /**
- * Persist an Action run with the durable execution it runs under, idempotently by run id.
+ * Persist what a requested run needs before it executes: the durable execution it runs under.
  *
- * Both are written in one serializable transaction. A run id that already exists must carry the
- * same request: its terminal record answers this request without running anything, and while it
- * is still executing the request is refused as in progress.
+ * Nothing else is stored before the run ends. A run id that is already recorded must carry the same
+ * request, and its record answers this request without running anything.
  */
 export async function persistActionRun(input: PersistActionRunInput): Promise<PersistedActionRun> {
-  const runId = createActionRunId(input.runId)
-  const actionRuns = requireActionRunStorage(input.storage)
-
-  const existing = await actionRuns.getById({ projectId: input.projectId, id: runId })
-  if (existing) return reuseActionRun(input, input.storage, existing)
-
-  await input.assertNewRun?.()
-  const execution = await input.createExecution(`exec_${randomUUID()}`, runId)
-  try {
-    return await input.storage.transaction(
-      async (tx): Promise<PersistedActionRun> => {
-        const transactionalRuns = requireActionRunStorage(tx)
-        const raced = await transactionalRuns.getById({ projectId: input.projectId, id: runId })
-        if (raced) return reuseActionRun(input, tx, raced)
-
-        const created = await tx.executions.create(execution)
-        const run = await transactionalRuns.queue({
-          projectId: input.projectId,
-          id: runId,
-          executionId: created.id,
-          actionId: input.actionId,
-          subject: input.subject,
-          params: input.params,
-          idempotencyKey: createActionRunIdempotencyKey(input.projectId, runId),
-          queuedAt: new Date(),
-        })
-        return { kind: "created", run, execution: created }
-      },
-      { isolation: "serializable" }
-    )
-  } catch (error) {
-    // A concurrent request for the same run id won the insert.
-    if (!(error instanceof ActionRunError)) throw error
-    const raced = await actionRuns.getById({ projectId: input.projectId, id: runId })
-    if (!raced) throw error
-    return reuseActionRun(input, input.storage, raced)
-  }
-}
-
-async function reuseActionRun(
-  input: PersistActionRunInput,
-  storage: Storage,
-  existing: ActionRunRecord
-): Promise<PersistedActionRun> {
-  await input.assertCanReuseExisting?.(storage, existing)
-  assertExistingRunMatchesRequest(existing, input)
-  if (!isTerminalActionRun(existing)) {
-    throw createSixbError(
-      "action.run_in_progress",
-      `[Sixb] Action run '${existing.id}' is already in progress.`,
-      { details: { actionId: existing.actionId, runId: existing.id } }
-    )
-  }
-  return { kind: "finished", run: existing }
-}
-
-function requireActionRunStorage(storage: Storage): NonNullable<Storage["actionRuns"]> {
-  if (!storage.actionRuns) {
+  const { projectId, runId, payload } = input
+  if (!input.storage.actionRuns) {
     throw new ActionRunError("[Sixb] Action run storage is not configured.")
   }
-  return storage.actionRuns
-}
 
-function assertExistingRunMatchesRequest(
-  existing: ActionRunRecord,
-  request: Pick<PersistActionRunInput, "actionId" | "subject" | "params">
-): void {
-  if (
-    existing.actionId !== request.actionId ||
-    !actionSubjectsEqual(existing.subject, request.subject) ||
-    !actionRunParamsEqual(existing.params, request.params)
-  ) {
-    throw new ActionRunError(
-      `[Sixb] Action run '${existing.id}' already exists with a different request payload.`
-    )
+  const recorded = await input.storage.actionRuns.getById({ projectId, id: runId })
+  if (recorded) {
+    await assertCanReuseActionRun(recorded, input)
+    return { kind: "recorded", run: recorded }
+  }
+
+  await input.assertNewRun?.()
+  // The execution is immutable provenance, created before the run executes: its record references
+  // it, and so do the commit of its edits and the model calls it makes.
+  const execution = await input.storage.executions.create(
+    await input.createExecution(`exec_${randomUUID()}`, runId)
+  )
+  return {
+    kind: "new",
+    run: {
+      id: runId,
+      projectId,
+      executionId: execution.id,
+      actionId: payload.actionId,
+      subject: payload.subject,
+      params: payload.params,
+      idempotencyKey: createActionRunIdempotencyKey(projectId, runId),
+    },
+    execution,
   }
 }

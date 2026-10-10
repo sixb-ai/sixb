@@ -17,7 +17,11 @@ import {
   SixbHost,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
-import { createTestSixb, createTestWorkflowExecution, queueTestActionRun } from "@sixb/core/testing"
+import {
+  createTestSixb,
+  createTestWorkflowExecution,
+  recordTestActionRun,
+} from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -88,7 +92,7 @@ async function createRunFileApi(options: { readonly auth?: boolean } = {}) {
     mediaType: "text/markdown",
   })
 
-  await queueTestActionRun(storage, {
+  await recordTestActionRun(storage, {
     id: "action_run_1",
     projectId: sixb.id,
     actionId: extractDocument.id,
@@ -98,19 +102,14 @@ async function createRunFileApi(options: { readonly auth?: boolean } = {}) {
       title: "not a file",
     },
     idempotencyKey: "action_run_1",
-    queuedAt: new Date("2026-06-30T12:00:00.000Z"),
-  })
-  await storage.actionRuns.start({
-    id: "action_run_1",
-    projectId: sixb.id,
+    phase: "writeback",
     startedAt: new Date("2026-06-30T12:00:30.000Z"),
-  })
-  await storage.actionRuns.recordWriteback({
-    id: "action_run_1",
-    projectId: sixb.id,
-    status: "succeeded",
-    result: { report: fileRefJson(actionResult) },
-    completedAt: new Date("2026-06-30T12:00:45.000Z"),
+    finishedAt: new Date("2026-06-30T12:00:46.000Z"),
+    writeback: {
+      status: "succeeded",
+      result: { report: fileRefJson(actionResult) },
+      completedAt: new Date("2026-06-30T12:00:45.000Z"),
+    },
   })
 
   const workflowExecutionId = await createTestWorkflowExecution(storage.executions, {

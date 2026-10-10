@@ -25,12 +25,14 @@ import {
   ref,
   resolveAuthorizationContext,
   type SecurityDefinitionCatalog,
+  type SixbErrorContext,
   SixbHost,
   type Storage,
   type StoredDomainEvent,
   type WorkflowDefinition,
 } from "../src"
 import { agentServiceAccountId } from "../src/agents/authority"
+import { flushSixbErrors } from "../src/error-reporting/internal"
 import { restoreAgentExecutionScope } from "../src/execution/agent"
 import { bindRequestExecution } from "../src/execution/request"
 import type { AuthStorage } from "../src/storage"
@@ -115,10 +117,23 @@ const reviewContractWithAgent = defineAgentStep("review-contract-with-agent", {
 
 // Widened to the base type, like renewContract below: keeps the registered
 // actions array out of the deep SixbHost<tuple> instantiation (TS2589).
+/** Holds a `send-contract` run at its edits, by subject, while a test needs it in flight. */
+const sendContractHolds = new Map<string, ReturnType<typeof holdRun>>()
+
+function holdRun() {
+  const reached = Promise.withResolvers<void>()
+  const released = Promise.withResolvers<void>()
+  return { reached, released }
+}
+
 const sendContract: ActionDefinition = defineAction("send-contract")
   .on(Contract)
   .params({})
-  .edits(() => {})
+  .edits(async ({ subject }) => {
+    const hold = sendContractHolds.get(subject.primaryId)
+    hold?.reached.resolve()
+    await hold?.released.promise
+  })
 
 const archiveInvoice: ActionDefinition = defineAction("archive-invoice")
   .on(Invoice)
@@ -222,7 +237,12 @@ const principal = { type: "user", id: "adam" } as const
 // No explicit instance annotations anywhere in this file: naming
 // SixbHost<three-type tuple> in a type position (alias, param, ReturnType) trips
 // TS2589 instantiation depth. Inference handles it fine.
-function createRuntime() {
+function createRuntime(
+  options: {
+    readonly deps?: ReturnType<typeof createTestRuntimeDeps>
+    readonly onError?: (error: Error, context: SixbErrorContext) => void
+  } = {}
+) {
   return new SixbHost({
     ontology: [Contract, SignedContract, Invoice],
     datasets: [ContractsDataset, InvoicesDataset],
@@ -258,7 +278,8 @@ function createRuntime() {
       blindInvoiceLinker,
       broadContractSender,
     ],
-    ...createTestRuntimeDeps(),
+    ...(options.onError === undefined ? {} : { onError: options.onError }),
+    ...(options.deps ?? createTestRuntimeDeps()),
   })
 }
 
@@ -466,7 +487,8 @@ describe("bound Sixb actions", () => {
 
   // Guard proof: drop the `object.view` check on the subject's type from `requestAction`
   // (`actions/request.ts`), and the fresh request runs on a contract its caller cannot view. Drop
-  // `assertCanViewReplayedRun` as well, and the replay hands that caller the stored run.
+  // the `canViewActionRun` check from `assertCallerMayHaveRun` as well, and the replay hands that caller
+  // the stored run.
   test("object actions require visibility of the subject's own type", async () => {
     const host = createRuntime()
     await seedPrincipal(host)
@@ -508,6 +530,99 @@ describe("bound Sixb actions", () => {
       operator.actions.request({ actionId: "send-contract", subject: signed, runId: "act_signed" })
     ).resolves.toEqual(run)
     expect(await operator.actions.runs.getById("act_signed")).toEqual(run)
+  })
+})
+
+describe("bound Sixb Action run reuse", () => {
+  // Guard proof: compare the payload before calling `assertCanReuse` in
+  // `assertCanReuseActionRun` (`actions/run-persistence.ts`), and the caller learns that the run it
+  // may not see carries another request.
+  test("refuses a principal a recorded run it may not see, before comparing its request", async () => {
+    const host = createRuntime()
+    await seedPrincipal(host)
+    const sixb = createTestSixb(host)
+    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
+    await sixb.objects(SignedContract).upsert({ properties: { id: "s1" } })
+    await sixb.actions.request({
+      actionId: "send-contract",
+      subject: { kind: "object", objectTypeId: "signed-contract", primaryId: "s1" },
+      runId: "act_hidden",
+    })
+    const broad = bindPrincipal(host, contextFor(host, ["broad-senders"]))
+
+    const refused = await broad.actions
+      .request({
+        actionId: "send-contract",
+        subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
+        runId: "act_hidden",
+      })
+      .then(
+        () => undefined,
+        (error: unknown) => error
+      )
+    expect(refused).toBeInstanceOf(AuthorizationError)
+    expect(refused instanceof Error ? refused.message : refused).toBe(
+      "[Sixb] Action run 'act_hidden' is not visible to this principal."
+    )
+  })
+
+  // Guard proof: return the record from `ActionRunExecutor.execute` (`actions/run/executor.ts`)
+  // without `assertCanReuseActionRun` when another process recorded it first, and this caller gets a
+  // run on a contract it may not see.
+  test("refuses a principal the run another process recorded first, when it may not see it", async () => {
+    const deps = createTestRuntimeDeps()
+    const reports: string[] = []
+    const onError = (_error: Error, context: SixbErrorContext) => {
+      reports.push(context.type)
+    }
+    const visible = createRuntime({ deps, onError })
+    const restricted = createRuntime({ deps, onError })
+    await seedPrincipal(visible)
+    const sixb = createTestSixb(visible)
+    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
+    await sixb.objects(SignedContract).upsert({ properties: { id: "s1" } })
+    const signedHold = holdRun()
+    const contractHold = holdRun()
+    sendContractHolds.set("s1", signedHold)
+    sendContractHolds.set("c1", contractHold)
+
+    try {
+      const recordedFirst = sixb.actions.request({
+        actionId: "send-contract",
+        subject: { kind: "object", objectTypeId: "signed-contract", primaryId: "s1" },
+        runId: "act_shared",
+      })
+      const recordedSecond = createTestSixb(restricted, {
+        authorization: contextFor(restricted, ["broad-senders"]),
+        executionId: "exec_restricted",
+        requestId: "request_restricted",
+        correlationId: "correlation_restricted",
+      })
+        .actions.request({
+          actionId: "send-contract",
+          subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
+          runId: "act_shared",
+        })
+        .then(
+          () => undefined,
+          (error: unknown) => error
+        )
+
+      // Both runs execute before either is recorded, as in two processes.
+      await Promise.all([signedHold.reached.promise, contractHold.reached.promise])
+      signedHold.released.resolve()
+      await expect(recordedFirst).resolves.toMatchObject({ status: "succeeded" })
+      contractHold.released.resolve()
+      const refused = await recordedSecond
+      expect(refused).toBeInstanceOf(AuthorizationError)
+      expect(refused instanceof Error ? refused.message : refused).toBe(
+        "[Sixb] Action run 'act_shared' is not visible to this principal."
+      )
+      await Promise.all([flushSixbErrors(visible), flushSixbErrors(restricted)])
+      expect(reports).toEqual([])
+    } finally {
+      sendContractHolds.clear()
+    }
   })
 })
 

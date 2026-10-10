@@ -266,6 +266,8 @@ function enumValue(flag, value, allowed) {
 function formatAlternatives(values) {
   if (values.length < 2)
     return values[0] ?? "a supported value";
+  if (values.length === 2)
+    return `${values[0]} or ${values[1]}`;
   return `${values.slice(0, -1).join(", ")}, or ${values.at(-1)}`;
 }
 // ../cli-core/src/policies.ts
@@ -464,7 +466,7 @@ List options:
   --action <action-id>
   --type <object-type>
   --id <primary-id>
-  --status queued|running|succeeded|failed|cancelled
+  --status succeeded|failed
   --started-after|--started-before <RFC3339>
   --limit <1-${CLI_LIMITS.list.maximum}>              Defaults to ${CLI_LIMITS.list.default}
   --offset <n>                  Non-negative; defaults to 0
@@ -1208,7 +1210,7 @@ async function project(api, args) {
 }
 
 // ../cli-core/src/commands/runs.ts
-var ACTION_RUN_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"];
+var ACTION_RUN_STATUSES = ["succeeded", "failed"];
 var WORKFLOW_RUN_STATUSES = [
   "queued",
   "running",
