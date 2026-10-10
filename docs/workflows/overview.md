@@ -52,7 +52,8 @@ workflow `input` and earlier outputs in `steps`. Step IDs become camelCase keys:
 ## Run an action
 
 Add an [action](../actions/overview.md) with `.then(action, mapper)`. The mapper returns the action's
-`subject` and `params`. The workflow waits for the action to finish before continuing.
+`subject` and `params`. The workflow runs the action and continues once it succeeds; a failed action
+stops the run.
 
 For a project action named `sendReminder` that accepts a `message` parameter, extend the workflow
 above like this:

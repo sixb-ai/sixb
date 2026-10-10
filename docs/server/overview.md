@@ -38,7 +38,7 @@ Being authenticated does not grant data access or member-management rights. Conf
 
 ## Send a request
 
-Send JSON with the appropriate content type. This requests a project-defined action on an invoice:
+Send JSON with the appropriate content type. This runs a project-defined action on an invoice:
 
 ```bash
 curl https://api.example.com/api/actions/markPaid \
@@ -54,7 +54,9 @@ curl https://api.example.com/api/actions/markPaid \
   }'
 ```
 
-The response acknowledges the queued request with a `runId`. Read `/api/action-runs/:runId` to check completion. A successful request does not mean the operation has finished.
+The response is the finished action run. A run that failed is still a `200` response, with `status: "failed"` and its `error`. An error status usually means no run was requested, but a `500` can follow a run that started: send the request again with the same `runId` to get that run's record. A request that reuses the `runId` of a run still in progress gets `409`, and a server that is shutting down answers `503` without starting anything. See [Actions](../actions/overview.md#request-an-action).
+
+Sync, pipeline, and workflow run requests instead answer with a `runId` once the run is queued. Read the matching run endpoint, such as `/api/workflow-runs/:runId`, to check completion.
 
 For paginated reads, use the parameters and continuation fields documented on that endpoint. Object queries return a `nextPageToken`; see [Paginate results](object-queries.md#paginate-results).
 
