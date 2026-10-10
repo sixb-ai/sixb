@@ -9,7 +9,7 @@ import {
 import { z } from "zod"
 import { AiCostSummarySchema } from "./ai-accounting"
 import { AiUsageSummarySchema } from "./ai-usage"
-import { JsonValueSchema, sixbFailureSchema } from "./common"
+import { ErrorResponseSchema, JsonValueSchema, sixbFailureSchema } from "./common"
 import { FileRefSchema } from "./files"
 import { LanguageModelRefSchema, ModelReasoningSchema } from "./models"
 
@@ -237,11 +237,20 @@ export const PostAgentMessageBodySchema = z
     text: z.string().trim().min(1),
     model: LanguageModelRefSchema.optional(),
     reasoning: ModelReasoningSchema.optional(),
+    /** IANA time zone of the person asking. The Agent presents dates and times in it. */
+    timeZone: z.string().trim().min(1).max(100).optional(),
+    /** BCP 47 language of the person asking. */
+    locale: z.string().trim().min(1).max(100).optional(),
     attachments: z.array(FileRefSchema).optional(),
     context: z.array(AgentContextEntryInputSchema).max(MAX_AGENT_CONTEXT_ENTRIES).optional(),
     messageId: z.string().trim().min(1).optional(),
   })
   .strict()
+
+/** A refused message request, with the stable code of the reason, such as `invalid_locale`. */
+export const AgentRequestErrorResponseSchema = ErrorResponseSchema.extend({
+  code: z.string().optional(),
+})
 
 export const CancelAgentRunBodySchema = z.object({
   runId: z.string().trim().min(1),

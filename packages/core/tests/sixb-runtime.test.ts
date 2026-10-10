@@ -167,6 +167,23 @@ describe("SixbHost runtime", () => {
     }
   })
 
+  test("canonicalizes the project locale and time zone and rejects invalid ones", () => {
+    const deps = createTestRuntimeDeps()
+    expect(new SixbHost({ ontology: [Room], ...deps })).toMatchObject({
+      locale: "en",
+      timeZone: "UTC",
+    })
+    expect(
+      new SixbHost({ ontology: [Room], ...deps, locale: "fr-fr", timeZone: "europe/paris" })
+    ).toMatchObject({ locale: "fr-FR", timeZone: "Europe/Paris" })
+    expect(() => new SixbHost({ ontology: [Room], ...deps, locale: "fr_FR" })).toThrow(
+      `[Sixb] 'locale' must be a BCP 47 language tag such as "fr-FR"; received "fr_FR".`
+    )
+    expect(() => new SixbHost({ ontology: [Room], ...deps, timeZone: "Paris" })).toThrow(
+      `[Sixb] 'timeZone' must be an IANA time zone such as "Europe/Paris"; received "Paris".`
+    )
+  })
+
   test("upserts an object using object-type tokens", async () => {
     const sixb = createTestSixb({ ontology: [Room], ...createTestRuntimeDeps() })
 

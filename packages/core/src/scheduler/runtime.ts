@@ -18,6 +18,8 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647
 export interface SchedulerRuntimeOptions {
   schedules: readonly ScheduleDefinition[]
   events: DomainEventLog
+  /** Evaluates cron schedules that set no time zone of their own. Defaults to UTC. */
+  timeZone?: string
   now?: () => Date
 }
 
@@ -30,6 +32,7 @@ export interface SchedulerController {
 export class SchedulerRuntime implements SchedulerController {
   private readonly schedules: readonly CronScheduleDefinition[]
   private readonly events: DomainEventLog
+  private readonly timeZone: string | undefined
   private readonly now: () => Date
   private started = false
   private timer: ReturnType<typeof setTimeout> | null = null
@@ -39,6 +42,8 @@ export class SchedulerRuntime implements SchedulerController {
   constructor(options: SchedulerRuntimeOptions) {
     this.schedules = options.schedules.filter(isCronSchedule)
     this.events = options.events
+    // `undefined` keeps the arithmetic UTC path; an explicit "UTC" would go through Intl.
+    this.timeZone = options.timeZone === "UTC" ? undefined : options.timeZone
     this.now = options.now ?? (() => new Date())
   }
 
@@ -60,7 +65,11 @@ export class SchedulerRuntime implements SchedulerController {
       // agree, or one unschedulable expression stops every other schedule in the project and
       // crash-loops the scheduler role.
       try {
-        const next = nextCronOccurrence(schedule.trigger.expression, now, schedule.trigger.timezone)
+        const next = nextCronOccurrence(
+          schedule.trigger.expression,
+          now,
+          schedule.trigger.timezone ?? this.timeZone
+        )
         this.nextOccurrences.set(schedule.id, next)
       } catch (error) {
         console.error(
@@ -178,7 +187,7 @@ export class SchedulerRuntime implements SchedulerController {
         const next = nextCronOccurrence(
           schedule.trigger.expression,
           occurrenceAt,
-          schedule.trigger.timezone
+          schedule.trigger.timezone ?? this.timeZone
         )
         this.nextOccurrences.set(schedule.id, next)
       } catch (error) {

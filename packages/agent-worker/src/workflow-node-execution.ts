@@ -205,6 +205,7 @@ export async function executeWorkflowAgentNode(
       workflowRunId: nodeRun.workflowRunId,
       nodeRunId: nodeRun.id,
       prompt: reserved.prompt,
+      createdAt: reserved.createdAt,
       valueTypesById,
       usageRecorder,
       signal: nodeSignal,

@@ -313,6 +313,8 @@ describe("SixbServer HTTP contract", () => {
     const storage: Storage = new SqliteStorage()
     const sixb = createSixbInstance({
       id: "contract-project",
+      locale: "fr-fr",
+      timeZone: "europe/paris",
       ontology: [Space, Device],
       actions: [setSpeed, renameDevice, syncDeviceLabel, createMaintenanceRun],
       broker: new InMemoryBroker(),
@@ -588,7 +590,12 @@ describe("SixbServer HTTP contract", () => {
     await withHttpContractServer(async ({ baseUrl, sixb }) => {
       const projectResponse = await fetch(`${baseUrl}/api/project`)
       expect(projectResponse.status).toBe(200)
-      expect(await projectResponse.json()).toEqual({ id: "contract-project" })
+      // The project's language and time zone come back canonicalized.
+      expect(await projectResponse.json()).toEqual({
+        id: "contract-project",
+        locale: "fr-FR",
+        timeZone: "Europe/Paris",
+      })
 
       const statusResponse = await fetch(`${baseUrl}/api/status`)
       expect(statusResponse.status).toBe(200)

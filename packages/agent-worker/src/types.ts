@@ -44,6 +44,9 @@ export type AgentWorkerStorage = Storage & {
  * Models are non-serialisable and never sent over the wire.
  */
 export interface AgentWorkerHost extends AgentExecutionHost {
+  /** Project locale and time zone, for runs that do not carry the requester's own. */
+  readonly locale: string
+  readonly timeZone: string
   readonly sandboxDefinition?: SandboxDefinition
   readonly broker: Broker
   readonly events: DomainEventLog
@@ -75,6 +78,9 @@ export interface AgentWorkerContext {
   readonly recoverAiModelCall: RecoverAiModelCall
   readonly defaultMaxSteps: number
   readonly turnTimeoutMs: number
+  /** Project locale and time zone, for runs that do not carry the requester's own. */
+  readonly locale: string
+  readonly timeZone: string
 }
 
 /** Provider ports activated only after an Agent execution scope is bound. */
@@ -101,6 +107,8 @@ export interface AgentTurnContext {
   readonly prepareStep?: RunModelLoopInput["prepareStep"]
   /** Complete worker-owned system prompt, derived from the mode and provisioned runtime. */
   readonly systemPrompt: string
+  /** Time zone of runs that captured none, used to date their user messages. */
+  readonly projectTimeZone: string
   readonly attachmentContext?: PreparedAgentAttachmentContext
   /**
    * The concurrently provisioning sandbox, exposed so the turn can fail if it rejects. Resolved

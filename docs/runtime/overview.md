@@ -59,6 +59,28 @@ Add services as your project needs them:
 | `onError` | Send failures to your monitoring service. | [Failure notifications](../logging/overview.md#report-failures) |
 | `connectorConnections` | Protect stored OAuth credentials. | [OAuth connectors](../connectors/authentication.md) |
 
+## Language and time zone
+
+Set the language and time zone your project's users work in:
+
+```ts
+export const sixb = createSixb({
+  id: "my-app",
+  locale: "fr-FR",
+  timeZone: "Europe/Paris",
+  // ...providers
+})
+```
+
+| Option | Format | Default | Used by |
+| --- | --- | --- | --- |
+| `locale` | BCP 47 language tag | `"en"` | The language your app pages declare, and the fallback language of the built-in chat. |
+| `timeZone` | IANA time zone | `"UTC"` | [Cron schedules](../schedules/overview.md#run-on-a-timer) without their own time zone, and the local time the agent works in. |
+
+Invalid values fail at startup. The agent knows the current date and time in this time zone. In
+chat, the user's browser time zone and language take precedence, so each user sees times in their
+own zone. Atlas stays in English.
+
 ## Environment variables
 
 Bun loads your project's `.env` file. Read credentials and environment-specific settings through `process.env`; keep secrets out of source control.

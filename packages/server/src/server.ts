@@ -425,13 +425,14 @@ export function createSixbApi(server: SixbServer) {
     })
   )
 
+  const authExperience = server.getAuthExperience()
   registerAuthRoutes(app, host, {
     resolveAuthContext: (request) => server.resolveAuthContext(request),
     resolveAuthRedirectContext: (request, input) =>
       server.resolveAuthRedirectContext(request, input),
     getInvitationDestinationOptions: (request) => server.getInvitationDestinationOptions(request),
     resolveAuthRequestOrigin: (request) => server.resolveAuthRequestOrigin(request),
-    authExperience: server.getAuthExperience(),
+    authExperience: authExperience && { ...authExperience, locale: host.locale },
     resolveInvitationRedirectContext: (request, input) =>
       server.resolveInvitationRedirectContext(request, input),
   })

@@ -9,6 +9,11 @@ export interface SixbAuthExperienceOptions {
   readonly audience?: AuthSessionAudience
 }
 
+/** The configured experience with the project's language, which its pages declare. */
+export interface ProjectAuthExperience extends SixbAuthExperienceOptions {
+  readonly locale: string
+}
+
 export type AuthExperiencePageState =
   | { readonly kind: "signIn" }
   | { readonly kind: "checkEmail" }
@@ -23,7 +28,7 @@ export interface AuthExperienceSubmission {
 }
 
 export async function customAuthExperienceResponse(
-  options: SixbAuthExperienceOptions | undefined,
+  options: ProjectAuthExperience | undefined,
   input: {
     readonly audience: AuthSessionAudience
     readonly state: AuthExperiencePageState
@@ -62,7 +67,11 @@ export async function customAuthExperienceResponse(
     " "
   )
 
-  return new Response(html.replace(AUTH_BOOTSTRAP_PLACEHOLDER, bootstrap), {
+  const page = withDocumentLanguage(
+    html.replace(AUTH_BOOTSTRAP_PLACEHOLDER, bootstrap),
+    options.locale
+  )
+  return new Response(page, {
     status: input.status ?? 200,
     headers: {
       "content-type": "text/html; charset=utf-8",
@@ -81,6 +90,15 @@ export async function customAuthExperienceResponse(
       "x-content-type-options": "nosniff",
     },
   })
+}
+
+// The page is built without loading the project, so its language is set when it is served.
+function withDocumentLanguage(html: string, locale: string): string {
+  return html.replace(
+    /<html\b([^>]*)>/i,
+    (_tag, attributes: string) =>
+      `<html${attributes.replace(/\s+lang\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i, "")} lang="${locale}">`
+  )
 }
 
 function normalizeCspOrigin(value: string): string {
