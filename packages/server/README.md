@@ -109,8 +109,8 @@ Send messages to control the subscription:
 { "type": "unsubscribe" }
 ```
 
-- `topic` -- Filter by topic: `objects`, `telemetry`, `links`, `actions`, `schedules`, `syncs`, `pipelines`, `workflows`, `datasets`, or `rules`.
-- `types` -- Filter by event type, for example `object.updated`, `link.created`, `telemetry.appended`, `action.requested`, or `workflow.run.finished`.
+- `topic` -- Filter by topic: `objects`, `telemetry`, `links`, `schedules`, `syncs`, `pipelines`, `workflows`, `datasets`, or `rules`.
+- `types` -- Filter by event type, for example `object.updated`, `link.created`, `telemetry.appended`, or `workflow.run.finished`.
 - `afterCursor` -- Start streaming after a broker cursor. Defaults to the cursor captured when the socket opened.
 
 Events are delivered as:
