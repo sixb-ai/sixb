@@ -7,7 +7,7 @@
 
 import { resolve } from "node:path"
 import type { ActionDefinition } from "../actions/types"
-import type { AgentToolDefinition } from "../agents"
+import type { AgentSkillDefinition, AgentToolDefinition } from "../agents"
 import {
   AuthRuntime,
   AuthRuntimeError,
@@ -59,6 +59,7 @@ import { ModelExecutionSession } from "../models/execution/session"
 import { createVectorIndexingRuntime } from "../objects/vectors/indexing"
 import { VectorIndexingDispatcher } from "../objects/vectors/indexing-dispatch"
 import { registerVectorIndexingRuntime } from "../objects/vectors/indexing-runtime"
+import type { OntologyDocsInput } from "../ontology/docs"
 import type { PipelineDefinition } from "../pipelines/types"
 import { registerProjectionRegistry } from "../projections/internal"
 import type { ProjectionDefinition } from "../projections/types"
@@ -130,6 +131,12 @@ export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsCon
   models?: ModelCatalogInput
   /** Project tools available to Agent runtimes. */
   tools?: readonly AgentToolDefinition[]
+  /** Agent Skills. createSixb() discovers them from `skills/`. */
+  skills?: readonly AgentSkillDefinition[]
+  /** The conversational Agent's instructions. createSixb() reads them from `SIXB.md`. */
+  projectInstructions?: string
+  /** The Agent's files under `ontology/`. createSixb() discovers them. */
+  ontologyDocs?: OntologyDocsInput
   markings?: readonly MarkingDefinition[]
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]

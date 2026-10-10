@@ -96,8 +96,12 @@ output before continuing.
 The task uses your [configured language model](../models/configuration.md#language-models) and built-in sandbox
 tools. `groups` controls its access to project data; grant the example's `finance` group permission
 to read invoices. Without groups, it has no project grants. To add custom tools, select them with
-`tools: [...]` and register them in `createSixb({ tools })`. See
-[Tools and skills](../models/tools-and-authorization.md).
+`tools: [...]` and register them in `createSixb({ tools })`. To give it
+[skills](../models/tools-and-authorization.md#add-a-skill), list their names in
+`skills: ["invoice-review"]`; Sixb checks them against `skills/` when your project loads.
+
+A task receives no tools and no skills unless it selects them. Earlier versions gave every task
+all project skills: add `skills` to the tasks that relied on one.
 
 For a single model call that does not need tools, use an ordinary step with
 [`sixb.models.language.generate()`](../models/configuration.md#generate-a-response).

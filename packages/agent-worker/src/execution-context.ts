@@ -1,5 +1,8 @@
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
-import type { AgentExecutionAuthorization } from "@sixb/core/internal/agents"
+import {
+  type AgentExecutionAuthorization,
+  resolveAgentPropertyClearance,
+} from "@sixb/core/internal/agents"
 import type { ExecutionRecord } from "@sixb/core/storage"
 import type { AgentExecutionContext, AgentWorkerContext, AgentWorkerHost } from "./types"
 
@@ -19,9 +22,14 @@ export function createAgentExecutionContext(input: {
     authorization: input.authorization,
   })
 
+  const propertyClearance = resolveAgentPropertyClearance(
+    input.host.definitions.ontology,
+    input.authorization
+  )
   return {
     ...input.context,
     sixb,
+    ...(propertyClearance === undefined ? {} : { propertyClearance }),
     ...(input.authorPrincipal === undefined ? {} : { authorPrincipal: input.authorPrincipal }),
     blobStorage: sixb.blobs,
     connector: sixb.connector,

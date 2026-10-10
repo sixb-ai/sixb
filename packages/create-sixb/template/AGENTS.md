@@ -40,7 +40,7 @@ limitation blocks, and a minimal reproducible example when possible.
 `createSixb()` in `sixb.config.ts` auto-discovers exported definitions from these folders:
 
 ```
-ontology/      object types + value types
+ontology/      object types + value types (+ .md notes and scripts/ for the chat agent)
 actions/       typed commands against objects
 datasets/      table-shaped data
 syncs/         pull external data into datasets
@@ -51,8 +51,11 @@ pipelines/     transform datasets
 rules/         continuous evaluation over object state
 workflows/     multi-step processes (with human-in-the-loop)
 security/      groups/ roles/ markings/ policies/
+skills/        Agent Skills: <name>/SKILL.md + files; chat uses all, AI workflow steps select theirs
 app/           custom React UI — NOT discovered (served separately)
 ```
+
+An optional `SIXB.md` at the root holds instructions the chat agent follows in every conversation.
 
 Discovery matches **exported values by type**, not filenames. One file can export several
 definitions.

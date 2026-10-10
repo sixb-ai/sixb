@@ -29,6 +29,7 @@ fit together.
 | [`shares/`](../auth/shared-access.md) | Permissions that can be granted through a share link |
 | [`app/`](../apps/overview.md) | React pages and layouts, with their own routing conventions |
 | [`skills/`](../models/tools-and-authorization.md#add-a-skill) | Agent instructions in `<name>/SKILL.md` and supporting resources |
+| [`SIXB.md`](../models/overview.md#give-it-project-instructions) | Instructions the chat agent follows in every conversation |
 | `lib/` | Shared helpers imported by your project |
 
 ## How files are loaded
@@ -37,5 +38,7 @@ fit together.
 - File names are up to you. Sixb also loads definitions from subfolders.
 - The starter creates only the folders it needs. Add optional folders as your project grows.
 - Keep tests and standalone scripts outside definition folders, since Sixb imports their modules.
+  The exception is `ontology/`: Markdown files and `scripts/` folders there are given to the
+  [agent](../ontology/overview.md#explain-it-to-the-agent), not imported.
 
 See [Organizing your project](organizing-your-project.md) for examples of grouping related files.

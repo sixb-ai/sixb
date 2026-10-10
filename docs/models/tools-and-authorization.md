@@ -68,8 +68,23 @@ description: Review invoices for missing details and payment discrepancies.
 ```
 
 Sixb discovers project skills automatically. The agent sees their names and descriptions, then
-reads the full instructions when relevant. Supporting files can live alongside `SKILL.md` and be
-referenced by relative path.
+reads the full instructions when relevant. Supporting files, such as references or scripts, can
+live alongside `SKILL.md` and be referenced by relative path. Executable files stay executable.
+Dotfiles such as `.env`, and `node_modules`, `venv`, or `__pycache__` folders, are left out. Every
+agent sandbox receives the skills, so their files are limited to 16 MB in total.
+
+Skills are validated when your project loads, like any other definition, so `sixb check` and
+`sixb dev` report a skill whose frontmatter is not valid YAML, whose `name` differs from its folder
+or starts with `sixb-`, or that contains a symlink. Quote a value that contains `: `:
+
+```md
+description: "Use when: an invoice is disputed."
+```
+
+In `sixb dev`, saving any file under `skills/` restarts your project.
+
+The chat agent can use every skill. An [AI workflow step](../workflows/overview.md#add-an-ai-task)
+uses only the skills it lists in `skills`.
 
 Skills guide behavior; they do not grant access. Domain operations still follow the agent's
 [permissions](./overview.md#control-access).

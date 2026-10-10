@@ -253,6 +253,7 @@ describe("agent runtime conformance", () => {
       actorId: "assistant",
       runId: "run-1",
       skills: [],
+      ontologyFiles: [],
     })
 
     try {
@@ -277,6 +278,7 @@ describe("agent runtime conformance", () => {
       actorId: "assistant",
       runId: "run-1",
       skills: [],
+      ontologyFiles: [],
     })
     const shimDir = join(sandbox.workingDirectory, "broken-tools")
     await mkdir(shimDir, { recursive: true })

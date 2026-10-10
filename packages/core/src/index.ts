@@ -64,6 +64,7 @@ export {
   userRef,
   valueTypeRef,
 } from "./ontology"
+export type { OntologyDoc, OntologyDocsCatalog, OntologyDocsInput } from "./ontology/docs"
 
 // ── Actions ─────────────────────────────────────────────────
 
@@ -1046,12 +1047,15 @@ export type {
   AgentMessagePart,
   AgentMessagePartType,
   AgentMessageRole,
+  AgentProjectFile,
   AgentProviderStatePart,
   AgentReasoning,
   AgentReasoningLevel,
   AgentReasoningPart,
   AgentReference,
   AgentRequestErrorCode,
+  AgentSkillCatalog,
+  AgentSkillDefinition,
   AgentStepStartPart,
   AgentTextPart,
   AgentToolArtifact,

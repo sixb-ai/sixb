@@ -1,5 +1,6 @@
 import { renderInstanceHelp } from "@sixb/cli-core"
-import type { AgentSkill } from "./agent-skills"
+import type { AgentSkillDefinition } from "@sixb/core"
+import type { OntologyDocsIndexEntry } from "@sixb/core/internal/ontology"
 
 export type AgentExecutionMode = "conversation" | "subagent" | "workflow-task"
 
@@ -59,7 +60,9 @@ const WORKFLOW_OUTPUT_FINALIZER_RULES = [
 export interface RenderAgentSystemPromptInput {
   readonly mode: AgentExecutionMode
   readonly instructions?: string
-  readonly skills: readonly AgentSkill[]
+  readonly skills: readonly AgentSkillDefinition[]
+  /** Ontology reference files to list; omitted, the prompt does not mention them. */
+  readonly ontologyIndex?: readonly OntologyDocsIndexEntry[]
   readonly sandboxResetAt?: string
   readonly workspace?: AgentWorkspacePromptContext
 }
@@ -81,7 +84,10 @@ export interface RenderWorkflowOutputFinalizerPromptInput {
 /** Render the worker-owned system prompt, with task-specific instructions when supplied. */
 export function renderAgentSystemPrompt(input: RenderAgentSystemPromptInput): string {
   return [
-    promptSection("sixb_runtime_context", renderRuntimeContext(input.mode, input.skills)),
+    promptSection(
+      "sixb_runtime_context",
+      renderRuntimeContext(input.mode, input.skills, input.ontologyIndex)
+    ),
     promptSection(
       "sandbox_state",
       input.sandboxResetAt
@@ -115,7 +121,11 @@ export function renderWorkflowOutputFinalizerPrompt(
     .join("\n\n")
 }
 
-function renderRuntimeContext(mode: AgentExecutionMode, skills: readonly AgentSkill[]): string {
+function renderRuntimeContext(
+  mode: AgentExecutionMode,
+  skills: readonly AgentSkillDefinition[],
+  ontologyIndex: readonly OntologyDocsIndexEntry[] = []
+): string {
   const skillCatalog =
     skills.length === 0
       ? []
@@ -128,6 +138,24 @@ function renderRuntimeContext(mode: AgentExecutionMode, skills: readonly AgentSk
             (skill) =>
               `- ${skill.name}: ${skill.description} Path: .sixb/agent/skills/${skill.name}/SKILL.md`
           ),
+        ]
+
+  const exampleDoc = ontologyIndex.find((entry) => !entry.path.endsWith("/")) ?? ontologyIndex[0]
+  const condensed = ontologyIndex.length > MAX_ONTOLOGY_INDEX_ENTRIES
+  const ontologyCatalog =
+    exampleDoc === undefined
+      ? []
+      : [
+          "Ontology reference files for the object types you can access are installed under $SIXB_ONTOLOGY_DIR.",
+          "Before querying, inspecting, or changing objects of a type, read its file with the read tool: it lists the type's properties and how each can be queried, its links in both directions, its actions, and the project's notes. Rely on these files instead of exploring the ontology with the CLI.",
+          `Read a file at ${ONTOLOGY_ROOT}<path in the tree>, for example ${ONTOLOGY_ROOT}${exampleDoc.path}.`,
+          ...(condensed
+            ? [
+                "There are too many files to list: the tree shows folders and how many files each holds. List a folder to find a type's file, named after the module that defines the type.",
+              ]
+            : []),
+          "",
+          ...renderOntologyTree(ontologyIndex, condensed),
         ]
 
   const fileContext =
@@ -155,7 +183,92 @@ function renderRuntimeContext(mode: AgentExecutionMode, skills: readonly AgentSk
     ...fileContext,
     "With read, use relative paths from this prompt or sandboxPath values.",
     ...skillCatalog,
+    ...(skillCatalog.length > 0 && ontologyCatalog.length > 0 ? [""] : []),
+    ...ontologyCatalog,
   ].join("\n")
+}
+
+const ONTOLOGY_ROOT = ".sixb/agent/ontology/"
+/** Past this many files, the index lists folders only, to keep large ontologies' prompts bounded. */
+const MAX_ONTOLOGY_INDEX_ENTRIES = 150
+
+interface OntologyTreeNode {
+  readonly folders: Map<string, OntologyTreeNode>
+  readonly files: Map<string, string>
+  summary?: string
+}
+
+/**
+ * Lay out the ontology index as a tree, folders first, one line per file or `scripts/` folder:
+ * `├── invoice.md  Invoice: A bill sent to a customer.` Condensed, it lists folders with their
+ * file counts: `├── billing/  12 files`.
+ */
+function renderOntologyTree(
+  index: readonly OntologyDocsIndexEntry[],
+  condensed: boolean
+): string[] {
+  const root: OntologyTreeNode = { folders: new Map(), files: new Map() }
+  for (const entry of index) {
+    const segments = entry.path.replace(/\/$/, "").split("/")
+    const name = segments.pop() ?? ""
+    let node = root
+    for (const segment of segments) {
+      let child = node.folders.get(segment)
+      if (!child) {
+        child = { folders: new Map(), files: new Map() }
+        node.folders.set(segment, child)
+      }
+      node = child
+    }
+    if (entry.path.endsWith("/")) {
+      const folder: OntologyTreeNode = node.folders.get(name) ?? {
+        folders: new Map(),
+        files: new Map(),
+      }
+      folder.summary = entry.summary
+      node.folders.set(name, folder)
+    } else {
+      node.files.set(name, entry.summary)
+    }
+  }
+
+  const countFiles = (node: OntologyTreeNode): number =>
+    node.files.size +
+    [...node.folders.values()].reduce((sum, folder) => sum + countFiles(folder), 0)
+  const fileCount = (count: number) => (count === 1 ? "1 file" : `${count} files`)
+
+  const lines = [condensed ? `${ONTOLOGY_ROOT}  ${fileCount(root.files.size)}` : ONTOLOGY_ROOT]
+  const walk = (node: OntologyTreeNode, prefix: string) => {
+    const children = [
+      ...[...node.folders]
+        .sort(([a], [b]) => compare(a, b))
+        .map(([name, folder]) => ({
+          label: `${name}/`,
+          summary: folder.summary ?? (condensed ? fileCount(countFiles(folder)) : undefined),
+          folder,
+        })),
+      ...[...(condensed ? [] : node.files)]
+        .sort(([a], [b]) => compare(a, b))
+        .map(([name, summary]) => ({
+          label: name,
+          summary,
+          folder: undefined,
+        })),
+    ]
+    children.forEach((child, position) => {
+      const last = position === children.length - 1
+      lines.push(
+        `${prefix}${last ? "└── " : "├── "}${child.label}${child.summary ? `  ${child.summary}` : ""}`
+      )
+      if (child.folder) walk(child.folder, `${prefix}${last ? "    " : "│   "}`)
+    })
+  }
+  walk(root, "")
+  return lines
+}
+
+function compare(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
 }
 
 function promptSection(tag: string, body: string | undefined): string {

@@ -1,3 +1,4 @@
+export type { PropertyClearance } from "../objects/property-clearance"
 export type {
   AgentFileDataProjection,
   AgentFileDataResolverInput,
@@ -18,6 +19,7 @@ export {
   agentServiceAccountId,
   ensureManagedAgentExecutionIdentity,
   resolveAgentExecutionAuthorization,
+  resolveAgentPropertyClearance,
   resolveInheritedAgentExecutionAuthorization,
 } from "./authority"
 export { defineAgentTool } from "./builders"
@@ -110,6 +112,7 @@ export {
   requestAgentRun,
   retryAgentRun,
 } from "./request"
+export type { AgentProjectFile, AgentSkillCatalog, AgentSkillDefinition } from "./skills"
 export type {
   AgentCompactionFailureCode,
   AgentRunControlStreamId,

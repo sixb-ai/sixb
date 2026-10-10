@@ -13,6 +13,10 @@ Think of the sandbox as the agent's computer. Sixb equips it with the [Sixb CLI]
 which lets the agent inspect your ontology, query live data, request actions, and start workflows.
 Your domain definitions give the agent a way to discover what exists and what it can do.
 
+Before working with a type, the agent reads a reference file that Sixb writes from your ontology
+and [your notes](../ontology/overview.md#explain-it-to-the-agent), limited to what the person it
+works for can see.
+
 The same agent can work across your application as its domain grows. Add
 [tools and skills](./tools-and-authorization.md) when it needs additional capabilities or
 instructions for a particular task.
@@ -40,6 +44,23 @@ export const sixb = createSixb({
 
 You can offer models from multiple providers through the same harness. In chat, users choose
 from your configured catalog and adjust the reasoning effort supported by their selected model.
+
+## Give it project instructions
+
+Write guidance that applies to every conversation, such as your team's vocabulary, tone, or
+conventions, in a `SIXB.md` file at the project root:
+
+File: `SIXB.md`
+
+```md
+Answer in French. Amounts are in euros, excluding VAT.
+A "dossier" is a `Case`; always mention its reference.
+```
+
+The chat agent receives the file as written at the start of every conversation. Keep it short: it
+counts toward every request, and it is limited to 32 KB. Put instructions for a particular task in
+a [skill](./tools-and-authorization.md#add-a-skill), which the agent reads only when relevant.
+AI workflow steps use their own `instructions` instead.
 
 ## Control access
 

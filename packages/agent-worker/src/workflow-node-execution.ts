@@ -152,6 +152,7 @@ export async function executeWorkflowAgentNode(
       step: node.agentStep,
       models: input.host.definitions.models?.language,
       tools: input.host.definitions.tools,
+      skills: input.host.definitions.skills,
       defaultMaxSteps: context.defaultMaxSteps,
     })
     modelId = configuredPlan.model.modelId

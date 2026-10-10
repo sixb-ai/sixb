@@ -1,3 +1,4 @@
+export { isAgentContextPath } from "./agent-context"
 export type {
   BundledProjectModule,
   DiscoveredProjectDefinitions,
@@ -5,7 +6,6 @@ export type {
   ProjectModule,
 } from "./discovery"
 export {
-  discoverOntologySources,
   discoverProjectDefinitions,
   listProjectModules,
   withProjectModules,

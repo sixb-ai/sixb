@@ -303,6 +303,9 @@ Discovery:
   sixb ontology list                  Compact visible type and relationship catalog
   sixb ontology get <type>            Inspect one object type, properties, links, and actions
 
+Read an object type's file under $SIXB_ONTOLOGY_DIR before querying it. Use \`sixb ontology get\`
+for a type that has no file there.
+
 Objects:
   sixb objects inspect <type> <id>    Inspect an object and its related graph in one command
   sixb objects list [options]         Browse materialized objects
@@ -334,6 +337,9 @@ Run \`sixb <group> --help\` or \`sixb <group> <command> --help\` for exact argum
 For query IR, run \`sixb objects query --help\` and \`sixb objects query --example list\`.`;
 var LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instance CLI").replace("The CLI uses the run-scoped SIXB_API_BASE_URL. Do not configure authentication or another origin.", "The CLI uses the selected local profile and its API credentials.").replace(`  sixb doctor                         Check the sandbox and API gateway
   sixb context                        Print the current run context
+`, "").replace(`
+Read an object type's file under $SIXB_ONTOLOGY_DIR before querying it. Use \`sixb ontology get\`
+for a type that has no file there.
 `, "");
 function renderInstanceHelp(mode) {
   return mode === "sandbox" ? SANDBOX_MAIN_HELP : LOCAL_MAIN_HELP;
@@ -426,7 +432,8 @@ Predicates use op, not kind:
 Traversal and expansion directions are outgoing or incoming. For incoming relationships, the link
 is declared on the child/source type; add sourceObjectTypeId when needed to disambiguate it.
 
-Run \`sixb ontology get <type>\` first; never guess property or link ids. Use refs for exact
+Run \`sixb ontology get <type>\` first (in the agent sandbox, read the type's file under
+$SIXB_ONTOLOGY_DIR instead); never guess property or link ids. Use refs for exact
 identities. Put limits and pages inside the query tree.
 
 Vector profile names are the keys of the type's search.vectors. Vector input is a start node,

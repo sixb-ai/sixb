@@ -4,6 +4,7 @@ import type {
   BlobStorage,
   Broker,
   DomainEventLog,
+  OntologyDocsCatalog,
   Queues,
   SandboxDefinition,
   SandboxFactory,
@@ -13,7 +14,7 @@ import type {
   ValueType,
 } from "@sixb/core"
 import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
-import type { RunModelLoopInput } from "@sixb/core/internal/agents"
+import type { PropertyClearance, RunModelLoopInput } from "@sixb/core/internal/agents"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import type { RecoverAiModelCall } from "@sixb/core/internal/model-execution"
 import type { ModelTool } from "@sixb/core/models"
@@ -24,7 +25,6 @@ import type {
   AiUsageStorage,
   AuthStorage,
 } from "@sixb/core/storage"
-import type { AgentSkill } from "./agent-skills"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import type { StreamSink } from "./stream-sink"
@@ -52,10 +52,16 @@ export interface AgentWorkerHost extends AgentExecutionHost {
   readonly queues: Queues
   readonly definitions: Pick<
     SixbDefinitions,
-    "workflows" | "ontology" | "security" | "models" | "tools"
+    | "workflows"
+    | "ontology"
+    | "security"
+    | "models"
+    | "tools"
+    | "skills"
+    | "projectInstructions"
+    | "ontologyDocs"
   >
   readonly sandboxes?: SandboxFactory
-  readonly projectRoot?: string
   readonly logging?: LoggingService
 }
 
@@ -70,11 +76,11 @@ export interface AgentWorkerContext {
   readonly sandboxes: SandboxFactory
   readonly logging?: LoggingService
   readonly valueTypesById: ReadonlyMap<string, ValueType>
+  readonly ontologyDocs: OntologyDocsCatalog
   readonly apiBaseUrl: string
   readonly streamSink: StreamSink
   /** Durable fallback used only when the direct model-call ledger append remains unavailable. */
   readonly recoverAiModelCall: RecoverAiModelCall
-  readonly agentSkills: Promise<readonly AgentSkill[]>
   readonly defaultMaxSteps: number
   readonly turnTimeoutMs: number
 }
@@ -82,6 +88,8 @@ export interface AgentWorkerContext {
 /** Provider ports activated only after an Agent execution scope is bound. */
 export interface AgentExecutionContext extends AgentWorkerContext {
   readonly sixb: Sixb
+  /** Marked properties the execution cannot read; absent when it reads every property. */
+  readonly propertyClearance?: PropertyClearance
   readonly authorPrincipal?: AuthorizablePrincipal
   readonly blobStorage: BlobStorage
   readonly connector: AgentToolRunContext["connector"]
@@ -123,8 +131,6 @@ export interface AgentWorkerOptions {
    */
   /** Not required when the worker only processes accounting recovery. */
   readonly apiBaseUrl?: string
-  /** Project Agent Skills directory. Defaults to `<projectRoot>/skills`; `false` disables project skills. */
-  readonly skillsDir?: string | false
   /** Maximum number of primary agent jobs this worker executes at once. Defaults to 8. */
   readonly concurrency?: number
   /** Stream routing seam. Defaults to broker backed. */
