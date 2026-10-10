@@ -5,13 +5,11 @@
 // Checked by `cd packages/client && bun run typecheck` (tests are in the program).
 import {
   col,
-  defineAction,
   defineConnector,
   defineDataset,
   definePipeline,
   defineRule,
   defineSync,
-  param,
 } from "@sixb/core"
 import { defineObjectType, link, prop } from "@sixb/core/ontology"
 import { events } from "../src/events-builder"
@@ -38,11 +36,6 @@ const Sensor = defineObjectType({
 const sensorOffline = defineRule("sensor.offline")
   .on(Sensor)
   .where((sensor) => sensor.p.name.eq("offline"))
-
-const acknowledgeSensor = defineAction("acknowledge-sensor")
-  .on(Sensor)
-  .params({ note: param("string") })
-  .writeback(async () => {})
 
 const readings = defineDataset("sensor.readings", { schema: [col("id", "string")] })
 const source = defineConnector("sensor-source", { type: "test", connect: () => ({}) })
@@ -76,16 +69,6 @@ events
     const ruleId: string = event.payload.ruleId
     void ruleId
   })
-
-function useActionEventsTypeProof() {
-  useEvents(events.action(acknowledgeSensor).completed(), (event) => {
-    const actionId: string = event.payload.actionId
-    const runId: string = event.payload.runId
-    void [actionId, runId]
-  })
-}
-
-void useActionEventsTypeProof
 
 function useRunEventsTypeProof() {
   useEvents(events.dataset(readings).updated(), (event) => {
@@ -321,54 +304,6 @@ events
       // @ts-expect-error — sync lifecycle failures expose only their primitive's code union.
       const datasetCode: "dataset.not_found" = event.payload.error.code
       void [code, message, datasetCode]
-    }
-  })
-
-events
-  .actions()
-  .run("act-1")
-  .action("approveQuote")
-  .subject(Sensor)
-  .byId("sensor-1")
-  .completed()
-  .subscribe((event) => {
-    const runId: string = event.payload.runId
-    const actionId: string = event.payload.actionId
-    const finishedAt: string = event.payload.finishedAt
-    // @ts-expect-error — completed events do not carry an error payload.
-    void event.payload.error
-    void [runId, actionId, finishedAt]
-  })
-
-events
-  .actions()
-  .subject("Sensor")
-  .byId("sensor-1")
-  .failed()
-  .subscribe((event) => {
-    const code:
-      | "internal.unexpected"
-      | "runtime.cancelled"
-      | "queue.enqueue_failed"
-      | "action.phase_failed"
-      | "action.read_conflict"
-      | "action.timeout" = event.payload.error.code
-    const message: string = event.payload.error.message
-    // @ts-expect-error — Action lifecycle failures expose only their primitive's code union.
-    const datasetCode: "dataset.not_found" = event.payload.error.code
-    void [code, message, datasetCode]
-  })
-
-events
-  .actions()
-  .terminal()
-  .subscribe((event) => {
-    if (event.type === "action.failed") {
-      const message: string = event.payload.error.message
-      void message
-    } else {
-      const finishedAt: string = event.payload.finishedAt
-      void finishedAt
     }
   })
 

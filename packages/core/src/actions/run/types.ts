@@ -1,6 +1,5 @@
 import type { BlobsRuntime } from "../../blob-storage/execution"
 import type { ConnectorRuntime } from "../../connectors/execution"
-import type { DomainEventLog } from "../../events"
 import type { LoggingService } from "../../logging/service"
 import type { ModelsRuntime } from "../../models/generation-types"
 import type { ObjectsRuntime } from "../../objects/execution"
@@ -22,7 +21,6 @@ export interface ActionExecutionFacade {
 export interface ActionRunContext {
   readonly id: string
   readonly errorReporterHost: object
-  readonly events: DomainEventLog
   readonly logging?: LoggingService
   readonly storage: Storage
   readonly actionRunsStorage: ActionRunStorage

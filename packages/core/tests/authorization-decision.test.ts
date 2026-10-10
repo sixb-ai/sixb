@@ -9,7 +9,6 @@ import {
   evaluate,
 } from "../src/authorization"
 import type {
-  StoredActionRequestedEvent,
   StoredDatasetVersionCommittedEvent,
   StoredLinkMutationEvent,
   StoredObjectMutationEvent,
@@ -28,7 +27,6 @@ function context(grants: {
   datasets?: readonly string[]
   edit?: readonly string[]
   append?: readonly string[]
-  apply?: readonly string[]
   run?: readonly string[]
   syncs?: readonly string[]
   pipelines?: readonly string[]
@@ -46,7 +44,6 @@ function context(grants: {
       "view:dataset": new Set(grants.datasets ?? []),
       "edit:object": new Set(grants.edit ?? []),
       "append:telemetry": new Set(grants.append ?? []),
-      "apply:action": new Set(grants.apply ?? []),
       "run:workflow": new Set(grants.run ?? []),
       "run:sync": new Set(grants.syncs ?? []),
       "run:pipeline": new Set(grants.pipelines ?? []),
@@ -367,19 +364,6 @@ const linkEvent: StoredLinkMutationEvent = {
   },
 }
 
-const actionEvent: StoredActionRequestedEvent = {
-  ...envelope,
-  type: "action.requested",
-  topic: "actions",
-  partitionKey: "note/n1",
-  payload: {
-    actionId: "acknowledge-note",
-    subject: { kind: "object", objectTypeId: "note", primaryId: "n1" },
-    params: {},
-    runId: "r1",
-  },
-}
-
 const workflowEvent: StoredWorkflowRunStartedEvent = {
   ...envelope,
   type: "workflow.run.started",
@@ -455,15 +439,6 @@ describe("canViewEvent", () => {
     // Seeing the source but not the target must not leak the link (or the target id).
     expect(canViewEvent(context({ view: ["note"] }), linkEvent)).toBe(false)
     expect(canViewEvent(context({ view: ["user"] }), linkEvent)).toBe(false)
-  })
-
-  test("object-bound action events require BOTH apply and viewing the subject type", () => {
-    expect(
-      canViewEvent(context({ apply: ["acknowledge-note"], view: ["note"] }), actionEvent)
-    ).toBe(true)
-    // Apply without view must not leak the bound object's id/type via the event.
-    expect(canViewEvent(context({ apply: ["acknowledge-note"] }), actionEvent)).toBe(false)
-    expect(canViewEvent(context({ view: ["note"] }), actionEvent)).toBe(false)
   })
 
   test("workflow events require running the workflow", () => {

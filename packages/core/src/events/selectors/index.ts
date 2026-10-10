@@ -1,5 +1,4 @@
 export type {
-  ActionEventSelectorBuilder,
   DatasetEventSelectorBuilder,
   EventPropertySelector,
   EventSelectors,
@@ -12,11 +11,6 @@ export type {
 export { events } from "./builder"
 export { buildEventSelectorPredicate, eventSelectorSpec } from "./predicate"
 export type {
-  ActionEventSelectorContext,
-  ActionEventSelectorEvent,
-  ActionEventSelectorOperation,
-  ActionEventToken,
-  ActionEventTokenOf,
   DatasetEventSelectorContext,
   DatasetEventSelectorEvent,
   DatasetEventToken,

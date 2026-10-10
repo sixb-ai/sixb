@@ -1,13 +1,6 @@
-import type {
-  ActionBinding,
-  ActionDefinition,
-  ActionParamsConfig,
-  InferActionParams,
-} from "../../actions"
 import type { LinkToken, ObjectRef, ObjectTypeWithTokens, Property } from "../../ontology"
 import type { InferPropertyValue } from "../../ontology/inference"
 import type { RuleDefinition } from "../../rules"
-import type { ActionRunFailure } from "../../storage"
 import type { PropertyChangeOperation } from "../property-changes"
 import type {
   DatasetVersionCommittedEvent,
@@ -42,33 +35,6 @@ export type RuleEventSelectorContext<
 > = {
   readonly kind: "rule"
   readonly rule: TRule
-  readonly operation: TOperation
-}
-
-export type ActionEventSelectorOperation = "requested" | "completed" | "failed"
-
-export type ActionEventToken<
-  TId extends string = string,
-  TParams extends ActionParamsConfig = ActionParamsConfig,
-  TBinding extends ActionBinding = ActionBinding,
-> = {
-  readonly id: TId
-  readonly params: TParams
-  readonly binding: TBinding
-}
-
-export type ActionEventTokenOf<TAction extends ActionDefinition> = ActionEventToken<
-  TAction["id"],
-  TAction["params"],
-  TAction["binding"]
->
-
-export type ActionEventSelectorContext<
-  TAction extends ActionEventToken = ActionEventToken,
-  TOperation extends ActionEventSelectorOperation = ActionEventSelectorOperation,
-> = {
-  readonly kind: "action"
-  readonly action: TAction
   readonly operation: TOperation
 }
 
@@ -116,7 +82,6 @@ export type EventSelectorContext =
   | ObjectEventSelectorContext
   | LinkEventSelectorContext
   | RuleEventSelectorContext
-  | ActionEventSelectorContext
   | DatasetEventSelectorContext
   | SyncEventSelectorContext
   | PipelineEventSelectorContext
@@ -138,15 +103,13 @@ export type EventSelectorEvent<TContext> =
       ? LinkEventSelectorEvent<TObjectType, TLink>
       : TContext extends RuleEventSelectorContext<infer TRule, infer TOperation>
         ? RuleEventSelectorEvent<TRule, TOperation>
-        : TContext extends ActionEventSelectorContext<infer TAction, infer TOperation>
-          ? ActionEventSelectorEvent<TAction, TOperation>
-          : TContext extends DatasetEventSelectorContext<infer TDataset>
-            ? DatasetEventSelectorEvent<TDataset>
-            : TContext extends SyncEventSelectorContext<infer TSync, infer TOperation>
-              ? SyncEventSelectorEvent<TSync, TOperation>
-              : TContext extends PipelineEventSelectorContext<infer TPipeline, infer TOperation>
-                ? PipelineEventSelectorEvent<TPipeline, TOperation>
-                : never
+        : TContext extends DatasetEventSelectorContext<infer TDataset>
+          ? DatasetEventSelectorEvent<TDataset>
+          : TContext extends SyncEventSelectorContext<infer TSync, infer TOperation>
+            ? SyncEventSelectorEvent<TSync, TOperation>
+            : TContext extends PipelineEventSelectorContext<infer TPipeline, infer TOperation>
+              ? PipelineEventSelectorEvent<TPipeline, TOperation>
+              : never
 
 export interface ObjectEventSelectorEvent<TObjectType extends ObjectTypeWithTokens> {
   readonly object: {
@@ -175,19 +138,6 @@ export type RuleEventSelectorEvent<
   readonly ruleId: TRule["id"]
   readonly subject: ObjectRef<RuleSubjectTypeId<TRule>>
 }
-
-export type ActionEventSelectorEvent<
-  TAction extends ActionEventToken = ActionEventToken,
-  TOperation extends ActionEventSelectorOperation = ActionEventSelectorOperation,
-> = {
-  readonly actionId: TAction["id"]
-  readonly runId: string
-} & ActionSubjectEvent<TAction> &
-  (TOperation extends "requested"
-    ? { readonly params: InferActionParams<TAction["params"]> }
-    : TOperation extends "failed"
-      ? { readonly error: ActionRunFailure }
-      : Record<never, never>)
 
 export type DatasetEventSelectorEvent<TDataset extends DatasetEventToken = DatasetEventToken> =
   Omit<DatasetVersionCommittedEvent["payload"], "datasetId"> & {
@@ -220,7 +170,6 @@ export interface EventSelectorSpec<TContext = EventSelectorContext> {
   readonly propertyOperation?: PropertyChangeOperation
   readonly linkId?: string
   readonly ruleId?: string
-  readonly actionId?: string
   readonly datasetId?: string
   readonly syncId?: string
   readonly pipelineId?: string
@@ -249,10 +198,3 @@ type ResolveTargetTypeId<TTarget> = TTarget extends readonly string[]
 
 type RuleSubjectTypeId<TRule extends RuleDefinition> =
   TRule extends RuleDefinition<string, infer TObjectType> ? TObjectType["id"] : string
-
-type ActionSubjectEvent<TAction extends ActionEventToken> = TAction["binding"] extends {
-  readonly kind: "object"
-  readonly objectType: infer TObjectType extends { readonly id: string }
-}
-  ? { readonly subject: ObjectRef<TObjectType["id"]> }
-  : Record<never, never>

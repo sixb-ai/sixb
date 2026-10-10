@@ -17,7 +17,6 @@ export interface EventScopeKeys {
   readonly linkId?: string
   readonly ruleId?: string
   readonly runId?: string
-  readonly actionId?: string
   readonly datasetId?: string
   readonly syncId?: string
   readonly pipelineId?: string
@@ -45,17 +44,6 @@ export function scopeKeysForEvent(event: DomainEvent): EventScopeKeys {
       return { pipelineId: event.payload.pipelineId, runId: event.payload.runId }
     case "syncs":
       return { syncId: event.payload.syncId, runId: event.payload.runId }
-    case "actions":
-      return {
-        actionId: event.payload.actionId,
-        runId: event.payload.runId,
-        ...(event.payload.subject.kind === "object"
-          ? {
-              objectTypeId: event.payload.subject.objectTypeId,
-              primaryId: event.payload.subject.primaryId,
-            }
-          : {}),
-      }
     case "rules":
       return { ruleId: event.payload.ruleId }
     case "schedules":

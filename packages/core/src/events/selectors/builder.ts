@@ -1,11 +1,7 @@
-import type { ActionDefinition } from "../../actions"
 import type { LinkToken, ObjectTypeWithTokens, Property, PropertyToken } from "../../ontology"
 import type { RuleDefinition } from "../../rules"
 import type { DomainEvent } from "../types"
 import type {
-  ActionEventSelectorContext,
-  ActionEventToken,
-  ActionEventTokenOf,
   DatasetEventSelectorContext,
   DatasetEventToken,
   EventSelectorSpec,
@@ -79,13 +75,6 @@ export interface RuleEventSelectorBuilder<TRule extends RuleDefinition>
   resolved(): EventSelectorSpec<RuleEventSelectorContext<TRule, "resolved">>
 }
 
-export interface ActionEventSelectorBuilder<TAction extends ActionEventToken>
-  extends EventSelectorSpec<ActionEventSelectorContext<TAction>> {
-  requested(): EventSelectorSpec<ActionEventSelectorContext<TAction, "requested">>
-  completed(): EventSelectorSpec<ActionEventSelectorContext<TAction, "completed">>
-  failed(): EventSelectorSpec<ActionEventSelectorContext<TAction, "failed">>
-}
-
 export interface DatasetEventSelectorBuilder<TDataset extends DatasetEventToken>
   extends EventSelectorSpec<DatasetEventSelectorContext<TDataset>> {
   updated(): EventSelectorSpec<DatasetEventSelectorContext<TDataset>>
@@ -138,10 +127,6 @@ abstract class EventSelectorSpecView<TContext> implements EventSelectorSpec<TCon
 
   get ruleId(): EventSelectorSpec["ruleId"] {
     return this.spec.ruleId
-  }
-
-  get actionId(): EventSelectorSpec["actionId"] {
-    return this.spec.actionId
   }
 
   get datasetId(): EventSelectorSpec["datasetId"] {
@@ -344,31 +329,6 @@ class RuleEventSelectorBuilderImpl<TRule extends RuleDefinition>
   }
 }
 
-class ActionEventSelectorBuilderImpl<TAction extends ActionEventToken>
-  extends EventSelectorSpecView<ActionEventSelectorContext<TAction>>
-  implements ActionEventSelectorBuilder<TAction>
-{
-  requested(): EventSelectorSpec<ActionEventSelectorContext<TAction, "requested">> {
-    return this.withType("action.requested")
-  }
-
-  completed(): EventSelectorSpec<ActionEventSelectorContext<TAction, "completed">> {
-    return this.withType("action.completed")
-  }
-
-  failed(): EventSelectorSpec<ActionEventSelectorContext<TAction, "failed">> {
-    return this.withType("action.failed")
-  }
-
-  private withType<TOperation extends "requested" | "completed" | "failed">(
-    type: `action.${TOperation}`
-  ): EventSelectorSpec<ActionEventSelectorContext<TAction, TOperation>> {
-    return { ...this.spec, types: [type] } as EventSelectorSpec<
-      ActionEventSelectorContext<TAction, TOperation>
-    >
-  }
-}
-
 class DatasetEventSelectorBuilderImpl<TDataset extends DatasetEventToken>
   extends EventSelectorSpecView<DatasetEventSelectorContext<TDataset>>
   implements DatasetEventSelectorBuilder<TDataset>
@@ -437,9 +397,6 @@ export interface EventSelectors {
     objectType: TObjectType
   ): ObjectEventSelectorBuilder<TObjectType>
   rule<TRule extends RuleDefinition>(rule: TRule): RuleEventSelectorBuilder<TRule>
-  action<TAction extends ActionDefinition>(
-    action: TAction
-  ): ActionEventSelectorBuilder<ActionEventTokenOf<TAction>>
   dataset<TDataset extends DatasetEventToken>(
     dataset: TDataset
   ): DatasetEventSelectorBuilder<TDataset>
@@ -460,14 +417,6 @@ export const events: EventSelectors = {
       topic: "rules",
       ruleId: rule.id,
     } as EventSelectorSpec<RuleEventSelectorContext<TRule>>)
-  },
-  action<TAction extends ActionDefinition>(
-    action: TAction
-  ): ActionEventSelectorBuilder<ActionEventTokenOf<TAction>> {
-    return new ActionEventSelectorBuilderImpl({
-      topic: "actions",
-      actionId: action.id,
-    } as EventSelectorSpec<ActionEventSelectorContext<ActionEventTokenOf<TAction>>>)
   },
   dataset<TDataset extends DatasetEventToken>(
     dataset: TDataset

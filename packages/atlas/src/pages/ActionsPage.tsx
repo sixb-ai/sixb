@@ -71,7 +71,6 @@ import {
   parseFileRefFormValue,
   stringifyFileRefFormValue,
 } from "../components/FileRefUploadField"
-import { useActionLiveUpdates } from "../features/actions/hooks/useActionLiveUpdates"
 import { formatDate, formatRelativeTime } from "../features/workflows/utils/workflows"
 import {
   type ActionParamFormValue,
@@ -88,6 +87,13 @@ type ActionRunStatus = ActionRunSummary["status"]
 
 type ActionsPageTab = "actions" | "runs"
 
+/**
+ * Runs record no event, so a tab that lists them reads them again while it is displayed, to show
+ * runs started elsewhere: by workflows, agents, or other users. Each tab mounts only while it is
+ * displayed, so it polls only then.
+ */
+const RUN_HISTORY_REFETCH_MS = 10_000
+
 const actionRunStatusLabels: Record<ActionRunStatus, string> = {
   succeeded: "Succeeded",
   failed: "Failed",
@@ -103,7 +109,6 @@ const actionRunStatusClasses: Record<ActionRunStatus, string> = {
 export function ActionsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab: ActionsPageTab = searchParams.get("tab") === "runs" ? "runs" : "actions"
-  useActionLiveUpdates()
 
   const handleTabChange = (value: string) => {
     const nextTab: ActionsPageTab = value === "runs" ? "runs" : "actions"
@@ -136,6 +141,7 @@ function ActionDefinitionsTab() {
   const actionsQuery = useQuery(listActionsOptions())
   const runsQuery = useQuery({
     ...listActionRunsOptions({ query: { limit: "50", order: "desc" } }),
+    refetchInterval: RUN_HISTORY_REFETCH_MS,
   })
   const actions = actionsQuery.data ?? []
   const [searchParams, setSearchParams] = useSearchParams()
@@ -369,6 +375,7 @@ function ActionCard({
 function ActionRunHistoryTab() {
   const runsQuery = useQuery({
     ...listActionRunsOptions({ query: { limit: "50", order: "desc" } }),
+    refetchInterval: RUN_HISTORY_REFETCH_MS,
   })
   const runs = runsQuery.data?.runs ?? []
 

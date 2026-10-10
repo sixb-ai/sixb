@@ -1,5 +1,4 @@
 import { EventsError } from "./errors"
-import type { ActionEvent } from "./types/actions"
 import type { DatasetEvent } from "./types/datasets"
 import type { DomainEvent, DomainEventDraft } from "./types/index"
 import type { LinkEvent } from "./types/links"
@@ -64,21 +63,6 @@ export const LINK_EVENT_DEFINITIONS = defineEventGroup<LinkEvent>({
   "link.deleted": {
     topic: "links",
     partitionKey: (payload) => `${payload.sourceTypeId}:${payload.sourceId}:${payload.linkId}`,
-  },
-})
-
-export const ACTION_EVENT_DEFINITIONS = defineEventGroup<ActionEvent>({
-  "action.requested": {
-    topic: "actions",
-    partitionKey: (payload) => payload.actionId,
-  },
-  "action.completed": {
-    topic: "actions",
-    partitionKey: (payload) => payload.actionId,
-  },
-  "action.failed": {
-    topic: "actions",
-    partitionKey: (payload) => payload.actionId,
   },
 })
 
@@ -190,7 +174,6 @@ export const EVENT_DEFINITIONS = {
   ...OBJECT_EVENT_DEFINITIONS,
   ...TELEMETRY_EVENT_DEFINITIONS,
   ...LINK_EVENT_DEFINITIONS,
-  ...ACTION_EVENT_DEFINITIONS,
   ...SCHEDULE_EVENT_DEFINITIONS,
   ...SYNC_EVENT_DEFINITIONS,
   ...PIPELINE_EVENT_DEFINITIONS,

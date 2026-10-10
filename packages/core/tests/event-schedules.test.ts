@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  defineAction,
   defineObjectType,
   defineRule,
   defineSchedule,
@@ -8,7 +7,6 @@ import {
   InMemoryBroker,
   link,
   OntologyRegistry,
-  param,
   prop,
   ScheduleValidationError,
 } from "../src"
@@ -37,11 +35,6 @@ const Invoice = defineObjectType({
 const invoiceAtRisk = defineRule("invoice.at-risk")
   .on(Invoice)
   .where((invoice) => invoice.p.amount.gt(500))
-
-const approveInvoice = defineAction("approve-invoice")
-  .on(Invoice)
-  .params({ reason: param("string") })
-  .writeback(async () => {})
 
 describe("evaluateEventSchedule", () => {
   test("returns the typed post-mutation context only on a false-to-true edge", async () => {
@@ -221,12 +214,9 @@ describe("event schedules", () => {
     })
   })
 
-  test("supports rule and action event sources without conditions", () => {
+  test("supports rule event sources without conditions", () => {
     const ruleSchedule = defineSchedule("invoice.at-risk-triggered").on(
       events.rule(invoiceAtRisk).triggered()
-    )
-    const actionSchedule = defineSchedule("invoice.approved").on(
-      events.action(approveInvoice).completed()
     )
 
     expect(ruleSchedule.trigger.source).toEqual({
@@ -234,13 +224,7 @@ describe("event schedules", () => {
       types: ["rule.triggered"],
       ruleId: invoiceAtRisk.id,
     })
-    expect(actionSchedule.trigger.source).toEqual({
-      topic: "actions",
-      types: ["action.completed"],
-      actionId: approveInvoice.id,
-    })
     expect("where" in ruleSchedule).toBe(false)
-    expect("where" in actionSchedule).toBe(false)
   })
 
   test("rejects empty ids and non-terminal event selectors", () => {
@@ -339,21 +323,19 @@ describe("validateSchedulesAtStartup", () => {
     ).toThrow('Schedule "bad-link-property": unknown property "missing" on link "payments"')
   })
 
-  test("validates registered rule and action sources", () => {
+  test("validates registered rule sources", () => {
     const schedules = [
       defineSchedule("invoice.at-risk-triggered").on(events.rule(invoiceAtRisk).triggered()),
-      defineSchedule("invoice.approved").on(events.action(approveInvoice).completed()),
     ]
 
     expect(() =>
       validateSchedulesAtStartup(schedules, new OntologyRegistry({ sources: [Invoice, Payment] }), {
         registeredRuleIds: new Set([invoiceAtRisk.id]),
-        registeredActionIds: new Set([approveInvoice.id]),
       })
     ).not.toThrow()
   })
 
-  test("rejects unknown rule and action sources", () => {
+  test("rejects unknown rule sources", () => {
     const ontology = new OntologyRegistry({ sources: [Invoice, Payment] })
 
     expect(() =>
@@ -362,13 +344,6 @@ describe("validateSchedulesAtStartup", () => {
         ontology
       )
     ).toThrow('unknown rule "invoice.at-risk"')
-
-    expect(() =>
-      validateSchedulesAtStartup(
-        [defineSchedule("invoice.approved").on(events.action(approveInvoice).completed())],
-        ontology
-      )
-    ).toThrow('unknown action "approve-invoice"')
   })
 
   test("validates dataset, sync, and pipeline event sources", () => {

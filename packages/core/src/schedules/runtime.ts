@@ -100,26 +100,6 @@ export function buildEventScheduleContext(event: DomainEvent): RuntimeEventSched
           primaryId: event.payload.subject.primaryId,
         },
       }
-    case "action.requested":
-      return {
-        actionId: event.payload.actionId,
-        runId: event.payload.runId,
-        ...actionSubjectContext(event.payload.subject),
-        params: { ...event.payload.params },
-      }
-    case "action.completed":
-      return {
-        actionId: event.payload.actionId,
-        runId: event.payload.runId,
-        ...actionSubjectContext(event.payload.subject),
-      }
-    case "action.failed":
-      return {
-        actionId: event.payload.actionId,
-        runId: event.payload.runId,
-        ...actionSubjectContext(event.payload.subject),
-        error: event.payload.error,
-      }
     case "dataset.version.committed":
       return { ...event.payload }
     case "sync.run.finished":
@@ -128,27 +108,6 @@ export function buildEventScheduleContext(event: DomainEvent): RuntimeEventSched
       return { ...event.payload }
     default:
       return null
-  }
-}
-
-function actionSubjectContext(subject: {
-  readonly kind: "none" | "object"
-  readonly objectTypeId?: string
-  readonly primaryId?: string
-}): { readonly subject?: { readonly objectTypeId: string; readonly primaryId: string } } {
-  if (
-    subject.kind !== "object" ||
-    subject.objectTypeId === undefined ||
-    subject.primaryId === undefined
-  ) {
-    return {}
-  }
-
-  return {
-    subject: {
-      objectTypeId: subject.objectTypeId,
-      primaryId: subject.primaryId,
-    },
   }
 }
 
