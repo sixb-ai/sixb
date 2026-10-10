@@ -1,5 +1,7 @@
 import type {
   AgentReasoningLevel,
+  AgentSkillCatalog,
+  AgentSkillDefinition,
   AgentStepDefinition,
   AgentToolCatalog,
   AgentToolDefinition,
@@ -23,14 +25,21 @@ export interface ResolvedAgentExecutionPlan {
   readonly reasoning?: AgentReasoningLevel
   readonly instructions?: string
   readonly tools: readonly AgentToolDefinition[]
+  /** Agent Skills installed in the sandbox and listed in the prompt. */
+  readonly skills: readonly AgentSkillDefinition[]
   readonly maxSteps: number
 }
 
-/** Resolve the project's conversational Agent without a static definition. */
+/**
+ * Resolve the project's conversational Agent without a static definition. It receives every
+ * project tool and skill, and the project's `SIXB.md` instructions.
+ */
 export function resolveAgentExecutionPlan(input: {
   readonly spec?: ConversationAgentRunSpec
   readonly models?: LanguageModelCatalog
   readonly tools: AgentToolCatalog
+  readonly skills: AgentSkillCatalog
+  readonly projectInstructions?: string
   readonly defaultMaxSteps: number
 }): ResolvedAgentExecutionPlan {
   const modelRef = input.spec?.model ?? input.models?.default
@@ -43,7 +52,9 @@ export function resolveAgentExecutionPlan(input: {
   }
   return Object.freeze({
     model,
+    ...(input.projectInstructions === undefined ? {} : { instructions: input.projectInstructions }),
     tools: input.tools.list(),
+    skills: input.skills.list(),
     maxSteps: input.defaultMaxSteps,
     ...(input.spec?.reasoning === undefined ? {} : { reasoning: input.spec.reasoning }),
   })
@@ -55,6 +66,7 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
   readonly step: AgentStepDefinition
   readonly models?: LanguageModelCatalog
   readonly tools: AgentToolCatalog
+  readonly skills: AgentSkillCatalog
   readonly defaultMaxSteps: number
 }): ResolvedAgentExecutionPlan {
   const { workflowId, step, models } = input
@@ -83,20 +95,37 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
     return tool
   })
 
+  const skills = step.skillNames.map((name) => {
+    const skill = input.skills.getByName(name)
+    if (skill === null) {
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Workflow '${workflowId}' agent step '${step.id}' cannot resolve Agent Skill '${name}'.`,
+        { details: { workflowId, agentStepId: step.id, skillName: name } }
+      )
+    }
+    return skill
+  })
+
   return Object.freeze({
     model,
     instructions: step.instructions,
     tools: Object.freeze(tools),
+    skills: Object.freeze(skills),
     maxSteps: input.defaultMaxSteps,
     ...(step.reasoning === undefined ? {} : { reasoning: step.reasoning }),
   })
 }
 
-/** Restore a headless child from the immutable model and tool selection captured at admission. */
+/**
+ * Restore a headless child from the immutable model and tool selection captured at admission. It
+ * receives every project skill, like its parent conversation.
+ */
 export function resolveSubagentExecutionPlan(input: {
   readonly run: SubagentRunRecord
   readonly models?: LanguageModelCatalog
   readonly tools: AgentToolCatalog
+  readonly skills: AgentSkillCatalog
 }): ResolvedAgentExecutionPlan {
   const { run, models } = input
   const model = models?.getByRef(run.spec.model)?.model ?? null
@@ -124,6 +153,7 @@ export function resolveSubagentExecutionPlan(input: {
     model,
     instructions: SUBAGENT_INSTRUCTIONS,
     tools: Object.freeze(tools),
+    skills: input.skills.list(),
     maxSteps: run.spec.maxSteps,
     ...(run.spec.reasoning === undefined ? {} : { reasoning: run.spec.reasoning }),
   })

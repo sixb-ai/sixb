@@ -145,6 +145,8 @@ export interface DefineAgentStepConfig {
   readonly groups?: readonly GroupDefinition[]
   /** Project tools this workflow task may call. Defaults to none. */
   readonly tools?: readonly AgentToolDefinition[]
+  /** Names of the project Agent Skills (`skills/<name>/`) this workflow task may use. Defaults to none. */
+  readonly skills?: readonly string[]
 }
 
 export interface AgentStepDefinition<
@@ -161,6 +163,7 @@ export interface AgentStepDefinition<
   readonly instructions: string
   readonly groupIds: readonly string[]
   readonly toolNames: readonly string[]
+  readonly skillNames: readonly string[]
   readonly input: TInput
   readonly output: TOutput
   readonly prompt: AgentStepPrompt<Record<string, unknown>>

@@ -1,5 +1,5 @@
 import type { ActionDefinitionCatalog } from "../actions"
-import type { AgentToolCatalog } from "../agents"
+import type { AgentSkillCatalog, AgentToolCatalog } from "../agents"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { ModelCatalog } from "../models"
@@ -24,6 +24,10 @@ export interface SixbDefinitions {
   readonly ontology: OntologyDefinitionCatalog
   readonly actions: ActionDefinitionCatalog
   readonly tools: AgentToolCatalog
+  /** Agent Skills from `skills/`. */
+  readonly skills: AgentSkillCatalog
+  /** The conversational Agent's instructions, from `SIXB.md`. Absent without that file. */
+  readonly projectInstructions?: string
   readonly connectors: DefinitionCatalog<ConnectorDefinition>
   readonly datasets: DefinitionCatalog<DatasetDefinition>
   /** Absent until a project configures `models` in createSixb(). */

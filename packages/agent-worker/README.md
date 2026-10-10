@@ -62,6 +62,10 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
   `{ provider: "vercel-ai-gateway", modelId: "deepseek/deepseek-v4-flash-vision-exp" }`. The tool schema
   restricts selection to configured pairs; the worker rechecks them before creating a child.
   Omitting `model` uses the first configured language model.
+- Project context comes from the host definitions that `createSixb()` discovered and validated,
+  never from the worker's filesystem: conversations receive `SIXB.md` as their instructions and
+  every skill in `definitions.skills`; a workflow agent step receives only the skills it selects;
+  subagents receive every skill and their own instructions.
 - Reasoning supports `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`,
   and `max`. The chat picker uses the configured model's catalog-supported levels. Sixb's native
   providers validate and translate the requested effort without silently lowering it.
@@ -139,12 +143,10 @@ The terminal run state is stored on the run record:
 
 - `apiBaseUrl`: required for agent execution; Sixb server origin that hosts the agent API gateway. The worker injects a
   run-scoped gateway URL into sandboxes as `SIXB_API_BASE_URL`, installs the self-documenting `sixb`
-  CLI on `PATH`, writes configured project skills into `SIXB_SKILLS_DIR`, and creates the sandbox
+  CLI on `PATH`, writes the run's project skills into `SIXB_SKILLS_DIR`, and creates the sandbox
   with a restricted network policy allowing the server origin. The gateway authorizes scoped
   ontology, object, telemetry, file publication, action, and workflow routes from the run execution
   token and restored execution authority; no bearer token is exposed to the sandbox.
-- `skillsDir`: optional project Agent Skills directory. Defaults to `<projectRoot>/skills`. Set to
-  `false` to install only the built-in Sixb skills.
 - `concurrency`: maximum number of agent run jobs this worker claims and executes at once; defaults
   to `8`. Headless children use a separate four-job lane so waiting parents cannot consume their
   capacity.

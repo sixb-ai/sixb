@@ -51,8 +51,11 @@ pipelines/     transform datasets
 rules/         continuous evaluation over object state
 workflows/     multi-step processes (with human-in-the-loop)
 security/      groups/ roles/ markings/ policies/
+skills/        Agent Skills: <name>/SKILL.md + files; chat uses all, AI workflow steps select theirs
 app/           custom React UI — NOT discovered (served separately)
 ```
+
+An optional `SIXB.md` at the root holds instructions the chat agent follows in every conversation.
 
 Discovery matches **exported values by type**, not filenames. One file can export several
 definitions.

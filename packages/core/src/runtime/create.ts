@@ -5,6 +5,7 @@ import { assertNoAgentDefinitions } from "../agents/retired-config"
 import type { SixbAuthConfig } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import { discoverOntologySources, discoverProjectDefinitions } from "../bootstrap"
+import { discoverAgentSkills, discoverProjectInstructions } from "../bootstrap/agent-context"
 import type { Broker } from "../broker"
 import type { ConnectorConnectionOptions, ConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets"
@@ -84,7 +85,7 @@ export interface CreateSixbOptions<in out TParams extends ParamsConfig = ParamsC
  * The host auto-discovers exported definitions from `ontology/`, `actions/`, `datasets/`,
  * `connectors/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`,
  * `rules/`, `workflows/`, `shares/`, and `security/{groups,roles,policies}/`
- * relative to `projectRoot`.
+ * relative to `projectRoot`, along with the Agent's `skills/` and `SIXB.md`.
  */
 export async function createSixb<const TParams extends ParamsConfig = ParamsConfig>(
   options: CreateSixbOptions<TParams>
@@ -102,6 +103,8 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
   }
 
   const definitions = await discoverProjectDefinitions(projectRoot)
+  const skills = await discoverAgentSkills(projectRoot)
+  const projectInstructions = await discoverProjectInstructions(projectRoot)
 
   // Explicit definitions come first so local setup can override ordering while duplicate ids are
   // still rejected by the SixbHost constructor. Every family merges — `actions` and `projections`
@@ -136,6 +139,8 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
     membershipPolicies: [...(options.membershipPolicies ?? []), ...definitions.membershipPolicies],
     models: options.models,
     tools: options.tools,
+    skills,
+    ...(projectInstructions === undefined ? {} : { projectInstructions }),
     shares: [...(options.shares ?? []), ...definitions.shares],
     auth: options.auth,
   })

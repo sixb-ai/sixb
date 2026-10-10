@@ -7,7 +7,7 @@
 
 import { resolve } from "node:path"
 import type { ActionDefinition } from "../actions/types"
-import type { AgentToolDefinition } from "../agents"
+import type { AgentSkillDefinition, AgentToolDefinition } from "../agents"
 import {
   AuthRuntime,
   AuthRuntimeError,
@@ -130,6 +130,10 @@ export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsCon
   models?: ModelCatalogInput
   /** Project tools available to Agent runtimes. */
   tools?: readonly AgentToolDefinition[]
+  /** Agent Skills. createSixb() discovers them from `skills/`. */
+  skills?: readonly AgentSkillDefinition[]
+  /** The conversational Agent's instructions. createSixb() reads them from `SIXB.md`. */
+  projectInstructions?: string
   markings?: readonly MarkingDefinition[]
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]

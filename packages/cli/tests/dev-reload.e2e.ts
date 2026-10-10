@@ -220,6 +220,20 @@ test("dev reloads backend modules, rediscovers files, recovers, and keeps fronte
     await edit("lib/value.ts", 'export const value = "recovered"\n')
     await runAction("recovered-edited")
 
+    // The Agent's files are project definitions: an invalid skill stops the dev child like a
+    // syntax error, and fixing its SKILL.md (not code) must restart it. Reproduce: drop
+    // `isAgentContextPath` from `isSource` in lib/dev-watch.ts and the fix is never picked up.
+    const skillErrorStart = output.length
+    await fixture.write("skills/acme/SKILL.md", "---\nname: acme\n---\n")
+    await waitFor(
+      () => output.slice(skillErrorStart).includes("Waiting for source changes"),
+      () => output
+    )
+    expect(output.slice(skillErrorStart)).toContain("[Sixb] Agent Skill 'skills/acme' is invalid")
+    await edit("skills/acme/SKILL.md", "---\nname: acme\ndescription: Use for Acme.\n---\n")
+    // `edit` waits for the next Ready: saving SIXB.md restarts the project too.
+    await edit("SIXB.md", "Answer briefly.\n")
+
     // First route must start the app server even though app/ did not exist at boot.
     await edit("app/page.tsx", pageSource("Frontend first"))
     const appResponse = await request(app)

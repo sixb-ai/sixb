@@ -1,5 +1,5 @@
 import { renderInstanceHelp } from "@sixb/cli-core"
-import type { AgentSkill } from "./agent-skills"
+import type { AgentSkillDefinition } from "@sixb/core"
 
 export type AgentExecutionMode = "conversation" | "subagent" | "workflow-task"
 
@@ -59,7 +59,7 @@ const WORKFLOW_OUTPUT_FINALIZER_RULES = [
 export interface RenderAgentSystemPromptInput {
   readonly mode: AgentExecutionMode
   readonly instructions?: string
-  readonly skills: readonly AgentSkill[]
+  readonly skills: readonly AgentSkillDefinition[]
   readonly sandboxResetAt?: string
   readonly workspace?: AgentWorkspacePromptContext
 }
@@ -115,7 +115,10 @@ export function renderWorkflowOutputFinalizerPrompt(
     .join("\n\n")
 }
 
-function renderRuntimeContext(mode: AgentExecutionMode, skills: readonly AgentSkill[]): string {
+function renderRuntimeContext(
+  mode: AgentExecutionMode,
+  skills: readonly AgentSkillDefinition[]
+): string {
   const skillCatalog =
     skills.length === 0
       ? []

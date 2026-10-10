@@ -172,6 +172,7 @@ describe("defineAgentStep", () => {
     expect(resolveInvoice.instructions).toBe("Resolve invoices from transaction evidence.")
     expect(resolveInvoice.groupIds).toEqual([])
     expect(resolveInvoice.toolNames).toEqual([])
+    expect(resolveInvoice.skillNames).toEqual([])
     expect(resolveInvoice.input).toEqual({
       transaction: { type: "objectRef", objectTypeId: "Transaction" },
     })
@@ -829,6 +830,52 @@ describe("SixbHost workflow registration", () => {
     })
 
     expect(sixb.workflows.getById(workflow.id)).toBe(workflow)
+  })
+
+  test("rejects an agent-step skill outside the project skills", () => {
+    const step = defineAgentStep("unknown-skill", {
+      model: workflowModel,
+      instructions: "Resolve invoices.",
+      skills: ["invoice-review"],
+    })
+      .input({ transaction: ref(Transaction) })
+      .output({ invoice: ref(Invoice) })
+      .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
+    const workflow: WorkflowDefinition = defineWorkflow("unknown-skill-workflow")
+      .input({ transaction: ref(Transaction) })
+      .then(step)
+
+    expect(
+      () =>
+        new SixbHost({
+          ontology: [Transaction, Invoice],
+          workflows: [workflow],
+          ...createTestRuntimeDeps(),
+        })
+    ).toThrow(
+      `Workflow "unknown-skill-workflow" agent step "unknown-skill" uses unknown Agent Skill "invoice-review". Add it as 'skills/invoice-review/SKILL.md'.`
+    )
+
+    const sixb = createTestSixb({
+      ontology: [Transaction, Invoice],
+      skills: [{ name: "invoice-review", description: "Review invoices.", files: [] }],
+      workflows: [workflow],
+      ...createTestRuntimeDeps(),
+    })
+    expect(sixb.workflows.getById(workflow.id)).toBe(workflow)
+  })
+
+  test("rejects agent-step skills that are not unique names", () => {
+    const define = (skills: unknown) =>
+      defineAgentStep("bad-skills", {
+        instructions: "Resolve invoices.",
+        skills: skills as readonly string[],
+      })
+    expect(() => define("invoice-review")).toThrow("skills must be an array of Agent Skill names")
+    expect(() => define([""])).toThrow("skills must contain only non-empty Agent Skill names")
+    expect(() => define(["invoice-review", "invoice-review"])).toThrow(
+      "skills contains duplicate skill 'invoice-review'"
+    )
   })
 
   test("rejects an agent-step group outside the security catalog", () => {

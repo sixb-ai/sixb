@@ -41,6 +41,23 @@ export const sixb = createSixb({
 You can offer models from multiple providers through the same harness. In chat, users choose
 from your configured catalog and adjust the reasoning effort supported by their selected model.
 
+## Give it project instructions
+
+Write guidance that applies to every conversation, such as your team's vocabulary, tone, or
+conventions, in a `SIXB.md` file at the project root:
+
+File: `SIXB.md`
+
+```md
+Answer in French. Amounts are in euros, excluding VAT.
+A "dossier" is a `Case`; always mention its reference.
+```
+
+The chat agent receives the file as written at the start of every conversation. Keep it short: it
+counts toward every request, and it is limited to 32 KB. Put instructions for a particular task in
+a [skill](./tools-and-authorization.md#add-a-skill), which the agent reads only when relevant.
+AI workflow steps use their own `instructions` instead.
+
 ## Control access
 
 The agent's access depends on where it runs:

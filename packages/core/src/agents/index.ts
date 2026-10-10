@@ -110,6 +110,7 @@ export {
   requestAgentRun,
   retryAgentRun,
 } from "./request"
+export type { AgentProjectFile, AgentSkillCatalog, AgentSkillDefinition } from "./skills"
 export type {
   AgentCompactionFailureCode,
   AgentRunControlStreamId,

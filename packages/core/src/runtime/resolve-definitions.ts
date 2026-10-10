@@ -1,7 +1,8 @@
 import { ActionRegistry } from "../actions"
 import type { ActionDefinition } from "../actions/types"
-import type { AgentToolDefinition } from "../agents"
+import type { AgentSkillDefinition, AgentToolDefinition } from "../agents"
 import { assertNoAgentDefinitions } from "../agents/retired-config"
+import { createAgentSkillCatalog } from "../agents/skills"
 import { createAgentToolCatalog } from "../agents/tool-catalog"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets/types"
@@ -46,6 +47,8 @@ interface DefinitionOptions {
   readonly rules?: readonly RuleDefinition[]
   readonly workflows?: readonly WorkflowDefinition[]
   readonly tools?: readonly AgentToolDefinition[]
+  readonly skills?: readonly AgentSkillDefinition[]
+  readonly projectInstructions?: string
   readonly models?: ModelCatalogInput
   readonly shares?: readonly ShareDefinition[]
   readonly markings?: readonly MarkingDefinition[]
@@ -92,6 +95,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     }
   }
   const tools = createAgentToolCatalog(options.tools)
+  const skills = createAgentSkillCatalog(options.skills)
   const connectorsById = indexUniqueDefinitions("connector", options.connectors ?? [])
 
   // Datasets resolve first because syncs, pipelines, projections, and security depend on them.
@@ -155,6 +159,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     registeredActionIds,
     ...(models === undefined ? {} : { models }),
     tools,
+    skills,
   })
   const workflowsById = indexUniqueDefinitions("workflow", workflows)
 
@@ -197,6 +202,10 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     ontology,
     actions: actionRegistry,
     tools,
+    skills,
+    ...(options.projectInstructions === undefined
+      ? {}
+      : { projectInstructions: options.projectInstructions }),
     connectors: createDefinitionCatalog(connectorsById),
     datasets: createDefinitionCatalog(datasetsById),
     ...(models === undefined ? {} : { models }),

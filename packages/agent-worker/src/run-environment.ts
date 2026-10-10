@@ -13,7 +13,6 @@ import type {
 import { waitForAbort } from "./abort"
 import { type AgentExecutionMode, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
-import type { AgentSkill } from "./agent-skills"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
 import {
   modelSupportsInlineImages,
@@ -36,7 +35,7 @@ import { createReadTool } from "./tools/read"
 import { AgentToolResultMediaBridge } from "./tools/result-media"
 import { createViewFileTool } from "./tools/view-file"
 import type { AgentTurnRuntime } from "./turn-runtime"
-import type { AgentExecutionContext, AgentTurnContext, AgentWorkerContext } from "./types"
+import type { AgentExecutionContext, AgentTurnContext } from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
 
 export interface AgentExecutionEnvironment {
@@ -70,8 +69,6 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
   readonly run: ConversationAgentRunRecord
   /** Retained model tail selected by preflight. Falls back to storage for direct callers. */
   readonly messages?: readonly AgentMessageRecord[]
-  /** Skills already loaded while estimating the request. */
-  readonly skills?: readonly AgentSkill[]
   /** Framework-owned tools available only to the main conversational Agent. */
   readonly frameworkTools?: readonly ModelTool[]
 }
@@ -134,8 +131,7 @@ export async function createConversationAgentEnvironment(
           frameworkTools: input.frameworkTools,
         })
       : undefined
-    const [skills, messages, inlineImages] = await Promise.all([
-      prepared?.skills ?? input.skills ?? context.agentSkills,
+    const [messages, inlineImages] = await Promise.all([
       prepared?.threadContext.retainedMessages ??
         input.messages ??
         context.storage.agents.messages
@@ -163,7 +159,6 @@ export async function createConversationAgentEnvironment(
       toolRun: { kind: "conversation", id: run.id, threadId: run.threadId },
       apiBaseUrl,
       attachmentContext,
-      skills,
       frameworkTools: input.frameworkTools,
       onDetachedTeardown: input.onDetachedTeardown,
     })
@@ -213,7 +208,6 @@ export async function createSubagentEnvironment(
       executionToken: execution.token,
     }),
     attachmentContext: emptyAttachmentContext(context.id),
-    skills: await context.agentSkills,
     errorDetails: { parentRunId: run.parentRunId, runId: run.id },
     onDetachedTeardown: input.onDetachedTeardown,
   })
@@ -230,14 +224,11 @@ export async function createWorkflowAgentNodeEnvironment(
       `[SixbAgentWorker] Agent workflow node run '${run.nodeRunId}' must hold an execution token.`
     )
   }
-  const [skills, attachmentContext] = await Promise.all([
-    context.agentSkills,
-    prepareWorkflowInputAttachments({
-      input: input.nodeInput,
-      blobStorage: context.blobStorage,
-      signal: input.signal,
-    }),
-  ])
+  const attachmentContext = await prepareWorkflowInputAttachments({
+    input: input.nodeInput,
+    blobStorage: context.blobStorage,
+    signal: input.signal,
+  })
 
   return startAgentEnvironment({
     mode: "workflow-task",
@@ -258,7 +249,6 @@ export async function createWorkflowAgentNodeEnvironment(
       executionToken: execution.token,
     }),
     attachmentContext,
-    skills,
     errorDetails: input.errorDetails,
     onDetachedTeardown: input.onDetachedTeardown,
   })
@@ -275,7 +265,6 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
   readonly threadId?: string
   readonly apiBaseUrl: string
   readonly attachmentContext: PreparedAgentAttachmentContext
-  readonly skills: Awaited<AgentWorkerContext["agentSkills"]>
   readonly errorDetails?: AgentErrorDetails
   readonly frameworkTools?: readonly ModelTool[]
 }
@@ -285,8 +274,7 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
  * Sandbox boot stays concurrent with the model call; sandbox tools await it only when used.
  */
 function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvironment {
-  const { mode, context, actorId, plan, runId, threadId, apiBaseUrl, attachmentContext, skills } =
-    input
+  const { mode, context, actorId, plan, runId, threadId, apiBaseUrl, attachmentContext } = input
 
   const logSession = resolveLoggingService(context.id, context.logging).startExecution({
     kind: "agent",
@@ -357,7 +345,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     apiBaseUrl,
     apiOrigin: new URL(apiBaseUrl).origin,
     attachmentContext,
-    skills,
+    skills: plan.skills,
   })
   // Creation failure is surfaced where it is awaited (turn / sandbox tool / dispose); attach a no-op
   // catch so a rejection observed by none of them is not reported as unhandled.
@@ -388,7 +376,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       systemPrompt: renderAgentSystemPrompt({
         mode,
         instructions: plan.instructions,
-        skills,
+        skills: plan.skills,
         sandboxResetAt: input.persistentSandbox?.resetAt,
         workspace: input.persistentSandbox?.promptContext,
       }),
@@ -427,7 +415,7 @@ interface ProvisionSandboxInput {
   readonly apiBaseUrl: string
   readonly apiOrigin: string
   readonly attachmentContext: PreparedAgentAttachmentContext
-  readonly skills: Awaited<AgentWorkerContext["agentSkills"]>
+  readonly skills: ResolvedAgentExecutionPlan["skills"]
 }
 
 async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSandboxHandle> {
