@@ -1,22 +1,14 @@
+import type { LiveRunPart, LiveRunTool } from "@sixb/client"
 import type { AgentDocumentSource } from "./document-preview/types"
 import type { AgentMessagePart } from "./types"
 
 // The render-ready vocabulary shared by the durable transcript and the live streaming row.
-// `liveRun` reduces stream chunks into these shapes and `AssistantBody` renders them, so both
-// layers agree on one part model without either depending on the other.
-export type NormalizedTool = {
-  readonly toolName: string
-  readonly state: "input-streaming" | "input-available" | "output-available" | "output-error"
-  readonly input?: unknown
-  readonly inputText?: string
-  readonly output?: unknown
-  readonly errorText?: string
-}
+// `@sixb/client`'s live run reducer produces the streaming parts; saved messages add files and step
+// boundaries. `AssistantBody` renders both, so the two layers agree on one part model.
+export type NormalizedTool = LiveRunTool
 
 export type NormalizedPart =
-  | { readonly kind: "text"; readonly text: string }
-  | { readonly kind: "reasoning"; readonly text: string; readonly streaming: boolean }
-  | { readonly kind: "tool"; readonly tool: NormalizedTool }
+  | LiveRunPart
   | {
       readonly kind: "file"
       readonly fileRef: Extract<AgentMessagePart, { type: "file" }>["fileRef"]

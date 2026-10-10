@@ -88,6 +88,8 @@ await signOutSixbSession({ baseUrl, store })
 
 The access token lasts 15 minutes. The client refreshes it before it expires, and once more if the API rejects it, so the user stays signed in while the tool is used. The session ends after the API's idle timeout without use, or when it is signed out or revoked; the client then clears the store and calls `onSessionEnded`. The session appears under the tool's name in the user's sessions in Atlas.
 
+Live subscriptions send the session's access token as a WebSocket header, the way Bun and Node take it. A runtime whose `WebSocket` takes headers another way passes `webSocket` to `configureSixbClient`: a function that opens a socket from a URL, its subprotocols, and its headers.
+
 A tool on a device with a camera can sign in without a browser instead. When the user chooses **Sign in on another device** in a signed-in browser, it shows a QR code holding a `sixb://connect` link. Read the scanned link and exchange its code for a session:
 
 ```ts

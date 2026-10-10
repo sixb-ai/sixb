@@ -1,3 +1,4 @@
+import { hasLiveContent, type LiveRunState } from "@sixb/client"
 import {
   Bubble,
   BubbleContent,
@@ -9,7 +10,6 @@ import {
   MessageScrollerViewport,
 } from "@sixb/ui/components"
 import { memo, useMemo } from "react"
-import { hasLiveContent, type LiveRunState } from "../liveRun"
 import type { AgentContextEntryInput, AgentFileRef, AgentMessage } from "../types"
 import { ContextChips } from "./ContextChips"
 import {

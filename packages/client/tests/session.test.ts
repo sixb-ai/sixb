@@ -7,6 +7,7 @@ import {
   parseSixbSignInLink,
   type SixbSessionStore,
   type SixbSessionTokens,
+  type SixbWebSocketInit,
   signOutSixbSession,
   startSixbDeviceLogin,
 } from "../src"
@@ -137,6 +138,31 @@ describe("native sessions", () => {
     await expect(
       exchangeSixbSignInCode({ baseUrl, code: "dva_2.used", clientName: "Acme scanner", fetch })
     ).rejects.toThrow("expired or was already used")
+  })
+
+  // Guards the `signal?.aborted` check in startSixbDeviceLogin's poll, which replaced
+  // `signal.throwIfAborted()`: remove the check and this signal, like a polyfill without
+  // `throwIfAborted`, makes the poll throw a TypeError instead.
+  test("stops polling on a cancelled signal that lacks throwIfAborted", async () => {
+    const fetch = (async () =>
+      Response.json({
+        deviceCode: "dva_1.secret",
+        userCode: "BCDF-HJKM",
+        verificationUri: `${baseUrl}/auth/device`,
+        verificationUriComplete: `${baseUrl}/auth/device?user_code=BCDF-HJKM`,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        interval: 1,
+      })) as unknown as typeof globalThis.fetch
+    const cancelled = new Error("cancelled")
+    const signal = {
+      aborted: true,
+      reason: cancelled,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    } as unknown as AbortSignal
+
+    const login = await startSixbDeviceLogin({ baseUrl, clientName: "Acme CLI", fetch })
+    await expect(login.complete({ signal })).rejects.toBe(cancelled)
   })
 
   test("refuses a login page on another origin", async () => {
@@ -322,6 +348,35 @@ describe("native sessions over WebSockets", () => {
     const [ws] = HeaderRecordingWebSocket.instances
     expect(ws?.url).toBe("wss://api.example.com/ws/events")
     expect(ws?.init?.headers).toEqual({ authorization: "Bearer access-2" })
+  })
+
+  // Guards `webSocketFactories.get(client)` in ws-socket.ts.
+  test("opens sockets through the client's own WebSocket factory", async () => {
+    const { store } = memoryStore(tokens(1, 10 * 60_000))
+    const api = fakeApi({ acceptedAccessToken: () => "access-1" })
+    const opened: { url: string; init: SixbWebSocketInit }[] = []
+    const client = createSixbClient({
+      baseUrl,
+      fetch: api.fetch,
+      auth: { kind: "session", store },
+      webSocket: (url, init) => {
+        opened.push({ url, init })
+        return new HeaderRecordingWebSocket(url) as unknown as WebSocket
+      },
+    })
+
+    const socket = createEventSocket({ client, baseUrl, reconnect: false, onEvent: () => {} })
+    await waitFor(() => opened.length === 1)
+    socket.close()
+
+    expect(opened).toEqual([
+      {
+        url: "wss://api.example.com/ws/events",
+        init: { headers: { authorization: "Bearer access-1" } },
+      },
+    ])
+    // Only the factory opened a socket: none came from the runtime's WebSocket with headers.
+    expect(HeaderRecordingWebSocket.instances.map((ws) => ws.init)).toEqual([undefined])
   })
 
   // Guards `client: options.client` and the `options.client?.getConfig().baseUrl` default in
