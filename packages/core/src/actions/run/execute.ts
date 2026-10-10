@@ -1,5 +1,4 @@
 import { createSixbError } from "../../errors/internal"
-import type { DomainEventLog } from "../../events"
 import {
   type BoundPrimitiveExecution,
   bindDurablePrimitiveExecution,
@@ -15,7 +14,6 @@ import type { ActionRunContext, ActionRunOutcome, PendingActionRun } from "./typ
 
 /** What executing a stored Action run needs from its host. */
 export interface ActionRunHost extends PrimitiveExecutionHost {
-  readonly events: DomainEventLog
   readonly storage: Storage
   readonly logging?: LoggingService
   readonly definitions: Pick<SixbDefinitions, "actions">
@@ -105,7 +103,6 @@ function buildActionContext(
   return {
     id: host.id,
     errorReporterHost: host,
-    events: host.events,
     logging: host.logging,
     storage: host.storage,
     actionRunsStorage,

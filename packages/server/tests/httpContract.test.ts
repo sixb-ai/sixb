@@ -1746,6 +1746,10 @@ describe("SixbServer HTTP contract", () => {
       }
       expect(events.count).toBeGreaterThanOrEqual(2)
       expect(events.events.some((event) => event.type === "telemetry.appended")).toBe(true)
+
+      // Actions record their runs and emit no events: their former topic is not a topic.
+      const actionEventsResponse = await fetch(`${baseUrl}/api/events?topic=actions`)
+      expect(actionEventsResponse.status).toBe(422)
     })
   })
 
@@ -2564,43 +2568,6 @@ describe("SixbServer HTTP contract", () => {
         links: Array<{ target: { primaryId: string } }>
       }
       expect(links.links.some((linkRow) => linkRow.target.primaryId === "fan-2")).toBe(true)
-
-      const actionEvents = await events.read({
-        topics: ["actions"],
-        limit: 10,
-      })
-      expect(actionEvents).toEqual([
-        expect.objectContaining({
-          type: "action.requested",
-          payload: {
-            actionId: "setSpeed",
-            subject: {
-              kind: "object",
-              objectTypeId: "device",
-              primaryId: "fan-2",
-            },
-            params: { speed: null },
-            runId: requestActionBody.id,
-          },
-        }),
-        expect.objectContaining({
-          type: "action.completed",
-          payload: expect.objectContaining({ runId: requestActionBody.id }),
-        }),
-        expect.objectContaining({
-          type: "action.requested",
-          payload: {
-            actionId: "createMaintenanceRun",
-            subject: { kind: "none" },
-            params: { note: "Inspect fan vibration" },
-            runId: "act_contract_global",
-          },
-        }),
-        expect.objectContaining({
-          type: "action.completed",
-          payload: expect.objectContaining({ runId: "act_contract_global" }),
-        }),
-      ])
 
       const removeLinkResponse = await fetch(
         `${baseUrl}/api/objects/space/system/links/contains?targetTypeId=device&targetId=fan-2`,

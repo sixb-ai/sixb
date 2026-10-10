@@ -134,7 +134,6 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
 
   validateSchedulesAtStartup(schedules, ontology, {
     registeredRuleIds: new Set(rulesById.keys()),
-    registeredActionIds,
     registeredDatasetIds: new Set(datasetsById.keys()),
     registeredSyncIds: new Set(syncsById.keys()),
     registeredPipelineIds: new Set(pipelinesById.keys()),

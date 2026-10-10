@@ -1099,7 +1099,7 @@ describe("SixbHost runtime", () => {
       properties: { id: "dev:1", name: "Device 1" },
     })
 
-    await sixb
+    const run = await sixb
       .objects(ActionType)
       .byId("dev:1")
       .requestAction({
@@ -1107,15 +1107,12 @@ describe("SixbHost runtime", () => {
         params: { force: true },
       })
 
-    const events = await sixb.events.read({
-      types: ["action.requested"],
+    expect(run).toMatchObject({
+      actionId: "reboot",
+      status: "succeeded",
+      subject: { kind: "object", objectTypeId: "ActionDevice", primaryId: "dev:1" },
+      params: { force: true },
     })
-    expect(events).toHaveLength(1)
-    expect(events[0].type).toBe("action.requested")
-    if (events[0].type === "action.requested") {
-      expect(events[0].payload.actionId).toBe("reboot")
-      expect(events[0].payload.params.force).toBe(true)
-    }
   })
 
   test("supports typed API and direct runtime access for server usage", async () => {

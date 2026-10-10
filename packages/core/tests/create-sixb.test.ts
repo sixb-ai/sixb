@@ -333,7 +333,7 @@ export const Publisher = defineRole("publisher", {
     expect(sixb.definitions.schedules.getById("transaction.high-value")).toBe(schedule)
   })
 
-  test("validates rule and action event schedules against registered definitions", async () => {
+  test("validates rule event schedules against registered definitions", async () => {
     const projectRoot = await createTempProjectRoot()
     const Invoice = defineObjectType({
       id: "Invoice",
@@ -346,19 +346,13 @@ export const Publisher = defineRole("publisher", {
     const invoiceAtRisk = defineRule("invoice.at-risk")
       .on(Invoice)
       .where((invoice) => invoice.p.amount.gt(500))
-    const approveInvoice = defineAction("approve-invoice")
-      .on(Invoice)
-      .params({})
-      .writeback(async () => {})
     const schedules = [
       defineSchedule("invoice.at-risk-triggered").on(events.rule(invoiceAtRisk).triggered()),
-      defineSchedule("invoice.approved").on(events.action(approveInvoice).completed()),
     ]
 
     const sixb = await createSixb({
       projectRoot,
       ontologies: [Invoice],
-      actions: [approveInvoice],
       rules: [invoiceAtRisk],
       schedules,
       ...createTestRuntimeDeps(),

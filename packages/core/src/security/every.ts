@@ -8,7 +8,7 @@
  *
  * They live under one `every` namespace on purpose. Spending seven of the best identifiers in
  * `@sixb/core` — `actions`, `workflows`, `syncs`, … — on an auxiliary subsystem collided with the
- * primitives themselves and with `events.actions()` / `logs.actions()` on the client.
+ * primitives themselves and with client builders such as `logs.actions()`.
  */
 
 import type { ActionDefinition } from "../actions/types"

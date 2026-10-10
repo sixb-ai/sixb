@@ -15,7 +15,7 @@ import {
 } from "../src"
 import { drainActionRuns } from "../src/actions"
 import { flushSixbErrors } from "../src/error-reporting/internal"
-import { ActionRunError } from "../src/storage"
+import { ActionRunError, type ActionRunStorage } from "../src/storage"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -427,8 +427,6 @@ describe("requestAction", () => {
       runId: "act_nullable_cleared",
     })
 
-    const events = await sixb.events.read({ types: ["action.requested"] })
-
     expect(omitted.params).toEqual({})
     expect(cleared.params).toEqual({
       category: null,
@@ -443,9 +441,6 @@ describe("requestAction", () => {
         runId: cleared.id,
       })
     ).resolves.toEqual(cleared)
-    expect(
-      events.map((event) => (event.type === "action.requested" ? event.payload.params : null))
-    ).toEqual([{}, { category: null, relatedRoom: null, reviewedAt: null }])
 
     await expect(
       sixb.objects(Room).requestAction({
@@ -535,7 +530,7 @@ describe("requestAction", () => {
       properties: { id: "room:1", externalId: "R1", name: "Room 1" },
     })
 
-    await sixb.objects(Room).requestAction({
+    const run = await sixb.objects(Room).requestAction({
       id: "room:1",
       actionId: "attachRelatedRoom",
       params: {
@@ -543,15 +538,9 @@ describe("requestAction", () => {
       },
     })
 
-    const events = await sixb.events.read({
-      types: ["action.requested"],
+    expect(run.params).toEqual({
+      relatedRoom: { objectTypeId: "Room", primaryId: "room:2" },
     })
-    expect(events.length).toBe(1)
-    if (events[0].type === "action.requested") {
-      expect(events[0].payload.params).toEqual({
-        relatedRoom: { objectTypeId: "Room", primaryId: "room:2" },
-      })
-    }
   })
 
   test("rejects object ref params with the wrong object type", async () => {
@@ -699,58 +688,6 @@ describe("requestAction", () => {
       id: sixb.execution.id,
       correlationId: sixb.execution.correlationId,
     })
-
-    const events = await sixb.events.read({ types: ["action.requested", "action.completed"] })
-    expect(events.map((event) => [event.type, event.correlationId])).toEqual([
-      ["action.requested", sixb.execution.correlationId],
-      ["action.completed", sixb.execution.correlationId],
-    ])
-    expect(events[0]?.payload).toEqual({
-      actionId: "counted",
-      subject: { kind: "object", objectTypeId: "Room", primaryId: "room:1" },
-      params: {},
-      runId: run.id,
-    })
-    expect(events[1]).toMatchObject({
-      idempotencyKey: `action.completed:${run.id}`,
-      payload: { actionId: "counted", runId: run.id, finishedAt: run.finishedAt?.toISOString() },
-    })
-  })
-
-  test("runs the Action when the action.requested observation event fails", async () => {
-    const runtimeDeps = createTestRuntimeDeps()
-    const host = new SixbHost({
-      id: "action-event-best-effort-test",
-      ontology: [Room],
-      actions: [actionDefinition(createRoom)],
-      onError: () => {},
-      ...runtimeDeps,
-    })
-    const sixb = createTestSixb(host)
-    const originalAppend = host.events.append.bind(host.events)
-
-    host.events.append = async (input) => {
-      if (input.events.some((event) => event.type === "action.requested")) {
-        throw new Error("event store unavailable")
-      }
-
-      return originalAppend(input)
-    }
-
-    try {
-      const run = await sixb.actions.request({
-        actionId: "createRoom",
-        params: { id: "room:1", name: "Room 1" },
-        runId: "act_event_failure",
-      })
-
-      expect(run).toMatchObject({ id: "act_event_failure", status: "succeeded" })
-      expect(await sixb.objects(Room).get("room:1")).not.toBeNull()
-      expect(await sixb.events.read({ types: ["action.requested"] })).toHaveLength(0)
-      expect(await sixb.events.read({ types: ["action.completed"] })).toHaveLength(1)
-    } finally {
-      host.events.append = originalAppend
-    }
   })
 
   test("answers a reused run id with its terminal run and rejects conflicting payloads", async () => {
@@ -789,7 +726,6 @@ describe("requestAction", () => {
     expect(first).toMatchObject({ id: "act_fixed", status: "succeeded" })
     expect(second).toEqual(first)
     expect(writebacks).toBe(1)
-    expect(await sixb.events.read({ types: ["action.requested"] })).toHaveLength(1)
 
     await expect(
       sixb.objects(Room).requestAction({
@@ -1048,7 +984,7 @@ describe("requestAction", () => {
 
   // Guard proof: answer `action.run_in_progress` from `joinHeldRunId`
   // (`actions/run/executor.ts`) without looking the record up, and the request that comes once the
-  // run is recorded, while its request still announces it, is refused as in progress.
+  // run is recorded, while its request still holds the run id, is refused as in progress.
   test("answers with the record a request still holding the run id has written", async () => {
     const runtimeDeps = createTestRuntimeDeps()
     const quick = defineAction("quick")
@@ -1061,28 +997,32 @@ describe("requestAction", () => {
       ...runtimeDeps,
     })
     const sixb = createTestSixb(host)
-    const announcing = Promise.withResolvers<void>()
+    const actionRuns = runtimeDeps.storage.actionRuns
+    const recorded = Promise.withResolvers<void>()
     const release = Promise.withResolvers<void>()
-    const emit = host.events.emit.bind(host.events)
-    host.events.emit = async (input, options) => {
-      if (input.events.some((event) => event.type === "action.completed")) {
-        announcing.resolve()
+    // The request waits once its record is written, outside the storage lock that a decorated
+    // storage method would hold.
+    const holdingActionRuns: ActionRunStorage = {
+      record: async (input) => {
+        const stored = await actionRuns.record(input)
+        recorded.resolve()
         await release.promise
-      }
-      return emit(input, options)
+        return stored
+      },
+      recordEffects: (input) => actionRuns.recordEffects(input),
+      getById: (params) => actionRuns.getById(params),
+      list: (input) => actionRuns.list(input),
     }
+    Object.defineProperty(runtimeDeps.storage, "actionRuns", { value: holdingActionRuns })
 
-    const first = sixb.actions.request({ actionId: "quick", runId: "act_announced" })
-    await announcing.promise
-    const second = sixb.actions.request({ actionId: "quick", runId: "act_announced" })
-    const recorded = await runtimeDeps.storage.actionRuns.getById({
-      projectId: host.id,
-      id: "act_announced",
-    })
-    if (!recorded) throw new Error("The run is recorded before it is announced.")
-    await expect(second).resolves.toEqual(recorded)
+    const first = sixb.actions.request({ actionId: "quick", runId: "act_held" })
+    await recorded.promise
+    const second = sixb.actions.request({ actionId: "quick", runId: "act_held" })
+    const stored = await actionRuns.getById({ projectId: host.id, id: "act_held" })
+    if (!stored) throw new Error("The run is recorded before its request releases the run id.")
+    await expect(second).resolves.toEqual(stored)
     release.resolve()
-    await expect(first).resolves.toEqual(recorded)
+    await expect(first).resolves.toEqual(stored)
   })
 
   test("calls onRequested before the run executes, with nothing recorded yet", async () => {
@@ -1159,7 +1099,6 @@ describe("requestAction", () => {
         id: "act_withdrawn",
       })
     ).toBeNull()
-    expect(await sixb.events.read({ types: ["action.requested"] })).toHaveLength(0)
 
     // Nothing was recorded, so the same run id runs once requested again.
     await expect(
@@ -1290,9 +1229,6 @@ describe("requestAction", () => {
       error: { code: "action.phase_failed", details: { phase: "validation" } },
     })
     expect(writebacks).toBe(0)
-    expect(await sixb.events.read({ types: ["action.failed"] })).toMatchObject([
-      { payload: { runId: run.id, error: run.error } },
-    ])
   })
 
   test("allows inherited actions on subtypes", async () => {
@@ -1308,24 +1244,17 @@ describe("requestAction", () => {
       properties: { id: "suite:1", externalId: "S1", name: "Suite 1", tier: "vip" },
     })
 
-    await sixb.objects(SuiteRoom).requestAction({
+    const run = await sixb.objects(SuiteRoom).requestAction({
       id: "suite:1",
       actionId: "setTemperature",
       params: { target: 72 },
     })
 
-    const events = await sixb.events.read({
-      types: ["action.requested"],
+    expect(run).toMatchObject({
+      actionId: "setTemperature",
+      status: "succeeded",
+      subject: { kind: "object", objectTypeId: "SuiteRoom", primaryId: "suite:1" },
     })
-    expect(events.length).toBe(1)
-    if (events[0].type === "action.requested") {
-      expect(events[0].payload.subject).toEqual({
-        kind: "object",
-        objectTypeId: "SuiteRoom",
-        primaryId: "suite:1",
-      })
-      expect(events[0].payload.actionId).toBe("setTemperature")
-    }
   })
 
   test("requests global actions through sixb.actions", async () => {
@@ -1342,22 +1271,15 @@ describe("requestAction", () => {
       params: { id: "room:1", name: "Room 1" },
     })
 
-    const events = await sixb.events.read({
-      types: ["action.requested"],
+    expect(result).toMatchObject({
+      actionId: "createRoom",
+      status: "succeeded",
+      subject: { kind: "none" },
+      params: { id: "room:1", name: "Room 1" },
     })
-    expect(result).toMatchObject({ status: "succeeded", subject: { kind: "none" } })
-    expect(events.length).toBe(1)
-    if (events[0].type === "action.requested") {
-      expect(events[0].payload).toEqual({
-        actionId: "createRoom",
-        subject: { kind: "none" },
-        params: { id: "room:1", name: "Room 1" },
-        runId: result.id,
-      })
-    }
   })
 
-  test("rejects invalid global action param schemas before emitting an event", async () => {
+  test("rejects invalid global action param schemas before running", async () => {
     const runtimeDeps = createTestRuntimeDeps()
     const sixb = createTestSixb({
       id: "global-action-test",
@@ -1373,10 +1295,9 @@ describe("requestAction", () => {
       })
     ).rejects.toBeInstanceOf(OntologyValidationError)
 
-    const events = await sixb.events.read({
-      types: ["action.requested"],
-    })
-    expect(events).toHaveLength(0)
+    const { runs } = await runtimeDeps.storage.actionRuns.list({ projectId: "global-action-test" })
+    expect(runs).toHaveLength(0)
+    expect(await sixb.objects(Room).get("room:1")).toBeNull()
   })
 
   test("rejects object-scoped actions without an object subject", async () => {
@@ -1611,7 +1532,6 @@ describe("Action effects", () => {
 
     expect(run).toMatchObject({ status: "succeeded", phase: "commit" })
     expect(run.effects).toBeUndefined()
-    expect(await sixb.events.read({ types: ["action.completed"] })).toHaveLength(1)
 
     releaseEffects.resolve()
     await drainActionRuns(host, 5_000)

@@ -12,7 +12,6 @@
  */
 
 import type {
-  ActionDefinition,
   DatasetDefinition,
   InferObjectProperties,
   InferPropertyValue,
@@ -249,42 +248,6 @@ export interface EventsRunBuilder<TEvent extends SixbEvent> extends Subscribable
   run(runId: string): EventsRunBuilder<TEvent>
 }
 
-/** Object-subject scope builder for action events: `events.actions().subject(Type).byId(id)`. */
-export interface EventsActionSubjectBuilder<TEvent extends SixbEvent>
-  extends SubscribableEvents<TEvent> {
-  /** Scope to a single action subject object. */
-  byId(primaryId: string): EventsActionBuilder<TEvent>
-}
-
-/** Action-scoped topic builder: `events.actions().run(runId).completed()`. */
-export interface EventsActionBuilder<TEvent extends SixbEvent> extends SubscribableEvents<TEvent> {
-  /** Scope to a single action run id. */
-  run(runId: string): EventsActionBuilder<TEvent>
-
-  /** Scope to one action definition id. */
-  action(actionId: string): EventsActionBuilder<TEvent>
-
-  /** Scope to an object-bound action subject type. */
-  subject<TObjectType extends ObjectTypeWithTokens>(
-    objectType: TObjectType
-  ): EventsActionSubjectBuilder<TEvent>
-  subject(objectTypeId: string): EventsActionSubjectBuilder<TEvent>
-
-  /** Action request events. */
-  requested(): EventsActionBuilder<SixbEventOfType<"action.requested">>
-
-  /** Successful terminal action events. */
-  completed(): EventsActionBuilder<SixbEventOfType<"action.completed">>
-
-  /** Failed or cancelled terminal action events. */
-  failed(): EventsActionBuilder<SixbEventOfType<"action.failed">>
-
-  /** All terminal action events. */
-  terminal(): EventsActionBuilder<
-    SixbEventOfType<"action.completed"> | SixbEventOfType<"action.failed">
-  >
-}
-
 /** Rule-scoped topic builder: `events.rule(rule).triggered()`. */
 export interface EventsRuleBuilder<TEvent extends SixbEvent> extends SubscribableEvents<TEvent> {
   triggered(): EventsRuleBuilder<SixbEventOfType<"rule.triggered">>
@@ -360,11 +323,10 @@ export function createWsSubscribeExecutor(options?: { client?: Client }): EventS
       const socket = createEventSocket({
         topic: filter.topic,
         types: filter.types,
-        // Object/action/run scope is filtered server-side; the client predicate
+        // Object/run scope is filtered server-side; the client predicate
         // still refines propertyId/linkId and guards correctness.
         objectTypeId: filter.objectTypeId,
         primaryId: filter.primaryId,
-        actionId: filter.actionId,
         runId: filter.runId,
         afterCursor: subscribeOptions?.afterCursor,
         limit: subscribeOptions?.limit,
@@ -518,29 +480,12 @@ class EventsBuilderImpl {
     return this.withFilter({ runId })
   }
 
-  action(actionId: string): EventsBuilderImpl {
-    return this.withFilter({ actionId })
-  }
-
-  subject(objectType: ObjectTypeWithTokens | string): EventsBuilderImpl {
-    const objectTypeId = typeof objectType === "string" ? objectType : objectType.id
-    return this.withFilter({ objectTypeId })
-  }
-
-  requested(): EventsBuilderImpl {
-    return this.withFilter({ topic: "actions", types: ["action.requested"] })
-  }
-
-  completed(): EventsBuilderImpl {
-    return this.withFilter({ topic: "actions", types: ["action.completed"] })
-  }
-
   failed(): EventsBuilderImpl {
     const selector = this.params.selector
     if (selector && "failed" in selector) {
       return this.withSelectorSpec(selector.failed())
     }
-    return this.withFilter({ topic: "actions", types: ["action.failed"] })
+    return this
   }
 
   succeeded(): EventsBuilderImpl {
@@ -557,10 +502,6 @@ class EventsBuilderImpl {
       return this.withSelectorSpec(selector.cancelled())
     }
     return this
-  }
-
-  terminal(): EventsBuilderImpl {
-    return this.withFilter({ topic: "actions", types: ["action.completed", "action.failed"] })
   }
 
   triggered(): EventsBuilderImpl {
@@ -647,11 +588,6 @@ export interface SixbEventsApi {
   objects(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"objects">>
   telemetry(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"telemetry">>
   links(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"links">>
-  actions(options?: SixbEventsClientOptions): EventsActionBuilder<SixbEventOfTopic<"actions">>
-  action<TAction extends ActionDefinition>(
-    action: TAction,
-    options?: SixbEventsClientOptions
-  ): EventsActionBuilder<SixbEventOfTopic<"actions">>
   rule<TRule extends RuleDefinition>(
     rule: TRule,
     options?: SixbEventsClientOptions
@@ -690,12 +626,6 @@ function runBuilder<TEvent extends SixbEvent>(
   return createBuilder({ topic }, options) as unknown as EventsRunBuilder<TEvent>
 }
 
-function actionBuilder<TEvent extends SixbEvent>(
-  options?: SixbEventsClientOptions
-): EventsActionBuilder<TEvent> {
-  return createBuilder({ topic: "actions" }, options) as unknown as EventsActionBuilder<TEvent>
-}
-
 const eventsApi = {} as SixbEventsApi
 
 eventsApi.object = (objectType, options) => {
@@ -710,12 +640,6 @@ eventsApi.all = (options) => createBuilder({}, options) as unknown as EventsTopi
 eventsApi.objects = (options) => topicBuilder("objects", options)
 eventsApi.telemetry = (options) => topicBuilder("telemetry", options)
 eventsApi.links = (options) => topicBuilder("links", options)
-eventsApi.actions = (options) => actionBuilder(options)
-eventsApi.action = (action, options) =>
-  createBuilder(
-    { topic: "actions", actionId: action.id },
-    options
-  ) as unknown as EventsActionBuilder<SixbEventOfTopic<"actions">>
 eventsApi.rule = (rule, options) =>
   createBuilder({ topic: "rules", ruleId: rule.id }, options) as unknown as EventsRuleBuilder<
     SixbEventOfTopic<"rules">

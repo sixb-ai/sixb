@@ -1,7 +1,6 @@
 export type { ErrorReporter } from "../error-reporting/reporter"
 export type { EventDefinition, EventDefinitionGroup, EventDefinitionMap } from "./definitions"
 export {
-  ACTION_EVENT_DEFINITIONS,
   DATASET_EVENT_DEFINITIONS,
   EVENT_DEFINITIONS,
   EVENT_TOPICS,
@@ -26,12 +25,6 @@ export {
 export type { EventScopeKeys } from "./scope"
 export { scopeKeysForEvent } from "./scope"
 export {
-  type ActionEventSelectorBuilder,
-  type ActionEventSelectorContext,
-  type ActionEventSelectorEvent,
-  type ActionEventSelectorOperation,
-  type ActionEventToken,
-  type ActionEventTokenOf,
   buildEventSelectorPredicate,
   type DatasetEventSelectorBuilder,
   type DatasetEventSelectorContext,
@@ -82,11 +75,7 @@ export {
 } from "./service"
 export { toStoredEvent } from "./toStoredEvent"
 export type {
-  ActionCompletedEvent,
-  ActionEvent,
   ActionEventOrigin,
-  ActionFailedEvent,
-  ActionRequestedEvent,
   AuthorableDomainEvent,
   AuthorableEventDraft,
   DatasetEvent,
@@ -122,9 +111,6 @@ export type {
   RuntimeMutationEventOrigin,
   ScheduleEvent,
   ScheduleTriggeredEvent,
-  StoredActionCompletedEvent,
-  StoredActionFailedEvent,
-  StoredActionRequestedEvent,
   StoredAuthorableEvent,
   StoredDatasetVersionCommittedEvent,
   StoredDomainEvent,
