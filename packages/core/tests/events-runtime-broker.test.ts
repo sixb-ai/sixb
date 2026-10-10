@@ -7,14 +7,13 @@ import {
   type StoredDomainEvent,
 } from "../src/events"
 
-function actionRequested(runId: string) {
+function syncRunStarted(runId: string) {
   return {
-    type: "action.requested" as const,
+    type: "sync.run.started" as const,
     payload: {
-      actionId: "test-action",
+      syncId: "test-sync",
       runId,
-      subject: { kind: "none" as const },
-      params: {},
+      startedAt: "2026-05-20T10:00:00.000Z",
     },
   }
 }
@@ -41,9 +40,9 @@ describe("DomainEventService broker backing", () => {
       causationId: "cause-1",
       events: [
         {
-          ...actionRequested("run-1"),
+          ...syncRunStarted("run-1"),
           metadata: { source: "unit-test" },
-          idempotencyKey: "action.requested:run-1",
+          idempotencyKey: "sync.run.started:run-1",
         },
       ],
     })
@@ -51,13 +50,13 @@ describe("DomainEventService broker backing", () => {
     expect(event).toMatchObject({
       cursor: "1",
       projectId: "project-a",
-      type: "action.requested",
-      topic: "actions",
-      partitionKey: "test-action",
+      type: "sync.run.started",
+      topic: "syncs",
+      partitionKey: "test-sync:run-1",
       correlationId: "corr-1",
       causationId: "cause-1",
       metadata: { source: "unit-test" },
-      idempotencyKey: "action.requested:run-1",
+      idempotencyKey: "sync.run.started:run-1",
     })
 
     const { records } = await broker.read({
@@ -68,55 +67,55 @@ describe("DomainEventService broker backing", () => {
     expect(record).toMatchObject({
       streamId: "__events",
       cursor: "1",
-      name: "action.requested",
-      key: "test-action",
+      name: "sync.run.started",
+      key: "test-sync:run-1",
     })
     expect(record?.payload).toMatchObject({
       id: event?.id,
-      type: "action.requested",
-      topic: "actions",
-      partitionKey: "test-action",
+      type: "sync.run.started",
+      topic: "syncs",
+      partitionKey: "test-sync:run-1",
     })
     expect(record?.payload).not.toHaveProperty("cursor")
-    expect(broker.appended[0]?.records[0]?.idempotencyKey).toBe("action.requested:run-1")
+    expect(broker.appended[0]?.records[0]?.idempotencyKey).toBe("sync.run.started:run-1")
 
     const [readBack] = await runtime.read()
     expect(readBack).toMatchObject({
       cursor: event?.cursor,
       id: event?.id,
       projectId: "project-a",
-      type: "action.requested",
-      topic: "actions",
+      type: "sync.run.started",
+      topic: "syncs",
       correlationId: "corr-1",
       causationId: "cause-1",
       metadata: { source: "unit-test" },
-      idempotencyKey: "action.requested:run-1",
+      idempotencyKey: "sync.run.started:run-1",
     })
   })
 
   test("reads with cursor and filter semantics", async () => {
     const runtime = new DomainEventService({ projectId: "project-a", broker: new InMemoryBroker() })
     await runtime.append({
-      events: [actionRequested("run-1"), scheduleTriggered("daily"), actionRequested("run-2")],
+      events: [syncRunStarted("run-1"), scheduleTriggered("daily"), syncRunStarted("run-2")],
     })
 
     const first = (await runtime.read({ limit: 1 }))[0]
     const afterFirst = await runtime.read({ afterCursor: first?.cursor })
     expect(afterFirst.map((event) => event.cursor)).toEqual(["2", "3"])
 
-    const actions = await runtime.read({ topics: ["actions"] })
-    expect(actions.map((event) => event.type)).toEqual(["action.requested", "action.requested"])
+    const syncs = await runtime.read({ topics: ["syncs"] })
+    expect(syncs.map((event) => event.type)).toEqual(["sync.run.started", "sync.run.started"])
 
     const schedules = await runtime.read({ types: ["schedule.triggered"] })
     expect(schedules.map((event) => event.type)).toEqual(["schedule.triggered"])
 
     const impossible = await runtime.read({
       topics: ["schedules"],
-      types: ["action.requested"],
+      types: ["sync.run.started"],
     })
     expect(impossible).toEqual([])
 
-    const limited = await runtime.read({ topics: ["actions"], limit: 1 })
+    const limited = await runtime.read({ topics: ["syncs"], limit: 1 })
     expect(limited.map(runIds)).toEqual(["run-1"])
   })
 
@@ -128,10 +127,10 @@ describe("DomainEventService broker backing", () => {
     })
     await runtime.append({
       events: [
-        actionRequested("run-1"),
-        actionRequested("run-2"),
-        actionRequested("run-3"),
-        actionRequested("run-4"),
+        syncRunStarted("run-1"),
+        syncRunStarted("run-2"),
+        syncRunStarted("run-3"),
+        syncRunStarted("run-4"),
       ],
     })
 
@@ -143,8 +142,8 @@ describe("DomainEventService broker backing", () => {
     const projectA = new DomainEventService({ projectId: "project-a", broker })
     const projectB = new DomainEventService({ projectId: "project-b", broker })
 
-    await projectA.append({ events: [actionRequested("a")] })
-    await projectB.append({ events: [actionRequested("b")] })
+    await projectA.append({ events: [syncRunStarted("a")] })
+    await projectB.append({ events: [syncRunStarted("b")] })
 
     expect((await projectA.read()).map(runIds)).toEqual(["a"])
     expect((await projectB.read()).map(runIds)).toEqual(["b"])
@@ -159,7 +158,7 @@ describe("DomainEventService broker backing", () => {
     })
 
     await runtime.append({
-      events: [actionRequested("run-1"), scheduleTriggered("daily")],
+      events: [syncRunStarted("run-1"), scheduleTriggered("daily")],
     })
 
     expect(received).toEqual(["schedule.triggered"])
@@ -176,8 +175,8 @@ describe("DomainEventService broker backing", () => {
       received.push(...batch.map((event) => event.type))
     })
 
-    await expect(runtime.append({ events: [actionRequested("run-1")] })).resolves.toHaveLength(1)
-    expect(received).toEqual(["action.requested"])
+    await expect(runtime.append({ events: [syncRunStarted("run-1")] })).resolves.toHaveLength(1)
+    expect(received).toEqual(["sync.run.started"])
   })
 
   test("skips retained event types that are no longer part of the domain contract", async () => {
@@ -188,17 +187,39 @@ describe("DomainEventService broker backing", () => {
     await broker.append({
       projectId: "project-a",
       streamId: EVENTS_STREAM.id,
-      records: [{ name: "object.upserted", payload: { type: "object.upserted" } }],
+      records: [
+        { name: "object.upserted", payload: { type: "object.upserted" } },
+        // An Action event as runtimes wrote them before Actions stopped emitting events.
+        {
+          name: "action.completed",
+          key: "approve-invoice",
+          payload: {
+            id: "event-1",
+            schemaVersion: 1,
+            projectId: "project-a",
+            occurredAt: "2026-05-20T10:00:00.000Z",
+            type: "action.completed",
+            topic: "actions",
+            partitionKey: "approve-invoice",
+            payload: {
+              actionId: "approve-invoice",
+              runId: "action-run-1",
+              subject: { kind: "none" },
+              finishedAt: "2026-05-20T10:00:00.000Z",
+            },
+          },
+        },
+      ],
     })
-    await runtime.append({ events: [actionRequested("run-1")] })
+    await runtime.append({ events: [syncRunStarted("run-1")] })
 
-    expect((await runtime.read()).map((event) => event.type)).toEqual(["action.requested"])
+    expect((await runtime.read()).map((event) => event.type)).toEqual(["sync.run.started"])
 
     const received: string[] = []
     const unsubscribe = await runtime.subscribe({ from: "earliest" }, (batch) => {
       received.push(...batch.map((event) => event.type))
     })
-    expect(received).toEqual(["action.requested"])
+    expect(received).toEqual(["sync.run.started"])
     unsubscribe()
   })
 
@@ -252,16 +273,18 @@ describe("DomainEventService broker backing", () => {
   test("rejects authorable events that cannot be stored as broker JSON", async () => {
     const runtime = new DomainEventService({ projectId: "project-a", broker: new InMemoryBroker() })
 
+    // No authorable payload field accepts a non-JSON value, so the draft leaves its type behind to
+    // reach the runtime check.
     await expect(
       runtime.append({
         events: [
           {
-            ...actionRequested("run-1"),
+            ...syncRunStarted("run-1"),
             payload: {
-              ...actionRequested("run-1").payload,
-              params: { observedAt: new Date("2026-01-01T00:00:00.000Z") },
+              ...syncRunStarted("run-1").payload,
+              startedAt: new Date("2026-01-01T00:00:00.000Z"),
             },
-          },
+          } as never,
         ],
       })
     ).rejects.toThrow("cannot be stored in broker")
@@ -269,7 +292,7 @@ describe("DomainEventService broker backing", () => {
 })
 
 function runIds(event: StoredDomainEvent): string | undefined {
-  return event.type === "action.requested" ? event.payload.runId : undefined
+  return event.type === "sync.run.started" ? event.payload.runId : undefined
 }
 
 class RecordingBroker extends InMemoryBroker {

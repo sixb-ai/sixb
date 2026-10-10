@@ -81,27 +81,21 @@ describe("parseSubscriptionMessage", () => {
     })
   })
 
-  test("accepts action-scoped subscriptions", () => {
+  test("accepts run-scoped subscriptions", () => {
     const result = parseSubscriptionMessage({
       type: "subscribe",
-      topic: "actions",
-      types: ["action.completed", "action.failed"],
-      actionId: "approveQuote",
-      runId: "act-1",
-      objectTypeId: "Quote",
-      primaryId: "q_123",
+      topic: "syncs",
+      types: ["sync.run.finished"],
+      runId: "run-1",
     })
 
     expect(result).toEqual({
       ok: true,
       data: {
         type: "subscribe",
-        topic: "actions",
-        types: ["action.completed", "action.failed"],
-        actionId: "approveQuote",
-        runId: "act-1",
-        objectTypeId: "Quote",
-        primaryId: "q_123",
+        topic: "syncs",
+        types: ["sync.run.finished"],
+        runId: "run-1",
       },
     })
   })
@@ -127,6 +121,12 @@ describe("parseSubscriptionMessage", () => {
     }
 
     expect(result.error).toContain("Invalid input")
+  })
+
+  test("rejects the actions topic, whose events were removed", () => {
+    const result = parseSubscriptionMessage({ type: "subscribe", topic: "actions" })
+
+    expect(result.ok).toBe(false)
   })
 
   test("accepts unsubscribe messages", () => {
@@ -280,7 +280,7 @@ describe("/ws/events subscriptions", () => {
     })
   })
 
-  test("scopes action streams by run, action id and object subject", async () => {
+  test("scopes run streams by run id", async () => {
     await withWsServer(async ({ baseUrl, sixb }) => {
       const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/events`)
 
@@ -290,44 +290,16 @@ describe("/ws/events subscriptions", () => {
         const [matching] = await sixb.events.append({
           events: [
             {
-              type: "action.completed",
-              payload: {
-                actionId: "approveQuote",
-                runId: "act-1",
-                subject: { kind: "object", objectTypeId: "Quote", primaryId: "q_123" },
-                finishedAt: "2026-02-18T10:00:10.000Z",
-              },
+              type: "sync.run.finished",
+              payload: { syncId: "import-quotes", runId: "run-1", status: "succeeded" },
             },
           ],
         })
         await sixb.events.append({
           events: [
             {
-              type: "action.completed",
-              payload: {
-                actionId: "approveQuote",
-                runId: "act-2",
-                subject: { kind: "object", objectTypeId: "Quote", primaryId: "q_123" },
-                finishedAt: "2026-02-18T10:00:11.000Z",
-              },
-            },
-            {
-              type: "action.completed",
-              payload: {
-                actionId: "rejectQuote",
-                runId: "act-1",
-                subject: { kind: "object", objectTypeId: "Quote", primaryId: "q_123" },
-                finishedAt: "2026-02-18T10:00:12.000Z",
-              },
-            },
-            {
-              type: "action.completed",
-              payload: {
-                actionId: "approveQuote",
-                runId: "act-1",
-                subject: { kind: "object", objectTypeId: "Quote", primaryId: "q_999" },
-                finishedAt: "2026-02-18T10:00:13.000Z",
-              },
+              type: "sync.run.finished",
+              payload: { syncId: "import-quotes", runId: "run-2", status: "succeeded" },
             },
           ],
         })
@@ -335,22 +307,16 @@ describe("/ws/events subscriptions", () => {
         ws.send(
           JSON.stringify({
             type: "subscribe",
-            topic: "actions",
-            types: ["action.completed"],
-            actionId: "approveQuote",
-            runId: "act-1",
-            objectTypeId: "Quote",
-            primaryId: "q_123",
+            topic: "syncs",
+            types: ["sync.run.finished"],
+            runId: "run-1",
           })
         )
 
         expect(await nextWsMessage(ws)).toMatchObject({ type: "subscribed" })
         expect(await nextWsMessage(ws)).toMatchObject({
           type: "event",
-          event: {
-            cursor: matching?.cursor,
-            payload: { actionId: "approveQuote", runId: "act-1" },
-          },
+          event: { cursor: matching?.cursor, payload: { syncId: "import-quotes", runId: "run-1" } },
         })
         await expectNoWsMessage(ws)
       } finally {

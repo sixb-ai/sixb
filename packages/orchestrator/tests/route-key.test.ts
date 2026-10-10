@@ -104,7 +104,7 @@ describe("routeKeysForEvent", () => {
     expect(routeKeysForEvent(event)).toEqual(["event-schedule:object.updated:Invoice"])
   })
 
-  test("adds link, rule, and action scoped event schedule keys", () => {
+  test("adds link and rule scoped event schedule keys", () => {
     const base = {
       schemaVersion: 1 as const,
       projectId: "test-project",
@@ -141,26 +141,9 @@ describe("routeKeysForEvent", () => {
       },
       cursor: "8",
     }
-    const actionEvent: StoredDomainEvent = {
-      ...base,
-      id: "evt-action",
-      type: "action.completed",
-      topic: "actions",
-      partitionKey: "approve-invoice:run-1",
-      payload: {
-        actionId: "approve-invoice",
-        runId: "run-1",
-        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv-1" },
-        finishedAt: base.occurredAt,
-      },
-      cursor: "9",
-    }
 
     expect(routeKeysForEvent(linkEvent)).toEqual(["event-schedule:link.created:Invoice:payments"])
     expect(routeKeysForEvent(ruleEvent)).toEqual(["event-schedule:rule.triggered:invoice.at-risk"])
-    expect(routeKeysForEvent(actionEvent)).toEqual([
-      "event-schedule:action.completed:approve-invoice",
-    ])
   })
 })
 

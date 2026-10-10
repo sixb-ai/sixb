@@ -8,7 +8,6 @@ import type { EventScheduleCondition, EventScheduleDefinition, ScheduleDefinitio
 const objectEventTypes = new Set(["object.created", "object.updated", "object.deleted"])
 const linkEventTypes = new Set(["link.created", "link.updated", "link.deleted"])
 const ruleEventTypes = new Set(["rule.triggered", "rule.resolved"])
-const actionEventTypes = new Set(["action.requested", "action.completed", "action.failed"])
 const datasetEventTypes = new Set(["dataset.version.committed"])
 const syncEventTypes = new Set(["sync.run.finished"])
 const pipelineEventTypes = new Set(["pipeline.run.finished"])
@@ -17,7 +16,6 @@ const linkIdentityFields = new Set(["target.objectTypeId", "target.primaryId"])
 
 export interface ValidateSchedulesAtStartupOptions {
   readonly registeredRuleIds?: ReadonlySet<string>
-  readonly registeredActionIds?: ReadonlySet<string>
   readonly registeredDatasetIds?: ReadonlySet<string>
   readonly registeredSyncIds?: ReadonlySet<string>
   readonly registeredPipelineIds?: ReadonlySet<string>
@@ -138,9 +136,6 @@ function assertEventSourceShape(
     case "rules":
       assertNonEmptyString(value.ruleId, `${path} ruleId`, createError)
       return
-    case "actions":
-      assertNonEmptyString(value.actionId, `${path} actionId`, createError)
-      return
     case "datasets":
       assertNonEmptyString(value.datasetId, `${path} datasetId`, createError)
       return
@@ -154,7 +149,7 @@ function assertEventSourceShape(
       return
     default:
       throw createError(
-        `${path} must select object, link, rule, action, dataset, sync, or pipeline events.`
+        `${path} must select object, link, rule, dataset, sync, or pipeline events.`
       )
   }
 }
@@ -210,15 +205,6 @@ function validateEventSchedule(
         options.registeredRuleIds,
         ruleEventTypes,
         "rule"
-      )
-      return
-    case "actions":
-      validateRegisteredSource(
-        schedule,
-        source.actionId,
-        options.registeredActionIds,
-        actionEventTypes,
-        "action"
       )
       return
     case "datasets":
@@ -294,7 +280,7 @@ function validateRegisteredSource(
   sourceId: string | undefined,
   registeredIds: ReadonlySet<string> | undefined,
   supportedTypes: ReadonlySet<string>,
-  sourceKind: "rule" | "action" | "dataset" | "sync" | "pipeline"
+  sourceKind: "rule" | "dataset" | "sync" | "pipeline"
 ): void {
   validateEventTypes(schedule, supportedTypes, sourceKind)
   if (!registeredIds?.has(sourceId ?? "")) {

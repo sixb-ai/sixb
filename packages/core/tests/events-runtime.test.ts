@@ -2,14 +2,13 @@ import { describe, expect, test } from "bun:test"
 import { InMemoryBroker } from "../src"
 import { DomainEventService, EVENTS_STREAM, type StoredDomainEvent } from "../src/events"
 
-function actionRequested(runId: string) {
+function syncRunStarted(runId: string) {
   return {
-    type: "action.requested" as const,
+    type: "sync.run.started" as const,
     payload: {
-      actionId: "test-action",
+      syncId: "test-sync",
       runId,
-      subject: { kind: "none" as const },
-      params: {},
+      startedAt: "2026-05-20T10:00:00.000Z",
     },
   }
 }
@@ -36,9 +35,9 @@ describe("DomainEventService", () => {
       causationId: "cause-1",
       events: [
         {
-          ...actionRequested("run-1"),
+          ...syncRunStarted("run-1"),
           metadata: { source: "unit-test" },
-          idempotencyKey: "action.requested:run-1",
+          idempotencyKey: "sync.run.started:run-1",
         },
       ],
     })
@@ -46,41 +45,41 @@ describe("DomainEventService", () => {
     expect(event).toMatchObject({
       cursor: "1",
       projectId: "project-a",
-      type: "action.requested",
-      topic: "actions",
-      partitionKey: "test-action",
+      type: "sync.run.started",
+      topic: "syncs",
+      partitionKey: "test-sync:run-1",
       correlationId: "corr-1",
       causationId: "cause-1",
       metadata: { source: "unit-test" },
-      idempotencyKey: "action.requested:run-1",
+      idempotencyKey: "sync.run.started:run-1",
     })
     expect(broker.appended[0]?.projectId).toBe("project-a")
-    expect(broker.appended[0]?.records[0]?.idempotencyKey).toBe("action.requested:run-1")
+    expect(broker.appended[0]?.records[0]?.idempotencyKey).toBe("sync.run.started:run-1")
   })
 
   test("reads with Events cursor and filter semantics without a projectId input", async () => {
     const events = new DomainEventService({ projectId: "project-a", broker: new InMemoryBroker() })
     await events.append({
-      events: [actionRequested("run-1"), scheduleTriggered("daily"), actionRequested("run-2")],
+      events: [syncRunStarted("run-1"), scheduleTriggered("daily"), syncRunStarted("run-2")],
     })
 
     const first = (await events.read({ limit: 1 }))[0]
     const afterFirst = await events.read({ afterCursor: first?.cursor })
     expect(afterFirst.map((event) => event.cursor)).toEqual(["2", "3"])
 
-    const actions = await events.read({ topics: ["actions"] })
-    expect(actions.map((event) => event.type)).toEqual(["action.requested", "action.requested"])
+    const syncs = await events.read({ topics: ["syncs"] })
+    expect(syncs.map((event) => event.type)).toEqual(["sync.run.started", "sync.run.started"])
 
     const schedules = await events.read({ types: ["schedule.triggered"] })
     expect(schedules.map((event) => event.type)).toEqual(["schedule.triggered"])
 
     const impossible = await events.read({
       topics: ["schedules"],
-      types: ["action.requested"],
+      types: ["sync.run.started"],
     })
     expect(impossible).toEqual([])
 
-    const limited = await events.read({ topics: ["actions"], limit: 1 })
+    const limited = await events.read({ topics: ["syncs"], limit: 1 })
     expect(limited.map(runIds)).toEqual(["run-1"])
   })
 
@@ -90,7 +89,7 @@ describe("DomainEventService", () => {
 
     expect(await events.latestCursor()).toBeUndefined()
     const appended = await events.append({
-      events: [actionRequested("run-1"), actionRequested("run-2")],
+      events: [syncRunStarted("run-1"), syncRunStarted("run-2")],
     })
 
     expect(await events.latestCursor()).toBe(appended.at(-1)?.cursor)
@@ -103,8 +102,8 @@ describe("DomainEventService", () => {
     const projectAEvents = new DomainEventService({ projectId: "project-a", broker })
     const projectBEvents = new DomainEventService({ projectId: "project-b", broker })
 
-    await projectAEvents.append({ events: [actionRequested("a")] })
-    await projectBEvents.append({ events: [actionRequested("b")] })
+    await projectAEvents.append({ events: [syncRunStarted("a")] })
+    await projectBEvents.append({ events: [syncRunStarted("b")] })
 
     expect((await projectAEvents.read()).map(runIds)).toEqual(["a"])
     expect((await projectBEvents.read()).map(runIds)).toEqual(["b"])
@@ -119,7 +118,7 @@ describe("DomainEventService", () => {
     })
 
     await events.append({
-      events: [actionRequested("run-1"), scheduleTriggered("daily")],
+      events: [syncRunStarted("run-1"), scheduleTriggered("daily")],
     })
 
     expect(received).toEqual(["schedule.triggered"])
@@ -127,7 +126,7 @@ describe("DomainEventService", () => {
 
   test("can subscribe from the earliest retained event", async () => {
     const events = new DomainEventService({ projectId: "project-a", broker: new InMemoryBroker() })
-    await events.append({ events: [actionRequested("run-1")] })
+    await events.append({ events: [syncRunStarted("run-1")] })
 
     const received: string[] = []
     const unsubscribe = await events.subscribe({ from: "earliest" }, (batch) => {
@@ -151,7 +150,7 @@ describe("DomainEventService", () => {
 })
 
 function runIds(event: StoredDomainEvent): string | undefined {
-  return event.type === "action.requested" ? event.payload.runId : undefined
+  return event.type === "sync.run.started" ? event.payload.runId : undefined
 }
 
 class LatestCursorRecordingBroker extends InMemoryBroker {

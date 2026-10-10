@@ -12144,7 +12144,6 @@ export type ListEventsData = {
       | "objects"
       | "telemetry"
       | "links"
-      | "actions"
       | "schedules"
       | "syncs"
       | "pipelines"
@@ -12159,9 +12158,6 @@ export type ListEventsData = {
       | "link.created"
       | "link.updated"
       | "link.deleted"
-      | "action.requested"
-      | "action.completed"
-      | "action.failed"
       | "schedule.triggered"
       | "sync.run.started"
       | "sync.run.finished"
@@ -13347,9 +13343,6 @@ export type ListEventsResponses = {
               | null
           }
           type:
-            | "action.requested"
-            | "action.completed"
-            | "action.failed"
             | "schedule.triggered"
             | "sync.run.started"
             | "sync.run.finished"
@@ -13375,7 +13368,6 @@ export type ListEventsResponses = {
             | "objects"
             | "telemetry"
             | "links"
-            | "actions"
             | "schedules"
             | "syncs"
             | "pipelines"
