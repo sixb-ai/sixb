@@ -123,8 +123,9 @@ export type AgentRunFailureCode = (typeof AGENT_RUN_FAILURE_CODES)[number]
 
 /**
  * Why a run ended — Sixb's provider-independent vocabulary. It includes model-loop reasons plus
- * platform-level endings such as `timeout`, so reads remain typed and exhaustive. `other` and
- * `unknown` preserve terminal state when a provider adds a new reason.
+ * platform-level endings such as `timeout`, or `interrupted` for a turn whose worker died before
+ * finishing it, so reads remain typed and exhaustive. `other` and `unknown` preserve terminal state
+ * when a provider adds a new reason.
  */
 export const AGENT_RUN_FINISH_REASONS = [
   "stop",
@@ -132,6 +133,7 @@ export const AGENT_RUN_FINISH_REASONS = [
   "content-filter",
   "tool-calls",
   "timeout",
+  "interrupted",
   "error",
   "other",
   "unknown",

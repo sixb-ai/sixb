@@ -153,7 +153,7 @@ All chat building blocks are available as named imports from `@sixb/agent-ui`:
 | `ModelControls`, `ModelPickerRow`, `ReasoningEffortSlider`, `ProviderLogo` | Model and reasoning selection. |
 | `FileAttachmentCard`, `UserFileAttachment` | File attachments. |
 | `ActivityStatusText`, `ThinkingMarker`, `CompactionMarker`, `ReconnectingMarker` | Live activity indicators. |
-| `RunCancelledMarker`, `RunErrorMarker`, `RunFailureMarker`, `RunTimeoutMarker` | Run outcomes and recovery actions. |
+| `RunCancelledMarker`, `RunErrorMarker`, `RunFailureMarker`, `RunInterruptedMarker`, `RunTimeoutMarker` | Run outcomes and recovery actions. |
 | `DocumentPreviewRoot`, `useDocumentPreview` | Shared document viewer and programmatic preview controls. |
 
 Use `useAgentConversation` once per conversation surface to share thread data, streaming state,
@@ -186,7 +186,8 @@ export function CustomChat() {
     onThreadCreated: setThreadId,
   })
   const turn = chat.presentation
-  const canRetry = turn.kind === "failed" || (turn.kind === "timeout" && !turn.hasProgress)
+  const resumable = turn.kind === "timeout" || turn.kind === "interrupted" ? turn : null
+  const canRetry = turn.kind === "failed" || resumable?.hasProgress === false
 
   if (chat.agentLoading) return <p role="status">Loading agent…</p>
   if (chat.agentError || !chat.currentAgent) return <p role="alert">Agent unavailable.</p>
@@ -216,10 +217,9 @@ export function CustomChat() {
             failedBeforeResponse={turn.kind === "failed"}
             cancelledBeforeResponse={turn.kind === "cancelled"}
             timeout={turn.kind === "timeout" ? turn : undefined}
+            interrupted={turn.kind === "interrupted" ? turn : undefined}
             onRetry={canRetry ? () => chat.retry(turn.run) : undefined}
-            onContinue={
-              turn.kind === "timeout" && turn.hasProgress ? chat.continueAfterTimeout : undefined
-            }
+            onContinue={resumable?.hasProgress ? chat.continueAfterTimeout : undefined}
             retrying={chat.retrying}
             continuing={chat.composerPending}
           />

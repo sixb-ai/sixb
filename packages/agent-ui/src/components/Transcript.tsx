@@ -18,6 +18,7 @@ import {
   ReconnectingMarker,
   RunCancelledMarker,
   RunFailureMarker,
+  RunInterruptedMarker,
   RunTimeoutMarker,
   ThinkingMarker,
   UserFileAttachment,
@@ -41,6 +42,8 @@ export interface TranscriptProps {
   readonly failedBeforeResponse?: boolean
   readonly cancelledBeforeResponse?: boolean
   readonly timeout?: { readonly hasProgress: boolean; readonly timeoutMs?: number }
+  /** The newest run lost its worker mid-turn; without saved progress, its stream is not shown. */
+  readonly interrupted?: { readonly hasProgress: boolean }
   readonly onRetry?: () => void
   readonly onContinue?: () => void
   readonly retrying?: boolean
@@ -62,6 +65,7 @@ export function Transcript({
   failedBeforeResponse,
   cancelledBeforeResponse,
   timeout,
+  interrupted,
   onRetry,
   onContinue,
   retrying,
@@ -73,7 +77,10 @@ export function Transcript({
   const finalizedInDurable =
     live.finalizedMessageId !== null &&
     messages.some((message) => message.id === live.finalizedMessageId)
-  const showLive = hasLiveContent(live, live.runId) && !finalizedInDurable
+  const showLive =
+    hasLiveContent(live, live.runId) &&
+    !finalizedInDurable &&
+    !(interrupted && !interrupted.hasProgress)
   const handoffPending = live.finalizedMessageId !== null && !finalizedInDurable
   // Bridge the gap between sending and the first stream event with a standalone thinking shimmer.
   const showThinking = Boolean(awaitingResponse) && !showLive && !finalizedInDurable
@@ -161,6 +168,7 @@ export function Transcript({
                   live={live}
                   keepWorkOpen={handoffPending}
                   timeout={timeout}
+                  interrupted={interrupted}
                   onRetry={onRetry}
                   onContinue={onContinue}
                   retrying={retrying}
@@ -176,6 +184,16 @@ export function Transcript({
                 <RunTimeoutMarker
                   hasProgress={timeout.hasProgress}
                   timeoutMs={timeout.timeoutMs}
+                  onRetry={onRetry}
+                  onContinue={onContinue}
+                  retrying={retrying}
+                  continuing={continuing}
+                />
+              </MessageScrollerItem>
+            ) : interrupted ? (
+              <MessageScrollerItem messageId="run-interrupted">
+                <RunInterruptedMarker
+                  hasProgress={interrupted.hasProgress}
                   onRetry={onRetry}
                   onContinue={onContinue}
                   retrying={retrying}

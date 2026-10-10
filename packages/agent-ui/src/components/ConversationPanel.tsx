@@ -36,6 +36,7 @@ export interface ConversationPanelProps {
   readonly failedBeforeResponse?: boolean
   readonly cancelledBeforeResponse?: boolean
   readonly timeout?: { readonly hasProgress: boolean; readonly timeoutMs?: number }
+  readonly interrupted?: { readonly hasProgress: boolean }
   readonly onRetry?: () => void
   readonly onContinue?: () => void
   readonly retrying?: boolean
@@ -105,6 +106,7 @@ export function ConversationPanel({
   failedBeforeResponse,
   cancelledBeforeResponse,
   timeout,
+  interrupted,
   onRetry,
   onContinue,
   retrying,
@@ -257,6 +259,7 @@ export function ConversationPanel({
                 failedBeforeResponse={failedBeforeResponse}
                 cancelledBeforeResponse={cancelledBeforeResponse}
                 timeout={timeout}
+                interrupted={interrupted}
                 onRetry={onRetry}
                 onContinue={onContinue}
                 retrying={retrying}
