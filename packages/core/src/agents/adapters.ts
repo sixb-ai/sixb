@@ -54,6 +54,11 @@ export interface ToModelMessagesOptions<TMessage extends AgentMessage = AgentMes
    * models that cannot consume inline files.
    */
   readonly fileText?: (input: AgentFileDataResolverInput<TMessage>) => string | undefined
+  /**
+   * Framework text closing a user message, such as when it was sent. It must derive from stored
+   * data only, so replaying the same history always projects the same bytes.
+   */
+  readonly userMessageSuffix?: (message: TMessage) => string | undefined
   /** Add current metadata, sandbox paths, and projection notes for a tool-result file. */
   readonly toolResultFileText?: (
     input: AgentToolResultFileResolverInput<TMessage>
@@ -152,6 +157,8 @@ function userModelMessage<TMessage extends AgentMessage>(
       }
     }
   })
+  const suffix = options.userMessageSuffix?.(message)
+  if (suffix) content.push({ type: "text", text: `\n\n${suffix}` })
   return { role: "user", content }
 }
 

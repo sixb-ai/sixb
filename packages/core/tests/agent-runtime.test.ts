@@ -142,6 +142,29 @@ describe("single project Agent", () => {
     expect(run.spec?.reasoning).toBe("high")
   })
 
+  test("freezes the requester's canonical time zone and locale on the run", async () => {
+    // Proven by removal: drop timeZone/locale from resolveConversationRunSpec.
+    const { host, storage } = setup()
+    const sixb = await userScope(host, "owner")
+    const { run } = await sixb.agent.runs.request({
+      text: "Hi",
+      timeZone: "europe/paris",
+      locale: "fr-ca",
+    })
+    expect(run.spec).toMatchObject({ timeZone: "Europe/Paris", locale: "fr-CA" })
+
+    for (const [settings, message] of [
+      [{ timeZone: "Etc/Unknown" }, `'timeZone' must be an IANA time zone; received "Etc/Unknown"`],
+      [{ locale: "fr_FR" }, `'locale' must be a BCP 47 language tag; received "fr_FR"`],
+    ] as const) {
+      await expect(sixb.agent.runs.request({ text: "Hi", ...settings })).rejects.toMatchObject({
+        code: "invalid_locale",
+        message: expect.stringContaining(message),
+      })
+    }
+    expect((await storage.agents.threads.list({ projectId: host.id })).total).toBe(1)
+  })
+
   test("rejects removed selectors and unknown models before creating history", async () => {
     const { host, storage } = setup()
     const sixb = createTestSixb(host)

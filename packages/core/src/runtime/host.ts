@@ -87,6 +87,13 @@ import type { RegisteredWebhook } from "../webhooks"
 import { WebhookRegistry, WebhookValidationError } from "../webhooks"
 import type { WorkflowDefinition } from "../workflows"
 import type { SixbDefinitions } from "./definitions"
+import { RuntimeError } from "./errors"
+import {
+  canonicalLocale,
+  canonicalTimeZone,
+  DEFAULT_PROJECT_LOCALE,
+  DEFAULT_PROJECT_TIME_ZONE,
+} from "./locale"
 import {
   createOntologyMutationRuntime,
   registerOntologyMutationRuntime,
@@ -99,6 +106,10 @@ import type { OntologySource, SixbHostContext, SixbRuntimeContext } from "./type
 
 export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsConfig> {
   id?: string
+  /** BCP 47 language of the project. Defaults to `"en"`. */
+  locale?: string
+  /** IANA time zone of the project. Defaults to `"UTC"`. */
+  timeZone?: string
   ontology: readonly OntologySource[]
   broker: Broker
   storage: Storage
@@ -143,6 +154,10 @@ export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsCon
 // return `SixbHost` that returns `new SixbHost(options)`.
 export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   readonly projectId: string
+  /** Canonical BCP 47 language of the project. */
+  readonly locale: string
+  /** Canonical IANA time zone of the project. */
+  readonly timeZone: string
   private readonly webhookRegistry: WebhookRegistry
   private readonly hostContext: SixbHostContext
   private readonly committedFacts: OntologyOutboxDispatcher
@@ -169,6 +184,8 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   constructor(options: SixbHostOptions<TParams>) {
     const errorReporter = attachSixbErrorReporter(this, options.onError)
     this.projectId = options.id ?? "default"
+    this.locale = resolveProjectLocale(options.locale)
+    this.timeZone = resolveProjectTimeZone(options.timeZone)
     this.broker = options.broker
     this.eventService = createDomainEventService({
       projectId: this.projectId,
@@ -282,6 +299,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     this.scheduler = new SchedulerRuntime({
       schedules: definitions.schedules.list(),
       events: this.eventService,
+      timeZone: this.timeZone,
     })
   }
 
@@ -410,6 +428,28 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
  */
 export type SixbHostView = Omit<SixbHost, "withScope"> & {
   withScope(scope: ExecutionScope): object
+}
+
+function resolveProjectLocale(locale: unknown): string {
+  if (locale === undefined) return DEFAULT_PROJECT_LOCALE
+  const canonical = canonicalLocale(locale)
+  if (canonical === undefined) {
+    throw new RuntimeError(
+      `[Sixb] 'locale' must be a BCP 47 language tag such as "fr-FR"; received ${JSON.stringify(locale)}.`
+    )
+  }
+  return canonical
+}
+
+function resolveProjectTimeZone(timeZone: unknown): string {
+  if (timeZone === undefined) return DEFAULT_PROJECT_TIME_ZONE
+  const canonical = canonicalTimeZone(timeZone)
+  if (canonical === undefined) {
+    throw new RuntimeError(
+      `[Sixb] 'timeZone' must be an IANA time zone such as "Europe/Paris"; received ${JSON.stringify(timeZone)}.`
+    )
+  }
+  return canonical
 }
 
 function validateAuthStrategySecurityReferences(

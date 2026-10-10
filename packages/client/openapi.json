@@ -10034,9 +10034,15 @@
                   "properties": {
                     "id": {
                       "type": "string"
+                    },
+                    "locale": {
+                      "type": "string"
+                    },
+                    "timeZone": {
+                      "type": "string"
                     }
                   },
-                  "required": ["id"],
+                  "required": ["id", "locale", "timeZone"],
                   "additionalProperties": false
                 }
               }
@@ -31564,6 +31570,16 @@
                       }
                     ]
                   },
+                  "timeZone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "locale": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
                   "attachments": {
                     "type": "array",
                     "items": {
@@ -31745,6 +31761,16 @@
                       }
                     ]
                   },
+                  "timeZone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "locale": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
                   "attachments": {
                     "type": "array",
                     "items": {
@@ -31925,6 +31951,16 @@
                         "additionalProperties": false
                       }
                     ]
+                  },
+                  "timeZone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "locale": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
                   },
                   "attachments": {
                     "type": "array",
@@ -32391,6 +32427,9 @@
                   "type": "object",
                   "properties": {
                     "error": {
+                      "type": "string"
+                    },
+                    "code": {
                       "type": "string"
                     }
                   },

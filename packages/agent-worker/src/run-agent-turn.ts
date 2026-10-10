@@ -21,6 +21,7 @@ import { AgentTurnTimeoutError } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
+import { loadUserMessageTimes } from "./message-times"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import { collectAgentOutputAttachments } from "./output-attachments"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
@@ -79,7 +80,15 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
           signal,
         })
       : undefined)
+  const sentTimes = await loadUserMessageTimes({
+    storage: agents,
+    projectId,
+    threadId: run.threadId,
+    messages: threadContext.retainedMessages,
+    projectTimeZone: context.projectTimeZone,
+  })
   const modelMessages = toModelMessages(threadContext.modelMessages, {
+    userMessageSuffix: (message) => (message.id ? sentTimes.get(message.id) : undefined),
     fileText: ({ message, partIndex }) =>
       message.id
         ? attachmentContext?.promptTextByPartKey.get(attachmentKey(message.id, partIndex))

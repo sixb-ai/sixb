@@ -224,10 +224,14 @@ export interface ConversationAgentRunRecord extends AgentRunRecordBase {
   readonly spec?: ConversationAgentRunSpec
 }
 
-/** Immutable, serialisable model selection for one conversational turn. */
+/** Immutable, serialisable model selection and requester settings for one conversational turn. */
 export interface ConversationAgentRunSpec {
   readonly model: LanguageModelRef
   readonly reasoning?: AgentReasoningLevel
+  /** Canonical IANA time zone of the requester. Absent uses the project time zone. */
+  readonly timeZone?: string
+  /** Canonical BCP 47 language of the requester. Absent uses the project locale. */
+  readonly locale?: string
 }
 
 /** Immutable, serialisable child configuration captured before dispatch. */

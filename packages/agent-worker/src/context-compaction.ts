@@ -17,7 +17,7 @@ import type {
   ConversationAgentRunRecord,
 } from "@sixb/core/storage"
 import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
-import { renderAgentSystemPrompt } from "./agent-prompt"
+import { agentRuntimeFacts, renderAgentSystemPrompt } from "./agent-prompt"
 import type { AgentSkill } from "./agent-skills"
 import type { AgentContextBudget } from "./context-budget"
 import { AgentContextCompactionError, AgentExecutionLostError } from "./errors"
@@ -76,6 +76,7 @@ export async function prepareAgentConversationContext(input: {
       mode: "conversation",
       instructions: plan.instructions,
       skills,
+      facts: agentRuntimeFacts(plan, context),
     }),
     tools: contextEstimateTools([
       ...agentModelToolSpecs({

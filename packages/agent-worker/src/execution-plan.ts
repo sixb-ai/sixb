@@ -25,6 +25,9 @@ export interface ResolvedAgentExecutionPlan {
   readonly instructions?: string
   readonly tools: readonly AgentToolDefinition[]
   readonly maxSteps: number
+  /** The requester's time zone and locale, when the run captured them. */
+  readonly timeZone?: string
+  readonly locale?: string
 }
 
 /** Resolve the project's conversational Agent without a static definition. */
@@ -50,6 +53,8 @@ export function resolveAgentExecutionPlan(input: {
     tools: input.tools.list(),
     maxSteps: input.defaultMaxSteps,
     ...(reasoning === undefined ? {} : { reasoning }),
+    ...(input.spec?.timeZone === undefined ? {} : { timeZone: input.spec.timeZone }),
+    ...(input.spec?.locale === undefined ? {} : { locale: input.spec.locale }),
   })
 }
 

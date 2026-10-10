@@ -203,7 +203,7 @@ describe("server auth guard", () => {
     const response = await app.fetch(new Request("http://localhost/api/project"))
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ id: "test-project" })
+    expect(await response.json()).toEqual({ id: "test-project", locale: "en", timeZone: "UTC" })
   })
 
   test("tells a browser shell that the project runs without auth", async () => {
@@ -330,7 +330,7 @@ describe("server auth guard", () => {
 
     expect(accepted.status).toBe(200)
     expect(getSetCookies(accepted)).toEqual([])
-    expect(await accepted.json()).toEqual({ id: "test-project" })
+    expect(await accepted.json()).toEqual({ id: "test-project", locale: "en", timeZone: "UTC" })
     expect(acceptedTelemetryRead.status).toBe(404)
     expect(acceptedActionRunDetail.status).toBe(404)
     expect(rejectedAuthManagement.status).toBe(403)

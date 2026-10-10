@@ -1,4 +1,5 @@
 import { renderInstanceHelp } from "@sixb/cli-core"
+import type { ModelMessage } from "@sixb/core/models"
 import type { AgentSkill } from "./agent-skills"
 
 export type AgentExecutionMode = "conversation" | "subagent" | "workflow-task"
@@ -62,6 +63,19 @@ export interface RenderAgentSystemPromptInput {
   readonly skills: readonly AgentSkill[]
   readonly sandboxResetAt?: string
   readonly workspace?: AgentWorkspacePromptContext
+  readonly facts?: AgentRuntimeFacts
+}
+
+/**
+ * For whom the run happens: the requester's settings, else the project's. Time is not a fact of the
+ * prompt: each user message carries its own send time instead (see {@link renderCurrentTime}), so
+ * the prompt and the replayed history stay byte-stable across runs.
+ */
+export interface AgentRuntimeFacts {
+  /** Canonical IANA time zone. */
+  readonly timeZone: string
+  /** Canonical BCP 47 language tag. */
+  readonly locale: string
 }
 
 /** Only non-secret facts about the environment actually prepared for this run. */
@@ -98,6 +112,7 @@ export function renderAgentSystemPrompt(input: RenderAgentSystemPromptInput): st
           ? SUBAGENT_RULES
           : WORKFLOW_TASK_RULES
     ),
+    promptSection("sixb_runtime_facts", input.facts && renderRuntimeFacts(input.facts)),
   ]
     .filter(Boolean)
     .join("\n\n")
@@ -156,6 +171,63 @@ function renderRuntimeContext(mode: AgentExecutionMode, skills: readonly AgentSk
     "With read, use relative paths from this prompt or sandboxPath values.",
     ...skillCatalog,
   ].join("\n")
+}
+
+/** The requester's settings when the run captured them, else the project's. */
+export function agentRuntimeFacts(
+  requester: { readonly timeZone?: string; readonly locale?: string },
+  project: { readonly timeZone: string; readonly locale: string }
+): AgentRuntimeFacts {
+  return {
+    timeZone: requester.timeZone ?? project.timeZone,
+    locale: requester.locale ?? project.locale,
+  }
+}
+
+function renderRuntimeFacts(facts: AgentRuntimeFacts): string {
+  return [
+    `Time zone: ${facts.timeZone}. Locale: ${facts.locale}.`,
+    "Each user message ends with <sixb_current_time>: the local date and time it was sent. The latest one is the current time.",
+    "Present dates and times in this time zone, converting stored timestamps, which are usually UTC. Follow the locale's conventions for dates and numbers.",
+  ].join("\n")
+}
+
+/**
+ * When a user message was sent, read in the time zone of the run that answered it. Derived from
+ * stored data only — never from the clock — so a replayed message always renders the same bytes.
+ */
+export function renderCurrentTime(sentAt: Date, timeZone: string): string {
+  return `<sixb_current_time>${formatLocalDateTime(sentAt, timeZone)}</sixb_current_time>`
+}
+
+/** Close a headless run's only user message with the time its run was created. */
+export function withCurrentTime(
+  message: Extract<ModelMessage, { role: "user" }>,
+  createdAt: Date,
+  timeZone: string
+): Extract<ModelMessage, { role: "user" }> {
+  const text = `\n\n${renderCurrentTime(createdAt, timeZone)}`
+  return { ...message, content: [...message.content, { type: "text", text }] }
+}
+
+/** `Saturday 2026-10-10 14:00 (UTC+02:00)`: unambiguous whatever the locale. */
+function formatLocalDateTime(now: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "long",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZoneName: "longOffset",
+  }).formatToParts(now)
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? ""
+  // ICU writes the offset as `GMT+02:00`, or a bare `GMT` for UTC itself.
+  const offset = part("timeZoneName").replace(/^GMT$/, "GMT+00:00").replace(/^GMT/, "UTC")
+  return `${part("weekday")} ${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")} (${offset})`
 }
 
 function promptSection(tag: string, body: string | undefined): string {

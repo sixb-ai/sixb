@@ -37,6 +37,13 @@ import type { OntologySource } from "./types"
 
 export interface CreateSixbOptions<in out TParams extends ParamsConfig = ParamsConfig> {
   id?: string
+  /** BCP 47 language of the project, such as `"fr-FR"`. Defaults to `"en"`. */
+  locale?: string
+  /**
+   * IANA time zone of the project, such as `"Europe/Paris"`. Defaults to `"UTC"`. Cron schedules
+   * without their own time zone and agent runs use it.
+   */
+  timeZone?: string
   broker: Broker
   storage: Storage
   lakeStorage: LakeStorage
@@ -108,6 +115,8 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
   // used to *replace* discovery instead, silently and undocumented.
   return new SixbHost<TParams>({
     id: options.id,
+    locale: options.locale,
+    timeZone: options.timeZone,
     ontology: allSources,
     broker: options.broker,
     storage: options.storage,

@@ -87,7 +87,7 @@ import {
 } from "@sixb/core/testing"
 import { createVercelGateway } from "../../../models/vercel-ai-gateway/src"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
-import { renderAgentSystemPrompt } from "../src/agent-prompt"
+import { renderAgentSystemPrompt, renderCurrentTime } from "../src/agent-prompt"
 import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
@@ -1641,6 +1641,8 @@ async function buildAgentWorkerContext(
     agentSkills: loadAgentSkills({ projectSkillsDir: false }),
     defaultMaxSteps: 4,
     turnTimeoutMs: 60_000,
+    locale: sixb.locale,
+    timeZone: sixb.timeZone,
   }
   const runId = "direct-agent-worker-test"
   const executionId = await createTestAgentExecution(context.storage, {
@@ -8333,7 +8335,11 @@ describe("AgentWorker", () => {
     try {
       const {
         run: { threadId },
-      } = await requestAgent(sixb, { text: "check the project" })
+      } = await requestAgent(sixb, {
+        text: "check the project",
+        timeZone: "Asia/Kolkata",
+        locale: "fr-fr",
+      })
       const run = await waitFor(
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
@@ -8344,6 +8350,9 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("succeeded")
+      // The requester's settings, frozen on the run, win over the project's (UTC, en).
+      // Proven by removal: drop timeZone/locale from resolveAgentExecutionPlan.
+      expect(capturedSystem).toContain("Time zone: Asia/Kolkata. Locale: fr-FR.")
       expect(capturedSystem).toContain("<sixb_mode_rules>")
       expect(capturedSystem).toContain("<sixb_runtime_context>")
       expect(capturedSystem).toContain("inside a live Sixb project modeled as an ontology")
@@ -8359,6 +8368,80 @@ describe("AgentWorker", () => {
       if (!sandbox) throw new Error("Expected a provisioned sandbox.")
       expect(sandbox.writtenFiles.some((file) => file.path.endsWith("/bin/sixb"))).toBe(true)
       expect(sandbox.writtenFiles.some((file) => file.path.endsWith("/SKILL.md"))).toBe(false)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("replays a byte-identical prefix and dates every user message from storage", async () => {
+    // Proven by removal: date messages with `new Date()` in loadUserMessageTimes; the replayed
+    // first message then differs between the two runs.
+    const requests: LanguageModelRequest[] = []
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (request) => {
+        requests.push(request)
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "Done" },
+          { type: "text-end", id: "answer" },
+          finish("stop"),
+        ])
+      },
+    })
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const terminal = (runId: string) =>
+        waitFor(
+          async () => {
+            const run = await storage.runs.getById({ projectId: PROJECT_ID, id: runId })
+            return run && run.status !== "queued" && run.status !== "running" ? run : null
+          },
+          { label: "dated run terminal" }
+        )
+      const first = await requestAgent(sixb, { text: "first", timeZone: "Asia/Kolkata" })
+      await terminal(first.run.id)
+      await Bun.sleep(5)
+      const threadId = first.run.threadId
+      const second = await requestAgent(sixb, {
+        text: "second",
+        threadId,
+        timeZone: "Asia/Kolkata",
+      })
+      await terminal(second.run.id)
+      const third = await requestAgent(sixb, { text: "third", threadId })
+      await terminal(third.run.id)
+
+      const [firstRequest, secondRequest, thirdRequest] = requests
+      if (!firstRequest || !secondRequest || !thirdRequest) {
+        throw new Error("Expected three model requests.")
+      }
+      expect(secondRequest.messages.slice(0, firstRequest.messages.length)).toEqual([
+        ...firstRequest.messages,
+      ])
+      // The third run uses the project time zone, so only its system prompt differs.
+      expect(thirdRequest.messages.slice(1, secondRequest.messages.length)).toEqual(
+        secondRequest.messages.slice(1)
+      )
+
+      // Each message keeps the zone of the run that answered it.
+      const sent = (await listMessages(storage, threadId)).filter(
+        (message) => message.role === "user"
+      )
+      const users = thirdRequest.messages.filter((message) => message.role === "user")
+      const sentAt = (index: number, timeZone: string) => ({
+        type: "text" as const,
+        text: `\n\n${renderCurrentTime(sent[index]!.createdAt, timeZone)}`,
+      })
+      expect(users.map((message) => message.content.at(-1))).toEqual([
+        sentAt(0, "Asia/Kolkata"),
+        sentAt(1, "Asia/Kolkata"),
+        sentAt(2, "UTC"),
+      ])
     } finally {
       await worker.stop()
     }
@@ -8714,6 +8797,7 @@ describe("AgentWorker", () => {
         blobStorage: sixb.blobStorage,
         tools: echoTool,
         systemPrompt: "Test system prompt.",
+        projectTimeZone: "UTC",
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
         turnTimeoutMs: 60_000,
@@ -9086,6 +9170,7 @@ describe("AgentWorker", () => {
         blobStorage: sixb.blobStorage,
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
+        projectTimeZone: "UTC",
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
         turnTimeoutMs: 60_000,
@@ -9140,6 +9225,7 @@ describe("AgentWorker", () => {
         blobStorage: sixb.blobStorage,
         tools: [],
         systemPrompt: testSystemPrompt(),
+        projectTimeZone: "UTC",
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
         turnTimeoutMs: 60_000,
@@ -9187,6 +9273,7 @@ describe("AgentWorker", () => {
         blobStorage: sixb.blobStorage,
         tools: [],
         systemPrompt: testSystemPrompt(),
+        projectTimeZone: "UTC",
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
         turnTimeoutMs: 60_000,
@@ -9498,6 +9585,7 @@ describe("AgentWorker", () => {
           blobStorage: sixb.blobStorage,
           tools: echoTool,
           systemPrompt: testSystemPrompt(),
+          projectTimeZone: "UTC",
           streamSink: createBrokerStreamSink({
             broker: sixb.broker,
             projectId: PROJECT_ID,
@@ -9538,6 +9626,7 @@ describe("AgentWorker", () => {
         blobStorage: sixb.blobStorage,
         tools: echoTool,
         systemPrompt: testSystemPrompt(),
+        projectTimeZone: "UTC",
         streamSink: createBrokerStreamSink({
           broker: sixb.broker,
           projectId: PROJECT_ID,

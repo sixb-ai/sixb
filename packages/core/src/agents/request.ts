@@ -14,6 +14,7 @@ import type { ExecutionContext } from "../execution/types"
 import type { LanguageModelCatalog, LanguageModelEntry, LanguageModelRef } from "../models"
 import { isModelReasoning, modelReasoningSupportIssue } from "../models/language-model"
 import { resolveLanguageModel } from "../models/resolve"
+import { canonicalLocale, canonicalTimeZone } from "../runtime/locale"
 import type { SixbRuntimeContext } from "../runtime/types"
 import {
   type AgentStorage,
@@ -52,6 +53,13 @@ export interface RequestAgentRunInput {
   readonly model?: LanguageModelRef
   /** Provider-neutral reasoning effort selected for this turn. Omitted uses the model's default. */
   readonly reasoning?: AgentReasoningLevel
+  /**
+   * IANA time zone of the person asking, such as their browser's. The Agent presents dates and
+   * times in it. Omitted uses the project time zone.
+   */
+  readonly timeZone?: string
+  /** BCP 47 language of the person asking. Omitted uses the project locale. */
+  readonly locale?: string
   /** Title to stamp on the thread when one is created. */
   readonly title?: string
   /** Explicit id for the trigger (user) message. Defaults to a generated id. */
@@ -301,7 +309,7 @@ async function assertAiLimitPreflight(
  */
 async function resolveConversationRunSpec(input: {
   readonly models?: LanguageModelCatalog
-  readonly input: Pick<RequestAgentRunInput, "model" | "reasoning">
+  readonly input: Pick<RequestAgentRunInput, "model" | "reasoning" | "timeZone" | "locale">
 }): Promise<ConversationAgentRunSpec> {
   if (!input.models) {
     throw new AgentRequestError(
@@ -323,11 +331,42 @@ async function resolveConversationRunSpec(input: {
     await assertModelSupportsReasoning(model, explicitReasoning)
   }
   const reasoning = explicitReasoning ?? model.reasoning
+  const timeZone = requestedSetting(
+    "timeZone",
+    input.input.timeZone,
+    canonicalTimeZone,
+    "an IANA time zone"
+  )
+  const locale = requestedSetting(
+    "locale",
+    input.input.locale,
+    canonicalLocale,
+    "a BCP 47 language tag"
+  )
 
   return Object.freeze({
     model: Object.freeze({ provider: selected.provider, modelId: selected.modelId }),
     ...(reasoning === undefined ? {} : { reasoning }),
+    ...(timeZone === undefined ? {} : { timeZone }),
+    ...(locale === undefined ? {} : { locale }),
   })
+}
+
+function requestedSetting(
+  field: "timeZone" | "locale",
+  value: string | undefined,
+  canonical: (value: unknown) => string | undefined,
+  expected: string
+): string | undefined {
+  if (value === undefined) return undefined
+  const resolved = canonical(value)
+  if (resolved === undefined) {
+    throw new AgentRequestError(
+      "invalid_locale",
+      `[Sixb] Agent request '${field}' must be ${expected}; received ${JSON.stringify(value)}.`
+    )
+  }
+  return resolved
 }
 
 // Checked against the model's resolved capabilities, as `GET /api/models` reports them (its

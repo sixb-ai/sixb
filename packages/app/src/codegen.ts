@@ -504,8 +504,9 @@ import {
   useNavigate,
   useRoutes,
 } from "react-router-dom"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query"
 import { isSixbApiError } from "@sixb/client/browser"
+import { getProjectInfoOptions } from "@sixb/client/hooks"
 import { routePaths, routes } from "./routes"
 ${globalsCssImport}
 ${layoutImport}
@@ -909,9 +910,26 @@ function RoutedApp({ hideErrorDetails }: { readonly hideErrorDetails: boolean })
   )
 }
 
+// The HTML is built without loading the project, so the document takes the project's language
+// from the API once the app starts.
+function ProjectLanguage() {
+  // Project settings do not change while the app runs: never refetch or collect them.
+  const { data: project } = useQuery({
+    ...getProjectInfoOptions(),
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  })
+  React.useEffect(() => {
+    if (project?.locale) document.documentElement.lang = project.locale
+  }, [project?.locale])
+  return null
+}
+
 function App({ basename }: StartAppOptions) {
   return (
     <QueryClientProvider client={queryClient}>
+      <ProjectLanguage />
       <BrowserRouter basename={basename}>
         <SharedDocumentLinkInterceptor basename={basename} />
         <InternalLinkInterceptor basename={basename} />

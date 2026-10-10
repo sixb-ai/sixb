@@ -57,6 +57,9 @@ browser theme and `backgroundColor` sets the launch background.
 Only the root layout supplies metadata. It is loaded during app generation, so do not access
 `window` or `document` at module scope.
 
+Pages declare the project's [`locale`](../runtime/overview.md#language-and-time-zone) as their
+document language, so browsers and screen readers handle your content in the right language.
+
 ## App icons
 
 Sixb generates a web app manifest at `/app.webmanifest`. Add these files under `app/public/` to

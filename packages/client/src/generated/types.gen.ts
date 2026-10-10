@@ -3163,6 +3163,8 @@ export type GetProjectInfoResponses = {
    */
   200: {
     id: string
+    locale: string
+    timeZone: string
   }
 }
 
@@ -10638,6 +10640,8 @@ export type PostAgentThreadMessageData = {
       | {
           budgetTokens: number
         }
+    timeZone?: string
+    locale?: string
     attachments?: Array<{
       blobId: string
       digest: string
@@ -10690,6 +10694,7 @@ export type PostAgentThreadMessageErrors = {
    */
   400: {
     error: string
+    code?: string
   }
   /**
    * Response for status 403

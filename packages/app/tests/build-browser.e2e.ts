@@ -78,8 +78,16 @@ import { pathToFileURL } from "node:url"
 import { GlobalWindow } from "happy-dom"
 
 const outdir = ${JSON.stringify(outdir)}
+const api = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  fetch: (request) =>
+    new URL(request.url).pathname === "/api/project"
+      ? Response.json({ id: "browser", locale: "fr-FR", timeZone: "Europe/Paris" })
+      : new Response(null, { status: 404 }),
+})
 const app = await createCustomApp({ rootDir: ${JSON.stringify(root)}, authEnabled: false })
-const server = await app.start({ host: "127.0.0.1", port: Number(process.env.TEST_APP_PORT), apiBaseUrl: "http://127.0.0.1:3000" })
+const server = await app.start({ host: "127.0.0.1", port: Number(process.env.TEST_APP_PORT), apiBaseUrl: "http://127.0.0.1:" + api.port })
 let html
 try {
   html = await (await fetch("http://127.0.0.1:" + server.port)).text()
@@ -117,15 +125,21 @@ await new Promise((resolve) => window.setTimeout(resolve, 0))
 
 const result = window.document.querySelector('[data-testid="phone-result"]')
 if (!result) throw new Error("React did not replace the production loading shell")
-console.log(result.textContent)
+for (let attempt = 0; attempt < 100 && !window.document.documentElement.lang; attempt += 1) {
+  await new Promise((resolve) => window.setTimeout(resolve, 10))
+}
+await api.stop(true)
+console.log(result.textContent + "|" + window.document.documentElement.lang)
 `
     )
 
     for (const value of ["runtime-key", "restarted-key"]) {
       const execution = await runBunScript(executeScript, root, value)
       expect(execution.exitCode, execution.stderr).toBe(0)
-      expect(execution.stdout.trim()).toBe(`(212) 555-1234|+12125551234|${value}|true`)
+      expect(execution.stdout.trim()).toBe(`(212) 555-1234|+12125551234|${value}|true|fr-FR`)
     }
+    // Regression proof for the document language: drop ProjectLanguage from the generated App;
+    // the document keeps no language because the HTML was built without the project.
     // Regression proof for public env: remove the publicEnv export or runtime read and this
     // fails to bundle or loses the value captured before the page module evaluates.
     // On Bun 1.4.2, removing sideEffects: false also breaks the workspace-path build by

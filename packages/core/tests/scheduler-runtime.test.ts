@@ -69,6 +69,36 @@ describe("SchedulerRuntime", () => {
     await runtime.stop()
   })
 
+  test("evaluates crons without a time zone in the project time zone", async () => {
+    // Proven by removal: drop `?? this.timeZone` from the scheduler; both fire at 08:00 UTC.
+    const eventsRuntime = createEvents()
+    const clock = createTestClock(new Date("2026-01-01T00:00:00Z"))
+    const runtime = new SchedulerRuntime({
+      schedules: [
+        defineSchedule("project-morning").cron("0 8 * * *"),
+        defineSchedule("tokyo-morning").cron("0 8 * * *", { timezone: "Asia/Tokyo" }),
+      ],
+      events: eventsRuntime,
+      timeZone: "Europe/Paris",
+      now: clock.now,
+    })
+
+    await runtime.start()
+    clock.advance(24 * HOUR)
+    jest.advanceTimersByTime(24 * HOUR)
+
+    const fired = (await eventsRuntime.read({ types: ["schedule.triggered"] })).map((event) => {
+      const { scheduleId, occurrenceAt } = (event as StoredScheduleTriggeredEvent).payload
+      return `${scheduleId}@${occurrenceAt}`
+    })
+    expect(fired.sort()).toEqual([
+      "project-morning@2026-01-01T07:00:00.000Z",
+      "tokyo-morning@2026-01-01T23:00:00.000Z",
+    ])
+
+    await runtime.stop()
+  })
+
   test("next occurrence after fire", async () => {
     const eventsRuntime = createEvents()
     const clock = createTestClock(new Date("2026-01-01T10:30:00Z"))

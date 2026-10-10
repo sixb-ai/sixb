@@ -11,7 +11,7 @@ import type {
   WorkflowAgentNodeRunRecord,
 } from "@sixb/core/storage"
 import { waitForAbort } from "./abort"
-import { type AgentExecutionMode, renderAgentSystemPrompt } from "./agent-prompt"
+import { type AgentExecutionMode, agentRuntimeFacts, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
 import type { AgentSkill } from "./agent-skills"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
@@ -369,6 +369,8 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   }
   ready.then(markSettled, markSettled)
 
+  const facts = agentRuntimeFacts(plan, context)
+
   const beforeFinalize = () => input.persistentSandbox?.save() ?? Promise.resolve()
   return {
     beforeFinalize,
@@ -391,7 +393,9 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
         skills,
         sandboxResetAt: input.persistentSandbox?.resetAt,
         workspace: input.persistentSandbox?.promptContext,
+        facts,
       }),
+      projectTimeZone: context.timeZone,
       sandboxReady: ready,
       sandboxWasUsed: () => sandboxWasUsed,
       streamSink: context.streamSink,

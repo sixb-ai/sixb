@@ -25,8 +25,9 @@ The fields are `minute hour day-of-month month day-of-week`.
 | `0 8 * * 1-5` | Weekdays at 08:00 |
 | `0 0 1 * *` | The first day of each month at midnight |
 
-Set an IANA timezone for predictable local times. If omitted, Sixb uses the host machine's
-local timezone. Invalid cron expressions and timezones fail at definition time.
+Set an IANA timezone for predictable local times. If omitted, Sixb uses the project's
+[`timeZone`](../runtime/overview.md#language-and-time-zone), which defaults to UTC. Invalid cron
+expressions and timezones fail at definition time.
 
 ## Attach to work
 
