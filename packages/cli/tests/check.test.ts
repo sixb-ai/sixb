@@ -62,6 +62,14 @@ describe("sixb check", () => {
     expect(result.stderr).toBe("")
   })
 
+  test("reports an invalid Agent Skill before a deploy", () => {
+    // Skills used to be read only when the agent worker started, so `sixb check` passed.
+    const result = runCheckFixture("invalid-skill-project")
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout + result.stderr).toContain("[Sixb] Agent Skill 'skills/acme-style'")
+  })
+
   test("fails the command when a provider probe fails", () => {
     // The old command exited 0 for everything but an empty ontology, because its four
     // provider rows were one hardcoded `{ ok: true }`. That made it useless as a deploy

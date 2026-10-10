@@ -23,7 +23,6 @@ import type {
   AiUsageStorage,
   AuthStorage,
 } from "@sixb/core/storage"
-import type { AgentSkill } from "./agent-skills"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import type { StreamSink } from "./stream-sink"
@@ -51,10 +50,9 @@ export interface AgentWorkerHost extends AgentExecutionHost {
   readonly queues: Queues
   readonly definitions: Pick<
     SixbDefinitions,
-    "workflows" | "ontology" | "security" | "models" | "tools"
+    "workflows" | "ontology" | "security" | "models" | "tools" | "agent"
   >
   readonly sandboxes?: SandboxFactory
-  readonly projectRoot?: string
   readonly logging?: LoggingService
 }
 
@@ -73,7 +71,6 @@ export interface AgentWorkerContext {
   readonly streamSink: StreamSink
   /** Durable fallback used only when the direct model-call ledger append remains unavailable. */
   readonly recoverAiModelCall: RecoverAiModelCall
-  readonly agentSkills: Promise<readonly AgentSkill[]>
   readonly defaultMaxSteps: number
   readonly turnTimeoutMs: number
 }
@@ -121,8 +118,6 @@ export interface AgentWorkerOptions {
    */
   /** Not required when the worker only processes accounting recovery. */
   readonly apiBaseUrl?: string
-  /** Project Agent Skills directory. Defaults to `<projectRoot>/skills`; `false` disables project skills. */
-  readonly skillsDir?: string | false
   /** Maximum number of primary agent jobs this worker executes at once. Defaults to 8. */
   readonly concurrency?: number
   /** Stream routing seam. Defaults to broker backed. */

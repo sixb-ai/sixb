@@ -1,6 +1,4 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { exa } from "@sixb/connector-exa"
 import { exaWebFetch, exaWebSearch } from "@sixb/connector-exa/agent-tools"
@@ -8,6 +6,7 @@ import {
   type AgentMessagePart,
   AgentRequestError,
   type AgentRuntime,
+  type AgentSkillDefinition,
   type AgentToolArtifact,
   type AgentToolDefinition,
   AgentToolPublicError,
@@ -97,7 +96,6 @@ import { createVercelGateway } from "../../../models/vercel-ai-gateway/src"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
 import { renderAgentSystemPrompt } from "../src/agent-prompt"
 import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
-import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments } from "../src/attachments"
 import * as conversationPreparation from "../src/context-compaction"
@@ -119,7 +117,7 @@ import type {
   AgentWorkerHost,
   AgentWorkerStorage,
 } from "../src/types"
-import { waitFor, writeProjectSkill } from "./helpers"
+import { waitFor } from "./helpers"
 import { testStream, WorkerTestModel, type WorkerTestStreamEvent } from "./worker-model-fixture"
 
 const PROJECT_ID = "agent-worker-tests"
@@ -1022,6 +1020,16 @@ function bashImageThenViewModel(captureViewed: (prompt: unknown) => void): Worke
   })
 }
 
+function testSkill(name: string): AgentSkillDefinition {
+  return {
+    name,
+    description: `Use for ${name}.`,
+    files: [
+      { path: "SKILL.md", contents: `---\nname: ${name}\ndescription: Use for ${name}.\n---\n` },
+    ],
+  }
+}
+
 function testSystemPrompt(): string {
   return renderAgentSystemPrompt({
     mode: "conversation",
@@ -1316,7 +1324,8 @@ function buildSixb(
   sandboxes: SandboxFactory = new RecordingSandboxFactory(),
   options: {
     readonly sandboxConfig?: SandboxConfig
-    readonly projectRoot?: string
+    readonly skills?: readonly AgentSkillDefinition[]
+    readonly projectInstructions?: string
     readonly agentTools?: readonly AgentToolDefinition[]
     readonly projectTools?: readonly AgentToolDefinition[]
     readonly connectors?: readonly ConnectorDefinition[]
@@ -1353,7 +1362,12 @@ function buildSixb(
         : {}),
     },
     models: options.models ?? { language: [model] },
-    ...(options.projectRoot === undefined ? {} : { projectRoot: options.projectRoot }),
+    agent: {
+      ...(options.skills === undefined ? {} : { skills: options.skills }),
+      ...(options.projectInstructions === undefined
+        ? {}
+        : { instructions: options.projectInstructions }),
+    },
   })
 }
 
@@ -1636,6 +1650,7 @@ function executionPlanFor(sixb: TestSixb, defaultMaxSteps = 4) {
   return resolveAgentExecutionPlan({
     models: sixb.definitions.models?.language,
     tools: sixb.definitions.tools,
+    skills: sixb.definitions.agent.skills,
     defaultMaxSteps,
   })
 }
@@ -1657,7 +1672,6 @@ async function buildAgentWorkerContext(
     apiBaseUrl: normalizeApiBaseUrl(input.apiBaseUrl ?? TEST_AGENT_API_BASE_URL),
     streamSink: NOOP_STREAM_SINK,
     recoverAiModelCall: recoverAiModelCall(sixb),
-    agentSkills: loadAgentSkills({ projectSkillsDir: false }),
     defaultMaxSteps: 4,
     turnTimeoutMs: 60_000,
   }
@@ -2103,7 +2117,7 @@ describe("AgentWorker", () => {
     const thread = await sdk.agent.threads.create({ sandbox: {} })
     const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
     const completion = observeQueueSettlement(host.queues.agents)
-    const worker = new AgentWorker(host, workerOptions({ skillsDir: false, turnTimeoutMs: 3_000 }))
+    const worker = new AgentWorker(host, workerOptions({ turnTimeoutMs: 3_000 }))
     await worker.start()
     try {
       await completion.wait()
@@ -2217,7 +2231,7 @@ describe("AgentWorker", () => {
       await stop()
     })
     const completion = observeQueueSettlement(host.queues.agents)
-    const worker = new AgentWorker(host, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(host, workerOptions())
     await worker.start()
     try {
       await completion.wait()
@@ -2263,7 +2277,7 @@ describe("AgentWorker", () => {
     const thread = await sdk.agent.threads.create({ sandbox: {} })
     const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
     const completion = observeQueueSettlement(host.queues.agents)
-    const worker = new AgentWorker(host, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(host, workerOptions())
     await worker.start()
     try {
       await completion.wait()
@@ -2311,7 +2325,7 @@ describe("AgentWorker", () => {
     const sdk = createTestSixb(host)
     const thread = await sdk.agent.threads.create({ sandbox: {} })
     await requestAgent(host, { threadId: thread.id, text: "Work" })
-    const worker = new AgentWorker(host, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(host, workerOptions())
     await worker.start()
     try {
       await waitFor(() => Promise.resolve(requestedName !== undefined), {
@@ -2463,7 +2477,7 @@ describe("AgentWorker", () => {
       for (let i = 0; i < 2; i++) {
         const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })
         const completion = observeQueueSettlement(host.queues.agents)
-        const worker = new AgentWorker(host, workerOptions({ skillsDir: false }))
+        const worker = new AgentWorker(host, workerOptions())
         await worker.start()
         try {
           await completion.wait()
@@ -2535,7 +2549,7 @@ describe("AgentWorker", () => {
         sourceUrl = "https://example.com/other.git"
         const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })
         const completion = observeQueueSettlement(host.queues.agents)
-        const worker = new AgentWorker(host, workerOptions({ skillsDir: false }))
+        const worker = new AgentWorker(host, workerOptions())
         await worker.start()
         try {
           await completion.wait()
@@ -2645,7 +2659,7 @@ describe("AgentWorker", () => {
     for (let i = 0; i < 3; i++) {
       const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })
       const completion = observeQueueSettlement(host.queues.agents)
-      const worker = new AgentWorker(host, workerOptions({ skillsDir: false }))
+      const worker = new AgentWorker(host, workerOptions())
       await worker.start()
       try {
         await completion.wait()
@@ -2741,7 +2755,7 @@ describe("AgentWorker", () => {
     for (let i = 0; i < 2; i++) {
       const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })
       const completion = observeQueueSettlement(host.queues.agents)
-      const worker = new AgentWorker(host, workerOptions({ skillsDir: false }))
+      const worker = new AgentWorker(host, workerOptions())
       await worker.start()
       try {
         await completion.wait()
@@ -2827,7 +2841,7 @@ describe("AgentWorker", () => {
     const thread = await sdk.agent.threads.create({ sandbox: {} })
     const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
     const completion = observeQueueSettlement(host.queues.agents)
-    const worker = new AgentWorker(host, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(host, workerOptions())
     await worker.start()
     try {
       await completion.wait()
@@ -2886,7 +2900,7 @@ describe("AgentWorker", () => {
     const thread = await createTestSixb(host).agent.threads.create({ sandbox: {} })
     const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })
     const completion = observeQueueSettlement(host.queues.agents)
-    const worker = new AgentWorker(host, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(host, workerOptions())
     await worker.start()
     try {
       await completion.wait()
@@ -2952,7 +2966,7 @@ describe("AgentWorker", () => {
       ],
     })
     const completion = observeQueueSettlement(sixb.queues.agents)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       await completion.wait()
@@ -2979,7 +2993,7 @@ describe("AgentWorker", () => {
     )
     const requested = await requestAgent(sixb, { text: "Hello" })
     const completion = observeQueueSettlement(sixb.queues.agents)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       await completion.wait()
@@ -3017,7 +3031,7 @@ describe("AgentWorker", () => {
       limit: { meter: "tokens.total", amount: 0 },
     })
 
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const failed = await waitFor(
@@ -3117,7 +3131,7 @@ describe("AgentWorker", () => {
         return new WorkerTestModel({ definition })
       },
     })
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     const warning = spyOn(console, "warn").mockImplementation(() => {})
     try {
       await worker.start()
@@ -3239,7 +3253,7 @@ describe("AgentWorker", () => {
       })
     }
 
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const request = await requestAgentAs(sixb, REQUESTER, {
@@ -3331,7 +3345,7 @@ describe("AgentWorker", () => {
       return statBlob(blobId)
     }
 
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const request = await requestAgentAs(sixb, REQUESTER, {
@@ -3509,7 +3523,7 @@ describe("AgentWorker", () => {
       limit: { meter: "tokens.total", amount: 0 },
     })
     const reporter = attachSixbErrorReporter(sixb, () => {})
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const run = await waitFor(
@@ -3561,7 +3575,7 @@ describe("AgentWorker", () => {
       reportedErrors.push(error)
     })
     const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const first = await requestAgent(sixb, {
@@ -3651,7 +3665,7 @@ describe("AgentWorker", () => {
       assistantText: `oversized-result-marker ${"x".repeat(460_000)}`,
     })
 
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const request = await requestAgentAs(sixb, REQUESTER, {
@@ -3712,7 +3726,7 @@ describe("AgentWorker", () => {
       })
     }
 
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     const originalConsoleError = console.error
     console.error = () => {}
     await worker.start()
@@ -3762,7 +3776,7 @@ describe("AgentWorker", () => {
 
   test("fails coded non-retryable errors and retries unknown infrastructure failures", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
-    const worker = new InspectableAgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new InspectableAgentWorker(sixb, workerOptions())
     const now = new Date().toISOString()
     const claimed: ClaimedQueueJob<AgentQueueJob> = {
       leaseId: "lease-1",
@@ -3822,6 +3836,7 @@ describe("AgentWorker", () => {
       instructions: "Resolve the best project.",
       groups: [AGENT_RUNTIME_GROUP],
       tools: [lookupProject],
+      skills: ["project-matching"],
     })
       .input({ query: "string" })
       .output({ answer: "string", confidence: "double" })
@@ -3829,18 +3844,23 @@ describe("AgentWorker", () => {
     const workflow = defineWorkflow("resolve-project-workflow")
       .input({ query: "string" })
       .then(agentStep)
+    const sandboxes = new RecordingSandboxFactory()
     const sixb = new SixbHost({
       id: PROJECT_ID,
       ontology: [],
       workflows: [workflow],
       tools: [lookupProject],
+      agent: {
+        skills: [testSkill("project-matching"), testSkill("customer-replies")],
+        instructions: "Always answer in French.",
+      },
       groups: [AGENT_RUNTIME_GROUP],
       broker: new InMemoryBroker(),
       storage: new InMemoryStorage(),
       lakeStorage: new InMemoryLakeStorage(),
       blobStorage: new InMemoryBlobStorage(),
       queues: new InMemoryQueues(),
-      sandboxes: new RecordingSandboxFactory(),
+      sandboxes,
     })
     const runs = sixb.storage.workflowRuns!
     const runId = "workflow-agent-run"
@@ -3911,7 +3931,7 @@ describe("AgentWorker", () => {
       })
     )
 
-    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(workerHost, workerOptions())
     await worker.start()
     try {
       const execution = await waitFor(
@@ -4028,6 +4048,17 @@ describe("AgentWorker", () => {
       )
       expect(capturedSystem).toContain("headless workflow agent")
       expect(capturedSystem).toContain("never ask a user for approval or a follow-up question")
+      // Regression proof: give workflow plans every project skill, or the conversation's
+      // project instructions, and these fail.
+      expect(capturedSystem).toContain("- project-matching: Use for project-matching.")
+      expect(capturedSystem).not.toContain("customer-replies")
+      expect(capturedSystem).not.toContain("Always answer in French.")
+      const installedSkills = sandboxes.sandboxes[0]?.writtenFiles
+        .map((file) => file.path)
+        .filter((path) => path.includes("/.sixb/agent/skills/"))
+      expect(installedSkills?.map((path) => path.split("/.sixb/agent/skills/")[1])).toEqual([
+        "project-matching/SKILL.md",
+      ])
       expect(await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })).toMatchObject({
         status: "succeeded",
         output: { answer: "Project Alpha", confidence: 0.96 },
@@ -4060,7 +4091,7 @@ describe("AgentWorker", () => {
       retried.push(params.jobId)
       return retry(params)
     }
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     const originalConsoleError = console.error
     console.error = () => {}
     await worker.start()
@@ -4087,7 +4118,7 @@ describe("AgentWorker", () => {
       runId: "workflow-resume-redelivered",
     })
     await succeedWorkflowAgentNode(runs, nodeRunId)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const [resume] = await waitFor(
@@ -4158,7 +4189,7 @@ describe("AgentWorker", () => {
       if (input.statuses?.includes("queued")) scanned()
       return result
     }
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     await repairPassScanned
     await worker.stop()
@@ -4175,7 +4206,7 @@ describe("AgentWorker", () => {
       models: { language: [trackedStructuredAnswerModel((phase) => catalogCalls.push(phase))] },
       runId: "workflow-catalog-model",
     })
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const execution = await waitFor(
@@ -4252,7 +4283,7 @@ describe("AgentWorker", () => {
             ],
           }
     )
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     const completion = observeQueueSettlement(sixb.queues.agents)
     await worker.start()
     try {
@@ -4328,7 +4359,7 @@ describe("AgentWorker", () => {
     const reporter = attachSixbErrorReporter(sixb, (error) => {
       errors.push(error)
     })
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const execution = await waitFor(
@@ -4399,7 +4430,7 @@ describe("AgentWorker", () => {
       model: gateway("creator/model"),
       runId,
     })
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const task = await waitFor(
@@ -4459,7 +4490,7 @@ describe("AgentWorker", () => {
       runId,
     })
     attachSixbErrorReporter(sixb, () => {})
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       await waitFor(
@@ -4498,7 +4529,7 @@ describe("AgentWorker", () => {
       model: invalidStructuredAnswerModel(),
       runId: "workflow-invalid-output",
     })
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
 
     await worker.start()
     try {
@@ -4554,7 +4585,7 @@ describe("AgentWorker", () => {
       tools: [failingTool],
       runId: "workflow-tool-failure",
     })
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
 
     await worker.start()
     try {
@@ -4624,7 +4655,7 @@ describe("AgentWorker", () => {
       }
       return jobs
     }
-    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(workerHost, workerOptions())
 
     await worker.start()
     try {
@@ -4721,7 +4752,7 @@ describe("AgentWorker", () => {
       }
       return enqueue(params)
     }
-    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(workerHost, workerOptions())
 
     await worker.start()
     try {
@@ -4764,7 +4795,7 @@ describe("AgentWorker", () => {
       storage,
       runId: "workflow-finalization-failure",
     })
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
 
     await worker.start()
     try {
@@ -4836,7 +4867,7 @@ describe("AgentWorker", () => {
       tools: [blockingTool],
       runId,
     })
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
 
     await worker.start()
     try {
@@ -5000,7 +5031,7 @@ describe("AgentWorker", () => {
       ],
     })
 
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const execution = await waitFor(
@@ -5152,7 +5183,7 @@ describe("AgentWorker", () => {
       ],
     })
 
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const execution = await waitFor(
@@ -5193,28 +5224,6 @@ describe("AgentWorker", () => {
       await reporter.flush()
     } finally {
       await worker.stop()
-    }
-  })
-
-  test("fails startup when a project Agent Skill is invalid", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "sixb-agent-skills-startup-"))
-    try {
-      await writeProjectSkill(
-        projectRoot,
-        "acme-style",
-        ["---", "name: acme-style", "---", "", "# Acme Style"].join("\n")
-      )
-      const worker = new AgentWorker(
-        buildSixb(toolThenAnswerModel(), new InMemoryBroker(), new RecordingSandboxFactory(), {
-          projectRoot,
-        }),
-        workerOptions()
-      )
-
-      await expect(worker.start()).rejects.toThrow("[SixbAgentWorker] Agent skill")
-      await worker.stop()
-    } finally {
-      await rm(projectRoot, { recursive: true, force: true })
     }
   })
 
@@ -5805,7 +5814,7 @@ describe("AgentWorker", () => {
       { projectTools: [selectedEcho], connectors: [knowledge] }
     )
     const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const selectedRequest = await requestAgent(sixb, { text: "echo hi" })
@@ -5918,7 +5927,7 @@ describe("AgentWorker", () => {
       { agentTools: [createImage] }
     )
     const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
 
     await worker.start()
     try {
@@ -6132,7 +6141,7 @@ describe("AgentWorker", () => {
         { agentTools: [webSearch], connectors: [exaConnector] }
       )
       const storage = agentStorageOf(sixb)
-      worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+      worker = new AgentWorker(sixb, workerOptions())
       await worker.start()
       const request = await requestAgent(sixb, {
         text: "search for connector tools",
@@ -6230,7 +6239,7 @@ describe("AgentWorker", () => {
         { agentTools: [webFetch], connectors: [exaConnector] }
       )
       const storage = agentStorageOf(sixb)
-      worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+      worker = new AgentWorker(sixb, workerOptions())
       await worker.start()
       const request = await requestAgent(sixb, {
         text: "fetch the Sixb docs",
@@ -6303,7 +6312,7 @@ describe("AgentWorker", () => {
       { agentTools: [webFetch], connectors: [exaConnector] }
     )
     const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
 
     await worker.start()
     try {
@@ -6355,7 +6364,7 @@ describe("AgentWorker", () => {
       { agentTools: [invalidResult] }
     )
     const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const first = await requestAgent(sixb, { text: "run the tool" })
@@ -6850,7 +6859,7 @@ describe("AgentWorker", () => {
       })
     )
     const modelCalls = spyOn(model, "stream")
-    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(workerHost, workerOptions())
     const completion = observeQueueSettlement(sixb.queues.agentChildren)
     await worker.start()
     try {
@@ -6972,7 +6981,7 @@ describe("AgentWorker", () => {
     })
     const modelCalls = spyOn(model, "stream")
     const completion = observeQueueSettlement(sixb.queues.agentChildren)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       await completion.wait()
@@ -7975,7 +7984,7 @@ describe("AgentWorker", () => {
       sandboxes
     )
     const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
 
     await worker.start()
     try {
@@ -8257,81 +8266,86 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("advertises and materializes project Agent Skills", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "sixb-agent-skills-"))
+  test("advertises and materializes project Agent Skills and instructions", async () => {
+    const acmeStyle: AgentSkillDefinition = {
+      name: "acme-style",
+      description: "Use when drafting Acme customer-facing messages.",
+      files: [
+        {
+          path: "SKILL.md",
+          contents: [
+            "---",
+            "name: acme-style",
+            "description: Use when drafting Acme customer-facing messages.",
+            "---",
+            "",
+            "# Acme Style",
+          ].join("\n"),
+        },
+        { path: "references/examples.md", contents: "Prefer concise, operational summaries." },
+        { path: "scripts/check.sh", contents: "#!/bin/sh\n", mode: 0o755 },
+      ],
+    }
+
+    let capturedSystem: string | undefined
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(
+      apiBashThenAnswerModel((system) => {
+        capturedSystem = system
+      }),
+      new InMemoryBroker(),
+      sandboxes,
+      { skills: [acmeStyle], projectInstructions: "Always answer in French." }
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
     try {
-      await writeProjectSkill(
-        projectRoot,
-        "acme-style",
-        [
-          "---",
-          "name: acme-style",
-          "description: >",
-          "  Use when drafting Acme customer-facing",
-          "  messages.",
-          "---",
-          "",
-          "# Acme Style",
-          "",
-          "Read references/examples.md before drafting customer-facing copy.",
-        ].join("\n"),
-        { "references/examples.md": "Prefer concise, operational summaries." }
+      const {
+        run: { threadId },
+      } = await requestAgent(sixb, {
+        text: "draft a note",
+      })
+      const run = await waitFor(
+        async () => {
+          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
+          const found = list.runs[0]
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
+        },
+        { label: "project skills run terminal" }
+      )
+      expect(run.status).toBe("succeeded")
+      expect(capturedSystem).toContain("Path: .sixb/agent/skills/acme-style/SKILL.md")
+      expect(capturedSystem).toContain("Use when drafting Acme customer-facing messages.")
+      expect(capturedSystem).toContain(
+        "<agent_instructions>\nAlways answer in French.\n</agent_instructions>"
       )
 
-      let capturedSystem: string | undefined
-      const sandboxes = new RecordingSandboxFactory()
-      const sixb = buildSixb(
-        apiBashThenAnswerModel((system) => {
-          capturedSystem = system
-        }),
-        new InMemoryBroker(),
-        sandboxes,
-        { projectRoot }
+      const command = sandboxes.sandboxes[0]?.commands.find(
+        (candidate) => candidate.args.at(-1) === "print-sixb-env"
       )
-      const storage = agentStorageOf(sixb)
-      const worker = new AgentWorker(sixb, workerOptions())
-      await worker.start()
-      try {
-        const {
-          run: { threadId },
-        } = await requestAgent(sixb, {
-          text: "draft a note",
-        })
-        const run = await waitFor(
-          async () => {
-            const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-            const found = list.runs[0]
-            return found && found.status !== "queued" && found.status !== "running" ? found : null
-          },
-          { label: "project skills run terminal" }
-        )
-        expect(run.status).toBe("succeeded")
-        expect(capturedSystem).toContain("Path: .sixb/agent/skills/acme-style/SKILL.md")
-        expect(capturedSystem).toContain("Use when drafting Acme customer-facing messages.")
-
-        const command = sandboxes.sandboxes[0]?.commands.find(
-          (candidate) => candidate.args.at(-1) === "print-sixb-env"
-        )
-        const skillsDir = command?.options.env?.SIXB_SKILLS_DIR
-        if (!skillsDir) {
-          throw new Error("Expected project skill sandbox env.")
-        }
-        const sandbox = sandboxes.sandboxes[0]
-        if (!sandbox) {
-          throw new Error("Expected project skill sandbox.")
-        }
-        expect(sandbox.readFileContents(join(skillsDir, "acme-style", "SKILL.md"))).toContain(
-          "# Acme Style"
-        )
-        expect(
-          sandbox.readFileContents(join(skillsDir, "acme-style", "references", "examples.md"))
-        ).toContain("Prefer concise")
-        expect(sandbox.writtenFiles.some((file) => file.path.includes("/skills/sixb/"))).toBe(false)
-      } finally {
-        await worker.stop()
+      const skillsDir = command?.options.env?.SIXB_SKILLS_DIR
+      if (!skillsDir) {
+        throw new Error("Expected project skill sandbox env.")
       }
+      const sandbox = sandboxes.sandboxes[0]
+      if (!sandbox) {
+        throw new Error("Expected project skill sandbox.")
+      }
+      expect(sandbox.readFileContents(join(skillsDir, "acme-style", "SKILL.md"))).toContain(
+        "# Acme Style"
+      )
+      expect(
+        sandbox.readFileContents(join(skillsDir, "acme-style", "references", "examples.md"))
+      ).toContain("Prefer concise")
+      expect(
+        sandbox.writtenFiles.find(
+          (file) => file.path === join(skillsDir, "acme-style", "scripts", "check.sh")
+        )?.mode
+      ).toBe(0o755)
+      expect(sandbox.writtenFiles.some((file) => file.path.includes("/skills/sixb/"))).toBe(false)
     } finally {
-      await rm(projectRoot, { recursive: true, force: true })
+      await worker.stop()
     }
   })
 
@@ -8346,7 +8360,7 @@ describe("AgentWorker", () => {
       sandboxes
     )
     const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const {
@@ -8690,7 +8704,7 @@ describe("AgentWorker", () => {
     )
     const storage = agentStorageOf(sixb)
     const request = await requestAgent(sixb, { text: "wait" })
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       await started.promise
@@ -9253,7 +9267,7 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(declaredModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
       models: { language: [catalogModel] },
     })
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
 
     await worker.start()
     try {
@@ -9731,7 +9745,7 @@ describe("AgentWorker", () => {
       assistantText: `historical-result ${"x".repeat(460_000)}`,
     })
 
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false, turnTimeoutMs: 50 }))
+    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 50 }))
     await worker.start()
     try {
       const request = await requestAgentAs(sixb, REQUESTER, {
@@ -10105,7 +10119,7 @@ describe("agent tools act as the requester", () => {
     await seedInvoice(sixb)
     await seedMember(sixb, FINANCE_USER, [finance.id])
     await seedMember(sixb, SALES_USER, [sales.id])
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       await expect(chatToolOutput(sixb, FINANCE_USER, readInvoice.name)).resolves.toEqual({
@@ -10151,7 +10165,7 @@ describe("agent tools act as the requester", () => {
       groupIds: [billing.id],
     })
     await seedInvoice(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const node = await waitFor(
@@ -10199,7 +10213,7 @@ describe("agent tools act as the requester", () => {
       { projectTools: [readAttachment] }
     )
     const quote = await putQuote(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const request = await requestAgentAs(sixb, REQUESTER, {
@@ -10304,7 +10318,7 @@ describe("agent tools act as the requester", () => {
       execution: freshTestExecution(),
     })
     const { workerHost, recorded } = recordUsage(sixb)
-    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(workerHost, workerOptions())
     await worker.start()
     try {
       const run = await finishedRun(sixb, request.run.id)
@@ -10336,7 +10350,7 @@ describe("agent tools act as the requester", () => {
       runId: "workflow-tool-model-call",
     })
     const { workerHost, recorded } = recordUsage(sixb)
-    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(workerHost, workerOptions())
     await worker.start()
     try {
       const node = await waitFor(
@@ -10382,7 +10396,7 @@ describe("agent tools act as the requester", () => {
       tools: [summarizeInvoice],
       runId: "workflow-tool-deadline",
     })
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false, turnTimeoutMs: 200 }))
+    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 200 }))
     await worker.start()
     try {
       const node = await waitFor(
@@ -10435,7 +10449,7 @@ describe("agent tools act as the requester", () => {
       }
       return enqueue(params)
     }
-    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(workerHost, workerOptions())
     await worker.start()
     try {
       const request = await requestAgentAs(sixb, REQUESTER, { text: "Summarize inv-1." })

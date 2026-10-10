@@ -105,8 +105,11 @@ description: Review invoices for missing details and payment discrepancies.
 ```
 
 Sixb discovers project skills automatically. The agent sees their names and descriptions, then
-reads the full instructions when relevant. Supporting files can live alongside `SKILL.md` and be
-referenced by relative path.
+reads the full instructions when relevant. Supporting files, such as references or scripts, can
+live alongside `SKILL.md` and be referenced by relative path.
+
+The chat agent can use every skill. An [AI workflow step](../workflows/overview.md#add-an-ai-task)
+uses only the skills it lists in `skills`.
 
 Skills guide behavior; they do not grant access. Domain operations still follow the agent's
 [permissions](./overview.md#control-access).

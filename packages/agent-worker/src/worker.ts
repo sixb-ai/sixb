@@ -1,4 +1,3 @@
-import { join } from "node:path"
 import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
   createAgentRunExecutionToken,
@@ -22,7 +21,6 @@ import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/co
 import type { AgentQueueJob, ClaimedQueueJob, SubagentQueueJob } from "@sixb/core/queues"
 import type { AgentRunExecution, AgentRunRecord, SubagentRunRecord } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
-import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
 import { prepareAgentModel } from "./context-budget"
 import {
@@ -120,7 +118,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   }
 
   override async start(): Promise<void> {
-    await this.context?.agentSkills
     await Promise.all([
       super.start(),
       ...(this.context === null ? [] : [this.subagentWorker.start()]),
@@ -265,6 +262,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         spec: run.spec,
         models: this.host.definitions.models?.language,
         tools: this.host.definitions.tools,
+        skills: this.host.definitions.agent.skills,
+        ...(this.host.definitions.agent.instructions === undefined
+          ? {}
+          : { projectInstructions: this.host.definitions.agent.instructions }),
         defaultMaxSteps: context.defaultMaxSteps,
       })
       const durableExecution = await context.storage.executions.getById({
@@ -478,6 +479,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         run: queuedRun,
         models: this.host.definitions.models?.language,
         tools: this.host.definitions.tools,
+        skills: this.host.definitions.agent.skills,
       })
       const durableExecution = await context.storage.executions.getById({
         projectId: context.id,
@@ -1094,13 +1096,6 @@ function buildAgentContext(
       "[SixbAgentWorker] Agent workers require createSixb({ sandboxes }) for the built-in read and bash tools."
     )
   }
-  const agentSkills = loadAgentSkills({
-    projectSkillsDir:
-      options.skillsDir === undefined
-        ? join(host.projectRoot ?? process.cwd(), "skills")
-        : options.skillsDir,
-  })
-  agentSkills.catch(() => {})
   return {
     id: host.id,
     storage,
@@ -1117,7 +1112,6 @@ function buildAgentContext(
       )
     ),
     recoverAiModelCall: (input) => enqueueAiModelCallRecovery(host.queues.agents, input),
-    agentSkills,
     defaultMaxSteps: options.defaultMaxSteps ?? DEFAULT_MAX_STEPS,
     turnTimeoutMs,
   }

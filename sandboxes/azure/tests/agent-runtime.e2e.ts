@@ -130,7 +130,6 @@ test.skipIf(!enabled)(
       console.log("[AzureE2E] Temporary HTTPS tunnel ready")
       worker = new AgentWorker(host, {
         apiBaseUrl: origin,
-        skillsDir: false,
         defaultMaxSteps: 3,
         turnTimeoutMs: 120_000,
       })
