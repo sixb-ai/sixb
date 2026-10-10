@@ -10,13 +10,21 @@ describe("dev source watching", () => {
       "SIXB.md",
       join("skills", "acme-style", "SKILL.md"),
       join("skills", "acme-style", "scripts", "extract.py"),
+      join("ontology", "billing", "invoice.md"),
+      join("ontology", "billing", "scripts", "export.py"),
+      join("ontology", "scripts", "lib", "util.sh"),
     ]) {
       expect(isSource(path)).toBe(true)
     }
   })
 
   test("ignores other non-code files", () => {
-    for (const path of ["README.md", join("docs", "SIXB.md"), join("public", "logo.png")]) {
+    for (const path of [
+      "README.md",
+      join("docs", "SIXB.md"),
+      join("public", "logo.png"),
+      join("ontology", "billing", "notes.txt"),
+    ]) {
       expect(isSource(path)).toBe(false)
     }
   })

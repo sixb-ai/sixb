@@ -17,6 +17,8 @@ export interface PrepareAgentSandboxApiContextInput {
   readonly runId: string
   readonly attachments?: PreparedAgentAttachmentContext
   readonly skills: readonly AgentSkillDefinition[]
+  /** The run's ontology reference docs and scripts, by path relative to the ontology directory. */
+  readonly ontologyFiles: readonly AgentProjectFile[]
 }
 
 export async function prepareAgentSandboxApiContext(
@@ -24,6 +26,7 @@ export async function prepareAgentSandboxApiContext(
 ): Promise<AgentSandboxApiContext> {
   const contextDir = join(input.sandbox.workingDirectory, ".sixb", "agent")
   const skillsDir = join(contextDir, "skills")
+  const ontologyDir = join(contextDir, "ontology")
   const binDir = join(contextDir, "bin")
   const libDir = join(contextDir, "lib")
   const runContextPath = join(contextDir, "context", "run.json")
@@ -55,11 +58,12 @@ export async function prepareAgentSandboxApiContext(
     2
   )
 
-  // Materialize skills + run context through the sandbox capability rather than the host
+  // Materialize skills, ontology docs + run context through the sandbox capability rather than the host
   // filesystem, so any provider (including non-host-path ones like smolvm) places the bytes in the
   // guest. Awaited before sandbox tools run, so the agent never sees an un-provisioned sandbox.
   await input.sandbox.writeFiles([
     ...input.skills.flatMap((skill) => installFiles(join(skillsDir, skill.name), skill.files)),
+    ...installFiles(ontologyDir, input.ontologyFiles),
     { path: join(binDir, "sixb"), contents: cli.launcher, mode: 0o755 },
     { path: join(libDir, "sixb.mjs"), contents: cli.artifact, mode: 0o644 },
     { path: runContextPath, contents: runContext },
@@ -92,6 +96,7 @@ export async function prepareAgentSandboxApiContext(
       SIXB_API_BASE_URL: input.apiBaseUrl,
       SIXB_CONTEXT_DIR: contextDir,
       SIXB_SKILLS_DIR: skillsDir,
+      SIXB_ONTOLOGY_DIR: ontologyDir,
       SIXB_BIN_DIR: binDir,
       SIXB_AGENT_RUNTIME_PROFILE: AGENT_RUNTIME_PROFILE,
       SIXB_RUNTIME_PROBE_FILE: runtimeProbePath,

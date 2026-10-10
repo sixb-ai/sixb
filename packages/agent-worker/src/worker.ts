@@ -1102,6 +1102,7 @@ function buildAgentContext(
     sandboxes: host.sandboxes,
     logging: host.logging,
     valueTypesById: host.definitions.ontology.getValueTypesById(),
+    ontologyDocs: host.definitions.agent.ontologyDocs,
     // Normalize the server base URL once here, at the boundary. Everything downstream (the gateway
     // URL builder, the sandbox run context) consumes it verbatim.
     apiBaseUrl: normalizeApiBaseUrl(normalizeRequiredString(options.apiBaseUrl)),

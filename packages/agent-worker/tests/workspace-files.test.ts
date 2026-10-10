@@ -39,6 +39,7 @@ test("git add . stages only project files across creation and resume", async () 
       runId,
       apiBaseUrl: "https://gateway.invalid/synthetic-capability",
       skills: [],
+      ontologyFiles: [],
       attachments: {
         entries: [],
         promptTextByPartKey: new Map(),
