@@ -27504,7 +27504,7 @@
       },
       "post": {
         "summary": "Request an action",
-        "description": "Runs the action and returns its terminal run. A run that fails is returned with status `failed`. An error response usually means no run was requested, but a 500 can follow a run that started: request again with the same `runId` to get its record. A `runId` that was already used returns that run once it has finished, and 409 while it still runs. 503 means the server is stopping and started nothing.",
+        "description": "Runs the action and returns its terminal run. A run that fails is returned with status `failed`. Its effects run after the response, which does not wait for them. An error response usually means no run was requested, but a 500 can follow a run that started: request again with the same `runId` to get its record if it was written. A `runId` that was already recorded returns that run, and 409 while this server still runs it. 503 means the server is stopping and started nothing.",
         "tags": ["Actions"],
         "operationId": "requestAction",
         "security": [
@@ -27741,23 +27741,11 @@
                     },
                     "status": {
                       "type": "string",
-                      "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                      "enum": ["succeeded", "failed"]
                     },
                     "phase": {
                       "type": "string",
-                      "enum": [
-                        "request",
-                        "enqueue",
-                        "validation",
-                        "writeback",
-                        "edits",
-                        "commit",
-                        "effects",
-                        "cancelled"
-                      ]
-                    },
-                    "queuedAt": {
-                      "type": "string"
+                      "enum": ["validation", "writeback", "edits", "commit", "effects"]
                     },
                     "startedAt": {
                       "type": "string"
@@ -27773,7 +27761,6 @@
                           "enum": [
                             "internal.unexpected",
                             "runtime.cancelled",
-                            "queue.enqueue_failed",
                             "action.phase_failed",
                             "action.read_conflict",
                             "action.timeout"
@@ -27801,16 +27788,7 @@
                             },
                             "phase": {
                               "type": "string",
-                              "enum": [
-                                "request",
-                                "enqueue",
-                                "validation",
-                                "writeback",
-                                "edits",
-                                "commit",
-                                "effects",
-                                "cancelled"
-                              ]
+                              "enum": ["validation", "writeback", "edits", "commit", "effects"]
                             }
                           },
                           "required": ["actionId", "runId", "phase"],
@@ -27894,7 +27872,6 @@
                                   "enum": [
                                     "internal.unexpected",
                                     "runtime.cancelled",
-                                    "queue.enqueue_failed",
                                     "action.phase_failed",
                                     "action.read_conflict",
                                     "action.timeout"
@@ -27985,7 +27962,6 @@
                                   "enum": [
                                     "internal.unexpected",
                                     "runtime.cancelled",
-                                    "queue.enqueue_failed",
                                     "action.phase_failed",
                                     "action.read_conflict",
                                     "action.timeout"
@@ -28049,7 +28025,9 @@
                     "actionId",
                     "subject",
                     "status",
-                    "queuedAt",
+                    "phase",
+                    "startedAt",
+                    "finishedAt",
                     "params"
                   ],
                   "additionalProperties": false
@@ -29286,7 +29264,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+              "enum": ["succeeded", "failed"]
             }
           },
           {
@@ -29405,23 +29383,11 @@
                           },
                           "status": {
                             "type": "string",
-                            "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                            "enum": ["succeeded", "failed"]
                           },
                           "phase": {
                             "type": "string",
-                            "enum": [
-                              "request",
-                              "enqueue",
-                              "validation",
-                              "writeback",
-                              "edits",
-                              "commit",
-                              "effects",
-                              "cancelled"
-                            ]
-                          },
-                          "queuedAt": {
-                            "type": "string"
+                            "enum": ["validation", "writeback", "edits", "commit", "effects"]
                           },
                           "startedAt": {
                             "type": "string"
@@ -29437,7 +29403,6 @@
                                 "enum": [
                                   "internal.unexpected",
                                   "runtime.cancelled",
-                                  "queue.enqueue_failed",
                                   "action.phase_failed",
                                   "action.read_conflict",
                                   "action.timeout"
@@ -29466,14 +29431,11 @@
                                   "phase": {
                                     "type": "string",
                                     "enum": [
-                                      "request",
-                                      "enqueue",
                                       "validation",
                                       "writeback",
                                       "edits",
                                       "commit",
-                                      "effects",
-                                      "cancelled"
+                                      "effects"
                                     ]
                                   }
                                 },
@@ -29504,7 +29466,9 @@
                           "actionId",
                           "subject",
                           "status",
-                          "queuedAt"
+                          "phase",
+                          "startedAt",
+                          "finishedAt"
                         ],
                         "additionalProperties": false
                       }
@@ -29639,23 +29603,11 @@
                     },
                     "status": {
                       "type": "string",
-                      "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                      "enum": ["succeeded", "failed"]
                     },
                     "phase": {
                       "type": "string",
-                      "enum": [
-                        "request",
-                        "enqueue",
-                        "validation",
-                        "writeback",
-                        "edits",
-                        "commit",
-                        "effects",
-                        "cancelled"
-                      ]
-                    },
-                    "queuedAt": {
-                      "type": "string"
+                      "enum": ["validation", "writeback", "edits", "commit", "effects"]
                     },
                     "startedAt": {
                       "type": "string"
@@ -29671,7 +29623,6 @@
                           "enum": [
                             "internal.unexpected",
                             "runtime.cancelled",
-                            "queue.enqueue_failed",
                             "action.phase_failed",
                             "action.read_conflict",
                             "action.timeout"
@@ -29699,16 +29650,7 @@
                             },
                             "phase": {
                               "type": "string",
-                              "enum": [
-                                "request",
-                                "enqueue",
-                                "validation",
-                                "writeback",
-                                "edits",
-                                "commit",
-                                "effects",
-                                "cancelled"
-                              ]
+                              "enum": ["validation", "writeback", "edits", "commit", "effects"]
                             }
                           },
                           "required": ["actionId", "runId", "phase"],
@@ -29792,7 +29734,6 @@
                                   "enum": [
                                     "internal.unexpected",
                                     "runtime.cancelled",
-                                    "queue.enqueue_failed",
                                     "action.phase_failed",
                                     "action.read_conflict",
                                     "action.timeout"
@@ -29883,7 +29824,6 @@
                                   "enum": [
                                     "internal.unexpected",
                                     "runtime.cancelled",
-                                    "queue.enqueue_failed",
                                     "action.phase_failed",
                                     "action.read_conflict",
                                     "action.timeout"
@@ -29947,7 +29887,9 @@
                     "actionId",
                     "subject",
                     "status",
-                    "queuedAt",
+                    "phase",
+                    "startedAt",
+                    "finishedAt",
                     "params"
                   ],
                   "additionalProperties": false

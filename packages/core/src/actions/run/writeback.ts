@@ -1,6 +1,5 @@
 import type { JsonValue } from "../../json"
 import { assertJsonValue, cloneJsonValue } from "../../json"
-import type { ActionRunRecord } from "../../storage"
 import type { ActionReadRecorder } from "../read-facade"
 import { isObjectActionDefinition } from "../validation"
 import {
@@ -10,33 +9,29 @@ import {
   toActionRuntimeFacade,
 } from "./context"
 import { toActionRunFailure, translateActionPhaseError } from "./normalize"
-import type {
-  LoadedObjectTarget,
-  PhaseExecutionBase,
-  RuntimePhaseHandler,
-  UpdateActiveRun,
-} from "./phase-types"
+import type { LoadedObjectTarget, PhaseExecutionBase, RuntimePhaseHandler } from "./phase-types"
+import type { ActionRunState } from "./state"
 
+/**
+ * Calls the Action's writeback, when it has one, and keeps how it ended on the run's state.
+ *
+ * A failed writeback fails the run with the writeback's own failure; a succeeded one is the run's
+ * irreversible boundary.
+ */
 export async function runWritebackPhase(
   input: PhaseExecutionBase & {
-    readonly run: ActionRunRecord
+    readonly state: ActionRunState
     readonly baseContext: BasePhaseContext
     readonly objectTarget: LoadedObjectTarget | null
     readonly reads: ActionReadRecorder
-    readonly updateActiveRun: UpdateActiveRun
   }
-): Promise<{ run: ActionRunRecord; value: JsonValue | undefined }> {
+): Promise<void> {
   const handler = input.action.phases.writeback as RuntimePhaseHandler | undefined
-  if (!handler) {
-    return { run: input.run, value: undefined }
-  }
+  if (!handler) return
 
-  let run = await input.runtime.actionRunsStorage.enterPhase({
-    projectId: input.runtime.id,
-    id: input.run.id,
-    phase: "writeback",
-  })
-  input.updateActiveRun(run)
+  const { state } = input
+  const ids = { actionId: input.action.id, runId: state.run.id }
+  state.enter("writeback")
 
   let result: JsonValue
   try {
@@ -53,44 +48,25 @@ export async function runWritebackPhase(
     const rawResult = isObjectActionDefinition(input.action)
       ? await handler({
           ...context,
-          target: requireObjectTarget(input.objectTarget, {
-            actionId: input.action.id,
-            runId: input.run.id,
-          }).snapshot,
+          target: requireObjectTarget(input.objectTarget, ids).snapshot,
         })
       : await handler(context)
     result = normalizeWritebackResult(rawResult)
   } catch (error) {
     const completedAt = new Date()
     const phaseError = translateActionPhaseError(error, "writeback", {
-      actionId: input.action.id,
-      runId: input.run.id,
+      ...ids,
       signal: input.signal,
     })
-    const failure = toActionRunFailure(phaseError, "writeback", {
-      actionId: input.action.id,
-      runId: input.run.id,
-      at: completedAt,
-    })
-    run = await input.runtime.actionRunsStorage.recordWriteback({
-      projectId: input.runtime.id,
-      id: input.run.id,
+    state.recordWriteback({
       status: "failed",
       completedAt,
-      error: failure,
+      error: toActionRunFailure(phaseError, "writeback", { ...ids, at: completedAt }),
     })
-    input.updateActiveRun(run)
     throw error
   }
 
-  run = await input.runtime.actionRunsStorage.recordWriteback({
-    projectId: input.runtime.id,
-    id: input.run.id,
-    status: "succeeded",
-    result,
-  })
-  input.updateActiveRun(run)
-  return { run, value: result }
+  state.recordWriteback({ status: "succeeded", completedAt: new Date(), result })
 }
 
 function normalizeWritebackResult(result: unknown): JsonValue {

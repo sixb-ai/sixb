@@ -1,7 +1,14 @@
 export {
   createTestActionExecution,
-  queueTestActionRun,
+  createTestActionRunRecord,
+  recordTestActionRun,
+  type TestActionRunInput,
 } from "./action-execution"
+export {
+  type ActionRunStorageContractStorage,
+  type ActionRunStorageContractSuiteOptions,
+  runActionRunStorageContractSuite,
+} from "./action-run-storage-contract"
 export { createTestAgentExecution } from "./agent-execution"
 export {
   type AgentStorageContractSuiteOptions,

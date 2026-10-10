@@ -4,7 +4,7 @@ import { existsSync, statSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { migrateStorage } from "@sixb/core"
+import { InMemoryStorage, migrateStorage } from "@sixb/core"
 import { parseActionRunFailure } from "@sixb/core/internal/action-run-storage"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
@@ -24,6 +24,7 @@ import {
   WORKFLOW_RUN_FAILURE_CODES,
 } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
+import { SqliteActionRunStorage } from "../src/action-run-storage"
 import {
   createSqliteStorageMigrators,
   SQLITE_STORAGE_ADAPTER_ID,
@@ -540,6 +541,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 59,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "060-terminal-action-runs",
+    status: "applied",
+    version: 60,
+  },
 ]
 
 afterEach(async () => {
@@ -724,6 +732,164 @@ describe("SQLite storage migrations", () => {
           )
           .get()
       ).toEqual({ count: 6 })
+    } finally {
+      db.close()
+    }
+  })
+
+  // Removal proofs: drop the `json_set` on `$.details.phase` from 060, and the enqueue failure below
+  // keeps phase 'enqueue', which `parseActionRunFailure` rejects. Drop the join on
+  // `ontology_commits`, and the runs whose edits committed are recorded as failed.
+  test("keeps every Action run readable as a terminal record", async () => {
+    const db = new Database(":memory:")
+    try {
+      const steps = sqliteStorageMigrations.steps
+      const index = steps.findIndex((step) => step.id === "060-terminal-action-runs")
+      for (const step of steps.slice(0, index)) await step.up(db)
+      const failure = (code: string, retryable: boolean, phase: string) =>
+        JSON.stringify({
+          code,
+          message: "Stored failure.",
+          retryable,
+          at: "2026-01-01T00:00:02.000Z",
+          details: { actionId: "send-quote", runId: "ignored", phase },
+        })
+      const insertRun = (
+        id: string,
+        status: string,
+        phase: string | null,
+        startedAt: string | null,
+        finishedAt: string | null,
+        error: string | null
+      ) => {
+        db.run(
+          `INSERT INTO action_runs (
+            project_id, id, execution_id, action_id, subject_kind, status, phase, queued_at,
+            started_at, finished_at, params, idempotency_key, error
+          ) VALUES ('p', ?, ?, 'send-quote', 'none', ?, ?, '2026-01-01T00:00:00.000Z', ?, ?,
+            '{"amount":1}', ?, ?)`,
+          [id, `execution-${id}`, status, phase, startedAt, finishedAt, `action:p:${id}`, error]
+        )
+      }
+      const started = "2026-01-01T00:00:01.000Z"
+      const finished = "2026-01-01T00:00:02.000Z"
+      insertRun("queued", "queued", "request", null, null, null)
+      insertRun("running", "running", "edits", started, null, null)
+      insertRun(
+        "cancelled",
+        "cancelled",
+        "cancelled",
+        started,
+        finished,
+        failure("runtime.cancelled", false, "cancelled")
+      )
+      insertRun(
+        "enqueue-failed",
+        "failed",
+        "enqueue",
+        null,
+        finished,
+        failure("queue.enqueue_failed", true, "enqueue")
+      )
+      insertRun("unexplained", "failed", "commit", started, finished, null)
+      insertRun("succeeded", "succeeded", "commit", started, finished, null)
+      // Runs a crash left running after their edits committed.
+      const committedAt = "2026-01-01T00:00:03.000Z"
+      const insertCommit = (runId: string) =>
+        db.run(
+          `INSERT INTO ontology_commits (
+            project_id, id, idempotency_key, request_hash, execution_id, origin_kind,
+            origin_run_id, origin, ontology_revision, intent, result, committed_at
+          ) VALUES ('p', ?, ?, 'hash', ?, 'action', ?, '{}', 'revision', '{}', '{}', ?)`,
+          [`commit-${runId}`, `action:${runId}:edits`, `execution-${runId}`, runId, committedAt]
+        )
+      for (const [id, phase] of [
+        ["committed", "commit"],
+        ["committed-in-effects", "effects"],
+      ] as const) {
+        insertRun(id, "running", phase, started, null, null)
+        insertCommit(id)
+      }
+
+      await steps[index]!.up(db)
+      // Read back through the provider: its read path never consults executions.
+      const actionRuns = new SqliteActionRunStorage({
+        connection: { db, ownsConnection: false, installFreshSchema: false },
+        executions: new InMemoryStorage().executions,
+      })
+      const runs = new Map(
+        (await actionRuns.list({ projectId: "p", limit: 10 })).runs.map((run) => [run.id, run])
+      )
+
+      expect(runs.get("queued")).toMatchObject({
+        status: "failed",
+        phase: "validation",
+        startedAt: new Date("2026-01-01T00:00:00.000Z"),
+        error: {
+          code: "internal.unexpected",
+          message: "Abandoned: Actions now run synchronously; this run never finished.",
+          details: { actionId: "send-quote", runId: "queued", phase: "validation" },
+        },
+      })
+      expect(runs.get("running")).toMatchObject({
+        status: "failed",
+        phase: "edits",
+        startedAt: new Date(started),
+        error: { code: "internal.unexpected", details: { phase: "edits" } },
+      })
+      expect(runs.get("running")?.finishedAt.getTime()).toBeGreaterThan(Date.parse(started))
+      expect(runs.get("cancelled")).toMatchObject({
+        status: "failed",
+        phase: "validation",
+        finishedAt: new Date(finished),
+        error: { code: "runtime.cancelled", details: { phase: "validation" } },
+      })
+      expect(runs.get("enqueue-failed")).toMatchObject({
+        status: "failed",
+        phase: "validation",
+        startedAt: new Date("2026-01-01T00:00:00.000Z"),
+        error: { code: "internal.unexpected", retryable: false, message: "Stored failure." },
+      })
+      expect(runs.get("unexplained")).toMatchObject({
+        status: "failed",
+        phase: "commit",
+        error: {
+          code: "internal.unexpected",
+          message: "This run failed before Sixb recorded why.",
+          at: finished,
+          details: { phase: "commit" },
+        },
+      })
+      expect(runs.get("succeeded")).toMatchObject({ status: "succeeded", phase: "commit" })
+      expect(runs.get("committed")).toMatchObject({
+        status: "succeeded",
+        phase: "commit",
+        finishedAt: new Date(committedAt),
+      })
+      expect(runs.get("committed")?.error).toBeUndefined()
+      expect(runs.get("committed")?.effects).toBeUndefined()
+      expect(runs.get("committed-in-effects")).toMatchObject({
+        status: "succeeded",
+        phase: "effects",
+        finishedAt: new Date(committedAt),
+        effects: {
+          status: "failed",
+          error: {
+            code: "internal.unexpected",
+            message: "Abandoned: Actions now run synchronously; these effects never finished.",
+            details: { actionId: "send-quote", runId: "committed-in-effects", phase: "effects" },
+          },
+        },
+      })
+      expect(readMemoryTableColumns(db, "action_runs")).not.toContain("queued_at")
+      expect(() => insertRun("late-queued", "queued", "request", started, finished, null)).toThrow()
+      expect(
+        db
+          .query(
+            "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND tbl_name = 'action_runs' AND name LIKE 'idx_%'"
+          )
+          .get()
+      ).toEqual({ count: 4 })
     } finally {
       db.close()
     }
@@ -2369,37 +2535,26 @@ describe("SQLite storage migrations", () => {
         "send-quote",
         "2026-01-01T00:00:00.000Z"
       )
-      db.query(`
-        INSERT INTO action_runs (
-          project_id, id, execution_id, action_id, subject_kind, status, phase, queued_at,
-          params, idempotency_key
-        ) VALUES (?, ?, ?, ?, 'none', 'queued', 'request', ?, '{}', ?)
-      `).run(
-        "project-a",
-        "action-run",
-        "action-execution",
-        "send-quote",
-        "2026-01-01T00:00:00.000Z",
-        "action:project-a:action-run"
-      )
-
-      expect(() =>
+      const insertRun = (id: string) =>
         db
           .query(`
             INSERT INTO action_runs (
-              project_id, id, execution_id, action_id, subject_kind, status, phase, queued_at,
-              params, idempotency_key
-            ) VALUES (?, ?, ?, ?, 'none', 'queued', 'request', ?, '{}', ?)
+              project_id, id, execution_id, action_id, subject_kind, status, phase, started_at,
+              finished_at, params, idempotency_key
+            ) VALUES (?, ?, ?, ?, 'none', 'succeeded', 'writeback', ?, ?, '{}', ?)
           `)
           .run(
             "project-a",
-            "second-action-run",
+            id,
             "action-execution",
             "send-quote",
             "2026-01-01T00:00:00.000Z",
-            "action:project-a:second-action-run"
+            "2026-01-01T00:00:01.000Z",
+            `action:project-a:${id}`
           )
-      ).toThrow("UNIQUE")
+      insertRun("action-run")
+
+      expect(() => insertRun("second-action-run")).toThrow("UNIQUE")
     } finally {
       db.close()
     }

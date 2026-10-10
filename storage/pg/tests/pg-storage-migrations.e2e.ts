@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, migrateStorage, OntologyRegistry, prop } from "@sixb/core"
-import { parseActionRunFailure } from "@sixb/core/internal/action-run-storage"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
   materializationEvent,
@@ -10,7 +9,6 @@ import {
   type OntologyMaterializationEventDraft,
 } from "@sixb/core/internal/materialization"
 import {
-  ACTION_RUN_FAILURE_CODES,
   defineMigrations,
   ONTOLOGY_OUTBOX_FAILURE_CODES,
   SYNC_RUN_FAILURE_CODES,
@@ -358,6 +356,7 @@ describe("Postgres storage migrations", () => {
             "058-reranking-model-kind",
             "059-file-download-grants",
             "060-drained-source-versions",
+            "061-terminal-action-runs",
           ],
         },
       ])
@@ -781,6 +780,13 @@ describe("Postgres storage migrations", () => {
           id: "060-drained-source-versions",
           status: "applied",
           version: 60,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "061-terminal-action-runs",
+          status: "applied",
+          version: 61,
         },
       ])
     })
@@ -1210,6 +1216,197 @@ describe("Postgres storage migrations", () => {
     })
   })
 
+  test("keeps every Action run readable as a terminal record", async () => {
+    // Removal proofs: drop the `jsonb_set` on `{details,phase}` from 061, and the enqueue failure
+    // below keeps phase 'enqueue', which `parseActionRunFailure` rejects. Drop the UPDATE that
+    // joins `ontology_commits`, and the runs whose edits committed are recorded as failed.
+    await withStorage(false, async (storage, schemaName) => {
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+      const index = postgresStorageMigrations.steps.findIndex(
+        (step) => step.id === "061-terminal-action-runs"
+      )
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
+      const migrateThrough = (count: number) =>
+        createPostgresMigrator({
+          sql,
+          schemaName,
+          migrations: defineMigrations({
+            adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+            steps: postgresStorageMigrations.steps.slice(0, count),
+          }),
+        }).migrate()
+      const schema = quoteIdent(schemaName)
+      const failure = (code: string, retryable: boolean, phase: string) =>
+        JSON.stringify({
+          code,
+          message: "Stored failure.",
+          retryable,
+          at: "2026-01-01T00:00:02.000Z",
+          details: { actionId: "send-quote", runId: "ignored", phase },
+        })
+      const insertRun = async (
+        id: string,
+        status: string,
+        phase: string | null,
+        startedAt: string | null,
+        finishedAt: string | null,
+        error: string | null
+      ) => {
+        await sql.unsafe(
+          `
+            INSERT INTO ${schema}.executions (
+              project_id, id, executor_kind, executor_id, source_kind, source_id,
+              correlation_id, authority_kind, authority_primitive_kind, authority_primitive_id,
+              created_at
+            ) VALUES (
+              'p', $1, 'action', $2, 'event', 'event', $1, 'trustedPrimitive', 'action',
+              'send-quote', '2026-01-01T00:00:00.000Z'
+            )
+          `,
+          [`execution-${id}`, id]
+        )
+        await sql.unsafe(
+          `
+            INSERT INTO ${schema}.action_runs (
+              project_id, id, execution_id, action_id, subject_kind, status, phase, queued_at,
+              started_at, finished_at, params, idempotency_key, error
+            ) VALUES (
+              'p', $1, $2, 'send-quote', 'none', $3, $4, '2026-01-01T00:00:00.000Z', $5, $6,
+              '{"amount": 1}', $7, $8::text::jsonb
+            )
+          `,
+          [id, `execution-${id}`, status, phase, startedAt, finishedAt, `action:p:${id}`, error]
+        )
+      }
+      const started = "2026-01-01T00:00:01.000Z"
+      const finished = "2026-01-01T00:00:02.000Z"
+      const committedAt = "2026-01-01T00:00:03.000Z"
+      try {
+        await migrateThrough(index)
+        await insertRun("queued", "queued", "request", null, null, null)
+        await insertRun("running", "running", "edits", started, null, null)
+        await insertRun(
+          "cancelled",
+          "cancelled",
+          "cancelled",
+          started,
+          finished,
+          failure("runtime.cancelled", false, "cancelled")
+        )
+        await insertRun(
+          "enqueue-failed",
+          "failed",
+          "enqueue",
+          null,
+          finished,
+          failure("queue.enqueue_failed", true, "enqueue")
+        )
+        await insertRun("unexplained", "failed", "commit", started, finished, null)
+        await insertRun("succeeded", "succeeded", "commit", started, finished, null)
+        // Runs a crash left running after their edits committed.
+        for (const [id, phase] of [
+          ["committed", "commit"],
+          ["committed-in-effects", "effects"],
+        ] as const) {
+          await insertRun(id, "running", phase, started, null, null)
+          await sql.unsafe(
+            `
+              INSERT INTO ${schema}.ontology_commits (
+                project_id, id, idempotency_key, request_hash, execution_id, origin_kind,
+                origin_run_id, origin, ontology_revision, intent, result, committed_at
+              ) VALUES (
+                'p', $1, $2, 'hash', $3, 'action', $4, '{}', 'revision', '{}', '{}', $5
+              )
+            `,
+            [`commit-${id}`, `action:${id}:edits`, `execution-${id}`, id, committedAt]
+          )
+        }
+
+        await migrateThrough(index + 1)
+        const listed = await storage.actionRuns.list({ projectId: "p", limit: 10 })
+        const runs = new Map(listed.runs.map((run) => [run.id, run]))
+
+        expect(runs.get("queued")).toMatchObject({
+          status: "failed",
+          phase: "validation",
+          startedAt: new Date("2026-01-01T00:00:00.000Z"),
+          error: {
+            code: "internal.unexpected",
+            message: "Abandoned: Actions now run synchronously; this run never finished.",
+            details: { actionId: "send-quote", runId: "queued", phase: "validation" },
+          },
+        })
+        expect(runs.get("running")).toMatchObject({
+          status: "failed",
+          phase: "edits",
+          startedAt: new Date(started),
+          error: { code: "internal.unexpected", details: { phase: "edits" } },
+        })
+        expect(runs.get("running")?.finishedAt.getTime()).toBeGreaterThan(Date.parse(started))
+        expect(runs.get("cancelled")).toMatchObject({
+          status: "failed",
+          phase: "validation",
+          finishedAt: new Date(finished),
+          error: { code: "runtime.cancelled", details: { phase: "validation" } },
+        })
+        expect(runs.get("enqueue-failed")).toMatchObject({
+          status: "failed",
+          phase: "validation",
+          startedAt: new Date("2026-01-01T00:00:00.000Z"),
+          error: { code: "internal.unexpected", retryable: false, message: "Stored failure." },
+        })
+        expect(runs.get("unexplained")).toMatchObject({
+          status: "failed",
+          phase: "commit",
+          error: {
+            code: "internal.unexpected",
+            message: "This run failed before Sixb recorded why.",
+            at: finished,
+            details: { phase: "commit" },
+          },
+        })
+        expect(runs.get("succeeded")).toMatchObject({ status: "succeeded", phase: "commit" })
+        expect(runs.get("committed")).toMatchObject({
+          status: "succeeded",
+          phase: "commit",
+          finishedAt: new Date(committedAt),
+        })
+        expect(runs.get("committed")?.error).toBeUndefined()
+        expect(runs.get("committed")?.effects).toBeUndefined()
+        expect(runs.get("committed-in-effects")).toMatchObject({
+          status: "succeeded",
+          phase: "effects",
+          finishedAt: new Date(committedAt),
+          effects: {
+            status: "failed",
+            error: {
+              code: "internal.unexpected",
+              message: "Abandoned: Actions now run synchronously; these effects never finished.",
+              details: { actionId: "send-quote", runId: "committed-in-effects", phase: "effects" },
+            },
+          },
+        })
+        expect(await readTableColumns(schemaName, "action_runs")).not.toContain("queued_at")
+        const refusal = await sql
+          .unsafe(
+            `INSERT INTO ${schema}.action_runs (
+              project_id, id, execution_id, action_id, subject_kind, status, phase, started_at,
+              finished_at, params, idempotency_key
+            ) VALUES ('p', 'late', 'execution-queued', 'send-quote', 'none', 'queued',
+              'validation', now(), now(), '{}', 'late')`
+          )
+          .then(
+            () => "inserted",
+            (error: unknown) => (error instanceof Error ? error.message : String(error))
+          )
+        expect(refusal).toContain("action_runs_status_check")
+      } finally {
+        await sql.end()
+      }
+    })
+  })
+
   test("migrates failed run records from the version 10 main schema", async () => {
     await withStorage(false, async (_storage, schemaName) => {
       const connectionString = process.env.DATABASE_URL
@@ -1278,7 +1475,8 @@ describe("Postgres storage migrations", () => {
           message: "An unexpected internal error occurred.",
           details: { syncId: "sync.orders", runId: "sync-legacy" },
         })
-        expect(parseActionRunFailure(action?.error)).toMatchObject({
+        // 061 later rewrites this failure: enqueue failures and phases are gone.
+        expect(parseSixbFailure(action?.error)).toMatchObject({
           code: "queue.enqueue_failed",
           retryable: true,
           details: { actionId: "approve", runId: "action-legacy", phase: "enqueue" },
@@ -1286,7 +1484,6 @@ describe("Postgres storage migrations", () => {
         expect(JSON.stringify(sync)).not.toContain("secret")
         expect(await readTableColumns(schemaName, "sync_runs")).not.toContain("error_message")
         expect(await readTableColumns(schemaName, "action_runs")).not.toContain("error_phase")
-        expect(ACTION_RUN_FAILURE_CODES).toContain("queue.enqueue_failed")
       } finally {
         await sql.end()
       }
@@ -3006,6 +3203,13 @@ describe("Postgres storage migrations", () => {
           id: "060-drained-source-versions",
           status: "applied",
           version: 60,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "061-terminal-action-runs",
+          status: "applied",
+          version: 61,
         },
       ])
     } finally {

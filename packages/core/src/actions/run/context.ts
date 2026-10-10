@@ -1,7 +1,6 @@
 import { createSixbError } from "../../errors/internal"
 import type { Logger } from "../../logging"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
-import type { ActionRunRecord } from "../../storage"
 import { ObjectNotFoundError } from "../../storage"
 import type { ActionReadRecorder } from "../read-facade"
 import { createActionReadFacade } from "../read-facade"
@@ -15,7 +14,8 @@ import type {
 } from "../types"
 import { coerceActionParamsToTyped, isObjectActionDefinition } from "../validation"
 import type { LoadedObjectTarget } from "./phase-types"
-import type { ActionRunContext } from "./types"
+import type { ActionRunState } from "./state"
+import type { ActionRunContext, PendingActionRun } from "./types"
 
 export function toActionRuntimeFacade(runtime: ActionRunContext): ActionRuntimeFacade {
   return {
@@ -86,24 +86,25 @@ function toActionTargetObject(
 export function createBasePhaseContext(input: {
   readonly runtime: ActionRunContext
   readonly action: ActionDefinition
-  readonly run: ActionRunRecord
+  readonly state: ActionRunState
   readonly logger: Logger
 }) {
+  const { run, startedAt } = input.state
   return {
     run: {
-      id: input.run.id,
-      startedAt: input.run.startedAt ?? input.run.queuedAt,
-      idempotencyKey: input.run.idempotencyKey,
+      id: run.id,
+      startedAt,
+      idempotencyKey: run.idempotencyKey,
     },
     logger: input.logger,
     // Params are stored as JSON (date/timestamp -> ISO string); handler types
     // promise `Date`, so re-hydrate them before the handler sees them.
     params: coerceActionParamsToTyped(
       input.action.params,
-      input.run.params,
+      run.params,
       input.runtime.sixb.objects.getValueTypesById()
     ),
-    subject: input.run.subject,
+    subject: run.subject,
   }
 }
 
@@ -112,7 +113,7 @@ export type BasePhaseContext = ReturnType<typeof createBasePhaseContext>
 export async function loadObjectTarget(input: {
   readonly runtime: ActionRunContext
   readonly action: ActionDefinition
-  readonly run: ActionRunRecord
+  readonly run: PendingActionRun
 }): Promise<LoadedObjectTarget | null> {
   if (!isObjectActionDefinition(input.action)) {
     if (input.run.subject.kind !== "none") {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { Storage } from "@sixb/core"
 import { StorageTransactionError } from "@sixb/core/storage"
-import { queueTestActionRun, startTestSyncRun, startTestWebhookRun } from "@sixb/core/testing"
+import { recordTestActionRun, startTestSyncRun, startTestWebhookRun } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
@@ -19,7 +19,7 @@ describe("PostgresStorage.transaction", () => {
 
   test("commits writes atomically", async () => {
     await storage.transaction(async (tx) => {
-      await queueTestActionRun(tx, actionRunInput("run_commit"))
+      await recordTestActionRun(tx, actionRunInput("run_commit"))
     })
 
     expect(
@@ -43,7 +43,7 @@ describe("PostgresStorage.transaction", () => {
     await expect(
       storage.transaction(async (tx) => {
         requireTransactionalRunStores(tx)
-        await queueTestActionRun(tx, actionRunInput("run_rollback"))
+        await recordTestActionRun(tx, actionRunInput("run_rollback"))
         await startTestSyncRun(tx, syncRunInput("sync_rollback"))
         await startTestWebhookRun(tx, webhookRunInput("webhook_rollback"))
 

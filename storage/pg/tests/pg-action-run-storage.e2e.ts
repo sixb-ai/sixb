@@ -1,28 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import type { ActionRunFailure, ActionRunPhase } from "@sixb/core/storage"
-import { queueTestActionRun } from "@sixb/core/testing"
+import { ActionRunError } from "@sixb/core/storage"
+import { createTestActionRunRecord, runActionRunStorageContractSuite } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
-const FAILURE_AT = "2026-04-29T10:00:00.000Z"
-
-function actionFailure<TPhase extends ActionRunPhase>(
-  phase: TPhase,
-  message: string
-): ActionRunFailure<TPhase> {
-  return {
-    code:
-      phase === "cancelled"
-        ? "runtime.cancelled"
-        : phase === "enqueue"
-          ? "queue.enqueue_failed"
-          : "internal.unexpected",
-    message,
-    retryable: phase === "enqueue",
-    at: FAILURE_AT,
-    details: { actionId: "createInvoice", runId: "act_1", phase },
-  }
-}
+runActionRunStorageContractSuite("PostgresStorage Action runs", {
+  createStorage: async () => (await createTestStorage()).storage,
+  cleanup: async (storage) => {
+    await storage.dropSchema()
+    await storage.close()
+  },
+})
 
 describe("PgActionRunStorage", () => {
   let storage: PostgresStorage
@@ -36,168 +24,46 @@ describe("PgActionRunStorage", () => {
     await storage.close()
   })
 
-  test("persists V2 lifecycle records and recomposes relational commit diffs", async () => {
-    await queueTestActionRun(storage, {
-      id: "act_1",
+  // Two processes can execute the same run id; the one that records it second must get a refusal
+  // it can answer with the first one's record, not a raised unique violation.
+  test("makes a concurrent record of the same run wait for the first, then refuses it", async () => {
+    const run = await createTestActionRunRecord(storage.executions, {
+      id: "act_concurrent",
       projectId: "my-app",
       actionId: "createInvoice",
       subject: { kind: "none" },
-      params: { amount: 42 },
-      idempotencyKey: "action:my-app:act_1",
+      params: {},
+      idempotencyKey: "action:my-app:act_concurrent",
     })
-
-    await storage.actionRuns.start({
-      id: "act_1",
-      projectId: "my-app",
-    })
-
-    await storage.actionRuns.recordWriteback({
-      id: "act_1",
-      projectId: "my-app",
-      status: "succeeded",
-      result: { externalInvoiceId: "ext_1" },
-      completedAt: new Date("2026-04-29T10:00:01.000Z"),
-    })
-
-    await storage.actionRuns.recordEffects({
-      id: "act_1",
-      projectId: "my-app",
-      status: "failed",
-      error: actionFailure("effects", "Slack timed out"),
-    })
-
-    await storage.actionRuns.finish({
-      id: "act_1",
-      projectId: "my-app",
-      status: "succeeded",
-    })
-
-    const run = await storage.actionRuns.getById({
-      projectId: "my-app",
-      id: "act_1",
-    })
-
-    expect(run).toMatchObject({
-      status: "succeeded",
-      phase: "effects",
-      error: undefined,
-      writeback: {
-        status: "succeeded",
-        result: { externalInvoiceId: "ext_1" },
-      },
-      effects: {
-        status: "failed",
-        error: actionFailure("effects", "Slack timed out"),
-      },
-    })
-    const page = await storage.actionRuns.list({
-      projectId: "my-app",
-      actionId: "createInvoice",
-      limit: 10,
-    })
-    expect(page.runs).toHaveLength(1)
-  })
-
-  test("serializes ontology materialization before terminal Action completion", async () => {
-    await queueRunningAction(storage, "act_materializing")
-    const locked = deferred<void>()
-    const release = deferred<void>()
-    const materialization = storage.transaction(async (tx) => {
-      if (!tx.actionRuns) throw new Error("missing fence")
-      await tx.actionRuns.lockForMaterialization({
-        projectId: "my-app",
-        actionId: "createInvoice",
-        runId: "act_materializing",
-      })
-      locked.resolve()
+    const recorded = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const first = storage.transaction(async (tx) => {
+      if (!tx.actionRuns) throw new Error("missing Action run storage")
+      await tx.actionRuns.record(run)
+      recorded.resolve()
       await release.promise
     })
-    await locked.promise
+    await recorded.promise
 
-    let completionSettled = false
-    const completion = storage
-      .transaction(async (tx) => {
-        if (!tx.actionRuns) throw new Error("missing Action storage")
-        await tx.actionRuns.finish({
-          projectId: "my-app",
-          id: "act_materializing",
-          status: "succeeded",
-        })
-      })
-      .finally(() => {
-        completionSettled = true
-      })
-    await Bun.sleep(20)
-    expect(completionSettled).toBe(false)
-
-    release.resolve()
-    await materialization
-    await completion
-    expect(
-      await storage.actionRuns.getById({ projectId: "my-app", id: "act_materializing" })
-    ).toMatchObject({ status: "succeeded" })
-  })
-
-  test("rejects ontology materialization after terminal Action completion wins the row lock", async () => {
-    await queueRunningAction(storage, "act_finishing")
-    const updated = deferred<void>()
-    const release = deferred<void>()
-    const completion = storage.transaction(async (tx) => {
-      if (!tx.actionRuns) throw new Error("missing Action storage")
-      await tx.actionRuns.finish({
-        projectId: "my-app",
-        id: "act_finishing",
-        status: "succeeded",
-      })
-      updated.resolve()
-      await release.promise
-    })
-    await updated.promise
-
-    let fenceSettled = false
-    const fence = storage
-      .transaction(async (tx) => {
-        if (!tx.actionRuns) throw new Error("missing fence")
-        await tx.actionRuns.lockForMaterialization({
-          projectId: "my-app",
-          actionId: "createInvoice",
-          runId: "act_finishing",
-        })
-      })
+    let secondSettled = false
+    const second = storage.actionRuns
+      .record(run)
       .then(
         () => null,
         (error: unknown) => error
       )
       .finally(() => {
-        fenceSettled = true
+        secondSettled = true
       })
     await Bun.sleep(20)
-    expect(fenceSettled).toBe(false)
+    expect(secondSettled).toBe(false)
 
     release.resolve()
-    await completion
-    const error = await fence
-    expect(error).toBeInstanceOf(Error)
-    expect((error as Error).message).toContain("status 'succeeded'")
+    await first
+    const refusal = await second
+    expect(refusal).toBeInstanceOf(ActionRunError)
+    expect(refusal instanceof Error ? refusal.message : refusal).toContain(
+      "Action run 'act_concurrent' is already recorded for project 'my-app'."
+    )
   })
 })
-
-async function queueRunningAction(storage: PostgresStorage, id: string): Promise<void> {
-  await queueTestActionRun(storage, {
-    id,
-    projectId: "my-app",
-    actionId: "createInvoice",
-    subject: { kind: "none" },
-    params: {},
-    idempotencyKey: `action:my-app:${id}`,
-  })
-  await storage.actionRuns.start({ id, projectId: "my-app" })
-}
-
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void
-  const promise = new Promise<T>((settle) => {
-    resolve = settle
-  })
-  return { promise, resolve }
-}

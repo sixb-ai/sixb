@@ -317,7 +317,7 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
           },
           {
             args: ["action-runs", "list", "--status", "waiting"],
-            message: "--status must be queued, running, succeeded, failed, or cancelled.",
+            message: "--status must be succeeded or failed.",
           },
           {
             args: ["workflow-runs", "list", "--started-after", "yesterday"],

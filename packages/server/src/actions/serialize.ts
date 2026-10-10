@@ -13,9 +13,8 @@ export function serializeActionRunSummary(
     subject: run.subject,
     status: run.status,
     phase: run.phase,
-    queuedAt: toIsoString(run.queuedAt),
-    startedAt: run.startedAt ? toIsoString(run.startedAt) : undefined,
-    finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
+    startedAt: toIsoString(run.startedAt),
+    finishedAt: toIsoString(run.finishedAt),
     error: run.error,
   })
 }

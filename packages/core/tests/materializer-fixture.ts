@@ -24,7 +24,7 @@ import {
   type ProjectionSourceReplacement,
   type TelemetryAppend,
 } from "../src/materializer"
-import { claimTestProjectionRun, createTestActionExecution } from "../src/testing"
+import { claimTestProjectionRun } from "../src/testing"
 
 export const Device = defineObjectType({
   id: "Device",
@@ -132,8 +132,8 @@ export function createMaterializerFixture(
   const materializer = {
     edits: {
       async commit(request: Parameters<typeof runtimeMaterializer.edits.commit>[0]) {
-        if (request.source.kind !== "action") return runtimeMaterializer.edits.commit(request)
-        const scope = await actionScope(storage, request.source.actionId, request.source.runId)
+        if (!("run" in request)) return runtimeMaterializer.edits.commit(request)
+        const scope = await actionScope(storage, request.source, request.run.executionId)
         return baseMaterializer.withScope(scope).edits.commit(request)
       },
     },
@@ -195,24 +195,17 @@ export function createMaterializerFixture(
   return { materializer, storage, ontology, projections }
 }
 
+/** The scope of the execution an Action commit's run record names. */
 async function actionScope(
   storage: InMemoryStorage,
-  actionId: string,
-  runId: string
+  source: { readonly actionId: string; readonly runId: string },
+  executionId: string
 ): Promise<ExecutionScope> {
-  const run = await storage.actionRuns?.getById({ projectId: "project", id: runId })
-  const executionId =
-    run?.executionId ??
-    (await createTestActionExecution(storage.executions, {
-      projectId: "project",
-      actionId,
-      runId,
-    }))
   const execution = await storage.executions.getById({ projectId: "project", id: executionId })
   if (!execution) throw new Error(`Action execution '${executionId}' is missing.`)
   return restoreTrustedPrimitiveExecutionScope({
     execution,
-    primitive: { kind: "action", id: actionId, runId },
+    primitive: { kind: "action", id: source.actionId, runId: source.runId },
   })
 }
 

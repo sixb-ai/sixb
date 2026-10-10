@@ -3,6 +3,7 @@ import type { EventOrigin } from "../events/envelope"
 import type { PropertyChange, PropertyChangeMap } from "../events/property-changes"
 import type { JsonValue } from "../json"
 import type { ProjectionProtocolIdentity, ProjectionRunFailureCode } from "../projections/types"
+import type { RecordActionRunInput } from "../storage/action-runs/types"
 import type { ObjectVectorWrite } from "./vectors"
 
 export type { ProjectionProtocolIdentity } from "../projections/types"
@@ -120,16 +121,32 @@ interface BaseOntologyEditCommit {
   readonly operations: readonly OntologyEditOperation[]
 }
 
+interface AtomicOntologyEditCommit extends BaseOntologyEditCommit {
+  readonly mode: "atomic"
+  readonly vectorWrites?: readonly ObjectVectorWrite[]
+  readonly expectedObjects: readonly ExpectedObjectRevision[]
+  readonly expectedLinks: readonly ExpectedLinkRevision[]
+  readonly expectedLinkScopes: readonly ExpectedLinkScopeRevision[]
+}
+
 export type OntologyEditCommit =
-  | (BaseOntologyEditCommit & {
-      readonly mode: "atomic"
-      readonly source:
-        | { readonly kind: "action"; readonly actionId: string; readonly runId: string }
-        | { readonly kind: "runtime"; readonly requestId: string }
-      readonly vectorWrites?: readonly ObjectVectorWrite[]
-      readonly expectedObjects: readonly ExpectedObjectRevision[]
-      readonly expectedLinks: readonly ExpectedLinkRevision[]
-      readonly expectedLinkScopes: readonly ExpectedLinkScopeRevision[]
+  | (AtomicOntologyEditCommit & {
+      readonly source: {
+        readonly kind: "action"
+        readonly actionId: string
+        readonly runId: string
+      }
+      /**
+       * The run's terminal record, inserted in the commit's transaction so that its edits never
+       * land without the run that made them.
+       *
+       * It is not part of the commit's intent: replaying the commit returns the stored commit and
+       * inserts nothing, whatever record the replay carries.
+       */
+      readonly run: RecordActionRunInput
+    })
+  | (AtomicOntologyEditCommit & {
+      readonly source: { readonly kind: "runtime"; readonly requestId: string }
     })
   | (BaseOntologyEditCommit & {
       readonly mode: "continue"

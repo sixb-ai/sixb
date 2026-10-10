@@ -9,7 +9,18 @@ import type {
   ProjectionRunStorage,
   StartOrReclaimProjectionRunInput,
 } from "../src/storage/projection-runs/types"
-import { queueTestActionRun } from "../src/testing"
+import { createTestActionRunRecord } from "../src/testing"
+
+function actionRunInput(id: string) {
+  return {
+    id,
+    projectId: "project",
+    actionId: "sendQuote",
+    subject: { kind: "none" as const },
+    params: {},
+    idempotencyKey: `action:${id}`,
+  }
+}
 
 const replacementIdentity = {
   projectionId: "devices",
@@ -291,61 +302,6 @@ async function admitProjectionRun(
   await projectionRuns.queue({ ...input, executionId })
 }
 
-describe("action run materialization correlation", () => {
-  test("requires an existing matching running Action", async () => {
-    const provider = new InMemoryStorage()
-    const storage = provider.actionRuns
-
-    await expect(
-      storage.lockForMaterialization({
-        projectId: "project",
-        actionId: "sendQuote",
-        runId: "action-run",
-      })
-    ).rejects.toThrow("not found")
-    await queueTestActionRun(provider, {
-      id: "action-run",
-      projectId: "project",
-      actionId: "sendQuote",
-      subject: { kind: "none" },
-      params: {},
-      idempotencyKey: "action:action-run",
-    })
-    await expect(
-      storage.lockForMaterialization({
-        projectId: "project",
-        actionId: "sendQuote",
-        runId: "action-run",
-      })
-    ).rejects.toThrow("status 'queued'")
-    await storage.start({ id: "action-run", projectId: "project" })
-
-    await expect(
-      storage.lockForMaterialization({
-        projectId: "project",
-        actionId: "different-action",
-        runId: "action-run",
-      })
-    ).rejects.toThrow("does not belong")
-    await expect(
-      storage.lockForMaterialization({
-        projectId: "project",
-        actionId: "sendQuote",
-        runId: "action-run",
-      })
-    ).resolves.toMatchObject({ id: "action-run", status: "running" })
-
-    await storage.finish({ id: "action-run", projectId: "project", status: "succeeded" })
-    await expect(
-      storage.lockForMaterialization({
-        projectId: "project",
-        actionId: "sendQuote",
-        runId: "action-run",
-      })
-    ).rejects.toThrow("status 'succeeded'")
-  })
-})
-
 describe("in-memory run root lock", () => {
   test("fences source staging with the current projection execution token", async () => {
     const storage = new InMemoryStorage()
@@ -403,15 +359,10 @@ describe("in-memory run root lock", () => {
     } as const
     await admitProjectionRun(storage.executions, storage.projectionRuns, projectionInput)
     const projection = await storage.projectionRuns.startOrReclaim(projectionInput)
-    await queueTestActionRun(storage, {
-      id: "action-run",
-      projectId: "project",
-      actionId: "sendQuote",
-      subject: { kind: "none" },
-      params: {},
-      idempotencyKey: "action:action-run",
-    })
-    await storage.actionRuns.start({ id: "action-run", projectId: "project" })
+    const actionRun = await createTestActionRunRecord(
+      storage.executions,
+      actionRunInput("action-run")
+    )
 
     let releaseTransaction!: () => void
     const transactionBlocked = new Promise<void>((resolve) => {
@@ -432,11 +383,7 @@ describe("in-memory run root lock", () => {
         executionToken: projection.execution.executionToken,
         progress: { sourceRowsRead: 99 },
       })
-      await tx.actionRuns.enterPhase({
-        id: "action-run",
-        projectId: "project",
-        phase: "edits",
-      })
+      await tx.actionRuns.record(actionRun)
       signalTransactionEntered()
       await transactionBlocked
       throw new Error("rollback")
@@ -458,7 +405,7 @@ describe("in-memory run root lock", () => {
         return record
       })
     const actionWrite = storage.actionRuns
-      .enterPhase({ id: "action-run", projectId: "project", phase: "effects" })
+      .record({ ...actionRun, phase: "writeback" })
       .then((record) => {
         actionFinished = true
         return record
@@ -472,26 +419,25 @@ describe("in-memory run root lock", () => {
     releaseTransaction()
     await expect(failedTransaction).rejects.toThrow("rollback")
     expect(await projectionWrite).toMatchObject({ progress: { sourceRowsRead: 1 } })
-    expect(await actionWrite).toMatchObject({ phase: "effects" })
+    expect(await actionWrite).toMatchObject({ phase: "writeback" })
     expect(
       await storage.projectionRuns.getById({ projectId: "project", id: "replacement-run" })
     ).toMatchObject({ progress: { sourceRowsRead: 1 } })
     expect(
       await storage.actionRuns.getById({ projectId: "project", id: "action-run" })
-    ).toMatchObject({ phase: "effects" })
+    ).toMatchObject({ phase: "writeback" })
   })
 
   test("does not treat async work inherited from a completed transaction as reentrant", async () => {
     const storage = new InMemoryStorage()
-    await queueTestActionRun(storage, {
-      id: "action-run",
-      projectId: "project",
-      actionId: "sendQuote",
-      subject: { kind: "none" },
-      params: {},
-      idempotencyKey: "action:action-run",
-    })
-    await storage.actionRuns.start({ id: "action-run", projectId: "project" })
+    const inheritedRun = await createTestActionRunRecord(
+      storage.executions,
+      actionRunInput("action-run")
+    )
+    const rolledBackRun = await createTestActionRunRecord(
+      storage.executions,
+      actionRunInput("rolled-back-run")
+    )
 
     let releaseInheritedWrite!: () => void
     const inheritedWriteGate = new Promise<void>((resolve) => {
@@ -501,13 +447,7 @@ describe("in-memory run root lock", () => {
     let inheritedWriteFinished = false
     await storage.transaction(() => {
       inheritedWrite = inheritedWriteGate
-        .then(() =>
-          storage.actionRuns.enterPhase({
-            id: "action-run",
-            projectId: "project",
-            phase: "effects",
-          })
-        )
+        .then(() => storage.actionRuns.record(inheritedRun))
         .then((record) => {
           inheritedWriteFinished = true
           return record
@@ -524,11 +464,7 @@ describe("in-memory run root lock", () => {
     })
     const failedTransaction = storage.transaction(async (tx) => {
       if (!tx.actionRuns) throw new Error("Expected Action run storage.")
-      await tx.actionRuns.enterPhase({
-        id: "action-run",
-        projectId: "project",
-        phase: "edits",
-      })
+      await tx.actionRuns.record(rolledBackRun)
       signalTransactionEntered()
       await transactionGate
       throw new Error("rollback")
@@ -545,7 +481,10 @@ describe("in-memory run root lock", () => {
     await inheritedWrite
     expect(
       await storage.actionRuns.getById({ projectId: "project", id: "action-run" })
-    ).toMatchObject({ phase: "effects" })
+    ).toMatchObject({ status: "succeeded" })
+    expect(
+      await storage.actionRuns.getById({ projectId: "project", id: "rolled-back-run" })
+    ).toBeNull()
   })
 
   test("allows inherited async work to open a transaction after its parent completed", async () => {

@@ -33,14 +33,14 @@ export const RequestActionBodySchema = z.object({
   runId: z.string().min(1).optional(),
 })
 
-/** A request reused the run id of a run that is still executing. */
+/** A request reused the run id of a run this server is still executing. */
 export const ActionRunInProgressResponseSchema = codedErrorResponseSchema([
   "action.run_in_progress",
 ])
 
 /**
  * An unexpected failure. It can follow a run that started: requesting the same `runId` again
- * returns the run's record.
+ * returns the run's record if it was written, and runs it again otherwise.
  */
 export const ActionRequestFailedResponseSchema = codedErrorResponseSchema(SIXB_ERROR_CODES)
 
@@ -66,13 +66,8 @@ export const ActionDetailSchema = ActionCatalogItemSchema.extend({
   inputSchema: z.record(z.unknown()),
 })
 
-export const ActionRunStatusSchema = z.enum([
-  "queued",
-  "running",
-  "succeeded",
-  "failed",
-  "cancelled",
-])
+/** How a run ended: a run is recorded once, when it ends. */
+export const ActionRunStatusSchema = z.enum(["succeeded", "failed"])
 
 export const ActionRunPhaseSchema = z.enum(ACTION_RUN_PHASES)
 
@@ -124,10 +119,10 @@ export const ActionRunSummarySchema = z.object({
   actionId: z.string(),
   subject: ActionSubjectSchema,
   status: ActionRunStatusSchema,
-  phase: ActionRunPhaseSchema.optional(),
-  queuedAt: z.string(),
-  startedAt: z.string().optional(),
-  finishedAt: z.string().optional(),
+  /** The last phase the run reached. */
+  phase: ActionRunPhaseSchema,
+  startedAt: z.string(),
+  finishedAt: z.string(),
   error: ActionRunFailureSchema.optional(),
 })
 
