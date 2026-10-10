@@ -4,6 +4,7 @@ import type { ConnectorRuntime } from "../connectors"
 import type { JsonPrimitive, JsonValue, ReadonlyJsonValue } from "../json"
 import type { Logger } from "../logging"
 import { type LanguageModelRef, MODEL_REASONING_LEVELS, type ModelReasoning } from "../models"
+import type { ModelsRuntime } from "../models/generation-types"
 import type { InferSchema } from "../ontology/inference"
 import type { Schema } from "../ontology/types"
 import type { ObjectReader } from "../runtime/types"
@@ -134,6 +135,7 @@ export type AgentToolResult = {
  */
 export interface AgentToolRuntimeFacade extends ObjectReader {
   readonly actions: ActionsRuntime
+  readonly models: ModelsRuntime
   readonly connector: ConnectorRuntime
 }
 

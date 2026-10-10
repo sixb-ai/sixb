@@ -43,9 +43,10 @@ unknown input usage and unresolved capacity. Inference is never retried here.
 replays accounting only, never inference; see the
 [worker recovery contract](../../../../agent-worker/docs/usage-accounting.md).
 
-Direct provider calls bypass this session. Webhook handlers have no bound model execution attempt;
-they must dispatch an action for accounted calls. A process crash before accounting is captured
-can still leave provider billing outside the ledger.
+An Agent run binds its own recorder to its SDK, so calls from its tools share the run's admission,
+failure state and cancellation. Direct provider calls bypass this session. Webhook handlers have no
+bound model execution attempt; they must dispatch an action for accounted calls. A process crash
+before accounting is captured can still leave provider billing outside the ledger.
 
 ## Reranking flow
 

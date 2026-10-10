@@ -34,6 +34,7 @@ export interface RunWorkflowAgentNodeInput {
   readonly prompt: string
   readonly valueTypesById: ReadonlyMap<string, ValueType>
   readonly usageRecorder: AiModelCallRecorder
+  /** Includes the node's deadline, which the caller also applies to its tools' model calls. */
   readonly signal: AbortSignal
 }
 
@@ -79,10 +80,8 @@ export async function runWorkflowAgentNode(
     }),
   })
 
-  const timeout = new AbortController()
-  const timer = setTimeout(() => timeout.abort(), input.context.turnTimeoutMs)
   const sandboxReadiness = monitorSandboxReadiness(input.context.sandboxReady)
-  const abortSignal = AbortSignal.any([input.signal, timeout.signal, sandboxReadiness.signal])
+  const abortSignal = AbortSignal.any([input.signal, sandboxReadiness.signal])
   const completedSteps: ModelStep[] = []
   const traceDetails = {
     agentStepId: input.agentStepId,
@@ -247,7 +246,5 @@ export async function runWorkflowAgentNode(
       trace: agentTraceFromModelSteps(completedSteps, traceDetails),
       cause,
     })
-  } finally {
-    clearTimeout(timer)
   }
 }
