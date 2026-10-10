@@ -18,8 +18,8 @@ import { knowledgeConnector } from "../connectors/knowledge"
 export const searchKnowledge = defineAgentTool("search_knowledge")
   .description("Search project knowledge.")
   .input({ query: "string" })
-  .run(async ({ input, signal, connector }) => {
-    const knowledge = await connector(knowledgeConnector)
+  .run(async ({ input, signal, sixb }) => {
+    const knowledge = await sixb.connector(knowledgeConnector)
     return knowledge.search(input.query, { signal })
   })
 ```
@@ -27,6 +27,50 @@ export const searchKnowledge = defineAgentTool("search_knowledge")
 The input schema validates arguments from the model. Return JSON-compatible data, and pass
 `signal` to requests that support cancellation. Resolving a [connector](../connectors/overview.md)
 in the handler keeps its credentials on the server.
+
+## Read project data
+
+The handler's `sixb` reads objects, telemetry, and datasets, and changes data through
+`sixb.actions`, which validate and record each change. It also offers `connector`. Object sets
+have the same reads as in a workflow step, without the writes. To return a file, publish it with
+`artifacts`. This tool finds a project by name:
+
+File: `agent-tools/find-project.ts`
+
+```ts
+import { defineAgentTool } from "@sixb/core"
+import { Project } from "../ontology/project"
+
+export const findProject = defineAgentTool("find_project")
+  .description("Find a project by name and return its budget.")
+  .input({ name: "string" })
+  .run(async ({ input, sixb }) => {
+    const project = await sixb
+      .objects(Project)
+      .query()
+      .where((p) => p.p.name.eq(input.name))
+      .first()
+    if (!project) return { found: false }
+    return { found: true, id: project.properties.id, budget: project.properties.budget ?? null }
+  })
+```
+
+Unlike a workflow step, which runs with trusted access, a tool acts with the permissions of the
+run that called it:
+
+| Run | Permissions |
+| --- | --- |
+| Chat | The signed-in user's. |
+| Child agent (delegation is currently disabled) | The parent chat's user's. |
+| Workflow AI task | Those granted through the step's `groups`. |
+
+The tool sees exactly what that requester may see: an object type or dataset they cannot view
+throws an `AuthorizationError`, and properties and columns [marked](../auth/markings.md) beyond
+their clearance are left out.
+
+A tool that requests an action runs it immediately. The agent asks the user to confirm a domain
+change before it requests one itself; actions a tool requests skip that confirmation, so request
+only changes the model may make on its own.
 
 ## Register the tool
 
@@ -47,7 +91,8 @@ export const sixb = createSixb({
 
 Project tools are available to the conversational agent. To use a tool in an
 [AI workflow step](../workflows/overview.md#add-an-ai-task), include it in that step's `tools`.
-Only expose operations and data that the tool's intended users should be able to access.
+Data read through `sixb` is already limited to the requester's permissions; also limit what the
+tool returns from connectors and other sources to what its users should see.
 
 ## Add a skill
 

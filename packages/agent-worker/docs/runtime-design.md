@@ -44,6 +44,12 @@ Workflow agent nodes cannot start another workflow, which bounds recursive execu
 object/link writes, telemetry append, workflow cancellation/interventions/node diagnostics, and
 infrastructure or administration routes remain outside the gateway.
 
+Project tools run in the worker, not the sandbox. Their `sixb` is the run's execution-bound SDK
+(the same authority the gateway resolves) narrowed to object, telemetry and dataset reads, actions
+and connectors. Like the gateway, it offers no generic data writes; without `workflows` it cannot
+open a way around the rule above. Tool authority is resolved once, at turn start, while the gateway
+re-resolves it on every request.
+
 Workflow run detail includes the run's top-level output after success. Agent gateway responses omit
 the route's internal node records, and only top-level input/output file paths are available.
 

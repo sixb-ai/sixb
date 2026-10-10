@@ -17,6 +17,7 @@
 import { objects } from "@sixb/client/query"
 import type {
   ActionReadFacade,
+  AgentToolRuntimeFacade,
   ObjectQueryBuilder,
   ObjectReader,
   ObjectTypeWithPropertyTokens,
@@ -27,6 +28,7 @@ import type {
 import { Contact, EmailMessage, EmailThread, Project } from "./ontology/correspondence"
 
 declare const workflow: WorkflowRuntimeFacade
+declare const tool: AgentToolRuntimeFacade
 declare const read: ActionReadFacade
 declare const sixb: Sixb
 
@@ -57,7 +59,7 @@ export function threadsQuery(messageId: string) {
   return threads
 }
 
-// ── One read helper for an Action, a Workflow step and the runtime ─────────
+// ── One read helper for an Action, a Workflow step, an Agent tool and the runtime ──
 
 function messagesToReview(reader: ObjectReader) {
   return reader
@@ -69,6 +71,7 @@ function messagesToReview(reader: ObjectReader) {
 export const sharedReads = [
   messagesToReview(read),
   messagesToReview(workflow),
+  messagesToReview(tool),
   messagesToReview(sixb),
 ]
 

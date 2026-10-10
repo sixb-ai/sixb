@@ -11,7 +11,7 @@ export type {
   ActionReadFacadeOptions,
   ActionTelemetryReadSource,
 } from "./read-facade"
-export { ActionReadRecorder, createActionReadFacade } from "./read-facade"
+export { ActionReadRecorder, createActionReadFacade, createObjectReadFacade } from "./read-facade"
 export type { ActionDefinitionCatalog, ActionRegistryOptions } from "./registry"
 export { ActionRegistry } from "./registry"
 export type {

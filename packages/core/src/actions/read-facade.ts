@@ -181,6 +181,31 @@ export function createActionReadFacade(
   }
 }
 
+/**
+ * Exposes `reader`'s reads and nothing else, such as to an agent tool: its object sets hold only
+ * their read methods, so not even a cast reaches the writes of the set behind them.
+ */
+export function createObjectReadFacade(
+  reader: ObjectReader,
+  telemetry: ActionTelemetryReadSource
+): ActionReadFacade {
+  return {
+    telemetry: createActionTelemetryReadFacade(telemetry),
+    objects<const TObjectType extends ObjectTypeWithPropertyTokens>(objectType: TObjectType) {
+      const objectSet = reader.objects(objectType)
+      return {
+        get: (id) => objectSet.get(id),
+        query: () => objectSet.query(),
+        list: (input) => objectSet.list(input),
+        byId(id) {
+          const handle = objectSet.byId(id)
+          return { get: () => handle.get(), listLinks: (link) => handle.listLinks(link) }
+        },
+      }
+    },
+  }
+}
+
 function createActionTelemetryReadFacade(
   source: ActionTelemetryReadSource | undefined
 ): ActionTelemetryReadFacade {

@@ -23,6 +23,7 @@ import {
 import type { AgentContextBudget } from "./context-budget"
 import { prepareAgentConversationContext } from "./context-compaction"
 import { AgentExecutionLostError } from "./errors"
+import { agentToolRuntime } from "./execution-context"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type AgentErrorDetails, modelToolsFromAgentDefinitions } from "./model-adapters"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
@@ -321,7 +322,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       definitions: plan.tools,
       valueTypesById: context.valueTypesById,
       run: input.toolRun,
-      connector: context.connector,
+      sixb: agentToolRuntime(context.sixb),
       logger,
       artifactsForToolCall,
       toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
