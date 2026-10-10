@@ -6,6 +6,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react"
 import { useAddressLookup } from "../../hooks/use-address-lookup"
 import type { AddressCoordinates, AddressProvider, AddressSuggestion } from "../../lib/address"
 import { formatAddress } from "../../lib/address"
+import { useUiMessages } from "../../lib/i18n/ui"
 import { cn } from "../../lib/utils"
 import { Input } from "../ui/input"
 import { Popover, PopoverAnchor, PopoverContent } from "../ui/popover"
@@ -58,7 +59,7 @@ export function AddressAutocomplete({
   onCancel,
   id,
   className,
-  placeholder = "Search for an address…",
+  placeholder,
   disabled = false,
   autoFocus,
   "aria-label": ariaLabel,
@@ -71,12 +72,13 @@ export function AddressAutocomplete({
   countries,
   proximity,
   bbox,
-  emptyLabel = "No addresses found.",
-  loadingLabel = "Searching addresses…",
+  emptyLabel,
+  loadingLabel,
   formatSelection = (suggestion) => formatAddress(suggestion),
   renderSuggestion,
   showAttribution = true,
 }: AddressAutocompleteProps) {
+  const messages = useUiMessages().address
   const generatedId = useId()
   const inputId = id ?? `${generatedId}-address`
   const listboxId = `${generatedId}-listbox`
@@ -213,7 +215,7 @@ export function AddressAutocomplete({
               onCommit?.(value)
             }}
             onKeyDown={onKeyDown}
-            placeholder={placeholder}
+            placeholder={placeholder ?? messages.placeholder}
             disabled={disabled}
             autoFocus={autoFocus}
             autoComplete="off"
@@ -241,7 +243,7 @@ export function AddressAutocomplete({
         onCloseAutoFocus={(event) => event.preventDefault()}
         className="w-[var(--radix-popover-trigger-width,var(--radix-popper-anchor-width))] overflow-hidden p-0"
       >
-        <div ref={listRef} id={listboxId} role="listbox" aria-label="Address suggestions">
+        <div ref={listRef} id={listboxId} role="listbox" aria-label={messages.suggestions}>
           {suggestions.length > 0 ? (
             <div className="max-h-72 overflow-y-auto p-1">
               {suggestions.map((suggestion, index) => (
@@ -284,7 +286,9 @@ export function AddressAutocomplete({
             </div>
           ) : (
             <p className="px-3 py-2.5 text-sm text-muted-foreground">
-              {loading ? loadingLabel : (error ?? emptyLabel)}
+              {loading
+                ? (loadingLabel ?? messages.loading)
+                : (error ?? emptyLabel ?? messages.empty)}
             </p>
           )}
 

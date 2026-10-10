@@ -6,11 +6,14 @@ import {
   AttachmentTitle,
   AttachmentTrigger,
 } from "@sixb/ui/components"
+import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { File as FileIcon, FileImage, FileText, Table2, X } from "lucide-react"
 import { useDocumentPreview } from "../document-preview/DocumentPreviewRoot"
 import { formatFileSize } from "../document-preview/file-size"
 import type { AgentDocumentSource } from "../document-preview/types"
+import { useAgentMessages } from "../i18n"
+import type { AgentMessages } from "../i18n/en"
 import type { AgentFileRef } from "../types"
 
 export function FileAttachmentCard({
@@ -23,10 +26,12 @@ export function FileAttachmentCard({
   readonly className?: string
 }) {
   const preview = useDocumentPreview()
-  const fileName = fileRef.fileName?.trim() || "File"
+  const messages = useAgentMessages().files
+  const locale = useLocale()
+  const fileName = fileRef.fileName?.trim() || messages.file
   const previewable = document !== undefined && preview?.canPreview(document) === true
   const selected = Boolean(document && previewable && preview?.activeDocumentId === document.id)
-  const mediaLabel = fileMediaLabel(fileRef.mediaType, fileName)
+  const mediaLabel = fileMediaLabel(fileRef.mediaType, fileName, messages)
   const { Icon, className: iconClassName } = fileIconPresentation(fileRef.mediaType, fileName)
 
   return (
@@ -48,7 +53,7 @@ export function FileAttachmentCard({
             onClick={() =>
               selected ? preview.closeDocument(document.id) : preview.openDocument(document)
             }
-            aria-label={selected ? `Close preview of ${fileName}` : `Preview ${fileName}`}
+            aria-label={selected ? messages.closePreview(fileName) : messages.preview(fileName)}
             aria-pressed={selected}
           />
         </AttachmentTrigger>
@@ -58,7 +63,7 @@ export function FileAttachmentCard({
             href={document.inlineUrl}
             target="_blank"
             rel="noreferrer"
-            aria-label={`Open ${fileName}`}
+            aria-label={messages.open(fileName)}
           />
         </AttachmentTrigger>
       ) : null}
@@ -70,7 +75,7 @@ export function FileAttachmentCard({
           {fileName}
         </AttachmentTitle>
         <AttachmentDescription className="text-xs" title={fileRef.digest}>
-          {mediaLabel} · {formatFileSize(fileRef.sizeBytes)}
+          {mediaLabel} · {formatFileSize(fileRef.sizeBytes, locale, messages)}
         </AttachmentDescription>
       </AttachmentContent>
       {selected ? (
@@ -85,7 +90,11 @@ export function FileAttachmentCard({
   )
 }
 
-function fileMediaLabel(mediaType: string | undefined, fileName: string): string {
+function fileMediaLabel(
+  mediaType: string | undefined,
+  fileName: string,
+  messages: AgentMessages["files"]
+): string {
   const normalized = mediaType?.trim().toLowerCase()
   const lowerName = fileName.toLowerCase()
   if (
@@ -93,15 +102,15 @@ function fileMediaLabel(mediaType: string | undefined, fileName: string): string
     normalized?.includes("csv") ||
     /\.(csv|tsv|xls|xlsx)$/i.test(lowerName)
   ) {
-    return "Spreadsheet"
+    return messages.spreadsheet
   }
-  if (normalized === "application/pdf" || lowerName.endsWith(".pdf")) return "PDF"
-  if (normalized?.startsWith("image/")) return "Image"
-  if (normalized === "text/markdown" || lowerName.endsWith(".md")) return "Markdown"
-  if (normalized === "text/plain" || lowerName.endsWith(".txt")) return "Text"
-  if (normalized?.startsWith("text/")) return "Document"
+  if (normalized === "application/pdf" || lowerName.endsWith(".pdf")) return messages.pdf
+  if (normalized?.startsWith("image/")) return messages.image
+  if (normalized === "text/markdown" || lowerName.endsWith(".md")) return messages.markdown
+  if (normalized === "text/plain" || lowerName.endsWith(".txt")) return messages.text
+  if (normalized?.startsWith("text/")) return messages.document
   if (normalized) return normalized
-  return "File"
+  return messages.file
 }
 
 function fileIconPresentation(mediaType: string | undefined, fileName: string) {

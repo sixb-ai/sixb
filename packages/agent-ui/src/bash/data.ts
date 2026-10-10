@@ -3,6 +3,7 @@
 // tests and re-used by `renderers.tsx`, which owns the JSX.
 
 import { formatRelativeTime } from "../format"
+import { type AgentMessages, en } from "../i18n/en"
 import { isRecord } from "./interpret"
 
 // `numberField` lives in the interpreter (the leaf module that owns `isRecord`); re-export it here so
@@ -79,13 +80,18 @@ export function seriesUnit(points: unknown): string | undefined {
 }
 
 /** The most-advanced timestamp on a run, phrased relatively. */
-export function runTiming(run: Record<string, unknown>): string {
+export function runTiming(
+  run: Record<string, unknown>,
+  messages: AgentMessages = en,
+  locale = "en"
+): string {
+  const ago = (iso: string) => formatRelativeTime(iso, locale, messages.time)
   const finished = stringField(run, "finishedAt")
-  if (finished) return `finished ${formatRelativeTime(finished)}`
+  if (finished) return messages.results.finishedAgo(ago(finished))
   const started = stringField(run, "startedAt")
-  if (started) return `started ${formatRelativeTime(started)}`
+  if (started) return messages.results.startedAgo(ago(started))
   const queued = stringField(run, "queuedAt")
-  return queued ? `queued ${formatRelativeTime(queued)}` : ""
+  return queued ? messages.results.queuedAgo(ago(queued)) : ""
 }
 
 /** Name + a short meta hint for properties/links/actions of an object-type definition. */
@@ -100,11 +106,13 @@ export function namedItems(value: unknown): Array<{ name: string; meta?: string 
   })
 }
 
-/** "3 properties · 1 link" from `[count, singular, plural]` triples, dropping the zero counts. */
-export function metaLine(parts: ReadonlyArray<readonly [number, string, string]>): string {
+/** "3 properties · 1 link" from `[count, format]` pairs, dropping the zero counts. */
+export function metaLine(
+  parts: ReadonlyArray<readonly [number, (count: number) => string]>
+): string {
   return parts
     .filter(([n]) => n > 0)
-    .map(([n, one, many]) => `${n} ${n === 1 ? one : many}`)
+    .map(([n, format]) => format(n))
     .join(" · ")
 }
 
@@ -120,10 +128,10 @@ export function arrayLen(value: unknown): number {
   return Array.isArray(value) ? value.length : 0
 }
 
-export function formatValue(value: unknown): string {
+export function formatValue(value: unknown, messages: AgentMessages["bash"] = en.bash): string {
   if (value === null || value === undefined || value === "") return "—"
   if (typeof value === "string") return value
-  if (typeof value === "number") return value.toLocaleString()
-  if (typeof value === "boolean") return value ? "Yes" : "No"
+  if (typeof value === "number") return messages.number(value)
+  if (typeof value === "boolean") return value ? messages.yes : messages.no
   return String(value)
 }

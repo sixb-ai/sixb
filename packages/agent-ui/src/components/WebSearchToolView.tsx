@@ -1,9 +1,11 @@
 import { Search } from "lucide-react"
+import { useAgentMessages } from "../i18n"
 import type { NormalizedTool } from "../parts"
 import { coerceWebSearchOutput, webSearchQuery } from "../utils/webSearch"
 import { ActivityStatusText } from "./ActivityStatus"
 
 export function WebSearchToolView({ tool }: { tool: NormalizedTool }) {
+  const messages = useAgentMessages().web
   const running = tool.state === "input-streaming" || tool.state === "input-available"
   const failed = tool.state === "output-error"
   const sources = coerceWebSearchOutput(tool.output)
@@ -14,22 +16,20 @@ export function WebSearchToolView({ tool }: { tool: NormalizedTool }) {
         <Search className="size-3.5 shrink-0" aria-hidden="true" />
         {running ? (
           <ActivityStatusText
-            label="Searching the web"
+            label={messages.searching}
             className="shimmer motion-reduce:animate-none"
           />
         ) : (
-          <span>{failed ? "Web search failed" : "Searched the web"}</span>
+          <span>{failed ? messages.searchFailed : messages.searched}</span>
         )}
         {!running && !failed && sources ? (
-          <span className="text-xs">
-            · {sources.length} {sources.length === 1 ? "result" : "results"}
-          </span>
+          <span className="text-xs">· {messages.results(sources.length)}</span>
         ) : null}
       </div>
       {query ? <p className="pl-5 break-words">{query}</p> : null}
       {failed ? (
         <p className="pl-5 whitespace-pre-wrap break-words">
-          {tool.errorText || "The search could not be completed."}
+          {tool.errorText || messages.searchError}
         </p>
       ) : null}
     </div>

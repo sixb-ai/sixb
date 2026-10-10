@@ -1,19 +1,23 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@sixb/ui/components"
 import { BookOpen, ChevronRight, FileText, type LucideIcon } from "lucide-react"
 import { ActivityStatusText } from "../components/ActivityStatus"
+import { useAgentMessages } from "../i18n"
 import type { NormalizedTool } from "../parts"
 import { coerceReadInput, coerceReadOutput, describeRead } from "./interpret"
 
 export function ReadToolView({ tool }: { tool: NormalizedTool }) {
+  const messages = useAgentMessages()
   const input = coerceReadInput(tool.input)
   const output = coerceReadOutput(tool.output)
-  const description = describeRead(input, output)
+  const description = describeRead(input, output, messages)
   const running = tool.state === "input-streaming" || tool.state === "input-available"
   const error = tool.state === "output-error"
   const Icon = description.skill ? BookOpen : FileText
   const label = error
-    ? `Couldn't read ${description.target}`
-    : `${running ? "Reading" : "Read"} ${description.target}`
+    ? description.failedTitle
+    : running
+      ? description.runningTitle
+      : description.title
 
   if (running || (description.skill && !error)) {
     return <ReadLine icon={Icon} label={label} detail={description.detail} running={running} />
@@ -39,13 +43,13 @@ export function ReadToolView({ tool }: { tool: NormalizedTool }) {
             </p>
           ) : null}
           {error ? (
-            <ReadBlock value={tool.errorText?.trim() || "The file could not be read."} />
+            <ReadBlock value={tool.errorText?.trim() || messages.read.error} />
           ) : output?.content ? (
             <ReadBlock value={output.content} />
           ) : output ? (
-            <p className="text-muted-foreground/60">This file is empty.</p>
+            <p className="text-muted-foreground/60">{messages.read.emptyFile}</p>
           ) : (
-            <p className="text-muted-foreground/60">No file content was returned.</p>
+            <p className="text-muted-foreground/60">{messages.read.noContent}</p>
           )}
         </div>
       </CollapsibleContent>

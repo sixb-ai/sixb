@@ -5,6 +5,7 @@ import { useCallback } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { AgentChat, type AgentChatProps } from "./AgentChat"
 import { useRegisteredAgentContext } from "./AgentContextProvider"
+import { useAgentMessages } from "./i18n"
 
 export type {
   AgentDocumentPreviewRenderer,
@@ -24,6 +25,7 @@ export function AgentChatPage({
   conversationHeaderActions,
   ...props
 }: AgentChatPageProps) {
+  const messages = useAgentMessages().surface
   const navigate = useNavigate()
   const registeredContext = useRegisteredAgentContext()
   const { threadId: routeThreadId } = useParams()
@@ -54,8 +56,8 @@ export function AgentChatPage({
               type="button"
               variant="ghost"
               size="icon-lg"
-              aria-label="Back to app"
-              title="Back to app"
+              aria-label={messages.backToApp}
+              title={messages.backToApp}
               onClick={() => navigate("/")}
             >
               <ArrowLeft />

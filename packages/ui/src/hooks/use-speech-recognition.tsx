@@ -2,6 +2,8 @@
 
 import type * as React from "react"
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { DEFAULT_LOCALE, useLocale } from "../lib/i18n/locale"
+import { useUiMessages } from "../lib/i18n/ui"
 import type { SpeechErrorCode, SpeechRecognizer, SpeechResult, SpeechSession } from "../lib/speech"
 import { appendDictationText, createWebSpeechRecognizer, speechErrorMessage } from "../lib/speech"
 
@@ -51,7 +53,10 @@ export type SpeechStatus = "idle" | "starting" | "listening" | "stopping"
 export type UseSpeechRecognitionOptions = {
   /** Overrides the recognizer from context. */
   readonly recognizer?: SpeechRecognizer
-  /** BCP 47 tag. Applies to the next session, not the running one. */
+  /**
+   * BCP 47 tag. Defaults to the interface locale (`en-US` in English). Applies to the next
+   * session, not the running one.
+   */
   readonly lang?: string
   readonly continuous?: boolean
   readonly interimResults?: boolean
@@ -97,8 +102,11 @@ export type SpeechRecognitionState = {
 export function useSpeechRecognition(
   options: UseSpeechRecognitionOptions = {}
 ): SpeechRecognitionState {
+  const locale = useLocale()
+  const messages = useUiMessages()
   const {
-    lang = DEFAULT_LANG,
+    // Listen in the interface language; English keeps the recognizer's historical default.
+    lang = locale === DEFAULT_LOCALE ? DEFAULT_LANG : locale,
     continuous = true,
     interimResults = true,
     maxAlternatives = 1,
@@ -110,7 +118,6 @@ export function useSpeechRecognition(
   const recognizer = useSpeechRecognizer(options.recognizer)
   const [supported, setSupported] = useState<boolean | null>(null)
   const [status, setStatus] = useState<SpeechStatus>("idle")
-  const [error, setError] = useState<string | null>(null)
   const [errorCode, setErrorCode] = useState<SpeechErrorCode | null>(null)
   const [isReceivingAudio, setIsReceivingAudio] = useState(false)
   const [transcript, setTranscript] = useState("")
@@ -180,11 +187,8 @@ export function useSpeechRecognition(
             if (sessionRef.current !== session) return
             lastErrorCodeRef.current = code
             setIsReceivingAudio(false)
-            const message = speechErrorMessage(code)
-            if (message) {
-              setError(message)
-              setErrorCode(code)
-            }
+            // The browser reports a deliberate stop as "aborted", which is not an error.
+            if (code !== "aborted") setErrorCode(code)
           },
           onEnd: () => {
             if (sessionRef.current !== session) return
@@ -217,7 +221,6 @@ export function useSpeechRecognition(
       handleRef.current = null
       setIsReceivingAudio(false)
       setStatus("idle")
-      setError(speechErrorMessage("unknown"))
       setErrorCode("unknown")
     }
   }, [recognizer])
@@ -261,7 +264,6 @@ export function useSpeechRecognition(
     stopRequestedRef.current = false
     lastErrorCodeRef.current = null
     silentRestartsRef.current = 0
-    setError(null)
     setErrorCode(null)
     setTranscript("")
     beginSessionRef.current()
@@ -279,7 +281,6 @@ export function useSpeechRecognition(
     } catch {
       handleRef.current = null
       setStatus("idle")
-      setError(speechErrorMessage("unknown"))
       setErrorCode("unknown")
     }
   }, [])
@@ -289,7 +290,6 @@ export function useSpeechRecognition(
   const reset = useCallback(() => {
     setTranscript("")
     setInterimTranscript("")
-    setError(null)
     setErrorCode(null)
   }, [])
 
@@ -300,7 +300,7 @@ export function useSpeechRecognition(
     isReceivingAudio,
     transcript,
     interimTranscript,
-    error,
+    error: errorCode === null ? null : speechErrorMessage(errorCode, messages.speech),
     errorCode,
     start,
     stop,

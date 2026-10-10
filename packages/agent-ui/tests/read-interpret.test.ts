@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { fr } from "../src/i18n/fr"
 import { coerceReadInput, coerceReadOutput, describeRead } from "../src/read/interpret"
 
 const output = {
@@ -22,20 +23,26 @@ describe("read tool presentation", () => {
   test("describes ordinary files with their range and continuation state", () => {
     expect(describeRead({ path: output.path }, output)).toEqual({
       path: "src/runtime.ts",
-      target: "runtime.ts",
+      title: "Read runtime.ts",
+      runningTitle: "Reading runtime.ts",
+      failedTitle: "Couldn't read runtime.ts",
       detail: "lines 4–5 · more available",
       skill: false,
+    })
+    expect(describeRead({ path: output.path }, output, fr)).toMatchObject({
+      runningTitle: "Lecture de runtime.ts",
+      detail: "lignes 4 à 5 · suite disponible",
     })
   })
 
   test("turns skill files into friendly private guide labels", () => {
     expect(describeRead({ path: ".sixb/agent/skills/sixb-actions/SKILL.md" }, null)).toMatchObject({
-      target: "the actions guide",
+      runningTitle: "Reading the actions guide",
       skill: true,
     })
     expect(
       describeRead({ path: ".sixb/agent/skills/sixb-query/references/query-api.md" }, null)
-    ).toMatchObject({ target: "the query api reference", skill: true })
+    ).toMatchObject({ title: "Read the query api reference", skill: true })
   })
 
   test("labels empty files without inventing a line range", () => {

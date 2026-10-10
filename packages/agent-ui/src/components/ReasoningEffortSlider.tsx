@@ -2,9 +2,9 @@ import type { ModelReasoningLevel } from "@sixb/core/models"
 import { cn } from "@sixb/ui/lib/utils"
 import { RotateCcw } from "lucide-react"
 import type { CSSProperties } from "react"
+import { useAgentMessages } from "../i18n"
 import { defaultReasoningLevel } from "../modelSelection"
 import type { LanguageModel } from "../types"
-import { reasoningLabel } from "./model-picker-labels"
 
 export function ReasoningEffortSlider({
   model,
@@ -20,6 +20,7 @@ export function ReasoningEffortSlider({
   /** Return to the model's default reasoning. Defaults to selecting that level. */
   onReset?: () => void
 }) {
+  const messages = useAgentMessages().reasoning
   const levels: readonly ModelReasoningLevel[] = model.reasoningLevels.filter(
     (level) => level !== "provider-default" && level !== "none" && level !== "minimal"
   )
@@ -33,25 +34,25 @@ export function ReasoningEffortSlider({
   return (
     <div>
       <div className="relative flex min-h-6 items-center justify-between gap-2 pr-8">
-        <span className="text-xs text-muted-foreground">Thinking</span>
+        <span className="text-xs text-muted-foreground">{messages.thinking}</span>
         <div className="min-w-0 text-center">
           <span
-            title={reasoningDescription(value)}
+            title={messages.descriptions[value]}
             className={cn(
               "text-sm font-medium",
               enhanced ? "text-[#007aff] dark:text-[#9ec3ee]" : "text-primary"
             )}
           >
             <span key={value} className="sixb-reasoning-label">
-              {reasoningLabel(value)}
+              {messages.levels[value]}
             </span>
           </span>
         </div>
         <button
           type="button"
           disabled={disabled || value === resetLevel}
-          aria-label="Reset reasoning effort"
-          title="Use model default"
+          aria-label={messages.reset}
+          title={messages.useDefault}
           onClick={() => {
             if (onReset) onReset()
             else if (resetLevel) onChange(resetLevel)
@@ -91,8 +92,8 @@ export function ReasoningEffortSlider({
           step={1}
           value={index}
           disabled={disabled}
-          aria-label="Reasoning effort"
-          aria-valuetext={`${reasoningLabel(value)}: ${reasoningDescription(value)}`}
+          aria-label={messages.effort}
+          aria-valuetext={`${messages.levels[value]}: ${messages.descriptions[value]}`}
           onChange={(event) => {
             const level = levels[Number(event.target.value)]
             if (level) onChange(level)
@@ -117,23 +118,4 @@ export function ReasoningEffortSlider({
       </div>
     </div>
   )
-}
-
-function reasoningDescription(level: ModelReasoningLevel): string {
-  switch (level) {
-    case "provider-default":
-      return "Use the model provider's default"
-    case "none":
-      return "Answer without extended reasoning"
-    case "minimal":
-    case "low":
-      return "Faster for straightforward work"
-    case "medium":
-      return "A balanced level for most tasks"
-    case "high":
-    case "xhigh":
-      return "More depth for complex tasks"
-    case "max":
-      return "Maximum reasoning depth for the hardest tasks"
-  }
 }

@@ -1,6 +1,8 @@
 import { MiniSparkline } from "@sixb/ui/components"
+import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { formatRelativeTime } from "../format"
+import { useAgentMessages } from "../i18n"
 import {
   arrayLen,
   extractObjects,
@@ -23,6 +25,7 @@ import {
   humanize,
   isRecord,
   type ParsedBashOutput,
+  runStatus,
   subjectLabel,
 } from "./interpret"
 
@@ -39,6 +42,7 @@ interface CommandViewProps {
 
 /** `sixb ontology list` — a calm two-column list of the live ontology. */
 export function ObjectTypesView({ parsed }: CommandViewProps) {
+  const counts = useAgentMessages().bash.counts
   const types = Array.isArray(parsed.json) ? parsed.json.filter(isRecord) : null
   if (!types) return <StructuredDataView parsed={parsed} />
 
@@ -54,9 +58,9 @@ export function ObjectTypesView({ parsed }: CommandViewProps) {
           ) : null}
           <p className="mt-0.5 text-[11px] text-muted-foreground/60">
             {metaLine([
-              [arrayLen(type.properties), "property", "properties"],
-              [arrayLen(type.links), "link", "links"],
-              [arrayLen(type.actions), "action", "actions"],
+              [arrayLen(type.properties), counts.properties],
+              [arrayLen(type.links), counts.links],
+              [arrayLen(type.actions), counts.actions],
             ])}
           </p>
         </div>
@@ -67,9 +71,10 @@ export function ObjectTypesView({ parsed }: CommandViewProps) {
 
 /** Sixb object list, lookup, search, and query results — a clean, separator-only table. */
 export function ObjectListView({ parsed }: CommandViewProps) {
+  const messages = useAgentMessages().results
   const objects = extractObjects(parsed.json)
   if (!objects) return <StructuredDataView parsed={parsed} />
-  if (objects.length === 0) return <Empty message="No matching objects." />
+  if (objects.length === 0) return <Empty message={messages.noMatchingObjects} />
 
   const columns = pickColumns(objects)
   const rows = objects.slice(0, MAX_ROWS)
@@ -133,6 +138,7 @@ export function ObjectDetailView({ parsed }: CommandViewProps) {
 
 /** `sixb objects facets` — a compact proportional breakdown. */
 export function FacetsView({ parsed }: CommandViewProps) {
+  const messages = useAgentMessages()
   const facets =
     isRecord(parsed.json) && Array.isArray(parsed.json.facets) ? parsed.json.facets : null
   if (!facets) return <StructuredDataView parsed={parsed} />
@@ -141,7 +147,7 @@ export function FacetsView({ parsed }: CommandViewProps) {
     (facet): facet is Record<string, unknown> =>
       isRecord(facet) && Array.isArray(facet.buckets) && facet.buckets.length > 0
   )
-  if (populated.length === 0) return <Empty message="No breakdown available." />
+  if (populated.length === 0) return <Empty message={messages.results.noBreakdown} />
 
   return (
     <div className="space-y-3">
@@ -151,7 +157,7 @@ export function FacetsView({ parsed }: CommandViewProps) {
         return (
           <div key={stringField(facet, "propertyId") ?? index}>
             <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/60">
-              {humanize(stringField(facet, "propertyId")) || "value"}
+              {humanize(stringField(facet, "propertyId")) || messages.results.value}
             </p>
             <div className="space-y-1">
               {buckets.map((bucket, bucketIndex) => {
@@ -159,7 +165,7 @@ export function FacetsView({ parsed }: CommandViewProps) {
                 return (
                   <div key={bucketIndex} className="flex items-center gap-2">
                     <span className="w-28 shrink-0 truncate text-foreground">
-                      {formatValue(bucket.value)}
+                      {formatValue(bucket.value, messages.bash)}
                     </span>
                     <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                       <span
@@ -168,7 +174,7 @@ export function FacetsView({ parsed }: CommandViewProps) {
                       />
                     </span>
                     <span className="w-8 shrink-0 text-right tabular-nums text-muted-foreground">
-                      {value.toLocaleString()}
+                      {messages.bash.number(value)}
                     </span>
                   </div>
                 )
@@ -183,18 +189,20 @@ export function FacetsView({ parsed }: CommandViewProps) {
 
 /** `sixb telemetry history` — latest value plus a clean sparkline. */
 export function TelemetryHistoryView({ parsed }: CommandViewProps) {
+  const messages = useAgentMessages().results
   const data = toSeriesData(parsed.json)
-  if (data.length === 0) return <Empty message="No readings." />
+  if (data.length === 0) return <Empty message={messages.noReadings} />
   return <SeriesChart data={data} unit={seriesUnit(parsed.json)} />
 }
 
 /** `sixb telemetry query` — one labeled sparkline per series. */
 export function TelemetryBulkView({ parsed }: CommandViewProps) {
+  const messages = useAgentMessages().results
   const series =
     isRecord(parsed.json) && Array.isArray(parsed.json.series)
       ? parsed.json.series.filter(isRecord)
       : null
-  if (!series || series.length === 0) return <Empty message="No series returned." />
+  if (!series || series.length === 0) return <Empty message={messages.noSeries} />
 
   return (
     <div className="space-y-4">
@@ -206,12 +214,12 @@ export function TelemetryBulkView({ parsed }: CommandViewProps) {
         return (
           <div key={index}>
             <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/60">
-              {label || `Series ${index + 1}`}
+              {label || messages.series(index + 1)}
             </p>
             {data.length > 0 ? (
               <SeriesChart data={data} unit={seriesUnit(entry.points)} />
             ) : (
-              <Empty message="No readings." />
+              <Empty message={messages.noReadings} />
             )}
           </div>
         )
@@ -222,6 +230,7 @@ export function TelemetryBulkView({ parsed }: CommandViewProps) {
 
 /** `sixb ontology get` — a single type's schema, in plain labeled sections. */
 export function ObjectTypeSchemaView({ parsed }: CommandViewProps) {
+  const messages = useAgentMessages().results
   const type = isRecord(parsed.json) ? parsed.json : null
   if (!type) return <StructuredDataView parsed={parsed} />
 
@@ -230,15 +239,18 @@ export function ObjectTypeSchemaView({ parsed }: CommandViewProps) {
       {stringField(type, "description") ? (
         <p className="text-muted-foreground">{stringField(type, "description")}</p>
       ) : null}
-      <SchemaSection label="Properties" items={namedItems(type.properties)} />
-      <SchemaSection label="Links" items={namedItems(type.links)} />
-      <SchemaSection label="Actions" items={namedItems(type.actions)} />
+      <SchemaSection label={messages.properties} items={namedItems(type.properties)} />
+      <SchemaSection label={messages.links} items={namedItems(type.links)} />
+      <SchemaSection label={messages.actions} items={namedItems(type.actions)} />
     </div>
   )
 }
 
 /** `sixb actions request` — a calm confirmation that a run was requested. */
 export function ActionResultView({ parsed }: CommandViewProps) {
+  const agentMessages = useAgentMessages()
+  const messages = agentMessages.results
+  const locale = useLocale()
   const result = isRecord(parsed.json) ? parsed.json : null
   const runId = result && typeof result.runId === "string" ? result.runId : null
   if (!runId) return <StructuredDataView parsed={parsed} />
@@ -249,11 +261,13 @@ export function ActionResultView({ parsed }: CommandViewProps) {
   return (
     <div className="space-y-1">
       <p className="text-foreground">
-        {created ? "Action requested." : "Action already in progress."}
+        {created ? messages.actionRequested : messages.actionInProgress}
       </p>
       <p className="text-[11px] text-muted-foreground/60">
-        Run <span className="font-mono text-muted-foreground">{runId}</span>
-        {queuedAt ? ` · queued ${formatRelativeTime(queuedAt)}` : ""}
+        {messages.run} <span className="font-mono text-muted-foreground">{runId}</span>
+        {queuedAt
+          ? ` · ${messages.queuedAgo(formatRelativeTime(queuedAt, locale, agentMessages.time))}`
+          : ""}
       </p>
     </div>
   )
@@ -269,6 +283,8 @@ const STATUS_DOT: Record<string, string> = {
 
 /** `sixb action-runs get` — the run's status, timing, and any error. */
 export function ActionRunView({ parsed }: CommandViewProps) {
+  const messages = useAgentMessages()
+  const locale = useLocale()
   const run = isRecord(parsed.json) ? parsed.json : null
   if (!run) return <StructuredDataView parsed={parsed} />
 
@@ -283,21 +299,27 @@ export function ActionRunView({ parsed }: CommandViewProps) {
         <span
           className={cn("size-2 shrink-0 rounded-full", STATUS_DOT[status] ?? STATUS_DOT.queued)}
         />
-        <span className="font-medium text-foreground">{capitalize(status)}</span>
-        {subject ? <span className="text-muted-foreground/60">on {subject}</span> : null}
-        <span className="ml-auto text-[11px] text-muted-foreground/60">{runTiming(run)}</span>
+        <span className="font-medium text-foreground">
+          {capitalize(runStatus({ status }, messages.bash) ?? status)}
+        </span>
+        {subject ? (
+          <span className="text-muted-foreground/60">{messages.results.onSubject(subject)}</span>
+        ) : null}
+        <span className="ml-auto text-[11px] text-muted-foreground/60">
+          {runTiming(run, messages, locale)}
+        </span>
       </div>
 
       {error ? (
         <p className="border-l-2 border-destructive/30 pl-3 text-destructive whitespace-pre-wrap">
-          {stringField(error, "message") ?? "The action failed."}
+          {stringField(error, "message") ?? messages.results.actionFailed}
         </p>
       ) : null}
 
       {params.length > 0 ? (
         <div>
           <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/60">
-            Inputs
+            {messages.results.inputs}
           </p>
           <PropertySheet entries={params.map(([key, value]) => [humanize(key) || key, value])} />
         </div>
@@ -311,12 +333,13 @@ export function GenericCommandView({
   parsed,
   command,
 }: CommandViewProps & { readonly command?: string }) {
+  const messages = useAgentMessages()
   return (
     <div className="space-y-2">
       {command ? (
         <pre className="overflow-x-auto rounded bg-muted/50 px-2 py-1.5 font-mono text-[11px] whitespace-pre-wrap text-muted-foreground">
           <span className="select-none text-muted-foreground/50">$ </span>
-          {commandPreview(command)}
+          {commandPreview(command, undefined, messages)}
         </pre>
       ) : null}
       {parsed.stdout.trim() ? (
@@ -324,7 +347,7 @@ export function GenericCommandView({
           {parsed.stdout}
         </pre>
       ) : (
-        <Empty message="No output." />
+        <Empty message={messages.results.noOutput} />
       )}
       {parsed.stderr.trim() ? (
         <pre className="scrollbar-thin max-h-40 overflow-auto rounded px-2 py-1.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-destructive">
@@ -332,7 +355,7 @@ export function GenericCommandView({
         </pre>
       ) : null}
       {parsed.truncated ? (
-        <p className="text-[11px] text-muted-foreground/60">Output truncated.</p>
+        <p className="text-[11px] text-muted-foreground/60">{messages.results.outputTruncated}</p>
       ) : null}
     </div>
   )
@@ -343,17 +366,18 @@ export function GenericCommandView({
  * list, objects a property sheet of their scalar fields. Never prints raw JSON in the reading path.
  */
 export function StructuredDataView({ parsed }: CommandViewProps) {
+  const messages = useAgentMessages().results
   const json = parsed.json
 
   if (Array.isArray(json)) {
     const items = json.filter(isRecord)
-    if (items.length === 0) return <Empty message="No items returned." />
+    if (items.length === 0) return <Empty message={messages.noItems} />
     return (
       <ul className="space-y-1.5">
         {items.slice(0, MAX_ROWS).map((item, index) => (
           <li key={index}>
             <span className="font-medium text-foreground">
-              {stringField(item, "name") ?? stringField(item, "id") ?? `Item ${index + 1}`}
+              {stringField(item, "name") ?? stringField(item, "id") ?? messages.item(index + 1)}
             </span>
             {stringField(item, "description") ? (
               <span className="ml-2 text-muted-foreground">{stringField(item, "description")}</span>
@@ -409,6 +433,8 @@ function PropertySheet({
 
 /** Latest reading + min/max framing a single sparkline. */
 function SeriesChart({ data, unit }: { data: readonly SeriesPoint[]; unit?: string }) {
+  const messages = useAgentMessages()
+  const locale = useLocale()
   const values = data.map((point) => point.value)
   const latest = data[data.length - 1]
   const min = Math.min(...values)
@@ -418,18 +444,18 @@ function SeriesChart({ data, unit }: { data: readonly SeriesPoint[]; unit?: stri
     <div className="space-y-1.5">
       <div className="flex items-baseline gap-2">
         <span className="text-xl font-semibold tabular-nums text-foreground">
-          {latest.value.toLocaleString()}
+          {messages.bash.number(latest.value)}
         </span>
         {unit ? <span className="text-muted-foreground">{unit}</span> : null}
         <span className="ml-auto text-[11px] text-muted-foreground/60">
-          {formatRelativeTime(latest.timestamp)}
+          {formatRelativeTime(latest.timestamp, locale, messages.time)}
         </span>
       </div>
       <MiniSparkline data={[...data]} width={560} height={48} showDot className="h-12 w-full" />
       {min !== max ? (
         <div className="flex justify-between text-[11px] tabular-nums text-muted-foreground/60">
-          <span>low {min.toLocaleString()}</span>
-          <span>high {max.toLocaleString()}</span>
+          <span>{messages.results.low(messages.bash.number(min))}</span>
+          <span>{messages.results.high(messages.bash.number(max))}</span>
         </div>
       ) : null}
     </div>
@@ -476,11 +502,10 @@ function ResultFooter({
   total: number | null
   hasMore: boolean
 }) {
+  const messages = useAgentMessages().results
   const label =
-    total !== null && total > shown
-      ? `Showing ${shown} of ${total.toLocaleString()}`
-      : `${shown} ${shown === 1 ? "result" : "results"}`
-  const suffix = hasMore && (total === null || total <= shown) ? " · more available" : ""
+    total !== null && total > shown ? messages.showing(shown, total) : messages.results(shown)
+  const suffix = hasMore && (total === null || total <= shown) ? ` · ${messages.moreAvailable}` : ""
   return <p className="mt-2 text-[11px] text-muted-foreground/60">{`${label}${suffix}`}</p>
 }
 
@@ -489,14 +514,15 @@ function Empty({ message }: { message: string }) {
 }
 
 function CellValue({ value }: { value: unknown }) {
+  const messages = useAgentMessages()
   if (value === null || value === undefined || value === "") {
     return <span className="text-muted-foreground/40">—</span>
   }
   if (typeof value === "number")
-    return <span className="tabular-nums">{value.toLocaleString()}</span>
-  if (typeof value === "boolean") return <span>{value ? "Yes" : "No"}</span>
+    return <span className="tabular-nums">{messages.bash.number(value)}</span>
+  if (typeof value === "boolean") return <span>{value ? messages.bash.yes : messages.bash.no}</span>
   if (typeof value === "string") return <span>{value}</span>
   if (Array.isArray(value))
-    return <span className="text-muted-foreground/60">{value.length} items</span>
+    return <span className="text-muted-foreground/60">{messages.results.items(value.length)}</span>
   return <span className="text-muted-foreground/60">…</span>
 }

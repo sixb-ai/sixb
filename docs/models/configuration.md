@@ -55,7 +55,7 @@ startup; if the provider later reports that the model does not support it, the c
 the provider default.
 
 Chat follows the project defaults until a user picks a model or an effort. Choosing a model starts
-from that model's default reasoning, and **Reset to default** forgets the choice, so later changes
+from that model's default reasoning, and **Reset** forgets the choice, so later changes
 to your defaults reach the user again. The chosen reasoning is fixed when a message is sent, so a
 retry runs with the same setting.
 

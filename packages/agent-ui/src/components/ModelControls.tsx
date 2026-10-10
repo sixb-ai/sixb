@@ -3,10 +3,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { ChevronDown, RotateCcw, Search, Shapes } from "lucide-react"
 import { useMemo, useState } from "react"
+import { useAgentMessages } from "../i18n"
+import type { AgentMessages } from "../i18n/en"
 import { defaultLanguageModel, defaultReasoningLevel } from "../modelSelection"
 import type { LanguageModel } from "../types"
 import { ModelPickerRow } from "./ModelPickerRow"
-import { reasoningLabel } from "./model-picker-labels"
 import { ProviderLogo } from "./ProviderLogo"
 import { ReasoningEffortSlider } from "./ReasoningEffortSlider"
 
@@ -40,9 +41,13 @@ export function ModelControls({
   usingDefault = false,
   onResetToDefault,
 }: ModelControlsProps) {
+  const agentMessages = useAgentMessages()
+  const messages = agentMessages.models
   const [modelOpen, setModelOpen] = useState(false)
   const defaultModel = defaultLanguageModel(models)
-  const defaultSummary = defaultModel ? modelSummary(defaultModel) : undefined
+  const defaultSummary = defaultModel
+    ? modelSummary(defaultModel, agentMessages.reasoning)
+    : undefined
   const [query, setQuery] = useState("")
   const normalizedQuery = query.trim().toLowerCase()
   const hasReasoning =
@@ -68,7 +73,7 @@ export function ModelControls({
           <button
             type="button"
             disabled={disabled || loading || models.length === 0}
-            aria-label="Choose model and reasoning effort"
+            aria-label={messages.choose}
             className={cn(
               "flex h-8 min-w-0 max-w-72 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground outline-none transition-colors",
               "hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40",
@@ -84,16 +89,22 @@ export function ModelControls({
             <span
               className="truncate text-foreground"
               title={
-                usingDefault && defaultSummary ? `Default · ${defaultSummary}` : selectedModel?.name
+                usingDefault && defaultSummary
+                  ? messages.defaultSummary(defaultSummary)
+                  : selectedModel?.name
               }
             >
-              {selectedModel ? selectedModel.name : error ? "Models unavailable" : "Default model"}
+              {selectedModel
+                ? selectedModel.name
+                : error
+                  ? messages.unavailable
+                  : messages.defaultModel}
             </span>
             {hasReasoning &&
             selectedReasoning !== "none" &&
             selectedReasoning !== "provider-default" ? (
               <span className="shrink-0 text-muted-foreground">
-                {reasoningLabel(selectedReasoning)}
+                {agentMessages.reasoning.levels[selectedReasoning]}
               </span>
             ) : null}
             <ChevronDown className="size-3.5 shrink-0 opacity-60" aria-hidden="true" />
@@ -104,7 +115,7 @@ export function ModelControls({
           side="top"
           sideOffset={10}
           collisionPadding={8}
-          aria-label="Model and reasoning effort"
+          aria-label={messages.popover}
           className="flex max-h-[var(--radix-popover-content-available-height)] w-72 max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl p-0 shadow-xl shadow-black/10"
         >
           {models.length > 5 ? (
@@ -113,8 +124,8 @@ export function ModelControls({
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search models"
-                aria-label="Search models"
+                placeholder={messages.search}
+                aria-label={messages.search}
                 className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
               />
             </div>
@@ -122,7 +133,7 @@ export function ModelControls({
           <div
             className="scrollbar-thin min-h-0 max-h-[min(22rem,50dvh)] space-y-0.5 overflow-y-auto p-1.5"
             role="group"
-            aria-label="Models"
+            aria-label={messages.list}
           >
             {visibleModels.map((model) => (
               <ModelPickerRow
@@ -135,7 +146,7 @@ export function ModelControls({
             ))}
             {visibleModels.length === 0 ? (
               <p className="px-3 py-8 text-center text-xs text-muted-foreground">
-                No matching models.
+                {messages.empty}
               </p>
             ) : null}
           </div>
@@ -151,22 +162,23 @@ export function ModelControls({
             </div>
           ) : null}
           {defaultSummary && onResetToDefault ? (
-            <div className="flex min-h-10 shrink-0 items-center gap-2 border-t border-border/60 px-4 py-1.5 text-xs">
+            <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-border/60 px-4 py-1.5 text-xs">
               {usingDefault ? (
-                <span className="shrink-0 text-muted-foreground">Default</span>
+                <span className="shrink-0 text-muted-foreground">{messages.default}</span>
               ) : (
                 <button
                   type="button"
                   disabled={disabled}
                   onClick={onResetToDefault}
+                  title={messages.defaultSummary(defaultSummary)}
                   className="-ml-2 flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 font-medium text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
                 >
                   <RotateCcw className="size-3.5" aria-hidden="true" />
-                  Reset to default
+                  {messages.resetToDefault}
                 </button>
               )}
               <span
-                className="min-w-0 flex-1 truncate text-right text-muted-foreground"
+                className="min-w-0 flex-1 basis-32 truncate text-right text-muted-foreground"
                 title={defaultSummary}
               >
                 {defaultSummary}
@@ -180,11 +192,11 @@ export function ModelControls({
 }
 
 /** "<model> · <level>", omitting a level the provider chooses. */
-function modelSummary(model: LanguageModel): string {
+function modelSummary(model: LanguageModel, messages: AgentMessages["reasoning"]): string {
   const reasoning = defaultReasoningLevel(model)
   return reasoning === undefined || reasoning === "provider-default"
     ? model.name
-    : `${model.name} · ${reasoningLabel(reasoning)}`
+    : `${model.name} · ${messages.levels[reasoning]}`
 }
 
 function sameModel(left: LanguageModel, right: LanguageModel | undefined): boolean {

@@ -1,16 +1,18 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@sixb/ui/components"
 import { ArrowUpRight, ChevronRight, Globe } from "lucide-react"
+import { useAgentMessages } from "../i18n"
 import type { NormalizedTool } from "../parts"
 import { coerceWebFetchOutput, webFetchUrl } from "../utils/webFetch"
 import { ActivityStatusText } from "./ActivityStatus"
 import { SourceFavicon } from "./WebSources"
 
 export function WebFetchToolView({ tool }: { tool: NormalizedTool }) {
+  const messages = useAgentMessages().web
   const running = tool.state === "input-streaming" || tool.state === "input-available"
   const failed = tool.state === "output-error"
   const source = coerceWebFetchOutput(tool.output)
   const url = webFetchUrl(tool.input)
-  const domain = source?.domain ?? url?.hostname.replace(/^www\./, "") ?? "web page"
+  const domain = source?.domain ?? url?.hostname.replace(/^www\./, "") ?? messages.webPage
   const favicon = source?.faviconUrl ?? (url ? new URL("/favicon.ico", url.origin).href : null)
 
   return (
@@ -26,12 +28,12 @@ export function WebFetchToolView({ tool }: { tool: NormalizedTool }) {
         <span className="min-w-0 flex-1">
           {running ? (
             <ActivityStatusText
-              label={`Reading ${domain}`}
+              label={messages.reading(domain)}
               className="shimmer motion-reduce:animate-none"
             />
           ) : (
             <span className="line-clamp-2 font-medium break-words">
-              {failed ? `Could not read ${domain}` : (source?.title ?? `Read ${domain}`)}
+              {failed ? messages.readFailed(domain) : (source?.title ?? messages.read(domain))}
             </span>
           )}
           {source && !running && !failed ? (
@@ -42,24 +44,22 @@ export function WebFetchToolView({ tool }: { tool: NormalizedTool }) {
       </CollapsibleTrigger>
       {failed ? (
         <p className="pl-[26px] whitespace-pre-wrap break-words">
-          {tool.errorText || "The page could not be read."}
+          {tool.errorText || messages.pageError}
         </p>
       ) : null}
       <CollapsibleContent className="space-y-2 pt-1 pl-[26px]">
         {source ? (
           <>
-            <p className="leading-relaxed break-words">
-              {source.excerpt || "No page text was returned."}
-            </p>
+            <p className="leading-relaxed break-words">{source.excerpt || messages.noPageText}</p>
             <a
               href={source.url}
               target="_blank"
               rel="noopener noreferrer"
               className="flex w-fit items-center gap-1 rounded text-xs font-medium underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-11"
             >
-              Open page
+              {messages.openPage}
               <ArrowUpRight className="size-3.5" aria-hidden="true" />
-              <span className="sr-only"> (opens in a new tab)</span>
+              <span className="sr-only">{messages.newTab}</span>
             </a>
           </>
         ) : null}

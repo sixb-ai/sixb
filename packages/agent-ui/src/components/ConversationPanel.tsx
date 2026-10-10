@@ -3,6 +3,7 @@ import { Button, Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { Plus } from "lucide-react"
 import type { ReactNode } from "react"
+import { useAgentMessages } from "../i18n"
 import type { LiveRunState } from "../liveRun"
 import type {
   Agent,
@@ -151,6 +152,7 @@ export function ConversationPanel({
   headerActions,
   sandboxRecovery,
 }: ConversationPanelProps) {
+  const labels = useAgentMessages()
   const name = agent?.name ?? "Agent"
   // Optimistic activity (a just-sent message or a live run) takes over the pane immediately, so the
   // brief durable-message load never flashes a centered "Loading…".
@@ -220,7 +222,7 @@ export function ConversationPanel({
             variant="ghost"
             size="icon-lg"
             onClick={onNewChat}
-            aria-label="New thread"
+            aria-label={labels.threads.new}
             className="[&_svg]:size-5"
           >
             <Plus />
@@ -246,7 +248,7 @@ export function ConversationPanel({
           <div className="relative flex min-h-0 flex-1 flex-col">
             {messagesLoading && !hasActivity ? (
               <div className="flex flex-1 items-center justify-center">
-                <LoadingInline label="Loading conversation…" />
+                <LoadingInline label={labels.chat.loadingConversation} />
               </div>
             ) : messagesError && !hasActivity ? (
               <div className="flex flex-1 items-center justify-center px-6 text-center">

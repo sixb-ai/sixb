@@ -13,6 +13,8 @@ import { AlertTriangle, ArrowRight, ChevronRight, Clock3, RotateCcw } from "luci
 import { memo } from "react"
 import { createAgentDocumentSource } from "../document-preview/source"
 import type { AgentDocumentSource } from "../document-preview/types"
+import { useAgentMessages } from "../i18n"
+import type { AgentMessages } from "../i18n/en"
 import { isAwaitingFirstToken, type LiveRunState } from "../liveRun"
 import { normalizeDurableParts } from "../parts"
 import type {
@@ -62,6 +64,7 @@ function UserMessage({ message }: { message: AgentMessage }) {
 }
 
 function AssistantMessage({ message }: { message: AgentMessage }) {
+  const messages = useAgentMessages()
   return (
     <div className="flex flex-col gap-2">
       {message.compaction ? <CompactionResult summary={message.compaction.summary} /> : null}
@@ -91,7 +94,7 @@ function AssistantMessage({ message }: { message: AgentMessage }) {
           </MarkerIcon>
           <MarkerContent>
             {annotation.path ? `${annotation.path}: ` : ""}
-            {annotation.message}
+            {diagnosticMessage(annotation.code, messages.diagnostics)}
           </MarkerContent>
         </Marker>
       ))}
@@ -100,10 +103,11 @@ function AssistantMessage({ message }: { message: AgentMessage }) {
 }
 
 function CompactionResult({ summary }: { summary: string }) {
+  const messages = useAgentMessages().transcript
   return (
     <Collapsible className="max-w-full">
       <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-[13px] leading-normal text-muted-foreground outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-        <span>Condensed conversation</span>
+        <span>{messages.condensed}</span>
         <ChevronRight className="size-4 shrink-0 opacity-0 transition-[transform,opacity] group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -135,6 +139,7 @@ export function LiveAssistant({
   retrying?: boolean
   continuing?: boolean
 }) {
+  const messages = useAgentMessages().transcript
   if (live.compacting && live.parts.length === 0) {
     return <CompactionMarker />
   }
@@ -178,27 +183,27 @@ export function LiveAssistant({
   return (
     <div className="flex flex-col gap-2">
       <AssistantBody parts={live.parts} live={live.active || keepWorkOpen} />
-      {live.finishStatus === "failed" ? (
-        <RunErrorMarker message="I couldn’t finish that response." />
-      ) : null}
+      {live.finishStatus === "failed" ? <RunErrorMarker message={messages.notFinished} /> : null}
       {live.finishStatus === "cancelled" ? <RunCancelledMarker /> : null}
     </div>
   )
 }
 
 export function CompactionMarker() {
+  const messages = useAgentMessages().transcript
   return (
-    <Marker role="status" aria-label="Agent is condensing earlier conversation">
-      <MarkerContent className="shimmer">Condensing earlier conversation…</MarkerContent>
+    <Marker role="status" aria-label={messages.condensingLabel}>
+      <MarkerContent className="shimmer">{messages.condensing}</MarkerContent>
     </Marker>
   )
 }
 
 export function ThinkingMarker({ takingLonger = false }: { takingLonger?: boolean }) {
+  const messages = useAgentMessages().transcript
   return (
-    <div className={ACTIVITY_STATUS_ROW_CLASS_NAME} role="status" aria-label="Agent is working">
+    <div className={ACTIVITY_STATUS_ROW_CLASS_NAME} role="status" aria-label={messages.working}>
       <ActivityStatusText
-        label={takingLonger ? "Taking a little longer" : "Thinking"}
+        label={takingLonger ? messages.takingLonger : messages.thinking}
         className="shimmer"
       />
     </div>
@@ -206,7 +211,8 @@ export function ThinkingMarker({ takingLonger = false }: { takingLonger?: boolea
 }
 
 export function RunCancelledMarker() {
-  return <p className="text-sm text-muted-foreground">Stopped.</p>
+  const messages = useAgentMessages().transcript
+  return <p className="text-sm text-muted-foreground">{messages.stopped}</p>
 }
 
 export function RunTimeoutMarker({
@@ -224,7 +230,8 @@ export function RunTimeoutMarker({
   retrying?: boolean
   continuing?: boolean
 }) {
-  const limit = formatTurnTimeout(timeoutMs)
+  const messages = useAgentMessages().transcript
+  const limit = formatTurnTimeout(timeoutMs, messages)
   return (
     <div className="flex flex-wrap items-center gap-2" role="status">
       <Marker className="text-amber-700 dark:text-amber-400">
@@ -232,21 +239,19 @@ export function RunTimeoutMarker({
           <Clock3 className="text-amber-600 dark:text-amber-400" />
         </MarkerIcon>
         <MarkerContent>
-          {hasProgress
-            ? `Stopped after reaching ${limit}.`
-            : `The response reached ${limit} before producing an answer.`}
+          {hasProgress ? messages.stoppedAtLimit(limit) : messages.limitBeforeAnswer(limit)}
         </MarkerContent>
       </Marker>
       {hasProgress && onContinue ? (
         <Button size="sm" onClick={onContinue} disabled={continuing}>
           <ArrowRight aria-hidden="true" />
-          {continuing ? "Continuing…" : "Continue"}
+          {continuing ? messages.continuing : messages.continue}
         </Button>
       ) : null}
       {!hasProgress && onRetry ? (
         <Button variant="outline" size="sm" onClick={onRetry} disabled={retrying}>
           <RotateCcw aria-hidden="true" />
-          {retrying ? "Retrying…" : "Try again"}
+          {retrying ? messages.retrying : messages.tryAgain}
         </Button>
       ) : null}
     </div>
@@ -260,13 +265,14 @@ export function RunFailureMarker({
   onRetry?: () => void
   retrying?: boolean
 }) {
+  const messages = useAgentMessages().transcript
   return (
     <div className="flex flex-wrap items-center gap-2" role="status">
-      <p className="text-sm text-muted-foreground">I couldn’t get a response started.</p>
+      <p className="text-sm text-muted-foreground">{messages.notStarted}</p>
       {onRetry ? (
         <Button variant="outline" size="sm" onClick={onRetry} disabled={retrying}>
           <RotateCcw aria-hidden="true" />
-          {retrying ? "Retrying…" : "Retry"}
+          {retrying ? messages.retrying : messages.retry}
         </Button>
       ) : null}
     </div>
@@ -275,9 +281,10 @@ export function RunFailureMarker({
 
 /** Shown while an active run's stream has dropped and the client is re-subscribing. */
 export function ReconnectingMarker() {
+  const messages = useAgentMessages().transcript
   return (
-    <Marker role="status" aria-label="Reconnecting to the agent stream">
-      <MarkerContent className="shimmer">Connection lost — reconnecting…</MarkerContent>
+    <Marker role="status" aria-label={messages.reconnectingLabel}>
+      <MarkerContent className="shimmer">{messages.reconnecting}</MarkerContent>
     </Marker>
   )
 }
@@ -303,22 +310,27 @@ export function RunErrorMarker({ message }: { message: string }) {
   )
 }
 
-function formatTurnTimeout(timeoutMs: number | undefined): string {
-  if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    return "the configured turn limit"
-  }
+function formatTurnTimeout(
+  timeoutMs: number | undefined,
+  messages: AgentMessages["transcript"]
+): string {
+  if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) return messages.turnLimit
   const units = [
     { label: "hour", ms: 60 * 60_000 },
     { label: "minute", ms: 60_000 },
     { label: "second", ms: 1_000 },
   ] as const
   for (const unit of units) {
-    if (timeoutMs % unit.ms === 0) {
-      const amount = timeoutMs / unit.ms
-      return `the ${amount}-${unit.label} turn limit`
-    }
+    if (timeoutMs % unit.ms === 0) return messages.turnLimitOf(timeoutMs / unit.ms, unit.label)
   }
-  return "the configured turn limit"
+  return messages.turnLimit
+}
+
+/** Diagnostics carry a stable code; their English `message` is for developers and logs. */
+function diagnosticMessage(code: string, messages: AgentMessages["diagnostics"]): string {
+  return Object.hasOwn(messages, code)
+    ? messages[code as keyof AgentMessages["diagnostics"]]
+    : messages.unknown
 }
 
 function textOf(message: AgentMessage): string {

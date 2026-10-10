@@ -2,7 +2,17 @@ import { Button, buttonVariants } from "@sixb/ui/components/ui/button"
 import { cn } from "@sixb/ui/lib/utils"
 import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
 import * as React from "react"
-import { type DayButton, DayPicker, getDefaultClassNames } from "react-day-picker"
+import {
+  type DayButton,
+  DayPicker,
+  type DayPickerLocale,
+  getDefaultClassNames,
+} from "react-day-picker"
+import { enUS } from "react-day-picker/locale/en-US"
+import { fr } from "react-day-picker/locale/fr"
+import { type SupportedLanguage, supportedLanguage, useMessageLocale } from "../../lib/i18n/locale"
+
+const DAY_PICKER_LOCALES: Record<SupportedLanguage, DayPickerLocale> = { en: enUS, fr }
 
 function Calendar({
   className,
@@ -17,9 +27,12 @@ function Calendar({
   buttonVariant?: React.ComponentProps<typeof Button>["variant"]
 }) {
   const defaultClassNames = getDefaultClassNames()
+  // Day and month names are words: they follow the language of the rest of the interface.
+  const locale = useMessageLocale()
 
   return (
     <DayPicker
+      locale={DAY_PICKER_LOCALES[supportedLanguage(locale) ?? "en"]}
       showOutsideDays={showOutsideDays}
       className={cn(
         "group/calendar bg-background p-3 [--cell-size:--spacing(8)] [[data-slot=card-content]_&]:bg-transparent [[data-slot=popover-content]_&]:bg-transparent",
@@ -29,7 +42,7 @@ function Calendar({
       )}
       captionLayout={captionLayout}
       formatters={{
-        formatMonthDropdown: (date) => date.toLocaleString("default", { month: "short" }),
+        formatMonthDropdown: (date) => date.toLocaleString(locale, { month: "short" }),
         ...formatters,
       }}
       classNames={{

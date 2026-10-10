@@ -138,8 +138,8 @@ console.log(result.textContent + "|" + window.document.documentElement.lang)
       expect(execution.exitCode, execution.stderr).toBe(0)
       expect(execution.stdout.trim()).toBe(`(212) 555-1234|+12125551234|${value}|true|fr-FR`)
     }
-    // Regression proof for the document language: drop ProjectLanguage from the generated App;
-    // the document keeps no language because the HTML was built without the project.
+    // Regression proof for the document language: drop the project fetch from the generated
+    // startApp; the document keeps no language because the HTML was built without the project.
     // Regression proof for public env: remove the publicEnv export or runtime read and this
     // fails to bundle or loses the value captured before the page module evaluates.
     // On Bun 1.4.2, removing sideEffects: false also breaks the workspace-path build by
