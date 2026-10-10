@@ -135,7 +135,7 @@ ${SEARCH_DETAILS}
 
 export const QUERY_HELP = `Usage:
   sixb objects query --file <path|-> [--include-total|--no-total]
-  sixb objects query --example <exact|filter|incoming|expand|sort|page|vector>
+  sixb objects query --example <name>
   sixb objects query --example list
 
 Input is a query node. A full {"query": ...} request is also accepted.
@@ -146,12 +146,26 @@ Query nodes compose through input:
   filter    {"kind":"filter","input":<query>,"predicate":<predicate>}
   text      {"kind":"text","input":<query>,"query":"words","fields":["name"]}
   traverse  {"kind":"traverse","input":<query>,"linkId":"link","direction":"outgoing"}
+  set       {"kind":"set","op":"union","inputs":[<query>,<query>]}  op: union, intersect, subtract
+  sort      {"kind":"sort","input":<query>,"fields":[{"kind":"property","propertyId":"name","direction":"asc"}]}
+  limit     {"kind":"limit","input":<query>,"limit":${CLI_LIMITS.list.default}}
+  page      {"kind":"page","input":<query>,"pageSize":${CLI_LIMITS.list.default},"pageToken":"from nextPageToken"}
+  project   {"kind":"project","input":<query>,"properties":["name","status"]}
+  expand    {"kind":"expand","input":<query>,"expansions":[{"linkId":"link","direction":"outgoing","limit":5}]}
   vector    {"kind":"vector","input":<start|filter>,"vector":"text","profile":"name","k":10}
-  set, sort, limit, page, project, and expand are also supported.
+  rerank    {"kind":"rerank","input":<vector>,"model":{"provider":"provider","modelId":"model"}}
 
 Predicates use op, not kind:
-  and/or, not, {"op":"eq","propertyId":"status","value":"open"}, neq, lt, lte, gt, gte,
-  in, exists, and contains.
+  {"op":"and","items":[<predicate>,<predicate>]}  or: same shape
+  {"op":"not","item":<predicate>}
+  {"op":"eq","propertyId":"status","value":"open"}  neq, lt, lte, gt, gte: same shape
+  {"op":"in","propertyId":"status","values":["open","blocked"]}
+  {"op":"exists","propertyId":"dueDate","value":true}
+  {"op":"contains","propertyId":"tags","value":"urgent"}
+
+Every field shown is required except includeSubtypes, fields, pageToken, properties, a sort
+direction, and an expansion's limit. Sort by relevance after text or vector with
+{"kind":"relevance"}. Wrap the outermost node in project to return only the properties you need.
 
 Traversal and expansion directions are outgoing or incoming. For incoming relationships, the link
 is declared on the child/source type; add sourceObjectTypeId when needed to disambiguate it.
@@ -227,6 +241,11 @@ export const QUERY_EXAMPLES: Readonly<Record<string, string>> = {
   exact:
     '{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]}',
   filter: `{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"eq","propertyId":"status","value":"active"}},"limit":${CLI_LIMITS.list.default}}`,
+  and: `{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"and","items":[{"op":"eq","propertyId":"status","value":"active"},{"op":"gte","propertyId":"createdAt","value":"2026-01-01T00:00:00Z"}]}},"limit":${CLI_LIMITS.list.default}}`,
+  not: `{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"not","item":{"op":"eq","propertyId":"status","value":"churned"}}},"limit":${CLI_LIMITS.list.default}}`,
+  in: `{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"in","propertyId":"status","values":["active","trial"]}},"limit":${CLI_LIMITS.list.default}}`,
+  exists: `{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"exists","propertyId":"accountManager","value":false}},"limit":${CLI_LIMITS.list.default}}`,
+  project: `{"kind":"project","input":{"kind":"limit","input":{"kind":"start","objectTypeId":"Customer"},"limit":${CLI_LIMITS.list.default}},"properties":["name","status"]}`,
   incoming:
     '{"kind":"traverse","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment"}',
   expand: `{"kind":"expand","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"expansions":[{"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment","limit":${CLI_LIMITS.list.default}}]}`,
