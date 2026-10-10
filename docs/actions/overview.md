@@ -123,14 +123,16 @@ Return JSON-compatible values or no value from `.writeback()`. For example, retu
 string timestamp rather than an SDK client or `Date` instance. An action can use `.writeback()`
 without `.edits()` when it only needs to call an external system.
 
-External calls are not part of the local atomic commit. A successful API call cannot be rolled
-back by Sixb if the later edit fails. Make calls safe to repeat, using `run.idempotencyKey` with
-an external API that supports idempotency.
+External calls are not part of the local atomic commit, and Sixb cannot undo one that succeeded.
+Once `.writeback()` succeeds, the run always goes on to its edits and commit, even past its
+[time limit](#request-an-action); an error thrown by `.edits()` still fails the run and leaves the
+external change unrecorded. Pass `run.idempotencyKey` to the external API, as above, so that a call
+retried after a lost response applies once.
 
 For notifications or other work after saving, add `.effects()` after `.edits()`. Its handler gets
 `writeback` and `commit`, which describes the saved changes. An effects error is recorded in
-`run.effects`; it does not undo the edits or make the committed action fail. Make these calls safe
-to repeat as well.
+`run.effects`; it does not undo the edits or make the committed action fail. Pass
+`run.idempotencyKey` to these calls as well.
 
 The order is `validate` → `writeback` → `edits` → `effects`. Only add the handlers you need, with
 at least `.writeback()` or `.edits()`. Sixb emits the corresponding [events](../websockets/overview.md)
@@ -184,9 +186,11 @@ to the projection.
 
 ## Concurrent changes
 
-If data the action read through `read` changes before the commit, nothing is committed and the
-run fails with [`action.read_conflict`](../errors/overview.md#error-catalog). Request a new run;
-if the action has a `.writeback()`, its external call already ran.
+If data the action read through `read` changes before the commit, Sixb runs `.edits()` again
+against the new data. An action without a writeback also reruns `.validate()`; one with a writeback
+reuses its result and never calls the external system twice. After three conflicting attempts,
+nothing is committed and the run fails with [`action.read_conflict`](../errors/overview.md#error-catalog).
+Request a new run; if the action has a `.writeback()`, its external call already ran.
 
 | Checked | Not checked |
 | --- | --- |
@@ -195,6 +199,37 @@ if the action has a `.writeback()`, its external call already ran.
 | `listLinks()` | Telemetry history |
 
 To depend on an object not existing yet, give it a deterministic ID and read it with `get()`.
+
+## Request an action
+
+`sixb.actions.request()`, and `requestAction()` on an object handle, run the action in the
+requesting process and return its finished run:
+
+```ts
+const run = await sixb.objects(Invoice).byId("inv-1").requestAction({
+  action: markPaid,
+  params: {},
+})
+if (run.status === "failed") {
+  console.error(run.error?.message)
+}
+```
+
+A run that fails comes back with `status: "failed"` and its `error`; it is not thrown. The call
+throws when no run was requested, such as for an unknown action, invalid params, or a missing
+permission. It can also throw `internal.unexpected` after a run started, when that run's record
+cannot be returned: request it again with the same `runId` to get the record.
+
+Pass a `runId` to make a request safe to retry. A repeated request with that `runId` returns the
+run once it has finished, without running the action again, and fails with
+[`action.run_in_progress`](../errors/overview.md#error-catalog) while it still runs.
+
+A run has 30 seconds to get through validation and a successful writeback, or through validation
+and edits when it has no writeback. A run that runs out of time before then stops, commits nothing,
+and fails with [`action.timeout`](../errors/overview.md#error-catalog); if its writeback was cut
+short, check the external system before requesting a new run. Handlers receive a `signal` that
+aborts at the limit: forward it to the calls they await so they stop in time. Effects get 30 more
+seconds after the commit. Move longer work into a [workflow](../workflows/overview.md).
 
 ## Use your action
 
