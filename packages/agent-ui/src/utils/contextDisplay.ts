@@ -1,9 +1,14 @@
 import { type AgentContextInput, agentContextIdentity } from "@sixb/core/agents/context"
+import { en } from "../i18n/en"
 
-export function agentContextLabel(context: AgentContextInput): string {
+/** `unnamed` labels an object type id with no readable words, in the reader's language. */
+export function agentContextLabel(
+  context: AgentContextInput,
+  unnamed: string = en.context.unnamed
+): string {
   if (context.kind === "app-state") return context.label
 
-  const typeLabel = displayWords(context.ref.objectTypeId)
+  const typeLabel = displayWords(context.ref.objectTypeId) || unnamed
   const primaryId = stripObjectTypePrefix(context.ref.primaryId, context.ref.objectTypeId)
   const parts = primaryId.split(/[:/]+/).filter(Boolean)
   while (parts.length > 1 && looksOpaque(parts.at(-1) ?? "")) parts.pop()
@@ -32,7 +37,7 @@ function stripObjectTypePrefix(primaryId: string, objectTypeId: string): string 
 
 function displayWords(value: string): string {
   const words = splitWords(value)
-  if (words.length === 0) return "Context"
+  if (words.length === 0) return ""
   const label = words.join(" ")
   return label.charAt(0).toUpperCase() + label.slice(1)
 }

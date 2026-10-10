@@ -68,6 +68,12 @@
       "import": "./dist/lib/address/index.js",
       "default": "./dist/lib/address/index.js"
     },
+    "./lib/i18n": {
+      "types": "./dist/lib/i18n/index.d.ts",
+      "bun": "./src/lib/i18n/index.ts",
+      "import": "./dist/lib/i18n/index.js",
+      "default": "./dist/lib/i18n/index.js"
+    },
     "./lib/speech": {
       "types": "./dist/lib/speech/index.d.ts",
       "bun": "./src/lib/speech/index.ts",

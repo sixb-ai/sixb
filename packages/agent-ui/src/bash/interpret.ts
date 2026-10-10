@@ -2,6 +2,7 @@
 // stable CLI command tree, so the UI only needs to tokenize one command and identify its group and
 // operation. Plain shell commands and the initial skill read keep neutral fallbacks.
 
+import { type AgentMessages, en } from "../i18n/en"
 import { commandInvocation, executableName, lexShellCommand, type ShellSegment } from "./shell"
 
 /** The bash tool input as authored by the agent. */
@@ -256,23 +257,36 @@ interface BashDescription {
   readonly detail?: string
 }
 
-export function describeBash(intent: BashIntent, parsed: ParsedBashOutput | null): BashDescription {
+/** A past-tense and a progressive headline, as the catalogs pair them. */
+interface Headline<TArgs extends unknown[] = []> {
+  readonly title: string | ((...args: TArgs) => string)
+  readonly running: string | ((...args: TArgs) => string)
+}
+
+export function describeBash(
+  intent: BashIntent,
+  parsed: ParsedBashOutput | null,
+  messages: AgentMessages = en
+): BashDescription {
+  const m = messages.bash
   if (intent.kind === "compound") {
-    const primary = describeBash(intent.primary, parsed)
-    if (primary.runningTitle !== "Running a command") return primary
-    const steps = `${intent.stepCount.toLocaleString()} steps`
-    return icon("terminal", `Ran ${steps}`, `Running ${steps}`)
+    const primary = describeBash(intent.primary, parsed, messages)
+    if (primary.runningTitle !== m.command.running) return primary
+    return icon("terminal", m.steps, intent.stepCount)
   }
-  if (intent.kind === "sixb") return describeSixb(intent, parsed)
+  if (intent.kind === "sixb") return describeSixb(intent, parsed, messages)
   if (intent.kind === "read-skill") {
-    const label = skillLabel(intent)
-    return icon("skill", `Read the ${label}`, `Reading the ${label}`)
+    if (intent.reference) return icon("skill", m.skillReference, referenceTitle(intent.reference))
+    if (intent.skillName) {
+      return icon("skill", m.skillGuide, humanize(intent.skillName.replace(/^sixb-/, "")))
+    }
+    return icon("skill", m.skill)
   }
-  return describeGenericCommand(intent.command)
+  return describeGenericCommand(intent.command, m)
 }
 
 type GenericCommandCategory =
-  | { readonly kind: "write-file"; readonly fileKind: string }
+  | { readonly kind: "write-file"; readonly fileKind: WrittenFileKind }
   | {
       readonly kind:
         | "edit-files"
@@ -287,31 +301,31 @@ type GenericCommandCategory =
         | "unknown"
     }
 
-function describeGenericCommand(command: string): BashDescription {
+function describeGenericCommand(command: string, m: AgentMessages["bash"]): BashDescription {
   const category = genericCommandCategory(command)
   switch (category.kind) {
     case "write-file":
-      return icon("terminal", `Created ${category.fileKind}`, `Creating ${category.fileKind}`)
+      return icon("terminal", m.writeFile, m.fileKinds[category.fileKind])
     case "edit-files":
-      return icon("terminal", "Edited files", "Editing files")
+      return icon("terminal", m.editFiles)
     case "search-files":
-      return icon("terminal", "Searched files", "Searching files")
+      return icon("terminal", m.searchFiles)
     case "run-tests":
-      return icon("terminal", "Ran tests", "Running tests")
+      return icon("terminal", m.runTests)
     case "create-folder":
-      return icon("terminal", "Created a folder", "Creating a folder")
+      return icon("terminal", m.createFolder)
     case "copy-files":
-      return icon("terminal", "Copied files", "Copying files")
+      return icon("terminal", m.copyFiles)
     case "move-files":
-      return icon("terminal", "Moved files", "Moving files")
+      return icon("terminal", m.moveFiles)
     case "inspect-files":
-      return icon("terminal", "Inspected files", "Inspecting files")
+      return icon("terminal", m.inspectFiles)
     case "workspace-location":
-      return icon("terminal", "Checked the workspace location", "Checking the workspace location")
+      return icon("terminal", m.workspaceLocation)
     case "read-file":
-      return icon("terminal", "Read a file", "Reading a file")
+      return icon("terminal", m.readFile)
     default:
-      return icon("terminal", "Ran a command", "Running a command")
+      return icon("terminal", m.command)
   }
 }
 
@@ -353,12 +367,14 @@ function leadingExecutable(firstLine: string): string | undefined {
   return executableName(match?.[1])
 }
 
+type WrittenFileKind = keyof AgentMessages["bash"]["fileKinds"]
+
 function writtenFileKind(
   command: string,
   firstLine: string,
   segment: ShellSegment | undefined,
   invocation: readonly string[]
-): string | null {
+): WrittenFileKind | null {
   const executable = executableName(invocation[0]) ?? leadingExecutable(firstLine)
   if (!executable || !["cat", "tee", "printf", "echo"].includes(executable)) return null
 
@@ -375,233 +391,171 @@ function writtenFileKind(
   ).toLowerCase()
   if (!target) return null
   if (/<!doctype\s+html|<html(?:\s|>)/i.test(command) || /\.html?$/.test(target)) {
-    return "an HTML file"
+    return "html"
   }
-  if (/\.json$/.test(target)) return "a JSON file"
-  if (/\.(?:md|mdx)$/.test(target)) return "a Markdown file"
-  if (/\.(?:csv|tsv)$/.test(target)) return "a data file"
-  return "a file"
+  if (/\.json$/.test(target)) return "json"
+  if (/\.(?:md|mdx)$/.test(target)) return "markdown"
+  if (/\.(?:csv|tsv)$/.test(target)) return "data"
+  return "file"
 }
 
 /** A stable one-line command preview. Multiline payloads stay folded behind the raw disclosure. */
-export function commandPreview(command: string, max = 96): string {
+export function commandPreview(command: string, max = 96, messages: AgentMessages = en): string {
   const lines = command.trim().split(/\r?\n/)
   const firstLine = truncateEnd(lines[0]?.trim() ?? "", max)
   if (lines.length <= 1) return firstLine
-  const remaining = lines.length - 1
-  return `${firstLine}\n… ${remaining.toLocaleString()} more ${remaining === 1 ? "line" : "lines"}`
+  return `${firstLine}\n${messages.bash.moreLines(lines.length - 1)}`
 }
 
 function describeSixb(
   intent: Extract<BashIntent, { kind: "sixb" }>,
-  parsed: ParsedBashOutput | null
+  parsed: ParsedBashOutput | null,
+  messages: AgentMessages
 ): BashDescription {
+  const m = messages.bash
+  const counts = m.counts
   const type = commandObjectType(intent, parsed)
   switch (intent.command) {
-    case "help": {
-      const subject = helpSubject(intent.args)
-      return icon("skill", `Checked ${subject}`, `Checking ${subject}`)
-    }
+    case "help":
+      return icon("skill", m.help, m.helpSubjects[helpSubject(intent.args)])
     case "version":
-      return icon("terminal", "Checked the Sixb version", "Checking the Sixb version")
+      return icon("terminal", m.version)
     case "doctor":
-      return icon("terminal", "Checked the agent runtime", "Checking the agent runtime")
+      return icon("terminal", m.doctor)
     case "context":
-      return icon("project", "Read the run context", "Reading the run context")
-    case "ontology.list": {
-      const n = arrayLength(parsed?.json)
-      return icon(
-        "ontology",
-        "Explored the ontology",
-        "Exploring the ontology",
-        count(n, "object type")
+      return icon("project", m.runContext)
+    case "ontology.list":
+      return withDetail(
+        icon("ontology", m.ontology),
+        count(arrayLength(parsed?.json), counts.objectTypes)
       )
-    }
     case "ontology.get":
-      return icon(
-        "ontology",
-        `Inspected the ${humanize(intent.args[0]) || "object"} type`,
-        `Inspecting the ${humanize(intent.args[0]) || "object"} type`
+      return icon("ontology", m.objectType, humanize(intent.args[0]))
+    case "objects.inspect":
+      return withDetail(
+        icon("object", m.inspectObject, intent.args[1] ?? ""),
+        graphDetail(parsed?.json, counts)
       )
-    case "objects.inspect": {
-      const objectId = intent.args[1] ?? "object"
-      return icon(
-        "object",
-        `Inspected ${objectId}`,
-        `Inspecting ${objectId}`,
-        graphDetail(parsed?.json)
-      )
-    }
     case "objects.list":
     case "objects.get":
     case "objects.search":
     case "objects.query": {
       const n = objectCount(parsed?.json)
-      const label = humanize(type) || "object"
-      const title = n === null ? "Queried objects" : `Found ${count(n, label)}`
-      return icon("objects", title, `Looking up ${plural(label)}`)
+      const label = humanize(type)
+      return {
+        icon: "objects",
+        title: n === null ? m.queriedObjects : m.foundObjects(n, label),
+        runningTitle: m.lookingUp(label),
+      }
     }
     case "objects.query-example":
-      return icon("skill", "Read a query example", "Reading a query example")
+      return icon("skill", m.queryExample)
     case "objects.count": {
       const value = numberField(parsed?.json, "count")
-      // Singular base — `plural()` adds the suffix, so "objects" here would become "objectses".
-      const label = humanize(type) || "object"
-      return icon(
-        "count",
-        `Counted ${plural(label)}`,
-        `Counting ${plural(label)}`,
-        value === null ? undefined : value.toLocaleString()
+      return withDetail(
+        icon("count", m.countObjects, humanize(type)),
+        value === null ? undefined : m.number(value)
       )
     }
     case "objects.exists": {
       const value = boolField(parsed?.json, "exists")
-      return icon(
-        "count",
-        "Checked for matches",
-        "Checking for matches",
-        value === null ? undefined : value ? "Yes" : "No"
-      )
+      return withDetail(icon("count", m.exists), value === null ? undefined : value ? m.yes : m.no)
     }
     case "objects.facets":
-      return icon("facets", "Broke down the data", "Breaking down the data")
-    case "objects.links": {
-      const n = nestedArrayLength(parsed?.json, "links")
-      return icon(
-        "objects",
-        `Read links for ${intent.args[1] ?? "an object"}`,
-        `Reading links for ${intent.args[1] ?? "an object"}`,
-        count(n, "link")
+      return icon("facets", m.facets)
+    case "objects.links":
+      return withDetail(
+        icon("objects", m.links, intent.args[1] ?? ""),
+        count(nestedArrayLength(parsed?.json, "links"), counts.links)
       )
-    }
     case "telemetry.latest":
-      return icon(
-        "telemetry",
-        `Read latest ${humanize(intent.args[2]) || "telemetry"}`,
-        `Reading latest ${humanize(intent.args[2]) || "telemetry"}`,
-        latestReading(parsed?.json)
+      return withDetail(
+        icon("telemetry", m.latestTelemetry, humanize(intent.args[2])),
+        latestReading(parsed?.json, m)
       )
-    case "telemetry.history": {
-      const n = arrayLength(parsed?.json)
-      return icon(
-        "telemetry",
-        `Read ${humanize(intent.args[2]) || "telemetry"} history`,
-        `Reading ${humanize(intent.args[2]) || "telemetry"} history`,
-        count(n, "point")
+    case "telemetry.history":
+      return withDetail(
+        icon("telemetry", m.telemetryHistory, humanize(intent.args[2])),
+        count(arrayLength(parsed?.json), counts.points)
       )
-    }
-    case "telemetry.query": {
-      const n = seriesCount(parsed?.json)
-      return icon(
-        "telemetry",
-        "Compared telemetry series",
-        "Comparing telemetry series",
-        n === null ? undefined : `${n} series`
+    case "telemetry.query":
+      return withDetail(
+        icon("telemetry", m.telemetryQuery),
+        count(seriesCount(parsed?.json), counts.series)
       )
-    }
-    case "actions.list": {
-      const n = arrayLength(parsed?.json)
-      return icon(
-        "actions",
-        "Listed available actions",
-        "Listing available actions",
-        count(n, "action")
+    case "actions.list":
+      return withDetail(
+        icon("actions", m.listActions),
+        count(arrayLength(parsed?.json), counts.actions)
       )
-    }
     case "actions.get":
-      return icon(
-        "actions",
-        `Inspected the ${humanize(intent.args[0]) || "action"} action`,
-        `Inspecting the ${humanize(intent.args[0]) || "action"} action`
-      )
+      return icon("actions", m.inspectAction, humanize(intent.args[0]))
     case "actions.request":
-      return icon(
-        "actions",
-        `Ran the ${humanize(intent.args[0]) || "requested"} action`,
-        `Running the ${humanize(intent.args[0]) || "requested"} action`,
-        actionOutcome(parsed?.json)
+      return withDetail(
+        icon("actions", m.requestAction, humanize(intent.args[0])),
+        actionOutcome(parsed?.json, m)
       )
     case "action-runs.get": {
       const run = actionRunInfo(parsed?.json)
-      return icon("actions", actionRunTitle(run), "Checking the action run", run.subjectLabel)
+      return {
+        icon: "actions",
+        title: actionRunTitle(run, m),
+        runningTitle: m.actionRun.checking,
+        detail: run.subjectLabel,
+      }
     }
-    case "action-runs.list": {
-      const n = arrayLength(parsed?.json)
-      return icon("actions", "Listed action runs", "Listing action runs", count(n, "run"))
-    }
-    case "workflows.list": {
-      const n = arrayLength(parsed?.json)
-      return icon("actions", "Listed workflows", "Listing workflows", count(n, "workflow"))
-    }
+    case "action-runs.list":
+      return withDetail(
+        icon("actions", m.listActionRuns),
+        count(arrayLength(parsed?.json), counts.runs)
+      )
+    case "workflows.list":
+      return withDetail(
+        icon("actions", m.listWorkflows),
+        count(arrayLength(parsed?.json), counts.workflows)
+      )
     case "workflows.get":
-      return icon(
-        "actions",
-        `Inspected the ${humanize(intent.args[0]) || "workflow"} workflow`,
-        `Inspecting the ${humanize(intent.args[0]) || "workflow"} workflow`
-      )
+      return icon("actions", m.inspectWorkflow, humanize(intent.args[0]))
     case "workflows.start":
-      return icon(
-        "actions",
-        `Started the ${humanize(intent.args[0]) || "requested"} workflow`,
-        `Starting the ${humanize(intent.args[0]) || "requested"} workflow`,
-        runOutcome(parsed?.json)
+      return withDetail(
+        icon("actions", m.startWorkflow, humanize(intent.args[0])),
+        runOutcome(parsed?.json, m)
       )
-    case "workflow-runs.list": {
-      const n = arrayLength(parsed?.json)
-      return icon("actions", "Listed workflow runs", "Listing workflow runs", count(n, "run"))
-    }
+    case "workflow-runs.list":
+      return withDetail(
+        icon("actions", m.listWorkflowRuns),
+        count(arrayLength(parsed?.json), counts.runs)
+      )
     case "workflow-runs.get":
-      return icon(
-        "actions",
-        "Checked a workflow run",
-        "Checking a workflow run",
-        runStatus(parsed?.json)
-      )
+      return withDetail(icon("actions", m.workflowRun), runStatus(parsed?.json, m))
     case "files.upload":
-      return icon("object", "Uploaded a file", "Uploading a file", filePath(parsed?.json))
+      return withDetail(icon("object", m.upload), filePath(parsed?.json))
     case "files.download":
-      return icon("object", "Downloaded a file", "Downloading a file", filePath(parsed?.json))
+      return withDetail(icon("object", m.download), filePath(parsed?.json))
     case "project.show":
-      return icon("project", "Read project info", "Reading project info")
+      return icon("project", m.project)
     case "api.get":
     case "api.post":
-      return icon("terminal", "Called the Sixb API", "Calling the Sixb API", intent.args[0])
+      return withDetail(icon("terminal", m.api), intent.args[0])
     default:
-      return icon(
-        "terminal",
-        "Ran a Sixb command",
-        "Running a Sixb command",
-        truncateMiddle(intent.args.join(" "), 64)
-      )
+      return withDetail(icon("terminal", m.sixbCommand), truncateMiddle(intent.args.join(" "), 64))
   }
 }
 
-function helpSubject(args: readonly string[]): string {
+function helpSubject(args: readonly string[]): keyof AgentMessages["bash"]["helpSubjects"] {
   const group = args.find((value) => !value.startsWith("-"))
   switch (group) {
     case "objects":
-      return "how to work with project data"
     case "ontology":
-      return "the project data model"
     case "telemetry":
-      return "how to work with telemetry"
     case "actions":
-      return "available actions"
     case "workflows":
-      return "available workflows"
     case "files":
-      return "how to work with files"
     case "project":
-      return "project information"
+      return group
     default:
-      return "available project operations"
+      return "other"
   }
-}
-
-function skillLabel(intent: Extract<BashIntent, { kind: "read-skill" }>): string {
-  if (intent.reference) return `${referenceTitle(intent.reference)} reference`
-  if (intent.skillName) return `${humanize(intent.skillName.replace(/^sixb-/, ""))} guide`
-  return "skill guide"
 }
 
 function referenceTitle(reference: string): string {
@@ -610,25 +564,23 @@ function referenceTitle(reference: string): string {
 
 // --- Small helpers ---------------------------------------------------------
 
-function icon(
+/** Resolve a catalog headline, passing `args` to its functions. */
+function icon<TArgs extends unknown[]>(
   iconName: BashIcon,
-  title: string,
-  runningTitle: string,
-  detail?: string
+  headline: Headline<TArgs>,
+  ...args: TArgs
 ): BashDescription {
-  return { icon: iconName, title, runningTitle, detail }
+  const text = (value: Headline<TArgs>["title"]) =>
+    typeof value === "string" ? value : value(...args)
+  return { icon: iconName, title: text(headline.title), runningTitle: text(headline.running) }
 }
 
-function count(n: number | null, noun: string): string | undefined {
-  if (n === null) return undefined
-  return n === 1 ? `1 ${noun}` : `${n.toLocaleString()} ${plural(noun)}`
+function withDetail(description: BashDescription, detail: string | undefined): BashDescription {
+  return detail === undefined ? description : { ...description, detail }
 }
 
-function plural(noun: string): string {
-  if (!noun) return noun
-  if (/(s|x|z|ch|sh)$/.test(noun)) return `${noun}es`
-  if (/[^aeiou]y$/.test(noun)) return `${noun.slice(0, -1)}ies`
-  return `${noun}s`
+function count(n: number | null, format: (n: number) => string): string | undefined {
+  return n === null ? undefined : format(n)
 }
 
 /** camelCase / PascalCase / kebab / snake → space-separated lowercase words. */
@@ -665,21 +617,21 @@ function optionValue(args: readonly string[], option: string): string | undefine
   return index === -1 ? undefined : args[index + 1]
 }
 
-function graphDetail(value: unknown): string | undefined {
+function graphDetail(value: unknown, counts: AgentMessages["bash"]["counts"]): string | undefined {
   if (!isRecord(value) || !isRecord(value.graph)) return undefined
   const objectCount = numberField(value.graph, "objectCount")
   const linkCount = numberField(value.graph, "linkCount")
-  const parts = [count(objectCount, "object"), count(linkCount, "link")].filter(Boolean)
+  const parts = [count(objectCount, counts.objects), count(linkCount, counts.links)].filter(Boolean)
   return parts.join(" · ") || undefined
 }
 
 /** A single latest telemetry point's value, e.g. "1,240 rpm". */
-function latestReading(value: unknown): string | undefined {
+function latestReading(value: unknown, m: AgentMessages["bash"]): string | undefined {
   if (!isRecord(value)) return undefined
   const reading = value.value
   const text =
     typeof reading === "number"
-      ? reading.toLocaleString()
+      ? m.number(reading)
       : typeof reading === "string" || typeof reading === "boolean"
         ? String(reading)
         : undefined
@@ -692,20 +644,24 @@ function seriesCount(value: unknown): number | null {
 }
 
 /** The outcome word for a queued action request. */
-function actionOutcome(value: unknown): string | undefined {
+function actionOutcome(value: unknown, m: AgentMessages["bash"]): string | undefined {
   if (!isRecord(value)) return undefined
-  if (typeof value.runId === "string") return value.created === false ? "already queued" : "queued"
+  if (typeof value.runId === "string") return value.created === false ? m.alreadyQueued : m.queued
   return undefined
 }
 
-function runOutcome(value: unknown): string | undefined {
+function runOutcome(value: unknown, m: AgentMessages["bash"]): string | undefined {
   if (!isRecord(value)) return undefined
-  if (typeof value.runId === "string" || typeof value.id === "string") return "queued"
-  return runStatus(value)
+  if (typeof value.runId === "string" || typeof value.id === "string") return m.queued
+  return runStatus(value, m)
 }
 
-function runStatus(value: unknown): string | undefined {
-  return isRecord(value) && typeof value.status === "string" ? humanize(value.status) : undefined
+/** A run status in words; statuses Sixb does not know yet are shown as they are. */
+export function runStatus(value: unknown, m: AgentMessages["bash"] = en.bash): string | undefined {
+  if (!isRecord(value) || typeof value.status !== "string") return undefined
+  return Object.hasOwn(m.statuses, value.status)
+    ? m.statuses[value.status as keyof typeof m.statuses]
+    : humanize(value.status)
 }
 
 function filePath(value: unknown): string | undefined {
@@ -751,21 +707,9 @@ export function subjectLabel(subject: unknown): string | undefined {
   return [objectTypeId, primaryId].filter(Boolean).join(" ") || undefined
 }
 
-function actionRunTitle(run: ActionRunInfo): string {
-  if (!run.status) return "Checked an action run"
-  const name = run.actionId ? capitalize(humanize(run.actionId)) : "Action"
-  switch (run.status) {
-    case "succeeded":
-      return `${name} succeeded`
-    case "failed":
-      return `${name} failed`
-    case "running":
-      return `Running ${run.actionId ? humanize(run.actionId) : "action"}`
-    case "cancelled":
-      return `${name} cancelled`
-    default:
-      return `${name} queued`
-  }
+function actionRunTitle(run: ActionRunInfo, m: AgentMessages["bash"]): string {
+  if (!run.status) return m.actionRun.checked
+  return m.actionRun[run.status](humanize(run.actionId))
 }
 
 export function capitalize(value: string): string {

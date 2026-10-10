@@ -19,6 +19,7 @@ import {
 import { MODEL_REASONING_LEVELS, type ModelReasoningLevel } from "@sixb/core/models"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
+import { useAgentMessages } from "../i18n"
 import {
   type ModelPreference,
   preferenceWithoutReasoning,
@@ -71,6 +72,7 @@ export function useAgentConversation({
   embedded = false,
   onThreadCreated,
 }: UseAgentConversationInput) {
+  const labels = useAgentMessages().chat
   const queryClient = useQueryClient()
   const agentQuery = useQuery(getAgentOptions())
   const modelsQuery = useQuery(listModelsOptions())
@@ -288,7 +290,7 @@ export function useAgentConversation({
       }))
       setSendError({
         threadId: createdThreadId ?? targetThreadId,
-        message: "Couldn't send your message. Please try again.",
+        message: labels.sendFailed,
       })
       if (createdThreadId) onThreadCreated(createdThreadId)
       if (targetThreadId !== null) {
@@ -348,7 +350,7 @@ export function useAgentConversation({
       setPendingSend({ run: response.run })
       await refreshThread(threadId)
     } catch {
-      setSendError({ threadId, message: "Couldn't send your message. Please try again." })
+      setSendError({ threadId, message: labels.sendFailed })
     }
   }
 
@@ -434,8 +436,7 @@ export function useAgentConversation({
     agentThreads,
     messages,
     messagesLoading: threadId !== null && messagesQuery.isLoading,
-    messagesError:
-      threadId !== null && messagesQuery.isError ? "Could not load this conversation." : null,
+    messagesError: threadId !== null && messagesQuery.isError ? labels.messagesLoadFailed : null,
     live,
     reconnecting,
     pendingUser: pendingUserForThread,

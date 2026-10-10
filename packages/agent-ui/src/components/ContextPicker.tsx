@@ -2,6 +2,7 @@ import { type AgentContextInput, agentContextIdentity } from "@sixb/core/agents/
 import { Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { Search } from "lucide-react"
+import { useAgentMessages } from "../i18n"
 
 export interface ContextPickerResult {
   readonly context: AgentContextInput
@@ -27,6 +28,7 @@ export function ContextPicker({
   onActiveIndexChange,
   onSelect,
 }: ContextPickerProps) {
+  const messages = useAgentMessages().context
   const hasQuery = query.length > 0
 
   return (
@@ -39,13 +41,13 @@ export function ContextPicker({
           : "pointer-events-none invisible translate-y-1 scale-[0.985] opacity-0"
       )}
       role="listbox"
-      aria-label="Add context"
+      aria-label={messages.add}
       aria-hidden={!open}
     >
       <div className="flex min-h-12 items-center gap-2 px-3 text-sm">
         <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-muted-foreground">
-          {hasQuery ? `Search results for “${query}”` : "Type after @ to search objects…"}
+          {hasQuery ? messages.results(query) : messages.hint}
         </span>
         {loading && hasQuery ? <Spinner className="size-3.5 text-muted-foreground" /> : null}
       </div>
@@ -71,13 +73,13 @@ export function ContextPicker({
             >
               <span className="min-w-0 flex-1 truncate">{result.label}</span>
               <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                {result.context.kind === "object" ? result.context.ref.objectTypeId : "Page"}
+                {result.context.kind === "object" ? result.context.ref.objectTypeId : messages.page}
               </span>
             </button>
           ))
         ) : hasQuery ? (
           <p className="border-t border-border/60 px-3 py-3 text-sm text-muted-foreground">
-            {loading ? "Searching…" : `No objects found for “${query}”`}
+            {loading ? messages.searching : messages.empty(query)}
           </p>
         ) : null}
       </div>

@@ -1,4 +1,5 @@
 import { humanize } from "../bash/interpret"
+import { type AgentMessages, en } from "../i18n/en"
 
 export interface ReadInput {
   readonly path: string
@@ -15,7 +16,9 @@ export interface ReadOutput {
 
 export interface ReadDescription {
   readonly path: string
-  readonly target: string
+  readonly title: string
+  readonly runningTitle: string
+  readonly failedTitle: string
   readonly detail?: string
   readonly skill: boolean
 }
@@ -49,33 +52,44 @@ export function coerceReadOutput(value: unknown): ReadOutput | null {
   }
 }
 
-export function describeRead(input: ReadInput | null, output: ReadOutput | null): ReadDescription {
+export function describeRead(
+  input: ReadInput | null,
+  output: ReadOutput | null,
+  messages: AgentMessages = en
+): ReadDescription {
+  const m = messages.read
   const path = output?.path ?? input?.path ?? ""
-  const skillTarget = describeSkillPath(path)
+  const skill = describeSkillPath(path)
+  const target = skill ? m[skill.kind] : m.file
+  const name = skill?.name ?? fileName(path)
   return {
     path,
-    target: skillTarget ?? fileName(path) ?? "a file",
-    ...(output ? { detail: readDetail(output) } : {}),
-    skill: skillTarget !== null,
+    title: target.title(name),
+    runningTitle: target.running(name),
+    failedTitle: target.failed(name),
+    ...(output ? { detail: readDetail(output, m) } : {}),
+    skill: skill !== null,
   }
 }
 
-function describeSkillPath(path: string): string | null {
+function describeSkillPath(
+  path: string
+): { readonly kind: "reference" | "guide"; readonly name: string } | null {
   const match = path.match(
     /(?:^|\/)\.sixb\/agent\/skills\/([^/]+)\/(?:references\/([^/]+)|SKILL\.md)$/
   )
   if (!match) return null
-  if (match[2]) return `the ${humanize(match[2].replace(/\.[^.]+$/, ""))} reference`
-  return `the ${humanize(match[1].replace(/^sixb-/, ""))} guide`
+  if (match[2]) return { kind: "reference", name: humanize(match[2].replace(/\.[^.]+$/, "")) }
+  return { kind: "guide", name: humanize(match[1].replace(/^sixb-/, "")) }
 }
 
-function readDetail(output: ReadOutput): string {
-  if (!output.content) return "empty"
+function readDetail(output: ReadOutput, m: AgentMessages["read"]): string {
+  if (!output.content) return m.empty
   const range =
     output.startLine === output.endLine
-      ? `line ${output.startLine}`
-      : `lines ${output.startLine}–${output.endLine}`
-  return output.truncated ? `${range} · more available` : range
+      ? m.line(output.startLine)
+      : m.lines(output.startLine, output.endLine)
+  return output.truncated ? m.moreAvailable(range) : range
 }
 
 function fileName(path: string): string {

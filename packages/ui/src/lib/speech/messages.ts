@@ -1,3 +1,4 @@
+import { en, type UiMessages } from "../i18n/messages/en"
 import type { SpeechErrorCode } from "./types"
 
 /**
@@ -20,23 +21,26 @@ export function appendDictationText(existingText: string, dictatedText: string):
  * Returns null for `"aborted"`, which is what the browser reports when dictation
  * is stopped on purpose — surfacing that as an error would be wrong.
  */
-export function speechErrorMessage(code: SpeechErrorCode): string | null {
+export function speechErrorMessage(
+  code: SpeechErrorCode,
+  messages: UiMessages["speech"] = en.speech
+): string | null {
   switch (code) {
     case "aborted":
       return null
     case "not-allowed":
     case "service-not-allowed":
-      return "Microphone access was denied. Allow microphone access in your browser settings and try again."
+      return messages.notAllowed
     case "audio-capture":
-      return "No microphone is available. Connect or enable a microphone and try again."
+      return messages.audioCapture
     case "no-speech":
-      return "No speech was detected. Try again when you're ready."
+      return messages.noSpeech
     case "network":
-      return "Voice dictation couldn't connect. Check your connection or type instead."
+      return messages.network
     case "language-not-supported":
-      return "Voice dictation isn't available for this language. Type instead."
+      return messages.languageNotSupported
     default:
-      return "Voice dictation couldn't start. Try again or type instead."
+      return messages.unknown
   }
 }
 

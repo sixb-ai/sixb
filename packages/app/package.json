@@ -39,6 +39,12 @@
       "import": "./dist/agents.js",
       "default": "./dist/agents.js"
     },
+    "./locale": {
+      "types": "./dist/locale.d.ts",
+      "bun": "./src/locale.ts",
+      "import": "./dist/locale.js",
+      "default": "./dist/locale.js"
+    },
     "./auth": {
       "types": "./dist/auth.d.ts",
       "bun": "./src/auth.ts",

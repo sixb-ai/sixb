@@ -7,10 +7,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@sixb/ui/components"
+import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { History, LoaderCircle, Plus, Search, X } from "lucide-react"
 import { type KeyboardEvent, type ReactNode, useMemo, useState } from "react"
 import { formatRelativeTime, groupThreadsByDate } from "../format"
+import { useAgentMessages } from "../i18n"
 import { agentThreadTitle } from "../threadNavigation"
 import type { AgentThread } from "../types"
 
@@ -41,6 +43,7 @@ export function AgentThreadSwitcher({
   onSelectThread,
   onNewThread,
 }: AgentThreadSwitcherProps) {
+  const messages = useAgentMessages().threads
   const [open, setOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [filter, setFilter] = useState<"all" | "archived">("all")
@@ -65,19 +68,20 @@ export function AgentThreadSwitcher({
         : shownThreads
     if (!normalizedSearchTerm) return byState
     return byState.filter((thread) =>
-      agentThreadTitle(thread).toLowerCase().includes(normalizedSearchTerm)
+      agentThreadTitle(thread, messages).toLowerCase().includes(normalizedSearchTerm)
     )
-  }, [filter, normalizedSearchTerm, shownThreads])
+  }, [filter, normalizedSearchTerm, shownThreads, messages])
   const matchingIds = new Set(matchingThreads.map((thread) => thread.id))
   const currentVisible = currentThread && matchingIds.has(currentThread.id) ? currentThread : null
   const groups = groupThreadsByDate(
     matchingThreads.filter((thread) => thread.id !== currentVisible?.id)
   )
   const archivedCount = shownThreads.filter((thread) => thread.status === "archived").length
+  const currentTitle = agentThreadTitle(currentThread, messages)
   const historyLabel =
     runningThreadCount > 0
-      ? `${runningThreadCount} ${runningThreadCount === 1 ? "thread" : "threads"} running. Open thread history. Current: ${agentThreadTitle(currentThread)}`
-      : `Thread history. Current: ${agentThreadTitle(currentThread)}`
+      ? messages.runningHistory(runningThreadCount, currentTitle)
+      : messages.historyCurrent(currentTitle)
 
   function updateOpen(nextOpen: boolean) {
     setOpen(nextOpen)
@@ -106,7 +110,7 @@ export function AgentThreadSwitcher({
           variant="ghost"
           size="icon-lg"
           aria-label={historyLabel}
-          title={runningThreadCount > 0 ? `${runningThreadCount} running` : "Thread history"}
+          title={runningThreadCount > 0 ? messages.running(runningThreadCount) : messages.history}
           className="[&_svg]:size-5"
         >
           {runningThreadCount > 0 ? (
@@ -130,16 +134,14 @@ export function AgentThreadSwitcher({
         onKeyDown={moveThreadFocus}
         className="top-0 left-0 flex h-dvh w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:top-[50%] sm:left-[50%] sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:w-[min(calc(100vw-2rem),40rem)] sm:max-w-[40rem] sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-2xl sm:border"
       >
-        <DialogDescription className="sr-only">
-          Search and switch between conversations with {agentName}.
-        </DialogDescription>
+        <DialogDescription className="sr-only">{messages.description(agentName)}</DialogDescription>
 
         <div className="flex h-16 shrink-0 items-center gap-3 px-4 sm:px-5">
-          <DialogTitle className="text-lg">Threads</DialogTitle>
+          <DialogTitle className="text-lg">{messages.title}</DialogTitle>
           {onNewThread ? (
             <Button type="button" size="sm" className="ml-auto gap-1.5" onClick={startThread}>
               <Plus />
-              New thread
+              {messages.new}
             </Button>
           ) : null}
           <DialogClose asChild>
@@ -147,7 +149,7 @@ export function AgentThreadSwitcher({
               type="button"
               variant="ghost"
               size="icon-sm"
-              aria-label="Close thread history"
+              aria-label={messages.close}
               className={cn(
                 !onNewThread && "ml-auto",
                 "text-muted-foreground hover:text-foreground"
@@ -165,20 +167,20 @@ export function AgentThreadSwitcher({
               autoFocus
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Search threads"
-              aria-label={`Search ${agentName} threads`}
+              placeholder={messages.search}
+              aria-label={messages.searchLabel(agentName)}
               className="h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
             />
           </div>
           {archivedCount > 0 ? (
-            <div className="mt-2.5 flex gap-1.5" aria-label="Filter threads">
+            <div className="mt-2.5 flex gap-1.5" aria-label={messages.filter}>
               <FilterButton
-                label="All"
+                label={messages.all}
                 active={filter === "all"}
                 onClick={() => setFilter("all")}
               />
               <FilterButton
-                label={`Archived ${archivedCount}`}
+                label={messages.archivedFilter(archivedCount)}
                 active={filter === "archived"}
                 onClick={() => setFilter("archived")}
               />
@@ -188,13 +190,13 @@ export function AgentThreadSwitcher({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:max-h-[min(68dvh,36rem)] sm:flex-none sm:px-4 sm:pb-4">
           {currentVisible ? (
-            <ThreadSwitcherSection label="Current">
+            <ThreadSwitcherSection label={messages.current}>
               <ThreadSwitcherRow thread={currentVisible} selected onSelect={selectThread} />
             </ThreadSwitcherSection>
           ) : null}
 
           {groups.map((group) => (
-            <ThreadSwitcherSection key={group.label} label={historyGroupLabel(group.label)}>
+            <ThreadSwitcherSection key={group.key} label={messages[group.key]}>
               {group.threads.map((thread) => (
                 <ThreadSwitcherRow
                   key={thread.id}
@@ -213,7 +215,7 @@ export function AgentThreadSwitcher({
           ) : null}
           {loadMoreThreadsError ? (
             <p role="alert" className="px-3 py-2 text-sm text-destructive">
-              Could not load more threads. Try again.
+              {messages.loadMoreFailed}
             </p>
           ) : null}
           {hasMoreThreads && onLoadMoreThreads ? (
@@ -223,13 +225,11 @@ export function AgentThreadSwitcher({
               disabled={loadingMoreThreads}
               onClick={onLoadMoreThreads}
             >
-              {loadingMoreThreads ? "Loading…" : "Load more threads"}
+              {loadingMoreThreads ? messages.loading : messages.loadMore}
             </Button>
           ) : null}
           {matchingThreads.length === 0 ? (
-            <p className="px-3 py-10 text-center text-sm text-muted-foreground">
-              No matching threads.
-            </p>
+            <p className="px-3 py-10 text-center text-sm text-muted-foreground">{messages.empty}</p>
           ) : null}
         </div>
       </DialogContent>
@@ -283,9 +283,16 @@ function ThreadSwitcherRow({
   selected: boolean
   onSelect: (threadId: string) => void
 }) {
-  const title = agentThreadTitle(thread)
-  const relativeTime = formatRelativeTime(thread.lastMessageAt ?? thread.updatedAt)
-  const meta = thread.status === "archived" ? "Archived" : relativeTime
+  const agentMessages = useAgentMessages()
+  const messages = agentMessages.threads
+  const locale = useLocale()
+  const title = agentThreadTitle(thread, messages)
+  const relativeTime = formatRelativeTime(
+    thread.lastMessageAt ?? thread.updatedAt,
+    locale,
+    agentMessages.time
+  )
+  const meta = thread.status === "archived" ? messages.archived : relativeTime
 
   return (
     <button
@@ -293,7 +300,9 @@ function ThreadSwitcherRow({
       data-thread-option=""
       onClick={() => onSelect(thread.id)}
       aria-current={selected ? "page" : undefined}
-      aria-label={[title, selected ? "current" : null, meta || null].filter(Boolean).join(", ")}
+      aria-label={[title, selected ? messages.currentState : null, meta || null]
+        .filter(Boolean)
+        .join(", ")}
       className={cn(
         "group flex min-h-14 w-full items-center rounded-xl px-4 py-2.5 text-left outline-none transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30",
         selected && "bg-muted/70"
@@ -302,7 +311,7 @@ function ThreadSwitcherRow({
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium text-foreground">{title}</span>
         <span className="mt-0.5 block text-[11px] text-muted-foreground">
-          {thread.messageCount} {thread.messageCount === 1 ? "message" : "messages"}
+          {messages.messages(thread.messageCount)}
         </span>
       </span>
       {meta ? (
@@ -334,8 +343,4 @@ function moveThreadFocus(event: KeyboardEvent<HTMLDivElement>) {
   const nextIndex = currentIndex < 0 ? (delta > 0 ? 0 : options.length - 1) : currentIndex + delta
   options[(nextIndex + options.length) % options.length]?.focus()
   event.preventDefault()
-}
-
-function historyGroupLabel(label: string): string {
-  return label === "Previous 7 days" ? "This week" : label
 }

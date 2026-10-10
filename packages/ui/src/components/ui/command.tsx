@@ -11,6 +11,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { Command as CommandPrimitive } from "cmdk"
 import { SearchIcon } from "lucide-react"
 import type * as React from "react"
+import { useUiMessages } from "../../lib/i18n/ui"
 
 function Command({ className, ...props }: React.ComponentProps<typeof CommandPrimitive>) {
   return (
@@ -26,8 +27,8 @@ function Command({ className, ...props }: React.ComponentProps<typeof CommandPri
 }
 
 function CommandDialog({
-  title = "Command Palette",
-  description = "Search for a command to run...",
+  title,
+  description,
   children,
   className,
   showCloseButton = true,
@@ -40,11 +41,12 @@ function CommandDialog({
   showCloseButton?: boolean
   shouldFilter?: boolean
 }) {
+  const messages = useUiMessages()
   return (
     <Dialog {...props}>
       <DialogHeader className="sr-only">
-        <DialogTitle>{title}</DialogTitle>
-        <DialogDescription>{description}</DialogDescription>
+        <DialogTitle>{title ?? messages.command.title}</DialogTitle>
+        <DialogDescription>{description ?? messages.command.description}</DialogDescription>
       </DialogHeader>
       <DialogContent
         className={cn("overflow-hidden p-0", className)}

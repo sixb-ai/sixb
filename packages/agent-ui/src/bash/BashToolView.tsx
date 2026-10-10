@@ -15,6 +15,7 @@ import {
 } from "lucide-react"
 import { useState } from "react"
 import { ActivityStatusText } from "../components/ActivityStatus"
+import { useAgentMessages } from "../i18n"
 import {
   type BashIcon,
   type BashIntent,
@@ -68,8 +69,9 @@ const ICONS: Record<BashIcon, LucideIcon> = {
  * A "View raw" toggle keeps the underlying payload one click away for developers.
  */
 export function BashToolView({ tool }: { tool: BashTool }) {
+  const messages = useAgentMessages()
   if (tool.state === "input-streaming") {
-    return <ToolLine icon={Terminal} label="Preparing a command" running />
+    return <ToolLine icon={Terminal} label={messages.bash.preparing} running />
   }
 
   const input = coerceBashInput(tool.input)
@@ -79,7 +81,7 @@ export function BashToolView({ tool }: { tool: BashTool }) {
 
   const running = tool.state === "input-available"
   const isError = tool.state === "output-error" || (parsed !== null && !parsed.ok)
-  const description = describeBash(intent, parsed)
+  const description = describeBash(intent, parsed, messages)
   const Icon = ICONS[description.icon]
   const label = running ? description.runningTitle : description.title
 
@@ -97,8 +99,11 @@ export function BashToolView({ tool }: { tool: BashTool }) {
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="mt-3 space-y-2 text-xs">
-            {command ? <RawBlock label="Command" value={command} /> : null}
-            <RawBlock label="Details" value={errorMessage(parsed, tool.errorText)} />
+            {command ? <RawBlock label={messages.results.command} value={command} /> : null}
+            <RawBlock
+              label={messages.results.details}
+              value={errorMessage(parsed, tool.errorText) || messages.results.commandFailed}
+            />
           </div>
         </CollapsibleContent>
       </Collapsible>
@@ -186,12 +191,13 @@ function BashResult({
   parsed: ParsedBashOutput | null
   command: string
 }) {
+  const messages = useAgentMessages()
   if (parsed === null) {
     // Still running — keep multiline payloads folded; the raw disclosure retains the full command.
     return command ? (
       <pre className="overflow-x-auto rounded bg-muted/50 px-2 py-1.5 font-mono text-[11px] whitespace-pre-wrap text-muted-foreground">
         <span className="select-none text-muted-foreground/50">$ </span>
-        {commandPreview(command)}
+        {commandPreview(command, undefined, messages)}
       </pre>
     ) : null
   }
@@ -231,6 +237,7 @@ function BashResult({
 
 /** Developer escape hatch: the literal command and output payload, off by default. */
 function RawToggle({ command, tool }: { command: string; tool: BashTool }) {
+  const messages = useAgentMessages().results
   const [open, setOpen] = useState(false)
   return (
     <div>
@@ -239,15 +246,15 @@ function RawToggle({ command, tool }: { command: string; tool: BashTool }) {
         onClick={() => setOpen((value) => !value)}
         className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/50 transition-colors hover:text-muted-foreground"
       >
-        {open ? "Hide raw" : "View raw"}
+        {open ? messages.hideRaw : messages.viewRaw}
       </button>
       {open ? (
         <div className="mt-1.5 space-y-2">
-          <RawBlock label="Command" value={command} />
+          <RawBlock label={messages.command} value={command} />
           {tool.output !== undefined ? (
-            <RawBlock label="Output" value={format(tool.output)} />
+            <RawBlock label={messages.output} value={format(tool.output)} />
           ) : null}
-          {tool.errorText ? <RawBlock label="Error" value={tool.errorText} /> : null}
+          {tool.errorText ? <RawBlock label={messages.error} value={tool.errorText} /> : null}
         </div>
       ) : null}
     </div>
@@ -267,9 +274,10 @@ function RawBlock({ label, value }: { label: string; value: string }) {
   )
 }
 
+/** The command's own output, empty when it explains nothing. */
 function errorMessage(parsed: ParsedBashOutput | null, errorText: string | undefined): string {
-  if (parsed) return parsed.stderr.trim() || parsed.stdout.trim() || "The command failed."
-  return errorText?.trim() || "The command failed."
+  if (parsed) return parsed.stderr.trim() || parsed.stdout.trim()
+  return errorText?.trim() ?? ""
 }
 
 function format(value: unknown): string {
