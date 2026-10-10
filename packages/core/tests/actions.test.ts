@@ -643,12 +643,6 @@ describe("requestAction", () => {
       .writeback(() => {
         invoked += 1
       })
-    let enqueued = 0
-    const enqueue = runtimeDeps.queues.actions.enqueue.bind(runtimeDeps.queues.actions)
-    runtimeDeps.queues.actions.enqueue = async (input) => {
-      enqueued += 1
-      return enqueue(input)
-    }
     const sixb = createTestSixb({
       id: "action-test",
       ontology: [Room],
@@ -666,7 +660,6 @@ describe("requestAction", () => {
     })
 
     expect(invoked).toBe(1)
-    expect(enqueued).toBe(0)
     expect(run.id.startsWith("act_")).toBe(true)
     expect(run).toMatchObject({
       actionId: "counted",

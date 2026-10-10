@@ -61,6 +61,14 @@ describe("sixb worker-group", () => {
     expect(result.stdout).toContain("Unknown worker 'missing'")
   })
 
+  test("points a group that still names the action worker to where Actions run", async () => {
+    const result = await runOnce(["worker-group", "sync", "action"], "valid-project")
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("'action' is no longer a worker type")
+    expect(result.logEntries).toEqual([])
+  })
+
   test("rejects InMemoryQueues like sixb worker", async () => {
     const result = await runOnce(["worker-group"], "valid-project")
 

@@ -179,7 +179,6 @@ sixb rules
 sixb worker sync
 sixb worker pipeline
 sixb worker projection
-sixb worker action
 sixb worker workflow
 
 # Development with custom entry and Atlas port

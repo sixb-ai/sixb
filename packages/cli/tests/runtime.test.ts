@@ -269,7 +269,6 @@ describe("startSixbRuntime", () => {
     expect(runtime.agentWorker).not.toBeNull()
     expect(runtime.rulesWorker).toBeNull()
     expect(runtime.syncWorker).toBeNull()
-    expect(runtime.actionWorker).toBeNull()
     expect(runtime.projectionWorker).toBeNull()
     expect(runtime.pipelineWorker).toBeNull()
     expect(runtime.workflowWorker).toBeNull()

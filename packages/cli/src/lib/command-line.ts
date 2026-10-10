@@ -414,17 +414,13 @@ const commandTree: readonly CommandNode[] = [
     options: ["entry", "no-migrate"],
   }),
   command("rules", "Start production rules runtime", { options: ["entry", "no-migrate"] }),
-  command(
-    "worker",
-    "Start production queue worker: sync, action, agent, pipeline, projection, workflow",
-    {
-      usage: "sixb worker <sync|action|agent|pipeline|projection|workflow> [options]",
-      options: ["entry", "no-migrate", "api-public-origin", "agent-turn-timeout", "concurrency"],
-      minimumPositionals: 1,
-      maximumPositionals: 1,
-      rootHelpLabel: "worker <type>",
-    }
-  ),
+  command("worker", "Start production queue worker: sync, agent, pipeline, projection, workflow", {
+    usage: "sixb worker <sync|agent|pipeline|projection|workflow> [options]",
+    options: ["entry", "no-migrate", "api-public-origin", "agent-turn-timeout", "concurrency"],
+    minimumPositionals: 1,
+    maximumPositionals: 1,
+    rootHelpLabel: "worker <type>",
+  }),
   command("worker-group", "Co-host multiple queue workers in one process (constrained resources)", {
     usage: "sixb worker-group [types...] [options]",
     options: ["entry", "no-migrate", "api-public-origin", "agent-turn-timeout", "concurrency"],

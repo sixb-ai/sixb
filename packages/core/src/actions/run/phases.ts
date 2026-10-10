@@ -2,7 +2,7 @@ import { isSixbError } from "../../errors/internal"
 import type { JsonValue } from "../../json"
 import { resolveLoggingService } from "../../logging/service"
 import type { ActionRunRecord } from "../../storage"
-import { type ActionEditCommitResult, findActionEditCommit } from "../commit-edits"
+import type { ActionEditCommitResult } from "../commit-edits"
 import { ActionReadRecorder } from "../read-facade"
 import type { ActionDefinition } from "../types"
 import { isObjectActionDefinition } from "../validation"
@@ -54,19 +54,10 @@ export async function executeActionPhases(input: PhasesInput): Promise<ActionRun
   })
 
   try {
-    // Resume past an authoritative commit without depending on the subject: a committed Action may
-    // have deleted it.
-    const existingCommit = await findActionEditCommit({
-      storage: runtime.storage,
-      projectId: runtime.id,
-      runId: input.run.id,
-    })
-    const committed: CommittedRun = existingCommit
-      ? { run: input.run, writeback: writebackValue(input.run), commit: existingCommit }
-      : await commitWithReplay({ ...input, logSession })
+    const committed = await commitWithReplay({ ...input, logSession })
     let run = committed.run
 
-    if (committed.commit && action.phases.effects && !run.effects) {
+    if (committed.commit && action.phases.effects) {
       run = await runEffectsPhase({
         runtime,
         action,
@@ -197,7 +188,6 @@ async function commitOnce(
     baseContext: { ...baseContext, logger: logSession.withContext({ phase: "edits" }) },
     objectTarget,
     writeback: writebackValue(run),
-    existingCommit: null,
     reads,
     updateActiveRun: input.updateActiveRun,
   })

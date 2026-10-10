@@ -6,7 +6,6 @@ import type {
 } from "../models/execution/types"
 import type { ProjectionRunFailureCode } from "../projections/types"
 import type { ProviderScope } from "../provider-scope"
-import type { ActionRunFailureCode } from "../storage/action-runs/types"
 import type { AgentRunFailureCode } from "../storage/agents/types"
 import type { PipelineRunFailureCode } from "../storage/pipeline-runs/types"
 import type { SyncRunFailureCode } from "../storage/sync-runs/types"
@@ -48,7 +47,6 @@ export type SyncQueueJobFailureCode = SyncRunFailureCode
 export type PipelineQueueJobFailureCode = PipelineRunFailureCode
 export type ProjectionQueueJobFailureCode = ProjectionRunFailureCode
 export type WorkflowQueueJobFailureCode = WorkflowRunFailureCode
-export type ActionQueueJobFailureCode = ActionRunFailureCode
 export type AgentQueueJobFailureCode = AgentRunFailureCode
 
 export interface ClaimedQueueJob<TQueueJob extends QueueJob = QueueJob> {
@@ -176,14 +174,6 @@ export interface WorkflowRunResumeRequestedQueueJob
 
 export type WorkflowQueueJob = WorkflowRunRequestedQueueJob | WorkflowRunResumeRequestedQueueJob
 
-export interface ActionRunRequestedQueueJob
-  extends QueueJob<
-    "action.run.requested",
-    {
-      readonly runId: string
-    }
-  > {}
-
 /**
  * An agent turn is requested for a thread. The payload points to the durable queued run created
  * with the user message; the worker transitions it to running and installs the delivery's execution
@@ -245,7 +235,6 @@ export interface Queues {
   readonly pipelines: Queue<PipelineRunRequestedQueueJob, PipelineQueueJobFailureCode>
   readonly projections: Queue<ProjectionRunRequestedQueueJob, ProjectionQueueJobFailureCode>
   readonly workflows: Queue<WorkflowQueueJob, WorkflowQueueJobFailureCode>
-  readonly actions: Queue<ActionRunRequestedQueueJob, ActionQueueJobFailureCode>
   readonly agents: Queue<AgentQueueJob, AgentQueueJobFailureCode>
   /** Internal capacity reserved for headless child runs. */
   readonly agentChildren: Queue<SubagentQueueJob, AgentQueueJobFailureCode>

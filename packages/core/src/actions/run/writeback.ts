@@ -31,10 +31,6 @@ export async function runWritebackPhase(
     return { run: input.run, value: undefined }
   }
 
-  if (input.run.writeback?.status === "succeeded") {
-    return { run: input.run, value: input.run.writeback.result ?? null }
-  }
-
   let run = await input.runtime.actionRunsStorage.enterPhase({
     projectId: input.runtime.id,
     id: input.run.id,

@@ -3,7 +3,7 @@ import { createSixbError, type SixbCodedError } from "../../errors/internal"
 import type { ActionRunFailure, ActionRunRecord } from "../../storage"
 import type { PersistedActionRun } from "../run-persistence"
 import { emitActionRequested, emitActionTerminal } from "./events"
-import { type ActionRunHost, executePersistedActionRun } from "./execute"
+import { type ActionRunHost, executeActionRun } from "./execute"
 import { toActionRunFailure } from "./normalize"
 import { UnrecordedActionRunError } from "./run-action"
 
@@ -100,15 +100,12 @@ export class ActionRunExecutor {
 
     try {
       await emitActionRequested(this.host.events, run, execution.correlationId)
-      const { result } = await executePersistedActionRun(this.host, {
+      const result = await executeActionRun(this.host, {
         run,
         execution,
         signal: request.signal,
-        attempt: 1,
       })
-      if (!("skipped" in result)) {
-        await emitActionTerminal(this.host.events, result, execution.correlationId)
-      }
+      await emitActionTerminal(this.host.events, result, execution.correlationId)
       return result.record
     } catch (error) {
       throw this.failRequest(

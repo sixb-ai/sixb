@@ -97,9 +97,18 @@ describe("sixb worker", () => {
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("Unknown worker 'missing'")
-    expect(result.stdout).toContain("sync, action, agent")
-    expect(result.stdout).toContain("pipeline, projection, workflow")
+    expect(result.stdout).toContain("sync, agent, pipeline")
+    expect(result.stdout).toContain("projection, workflow")
     expect(result.stdout).not.toContain("requires a queues provider")
+    expect(result.stderr).toBe("")
+  })
+
+  test("points `sixb worker action` to where Actions run", () => {
+    const result = runWorkerFixture("valid-project", ["action"])
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("'action' is no longer a worker type")
+    expect(result.stdout).not.toContain("Unknown worker")
     expect(result.stderr).toBe("")
   })
 
@@ -118,7 +127,7 @@ describe("sixb worker", () => {
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toContain("sixb worker")
-    expect(result.stdout).toContain("<sync|action|agent|pipeline|projection|workflow>")
+    expect(result.stdout).toContain("<sync|agent|pipeline|projection|workflow>")
     expect(result.stderr).toBe("")
   })
 
@@ -208,8 +217,8 @@ describe("sixb worker", () => {
     expect(result.stdout).toContain("--concurrency <value>")
     expect(result.stdout).not.toContain("--type <type>")
     expect(result.stdout).not.toContain("--worker <type>")
-    expect(result.stdout).toContain("sync, action, agent")
-    expect(result.stdout).toContain("pipeline, projection, workflow")
+    expect(result.stdout).toContain("sync, agent, pipeline")
+    expect(result.stdout).toContain("projection, workflow")
     expect(result.stdout).toContain("--agent-turn-timeout <duration>")
     expect(result.stderr).toBe("")
   })
@@ -221,7 +230,14 @@ describe("sixb worker", () => {
 
   test("rejects unknown workers with the known worker list", () => {
     expect(() => resolveWorkerTypeToStart("missing")).toThrow(
-      "Available: sync, action, agent, pipeline, projection, workflow"
+      "Available: sync, agent, pipeline, projection, workflow"
+    )
+  })
+
+  test("says where Actions run when a command still names the action worker", () => {
+    expect(() => resolveWorkerTypeToStart("action")).toThrow(
+      "[SixbWorker] 'action' is no longer a worker type: Actions run in the process that " +
+        "requests them (API, workflows, syncs). Remove it from the command."
     )
   })
 })

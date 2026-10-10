@@ -1,7 +1,5 @@
 import type { Queues } from "@sixb/core"
 import type {
-  ActionQueueJobFailureCode,
-  ActionRunRequestedQueueJob,
   AgentQueueJob,
   AgentQueueJobFailureCode,
   PipelineQueueJobFailureCode,
@@ -85,7 +83,6 @@ export class BullMqQueues implements Queues {
   readonly pipelines: BullMqQueue<PipelineRunRequestedQueueJob, PipelineQueueJobFailureCode>
   readonly projections: BullMqQueue<ProjectionRunRequestedQueueJob, ProjectionQueueJobFailureCode>
   readonly workflows: BullMqQueue<WorkflowQueueJob, WorkflowQueueJobFailureCode>
-  readonly actions: BullMqQueue<ActionRunRequestedQueueJob, ActionQueueJobFailureCode>
   readonly agents: BullMqQueue<AgentQueueJob, AgentQueueJobFailureCode>
   readonly agentChildren: BullMqQueue<SubagentQueueJob, AgentQueueJobFailureCode>
 
@@ -121,10 +118,6 @@ export class BullMqQueues implements Queues {
       shared,
       "workflow.runs"
     )
-    this.actions = new BullMqQueue<ActionRunRequestedQueueJob, ActionQueueJobFailureCode>(
-      shared,
-      "action.runs"
-    )
     this.agents = new BullMqQueue<AgentQueueJob, AgentQueueJobFailureCode>(shared, "agent.runs")
     this.agentChildren = new BullMqQueue<SubagentQueueJob, AgentQueueJobFailureCode>(
       shared,
@@ -143,7 +136,6 @@ export class BullMqQueues implements Queues {
       this.pipelines.close(),
       this.projections.close(),
       this.workflows.close(),
-      this.actions.close(),
       this.agents.close(),
       this.agentChildren.close(),
       this.vectorIndexing.close(),

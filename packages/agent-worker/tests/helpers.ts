@@ -17,7 +17,7 @@ export async function writeProjectSkill(
   }
 }
 
-/** Poll `fn` until it returns a truthy value or the timeout elapses (mirrors the action-worker helper). */
+/** Poll `fn` until it returns a truthy value or the timeout elapses. */
 export async function waitFor<T>(
   fn: () => Promise<T | null | undefined | false> | T | null | undefined | false,
   options: { timeoutMs?: number; intervalMs?: number; label?: string } = {}

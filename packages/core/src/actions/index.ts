@@ -3,10 +3,9 @@ export type {
   ActionEditCommitResult,
   ActionReadDependencies,
   CommitActionEditsInput,
-  FindActionEditCommitInput,
 } from "./commit-edits"
-export { commitActionEdits, findActionEditCommit } from "./commit-edits"
-export { ActionDefinitionError, ActionEditCommitError } from "./errors"
+export { commitActionEdits } from "./commit-edits"
+export { ActionDefinitionError } from "./errors"
 export type {
   ActionReadFacadeOptions,
   ActionTelemetryReadSource,
@@ -16,11 +15,8 @@ export type { ActionDefinitionCatalog, ActionRegistryOptions } from "./registry"
 export { ActionRegistry } from "./registry"
 export type { RequestActionInput, RequestActionOptions } from "./request"
 export { requestAction } from "./request"
-export type { ActionRunHost } from "./run/execute"
-export { executeActionRun } from "./run/execute"
 export { drainActionRuns } from "./run/executor"
 export { ACTION_RUN_DRAIN_TIMEOUT_MS } from "./run/signals"
-export type { ActionRunResult } from "./run/types"
 export type {
   ActionBinding,
   ActionBlobContext,

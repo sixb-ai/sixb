@@ -16,13 +16,20 @@ import {
   type SixbErrorContext,
   SixbHost,
 } from "../src"
-import { findActionEditCommit } from "../src/actions"
 import { type ActionRunHost, executeActionRun } from "../src/actions/run/execute"
 import { runAction } from "../src/actions/run/run-action"
 import { ActionRunSignals } from "../src/actions/run/signals"
 import type { ActionRunContext } from "../src/actions/run/types"
 import { attachSixbErrorReporter } from "../src/error-reporting/internal"
 import { bindDurablePrimitiveExecution } from "../src/execution/primitive"
+import { LOGS_STREAM } from "../src/logging/stream"
+import {
+  type DecisionModel,
+  defineLanguageModel,
+  type LanguageModel,
+  type LanguageModelStreamEvent,
+  question,
+} from "../src/models"
 import type { ActionRunParams, ActionRunRecord } from "../src/storage"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import { createTestSixb, queueTestActionRun } from "../src/testing"
@@ -65,7 +72,7 @@ function createSixb(
   ontology: readonly OntologySource[] = [Device]
 ) {
   const host = new SixbHost({
-    id: "action-worker-tests",
+    id: "action-run-tests",
     ontology,
     actions,
     broker: new InMemoryBroker(),
@@ -131,19 +138,41 @@ async function queueActionRun(
   })
 }
 
+/** Execute a stored run as the request that persisted it would. */
 async function runStoredAction(input: {
   readonly host: ActionRunHost
   readonly runId: string
   readonly signal?: AbortSignal
-  readonly attempt?: number
   readonly timeoutMs?: number
 }) {
-  const { result } = await executeActionRun(input.host, {
-    runId: input.runId,
+  const { host } = input
+  const run = await host.storage.actionRuns?.getById({ projectId: host.id, id: input.runId })
+  if (!run) throw new Error(`Action run '${input.runId}' was not stored.`)
+  const execution = await host.storage.executions.getById({
+    projectId: host.id,
+    id: run.executionId,
+  })
+  if (!execution) throw new Error(`Action run '${run.id}' has no execution.`)
+
+  return executeActionRun(host, {
+    run,
+    execution,
     signal: input.signal,
-    attempt: input.attempt ?? 1,
     timeoutMs: input.timeoutMs,
   })
+}
+
+/** The edit commit a run produced, or `null` when it committed nothing. */
+async function findEditCommit(host: ActionRunHost, runId: string) {
+  const commit = await host.storage.ontology.commits.getByOrigin({
+    projectId: host.id,
+    origin: { kind: "action", actionRunId: runId },
+  })
+  const result = commit?.result
+  if (!result) return null
+  if (result.kind !== "edit") {
+    throw new Error(`Action run '${runId}' produced a ${result.kind} commit.`)
+  }
   return result
 }
 
@@ -209,12 +238,11 @@ describe("runAction", () => {
           runtime: await createContext(host, run),
           run: { ...run, projectId: "other-project" },
           signals,
-          attempt: 1,
         })
       ).rejects.toMatchObject({
         code: "internal.unexpected",
         message:
-          "[Sixb] Action run 'act_stored' belongs to project 'other-project', not 'action-worker-tests'.",
+          "[Sixb] Action run 'act_stored' belongs to project 'other-project', not 'action-run-tests'.",
         retryable: false,
         details: { actionId: "count", runId: "act_stored", durableProjectId: "other-project" },
       })
@@ -277,11 +305,7 @@ describe("runAction", () => {
     const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_1" })
     expect(run?.status).toBe("succeeded")
     expect(run?.phase).toBe("commit")
-    const commit = await findActionEditCommit({
-      storage: host.storage,
-      projectId: host.id,
-      runId: "act_1",
-    })
+    const commit = await findEditCommit(host, "act_1")
     expect(commit?.changes.objects.map((change) => [change.kind, change.ref.primaryId])).toEqual([
       ["updated", "device-1"],
     ])
@@ -333,9 +357,7 @@ describe("runAction", () => {
 
     const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_1" })
     expect(run?.writeback?.status).toBe("failed")
-    expect(
-      await findActionEditCommit({ storage: host.storage, projectId: host.id, runId: "act_1" })
-    ).toBeNull()
+    expect(await findEditCommit(host, "act_1")).toBeNull()
     const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBe("old")
   })
@@ -424,39 +446,32 @@ describe("runAction", () => {
     })
   })
 
-  test("skips duplicate terminal run ids without invoking phases twice", async () => {
+  // Guard proof: drop the `queued` check from `runAction`, and this run is finished as failed
+  // under the execution that owns it.
+  test("leaves a run that is no longer queued to the execution that owns it", async () => {
     let invoked = 0
     const count = defineAction("count")
-      .on(Device)
       .params({})
       .writeback(() => {
         invoked += 1
       })
-
-    const { host, sixb } = createSixb([count])
-    await sixb.objects.upsert("Device", {
-      id: "device-1",
-      name: "Device 1",
-    })
+    const { host } = createSixb([count])
     await queueActionRun(host, {
-      id: "act_1",
+      id: "act_running",
       actionId: "count",
-      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      subject: { kind: "none" },
       params: {},
     })
+    await host.storage.actionRuns!.start({ projectId: host.id, id: "act_running" })
 
-    await runStoredAction({
-      host,
-      runId: "act_1",
+    await expect(runStoredAction({ host, runId: "act_running" })).rejects.toMatchObject({
+      code: "internal.unexpected",
+      message: "[Sixb] Action run 'act_running' cannot execute from status 'running'.",
     })
-
-    const duplicate = await runStoredAction({
-      host,
-      runId: "act_1",
-    })
-
-    expect(invoked).toBe(1)
-    expect("skipped" in duplicate).toBe(true)
+    expect(invoked).toBe(0)
+    expect(
+      await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_running" })
+    ).toMatchObject({ status: "running" })
   })
 
   test("commits global action edits without loading a target", async () => {
@@ -532,9 +547,7 @@ describe("runAction", () => {
     expect(created.status).toBe("succeeded")
     expect(updated.status).toBe("succeeded")
     const commits = await Promise.all(
-      ["act_create", "act_rename"].map((runId) =>
-        findActionEditCommit({ storage: host.storage, projectId: host.id, runId })
-      )
+      ["act_create", "act_rename"].map((runId) => findEditCommit(host, runId))
     )
     expect(commits.map((commit) => commit?.changes.objects[0]?.kind)).toEqual([
       "created",
@@ -1103,143 +1116,6 @@ describe("runAction", () => {
     expect(run?.phase).toBe("validation")
   })
 
-  test("reports a lease-loss failure once and not on terminal redelivery", async () => {
-    let invoked = 0
-    const count = defineAction("count")
-      .params({})
-      .writeback(() => {
-        invoked += 1
-      })
-
-    const { host } = createSixb([count])
-    let reportCount = 0
-    const reporter = attachSixbErrorReporter(host, () => {
-      reportCount += 1
-    })
-    await queueActionRun(host, {
-      id: "act_1",
-      actionId: "count",
-      subject: { kind: "none" },
-      params: {},
-    })
-    await host.storage.actionRuns!.start({
-      projectId: host.id,
-      id: "act_1",
-    })
-
-    const result = await runStoredAction({
-      host,
-      runId: "act_1",
-    })
-
-    expect(result.status).toBe("failed")
-    if ("error" in result) {
-      expect(result.error.code).toBe("internal.unexpected")
-      expect(result.error.message).toBe("An unexpected internal error occurred.")
-      expect(result.error.details.phase).toBe("validation")
-    }
-    expect(invoked).toBe(0)
-
-    const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_1" })
-    expect(run?.status).toBe("failed")
-    expect(run?.phase).toBe("validation")
-    expect(run?.finishedAt).toBeInstanceOf(Date)
-
-    const redelivered = await runStoredAction({
-      host,
-      runId: "act_1",
-      attempt: 2,
-    })
-    expect("skipped" in redelivered && redelivered.skipped).toBe(true)
-    await reporter.flush()
-    expect(reportCount).toBe(1)
-  })
-
-  test("resumes from a persisted successful writeback without replaying it", async () => {
-    let writebackCalls = 0
-    const setStatus = defineAction("setStatus")
-      .on(Device)
-      .params({})
-      .writeback(() => {
-        writebackCalls += 1
-        return { status: "from-writeback" }
-      })
-      .edits(({ objects, subject, writeback }) => {
-        objects(Device).byId(subject.primaryId).update({ status: writeback.status })
-      })
-
-    const { host, sixb } = createSixb([setStatus])
-    await sixb.objects.upsert("Device", {
-      id: "device-1",
-      name: "Device 1",
-    })
-    await queueActionRun(host, {
-      id: "act_1",
-      actionId: "setStatus",
-      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
-      params: {},
-    })
-    await host.storage.actionRuns!.start({ projectId: host.id, id: "act_1" })
-    await host.storage.actionRuns!.recordWriteback({
-      projectId: host.id,
-      id: "act_1",
-      status: "succeeded",
-      result: { status: "persisted" },
-    })
-
-    const result = await runStoredAction({
-      host,
-      runId: "act_1",
-    })
-
-    expect(result.status).toBe("succeeded")
-    expect(writebackCalls).toBe(0)
-    const updated = await deviceObjects(sixb).get("device-1")
-    expect(updated?.properties.status).toBe("persisted")
-  })
-
-  test("resumes after its committed edits deleted the Action subject", async () => {
-    const deleteDevice = defineAction("deleteDevice")
-      .on(Device)
-      .params({})
-      .edits(({ objects, subject }) => {
-        objects(Device).byId(subject.primaryId).delete()
-      })
-    const { host, sixb } = createSixb([deleteDevice])
-    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
-    const queuedRun = await queueActionRun(host, {
-      id: "act_delete",
-      actionId: "deleteDevice",
-      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
-      params: {},
-    })
-    await host.storage.actionRuns!.start({ projectId: host.id, id: "act_delete" })
-    const context = await createContext(host, queuedRun)
-    await context.ontologyMutations.commitEdits({
-      mode: "atomic",
-      source: { kind: "action", actionId: "deleteDevice", runId: "act_delete" },
-      operations: [
-        {
-          id: "delete-subject",
-          kind: "object.delete",
-          ref: { objectTypeId: "Device", primaryId: "device-1" },
-        },
-      ],
-      expectedObjects: [],
-      expectedLinks: [],
-      expectedLinkScopes: [],
-    })
-
-    const resumed = await runStoredAction({
-      host,
-      runId: "act_delete",
-      attempt: 2,
-    })
-
-    expect(resumed.status).toBe("succeeded")
-    expect(await deviceObjects(sixb).get("device-1")).toBeNull()
-  })
-
   test("records effects errors without failing committed actions", async () => {
     const originalError = new Error("notification failed")
     const setStatus = defineAction("setStatus")
@@ -1334,10 +1210,9 @@ describe("runAction", () => {
       host,
       runId: "act_cancelled",
       signal: controller.signal,
-      attempt: 1,
     })
     await entered
-    controller.abort(new Error("worker stopping"))
+    controller.abort(new Error("caller went away"))
     const result = await execution
 
     expect(result.status).toBe("cancelled")
@@ -1393,6 +1268,232 @@ describe("runAction", () => {
       })
     }
     expect(invoked).toBe(0)
+  })
+
+  test("reports a failed run once, with the handler's original error", async () => {
+    const originalError = new Error("writeback failed")
+    const fail = defineAction("fail")
+      .on(Device)
+      .params({})
+      .writeback(() => {
+        throw originalError
+      })
+    const { host, sixb } = createSixb([fail])
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const reporter = attachSixbErrorReporter(host, (error, context) => {
+      reports.push({ error, context })
+    })
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
+    await queueActionRun(host, {
+      id: "act_fail",
+      actionId: "fail",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+
+    const result = await runStoredAction({ host, runId: "act_fail" })
+    await reporter.flush()
+
+    if (!("error" in result)) throw new Error(`Expected a failed run, got ${result.status}.`)
+    expect(result.error).toMatchObject({
+      code: "action.phase_failed",
+      details: { actionId: "fail", runId: "act_fail", phase: "writeback" },
+    })
+    expect(result.record.error).toEqual(result.error)
+    expect(reports).toHaveLength(1)
+    expect(reports[0]?.error).toBe(originalError)
+    expect(reports[0]?.context).toEqual({
+      type: "run.failed",
+      notificationId: `project:${host.id}:run:action:act_fail:failed:${result.error.at}`,
+      projectId: host.id,
+      occurredAt: result.error.at,
+      runKind: "action",
+      run: { runId: "act_fail", actionId: "fail" },
+      failure: result.error,
+    })
+  })
+
+  test("streams a run-scoped log line to the broker", async () => {
+    const noteStatus = defineAction("noteStatus")
+      .on(Device)
+      .params({ status: param("string") })
+      .writeback((ctx) => {
+        ctx.logger.info("Applying status", { status: ctx.params.status })
+      })
+    const { host, sixb } = createSixb([noteStatus])
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
+    await queueActionRun(host, {
+      id: "act_log",
+      actionId: "noteStatus",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: { status: "active" },
+    })
+
+    await runStoredAction({ host, runId: "act_log" })
+
+    const { records } = await host.broker.read({
+      projectId: host.id,
+      streamId: LOGS_STREAM.id,
+      names: ["action.info"],
+    })
+    const line = records.find(
+      (record) => (record.payload as { message?: string }).message === "Applying status"
+    )
+    expect(line?.key).toBe("action:act_log")
+    expect(line?.payload).toMatchObject({
+      level: "info",
+      fields: { status: "active" },
+      context: { phase: "writeback", run: { kind: "action", id: "act_log" } },
+    })
+  })
+
+  test("hands stored date and timestamp params to handlers as Dates", async () => {
+    const observed: { dueDate: unknown; day: unknown }[] = []
+    const setDue = defineAction("setDue")
+      .on(Device)
+      .params({ dueDate: param("timestamp"), day: param("date") })
+      .writeback((ctx) => {
+        observed.push({ dueDate: ctx.params.dueDate, day: ctx.params.day })
+        // Typed as Date, so this must not throw at runtime.
+        return { iso: ctx.params.dueDate.toISOString() }
+      })
+    const { host, sixb } = createSixb([setDue])
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
+    // Stored params are JSON, as a request normalized them.
+    await queueActionRun(host, {
+      id: "act_due",
+      actionId: "setDue",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: { dueDate: "2026-06-20T12:34:56.000Z", day: "2026-06-20" },
+    })
+
+    const result = await runStoredAction({ host, runId: "act_due" })
+
+    expect(result.status).toBe("succeeded")
+    const seen = observed[0]
+    expect(seen?.dueDate).toBeInstanceOf(Date)
+    expect(seen?.day).toBeInstanceOf(Date)
+    expect((seen?.dueDate as Date).toISOString()).toBe("2026-06-20T12:34:56.000Z")
+  })
+})
+
+describe("runAction model accounting", () => {
+  test("persists a decision writeback and accounts for it under the run's attempt", async () => {
+    // Removal proof: omit the decision facade or its accounting call; this path fails.
+    const questions = {
+      status: question.choice({
+        instructions: "Operational status?",
+        options: { ready: "Operational", blocked: "Unusable" },
+      }),
+    }
+    const model: DecisionModel = {
+      providerId: "test",
+      modelId: "decision",
+      definition: {
+        kind: "decision",
+        providerId: "test",
+        modelId: "decision",
+        capabilities: { questions: ["choice"] },
+      },
+      evaluate: async () => ({
+        output: { status: { choice: "ready", probabilities: { ready: 1, blocked: 0 } } },
+        usage: { inputTokens: 6, outputTokens: 4 },
+      }),
+    }
+    const decideStatus = defineAction("decide-status")
+      .on(Device)
+      .params({})
+      .writeback(
+        async ({ sixb }) =>
+          (await sixb.models.decision.evaluate({ model, input: "Repaired", questions })).output
+      )
+      .edits(({ objects, subject, writeback }) => {
+        objects(Device).byId(subject.primaryId).update({ status: writeback.status.choice })
+      })
+    const { host, sixb } = createSixb([decideStatus])
+    await sixb.objects.upsert("Device", { id: "decision-device", name: "Device" })
+    await queueActionRun(host, {
+      id: "act_decide",
+      actionId: decideStatus.id,
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "decision-device" },
+      params: {},
+    })
+
+    const { record: run } = await runStoredAction({ host, runId: "act_decide" })
+
+    expect(run.status).toBe("succeeded")
+    expect(run.writeback).toMatchObject({
+      status: "succeeded",
+      result: { status: { choice: "ready" } },
+    })
+    expect(
+      await host.storage.aiUsage?.getLatestForExecution({
+        projectId: host.id,
+        executionId: run.executionId,
+      })
+    ).toMatchObject({ attempt: 1, usage: { inputTokens: 6, outputTokens: 4, totalTokens: 10 } })
+  })
+
+  test("accounts for direct generation in writeback before persisting the result", async () => {
+    // Removal proof: remove models from the Action facade or the run's attempt binding.
+    const model: LanguageModel = {
+      providerId: "test",
+      modelId: "extract",
+      definition: defineLanguageModel({
+        kind: "language",
+        providerId: "test",
+        modelId: "extract",
+        capabilities: { nativeStructuredOutput: true },
+      }),
+      async stream() {
+        return {
+          events: (async function* (): AsyncIterable<LanguageModelStreamEvent> {
+            yield { type: "stream-start" }
+            yield { type: "text-start", id: "text" }
+            yield { type: "text-delta", id: "text", delta: '{"status":"ready"}' }
+            yield { type: "text-end", id: "text" }
+            yield {
+              type: "finish",
+              finishReason: "stop",
+              usage: { inputTokens: 5, outputTokens: 3 },
+            }
+          })(),
+        }
+      },
+    }
+    const extractStatus = defineAction("extract-status")
+      .on(Device)
+      .params({})
+      .writeback(async ({ sixb }) => {
+        const result = await sixb.models.language.generate({
+          model,
+          prompt: "Extract status",
+          output: { status: "string" },
+        })
+        return result.output
+      })
+      .edits(({ objects, subject, writeback }) => {
+        objects(Device).byId(subject.primaryId).update({ status: writeback.status })
+      })
+    const { host, sixb } = createSixb([extractStatus])
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device" })
+    await queueActionRun(host, {
+      id: "act_extract",
+      actionId: extractStatus.id,
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+
+    const { record: run } = await runStoredAction({ host, runId: "act_extract" })
+
+    expect(run.status).toBe("succeeded")
+    expect(run.writeback).toMatchObject({ status: "succeeded", result: { status: "ready" } })
+    expect(
+      await host.storage.aiUsage?.getLatestForExecution({
+        projectId: host.id,
+        executionId: run.executionId,
+      })
+    ).toMatchObject({ attempt: 1, requesterGroupIds: [], usage: { totalTokens: 8 } })
   })
 })
 
@@ -1508,13 +1609,7 @@ describe("runAction deadline and boundary", () => {
       status: "failed",
       error: { code: "action.timeout", details: { runId: "act_slow_edits", phase: "edits" } },
     })
-    expect(
-      await findActionEditCommit({
-        storage: host.storage,
-        projectId: host.id,
-        runId: "act_slow_edits",
-      })
-    ).toBeNull()
+    expect(await findEditCommit(host, "act_slow_edits")).toBeNull()
     expect((await deviceObjects(sixb).get("device-1"))?.properties.status).toBe("old")
   })
 

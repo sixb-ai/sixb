@@ -1,5 +1,4 @@
 import {
-  DEPLOY_CONFIGURABLE_WORKER_TYPES,
   DEPLOY_SERVICES,
   DEPLOY_WORKER_TYPES,
   isDeployHttpService,
@@ -131,6 +130,7 @@ function workerTypes(value: unknown, path: string): void {
   }
   const seen = new Set<string>()
   for (const workerType of value) {
+    if (workerType === "action") throw removedActionWorker(path)
     if (!(DEPLOY_WORKER_TYPES as readonly unknown[]).includes(workerType)) {
       throw new Error(
         `[SixbDeploy] ${path} has unknown worker type ${JSON.stringify(workerType)}. ` +
@@ -147,17 +147,23 @@ function workerTypes(value: unknown, path: string): void {
 function workerConcurrency(value: unknown, path: string): void {
   const config = record(value, path)
   for (const [workerType, concurrency] of Object.entries(config)) {
-    if (workerType === "action") {
-      throw new Error(`[SixbDeploy] ${path}.action cannot be set: action jobs run one at a time.`)
-    }
-    if (!(DEPLOY_CONFIGURABLE_WORKER_TYPES as readonly string[]).includes(workerType)) {
+    if (workerType === "action") throw removedActionWorker(path)
+    if (!(DEPLOY_WORKER_TYPES as readonly string[]).includes(workerType)) {
       throw new Error(
         `[SixbDeploy] ${path} has unknown worker type "${workerType}". ` +
-          `Available: ${DEPLOY_CONFIGURABLE_WORKER_TYPES.join(", ")}.`
+          `Available: ${DEPLOY_WORKER_TYPES.join(", ")}.`
       )
     }
     positiveInteger(concurrency, `${path}.${workerType}`)
   }
+}
+
+/** `"action"` was a worker type until Actions ran in the process that requests them. */
+function removedActionWorker(path: string): Error {
+  return new Error(
+    `[SixbDeploy] ${path} names "action", which is no longer a worker type: Actions run in the ` +
+      "process that requests them (API, workflows, syncs). Remove it."
+  )
 }
 
 function processOptions(

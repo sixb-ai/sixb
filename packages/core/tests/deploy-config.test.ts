@@ -37,7 +37,7 @@ describe("deploy config validation", () => {
         scheduler: false,
         rules: { env: { RULES_DEBUG: "1" } },
         workers: {
-          types: ["sync", "agent", "action"],
+          types: ["sync", "agent", "workflow"],
           agentTurnTimeout: "30m",
           concurrency: { sync: 2, agent: 8 },
           process: { instances: 2, maxMemory: "1.5G" },
@@ -101,12 +101,20 @@ describe("deploy config validation", () => {
       "lists sync more than once"
     )
     rejects(
-      config({ services: { workers: { concurrency: { action: 2 } } } }),
-      "action jobs run one at a time"
-    )
-    rejects(
       config({ services: { workers: { concurrency: { agent: 0 } } } }),
       "services.workers.concurrency.agent must be a positive integer"
+    )
+  })
+
+  test("points a config that still names the action worker to where Actions run", () => {
+    const removed = "Actions run in the process that requests them (API, workflows, syncs)."
+    rejects(
+      config({ services: { workers: { types: ["sync", "action"] } } }),
+      `services.workers.types names "action", which is no longer a worker type: ${removed}`
+    )
+    rejects(
+      config({ services: { workers: { concurrency: { action: 1 } } } }),
+      `services.workers.concurrency names "action", which is no longer a worker type: ${removed}`
     )
   })
 

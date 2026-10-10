@@ -60,9 +60,8 @@ export interface AgentWorkerHost extends AgentExecutionHost {
 }
 
 /**
- * The worker's derived, stable execution context (mirrors `ActionRunContext`): built once from
- * {@link AgentWorkerHost} + options, then handed to each turn alongside the per-turn run. `id` is the
- * project id.
+ * The worker's derived, stable execution context: built once from {@link AgentWorkerHost} +
+ * options, then handed to each turn alongside the per-turn run. `id` is the project id.
  */
 export interface AgentWorkerContext {
   readonly id: string
