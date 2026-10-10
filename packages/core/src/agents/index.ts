@@ -86,6 +86,7 @@ export {
 } from "./ids"
 export {
   AGENT_MESSAGE_CONTENT_VERSION,
+  type AgentContinuationPart,
   type AgentFilePart,
   type AgentMessage,
   type AgentMessagePart,

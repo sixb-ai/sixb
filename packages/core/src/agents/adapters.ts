@@ -20,6 +20,10 @@ import type {
 import { isAgentToolResult } from "./tool-result"
 import type { AgentToolFileContent } from "./types"
 
+/** What the model reads for a {@link AgentContinuationPart}, in place of a user's words. */
+export const AGENT_CONTINUATION_INSTRUCTION =
+  "<sixb_continuation>Your previous answer stopped at the turn time limit. Continue from where it stopped, in the same language, without repeating what you already wrote.</sixb_continuation>"
+
 export interface AgentFileDataResolverInput<TMessage extends AgentMessage = AgentMessage> {
   readonly message: TMessage
   readonly part: AgentFilePart
@@ -127,6 +131,10 @@ function userModelMessage<TMessage extends AgentMessage>(
     content.push({ type: "text", text: `${serializedContext}\n\n` })
   }
   message.parts.forEach((part, partIndex) => {
+    if (part.type === "continuation") {
+      content.push({ type: "text", text: AGENT_CONTINUATION_INSTRUCTION })
+      return
+    }
     if (part.type === "text") {
       content.push({
         type: "text",

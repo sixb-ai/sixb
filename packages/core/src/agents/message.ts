@@ -60,6 +60,14 @@ interface AgentToolCallBase {
   readonly providerMetadata?: ProviderData
 }
 
+/**
+ * The user asked the Agent to continue an answer the turn limit cut short. Sixb writes the
+ * instruction the model reads; chats show no message for it.
+ */
+export interface AgentContinuationPart {
+  readonly type: "continuation"
+}
+
 /** Ordered, hidden provider state required to replay a model response losslessly. */
 export interface AgentProviderStatePart {
   readonly type: "provider-state"
@@ -84,6 +92,7 @@ export type AgentMessagePart =
   | AgentStepStartPart
   | AgentFilePart
   | AgentContextPart
+  | AgentContinuationPart
   | AgentToolCallPart
   | AgentProviderStatePart
 

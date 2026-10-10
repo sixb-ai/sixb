@@ -316,25 +316,40 @@ export function useAgentConversation({
       {
         onSuccess: (response) => {
           setPendingSend({ run: response.run })
-          void Promise.all([
-            queryClient.invalidateQueries({
-              queryKey: listAgentThreadMessagesQueryKey({ path: { threadId } }),
-            }),
-            queryClient.invalidateQueries({
-              queryKey: listAgentThreadRunsQueryKey({ path: { threadId } }),
-            }),
-            queryClient.invalidateQueries({
-              queryKey: getAgentThreadQueryKey({ path: { threadId } }),
-            }),
-            queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() }),
-          ])
+          void refreshThread(threadId)
         },
       }
     )
   }
 
-  const continueAfterTimeout = () => {
-    void send("Continue from where you left off.", [], [])
+  const refreshThread = (threadId: string) =>
+    Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: listAgentThreadMessagesQueryKey({ path: { threadId } }),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: listAgentThreadRunsQueryKey({ path: { threadId } }),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: getAgentThreadQueryKey({ path: { threadId } }),
+      }),
+      queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() }),
+    ])
+
+  // Sixb writes the continuation for the model, with the cut-short turn's model and reasoning; the
+  // transcript shows no message for it.
+  const continueAfterTimeout = async () => {
+    if (isRunning || threadId === null) return
+    setSendError(null)
+    try {
+      const response = await sendWithRequesterSettings((settings) =>
+        postMessage.mutateAsync({ path: { threadId }, body: { continue: true, ...settings } })
+      )
+      setPendingSend({ run: response.run })
+      await refreshThread(threadId)
+    } catch {
+      setSendError({ threadId, message: "Couldn't send your message. Please try again." })
+    }
   }
 
   const handleRecreateSandbox = () => {
