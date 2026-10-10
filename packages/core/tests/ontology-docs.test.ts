@@ -162,7 +162,11 @@ test("renders the reader's view of each type, merged with the team's docs", () =
     objectTypes: sixb.objects.listTypes(),
     valueTypesById: sixb.objects.getValueTypesById(),
     actionsFor: (objectType) => sixb.actions.listForType(objectType),
-    ...(clearance === undefined ? {} : { restrictedPropertyIds: clearance.hiddenPropertyIds }),
+    ...(clearance === undefined
+      ? {}
+      : {
+          restrictedPropertyIds: (objectTypeId) => clearance.hiddenProperties(objectTypeId)?.ids,
+        }),
   })
 
   const file = (path: string) =>

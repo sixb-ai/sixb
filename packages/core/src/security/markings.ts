@@ -85,9 +85,20 @@ function assertSubtypeKeepsParentMarkings(
   const parent = ontology.getObjectTypeById(objectType.extends)
   if (!parent) return
 
+  // Indexed on the first marked parent property: most parents mark nothing.
+  let propertiesById: Map<string, Property> | undefined
   for (const parentProperty of parent.properties) {
-    const property = objectType.properties.find((candidate) => candidate.id === parentProperty.id)
-    const missing = missingMarkings(parentProperty.markings, property?.markings)
+    const parentMarkings = parentProperty.markings
+    if (!parentMarkings) continue
+
+    if (!propertiesById) {
+      propertiesById = new Map()
+      for (const property of objectType.properties) {
+        if (!propertiesById.has(property.id)) propertiesById.set(property.id, property)
+      }
+    }
+
+    const missing = missingMarkings(parentMarkings, propertiesById.get(parentProperty.id)?.markings)
     if (missing.length > 0) {
       throw new SecurityValidationError(
         `[Sixb] Property '${objectType.id}.${parentProperty.id}' must keep the markings of '${parent.id}.${parentProperty.id}': add ${missing.map((markingId) => `'${markingId}'`).join(", ")}.`
