@@ -44,6 +44,7 @@ export {
   RunCancelledMarker,
   RunErrorMarker,
   RunFailureMarker,
+  RunInterruptedMarker,
   RunTimeoutMarker,
   ThinkingMarker,
   UserFileAttachment,

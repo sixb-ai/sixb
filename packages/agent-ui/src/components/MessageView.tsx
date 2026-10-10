@@ -9,7 +9,7 @@ import {
   MarkerContent,
   MarkerIcon,
 } from "@sixb/ui/components"
-import { AlertTriangle, ArrowRight, ChevronRight, Clock3, RotateCcw } from "lucide-react"
+import { AlertTriangle, ArrowRight, ChevronRight, Clock3, RotateCcw, Unplug } from "lucide-react"
 import { memo } from "react"
 import { createAgentDocumentSource } from "../document-preview/source"
 import type { AgentDocumentSource } from "../document-preview/types"
@@ -122,6 +122,7 @@ export function LiveAssistant({
   live,
   keepWorkOpen = false,
   timeout,
+  interrupted,
   onRetry,
   onContinue,
   retrying = false,
@@ -130,6 +131,7 @@ export function LiveAssistant({
   live: LiveRunState
   keepWorkOpen?: boolean
   timeout?: { readonly hasProgress: boolean; readonly timeoutMs?: number }
+  interrupted?: { readonly hasProgress: boolean }
   onRetry?: () => void
   onContinue?: () => void
   retrying?: boolean
@@ -160,6 +162,20 @@ export function LiveAssistant({
         <RunTimeoutMarker
           hasProgress={timeout.hasProgress}
           timeoutMs={timeout.timeoutMs}
+          onRetry={onRetry}
+          onContinue={onContinue}
+          retrying={retrying}
+          continuing={continuing}
+        />
+      </div>
+    )
+  }
+  if (interrupted) {
+    return (
+      <div className="flex flex-col gap-2">
+        <AssistantBody parts={live.parts} live={keepWorkOpen} />
+        <RunInterruptedMarker
+          hasProgress={interrupted.hasProgress}
           onRetry={onRetry}
           onContinue={onContinue}
           retrying={retrying}
@@ -236,6 +252,44 @@ export function RunTimeoutMarker({
             ? `Stopped after reaching ${limit}.`
             : `The response reached ${limit} before producing an answer.`}
         </MarkerContent>
+      </Marker>
+      {hasProgress && onContinue ? (
+        <Button size="sm" onClick={onContinue} disabled={continuing}>
+          <ArrowRight aria-hidden="true" />
+          {continuing ? "Continuing…" : "Continue"}
+        </Button>
+      ) : null}
+      {!hasProgress && onRetry ? (
+        <Button variant="outline" size="sm" onClick={onRetry} disabled={retrying}>
+          <RotateCcw aria-hidden="true" />
+          {retrying ? "Retrying…" : "Try again"}
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+/** The worker running the turn stopped: continue from its saved progress, or run it again. */
+export function RunInterruptedMarker({
+  hasProgress,
+  onRetry,
+  onContinue,
+  retrying = false,
+  continuing = false,
+}: {
+  hasProgress: boolean
+  onRetry?: () => void
+  onContinue?: () => void
+  retrying?: boolean
+  continuing?: boolean
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2" role="status">
+      <Marker className="text-amber-700 dark:text-amber-400">
+        <MarkerIcon>
+          <Unplug className="text-amber-600 dark:text-amber-400" />
+        </MarkerIcon>
+        <MarkerContent>The response was interrupted before it finished.</MarkerContent>
       </Marker>
       {hasProgress && onContinue ? (
         <Button size="sm" onClick={onContinue} disabled={continuing}>

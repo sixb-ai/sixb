@@ -86,6 +86,8 @@ Set `SIXB_<TYPE>_WORKER_CONCURRENCY` to configure concurrency through the enviro
 
 Agent turns default to a 10-minute timeout. Override it with `--agent-turn-timeout 20m` or `SIXB_AGENT_TURN_TIMEOUT=20m` on `dev`, agent workers, or worker groups containing an agent worker.
 
+A worker that stops or is killed mid-turn ends the chat turn as interrupted; it is never run again behind the user's back. The chat offers Continue when part of the answer was saved, and Try again otherwise. Workflow agent steps are retried automatically.
+
 ## Deploy commands
 
 Run these from a project with a `sixb.deploy.ts`. See [Deploy to a server](../deployment/servers.md).

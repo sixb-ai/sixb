@@ -19,7 +19,14 @@ import {
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
 import type { AgentQueueJob, ClaimedQueueJob, SubagentQueueJob } from "@sixb/core/queues"
-import type { AgentRunExecution, AgentRunRecord, SubagentRunRecord } from "@sixb/core/storage"
+import type {
+  AgentRunExecution,
+  AgentRunRecord,
+  AgentThreadRecord,
+  ConversationAgentRunRecord,
+  ExecutionRecord,
+  SubagentRunRecord,
+} from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
@@ -33,14 +40,20 @@ import {
   AgentEnvironmentSaveError,
   AgentExecutionLostError,
   AgentFinalizationError,
+  AgentRunOwnedElsewhereError,
+  AgentTurnInterruptedError,
   AgentTurnTimeoutError,
   WorkflowResumeDispatchError,
 } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
-import { resolveAgentExecutionPlan, resolveSubagentExecutionPlan } from "./execution-plan"
+import {
+  type ResolvedAgentExecutionPlan,
+  resolveAgentExecutionPlan,
+  resolveSubagentExecutionPlan,
+} from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure, toAgentRunFailure } from "./failure"
 import { finishRunOrThrow } from "./finalize"
-import { DEFAULT_MAX_STEPS, runAgentTurn } from "./run-agent-turn"
+import { DEFAULT_MAX_STEPS, runAgentTurn, stoppedByWorker } from "./run-agent-turn"
 import {
   type AgentExecutionEnvironment,
   type ConversationAgentExecutionEnvironment,
@@ -51,6 +64,7 @@ import { runSubagent } from "./run-subagent"
 import { createBrokerStreamSink, isolateStreamSink, withAgentActivityStream } from "./stream-sink"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type {
+  AgentExecutionContext,
   AgentWorkerContext,
   AgentWorkerHost,
   AgentWorkerOptions,
@@ -68,8 +82,21 @@ const AGENT_DISPATCH_REPAIR_MS = 30_000
 /** Backoff before redelivering a job whose run could not be finalized (storage was unavailable). */
 const FINALIZE_RETRY_BACKOFF_MS = 5_000
 const PRESTART_RETRY_BACKOFF_MS = 5_000
+/** A turn's own preparation retries quickly first, so a storage blip does not delay the answer. */
+const PREPARATION_RETRY_BACKOFF_MS = [250, 1_000, PRESTART_RETRY_BACKOFF_MS] as const
+/** Floor for a duplicate's deferral, so a skewed lease clock cannot make it redeliver at once. */
+const OWNED_ELSEWHERE_MIN_DEFER_MS = 1_000
 const AI_USAGE_RECOVERY_INITIAL_BACKOFF_MS = 5_000
 const AI_USAGE_RECOVERY_MAX_BACKOFF_MS = 5 * 60_000
+
+/** What a conversation turn resolves before its first model call. */
+interface PreparedConversationTurn {
+  readonly thread: AgentThreadRecord | null
+  readonly plan: ResolvedAgentExecutionPlan
+  readonly execution: ExecutionRecord
+  readonly executionContext: AgentExecutionContext
+  readonly model: Awaited<ReturnType<typeof prepareAgentModel>>
+}
 
 /** Outcome of trying to own a run for a claimed job. */
 type Reservation<TRun extends AgentRunRecord = AgentRunRecord> =
@@ -206,8 +233,19 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     if (queuedRun.status !== "queued" && queuedRun.status !== "running") {
       return
     }
-    // Own this attempt before preparation: even a revoked authority on redelivery needs a fenced
-    // terminal outcome. Never reclaim again while handling a preparation failure.
+    // A conversation turn left running by a dead delivery already streamed to the user and billed
+    // its model calls. Replaying it would repeat both behind their back, so it ends interrupted and
+    // the user chooses whether to run it again. A delivery whose projected lease has not lapsed may
+    // still be alive: this job is then a duplicate and comes back once that lease runs out.
+    if (queuedRun.status === "running") {
+      const ownedUntil = queuedRun.execution?.queueLeaseExpiresAt
+      if (ownedUntil && ownedUntil.getTime() > Date.now()) {
+        throw new AgentRunOwnedElsewhereError(queuedRun.id, ownedUntil)
+      }
+      await this.finishInterruptedTurn(context, queuedRun, delivery)
+      return
+    }
+    // Own this attempt before preparation: even a revoked authority needs a fenced terminal outcome.
     const reservation = await this.startOrReclaim(context, {
       run: queuedRun,
       modelId: queuedRun.spec?.model.modelId,
@@ -251,68 +289,32 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           }
         })
       })
-      // Catch a renewal that completed between starting/reclaiming the run and attaching the
-      // observer. Storage keeps this projection monotonic, so racing confirmations are safe.
-      await this.confirmExecutionOwnership(context, run.id, executionToken, delivery.leaseExpiresAt)
-
-      const thread = await context.storage.agents.threads.getById({
-        projectId: context.id,
-        id: run.threadId,
-      })
-
-      const configuredPlan = resolveAgentExecutionPlan({
-        spec: run.spec,
-        models: this.host.definitions.models?.language,
-        tools: this.host.definitions.tools,
-        defaultMaxSteps: context.defaultMaxSteps,
-      })
-      const durableExecution = await context.storage.executions.getById({
-        projectId: context.id,
-        id: run.executionId,
-      })
-      if (!durableExecution) {
-        throw createSixbError(
-          "internal.unexpected",
-          `[SixbAgentWorker] Agent run '${run.id}' references missing execution '${run.executionId}'.`,
-          { details: { runId: run.id, threadId: run.threadId, executionId: run.executionId } }
+      const prepared = await retryPreparationInPlace(job.attempt, turnSignal, async () => {
+        // Catch a renewal that completed between starting the run and attaching the observer.
+        // Storage keeps this projection monotonic, so racing confirmations are safe.
+        await this.confirmExecutionOwnership(
+          context,
+          run.id,
+          executionToken,
+          delivery.leaseExpiresAt
         )
-      }
-      const executionContext = createAgentExecutionContext({
-        context,
-        host: this.host,
-        execution: durableExecution,
-        runId: run.id,
-        authorization: await resolveInheritedAgentExecutionAuthorization({
-          auth: context.storage.auth,
-          projectId: context.id,
-          authorizationRef: durableExecution.authorizationRef,
-          security: this.host.definitions.security,
-        }),
+        return this.prepareConversationTurn(context, run)
       })
-      if (thread?.sandboxParams) {
-        runtime = createAgentTurnRuntime({
-          context: executionContext,
-          run,
-          signal: turnSignal,
-          execution: durableExecution,
-        })
-      }
-      const preparedModel = await prepareAgentModel(configuredPlan)
-      const plan = Object.freeze({ ...configuredPlan, model: preparedModel.model })
+      const plan = Object.freeze({ ...prepared.plan, model: prepared.model.model })
 
       await context.streamSink.publishStarted(run)
-      runtime ??= createAgentTurnRuntime({
-        context: executionContext,
+      runtime = createAgentTurnRuntime({
+        context: prepared.executionContext,
         run,
         signal: turnSignal,
-        execution: durableExecution,
+        execution: prepared.execution,
       })
       // Delegation is temporarily disabled; retain the child runtime for later re-enablement.
       environment = await createConversationAgentEnvironment({
-        thread,
+        thread: prepared.thread,
         sandboxDefinition: this.host.sandboxDefinition,
-        preflight: { budget: preparedModel.budget, runtime },
-        context: executionContext,
+        preflight: { budget: prepared.model.budget, runtime },
+        context: prepared.executionContext,
         plan,
         run,
         signal: runtime.signal,
@@ -324,6 +326,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         plan,
         run,
         signal: turnSignal,
+        stopSignal: signal,
         runtime,
         threadContext: environment.threadContext,
       })
@@ -354,15 +357,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           environmentSaveFailed = true
         }
       }
-      // Preparation has no model/tool effects yet; preserve the existing bounded dependency retry.
-      if (
-        runtime === null &&
-        !turnSignal.aborted &&
-        shouldRetryAgentPreparation(error, job.attempt)
-      ) {
-        throw error
-      }
-      // Otherwise record the run's terminal fate. `recordFate` retries transient blips; if it cannot
+      // Record the run's terminal fate. `recordFate` retries transient blips; if it cannot
       // record the fate at all it raises `AgentFinalizationError`, which propagates here so the job
       // is redelivered rather than acked with the thread left silently locked. A user cancel is
       // detected off its own signal so it records `cancelled` however the aborted stream surfaced.
@@ -370,12 +365,14 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         !environmentSaveFailed &&
         !(error instanceof ModelUsageRecordingError) &&
         (signal.aborted || cancel.signal.aborted || isAbortError(error))
+      // A worker stop, unlike a user cancel, leaves the user something to resume.
+      const interrupted = aborted && stoppedByWorker(turnSignal, signal)
       const finalized = await this.recordFate(
         context,
         run,
         executionToken,
         aborted ? "cancelled" : "failed",
-        error
+        interrupted ? new AgentTurnInterruptedError(run.id) : error
       )
       if (finalized) {
         if (finalized.run.status === "failed" && !(error instanceof AgentTurnTimeoutError)) {
@@ -398,6 +395,75 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       runtime?.dispose()
       await environment?.dispose()
     }
+  }
+
+  /** Resolve everything a turn needs before its first model call. */
+  private async prepareConversationTurn(
+    context: AgentWorkerContext,
+    run: ConversationAgentRunRecord
+  ): Promise<PreparedConversationTurn> {
+    const thread = await context.storage.agents.threads.getById({
+      projectId: context.id,
+      id: run.threadId,
+    })
+    const plan = resolveAgentExecutionPlan({
+      spec: run.spec,
+      models: this.host.definitions.models?.language,
+      tools: this.host.definitions.tools,
+      defaultMaxSteps: context.defaultMaxSteps,
+    })
+    const execution = await context.storage.executions.getById({
+      projectId: context.id,
+      id: run.executionId,
+    })
+    if (!execution) {
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Agent run '${run.id}' references missing execution '${run.executionId}'.`,
+        { details: { runId: run.id, threadId: run.threadId, executionId: run.executionId } }
+      )
+    }
+    const executionContext = createAgentExecutionContext({
+      context,
+      host: this.host,
+      execution,
+      runId: run.id,
+      authorization: await resolveInheritedAgentExecutionAuthorization({
+        auth: context.storage.auth,
+        projectId: context.id,
+        authorizationRef: execution.authorizationRef,
+        security: this.host.definitions.security,
+      }),
+    })
+    const model = await prepareAgentModel(plan)
+    return { thread, plan, execution, executionContext, model }
+  }
+
+  /**
+   * End a turn whose delivery died, without calling the model. Reclaiming first rotates the
+   * execution token, so a delivery that is only slow, not dead, can no longer write to the run.
+   */
+  private async finishInterruptedTurn(
+    context: AgentWorkerContext,
+    queuedRun: ConversationAgentRunRecord,
+    delivery: QueueDelivery<AgentQueueJob, (typeof AGENT_RUN_FAILURE_CODES)[number]>
+  ): Promise<void> {
+    const reservation = await this.startOrReclaim(context, {
+      run: queuedRun,
+      execution: freshExecution(delivery.leaseExpiresAt),
+    })
+    if (reservation.kind === "skip" || !reservation.run.execution) return
+
+    const finalized = await this.recordFate(
+      context,
+      reservation.run,
+      reservation.run.execution.token,
+      "cancelled",
+      new AgentTurnInterruptedError(queuedRun.id)
+    )
+    if (!finalized) return
+    await context.streamSink.publishRunFinished(finalized.run)
+    await this.cancelActiveSubagents(finalized.run.id, "The parent Agent run was interrupted.")
   }
 
   async executeSubagent(
@@ -577,6 +643,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
             availableAt: backoff(aiUsageRecoveryBackoffMs(claimed.job.attempt)),
           }
     }
+    if (error instanceof AgentRunOwnedElsewhereError) return retryOnceReleased(error)
     // The node's result is durable; only its workflow resume is unpublished. Redeliver until it is.
     if (error instanceof WorkflowResumeDispatchError) {
       console.error(`${error.message} Retrying.`, error.cause)
@@ -638,6 +705,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     if (claimed.job.type === "agent.workflow-node.requested") {
       return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
     }
+    // A deferred duplicate stays deferred during shutdown: failing it would orphan a live run.
+    if (error instanceof AgentRunOwnedElsewhereError) return retryOnceReleased(error)
     // Shutdown reached us before we could record the run's fate: redeliver so another process
     // finalizes it. Otherwise the run is already terminal, so fail (no redelivery needed).
     if (error instanceof AgentFinalizationError) {
@@ -1012,6 +1081,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         error: failure,
         completedAt,
         ...(error instanceof AgentTurnTimeoutError ? { finishReason: "timeout" as const } : {}),
+        ...(error instanceof AgentTurnInterruptedError
+          ? { finishReason: "interrupted" as const }
+          : {}),
       })
       return { run: finalized, failure }
     } catch (finalizeError) {
@@ -1157,6 +1229,15 @@ function isExecutionGone(error: unknown): boolean {
   )
 }
 
+/** Come back once the owning delivery's projected lease lapses, and never sooner than a moment. */
+function retryOnceReleased(error: AgentRunOwnedElsewhereError): QueueWorkerFailureDecision {
+  const availableAt = Math.max(
+    error.ownedUntil.getTime(),
+    Date.now() + OWNED_ELSEWHERE_MIN_DEFER_MS
+  )
+  return { kind: "retry", availableAt: new Date(availableAt).toISOString() }
+}
+
 function backoff(ms: number): string {
   return new Date(Date.now() + ms).toISOString()
 }
@@ -1202,6 +1283,34 @@ async function waitForAbort(ms: number, signal: AbortSignal): Promise<void> {
     signal.addEventListener("abort", finish, { once: true })
   })
 }
+
+/**
+ * Preparation calls no model and no tool, so a dependency failure is retried here, within the
+ * delivery that owns the run. A redelivery would find the run running and end it as interrupted.
+ */
+async function retryPreparationInPlace<T>(
+  attempt: number,
+  signal: AbortSignal,
+  prepare: () => Promise<T>
+): Promise<T> {
+  for (let retry = 0; ; retry += 1) {
+    try {
+      return await prepare()
+    } catch (error) {
+      if (
+        signal.aborted ||
+        isExecutionGone(error) ||
+        !shouldRetryAgentPreparation(error, attempt + retry)
+      ) {
+        throw error
+      }
+    }
+    const backoffMs = PREPARATION_RETRY_BACKOFF_MS[retry] ?? PRESTART_RETRY_BACKOFF_MS
+    await waitForAbort(backoffMs, signal)
+    signal.throwIfAborted()
+  }
+}
+
 function normalizeTurnTimeoutMs(value: number | undefined): number {
   const timeoutMs = value ?? DEFAULT_TURN_TIMEOUT_MS
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMER_DURATION_MS) {

@@ -1,5 +1,9 @@
 import { AgentRequestError, type AgentRunView, type FileRef, type SixbHostView } from "@sixb/core"
-import { publishAgentRunCancel, publishAgentRunFinished } from "@sixb/core/internal/agents"
+import {
+  isRetryableAgentRun,
+  publishAgentRunCancel,
+  publishAgentRunFinished,
+} from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
 import {
   type AgentContextCheckpointRecord,
@@ -748,9 +752,9 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             set.status = 404
             return { error: "Agent run not found" }
           }
-          if (failedRun.status !== "failed") {
+          if (!isRetryableAgentRun(failedRun)) {
             set.status = 409
-            return { error: "Only failed agent runs can be retried" }
+            return { error: "Only failed or interrupted agent runs can be retried" }
           }
 
           const { run } = await sixb.agent.runs.retry(failedRun.id)
@@ -774,7 +778,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           501: ErrorResponseSchema,
         },
         detail: {
-          summary: "Retry a failed agent run",
+          summary: "Retry a failed or interrupted agent run",
           tags: [OPENAPI_TAGS.agentRuns.name],
           operationId: "retryAgentRun",
           security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,

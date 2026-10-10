@@ -84,6 +84,34 @@ export class AgentTurnTimeoutError extends Error {
   }
 }
 
+/**
+ * The worker running a conversation turn stopped, or died, before finishing it. The turn is
+ * recorded `cancelled` with `finishReason: "interrupted"` rather than replayed: the user already saw
+ * it stream and its model calls were billed, so resuming it is their call.
+ */
+export class AgentTurnInterruptedError extends Error {
+  readonly name = "AgentTurnInterruptedError"
+  constructor(readonly runId: string) {
+    super(
+      `[SixbAgentWorker] Agent run '${runId}' was interrupted when the worker running it stopped.`
+    )
+  }
+}
+
+/**
+ * A redelivered job found its run still owned by a live delivery: a duplicate job. The worker
+ * leaves the run alone and retries the job once that delivery's projected lease lapses.
+ */
+export class AgentRunOwnedElsewhereError extends Error {
+  readonly name = "AgentRunOwnedElsewhereError"
+  constructor(
+    readonly runId: string,
+    readonly ownedUntil: Date
+  ) {
+    super(`[SixbAgentWorker] Agent run '${runId}' is still owned by another delivery.`)
+  }
+}
+
 /** Keep an untrusted tool failure as the cause while exposing only a generic message to the model. */
 export class AgentToolExecutionError extends Error {
   readonly name = "AgentToolExecutionError"
