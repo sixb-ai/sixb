@@ -31,9 +31,9 @@ in the handler keeps its credentials on the server.
 ## Read project data
 
 The handler's `sixb` reads objects, telemetry, and datasets, and changes data through
-`sixb.actions`, which validate and record each change. It also offers `connector`. Object sets
-have the same reads as in a workflow step, without the writes. To return a file, publish it with
-`artifacts`. This tool finds a project by name:
+`sixb.actions`, which validate and record each change. It also offers `models` and `connector`.
+Object sets have the same reads as in a workflow step, without the writes. To return a file,
+publish it with `artifacts`. This tool finds a project by name:
 
 File: `agent-tools/find-project.ts`
 
@@ -66,7 +66,8 @@ run that called it:
 
 The tool sees exactly what that requester may see: an object type or dataset they cannot view
 throws an `AuthorizationError`, and properties and columns [marked](../auth/markings.md) beyond
-their clearance are left out.
+their clearance are left out. Model calls count toward the agent run's
+[usage and limits](./usage-and-limits.md).
 
 A tool that requests an action runs it immediately. The agent asks the user to confirm a domain
 change before it requests one itself; actions a tool requests skip that confirmation, so request

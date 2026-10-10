@@ -49,6 +49,7 @@ export function agentToolRuntime(sixb: Sixb): AgentToolRuntimeFacade {
       getById: (datasetId: string) => datasets.getById(datasetId),
       readRows: (...args: Parameters<typeof datasets.readRows>) => datasets.readRows(...args),
     }),
+    models: sixb.models,
     connector: sixb.connector,
   })
 }

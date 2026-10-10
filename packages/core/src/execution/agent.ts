@@ -1,4 +1,6 @@
 import { type AgentExecutionAuthorization, agentServiceAccountId } from "../agents/authority"
+import { bindModelExecutionAttempt } from "../models/execution/binding"
+import type { AiModelCallRecorder } from "../models/execution/model-call-recorder"
 import { isBoundSixb, type Sixb } from "../runtime/sixb"
 import type { ExecutionRecord } from "../storage/executions"
 import { ExecutionStorageError } from "../storage/executions"
@@ -105,6 +107,31 @@ export function bindDurableAgentExecution(
     throw new Error("[Sixb] Agent execution host returned an invalid bound SDK.")
   }
   return sixb
+}
+
+/**
+ * Account model calls made through a run's bound SDK — by its tools, or embeddings behind their
+ * searches — like the run's own: same execution attempt, limits, failure state and cancellation.
+ * The attempt is the recorder's, so the two cannot diverge.
+ */
+export function bindAgentModelExecution(
+  sixb: Sixb,
+  input: {
+    readonly signal: AbortSignal
+    readonly accounting: AiModelCallRecorder
+  }
+): void {
+  const { accounting } = input
+  if (accounting.executionId !== sixb.execution.id) {
+    throw new Error(
+      `[Sixb] Agent execution '${sixb.execution.id}' cannot account its model calls to execution '${accounting.executionId}'.`
+    )
+  }
+  bindModelExecutionAttempt(sixb.models, {
+    attempt: accounting.attempt,
+    signal: input.signal,
+    accounting,
+  })
 }
 
 /** Restore one provider-validated Agent execution with its currently resolved grants. */

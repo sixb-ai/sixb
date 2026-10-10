@@ -9976,10 +9976,24 @@ describe("agent tools act as the requester", () => {
     throw error
   }
 
-  /** Call one tool, then answer once the conversation holds a reply. */
+  const SUMMARY_PROMPT = "Summarize invoice inv-1."
+  // Passes no signal of its own: only the run can cancel its model call.
+  const summarizeInvoice = defineAgentTool("summarize_invoice")
+    .description("Summarize an invoice with the project's model.")
+    .input({})
+    .run(async ({ sixb }) => {
+      const { output } = await sixb.models.language.generate({ prompt: SUMMARY_PROMPT })
+      return { summary: output }
+    })
+
+  /** Call one tool, then answer once the conversation holds a reply; answer tools directly. */
   function toolCallThenAnswerModel(
     toolName: string,
-    input: Readonly<Record<string, string>>
+    input: Readonly<Record<string, string>>,
+    options: {
+      readonly onAgentCall?: () => void
+      readonly onToolCall?: (request: LanguageModelRequest) => Promise<never>
+    } = {}
   ): WorkerTestModel {
     const text = (value: string) => ({
       content: [{ type: "text" as const, text: value }],
@@ -9988,7 +10002,14 @@ describe("agent tools act as the requester", () => {
     })
     return new WorkerTestModel({
       modelId: "mock-model",
-      generate: async ({ messages }) => {
+      generate: async (request) => {
+        const { messages } = request
+        const [first] = messages
+        const fromTool =
+          first?.role === "user" &&
+          first.content.some((part) => part.type === "text" && part.text === SUMMARY_PROMPT)
+        if (fromTool) return options.onToolCall?.(request) ?? text("Paid in full.")
+        options.onAgentCall?.()
         if (messages.some((message) => message.role !== "system" && message.role !== "user")) {
           return text(JSON.stringify({ answer: "Done.", confidence: 1 }))
         }
@@ -10181,6 +10202,7 @@ describe("agent tools act as the requester", () => {
       "actions",
       "connector",
       "datasets",
+      "models",
       "objects",
       "telemetry",
     ])
@@ -10189,6 +10211,180 @@ describe("agent tools act as the requester", () => {
     expect(Object.keys(invoices).sort()).toEqual(["byId", "get", "list", "query"])
     expect(Object.keys(invoices.byId("inv-1")).sort()).toEqual(["get", "listLinks"])
     expect(Object.keys(tools.objects)).toEqual([])
+  })
+
+  function recordUsage(host: TestSixb) {
+    const recorded: { readonly executionId: string; readonly attempt: number }[] = []
+    const workerHost = withStorage(
+      host,
+      withAiUsageRecordInterceptor(host.storage, async ({ executionId, attempt }, record) => {
+        recorded.push({ executionId, attempt })
+        return record()
+      })
+    )
+    return { workerHost, recorded }
+  }
+
+  // Regression proof: remove the bindAgentModelExecution call after the turn runtime in
+  // worker.ts; the tool's generate() then fails without a bound execution attempt.
+  test("accounts a tool's model call to a reclaimed chat run like the Agent's own", async () => {
+    const sixb = buildSixb(
+      toolCallThenAnswerModel(summarizeInvoice.name, {}),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      { projectTools: [summarizeInvoice] }
+    )
+    const request = await requestAgentAs(sixb, REQUESTER, { text: "Summarize inv-1." })
+    // A worker crashed after starting the run: this delivery reclaims it as attempt 2.
+    await agentStorageOf(sixb).runs.start({
+      id: request.run.id,
+      projectId: PROJECT_ID,
+      execution: freshTestExecution(),
+    })
+    const { workerHost, recorded } = recordUsage(sixb)
+    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const run = await finishedRun(sixb, request.run.id)
+      expect(run).toMatchObject({ status: "succeeded", attempt: 2 })
+      const messages = await listMessages(agentStorageOf(sixb), request.run.threadId)
+      expect(
+        toolOutput(
+          messages.flatMap((message) => message.parts),
+          summarizeInvoice.name
+        )
+      ).toEqual({ summary: "Paid in full." })
+      // The Agent's tool call, the tool's own call, then the Agent's answer.
+      expect(recorded).toEqual(
+        Array.from({ length: 3 }, () => ({ executionId: run.executionId, attempt: 2 }))
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Regression proof: remove the bindAgentModelExecution call in workflow-node-execution.ts; the
+  // tool's call fails, so only the node's own three calls are recorded.
+  test("accounts a tool's model call to a workflow node like the node's own", async () => {
+    const model = toolCallThenAnswerModel(summarizeInvoice.name, {})
+    const { sixb, runs, nodeRunId, agentExecutionId } = await queueWorkflowAgentNode({
+      model,
+      models: { language: [model] },
+      tools: [summarizeInvoice],
+      runId: "workflow-tool-model-call",
+    })
+    const { workerHost, recorded } = recordUsage(sixb)
+    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const node = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "workflow tool model call node terminal", timeoutMs: 10_000 }
+      )
+      expect(node.status).toBe("succeeded")
+      expect(toolOutput(node.trace ?? [], summarizeInvoice.name)).toEqual({
+        summary: "Paid in full.",
+      })
+      // The tool call, the tool's own call, the research answer, then the structured output.
+      expect(recorded).toEqual(
+        Array.from({ length: 4 }, () => ({ executionId: agentExecutionId, attempt: 1 }))
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Regression proof: bind `turnSignal` instead of the node's deadline in
+  // workflow-node-execution.ts; the tool's call then outlives the deadline and the test times out.
+  test("cancels a tool's model call at the workflow node's deadline", async () => {
+    let toolCallCancelled = false
+    const model = toolCallThenAnswerModel(
+      summarizeInvoice.name,
+      {},
+      {
+        onToolCall: ({ signal }) =>
+          new Promise((_, reject) =>
+            signal.addEventListener("abort", () => {
+              toolCallCancelled = true
+              reject(signal.reason)
+            })
+          ),
+      }
+    )
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model,
+      models: { language: [model] },
+      tools: [summarizeInvoice],
+      runId: "workflow-tool-deadline",
+    })
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false, turnTimeoutMs: 200 }))
+    await worker.start()
+    try {
+      const node = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "workflow tool deadline node terminal", timeoutMs: 5_000 }
+      )
+      expect(node.status).not.toBe("succeeded")
+      expect(toolCallCancelled).toBe(true)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Regression proof: stop passing `accounting` to bindAgentModelExecution, so the tool's calls
+  // open their own recorder; the Agent then answers after the unrecorded call and the run succeeds.
+  test("stops the run when a tool's model call cannot be accounted", async () => {
+    let agentCalls = 0
+    const sixb = buildSixb(
+      toolCallThenAnswerModel(
+        summarizeInvoice.name,
+        {},
+        {
+          onAgentCall: () => {
+            agentCalls += 1
+          },
+        }
+      ),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      { projectTools: [summarizeInvoice] }
+    )
+    const callIds: string[] = []
+    const workerHost = withStorage(
+      sixb,
+      withAiUsageRecordInterceptor(sixb.storage, async (usage, record) => {
+        if (!callIds.includes(usage.callId)) callIds.push(usage.callId)
+        // The second call is the tool's: neither the ledger nor its durable recovery takes it.
+        if (usage.callId === callIds[1]) throw new Error("usage storage unavailable")
+        return record()
+      })
+    )
+    const queue = sixb.queues.agents
+    const enqueue = queue.enqueue.bind(queue)
+    queue.enqueue = async (params) => {
+      if (params.jobs.some((job) => job.type === "agent.ai-usage.record.requested")) {
+        throw new Error("agent queue unavailable")
+      }
+      return enqueue(params)
+    }
+    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, { text: "Summarize inv-1." })
+      const run = await finishedRun(sixb, request.run.id)
+      expect(run.status).toBe("failed")
+      expect(run.error?.code).toBe("agent.execution_failed")
+      expect(callIds).toHaveLength(2)
+      expect(agentCalls).toBe(1)
+    } finally {
+      await worker.stop()
+    }
   })
 })
 

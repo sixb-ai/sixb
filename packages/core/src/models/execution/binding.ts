@@ -1,10 +1,16 @@
 import type { ModelsRuntime } from "../generation-types"
+import type { AiModelCallRecorder } from "./model-call-recorder"
 
 export interface ModelExecutionAttempt {
   readonly attempt: number
   readonly signal: AbortSignal
   /** Internal durable fence around admission; it must invoke admit exactly once to proceed. */
   readonly embeddingAdmission?: (admit: () => Promise<void>) => Promise<void>
+  /**
+   * Accounting the execution attempt already owns, such as an Agent run's. Calls then share its
+   * admission and failure state instead of opening a second recorder for the same attempt.
+   */
+  readonly accounting?: AiModelCallRecorder
 }
 
 const bindings = new WeakMap<ModelsRuntime, (input: ModelExecutionAttempt) => void>()

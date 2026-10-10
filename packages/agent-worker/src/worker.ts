@@ -1,4 +1,5 @@
 import { join } from "node:path"
+import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
   createAgentRunExecutionToken,
   dispatchQueuedAgentRuns,
@@ -307,6 +308,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         signal: turnSignal,
         execution: durableExecution,
       })
+      bindAgentModelExecution(executionContext.sixb, {
+        signal: runtime.signal,
+        accounting: runtime.usageRecorder,
+      })
       // Delegation is temporarily disabled; retain the child runtime for later re-enablement.
       environment = await createConversationAgentEnvironment({
         thread,
@@ -441,6 +446,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     const turnSignal = AbortSignal.any([signal, cancel.signal, parentCancel.signal])
     let preparationComplete = false
     let environment: AgentExecutionEnvironment | null = null
+    let runtime: AgentTurnRuntime | null = null
     let stopOwnershipProjection: (() => void) | undefined
 
     try {
@@ -511,6 +517,16 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       const plan = Object.freeze({ ...configuredPlan, model: prepared.model })
       preparationComplete = true
       await context.streamSink.publishStarted(run)
+      runtime = createAgentTurnRuntime({
+        context: executionContext,
+        run,
+        signal: turnSignal,
+        execution: durableExecution,
+      })
+      bindAgentModelExecution(executionContext.sixb, {
+        signal: runtime.signal,
+        accounting: runtime.usageRecorder,
+      })
       environment = await createSubagentEnvironment({
         context: executionContext,
         plan,
@@ -518,7 +534,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         signal: turnSignal,
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
-      await runSubagent({ context: environment.turnContext, plan, run, signal: turnSignal })
+      await runSubagent({ context: environment.turnContext, plan, run, runtime })
     } catch (error) {
       if (
         error instanceof AgentExecutionLostError ||
@@ -561,6 +577,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       stopOwnershipProjection?.()
       cancel.stop()
       parentCancel.stop()
+      runtime?.dispose()
       await environment?.dispose()
     }
   }

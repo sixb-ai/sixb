@@ -1,4 +1,5 @@
 import type { AgentMessagePart, SixbFailure, ValueType, WorkflowDefinition } from "@sixb/core"
+import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
   createAgentRunExecutionToken,
   resolveAgentExecutionAuthorization,
@@ -113,6 +114,9 @@ export async function executeWorkflowAgentNode(
   let preparationComplete = false
   const cancel = await input.watchForCancel(nodeRun.id)
   const turnSignal = AbortSignal.any([signal, cancel.signal])
+  // Bounds the node's model loop and its tools' model calls, and ends them with the node.
+  const deadline = new AbortController()
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined
   const stopOwnershipProjection = projectQueueOwnership({
     delivery,
     runs,
@@ -185,6 +189,12 @@ export async function executeWorkflowAgentNode(
       signal: turnSignal,
       onDetachedTeardown: input.onDetachedTeardown,
     })
+    deadlineTimer = setTimeout(() => deadline.abort(), context.turnTimeoutMs)
+    const nodeSignal = AbortSignal.any([turnSignal, deadline.signal])
+    bindAgentModelExecution(executionContext.sixb, {
+      signal: nodeSignal,
+      accounting: usageRecorder,
+    })
     const result = await runWorkflowAgentNode({
       context: environment.turnContext,
       agentStepId: node.agentStep.id,
@@ -196,7 +206,7 @@ export async function executeWorkflowAgentNode(
       prompt: reserved.prompt,
       valueTypesById,
       usageRecorder,
-      signal: turnSignal,
+      signal: nodeSignal,
     })
     const completedNode = await finishWorkflowAgentNodeSucceeded({
       context,
@@ -278,6 +288,8 @@ export async function executeWorkflowAgentNode(
     }
     await emitNodeAndRunFailed(input.host, failed, totalNodes, status)
   } finally {
+    clearTimeout(deadlineTimer)
+    deadline.abort()
     stopOwnershipProjection()
     cancel.stop()
     await environment?.dispose()

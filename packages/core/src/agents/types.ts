@@ -6,6 +6,7 @@ import type { DatasetsRuntime } from "../datasets/execution"
 import type { JsonPrimitive, JsonValue, ReadonlyJsonValue } from "../json"
 import type { Logger } from "../logging"
 import { type LanguageModelRef, MODEL_REASONING_LEVELS, type ModelReasoning } from "../models"
+import type { ModelsRuntime } from "../models/generation-types"
 import type { InferSchema } from "../ontology/inference"
 import type { Schema } from "../ontology/types"
 
@@ -128,14 +129,15 @@ export type AgentToolResult = {
  * actions, it acts as the run's requester: the signed-in user in a chat, that same user in a child
  * Agent, and the step's groups in a workflow AI task.
  *
- * A structural view of the public `Sixb` SDK, like `WorkflowRuntimeFacade`, narrowed to the data
- * operations a tool needs. Objects and telemetry are read through the same view as an Action's
- * `read`, and datasets are read only: a tool changes data by requesting actions, which validate and
- * record the change. Files a tool produces go through its `artifacts`.
+ * A structural view of the public `Sixb` SDK, like `WorkflowRuntimeFacade`, narrowed to the data and
+ * model operations a tool needs. Objects and telemetry are read through the same view as an
+ * Action's `read`, and datasets are read only: a tool changes data by requesting actions, which
+ * validate and record the change. Files a tool produces go through its `artifacts`.
  */
 export interface AgentToolRuntimeFacade extends ActionReadFacade {
   readonly actions: ActionsRuntime
   readonly datasets: Pick<DatasetsRuntime, "list" | "getById" | "readRows">
+  readonly models: ModelsRuntime
   readonly connector: ConnectorRuntime
 }
 

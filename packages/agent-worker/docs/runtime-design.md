@@ -45,10 +45,10 @@ object/link writes, telemetry append, workflow cancellation/interventions/node d
 infrastructure or administration routes remain outside the gateway.
 
 Project tools run in the worker, not the sandbox. Their `sixb` is the run's execution-bound SDK
-(the same authority the gateway resolves) narrowed to object, telemetry and dataset reads, actions
-and connectors. Like the gateway, it offers no generic data writes; without `workflows` it cannot
-open a way around the rule above. Tool authority is resolved once, at turn start, while the gateway
-re-resolves it on every request.
+(the same authority the gateway resolves) narrowed to object, telemetry and dataset reads, actions,
+models and connectors. Like the gateway, it offers no generic data writes; without `workflows` it
+cannot open a way around the rule above. Tool authority is resolved once, at turn start, while the
+gateway re-resolves it on every request. Their model calls use the run's accounting recorder.
 
 Workflow run detail includes the run's top-level output after success. Agent gateway responses omit
 the route's internal node records, and only top-level input/output file paths are available.
