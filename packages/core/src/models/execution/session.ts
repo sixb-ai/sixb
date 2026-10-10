@@ -34,8 +34,8 @@ export class ModelExecutionSession {
   }
 
   accounting(): Promise<AiModelCallRecorder> {
-    this.requireBinding()
-    this.recorder ??= this.createRecorder()
+    const { accounting } = this.requireBinding()
+    this.recorder ??= accounting ? Promise.resolve(accounting) : this.createRecorder()
     return this.recorder
   }
 
