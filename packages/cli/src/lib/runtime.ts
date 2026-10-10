@@ -54,9 +54,19 @@ export interface RunningSixbRuntime {
 
 export interface StartSixbRuntimeOptions {
   readonly cohostWorkers?: boolean
+  /**
+   * The API this process serves. Agent turns call it from their sandbox, so a co-hosted agent
+   * worker starts only once it listens and stops before it closes.
+   */
+  readonly api?: RuntimeApiServer
   readonly agentApiBaseUrl?: string
   readonly agentTurnTimeoutMs?: number
   readonly workerConcurrency?: WorkerConcurrency
+}
+
+export interface RuntimeApiServer {
+  start(): Promise<void>
+  stop(): Promise<void>
 }
 
 export interface RunningRulesRuntime {
@@ -194,25 +204,27 @@ export async function startOrchestratorRuntime(
  * Startup order (consumers before producers):
  *   1. RulesWorker (subscribes to ontology events)
  *   2. ActionWorker (subscribes to events)
- *   3. AgentWorker (claims from queues)
- *   4. ProjectionWorker (claims from queues)
- *   5. PipelineWorker (claims from queues)
- *   6. WorkflowWorker (claims from queues)
- *   7. SyncWorker (claims from queues)
- *   8. Orchestrator (subscribes to events and enqueues jobs)
- *   9. Scheduler (emits schedule.triggered)
+ *   3. ProjectionWorker (claims from queues)
+ *   4. PipelineWorker (claims from queues)
+ *   5. WorkflowWorker (claims from queues)
+ *   6. SyncWorker (claims from queues)
+ *   7. Orchestrator (subscribes to events and enqueues jobs)
+ *   8. Scheduler (emits schedule.triggered)
+ *   9. API server, when this process serves it
+ *   10. AgentWorker (claims from queues; its turns call the API)
  *
  * Shutdown order (producers before consumers):
- *   1. Scheduler
- *   2. Orchestrator (drains pending dispatches)
- *   3. SyncWorker
- *   4. WorkflowWorker
- *   5. PipelineWorker
- *   6. ProjectionWorker
- *   7. AgentWorker
- *   8. ActionWorker
- *   9. RulesWorker (drains pending evaluations)
- *   10. Runtime providers (connectors, broker)
+ *   1. AgentWorker (ends its turns while the API still answers them)
+ *   2. API server
+ *   3. Scheduler
+ *   4. Orchestrator (drains pending dispatches)
+ *   5. SyncWorker
+ *   6. WorkflowWorker
+ *   7. PipelineWorker
+ *   8. ProjectionWorker
+ *   9. ActionWorker
+ *   10. RulesWorker (drains pending evaluations)
+ *   11. Runtime providers (connectors, broker)
  */
 export async function startSixbRuntime(
   sixb: LoadedSixbHost,
@@ -232,13 +244,14 @@ export async function startSixbRuntime(
   const warnings: string[] = []
 
   async function stop() {
+    await stopQuietly(() => agentWorker?.stop() ?? Promise.resolve())
+    await stopQuietly(() => options.api?.stop() ?? Promise.resolve())
     await stopQuietly(() => schedulerRuntime?.stop() ?? Promise.resolve())
     await stopQuietly(() => orchestratorRuntime?.stop() ?? Promise.resolve())
     await stopQuietly(() => syncWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => workflowWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => pipelineWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => projectionWorker?.stop() ?? Promise.resolve())
-    await stopQuietly(() => agentWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => actionWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => rulesRuntime?.stop() ?? Promise.resolve())
     await stopSixbProviders(sixb)
@@ -257,6 +270,7 @@ export async function startSixbRuntime(
         await actionWorker.start()
       }
 
+      // Constructed here so a configuration error stops startup early; started last, below.
       if (agentWorkerRequired(sixb)) {
         agentWorker = new AgentWorker(sixb, {
           apiBaseUrl: agentRuntimeRequired(sixb.definitions)
@@ -265,7 +279,6 @@ export async function startSixbRuntime(
           concurrency: options.workerConcurrency?.agent,
           turnTimeoutMs: options.agentTurnTimeoutMs,
         })
-        await agentWorker.start()
       }
 
       const projectionCount = sixb.definitions.projections.list().length
@@ -301,6 +314,9 @@ export async function startSixbRuntime(
 
       schedulerRuntime = await startSchedulerRuntime(sixb)
     }
+
+    await options.api?.start()
+    await agentWorker?.start()
   } catch (error) {
     await stop()
     throw error

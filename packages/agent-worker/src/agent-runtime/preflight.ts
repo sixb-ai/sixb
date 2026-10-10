@@ -1,4 +1,4 @@
-import { INSTANCE_CLI_VERSION } from "@sixb/cli-core"
+import { EXIT_API, INSTANCE_CLI_VERSION } from "@sixb/cli-core"
 import type { CommandResult, Sandbox } from "@sixb/core"
 import { AgentRuntimeProfileError } from "./errors"
 import {
@@ -11,6 +11,15 @@ import {
 } from "./profile"
 
 const PREFLIGHT_TIMEOUT_MS = 15_000
+/** Backoff between gateway probes while the API may be restarting: a few seconds in total. */
+const GATEWAY_RETRY_DELAYS_MS: readonly number[] = [250, 500, 1_000, 2_000]
+/**
+ * Retries end this long after the first gateway probe starts, so a gateway that stays down still
+ * fails within a worker's shutdown grace period rather than after several full probe timeouts.
+ */
+const GATEWAY_RETRY_WINDOW_MS = 8_000
+/** A retry is only worth starting with at least this much of the window left. */
+const GATEWAY_RETRY_MIN_ATTEMPT_MS = 1_000
 
 const CHECK_BY_EXIT_CODE: Readonly<Record<number, AgentRuntimeProfileCheck>> = {
   20: "environment-bootstrap",
@@ -25,6 +34,9 @@ export interface AssertAgentRuntimeProfileInput {
   readonly sandbox: Sandbox
   readonly env: Readonly<Record<string, string>>
   readonly projectId: string
+  /** Default to {@link GATEWAY_RETRY_DELAYS_MS} and {@link GATEWAY_RETRY_WINDOW_MS}; tests shorten them. */
+  readonly gatewayRetryDelaysMs?: readonly number[]
+  readonly gatewayRetryWindowMs?: number
 }
 
 /**
@@ -53,7 +65,7 @@ export async function assertAgentRuntimeProfile(
     throw profileError(input.sandbox, "cli-execution", "invalid-output")
   }
 
-  const gateway = await runProbe(input.sandbox, "sixb doctor", input.env, "gateway-connectivity")
+  const gateway = await probeGateway(input)
   if (gateway.exitCode !== 0) {
     throw profileError(input.sandbox, "gateway-connectivity", "nonzero-exit", gateway.exitCode)
   }
@@ -64,12 +76,13 @@ async function runProbe(
   sandbox: Sandbox,
   script: string,
   env: Readonly<Record<string, string>>,
-  failureCheck: AgentRuntimeProfileCheck
+  failureCheck: AgentRuntimeProfileCheck,
+  timeoutMs = PREFLIGHT_TIMEOUT_MS
 ): Promise<CommandResult> {
   try {
     const result = await sandbox.runCommand("bash", ["-lc", script], {
       env,
-      timeout: PREFLIGHT_TIMEOUT_MS,
+      timeout: timeoutMs,
     })
     if (result.timedOut) throw profileError(sandbox, failureCheck, "timed-out")
     return result
@@ -77,6 +90,58 @@ async function runProbe(
     if (error instanceof AgentRuntimeProfileError) throw error
     throw profileError(sandbox, failureCheck, "command-error")
   }
+}
+
+/**
+ * Reach the API through the gateway, retrying only what an API restart looks like from inside the
+ * sandbox: a refused or reset connection, a 5xx, or an attempt that times out. The first probe has
+ * the full timeout; retries share what is left of a short window, so a probe that timed out once is
+ * not retried at all. The last attempt's outcome is the one checked, so a gateway that stays down
+ * fails the run as before.
+ */
+async function probeGateway(input: AssertAgentRuntimeProfileInput): Promise<CommandResult> {
+  const delays = input.gatewayRetryDelaysMs ?? GATEWAY_RETRY_DELAYS_MS
+  const deadline = Date.now() + (input.gatewayRetryWindowMs ?? GATEWAY_RETRY_WINDOW_MS)
+  for (let retry = 0; ; retry += 1) {
+    const timeoutMs = retry === 0 ? PREFLIGHT_TIMEOUT_MS : deadline - Date.now()
+    const outcome = await runProbe(
+      input.sandbox,
+      "sixb doctor",
+      input.env,
+      "gateway-connectivity",
+      timeoutMs
+    ).then(
+      (result) => ({ result, transient: isTransientGatewayFailure(result) }),
+      (error: unknown) => ({
+        error,
+        transient: error instanceof AgentRuntimeProfileError && error.reason === "timed-out",
+      })
+    )
+    const delayMs = delays[retry]
+    if (
+      !outcome.transient ||
+      delayMs === undefined ||
+      Date.now() + delayMs + GATEWAY_RETRY_MIN_ATTEMPT_MS > deadline
+    ) {
+      if ("error" in outcome) throw outcome.error
+      return outcome.result
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs))
+  }
+}
+
+/** The CLI reports API failures as `{"error":{...}}` on its last stderr line, with exit code 3. */
+function isTransientGatewayFailure(result: CommandResult): boolean {
+  if (result.exitCode !== EXIT_API) return false
+  let error: Record<string, unknown>
+  try {
+    error = record(record(JSON.parse(result.stderr.trim().split("\n").at(-1) ?? "")).error)
+  } catch {
+    return false
+  }
+  return (
+    error.code === "api_unreachable" || (typeof error.status === "number" && error.status >= 500)
+  )
 }
 
 function parseLocalProbe(

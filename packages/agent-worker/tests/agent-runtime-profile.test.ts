@@ -47,11 +47,14 @@ class StubSandbox implements Sandbox {
   readonly status = "running" as const
   readonly commands: RecordedCommand[] = []
 
+  private readonly delayMs: number
+
   constructor(
     private readonly responses: CommandResult[],
-    provider = "test-provider"
+    options: { readonly provider?: string; readonly delayMs?: number } = {}
   ) {
-    this.provider = provider
+    this.provider = options.provider ?? "test-provider"
+    this.delayMs = options.delayMs ?? 0
   }
 
   async runCommand(
@@ -60,6 +63,7 @@ class StubSandbox implements Sandbox {
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
     this.commands.push({ command, args, options })
+    if (this.delayMs > 0 && this.commands.length > 1) await Bun.sleep(this.delayMs)
     const response = this.responses.shift()
     if (!response) throw new Error("https://capability.invalid/run-secret/ was unavailable")
     return response
@@ -197,6 +201,140 @@ describe("sixb-agent-runtime/v1 preflight", () => {
         })
       }
     }
+  })
+
+  test("retries the gateway while the API restarts, then fails as before if it stays down", async () => {
+    // Regression proof: call runProbe once in probeGateway; every case below fails on its first
+    // transient response.
+    const unreachable: CommandResult = {
+      exitCode: 3,
+      stdout: "",
+      stderr: `${JSON.stringify({ error: { code: "api_unreachable", message: "unreachable" } })}\n`,
+      durationMs: 1,
+    }
+    const unavailable: CommandResult = {
+      ...unreachable,
+      stderr: JSON.stringify({ error: { code: "http_error", status: 503, message: "busy" } }),
+    }
+    const timedOut: CommandResult = { ...unreachable, exitCode: 137, stderr: "", timedOut: true }
+
+    const recovering = new StubSandbox([
+      SUCCESSFUL_LOCAL_PROBE,
+      unreachable,
+      unavailable,
+      timedOut,
+      SUCCESSFUL_GATEWAY_PROBE,
+    ])
+    await expect(
+      assertAgentRuntimeProfile({
+        sandbox: recovering,
+        env: ENV,
+        projectId: PROJECT_ID,
+        gatewayRetryDelaysMs: [1, 1, 1, 1],
+      })
+    ).resolves.toBeUndefined()
+    expect(recovering.commands).toHaveLength(5)
+
+    const down = new StubSandbox([SUCCESSFUL_LOCAL_PROBE, ...Array(5).fill(unreachable)])
+    await expect(
+      assertAgentRuntimeProfile({
+        sandbox: down,
+        env: ENV,
+        projectId: PROJECT_ID,
+        gatewayRetryDelaysMs: [1, 1, 1, 1],
+      })
+    ).rejects.toMatchObject({ check: "gateway-connectivity", reason: "nonzero-exit", exitCode: 3 })
+    expect(down.commands).toHaveLength(6)
+  })
+
+  test("bounds gateway retries by a short window after the first probe", async () => {
+    // Regression proof: give every retry the full probe timeout and ignore the window; the
+    // retried timeouts grow past the window and the probe count reaches the backoff list's length.
+    const unreachable: CommandResult = {
+      exitCode: 3,
+      stdout: "",
+      stderr: JSON.stringify({ error: { code: "api_unreachable", message: "unreachable" } }),
+      durationMs: 100,
+    }
+    const slow = new StubSandbox([SUCCESSFUL_LOCAL_PROBE, ...Array(20).fill(unreachable)], {
+      delayMs: 100,
+    })
+    const startedAt = Date.now()
+    await expect(
+      assertAgentRuntimeProfile({
+        sandbox: slow,
+        env: ENV,
+        projectId: PROJECT_ID,
+        gatewayRetryDelaysMs: Array(20).fill(1),
+        gatewayRetryWindowMs: 1_500,
+      })
+    ).rejects.toMatchObject({ check: "gateway-connectivity", exitCode: 3 })
+    expect(Date.now() - startedAt).toBeLessThan(1_500 + 300)
+    const probes = slow.commands.slice(1)
+    expect(probes.length).toBeLessThan(8)
+    expect(probes[0]?.options.timeout).toBe(15_000)
+    for (const retry of probes.slice(1)) expect(retry.options.timeout).toBeLessThanOrEqual(1_500)
+
+    // A first probe that used its full timeout has outlived the window: it is not retried.
+    const hung = new StubSandbox(
+      [SUCCESSFUL_LOCAL_PROBE, { ...unreachable, exitCode: 137, stderr: "", timedOut: true }],
+      { delayMs: 50 }
+    )
+    await expect(
+      assertAgentRuntimeProfile({
+        sandbox: hung,
+        env: ENV,
+        projectId: PROJECT_ID,
+        gatewayRetryDelaysMs: [1, 1, 1, 1],
+        gatewayRetryWindowMs: 30,
+      })
+    ).rejects.toMatchObject({ check: "gateway-connectivity", reason: "timed-out" })
+    expect(hung.commands).toHaveLength(2)
+  })
+
+  test("never retries a gateway that answers, rejects the run, or cannot start the CLI", async () => {
+    const rejected: CommandResult = {
+      exitCode: 3,
+      stdout: "",
+      stderr: JSON.stringify({ error: { code: "forbidden", status: 403, message: "denied" } }),
+      durationMs: 1,
+    }
+    const wrongProject = JSON.stringify({
+      ...JSON.parse(SUCCESSFUL_GATEWAY_PROBE.stdout),
+      project: { id: "another-project" },
+    })
+    const cases = [
+      { response: rejected, check: "gateway-connectivity", reason: "nonzero-exit" },
+      { response: { ...rejected, stderr: "not json" }, check: "gateway-connectivity" },
+      { response: { ...rejected, exitCode: 1 }, check: "gateway-connectivity" },
+      {
+        response: { ...SUCCESSFUL_GATEWAY_PROBE, stdout: wrongProject },
+        check: "gateway-connectivity",
+        reason: "invalid-output",
+      },
+    ] as const
+
+    for (const { response, ...failure } of cases) {
+      const sandbox = new StubSandbox([SUCCESSFUL_LOCAL_PROBE, response, SUCCESSFUL_GATEWAY_PROBE])
+      await expect(
+        assertAgentRuntimeProfile({
+          sandbox,
+          env: ENV,
+          projectId: PROJECT_ID,
+          gatewayRetryDelaysMs: [1, 1, 1, 1],
+        })
+      ).rejects.toMatchObject(failure)
+      expect(sandbox.commands).toHaveLength(2)
+    }
+
+    const local = new StubSandbox([
+      { exitCode: 22, stdout: "", stderr: "", durationMs: 1 },
+      SUCCESSFUL_LOCAL_PROBE,
+    ])
+    await expect(
+      assertAgentRuntimeProfile({ sandbox: local, env: ENV, projectId: PROJECT_ID })
+    ).rejects.toMatchObject({ check: "cli-installation" })
+    expect(local.commands).toHaveLength(1)
   })
 
   test("never exposes the gateway capability URL or raw command diagnostics", async () => {
