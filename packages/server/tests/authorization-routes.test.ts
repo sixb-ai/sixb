@@ -1058,8 +1058,8 @@ describe("authorized action routes", () => {
         body,
       })
     )
-    // Action requests enqueue asynchronously, so the route returns 202 Accepted.
-    expect(allowed.status).toBe(202)
+    expect(allowed.status).toBe(200)
+    expect(await allowed.json()).toMatchObject({ actionId: "send-contract", status: "succeeded" })
 
     const denied = await app.fetch(
       new Request("http://localhost/api/actions/send-contract", {
@@ -1084,7 +1084,7 @@ describe("authorized action routes", () => {
         }),
       })
     )
-    const requested = (await request.json()) as { runId: string }
+    const requested = (await request.json()) as { id: string }
     await queueTestActionRun(storage, {
       id: "act_hidden_invoice",
       projectId: "test-project",
@@ -1099,7 +1099,7 @@ describe("authorized action routes", () => {
       new Request("http://localhost/api/action-runs?limit=1", { headers: operator.headers })
     )
     expect(await visibleList.json()).toMatchObject({
-      runs: [expect.objectContaining({ id: requested.runId })],
+      runs: [expect.objectContaining({ id: requested.id })],
       hasMore: false,
       total: 1,
     })
@@ -1110,7 +1110,7 @@ describe("authorized action routes", () => {
     expect(await hiddenList.json()).toMatchObject({ runs: [], total: 0 })
 
     const hiddenDetail = await app.fetch(
-      new Request(`http://localhost/api/action-runs/${requested.runId}`, {
+      new Request(`http://localhost/api/action-runs/${requested.id}`, {
         headers: runner.headers,
       })
     )

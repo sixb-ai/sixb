@@ -1,10 +1,11 @@
+import { SIXB_ERROR_CODES } from "@sixb/core/internal/errors"
 import {
   ACTION_RUN_FAILURE_CODES,
   ACTION_RUN_PHASES,
   type ActionRunFailure,
 } from "@sixb/core/storage"
 import { z } from "zod"
-import { JsonValueSchema, sixbFailureSchema } from "./common"
+import { codedErrorResponseSchema, JsonValueSchema, sixbFailureSchema } from "./common"
 import { ActionParamSchema } from "./ontology"
 
 export const ActionIdParamsSchema = z.object({
@@ -32,12 +33,19 @@ export const RequestActionBodySchema = z.object({
   runId: z.string().min(1).optional(),
 })
 
-export const RequestActionResponseSchema = z.object({
-  runId: z.string(),
-  queuedAt: z.string(),
-  jobId: z.string().optional(),
-  created: z.boolean(),
-})
+/** A request reused the run id of a run that is still executing. */
+export const ActionRunInProgressResponseSchema = codedErrorResponseSchema([
+  "action.run_in_progress",
+])
+
+/**
+ * An unexpected failure. It can follow a run that started: requesting the same `runId` again
+ * returns the run's record.
+ */
+export const ActionRequestFailedResponseSchema = codedErrorResponseSchema(SIXB_ERROR_CODES)
+
+/** The server is stopping and refused the request before starting anything. */
+export const RuntimeStoppingResponseSchema = codedErrorResponseSchema(["runtime.stopping"])
 
 export const ActionCatalogItemSchema = z.object({
   id: z.string(),

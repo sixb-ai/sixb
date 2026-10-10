@@ -2404,17 +2404,33 @@ describe("SixbServer HTTP contract", () => {
           params: { speed: null },
         }),
       })
-      expect(requestActionResponse.status).toBe(202)
-      const requestActionBody = (await requestActionResponse.json()) as {
-        runId: string
+      expect(requestActionResponse.status).toBe(200)
+      const requestActionBody = (await requestActionResponse.json()) as Record<string, unknown> & {
+        id: string
         queuedAt: string
-        created: boolean
-        jobId?: string
+        finishedAt: string
       }
-      expect(requestActionBody.runId.startsWith("act_")).toBe(true)
-      expect(new Date(requestActionBody.queuedAt).toISOString()).toBe(requestActionBody.queuedAt)
-      expect(requestActionBody.created).toBe(true)
-      expect(requestActionBody.jobId).toBeTruthy()
+      expect(requestActionBody.id.startsWith("act_")).toBe(true)
+      expect(requestActionBody).toEqual({
+        id: requestActionBody.id,
+        projectId: "contract-project",
+        actionId: "setSpeed",
+        subject: {
+          kind: "object",
+          objectTypeId: "device",
+          primaryId: "fan-2",
+        },
+        status: "succeeded",
+        phase: "writeback",
+        queuedAt: expect.any(String),
+        startedAt: expect.any(String),
+        finishedAt: expect.any(String),
+        params: { speed: null },
+        writeback: { status: "succeeded", completedAt: expect.any(String), result: null },
+      })
+      expect(new Date(requestActionBody.finishedAt).toISOString()).toBe(
+        requestActionBody.finishedAt
+      )
 
       const requestCreateMaintenanceRunResponse = await fetch(
         `${baseUrl}/api/actions/createMaintenanceRun`,
@@ -2427,25 +2443,25 @@ describe("SixbServer HTTP contract", () => {
           }),
         }
       )
-      expect(requestCreateMaintenanceRunResponse.status).toBe(202)
-      expect(await requestCreateMaintenanceRunResponse.json()).toEqual({
-        runId: "act_contract_global",
-        queuedAt: expect.any(String),
-        jobId: expect.any(String),
-        created: true,
+      expect(requestCreateMaintenanceRunResponse.status).toBe(200)
+      expect(await requestCreateMaintenanceRunResponse.json()).toMatchObject({
+        id: "act_contract_global",
+        actionId: "createMaintenanceRun",
+        subject: { kind: "none" },
+        status: "succeeded",
       })
 
-      const actionRunsResponse = await fetch(`${baseUrl}/api/action-runs?status=queued`)
+      const actionRunsResponse = await fetch(`${baseUrl}/api/action-runs?status=succeeded`)
       expect(actionRunsResponse.status).toBe(200)
       const actionRunsBody = (await actionRunsResponse.json()) as {
         runs: Array<{ id: string; status: string; actionId: string }>
         hasMore: boolean
         total: number
       }
-      expect(actionRunsBody.total).toBe(2)
+      expect(actionRunsBody.total).toBe(3)
       expect(actionRunsBody.hasMore).toBe(false)
       expect(actionRunsBody.runs.map((run) => run.id).sort()).toEqual(
-        [requestActionBody.runId, "act_contract_global"].sort()
+        [requestActionBody.id, "act_contract_global", "act_audit_previous"].sort()
       )
 
       const objectActionRunsResponse = await fetch(
@@ -2455,7 +2471,7 @@ describe("SixbServer HTTP contract", () => {
       expect(await objectActionRunsResponse.json()).toMatchObject({
         runs: [
           {
-            id: requestActionBody.runId,
+            id: requestActionBody.id,
             projectId: "contract-project",
             actionId: "setSpeed",
             subject: {
@@ -2463,30 +2479,19 @@ describe("SixbServer HTTP contract", () => {
               objectTypeId: "device",
               primaryId: "fan-2",
             },
-            status: "queued",
-            queuedAt: expect.any(String),
+            status: "succeeded",
+            queuedAt: requestActionBody.queuedAt,
           },
         ],
         hasMore: false,
         total: 1,
       })
 
-      const queuedActionRunResponse = await fetch(
-        `${baseUrl}/api/action-runs/${requestActionBody.runId}`
+      const requestedActionRunResponse = await fetch(
+        `${baseUrl}/api/action-runs/${requestActionBody.id}`
       )
-      expect(queuedActionRunResponse.status).toBe(200)
-      expect(await queuedActionRunResponse.json()).toMatchObject({
-        id: requestActionBody.runId,
-        projectId: "contract-project",
-        actionId: "setSpeed",
-        subject: {
-          kind: "object",
-          objectTypeId: "device",
-          primaryId: "fan-2",
-        },
-        status: "queued",
-        params: { speed: null },
-      })
+      expect(requestedActionRunResponse.status).toBe(200)
+      expect(await requestedActionRunResponse.json()).toEqual(requestActionBody)
 
       const completedActionRunResponse = await fetch(
         `${baseUrl}/api/action-runs/act_audit_previous`
@@ -2592,8 +2597,12 @@ describe("SixbServer HTTP contract", () => {
               primaryId: "fan-2",
             },
             params: { speed: null },
-            runId: requestActionBody.runId,
+            runId: requestActionBody.id,
           },
+        }),
+        expect.objectContaining({
+          type: "action.completed",
+          payload: expect.objectContaining({ runId: requestActionBody.id }),
         }),
         expect.objectContaining({
           type: "action.requested",
@@ -2603,6 +2612,10 @@ describe("SixbServer HTTP contract", () => {
             params: { note: "Inspect fan vibration" },
             runId: "act_contract_global",
           },
+        }),
+        expect.objectContaining({
+          type: "action.completed",
+          payload: expect.objectContaining({ runId: "act_contract_global" }),
         }),
       ])
 

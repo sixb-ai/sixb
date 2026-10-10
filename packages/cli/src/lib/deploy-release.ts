@@ -65,6 +65,13 @@ const API_READINESS_PATH = "/ready"
 const DEFAULT_KILL_TIMEOUT_MS = 10_000
 const DEFAULT_RESTART_DELAY_MS = 1_000
 
+/**
+ * A stopping API first waits up to 35 s for the Actions it is running (`ACTION_RUN_DRAIN_TIMEOUT_MS`
+ * in core), so a graceful restart must not kill it before. A literal keeps the runtime out of the
+ * deploy command; `deploy.test.ts` holds the two together.
+ */
+const API_KILL_TIMEOUT_MS = 40_000
+
 export interface DeployReleaseOptions {
   /** The Bun version the project runs on, from its `packageManager` or the running Bun. */
   readonly bunVersion: string
@@ -135,7 +142,9 @@ function sixbService(
     env: { ...env, ...options.env },
     instances: processOptions.instances ?? 1,
     ...(address ? { http: address } : {}),
-    process: releaseProcess(processOptions),
+    process: releaseProcess(processOptions, {
+      killTimeoutMs: service === "api" ? API_KILL_TIMEOUT_MS : DEFAULT_KILL_TIMEOUT_MS,
+    }),
   }
 }
 
@@ -171,7 +180,7 @@ function projectProcess(
     command: { program: "bun", args: [definition.entrypoint, ...(definition.args ?? [])] },
     env: { ...env, ...definition.env },
     instances: processOptions.instances ?? 1,
-    process: releaseProcess(processOptions),
+    process: releaseProcess(processOptions, { killTimeoutMs: DEFAULT_KILL_TIMEOUT_MS }),
   }
 }
 
@@ -237,9 +246,12 @@ function defaultDomain(config: DeployConfig, service: DeployHttpServiceName): st
   return `${label}.${config.domain}`
 }
 
-function releaseProcess(options: DeployScalableProcessOptions): DeployReleaseProcess {
+function releaseProcess(
+  options: DeployScalableProcessOptions,
+  defaults: { readonly killTimeoutMs: number }
+): DeployReleaseProcess {
   return {
-    killTimeoutMs: options.killTimeoutMs ?? DEFAULT_KILL_TIMEOUT_MS,
+    killTimeoutMs: options.killTimeoutMs ?? defaults.killTimeoutMs,
     restartDelayMs: options.restartDelayMs ?? DEFAULT_RESTART_DELAY_MS,
     ...(options.maxMemory === undefined ? {} : { maxMemory: options.maxMemory.trim() }),
   }

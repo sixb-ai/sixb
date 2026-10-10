@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { randomUUID } from "node:crypto"
 import {
   type ActionDefinition,
+  type ActionSubject,
   defineAction,
   defineObjectType,
   InMemoryBlobStorage,
@@ -10,7 +12,6 @@ import {
   InMemoryStorage,
   param,
   prop,
-  type Sixb,
   type SixbErrorContext,
   SixbHost,
   type Storage,
@@ -24,8 +25,8 @@ import {
   type LanguageModelStreamEvent,
   question,
 } from "@sixb/core/models"
-import type { ActionRunRecord } from "@sixb/core/storage"
-import { createTestSixb } from "@sixb/core/testing"
+import { type ActionRunParams, type ActionRunRecord, isTerminalActionRun } from "@sixb/core/storage"
+import { createTestSixb, queueTestActionRun } from "@sixb/core/testing"
 import { ActionWorker } from "../src"
 import { waitFor } from "./helpers"
 
@@ -39,22 +40,46 @@ const Device = defineObjectType({
   ],
 })
 
-interface DeviceObjectSet {
-  upsert(input: { properties: Record<string, unknown> }): Promise<unknown>
-  requestAction(input: {
-    id: string
-    actionId: string
-    params?: Record<string, unknown>
-  }): Promise<{ runId: string }>
-  requestActionAndWait(input: {
-    id: string
-    actionId: string
-    params?: Record<string, unknown>
-  }): Promise<ActionRunRecord>
+/**
+ * Queue a run and its job, as requests did before they ran Actions in the requesting process.
+ * `request` no longer enqueues, so this is how work still reaches the worker.
+ */
+async function enqueueActionRun(
+  host: SixbHost,
+  input: {
+    readonly actionId: string
+    readonly primaryId: string
+    readonly params?: ActionRunParams
+  }
+): Promise<string> {
+  const runId = `act_${randomUUID()}`
+  const subject: ActionSubject = {
+    kind: "object",
+    objectTypeId: "Device",
+    primaryId: input.primaryId,
+  }
+  await queueTestActionRun(host.storage, {
+    projectId: host.id,
+    id: runId,
+    actionId: input.actionId,
+    subject,
+    params: input.params ?? {},
+    idempotencyKey: `action:${host.id}:${runId}`,
+  })
+  await host.queues.actions.enqueue({
+    projectId: host.id,
+    jobs: [{ id: runId, type: "action.run.requested", payload: { runId } }],
+  })
+  return runId
 }
 
-function deviceObjects(sixb: Sixb): DeviceObjectSet {
-  return sixb.objects(Device)
+async function waitForTerminalRun(host: SixbHost, runId: string): Promise<ActionRunRecord> {
+  const run = await waitFor(
+    () => host.storage.actionRuns!.getById({ projectId: host.id, id: runId }),
+    (value) => value !== null && isTerminalActionRun(value)
+  )
+  if (!run) throw new Error(`Action run '${runId}' was not stored.`)
+  return run
 }
 
 function createSixb(
@@ -121,10 +146,11 @@ describe("ActionWorker", () => {
     await sixb.objects.upsert("Device", { id: "decision-device", name: "Device" })
     await worker.start()
     try {
-      const run = await deviceObjects(sixb).requestActionAndWait({
-        id: "decision-device",
+      const runId = await enqueueActionRun(host, {
         actionId: action.id,
+        primaryId: "decision-device",
       })
+      const run = await waitForTerminalRun(host, runId)
       expect(run.status).toBe("succeeded")
       expect(run.writeback).toMatchObject({
         status: "succeeded",
@@ -187,10 +213,8 @@ describe("ActionWorker", () => {
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device" })
     await worker.start()
     try {
-      const run = await deviceObjects(sixb).requestActionAndWait({
-        id: "device-1",
-        actionId: action.id,
-      })
+      const runId = await enqueueActionRun(host, { actionId: action.id, primaryId: "device-1" })
+      const run = await waitForTerminalRun(host, runId)
       expect(run.status).toBe("succeeded")
       expect(run.writeback).toMatchObject({ status: "succeeded", result: { status: "ready" } })
       expect(
@@ -241,16 +265,13 @@ describe("ActionWorker", () => {
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
 
     await worker.start()
-    const { runId } = await deviceObjects(sixb).requestAction({
-      id: "device-1",
+    const runId = await enqueueActionRun(host, {
       actionId: "noteStatus",
+      primaryId: "device-1",
       params: { status: "active" },
     })
 
-    await waitFor(
-      () => host.storage.actionRuns!.getById({ projectId: host.id, id: runId }),
-      (value) => value?.status === "succeeded" || value?.status === "failed"
-    )
+    await waitForTerminalRun(host, runId)
     await worker.stop()
 
     const { records } = await host.broker.read({
@@ -289,20 +310,15 @@ describe("ActionWorker", () => {
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
 
     await worker.start()
-    const { runId } = await deviceObjects(sixb).requestAction({
-      id: "device-1",
+    // Stored params are JSON, as a request normalized them.
+    const runId = await enqueueActionRun(host, {
       actionId: "setDue",
-      params: {
-        dueDate: new Date("2026-06-20T12:34:56.000Z"),
-        day: new Date("2026-06-20T12:34:56.000Z"),
-      },
+      primaryId: "device-1",
+      params: { dueDate: "2026-06-20T12:34:56.000Z", day: "2026-06-20" },
     })
 
-    const run = await waitFor(
-      () => host.storage.actionRuns!.getById({ projectId: host.id, id: runId }),
-      (value) => value?.status === "succeeded" || value?.status === "failed"
-    )
-    expect(run?.status).toBe("succeeded")
+    const run = await waitForTerminalRun(host, runId)
+    expect(run.status).toBe("succeeded")
     const seen = observed[0]
     expect(seen?.dueDate).toBeInstanceOf(Date)
     expect(seen?.day).toBeInstanceOf(Date)
@@ -327,27 +343,17 @@ describe("ActionWorker", () => {
     })
 
     await worker.start()
-    const { runId } = await deviceObjects(sixb).requestAction({
-      id: "device-1",
+    const runId = await enqueueActionRun(host, {
       actionId: "setStatus",
+      primaryId: "device-1",
       params: { status: "ready" },
     })
 
-    const run = await waitFor(
-      () => host.storage.actionRuns!.getById({ projectId: host.id, id: runId }),
-      (value) => value?.status === "succeeded"
-    )
-    expect(run?.actionId).toBe("setStatus")
-    const durableExecution = run
-      ? await host.storage.executions.getById({ projectId: host.id, id: run.executionId })
-      : null
-    expect(durableExecution).toMatchObject({
-      source: { type: "execution", executionId: sixb.execution.id },
-      correlationId: sixb.execution.correlationId,
-      authorizationRef: {
-        type: "trustedPrimitive",
-        primitive: { kind: "action", id: "setStatus", runId },
-      },
+    const run = await waitForTerminalRun(host, runId)
+    expect(run).toMatchObject({ actionId: "setStatus", status: "succeeded" })
+    const durableExecution = await host.storage.executions.getById({
+      projectId: host.id,
+      id: run.executionId,
     })
 
     const events = await waitFor(
@@ -356,7 +362,7 @@ describe("ActionWorker", () => {
     )
     expect(events[0]).toMatchObject({
       type: "action.completed",
-      correlationId: sixb.execution.correlationId,
+      correlationId: durableExecution?.correlationId,
       idempotencyKey: `action.completed:${runId}`,
       payload: {
         actionId: "setStatus",
@@ -389,10 +395,10 @@ describe("ActionWorker", () => {
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
 
     await worker.start()
-    const failed = await deviceObjects(sixb).requestActionAndWait({
-      id: "device-1",
-      actionId: "fail",
-    })
+    const failed = await waitForTerminalRun(
+      host,
+      await enqueueActionRun(host, { actionId: "fail", primaryId: "device-1" })
+    )
     await worker.stop()
     await reporter.flush()
 
@@ -416,47 +422,6 @@ describe("ActionWorker", () => {
       failure: failed.error,
     })
     expect(reports[0]?.context.occurredAt).toBe(failed.error?.at ?? "")
-  })
-
-  test("requestActionAndWait resolves with the terminal action run", async () => {
-    const setStatus = defineAction("setStatus")
-      .on(Device)
-      .params({ status: param("string") })
-      .edits(({ objects, params, subject }) => {
-        objects(Device).byId(subject.primaryId).update({ status: params.status })
-      })
-    const fail = defineAction("fail")
-      .on(Device)
-      .params({})
-      .writeback(() => {
-        throw new Error("writeback failed")
-      })
-
-    const { host, sixb } = createSixb([setStatus, fail])
-    const worker = new ActionWorker(host)
-    await sixb.objects.upsert("Device", {
-      id: "device-1",
-      name: "Device 1",
-    })
-
-    await worker.start()
-
-    const succeeded = await deviceObjects(sixb).requestActionAndWait({
-      id: "device-1",
-      actionId: "setStatus",
-      params: { status: "ready" },
-    })
-    expect(succeeded.id.startsWith("act_")).toBe(true)
-    expect(succeeded.status).toBe("succeeded")
-
-    const failed = await deviceObjects(sixb).requestActionAndWait({
-      id: "device-1",
-      actionId: "fail",
-    })
-    expect(failed.status).toBe("failed")
-    expect(failed.error?.message).toBe("Action execution failed.")
-
-    await worker.stop()
   })
 })
 

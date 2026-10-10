@@ -9,6 +9,7 @@ import type { OntologyMutationRuntime } from "../../runtime/ontology-mutations"
 import type { ActionRunFailure, ActionRunRecord, ActionRunStorage, Storage } from "../../storage"
 import type { ActionsRuntime } from "../execution"
 import type { ActionSubject } from "../types"
+import type { ActionRunSignals } from "./signals"
 
 /** Execution-bound primitives exposed to Action phase handlers. */
 export interface ActionExecutionFacade {
@@ -31,11 +32,6 @@ export interface ActionRunContext {
   readonly actions: Pick<SixbDefinitions["actions"], "getById">
 }
 
-export interface ActionJob {
-  readonly id: string
-  readonly actionId: string
-}
-
 interface BaseActionRunResult {
   readonly id: string
   readonly actionId: string
@@ -43,14 +39,13 @@ interface BaseActionRunResult {
   readonly record: ActionRunRecord
 }
 
-export interface RunActionJobInput {
+export interface RunActionInput {
   readonly runtime: ActionRunContext
-  readonly job: ActionJob
   /** Durable run loaded before the execution scope is restored. */
   readonly run: ActionRunRecord
-  readonly signal?: AbortSignal
-  /** Queue delivery attempt, when invoked by ActionWorker. */
-  readonly attempt?: number
+  readonly signals: ActionRunSignals
+  /** Execution attempt, used to account model calls and to report failures. */
+  readonly attempt: number
 }
 
 export type ActionRunResult =

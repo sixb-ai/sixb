@@ -10,10 +10,7 @@ import { OntologyValidationError } from "../../ontology/errors"
 import type { LinkToken, ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import { assertLinkTokenBelongsToObjectType } from "../../ontology/validation"
 import type { ObjectByIdHandle, TwinObject } from "../../runtime/types"
-import {
-  requestActionAndWait as requestActionAndWaitLeaf,
-  requestAction as requestActionLeaf,
-} from "../action"
+import { requestAction as requestActionLeaf } from "../action"
 import type { ExecutionObjectContext, ResolvedLinkContext } from "../context"
 import { removeLink as removeLinkLeaf, upsertLink as upsertLinkLeaf } from "../link"
 import { deleteObject, restoreObject } from "../object"
@@ -90,6 +87,7 @@ export function createObjectByIdHandle<TObjectType extends ObjectTypeWithPropert
       actionId?: string
       params?: Record<string, unknown>
       runId?: string
+      signal?: AbortSignal
     }) => {
       const actionId = input.action?.id ?? input.actionId
       if (!actionId) {
@@ -101,31 +99,7 @@ export function createObjectByIdHandle<TObjectType extends ObjectTypeWithPropert
         primaryId,
         actionId,
         params: input.params,
-        options: { runId: input.runId },
-      })
-    },
-
-    requestActionAndWait: async (input: {
-      action?: ActionDefinition
-      actionId?: string
-      params?: Record<string, unknown>
-      timeoutMs?: number
-      signal?: AbortSignal
-    }) => {
-      const actionId = input.action?.id ?? input.actionId
-      if (!actionId) {
-        throw new OntologyValidationError(
-          "[Sixb] requestActionAndWait requires either 'action' or 'actionId'"
-        )
-      }
-      return requestActionAndWaitLeaf(ctx, {
-        primaryId,
-        actionId,
-        params: input.params,
-        options: {
-          timeoutMs: input.timeoutMs,
-          signal: input.signal,
-        },
+        options: { runId: input.runId, signal: input.signal },
       })
     },
 

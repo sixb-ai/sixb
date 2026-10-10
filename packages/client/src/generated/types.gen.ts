@@ -9232,19 +9232,213 @@ export type RequestActionErrors = {
   404: {
     error: string
   }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "action.run_in_progress"
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code:
+      | "action.phase_failed"
+      | "action.read_conflict"
+      | "action.run_in_progress"
+      | "action.timeout"
+      | "agent.execution_failed"
+      | "ai.usage_limit_exceeded"
+      | "ai.usage_limit_unavailable"
+      | "connector.adapter_invalid"
+      | "connector.authorization_invalid"
+      | "connector.authorization_required"
+      | "connector.configuration_invalid"
+      | "connector.credentials_unavailable"
+      | "connector.not_found"
+      | "connector.operation_conflict"
+      | "connector.operation_in_progress"
+      | "connector.provider_failed"
+      | "connector.provider_unavailable"
+      | "connector.replacement_required"
+      | "connector.revocation_pending"
+      | "dataset.not_found"
+      | "dataset.version_incompatible"
+      | "dataset.version_not_found"
+      | "dataset.version_read_inconsistent"
+      | "event.delivery_failed"
+      | "internal.unexpected"
+      | "queue.enqueue_failed"
+      | "pipeline.step_failed"
+      | "projection.definition_invalid"
+      | "projection.execution_failed"
+      | "projection.not_found"
+      | "projection.run_already_terminal"
+      | "projection.run_identity_mismatch"
+      | "runtime.cancelled"
+      | "runtime.stopping"
+      | "vector.model_unavailable"
+      | "vector.response_invalid"
+      | "vector.outcome_unknown"
+      | "storage.unavailable"
+      | "sync.execution_failed"
+      | "webhook.delivery_failed"
+      | "webhook.delivery_rejected"
+      | "workflow.node_failed"
+  }
+  /**
+   * Response for status 503
+   */
+  503: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "runtime.stopping"
+  }
 }
 
 export type RequestActionError = RequestActionErrors[keyof RequestActionErrors]
 
 export type RequestActionResponses = {
   /**
-   * Response for status 202
+   * Response for status 200
    */
-  202: {
-    runId: string
+  200: {
+    id: string
+    projectId: string
+    actionId: string
+    subject:
+      | {
+          kind: "none"
+        }
+      | {
+          kind: "object"
+          objectTypeId: string
+          primaryId: string
+        }
+    status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+    phase?:
+      | "request"
+      | "enqueue"
+      | "validation"
+      | "writeback"
+      | "edits"
+      | "commit"
+      | "effects"
+      | "cancelled"
     queuedAt: string
-    jobId?: string
-    created: boolean
+    startedAt?: string
+    finishedAt?: string
+    error?: {
+      code:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "queue.enqueue_failed"
+        | "action.phase_failed"
+        | "action.read_conflict"
+        | "action.timeout"
+      message: string
+      retryable: boolean
+      at: string
+      details: {
+        actionId: string
+        runId: string
+        phase:
+          | "request"
+          | "enqueue"
+          | "validation"
+          | "writeback"
+          | "edits"
+          | "commit"
+          | "effects"
+          | "cancelled"
+      }
+      httpStatus?: number
+      redacted?: true
+      truncated?: true
+    }
+    params: {
+      [key: string]: unknown
+    }
+    writeback?:
+      | {
+          status: "succeeded"
+          completedAt: string
+          /**
+           * Any JSON-compatible value.
+           */
+          result:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      | {
+          status: "failed"
+          completedAt: string
+          error: {
+            code:
+              | "internal.unexpected"
+              | "runtime.cancelled"
+              | "queue.enqueue_failed"
+              | "action.phase_failed"
+              | "action.read_conflict"
+              | "action.timeout"
+            message: string
+            retryable: boolean
+            at: string
+            details: {
+              actionId: string
+              runId: string
+              phase: "writeback"
+            }
+            httpStatus?: number
+            redacted?: true
+            truncated?: true
+          }
+        }
+    effects?:
+      | {
+          status: "succeeded"
+          completedAt: string
+        }
+      | {
+          status: "failed"
+          completedAt: string
+          error: {
+            code:
+              | "internal.unexpected"
+              | "runtime.cancelled"
+              | "queue.enqueue_failed"
+              | "action.phase_failed"
+              | "action.read_conflict"
+              | "action.timeout"
+            message: string
+            retryable: boolean
+            at: string
+            details: {
+              actionId: string
+              runId: string
+              phase: "effects"
+            }
+            httpStatus?: number
+            redacted?: true
+            truncated?: true
+          }
+        }
   }
 }
 
@@ -9669,6 +9863,7 @@ export type ListActionRunsResponses = {
           | "queue.enqueue_failed"
           | "action.phase_failed"
           | "action.read_conflict"
+          | "action.timeout"
         message: string
         retryable: boolean
         at: string
@@ -9766,6 +9961,7 @@ export type GetActionRunResponses = {
         | "queue.enqueue_failed"
         | "action.phase_failed"
         | "action.read_conflict"
+        | "action.timeout"
       message: string
       retryable: boolean
       at: string
@@ -9816,6 +10012,7 @@ export type GetActionRunResponses = {
               | "queue.enqueue_failed"
               | "action.phase_failed"
               | "action.read_conflict"
+              | "action.timeout"
             message: string
             retryable: boolean
             at: string
@@ -9844,6 +10041,7 @@ export type GetActionRunResponses = {
               | "queue.enqueue_failed"
               | "action.phase_failed"
               | "action.read_conflict"
+              | "action.timeout"
             message: string
             retryable: boolean
             at: string

@@ -20,9 +20,10 @@ export class ObjectReadLimitExceededError extends Error {
 
   constructor(
     readonly metric: ObjectReadLimitMetric,
-    readonly limit: number
+    readonly limit: number,
+    message = `[Sixb] Object read exceeded its ${metric} limit (${limit}).`
   ) {
-    super(`[Sixb] Object read exceeded its ${metric} limit (${limit}).`)
+    super(message)
   }
 }
 

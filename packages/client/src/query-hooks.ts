@@ -30,13 +30,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { useMemo } from "react"
-import {
-  type ActionRunDetail,
-  ActionRunFailedError,
-  type ActionWaitOptions,
-  type RequestActionAndWaitInput,
-  requestActionAndWait,
-} from "./actions"
+import { type ActionRunDetail, ActionRunFailedError, isFailedActionRun } from "./actions"
 import { SixbProvider, useSixbProviderClient } from "./client-provider"
 import { type SixbFileUploadError, type UploadFileInput, uploadFile } from "./file"
 import {
@@ -45,7 +39,12 @@ import {
   listActionRunsQueryKey,
 } from "./generated/@tanstack/react-query.gen"
 import type { Client } from "./generated/client"
-import { getBulkTelemetryHistory, getTelemetryHistory, type Options } from "./generated/sdk.gen"
+import {
+  getBulkTelemetryHistory,
+  getTelemetryHistory,
+  type Options,
+  requestAction,
+} from "./generated/sdk.gen"
 import type {
   GetBulkTelemetryHistoryData,
   GetTelemetryHistoryData,
@@ -323,17 +322,16 @@ export type ActionRunMutationObjectSubject<
 
 export type ActionRunMutationSubject = ActionRunMutationWireSubject | ActionRunMutationObjectSubject
 
-type ActionRunMutationRequestBody = Omit<RequestActionAndWaitInput["body"], "subject"> & {
+type ActionRunMutationRequestBody = Omit<RequestActionData["body"], "subject"> & {
   readonly subject?: ActionRunMutationSubject
 }
 
-export type ActionRunMutationRequest = Omit<RequestActionAndWaitInput, "body"> & {
+export type ActionRunMutationRequest = Omit<Options<RequestActionData>, "body"> & {
   readonly body: ActionRunMutationRequestBody
 }
 
 export interface ActionRunMutationBaseOptions<TVariables, TContext>
-  extends ActionWaitOptions,
-    Omit<UseMutationOptions<ActionRunDetail, Error, TVariables, TContext>, "mutationFn"> {
+  extends Omit<UseMutationOptions<ActionRunDetail, Error, TVariables, TContext>, "mutationFn"> {
   /** hey-api client override. Defaults to the nearest SixbProvider client, then the global client. */
   readonly client?: Client
   /** Invalidate action-run caches, and object-query caches when the terminal run committed changes. */
@@ -389,11 +387,6 @@ function createActionRunMutationOptions<TVariables, TContext>(
     actionId,
     subject,
     runId,
-    timeoutMs,
-    fallbackPollIntervalMs,
-    disconnectedPollIntervalMs,
-    signal,
-    rejectOnTerminalFailure,
     client,
     invalidateOnCommit = false,
     queryClient,
@@ -402,26 +395,20 @@ function createActionRunMutationOptions<TVariables, TContext>(
     ...mutationOptions
   } = options ?? {}
 
-  const waitOptions: ActionWaitOptions = {
-    timeoutMs,
-    fallbackPollIntervalMs,
-    disconnectedPollIntervalMs,
-    signal,
-    rejectOnTerminalFailure,
-  }
-
   return {
     ...mutationOptions,
-    mutationFn: (variables) =>
-      requestActionAndWait(
-        buildActionRunMutationRequest(variables, {
-          actionId,
-          subject,
-          runId,
-          client,
-          waitOptions,
-        })
-      ),
+    mutationFn: async (variables) => {
+      // The API answers with the terminal run. A failed or cancelled run is the mutation's error,
+      // and any other answer throws the API's error response.
+      const { data: run } = await requestAction<true>({
+        ...buildActionRunMutationRequest(variables, { actionId, subject, runId, client }),
+        throwOnError: true,
+      })
+      if (isFailedActionRun(run)) {
+        throw new ActionRunFailedError(run)
+      }
+      return run
+    },
     onSuccess: async (run, variables, context, mutation) => {
       if (invalidateOnCommit && queryClient) {
         await invalidateActionRunMutationCaches(queryClient, run)
@@ -467,14 +454,12 @@ function buildActionRunMutationRequest<TVariables>(
     readonly subject?: ActionRunMutationSubject
     readonly runId?: string
     readonly client?: Client
-    readonly waitOptions: ActionWaitOptions
   }
-): RequestActionAndWaitInput {
+): Options<RequestActionData> {
   if (options.actionId) {
     const params = variables === undefined ? undefined : (variables as Record<string, unknown>)
     const subject = normalizeActionRunMutationSubject(options.subject)
     return {
-      ...options.waitOptions,
       client: options.client,
       path: { actionId: options.actionId },
       body: {
@@ -488,7 +473,6 @@ function buildActionRunMutationRequest<TVariables>(
   if (isActionRunMutationRequest(variables)) {
     const subject = normalizeActionRunMutationSubject(variables.body.subject)
     return {
-      ...options.waitOptions,
       client: options.client,
       ...variables,
       body: {

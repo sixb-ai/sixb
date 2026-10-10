@@ -241,11 +241,7 @@ describe("shared browser client", () => {
           })
         }
         if (pathname.endsWith("/sign-out")) return Response.json({ signedOut: true })
-        return Response.json({
-          runId: "run_1",
-          queuedAt: "2026-08-29T10:00:00.000Z",
-          created: true,
-        })
+        return Response.json({ id: "run_1", status: "succeeded" })
       },
       { preconnect: fetch.preconnect }
     ) satisfies typeof fetch

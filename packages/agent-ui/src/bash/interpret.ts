@@ -514,13 +514,17 @@ function describeSixb(
         `Inspected the ${humanize(intent.args[0]) || "action"} action`,
         `Inspecting the ${humanize(intent.args[0]) || "action"} action`
       )
-    case "actions.request":
+    case "actions.request": {
+      // The request answers with the finished run, so it reads like `action-runs get`.
+      const run = actionRunInfo(parsed?.json)
+      const action = humanize(intent.args[0]) || "requested"
       return icon(
         "actions",
-        `Ran the ${humanize(intent.args[0]) || "requested"} action`,
-        `Running the ${humanize(intent.args[0]) || "requested"} action`,
-        actionOutcome(parsed?.json)
+        run.status ? actionRunTitle(run) : `Ran the ${action} action`,
+        `Running the ${action} action`,
+        run.subjectLabel
       )
+    }
     case "action-runs.get": {
       const run = actionRunInfo(parsed?.json)
       return icon("actions", actionRunTitle(run), "Checking the action run", run.subjectLabel)
@@ -689,13 +693,6 @@ function latestReading(value: unknown): string | undefined {
 
 function seriesCount(value: unknown): number | null {
   return isRecord(value) && Array.isArray(value.series) ? value.series.length : null
-}
-
-/** The outcome word for a queued action request. */
-function actionOutcome(value: unknown): string | undefined {
-  if (!isRecord(value)) return undefined
-  if (typeof value.runId === "string") return value.created === false ? "already queued" : "queued"
-  return undefined
 }
 
 function runOutcome(value: unknown): string | undefined {

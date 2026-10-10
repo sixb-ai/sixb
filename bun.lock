@@ -637,7 +637,6 @@
         "@sixb/core": "workspace:^",
       },
       "devDependencies": {
-        "@sixb/action-worker": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
       },

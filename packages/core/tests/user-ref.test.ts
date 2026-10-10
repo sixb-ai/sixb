@@ -335,6 +335,7 @@ describe("userRef writes", () => {
   // Guard: `assertParamUsersActive` in the Action and Workflow run dispatchers.
   test("checks user references in Action params and Workflow input of new runs", async () => {
     const { sixb } = await setup()
+    await sixb.objects(Task).upsert({ properties: { id: "t1" } })
 
     await expect(
       sixb.objects(Task).requestAction({
@@ -342,7 +343,7 @@ describe("userRef writes", () => {
         action: assignTask,
         params: { assignee: userRef("usr_active") },
       })
-    ).resolves.toMatchObject({ created: true })
+    ).resolves.toMatchObject({ status: "succeeded" })
     await expect(
       sixb.objects(Task).requestAction({
         id: "t1",

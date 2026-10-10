@@ -2230,6 +2230,8 @@ export const getAction = <ThrowOnError extends boolean = false>(
 
 /**
  * Request an action
+ *
+ * Runs the action and returns its terminal run. A run that fails is returned with status `failed`. An error response usually means no run was requested, but a 500 can follow a run that started: request again with the same `runId` to get its record. A `runId` that was already used returns that run once it has finished, and 409 while it still runs. 503 means the server is stopping and started nothing.
  */
 export const requestAction = <ThrowOnError extends boolean = false>(
   options: Options<RequestActionData, ThrowOnError>

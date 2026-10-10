@@ -115,12 +115,8 @@ export type {
   ObjectActionDefinition,
   ObjectActionParamsBuilder,
   ObjectActionPhaseBuilder,
-  RequestActionAndWaitInput,
-  RequestActionAndWaitOptions,
   RequestActionInput,
   RequestActionOptions,
-  RequestActionResult,
-  WaitForActionRunInput,
 } from "./actions"
 export {
   ActionDefinitionError,
@@ -136,11 +132,7 @@ export {
  * it to write `catch (error) { if (error instanceof EditBatchError) … }`.
  */
 export { EditBatchError } from "./edits"
-export {
-  ActionRunFailedError,
-  ActionRunTimeoutError,
-  ActionValidationError,
-} from "./objects/action"
+export { ActionRunFailedError, ActionValidationError } from "./objects/action"
 
 // ── Datasets ────────────────────────────────────────────────
 

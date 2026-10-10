@@ -121,11 +121,7 @@ describe("createSixbClient", () => {
   })
 
   test("enforces shared authority after every request interceptor", async () => {
-    const { fetchMock, requests } = createObservedFetch({
-      runId: "run_1",
-      queuedAt: "2026-08-29T10:00:00.000Z",
-      created: true,
-    })
+    const { fetchMock, requests } = createObservedFetch({ id: "run_1", status: "succeeded" })
     const sharedClient = createSixbClient({
       baseUrl: "https://api.example.test",
       auth: {
