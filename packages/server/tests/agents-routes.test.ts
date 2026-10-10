@@ -565,6 +565,19 @@ describe("agent routes", () => {
     expect(invalidAttachmentResponse.status).toBe(400)
     expect(await invalidAttachmentResponse.json()).toEqual({
       error: "[Sixb] Attachment 0 is not a valid file reference.",
+      code: "invalid_attachment",
+    })
+    // Strict on browser hints, naming the field and the code clients retry on.
+    const invalidZoneResponse = await app.fetch(
+      jsonRequest(`/api/agent-threads/${createThreadBody.thread.id}/messages`, "POST", {
+        text: "Check the failed pipeline.",
+        timeZone: "Etc/Unknown",
+      })
+    )
+    expect(invalidZoneResponse.status).toBe(400)
+    expect(await invalidZoneResponse.json()).toEqual({
+      error: `[Sixb] Agent request 'timeZone' must be an IANA time zone; received "Etc/Unknown".`,
+      code: "invalid_locale",
     })
     const postMessageResponse = await app.fetch(
       jsonRequest(`/api/agent-threads/${createThreadBody.thread.id}/messages`, "POST", {
@@ -985,7 +998,7 @@ describe("agent routes", () => {
       jsonRequest(
         `/api/agent-threads/${thread.thread.id}/messages`,
         "POST",
-        { text: "try this", reasoning: "medium" },
+        { text: "try this", reasoning: "medium", timeZone: "Europe/Paris", locale: "fr-FR" },
         session.csrfHeaders
       )
     )
@@ -998,7 +1011,12 @@ describe("agent routes", () => {
       id: request.run.id,
     })
     expect(originalRun).toMatchObject({
-      spec: { model: { provider: "test", modelId: "test-model" }, reasoning: "medium" },
+      spec: {
+        model: { provider: "test", modelId: "test-model" },
+        reasoning: "medium",
+        timeZone: "Europe/Paris",
+        locale: "fr-FR",
+      },
     })
     await expect(
       storage.executions.getById({ projectId: sixb.id, id: originalRun?.executionId ?? "" })

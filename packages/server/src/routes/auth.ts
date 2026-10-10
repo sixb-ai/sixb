@@ -52,7 +52,7 @@ import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../auth/csrf"
 import {
   customAuthExperienceAssetResponse,
   customAuthExperienceResponse,
-  type SixbAuthExperienceOptions,
+  type ProjectAuthExperience,
 } from "../auth/experience"
 import { ClientAddressRateLimiter } from "../auth/rate-limit"
 import { requestCaller } from "../auth/scope"
@@ -143,7 +143,7 @@ export interface AuthRoutesOptions {
     request: Request,
     input: AuthInvitationRedirectInput
   ) => AuthInvitationRedirectContext
-  readonly authExperience?: SixbAuthExperienceOptions
+  readonly authExperience?: ProjectAuthExperience
 }
 
 export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: AuthRoutesOptions) {

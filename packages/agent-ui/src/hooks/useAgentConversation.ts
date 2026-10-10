@@ -25,6 +25,7 @@ import {
   preferenceWithReasoning,
   resolveModelSelection,
 } from "../modelSelection"
+import { type RequesterSettings, sendWithRequesterSettings } from "../requesterSettings"
 import {
   EXTENDED_WAITING_STATUS_MS,
   isActiveAgentRunStatus,
@@ -243,10 +244,12 @@ export function useAgentConversation({
     try {
       if (targetThreadId !== null) {
         setPendingUser({ threadId: targetThreadId, text, attachments, context, messageId: null })
-        const response = await postMessage.mutateAsync({
-          path: { threadId: targetThreadId },
-          body: messageBody(text, attachments, context, modelSelection.request),
-        })
+        const response = await sendWithRequesterSettings((settings) =>
+          postMessage.mutateAsync({
+            path: { threadId: targetThreadId },
+            body: messageBody(text, attachments, context, modelSelection.request, settings),
+          })
+        )
         recordAcceptedSend(response.run)
         await Promise.all([
           queryClient.invalidateQueries({
@@ -263,10 +266,13 @@ export function useAgentConversation({
       })
       createdThreadId = created.thread.id
       setPendingUser({ threadId: createdThreadId, text, attachments, context, messageId: null })
-      const response = await postMessage.mutateAsync({
-        path: { threadId: createdThreadId },
-        body: messageBody(text, attachments, context, modelSelection.request),
-      })
+      const newThreadId = createdThreadId
+      const response = await sendWithRequesterSettings((settings) =>
+        postMessage.mutateAsync({
+          path: { threadId: newThreadId },
+          body: messageBody(text, attachments, context, modelSelection.request, settings),
+        })
+      )
       recordAcceptedSend(response.run)
       await queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
       onThreadCreated(createdThreadId)
@@ -438,11 +444,13 @@ function messageBody(
   text: string,
   attachments: readonly AgentFileRef[],
   context: readonly AgentContextEntryInput[],
-  selection: ModelPreference | undefined
+  selection: ModelPreference | undefined,
+  settings: RequesterSettings
 ) {
   return {
     text,
     ...(selection === undefined ? {} : selection),
+    ...settings,
     ...(attachments.length === 0 ? {} : { attachments: [...attachments] }),
     ...(context.length === 0 ? {} : { context: [...context] }),
   }

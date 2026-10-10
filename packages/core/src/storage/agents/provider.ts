@@ -150,6 +150,17 @@ export function assertConversationAgentRunSpec(
       `[${prefix}] Conversational Agent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}, or a nonnegative budgetTokens object.`
     )
   }
+  for (const [name, value] of [
+    ["timeZone", spec.timeZone],
+    ["locale", spec.locale],
+  ] as const) {
+    if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] Conversational Agent run '${name}' must be a non-empty string.`
+      )
+    }
+  }
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

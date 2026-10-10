@@ -4,7 +4,8 @@ import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ProjectInfoResponseSchema } from "../schemas/project"
 export function registerProjectRoutes(app: Elysia, host: SixbHostView) {
-  return app.get("/api/project", async () => ({ id: host.id }), {
+  const project = { id: host.id, locale: host.locale, timeZone: host.timeZone }
+  return app.get("/api/project", async () => project, {
     response: { 200: ProjectInfoResponseSchema },
     detail: {
       summary: "Get current project metadata",

@@ -302,6 +302,7 @@ describe("GET /api/models", () => {
     expect(await response.json()).toEqual({
       error:
         "[Sixb] Language model 'gateway/unconfigured/model' is not in the project model catalog.",
+      code: "model_not_found",
     })
   })
 })

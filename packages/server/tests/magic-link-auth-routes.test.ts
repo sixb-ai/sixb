@@ -48,6 +48,7 @@ function createRuntime(
     readonly rateLimit?: false | { readonly perMinute?: number; readonly perHour?: number }
     readonly session?: AuthSessionOptions
     readonly authExperience?: SixbServerOptions["authExperience"]
+    readonly locale?: string
   } = {}
 ) {
   const storage = new InMemoryStorage()
@@ -69,6 +70,7 @@ function createRuntime(
     queues: new InMemoryQueues(),
     groups: [securityAdmins],
     auth: options.session ? { strategy, session: options.session } : strategy,
+    locale: options.locale,
   })
 
   return {
@@ -193,7 +195,10 @@ describe("magic-link auth routes", () => {
   test("renders a custom app auth experience while retaining the Atlas fallback", async () => {
     const fixture = await createCustomAuthFixture()
     try {
-      const { app } = createRuntime({ authExperience: { outdir: fixture.outdir } })
+      const { app } = createRuntime({
+        authExperience: { outdir: fixture.outdir },
+        locale: "fr-FR",
+      })
 
       const custom = await app.fetch(
         new Request(
@@ -205,6 +210,8 @@ describe("magic-link auth routes", () => {
 
       expect(custom.status).toBe(200)
       expect(customHtml).toContain("Acme auth")
+      // Built without the project, the page declares its language when served.
+      expect(customHtml).toStartWith('<!doctype html><html lang="fr-FR"><body>')
       expect(custom.headers.get("referrer-policy")).toBe("same-origin")
       expect(custom.headers.get("content-security-policy")).toContain(
         "form-action 'self'; frame-ancestors 'none'"

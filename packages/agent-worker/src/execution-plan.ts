@@ -28,6 +28,9 @@ export interface ResolvedAgentExecutionPlan {
   /** Agent Skills installed in the sandbox and listed in the prompt. */
   readonly skills: readonly AgentSkillDefinition[]
   readonly maxSteps: number
+  /** The requester's time zone and locale, when the run captured them. */
+  readonly timeZone?: string
+  readonly locale?: string
 }
 
 /**
@@ -60,6 +63,8 @@ export function resolveAgentExecutionPlan(input: {
     skills: input.skills.list(),
     maxSteps: input.defaultMaxSteps,
     ...(reasoning === undefined ? {} : { reasoning }),
+    ...(input.spec?.timeZone === undefined ? {} : { timeZone: input.spec.timeZone }),
+    ...(input.spec?.locale === undefined ? {} : { locale: input.spec.locale }),
   })
 }
 

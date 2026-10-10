@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { renderInstanceHelp } from "@sixb/cli-core"
-import { renderAgentSystemPrompt, renderWorkflowOutputFinalizerPrompt } from "../src/agent-prompt"
+import {
+  agentRuntimeFacts,
+  renderAgentSystemPrompt,
+  renderCurrentTime,
+  renderWorkflowOutputFinalizerPrompt,
+  withCurrentTime,
+} from "../src/agent-prompt"
 
 const SKILLS = [
   {
@@ -90,6 +96,52 @@ describe("agent system prompt", () => {
     expect(renderWorkflowOutputFinalizerPrompt({ instructions })).not.toContain(
       "<agent_instructions>"
     )
+  })
+
+  test("keeps only stable facts in the prompt so it stays cacheable", () => {
+    const prompt = renderAgentSystemPrompt({
+      mode: "workflow-task",
+      skills: [],
+      facts: { timeZone: "Europe/Paris", locale: "fr-FR" },
+    })
+    expect(prompt).toContain("<sixb_runtime_facts>\nTime zone: Europe/Paris. Locale: fr-FR.")
+    expect(prompt).not.toMatch(/<sixb_current_time>\w/)
+  })
+
+  test.each([
+    ["Europe/Paris", "Saturday 2026-10-10 14:05 (UTC+02:00)"],
+    ["UTC", "Saturday 2026-10-10 12:05 (UTC+00:00)"],
+    ["America/St_Johns", "Saturday 2026-10-10 09:35 (UTC-02:30)"],
+  ])("states the current local time in %s", (timeZone, local) => {
+    expect(renderCurrentTime(new Date("2026-10-10T12:05:30Z"), timeZone)).toBe(
+      `<sixb_current_time>${local}</sixb_current_time>`
+    )
+  })
+
+  test("closes a headless run's prompt with the time its run was created", () => {
+    // Proven by removal: return `message` unchanged from withCurrentTime.
+    expect(
+      withCurrentTime(
+        { role: "user", content: [{ type: "text", text: "Review the order." }] },
+        new Date("2026-10-10T12:05:30Z"),
+        "Europe/Paris"
+      ).content
+    ).toEqual([
+      { type: "text", text: "Review the order." },
+      {
+        type: "text",
+        text: "\n\n<sixb_current_time>Saturday 2026-10-10 14:05 (UTC+02:00)</sixb_current_time>",
+      },
+    ])
+  })
+
+  test("prefers the requester's settings over the project's", () => {
+    const project = { timeZone: "UTC", locale: "en" }
+    expect(agentRuntimeFacts({}, project)).toMatchObject(project)
+    expect(agentRuntimeFacts({ timeZone: "Europe/Paris" }, project)).toMatchObject({
+      timeZone: "Europe/Paris",
+      locale: "en",
+    })
   })
 
   test("renders the canonical conversation mode", () => {
