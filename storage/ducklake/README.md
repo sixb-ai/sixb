@@ -86,8 +86,14 @@ Or run it directly against the provider:
 const report = await lakeStorage.runMaintenance({
   dryRun: true,
   expireOlderThan: "7 days",
+  protect: [{ datasetId: "invoices", versionId: "ducklake:42" }],
 })
 ```
+
+Expiring a snapshot removes the version it holds. Two kinds of versions are kept whatever their
+age, and the snapshots holding them are reported as `keptSnapshots`: each dataset's latest
+version, so a dataset idle longer than the retention stays readable, and the versions passed as
+`protect`. `sixb lake cleanup` protects the version each projection applied.
 
 ### Read and Write Concurrency
 

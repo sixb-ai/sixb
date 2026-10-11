@@ -55,6 +55,7 @@ class MaintenanceLakeStorage extends FixtureLakeStorage {
     readonly dryRun?: boolean
     readonly expireOlderThan?: string
     readonly deleteOlderThan?: string
+    readonly protect?: readonly { readonly datasetId: string; readonly versionId: string }[]
   }) {
     logFixtureEvent({
       type: "lake:maintenance",
@@ -62,12 +63,14 @@ class MaintenanceLakeStorage extends FixtureLakeStorage {
       expireOlderThan: options?.expireOlderThan,
       deleteOlderThan: options?.deleteOlderThan,
     })
+    logFixtureEvent({ type: "lake:maintenance:protect", protect: options?.protect })
 
     return {
       dryRun: options?.dryRun ?? false,
       expireOlderThan: options?.expireOlderThan ?? "7 days",
       deleteOlderThan: options?.deleteOlderThan ?? options?.expireOlderThan ?? "7 days",
       snapshots: 2,
+      keptSnapshots: 5,
       oldFiles: 3,
       orphanedFiles: 4,
     }
@@ -82,11 +85,32 @@ function createLakeStorage(): FixtureLakeStorage {
   return new MaintenanceLakeStorage()
 }
 
+const storage = new InMemoryStorage()
+
+// Stands for a projection that applied a dataset version: what cleanup must keep.
+if (process.env.SIXB_CLI_TEST_APPLIED_VERSION) {
+  const versionId = process.env.SIXB_CLI_TEST_APPLIED_VERSION
+  storage.ontology.sources.listActive = async () => {
+    if (versionId === "unreadable") throw new Error("ontology storage is unreachable")
+
+    return [
+      {
+        source: { projectionId: "rooms" },
+        projectionKind: "object",
+        datasetVersion: { datasetId: things.id, versionId, createdAt: "2026-10-10T00:00:00.000Z" },
+        projectionRevision: "revision",
+        ontologyRevision: "ontology",
+        activatedAt: "2026-10-10T00:00:00.000Z",
+      },
+    ]
+  }
+}
+
 export const sixb = new SixbHost({
   id: "cli-lake-project",
   ontology: [Room],
   broker: new InMemoryBroker(),
-  storage: new InMemoryStorage(),
+  storage,
   lakeStorage: createLakeStorage(),
   blobStorage: new InMemoryBlobStorage(),
   queues: new InMemoryQueues(),

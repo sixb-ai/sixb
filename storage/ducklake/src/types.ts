@@ -1,3 +1,5 @@
+import type { DatasetVersionRef } from "@sixb/core/lake-storage"
+
 /**
  * DuckLake catalog connection settings.
  *
@@ -119,19 +121,27 @@ export type DuckDbSecretOptions =
   | AzureSecretOptions
 
 export interface DuckLakeMaintenanceOptions {
-  /** How long to keep snapshots before they can expire. Default: "7 days". */
+  /**
+   * How long to keep snapshots before they can expire. Default: "7 days". Each dataset's latest
+   * version and the `protect` versions are kept whatever their age.
+   */
   readonly expireOlderThan?: string
   /** How long to keep deleted/orphaned files before reclaim. Default: expireOlderThan. */
   readonly deleteOlderThan?: string
   /** Report what would be expired/deleted without changing the lake. Default: false. */
   readonly dryRun?: boolean
+  /** Versions to keep whatever their age, such as those projections applied. */
+  readonly protect?: readonly DatasetVersionRef[]
 }
 
 export interface DuckLakeMaintenanceReport {
   readonly dryRun: boolean
   readonly expireOlderThan: string
   readonly deleteOlderThan: string
+  /** Snapshots expired, or that would expire on a dry run. */
   readonly snapshots: number
+  /** Snapshots older than `expireOlderThan` kept because a version they hold is still needed. */
+  readonly keptSnapshots: number
   readonly oldFiles: number
   readonly orphanedFiles: number
 }

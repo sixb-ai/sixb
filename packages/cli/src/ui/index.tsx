@@ -1321,6 +1321,7 @@ export interface LakeCleanupReport {
   readonly expireOlderThan: string
   readonly deleteOlderThan: string
   readonly snapshots: number
+  readonly keptSnapshots?: number
   readonly oldFiles: number
   readonly orphanedFiles: number
 }
@@ -1345,6 +1346,9 @@ export function LakeCleanupView({
           { label: "Expire older than", value: report.expireOlderThan },
           { label: "Delete older than", value: report.deleteOlderThan },
           { label: "Snapshots", value: String(report.snapshots) },
+          ...(report.keptSnapshots === undefined
+            ? []
+            : [{ label: "Kept snapshots", value: String(report.keptSnapshots) }]),
           { label: "Old files", value: String(report.oldFiles) },
           { label: "Orphaned files", value: String(report.orphanedFiles) },
         ]}
