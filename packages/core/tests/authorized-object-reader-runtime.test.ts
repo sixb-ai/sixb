@@ -11,6 +11,7 @@ import { SixbHost } from "../src/runtime/host"
 import { createBoundSixb, type SixbDependencies } from "../src/runtime/sixb"
 import type { SixbRuntimeContext } from "../src/runtime/types"
 import { createSchedulesRuntime } from "../src/schedules/execution"
+import { getDatasetVersionMarkings } from "../src/security/dataset-version-markings"
 import { InMemoryStorage } from "../src/storage"
 import { createSyncsRuntime } from "../src/syncs/execution"
 import { createWorkflowsRuntime } from "../src/workflows/execution"
@@ -93,7 +94,14 @@ describe("AuthorizedObjectReader runtime binding", () => {
     }
     const source = { list: trap, getById: trap }
     const catalogs = [
-      createDatasetsRuntime(runtime, scope.execution, source, host.lakeStorage, host.blobStorage),
+      createDatasetsRuntime(
+        runtime,
+        scope.execution,
+        source,
+        host.lakeStorage,
+        host.blobStorage,
+        getDatasetVersionMarkings(host)
+      ),
       createWorkflowsRuntime(runtime, scope.execution, source),
       createSyncsRuntime(runtime, scope.execution, source),
       createPipelinesRuntime(runtime, scope.execution, source),

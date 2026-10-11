@@ -305,6 +305,12 @@
       "import": "./dist/storage/share-grants/provider.js",
       "default": "./dist/storage/share-grants/provider.js"
     },
+    "./internal/security": {
+      "types": "./dist/security/internal.d.ts",
+      "bun": "./src/security/internal.ts",
+      "import": "./dist/security/internal.js",
+      "default": "./dist/security/internal.js"
+    },
     "./internal/shares": {
       "types": "./dist/shares/internal.d.ts",
       "bun": "./src/shares/internal.ts",

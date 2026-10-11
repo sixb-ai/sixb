@@ -8,6 +8,7 @@ import {
   ProjectionRunDispatcher,
 } from "@sixb/core/internal/projections"
 import { setApiPublicOrigin } from "@sixb/core/internal/runtime"
+import { checkPipelineMarkings } from "@sixb/core/internal/security"
 import { SyncRunDispatcher } from "@sixb/core/internal/syncs"
 import type { Worker } from "@sixb/core/internal/workers"
 import { WorkflowRunDispatcher } from "@sixb/core/internal/workflows"
@@ -106,6 +107,11 @@ export async function checkRuntimeLakeDefinitions(sixb: LoadedSixbHost): Promise
     lakeStorage: sixb.lakeStorage,
     definitions: sixb.definitions.datasets.list(),
   })
+}
+
+/** Derives the markings SQL steps give their outputs and checks every projection against them. */
+export async function checkRuntimePipelineMarkings(sixb: LoadedSixbHost): Promise<void> {
+  await checkPipelineMarkings({ definitions: sixb.definitions, lakeStorage: sixb.lakeStorage })
 }
 
 export async function stopSixbProviders(sixb: LoadedSixbHost): Promise<void> {
@@ -262,6 +268,7 @@ export async function startSixbRuntime(
     // Own providers from the first startup phase, including preflight failures.
     await migrateRuntimeStorage(sixb)
     await checkRuntimeLakeDefinitions(sixb)
+    await checkRuntimePipelineMarkings(sixb)
     rulesRuntime = await startRulesRuntime(sixb)
     rulesWorker = rulesRuntime.rulesWorker
 
