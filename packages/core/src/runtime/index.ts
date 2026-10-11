@@ -30,12 +30,15 @@ export { SixbHost } from "./host"
 export type { Sixb } from "./sixb"
 export type {
   BatchItemResult,
+  FileListPropertyToken,
+  FilePropertyToken,
   ListResult,
   ListResultWithoutTotal,
   ObjectByIdHandle,
   ObjectExpandBuilder,
   ObjectExpandOptions,
   ObjectExpansionSort,
+  ObjectFileHandle,
   ObjectQueryBuilder,
   ObjectQueryFacetBucket,
   ObjectQueryFacetInput,

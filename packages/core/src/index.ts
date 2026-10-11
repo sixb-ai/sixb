@@ -569,6 +569,7 @@ export type {
   BlobInfo,
   BlobStorage,
   FileRef,
+  OpenedFileRef,
 } from "./blob-storage"
 export {
   DEFAULT_SIMPLE_FILE_UPLOAD_BYTES,
@@ -956,12 +957,15 @@ export type {
   BatchItemResult,
   CreateSixbOptions,
   DefinitionCatalog,
+  FileListPropertyToken,
+  FilePropertyToken,
   ListResult,
   ListResultWithoutTotal,
   ObjectByIdHandle,
   ObjectExpandBuilder,
   ObjectExpandOptions,
   ObjectExpansionSort,
+  ObjectFileHandle,
   ObjectQueryBuilder,
   ObjectQueryFacetBucket,
   ObjectQueryFacetInput,

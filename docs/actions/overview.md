@@ -192,7 +192,7 @@ if the action has a `.writeback()`, its external call already ran.
 | --- | --- |
 | The target object and `get()`, even for a missing object | Objects that start matching a query later |
 | `list()`, `query()`, and expanded objects | `count()`, `exists()`, and `facets()` |
-| `listLinks()` | Telemetry history |
+| `listLinks()` | Telemetry history and file content |
 
 To depend on an object not existing yet, give it a deterministic ID and read it with `get()`.
 

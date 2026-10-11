@@ -12,6 +12,7 @@ import type {
   RequestActionResult,
 } from "../actions"
 import type { AuthorizationContext } from "../authorization"
+import type { OpenedFileRef } from "../blob-storage"
 import type { Broker } from "../broker"
 import type { DomainEventLog } from "../events"
 import type { RuntimeAuthorization } from "../execution"
@@ -316,6 +317,32 @@ export type ObjectWhereBuilder<TObjectType extends ObjectTypeWithPropertyTokens>
 
 export type TelemetryPropertyToken<TObjectType extends ObjectTypeWithPropertyTokens> =
   TObjectType["p"][InferTelemetryPropertyIds<TObjectType>]
+
+type FilePropertyId<TObjectType extends ObjectTypeWithPropertyTokens, TSchema> = Extract<
+  TObjectType["properties"][number],
+  { readonly schema: TSchema }
+>["id"]
+
+/** A property token holding one file: its schema is `"fileRef"`. */
+export type FilePropertyToken<TObjectType extends ObjectTypeWithPropertyTokens> =
+  TObjectType["p"][FilePropertyId<TObjectType, "fileRef">]
+
+/** A property token holding a list of files: an array of `"fileRef"`. */
+export type FileListPropertyToken<TObjectType extends ObjectTypeWithPropertyTokens> =
+  TObjectType["p"][FilePropertyId<
+    TObjectType,
+    { readonly type: "array"; readonly items: "fileRef" }
+  >]
+
+/** One file property value of one object, read through that object. */
+export interface ObjectFileHandle {
+  /**
+   * Re-read the object with the caller's permissions and open the file it references. Returns
+   * null when the object, the value or its stored blob is absent; throws `AuthorizationError`
+   * when the caller cannot view the object type or is not cleared for the property's markings.
+   */
+  open(): Promise<OpenedFileRef | null>
+}
 
 type AnyPropertyToken = PropertyToken<string, string, Property>
 
@@ -777,6 +804,11 @@ export interface ObjectReadByIdHandle<out TObjectType extends ObjectTypeWithProp
 
   /** List links from this object, optionally filtered by link token. */
   listLinks(link?: LinkTokenForObjectType<TObjectType>): Promise<readonly ObjectLinkRow[]>
+
+  /** Read a `fileRef` property of this object. */
+  file(property: FilePropertyToken<TObjectType>): ObjectFileHandle
+  /** Read one file of a property holding a list of files. */
+  file(property: FileListPropertyToken<TObjectType>, index: number): ObjectFileHandle
 }
 
 /**

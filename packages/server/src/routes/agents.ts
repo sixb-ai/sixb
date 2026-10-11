@@ -1,6 +1,7 @@
 import { AgentRequestError, type AgentRunView, type FileRef, type SixbHostView } from "@sixb/core"
 import { publishAgentRunCancel, publishAgentRunFinished } from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
+import { resolveFileRefAtPath } from "@sixb/core/internal/blob-storage"
 import {
   type AgentContextCheckpointRecord,
   type AgentMessageRecord,
@@ -19,7 +20,6 @@ import {
   createFileContentResponse,
   fileContentGetResponses,
   fileContentHeadResponses,
-  resolveFileRefAtPath,
 } from "../files/content"
 import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"

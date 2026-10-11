@@ -49,7 +49,7 @@ export interface ActionTelemetryReadSource {
  * reflect the handler's own intent. Objects returned by `list()` and `query()` are fenced like
  * concrete reads, but query membership is not yet: an object that starts matching a query after the
  * read, and aggregate results (`count()`, `exists()`, `facets()`), stay unfenced. Telemetry history
- * is also a call-level snapshot, not an edit dependency.
+ * and file content are also call-level snapshots, not edit dependencies.
  */
 export class ActionReadRecorder {
   private readonly objects = new Map<string, ExpectedObjectRevision>()
@@ -320,6 +320,7 @@ function recordObjectReads<TObjectType extends ObjectTypeWithPropertyTokens>(
           )
           return rows
         },
+        file: handle.file,
       }
     },
   }

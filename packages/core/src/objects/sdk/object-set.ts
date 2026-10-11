@@ -6,6 +6,7 @@
 
 import type { ActionDefinition } from "../../actions"
 import type { AuthorizationContext } from "../../authorization"
+import type { BlobStorage } from "../../blob-storage"
 import { shareSixbErrorReporter } from "../../error-reporting/capability"
 import type { ExecutionContext } from "../../execution"
 import { assertAuthorizedObjectReaderBinding } from "../../execution/authorized-object-reader"
@@ -22,7 +23,7 @@ import {
   requestActionAndWait as requestActionAndWaitLeaf,
   requestAction as requestActionLeaf,
 } from "../action"
-import type { ExecutionObjectContext, ResolvedLinkContext } from "../context"
+import type { ObjectSetContext, ResolvedLinkContext } from "../context"
 import { requireLinkDefinition } from "../context"
 import { removeLink as removeLinkLeaf, upsertLink as upsertLinkLeaf } from "../link"
 import { upsertObject as upsertObjectLeaf } from "../object"
@@ -36,6 +37,7 @@ export function createObjectSet<TObjectType extends ObjectTypeWithPropertyTokens
     readonly execution: ExecutionContext
     readonly objectType: TObjectType
     readonly authorization?: AuthorizationContext
+    readonly blobStorage: Pick<BlobStorage, "stat" | "open">
   }
 ): ObjectSet<TObjectType> {
   assertAuthorizedObjectReaderBinding({
@@ -67,7 +69,7 @@ export function createObjectSet<TObjectType extends ObjectTypeWithPropertyTokens
     objectReader,
   })
 
-  const resolvedCtx: ExecutionObjectContext = {
+  const resolvedCtx: ObjectSetContext = {
     embeddingModels: params.embeddingModels,
     projectId,
     broker,
@@ -80,6 +82,7 @@ export function createObjectSet<TObjectType extends ObjectTypeWithPropertyTokens
     runtimeAuthorization,
     authorization,
     execution,
+    blobStorage: params.blobStorage,
     objectType,
     primaryPropertyId,
   }

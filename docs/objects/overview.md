@@ -113,6 +113,16 @@ Use `listLinks(Invoice.l.reviewers)` to read the relationship rows, or
 [expand the link](querying.md#include-related-objects) to read the related objects with their
 `linkProperties`.
 
+## Open a file
+
+`file()` reads a `fileRef` property through its object, with your permissions. `open()` returns the
+`fileRef` and a `body` stream, or `null` when the object, the value, or the stored file is missing.
+For a list of files, pass the index, such as `file(Invoice.p.attachments, 0)`:
+
+```ts
+const pdf = await invoices.byId("inv-001").file(Invoice.p.pdf).open()
+```
+
 ## Delete and restore
 
 `delete()` removes an object and its links. Deleting an object that does not exist has no effect:

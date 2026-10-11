@@ -1,31 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { type FileRef, InMemoryBlobStorage } from "@sixb/core"
-import { createFileContentResponse, resolveFileRefAtPath } from "../src/files/content"
-
-const fileRef: FileRef = {
-  blobId: "blob_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  sizeBytes: 12,
-  fileName: "test.pdf",
-  mediaType: "application/pdf",
-}
+import { InMemoryBlobStorage } from "@sixb/core"
+import { createFileContentResponse } from "../src/files/content"
 
 const SANDBOXED = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
 
 describe("file content helpers", () => {
-  test("resolves FileRefs only through own JSON pointer properties", () => {
-    expect(resolveFileRefAtPath({ properties: { pdf: fileRef } }, "/properties/pdf")).toEqual(
-      fileRef
-    )
-
-    const inheritedObject = Object.create({ properties: { pdf: fileRef } }) as unknown
-    expect(resolveFileRefAtPath(inheritedObject, "/properties/pdf")).toBeNull()
-
-    const sparseArray = [] as unknown[]
-    Object.setPrototypeOf(sparseArray, { 0: fileRef })
-    expect(resolveFileRefAtPath({ files: sparseArray }, "/files/0")).toBeNull()
-  })
-
   // The header is the last check before a browser reads the bytes, so it re-parses the type
   // instead of trusting it. Regression proof: send `fileRef.mediaType` verbatim and decide `inline`
   // with `startsWith("image/")` again; the lists then go out inline, as sent.

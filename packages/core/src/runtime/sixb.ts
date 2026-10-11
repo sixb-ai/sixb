@@ -110,7 +110,7 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
   dependencies: SixbDependencies
 ): Omit<Sixb<TParams>, "execution"> {
   return {
-    objects: createObjectsRuntime(runtime, execution),
+    objects: createObjectsRuntime(runtime, execution, dependencies.blobStorage),
     actions: createActionsRuntime(runtime, execution),
     datasets: createDatasetsRuntime(
       runtime,
