@@ -11,6 +11,7 @@ import type { DatasetMergeCommitResult } from "../lake-storage/merge"
 import { getDatasetPrimaryKeyColumns } from "../lake-storage/merge-validation"
 import type { DatasetRow, DatasetVersion, LakeStorage } from "../lake-storage/types"
 import type { SixbRuntimeContext } from "../runtime/types"
+import type { DatasetVersionMarkings } from "../security/dataset-version-markings"
 import { missingClearanceRedactions } from "../security/redactions"
 import type { Redactions } from "../security/types"
 import type { MergeChange } from "./changes"
@@ -42,7 +43,7 @@ export interface DatasetRows {
   /** Columns each row holds. Redacted columns are left out. */
   readonly columns: readonly string[]
   /**
-   * Every column of the dataset the reader cannot read, whether or not it was requested. Absent
+   * Every column of the version the reader cannot read, whether or not it was requested. Absent
    * when the reader can read every column.
    */
   readonly redactions?: Redactions
@@ -65,7 +66,8 @@ export function createDatasetsRuntime(
   execution: ExecutionContext,
   source: Pick<DatasetsRuntime, "list" | "getById">,
   lakeStorage: LakeStorage,
-  blobStorage: Pick<BlobStorage, "stat">
+  blobStorage: Pick<BlobStorage, "stat">,
+  versionMarkings: DatasetVersionMarkings
 ): DatasetsRuntime {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
   const allowed = (datasetId: string) =>
@@ -91,7 +93,11 @@ export function createDatasetsRuntime(
           : await lakeStorage.getVersion(registered.id, input.versionId)
       if (!version) return null
 
-      const redacted = redactedColumns(registered, assertRuntimeAuthorizationBound(runtime))
+      const redacted = redactedColumns(
+        version,
+        versionMarkings,
+        assertRuntimeAuthorizationBound(runtime)
+      )
       const selected = selectColumns(version, input.columns)
       const columns = selected.filter((column) => !redacted.has(column))
       const read = (readColumns: readonly string[] | undefined) =>
@@ -181,20 +187,27 @@ function selectColumns(version: DatasetVersion, requested: readonly string[] | u
 }
 
 /**
- * Columns the reader cannot read. Trusted code reads every column, a principal reads what its roles
- * clear, and any other authority is cleared for nothing.
+ * Columns of the version the reader cannot read. Trusted code reads every column, a principal reads
+ * what its roles clear, and any other authority is cleared for nothing.
+ *
+ * No version carries a marking the project does not declare on a column, so a reader cleared for
+ * every declared marking (all readers, when none is declared) reads every column without
+ * classifying the version.
  */
 function redactedColumns(
-  dataset: DatasetDefinition,
+  version: DatasetVersion,
+  versionMarkings: DatasetVersionMarkings,
   authority: ReturnType<typeof assertRuntimeAuthorizationBound>
 ): ReadonlySet<string> {
   if (authority.type === "unrestricted") return new Set()
   const clearances =
     authority.type === "principal" ? (authority.context.clearances ?? new Set()) : new Set()
+  if ([...versionMarkings.everyMarking()].every((id) => clearances.has(id))) return new Set()
+  const { columns } = versionMarkings.classify(version)
   return new Set(
-    dataset.schema.columns
-      .filter((column) => column.markings?.some((markingId) => !clearances.has(markingId)))
-      .map((column) => column.name)
+    [...columns]
+      .filter(([, columnMarkings]) => [...columnMarkings].some((id) => !clearances.has(id)))
+      .map(([column]) => column)
   )
 }
 

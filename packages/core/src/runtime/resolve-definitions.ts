@@ -4,6 +4,8 @@ import type { AgentToolDefinition } from "../agents"
 import { assertNoAgentDefinitions } from "../agents/retired-config"
 import { createAgentToolCatalog } from "../agents/tool-catalog"
 import type { ConnectorDefinition } from "../connectors"
+import { isDatasetPick } from "../datasets/builders"
+import { columnsByName } from "../datasets/column-index"
 import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
 import { createModelCatalog, type ModelCatalogInput } from "../models"
@@ -108,11 +110,13 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
   for (const sync of options.syncs ?? []) {
     assertUniqueDefinitionId("sync", sync.id, syncsById)
 
-    if (!datasetsById.has(sync.target.dataset.id)) {
+    const target = datasetsById.get(sync.target.dataset.id)
+    if (!target) {
       throw new RuntimeError(
         `Sync '${sync.id}' targets unknown dataset '${sync.target.dataset.id}'. Add it to 'datasets' in createSixb() or export it from 'datasets/'.`
       )
     }
+    assertRegisteredColumns(`Sync '${sync.id}' target '${target.id}'`, sync.target.dataset, target)
 
     syncsById.set(sync.id, sync)
   }
@@ -250,18 +254,70 @@ function validatePipelineDatasets(
     stepIds.add(step.id)
 
     for (const [inputName, dataset] of Object.entries(step.inputs)) {
-      if (!datasetsById.has(dataset.id)) {
+      const registered = datasetsById.get(dataset.id)
+      if (!registered) {
         throw new RuntimeError(
           `Pipeline '${pipeline.id}' step '${step.id}' input '${inputName}' references unknown dataset '${dataset.id}'. Add it to 'datasets' in createSixb() or export it from 'datasets/'.`
         )
       }
+      assertRegisteredColumns(
+        `Pipeline '${pipeline.id}' step '${step.id}' input '${inputName}'`,
+        dataset,
+        registered,
+        { pick: "allowed" }
+      )
     }
 
-    if (!datasetsById.has(step.output.id)) {
+    const output = datasetsById.get(step.output.id)
+    if (!output) {
       throw new RuntimeError(
         `Pipeline '${pipeline.id}' step '${step.id}' outputs unknown dataset '${step.output.id}'. Add it to 'datasets' in createSixb() or export it from 'datasets/'.`
       )
     }
+    assertRegisteredColumns(
+      `Pipeline '${pipeline.id}' step '${step.id}' output '${output.id}'`,
+      step.output,
+      output
+    )
+  }
+}
+
+/**
+ * A definition with a registered id stands for the whole dataset unless `pick()` made it, and only
+ * a step input may be a pick. Comparing columns catches a stale copy of a definition, which would
+ * read or write other columns than the registered ones.
+ */
+function assertRegisteredColumns(
+  subject: string,
+  dataset: DatasetDefinition,
+  registered: DatasetDefinition,
+  options: { readonly pick?: "allowed" } = {}
+): void {
+  // The registered definition itself, as almost every step and sync uses.
+  if (dataset === registered) return
+  const pick = isDatasetPick(dataset)
+  if (pick && options.pick !== "allowed") {
+    throw new RuntimeError(`${subject} must be the whole dataset, not a pick.`)
+  }
+  const registeredColumns = columnsByName(registered)
+  for (const column of dataset.schema.columns) {
+    const declared = registeredColumns.get(column.name)
+    if (!declared) {
+      throw new RuntimeError(
+        `${subject} has column '${column.name}', which dataset '${registered.id}' does not declare. Use the registered definition.`
+      )
+    }
+    if (declared.type !== column.type) {
+      throw new RuntimeError(
+        `${subject} has column '${column.name}' as '${column.type}', but dataset '${registered.id}' declares it as '${declared.type}'. Use the registered definition.`
+      )
+    }
+  }
+  if (!pick && dataset.schema.columns.length !== registeredColumns.size) {
+    const hint = options.pick === "allowed" ? ", or .pick(...) to read some of its columns" : ""
+    throw new RuntimeError(
+      `${subject} lacks columns of dataset '${registered.id}'. Use the registered definition${hint}.`
+    )
   }
 }
 

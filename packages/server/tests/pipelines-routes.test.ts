@@ -11,7 +11,8 @@ import { Elysia } from "elysia"
 import { registerPipelineRoutes } from "../src/routes/pipelines"
 
 const rawDataset = defineDataset("raw.customers", {
-  schema: [col("id", "string")],
+  schema: [col("id", "string"), col("email", "string")],
+  primaryKey: "id",
 })
 
 const cleanDataset = defineDataset("clean.customers", {
@@ -19,7 +20,7 @@ const cleanDataset = defineDataset("clean.customers", {
 })
 
 const cleanStep = definePipelineStep("clean-customers")
-  .inputs({ raw: rawDataset })
+  .inputs({ raw: rawDataset.pick("id") })
   .output(cleanDataset)
   .run(async () => {})
 
@@ -122,6 +123,23 @@ describe("pipeline routes", () => {
       {
         id: "customers",
         latestRun: { status: "failed", error: FAILURE },
+      },
+    ])
+  })
+
+  test("lists the columns a step input picks", async () => {
+    const app = createTestApp({})
+
+    const response = await app.handle(new Request("http://localhost/api/pipelines"))
+
+    expect(response.status).toBe(200)
+    const [listed] = (await response.json()) as [
+      { graph: { nodes: [{ step: { inputs: unknown } }] } },
+    ]
+    expect(listed.graph.nodes[0].step.inputs).toEqual([
+      {
+        name: "raw",
+        dataset: { id: "raw.customers", schema: { columns: [{ name: "id", type: "string" }] } },
       },
     ])
   })

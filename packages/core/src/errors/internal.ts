@@ -13,6 +13,7 @@ const SIXB_ERROR_CODE_SET: ReadonlySet<string> = new Set(SIXB_ERROR_CODES)
 type SixbErrorCodeTuple = readonly [SixbErrorCode, ...SixbErrorCode[]]
 
 export { SIXB_ERROR_CODES }
+export { withFailureMessage } from "./failure-message"
 
 export interface SixbErrorOptions {
   readonly cause?: unknown

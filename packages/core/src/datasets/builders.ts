@@ -93,6 +93,17 @@ type PickColumns<
     ? readonly []
     : readonly ColumnDefinitionOf<TColumns, TNames[number]>[]
 
+/** A dataset read through some of its columns: `rawInvoices.pick("id", "title")`. */
+type PickableDataset<TId extends string, TColumns extends readonly DatasetColumnDefinition[]> = {
+  /**
+   * The same dataset with only these columns, in this order. A pipeline step given it as an input
+   * reads nothing else, so its output inherits no other column's markings.
+   */
+  pick<const TNames extends readonly [ColumnNameOf<TColumns>, ...ColumnNameOf<TColumns>[]]>(
+    ...columns: TNames
+  ): DatasetDefinition<TId, PickColumns<TColumns, TNames>>
+}
+
 type AddColumns<
   TColumns extends readonly DatasetColumnDefinition[],
   TAdd extends readonly DatasetColumnDefinition[],
@@ -140,7 +151,8 @@ type DatasetDefinitionResult<TId extends string, TOptions extends DefineDatasetO
   FieldFromOptions<TOptions, "sequenceBy", string> &
   FieldFromOptions<TOptions, "primaryKey", DatasetPrimaryKey> &
   FieldFromOptions<TOptions, "partitionBy", readonly string[]> &
-  FieldFromOptions<TOptions, "description", string>
+  FieldFromOptions<TOptions, "description", string> &
+  PickableDataset<TId, TOptions["schema"]>
 
 type DerivedDatasetDefinitionResult<
   TId extends string,
@@ -153,7 +165,8 @@ type DerivedDatasetDefinitionResult<
   FieldFromOptions<TOptions, "sequenceBy", string> &
   FieldFromOptions<TOptions, "primaryKey", DatasetPrimaryKey> &
   FieldFromOptions<TOptions, "partitionBy", readonly string[]> &
-  FieldFromOptions<TOptions, "description", string>
+  FieldFromOptions<TOptions, "description", string> &
+  PickableDataset<TId, DerivedColumns<TParent, TOptions>>
 
 type CheckedDeriveDatasetOptions<
   TParent extends DatasetDefinition,
@@ -217,7 +230,52 @@ function createDatasetDefinition(id: string, options: DefineDatasetOptions): Dat
   }
 
   assertDatasetDefinition(definition, (message) => new DatasetValidationError(message))
+  // Not enumerable: the definition stays plain data for cloning, spreading, and storage.
+  Object.defineProperty(definition, "pick", {
+    value: (...columns: string[]) => pickDatasetColumns(definition, columns),
+  })
   return definition
+}
+
+const datasetPick: unique symbol = Symbol("sixb.datasetPick")
+
+/**
+ * Whether a definition was made by `pick()`. Only a pick may hold some of a dataset's columns: any
+ * other definition with a registered id stands for the whole dataset.
+ */
+export function isDatasetPick(dataset: DatasetDefinition): boolean {
+  return (dataset as { readonly [datasetPick]?: true })[datasetPick] === true
+}
+
+function pickDatasetColumns(
+  dataset: DatasetDefinition,
+  columnNames: readonly string[]
+): DatasetDefinition {
+  if (columnNames.length === 0) {
+    throw new DatasetValidationError(
+      `[Sixb] Dataset '${dataset.id}' pick needs at least one column.`
+    )
+  }
+  const columnsByName = new Map(dataset.schema.columns.map((column) => [column.name, column]))
+  const picked = new Set<string>()
+  const columns = columnNames.map((columnName) => {
+    if (picked.has(columnName)) {
+      throw new DatasetValidationError(
+        `[Sixb] Dataset '${dataset.id}' pick lists column '${columnName}' twice.`
+      )
+    }
+    picked.add(columnName)
+    const column = columnsByName.get(columnName)
+    if (column === undefined) {
+      throw new DatasetValidationError(
+        `[Sixb] Dataset '${dataset.id}' has no column '${columnName}' to pick.`
+      )
+    }
+    return column
+  })
+  const pick: DatasetDefinition = { kind: "dataset", id: dataset.id, schema: { columns } }
+  Object.defineProperty(pick, datasetPick, { value: true })
+  return pick
 }
 
 function assertStringArray(value: unknown, field: string): asserts value is readonly string[] {

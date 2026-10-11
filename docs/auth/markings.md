@@ -60,6 +60,67 @@ The ontology is what your app reads, so a [projected](../projections/overview.md
 [Sixb] Projection 'invoices': property 'Invoice.amount' is projected from column 'raw_invoices.amount', which carries [financial]. Add markings: [financial] to the property.
 ```
 
+## Markings through pipelines
+
+[Pipeline](../pipelines/overview.md) steps pass markings on to the columns they compute. Mark the source columns; the datasets a pipeline writes need no markings of their own.
+
+### SQL steps
+
+An output column carries the markings of every input column it depends on:
+
+- its value: the columns its expression reads;
+- its rows: the columns that filter, join, group, window, order, or limit the rows. They mark every output column.
+
+```ts
+definePipelineStep("large-invoices")
+  .inputs({ invoices: rawInvoices })
+  .output(largeInvoices)
+  .sql(({ invoices }) => `SELECT id, title FROM ${invoices} WHERE amount > 100`)
+```
+
+`id` and `title` hold no amount, but the result reveals which invoices exceed 100, so both carry `financial`. A projection from `large_invoices` then reports where the marking comes from, naming each step as `pipeline/step`:
+
+```text
+[Sixb] Projection 'large-invoices': property 'Invoice.title' is projected from column 'large_invoices.title', which carries [financial] from 'raw_invoices.amount' through step 'invoices/large-invoices'. Add markings: [financial] to the property.
+```
+
+What decided the rows of an input follows every column computed from that input, even one that reads none of its columns: `SELECT count(*) FROM large_invoices`, or a constant selected from it, carries `financial` too.
+
+The lake provider analyzes each SQL step that reads a marked column. Sixb runs this check before the API server serves traffic, when `sixb dev` starts, and in `sixb check` and `sixb lake check`. A query the provider cannot analyze exactly, such as `PIVOT` or `UNPIVOT`, is reported with its step and the construct. A nested field counts as its whole column: reading `meta.plan` carries every marking of `meta`. A lake provider that cannot analyze SQL cannot run SQL steps over marked columns.
+
+Read data only through the step's inputs. A table the query reads by its lake name, or data it reads through a table function that reads files or other tables, such as `read_parquet` or `query_table`, is not tracked, so its markings do not follow.
+
+### TypeScript steps
+
+Sixb cannot see what a `.run()` step computes, so every column it writes carries the markings of every column it reads. Use `pick` to read only the columns the step needs:
+
+```ts
+definePipelineStep("score-invoices")
+  .inputs({ invoices: rawInvoices.pick("id", "title") })
+  .output(scoredInvoices)
+  .run(async ({ inputs, output }) => {
+    // inputs.invoices holds only id and title
+  })
+```
+
+`scoredInvoices` carries no `financial`, because the step never reads `amount`. `pick` narrows SQL steps the same way. Only `pick` narrows an input: a copy of a dataset definition with other columns than the registered one is rejected at startup.
+
+### Changing a step
+
+Each dataset version records, when it is written, the source columns each of its columns comes from, through every step upstream. It keeps the markings of the code that produced it: editing a step never declassifies data it already wrote. If a step used to copy `amount` into `title`, the versions it wrote then keep `title` marked, and so do the versions computed from them, however many steps away.
+
+An append or a merge keeps the rows before it, so it also keeps their markings. A history that a step appends to keeps `title` marked after the fix, because it still holds the titles computed from amounts; only a new snapshot replaces them.
+
+Since every version carries its own record, removing older versions from the lake changes no markings. The record grows with the number of source columns behind a dataset, not with its number of versions.
+
+A version written by SQL the lake provider could not analyze carries every marking your project declares, in every column. So does every version computed from it, and every later version of its dataset that keeps its rows, until a new snapshot replaces them.
+
+For versions written before Sixb recorded this lineage, a pipeline version carries every marking your project declares, and a version written by a sync or an ingestion carries the markings its own dataset declares. A version that keeps the rows of such a pipeline version, an append or a merge onto it, carries every marking too, until a new snapshot replaces those rows; for a pipeline that writes snapshots, that is its next run. One case escapes this: a version written before then by a sync or an ingestion, or by a lake schema change, on top of a pipeline version carries only those markings too, and so do the versions that keep its rows. Write a new snapshot of that dataset to replace the rows it kept.
+
+Markings themselves are read from your code. Removing a marking from a source column declassifies that column in every version, past and future.
+
+Reading a dataset version applies that version's markings. A projection refuses a version whose columns carry markings the mapped properties do not declare, and says why. Add the markings to the property, or, if the step's code no longer derives them, rerun its pipeline.
+
 ## Grant a clearance
 
 Add `clearances` to a [role](authorization.md). A role can carry clearances alone; its members still need a view grant from any role to read the object.
@@ -121,12 +182,12 @@ In TypeScript, a marked property is optional when read, even if it is required. 
 
 - A primary property, a telemetry property, or a link property cannot be marked.
 - A subtype that redefines a marked property must keep its parent's markings.
-- A projected property declares the markings of its column.
-- A column cannot be marked when it becomes an object id or a link key, decides a `mostRecent` conflict, or feeds a telemetry projection.
-- Pipeline steps cannot read marked columns yet. A step may mark the columns it produces.
+- A projected property declares the markings of its column, including the ones the column inherits through pipeline steps.
+- A column cannot carry markings when it becomes an object id or a link key, decides a `mostRecent` conflict, or feeds a telemetry projection.
+- A SQL step that reads a marked column needs a lake provider that can analyze its query.
 - Every marking used by a property, a column, or a clearance must be registered.
 
-Sixb checks these rules at startup.
+Sixb checks these rules at startup, and again for each dataset version a projection reads.
 
 ## Trusted code
 

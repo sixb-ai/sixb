@@ -58,6 +58,7 @@ describe("sixb check", () => {
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("Sixb is healthy")
     expect(result.stdout).toContain("Project")
+    expect(result.stdout).toMatch(/Markings\s+ok/)
     expect(result.stdout).not.toContain("validation error(s)")
     expect(result.stderr).toBe("")
   })
@@ -71,6 +72,18 @@ describe("sixb check", () => {
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("Sixb has issues")
     expect(result.stdout).toContain("UnreachableStorage")
+  })
+
+  // Reproduce: drop `markings` from the failed checks in commands/check.tsx; this exits 0.
+  test("fails the command when a SQL step gives a projected column undeclared markings", () => {
+    const result = runCheckFixture("misdeclared-markings-project")
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("Sixb has issues")
+    expect(result.stdout).toContain("Markings")
+    expect(result.stdout.replace(/\s+/g, " ")).toContain(
+      "property 'Invoice.title' is projected from column 'invoices.title', which carries [financial] from 'raw_invoices.amount' through step 'invoices/normalize-invoices'."
+    )
   })
 
   test("exits instead of hanging when a provider holds the event loop open", async () => {

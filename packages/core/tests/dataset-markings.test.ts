@@ -9,8 +9,6 @@ import {
   defineGroup,
   defineMarking,
   defineObjectType,
-  definePipeline,
-  definePipelineStep,
   defineProjection,
   defineRole,
   link,
@@ -333,37 +331,7 @@ describe("markings at startup", () => {
       .fromDataset(readings)
       .points({ objectId: "customer_id", at: "at", value: "score" })
     expect(start({ datasets: [readings], projections: [projection] })).toThrow(
-      "[Sixb] Projection 'scores' reads column 'readings.score', which carries [financial]. Telemetry projections cannot read marked columns yet."
+      "[Sixb] Projection 'scores': column 'readings.score' carries [financial], and telemetry projections cannot read marked columns yet."
     )
-  })
-
-  test("pipeline steps cannot read marked columns yet", () => {
-    const normalized = defineDataset("normalized_invoices", {
-      schema: [col("id", "string"), col("title", "string")],
-    })
-    const step = definePipelineStep("normalize")
-      .inputs({ invoices: rawInvoices })
-      .output(normalized)
-      .sql(({ invoices }) => `SELECT id, title FROM ${invoices}`)
-    expect(
-      start({
-        datasets: [rawInvoices, normalized],
-        pipelines: [definePipeline("invoices").then(step)],
-      })
-    ).toThrow(
-      "[Sixb] Pipeline 'invoices' step 'normalize' reads column 'raw_invoices.amount', which carries [financial]. Pipeline steps cannot read marked columns yet."
-    )
-
-    // A step may still mark the columns it produces.
-    const scored = defineDataset("scored", {
-      schema: [col("id", "string"), col("risk", "float64", { markings: [financial] })],
-    })
-    const scoring = definePipelineStep("score")
-      .inputs({ invoices: normalized })
-      .output(scored)
-      .run(() => {})
-    expect(
-      start({ datasets: [normalized, scored], pipelines: [definePipeline("risk").then(scoring)] })
-    ).not.toThrow()
   })
 })

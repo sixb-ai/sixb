@@ -7,13 +7,22 @@ import type {
   ProjectionDefinition,
   TelemetryProjectionDefinition,
 } from "@sixb/core"
-import { createSixbError, isSixbError } from "@sixb/core/internal/errors"
+import {
+  createSixbError,
+  isSixbError,
+  summarizeErrorMessage,
+  withFailureMessage,
+} from "@sixb/core/internal/errors"
 import {
   createProjectionRunId,
   getProjectionRegistry,
   type ProjectionDispatchDescriptor,
   projectionTargetOf,
 } from "@sixb/core/internal/projections"
+import {
+  assertProjectionVersionMarkings,
+  getDatasetVersionMarkings,
+} from "@sixb/core/internal/security"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { collectIdentityMismatches } from "./identity-mismatch"
 import {
@@ -74,6 +83,7 @@ export async function validateProjectionJob(
   const version = await requirePinnedVersion(runtime, job)
 
   validatePinnedSchema({ runtime, job, projection, dataset, version })
+  validatePinnedMarkings({ runtime, job, projection, version })
 
   return correlateValidatedProjection({ job, projection, dataset, version })
 }
@@ -175,6 +185,37 @@ function validatePinnedSchema(input: {
         cause: error,
         details: projectionJobContext(input.job),
       }
+    )
+  }
+}
+
+/** A version keeps the markings of the code that wrote it, which the projection may not allow. */
+function validatePinnedMarkings(input: {
+  readonly runtime: ProjectionWorkerContext
+  readonly job: ProjectionJob
+  readonly projection: ProjectionDefinition
+  readonly version: DatasetVersion
+}): void {
+  const markings = getDatasetVersionMarkings(input.runtime)
+  // Classifying and checking read nothing but the version: whatever they throw is a refusal of
+  // this version, which no retry changes.
+  try {
+    const classification = markings.classify(input.version)
+    assertProjectionVersionMarkings({
+      projection: input.projection,
+      ontology: input.runtime.ontology,
+      version: input.version,
+      classification,
+    })
+  } catch (error) {
+    const message = summarizeErrorMessage(error)
+    // Core writes it from definitions and version ids only, so the run's failure can keep it.
+    throw withFailureMessage(
+      createSixbError("dataset.version_incompatible", message, {
+        cause: error,
+        details: projectionJobContext(input.job),
+      }),
+      message
     )
   }
 }

@@ -86,6 +86,21 @@ const cleanNames = definePipelineStep("clean-campaign-names")
   })
 ```
 
+## Read only some columns
+
+Pass `dataset.pick(...)` as an input to read only those columns:
+
+```ts
+const titles = definePipelineStep("campaign-titles")
+  .inputs({ campaigns: rawCampaigns.pick("id", "name") })
+  .output(campaignTitles)
+  .sql(({ campaigns }) => `select id, upper(name) as name from ${campaigns}`)
+```
+
+A step's output inherits the [markings](../auth/markings.md#markings-through-pipelines) of the
+columns it reads. A `.run()` step inherits every one of them, so picking only what it needs keeps
+sensitive columns out of its output. The output of a step is always the whole dataset.
+
 ## Next steps
 
 - [Projections](../projections/overview.md): Map the output to your domain model.

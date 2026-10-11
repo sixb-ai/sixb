@@ -40,6 +40,10 @@ import {
   startSixbRuntime,
   stopSixbProviders,
 } from "../src/lib/runtime"
+import {
+  createMisdeclaredMarkingsSixb,
+  MISDECLARED_MARKINGS_MESSAGE,
+} from "./fixtures/shared/createMisdeclaredMarkingsSixb"
 
 const Zone = defineObjectType({
   id: "Zone",
@@ -328,6 +332,15 @@ describe("startSixbRuntime", () => {
 
     await expect(startSixbRuntime(sixb, { cohostWorkers: true })).rejects.toThrow(
       "Lake dataset definition check failed"
+    )
+  })
+
+  // Reproduce: remove `checkRuntimePipelineMarkings` from startSixbRuntime; the workers start.
+  test("fails startup when a SQL step gives a projected column undeclared markings", async () => {
+    const sixb = createMisdeclaredMarkingsSixb("cli-misdeclared-markings")
+
+    await expect(startSixbRuntime(sixb, { cohostWorkers: true })).rejects.toThrow(
+      MISDECLARED_MARKINGS_MESSAGE
     )
   })
 

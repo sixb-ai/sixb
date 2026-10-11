@@ -24,6 +24,7 @@ import { createProjectionsRuntime, type ProjectionsRuntime } from "../projection
 import { createRulesRuntime, type RulesRuntime } from "../rules/execution"
 import type { SandboxDefinition } from "../sandboxes/configuration"
 import { createSchedulesRuntime, type SchedulesRuntime } from "../schedules/execution"
+import type { DatasetVersionMarkings } from "../security/dataset-version-markings"
 import { createSharesRuntime, type SharesRuntime } from "../shares/execution"
 import { createSyncsRuntime, type SyncsRuntime } from "../syncs/execution"
 import { createWorkflowsRuntime, type WorkflowsRuntime } from "../workflows/execution"
@@ -67,6 +68,7 @@ export interface SixbDependencies {
   readonly blobStorage: BlobStorage
   readonly apiPublicOrigin: () => string | undefined
   readonly lakeStorage: LakeStorage
+  readonly datasetVersionMarkings: DatasetVersionMarkings
 }
 
 export function createBoundSixb<TParams extends Record<string, unknown> = Record<string, unknown>>(
@@ -117,7 +119,8 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
       execution,
       dependencies.definitions.datasets,
       dependencies.lakeStorage,
-      dependencies.blobStorage
+      dependencies.blobStorage,
+      dependencies.datasetVersionMarkings
     ),
     workflows: createWorkflowsRuntime(runtime, execution, dependencies.definitions.workflows),
     syncs: createSyncsRuntime(runtime, execution, dependencies.definitions.syncs),

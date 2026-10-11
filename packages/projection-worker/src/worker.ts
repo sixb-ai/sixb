@@ -7,6 +7,7 @@ import {
 } from "@sixb/core/internal/primitive-execution"
 import { shareProjectionRegistry } from "@sixb/core/internal/projections"
 import { registerOntologyMutationRuntime } from "@sixb/core/internal/runtime"
+import { shareDatasetVersionMarkings } from "@sixb/core/internal/security"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, ProjectionRunRequestedQueueJob } from "@sixb/core/queues"
@@ -194,6 +195,7 @@ function buildProjectionContext(
   }
   registerOntologyMutationRuntime(context, execution.ontologyMutations)
   shareProjectionRegistry(host, context)
+  shareDatasetVersionMarkings(host, context)
   return context
 }
 
