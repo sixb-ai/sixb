@@ -16,7 +16,7 @@ import {
   runtimeOperationId,
 } from "../materializer-adapter"
 import { runRuntimeItemBatch } from "../runtime-batch"
-import { assertCanWriteLink } from "./authorization"
+import { assertCanWriteLinks } from "./authorization"
 import { collectEndpointLookups, loadEndpointExistence, requireEndpoints } from "./endpoints"
 
 export async function upsertLinkBatch(
@@ -30,12 +30,14 @@ export async function upsertLinkBatch(
   // a per-item validation: a refused item must not become one failed `BatchItemResult` while the
   // rest of the batch commits. Asserting inside `plan` would do exactly that, and would also let the
   // existence lookup answer for targets the principal cannot see.
-  for (const item of items) {
-    assertCanWriteLink(ctx, {
+  await assertCanWriteLinks(
+    ctx,
+    items.map((item) => ({
       sourceTypeId: item.objectType.id,
+      linkId: item.linkId,
       targetTypeId: item.targetTypeId,
-    })
-  }
+    }))
+  )
 
   const existing = await loadEndpointExistence(ctx, collectEndpointLookups(items))
   const valueTypesById = ontology.getValueTypesById()

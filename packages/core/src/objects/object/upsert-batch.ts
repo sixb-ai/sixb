@@ -25,6 +25,7 @@ export async function upsertObjectBatch(
   assertCanEdit(ctx, ctx.objectType.id)
   const { objectType, primaryPropertyId, ontology } = ctx
   const valueTypesById = ontology.getValueTypesById()
+  const redact = await ctx.objectReader.writtenRowRedactor(objectType.id)
 
   return runRuntimeItemBatch({
     ctx,
@@ -52,9 +53,6 @@ export async function upsertObjectBatch(
         ],
       }
     },
-    value: ([outcome]) =>
-      ctx.objectReader.redactWrittenRow(
-        toObjectRow(ctx.projectId, requireEffectiveObject(outcome))
-      ),
+    value: ([outcome]) => redact(toObjectRow(ctx.projectId, requireEffectiveObject(outcome))),
   })
 }
