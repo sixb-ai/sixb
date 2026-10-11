@@ -1,4 +1,5 @@
 export type { AgentRunFailure } from "@sixb/client"
+export { createLiveRunState, type LiveRunState } from "@sixb/client"
 export type { ModelReasoningLevel } from "@sixb/core/models"
 export { AgentChat, type AgentChatProps } from "./AgentChat"
 export {
@@ -69,7 +70,6 @@ export {
   type UseAgentConversationInput,
   useAgentConversation,
 } from "./hooks/useAgentConversation"
-export { createLiveRunState, type LiveRunState } from "./liveRun"
 export { type NormalizedPart, type NormalizedTool, normalizeDurableParts } from "./parts"
 export type { ActiveTurnPresentation } from "./runPresentation"
 export type {

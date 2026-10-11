@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { AgentRunStreamEvent } from "@sixb/client"
-import { createLiveRunState, liveRunReducer } from "../src/liveRun"
+import type { AgentRunStreamEvent } from "../src"
+import { createLiveRunState, liveRunReducer } from "../src/live-run"
 
 const BASE_EVENT = {
   schemaVersion: 1,
@@ -58,11 +58,9 @@ describe("liveRunReducer", () => {
     ])
 
     expect(
-      state.parts.map((part) => {
-        if (part.kind === "tool") return `tool:${part.tool.toolName}`
-        if (part.kind === "text" || part.kind === "reasoning") return `${part.kind}:${part.text}`
-        return part.kind
-      })
+      state.parts.map((part) =>
+        part.kind === "tool" ? `tool:${part.tool.toolName}` : `${part.kind}:${part.text}`
+      )
     ).toEqual(["text:Before tool.", "tool:bash", "text:After tool."])
   })
 

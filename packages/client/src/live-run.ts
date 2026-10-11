@@ -1,6 +1,27 @@
-import type { AgentRunFailure, AgentRunStreamEvent } from "@sixb/client"
-import type { NormalizedPart, NormalizedTool } from "./parts"
-import type { AgentRunStatus } from "./types"
+/**
+ * The reply an agent run is streaming, rebuilt from its `/ws/agents` events as render-ready parts.
+ * React-free: feed `liveRunReducer` the events a `createAgentRunSocket` delivers.
+ */
+import type { AgentRunFailure, AgentRunStreamEvent } from "./agent-streams"
+import type { GetAgentRunResponse } from "./generated/types.gen"
+
+type AgentRunStatus = GetAgentRunResponse["status"]
+
+/** A tool call in a streaming reply, as far as its chunks have arrived. */
+export type LiveRunTool = {
+  readonly toolName: string
+  readonly state: "input-streaming" | "input-available" | "output-available" | "output-error"
+  readonly input?: unknown
+  readonly inputText?: string
+  readonly output?: unknown
+  readonly errorText?: string
+}
+
+/** One part of a streaming reply. Files arrive only with the saved message, never live. */
+export type LiveRunPart =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "reasoning"; readonly text: string; readonly streaming: boolean }
+  | { readonly kind: "tool"; readonly tool: LiveRunTool }
 
 export interface LiveRunState {
   /** The run this state belongs to, or null when idle. */
@@ -10,7 +31,7 @@ export interface LiveRunState {
   /** True while the worker is condensing earlier turns before the normal model call. */
   readonly compacting: boolean
   /** Ordered, render-ready parts of the in-flight assistant message, in first-chunk order. */
-  readonly parts: readonly NormalizedPart[]
+  readonly parts: readonly LiveRunPart[]
   /**
    * Internal bookkeeping, index-aligned with `parts`: the identity each part is merged on as more
    * chunks arrive (text/reasoning by id within a step, tools by their global call id). Not meant for
@@ -195,7 +216,7 @@ function reduceTool(state: LiveRunState, chunk: Record<string, unknown>): LiveRu
   )
 }
 
-function applyToolChunk(tool: NormalizedTool, chunk: Record<string, unknown>): NormalizedTool {
+function applyToolChunk(tool: LiveRunTool, chunk: Record<string, unknown>): LiveRunTool {
   switch (chunk.type) {
     case "tool-input-start":
       return { ...tool, state: "input-streaming" }
@@ -234,15 +255,15 @@ function applyToolChunk(tool: NormalizedTool, chunk: Record<string, unknown>): N
 function upsertPart(
   state: LiveRunState,
   key: string,
-  create: () => NormalizedPart,
-  update: (part: NormalizedPart) => NormalizedPart,
+  create: () => LiveRunPart,
+  update: (part: LiveRunPart) => LiveRunPart,
   index = state.partKeys.indexOf(key)
 ): LiveRunState {
   if (index === -1) {
     return { ...state, parts: [...state.parts, create()], partKeys: [...state.partKeys, key] }
   }
   const parts = state.parts.slice()
-  parts[index] = update(parts[index] as NormalizedPart)
+  parts[index] = update(parts[index] as LiveRunPart)
   return { ...state, parts }
 }
 

@@ -12,6 +12,16 @@ export * from "./events"
 export * from "./file"
 export * from "./generated"
 export { client } from "./generated/client.gen"
+export {
+  createLiveRunState,
+  hasLiveContent,
+  isAwaitingFirstToken,
+  type LiveRunAction,
+  type LiveRunPart,
+  type LiveRunState,
+  type LiveRunTool,
+  liveRunReducer,
+} from "./live-run"
 export * from "./logs"
 // Framework UI models and adapters
 export * from "./models"
@@ -31,3 +41,4 @@ export {
   signOutSixbSession,
   startSixbDeviceLogin,
 } from "./session"
+export type { SixbWebSocketFactory, SixbWebSocketInit } from "./ws-socket"

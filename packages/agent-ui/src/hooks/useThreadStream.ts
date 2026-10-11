@@ -1,4 +1,5 @@
 import type { AgentRunSnapshot } from "@sixb/client"
+import { createLiveRunState, type LiveRunState, liveRunReducer } from "@sixb/client"
 import {
   getAgentRunQueryKey,
   getAgentThreadQueryKey,
@@ -9,7 +10,6 @@ import {
 } from "@sixb/client/hooks"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useReducer, useRef, useState } from "react"
-import { createLiveRunState, type LiveRunState, liveRunReducer } from "../liveRun"
 
 export interface UseThreadStreamOptions {
   readonly threadId: string | null

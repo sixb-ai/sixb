@@ -1,4 +1,4 @@
-import type { LiveRunState } from "./liveRun"
+import type { LiveRunState } from "@sixb/client"
 import type { NormalizedPart } from "./parts"
 import type { AgentMessage, AgentRun, AgentRunStatus } from "./types"
 

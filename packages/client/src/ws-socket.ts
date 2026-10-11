@@ -20,6 +20,29 @@ const DEFAULT_SIXB_API_BASE_URL = "http://localhost:3002"
 const DEFAULT_RECONNECT_DELAY_MS = 1000
 const DEFAULT_READY_TIMEOUT_MS = 10_000
 
+/** What a WebSocket opens with: subprotocols, and the session's credential when there is one. */
+export interface SixbWebSocketInit {
+  readonly protocols?: readonly string[]
+  readonly headers?: Readonly<Record<string, string>>
+}
+
+/**
+ * Opens a client's WebSockets. Runtimes differ in how a WebSocket takes headers: give a client one
+ * for a runtime whose `WebSocket` does not take them the way Bun and Node do.
+ */
+export type SixbWebSocketFactory = (url: string, init: SixbWebSocketInit) => WebSocket
+
+const webSocketFactories = new WeakMap<Client, SixbWebSocketFactory>()
+
+/** Record how a client opens its WebSockets; `undefined` restores the runtime default. */
+export function setClientWebSocketFactory(
+  client: Client,
+  factory: SixbWebSocketFactory | undefined
+): void {
+  if (factory) webSocketFactories.set(client, factory)
+  else webSocketFactories.delete(client)
+}
+
 export interface ReconnectingSocketState {
   readonly connected: boolean
   readonly reconnecting: boolean
@@ -89,6 +112,7 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
   // Like the session fetch, present the token only to the API the session belongs to.
   const session = getClientSessionAuthority(client)
   const socketSession = session && servesSocket(session.baseUrl, options.url) ? session : null
+  const openSocket = webSocketFactories.get(client) ?? openRuntimeWebSocket
 
   let state = INITIAL_STATE
   let stopped = false
@@ -147,7 +171,10 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
     }
     if (stopped || generation !== connectionGeneration) return
 
-    const ws = openWebSocket(options.url, protocols, accessToken)
+    const ws = openSocket(options.url, {
+      ...(protocols ? { protocols: [...protocols] } : {}),
+      ...(accessToken ? { headers: { authorization: `Bearer ${accessToken}` } } : {}),
+    })
     socket = ws
     let subscribed = false
     let readyTimer: ReturnType<typeof setTimeout> | null = null
@@ -245,15 +272,11 @@ type HeaderWebSocketConstructor = new (
   options: { readonly protocols?: string[]; readonly headers: Record<string, string> }
 ) => WebSocket
 
-function openWebSocket(
-  url: string,
-  protocols: readonly string[] | undefined,
-  accessToken: string | null
-): WebSocket {
-  if (accessToken) {
+function openRuntimeWebSocket(url: string, { protocols, headers }: SixbWebSocketInit): WebSocket {
+  if (headers) {
     return new (WebSocket as unknown as HeaderWebSocketConstructor)(url, {
       ...(protocols ? { protocols: [...protocols] } : {}),
-      headers: { authorization: `Bearer ${accessToken}` },
+      headers: { ...headers },
     })
   }
   return protocols ? new WebSocket(url, [...protocols]) : new WebSocket(url)

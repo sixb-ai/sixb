@@ -1,9 +1,9 @@
+import type { LiveRunState } from "@sixb/client"
 import type { ModelReasoningLevel } from "@sixb/core/models"
 import { Button, Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { Plus } from "lucide-react"
 import type { ReactNode } from "react"
-import type { LiveRunState } from "../liveRun"
 import type {
   Agent,
   AgentContextEntryInput,

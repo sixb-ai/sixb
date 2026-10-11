@@ -1,3 +1,4 @@
+import { isAwaitingFirstToken, type LiveRunState } from "@sixb/client"
 import {
   Bubble,
   BubbleContent,
@@ -13,7 +14,6 @@ import { AlertTriangle, ArrowRight, ChevronRight, Clock3, RotateCcw } from "luci
 import { memo } from "react"
 import { createAgentDocumentSource } from "../document-preview/source"
 import type { AgentDocumentSource } from "../document-preview/types"
-import { isAwaitingFirstToken, type LiveRunState } from "../liveRun"
 import { normalizeDurableParts } from "../parts"
 import type {
   AgentContextEntryInput,

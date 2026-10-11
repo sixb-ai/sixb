@@ -98,7 +98,9 @@ export async function startSixbDeviceLogin(
     expiresAt,
     async complete({ signal } = {}) {
       while (Date.now() < Date.parse(expiresAt)) {
-        signal?.throwIfAborted()
+        // Not `signal.throwIfAborted()`: some runtimes' AbortSignal polyfills lack it.
+        if (signal?.aborted)
+          throw signal.reason ?? new Error("[SixbClient] Device login was aborted.")
         const poll = await post("/api/auth/device-authorizations/token", { deviceCode }, signal)
         if (!poll.ok) throw await requestError(poll, "complete device login")
         const result = asRecord(await poll.json())
