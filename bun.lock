@@ -48,7 +48,7 @@
     },
     "auth/oidc": {
       "name": "@sixb/auth-oidc",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "dependencies": {
         "openid-client": "^6.8.4",
       },
@@ -122,7 +122,7 @@
     },
     "connectors/exa": {
       "name": "@sixb/connector-exa",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "dependencies": {
         "@sixb/connector-rest": "workspace:^",
       },
@@ -137,7 +137,7 @@
     },
     "connectors/fullenrich": {
       "name": "@sixb/connector-fullenrich",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@sixb/connector-rest": "workspace:^",
       },
@@ -597,7 +597,7 @@
     },
     "models/anthropic": {
       "name": "@sixb/anthropic",
-      "version": "0.1.3",
+      "version": "0.1.4",
       "dependencies": {
         "@sixb/core": "workspace:^",
         "@sixb/model-protocols": "workspace:*",
@@ -609,7 +609,7 @@
     },
     "models/azure-ai-foundry": {
       "name": "@sixb/azure-ai-foundry",
-      "version": "0.1.3",
+      "version": "0.1.4",
       "dependencies": {
         "@sixb/core": "workspace:^",
         "@sixb/model-protocols": "workspace:*",
@@ -644,7 +644,7 @@
     },
     "models/vercel-ai-gateway": {
       "name": "@sixb/vercel-ai-gateway",
-      "version": "0.1.6",
+      "version": "0.1.7",
       "dependencies": {
         "@sixb/core": "workspace:^",
         "@sixb/model-protocols": "workspace:*",
@@ -656,7 +656,7 @@
     },
     "packages/action-worker": {
       "name": "@sixb/action-worker",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -668,7 +668,7 @@
     },
     "packages/agent-ui": {
       "name": "@sixb/agent-ui",
-      "version": "0.1.10",
+      "version": "0.1.11",
       "dependencies": {
         "@sixb/client": "workspace:^",
         "@sixb/core": "workspace:^",
@@ -697,7 +697,7 @@
     },
     "packages/agent-worker": {
       "name": "@sixb/agent-worker",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "dependencies": {
         "@sixb/cli-core": "workspace:^",
       },
@@ -714,7 +714,7 @@
     },
     "packages/app": {
       "name": "@sixb/app",
-      "version": "0.1.10",
+      "version": "0.1.11",
       "dependencies": {
         "@sixb/agent-ui": "workspace:^",
         "@sixb/core": "workspace:^",
@@ -739,7 +739,7 @@
     },
     "packages/atlas": {
       "name": "@sixb/atlas",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "dependencies": {
         "@sixb/agent-ui": "workspace:^",
         "@sixb/app": "workspace:^",
@@ -765,7 +765,7 @@
     },
     "packages/cli": {
       "name": "@sixb/cli",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "bin": {
         "sixb": "./src/index.tsx",
       },
@@ -798,7 +798,7 @@
     },
     "packages/cli-core": {
       "name": "@sixb/cli-core",
-      "version": "0.1.6",
+      "version": "0.1.7",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.7.0",
@@ -806,7 +806,7 @@
     },
     "packages/client": {
       "name": "@sixb/client",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "dependencies": {
         "@sixb/core": "workspace:^",
       },
@@ -833,7 +833,7 @@
     },
     "packages/core": {
       "name": "@sixb/core",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.7.0",
@@ -841,7 +841,7 @@
     },
     "packages/create-sixb": {
       "name": "create-sixb",
-      "version": "0.1.3",
+      "version": "0.1.4",
       "bin": {
         "create-sixb": "./dist/index.js",
       },
@@ -857,7 +857,7 @@
     },
     "packages/orchestrator": {
       "name": "@sixb/orchestrator",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -869,7 +869,7 @@
     },
     "packages/pipeline-worker": {
       "name": "@sixb/pipeline-worker",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -881,7 +881,7 @@
     },
     "packages/projection-worker": {
       "name": "@sixb/projection-worker",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -893,7 +893,7 @@
     },
     "packages/rules-worker": {
       "name": "@sixb/rules-worker",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -905,7 +905,7 @@
     },
     "packages/server": {
       "name": "@sixb/server",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "dependencies": {
         "@elysiajs/cors": "^1.2.0",
         "@elysiajs/openapi": "^1.4.16",
@@ -928,7 +928,7 @@
     },
     "packages/sync-worker": {
       "name": "@sixb/sync-worker",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@sixb/lake-local": "workspace:*",
@@ -941,7 +941,7 @@
     },
     "packages/ui": {
       "name": "@sixb/ui",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "dependencies": {
         "@shadcn/react": "^0.3.0",
         "@tanstack/react-table": "^8.21.3",
@@ -986,7 +986,7 @@
     },
     "packages/workflow-worker": {
       "name": "@sixb/workflow-worker",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -1155,7 +1155,7 @@
     },
     "storage/pg": {
       "name": "@sixb/pg",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "dependencies": {
         "postgres": "^3.4.5",
       },
@@ -1170,7 +1170,7 @@
     },
     "storage/sqlite": {
       "name": "@sixb/sqlite",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "dependencies": {
         "sqlite-vec": "0.1.9",
       },

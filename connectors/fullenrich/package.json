@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-fullenrich",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "FullEnrich contact enrichment, reverse email lookup, and people and company search connector with agent tools for Sixb",
   "keywords": [
     "sixb",

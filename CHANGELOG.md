@@ -2,6 +2,105 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-10-11 — Framework 0.1.18
+
+### Highlights
+
+- Hide sensitive properties and dataset columns from roles that are not cleared for them: define a
+  marking with `defineMarking()` in `security/markings/`, apply it with `prop({ markings })` or
+  `col({ markings })`, and grant it with a role's `clearances`. Readers without clearance receive
+  the object or row with the value omitted and listed in `redactions`.
+- Read dataset rows as the caller with `sixb.datasets.readRows(dataset)`, and open a file property
+  through the object that holds it with `sixb.objects(Type).byId(id).file(Type.p.logo).open()`.
+- Let agent tools use project data as the requester: a handler receives `sixb` to read objects,
+  request actions, resolve connectors, and call models, with those model calls accounted to the
+  run, and `attachments.open(key)` to open a file attached to the run.
+- Give the chat agent project instructions in a root `SIXB.md`. Skills and `SIXB.md` are now
+  discovered by `createSixb()`, so `sixb check` validates them and `sixb dev` restarts when they
+  change.
+- Give the agent a reference file per object type, written from your ontology and limited to what
+  its requester can see. Add notes in a Markdown file next to the type's module, and scripts the
+  agent can run in a `scripts/` folder under `ontology/`.
+- Set the project's language and time zone with `createSixb({ locale, timeZone })`. Cron schedules
+  without their own time zone, the dates the agent works with, and the document language of app
+  pages follow them; in chat, the user's browser time zone and language take precedence.
+- Show the text Sixb writes itself in English or French: `@sixb/ui` components, the agent chat, and
+  the screens `@sixb/app` generates follow the user's browser languages and fall back to the
+  project's `locale`. Reword individual messages with `UiLabelsProvider` and `AgentLabelsProvider`.
+- Give a language model a default reasoning effort with its binding's `reasoning` option, such as
+  `vercelGateway("zai/glm-5.3-flash", { reasoning: "low" })`. It applies wherever the model runs
+  without an explicit choice, and chat follows the project defaults until the user picks one.
+- End a chat turn whose worker stopped or died as interrupted instead of running it again: saved
+  progress is kept and the chat offers **Continue**, or **Try again** when there is none. In
+  `sixb dev`, agent turns start once the API listens, and a turn that starts while the API
+  restarts waits up to eight seconds for it.
+- Keep files the agent only viewed out of its answer: attachments are the files project tools
+  return and the files published to `$SIXB_OUTPUT_DIR`. Viewed files stay in the work trace.
+- Label an object in chat context by its title instead of its id, or set your own with
+  `agentContext.object(Type, id, { label })`.
+- Run `sixb atlas` and `sixb app` without loading the project: they hold about a third of the
+  memory they did and need neither the project's secrets nor its database. Both show an error
+  screen with a **Retry** button instead of a blank page when the API is unreachable.
+- Close four access gaps. Following or expanding a link no longer returns subtypes the caller
+  cannot view. An OIDC sign-in completes only in the browser that started it. An access token can
+  no longer create another token. File responses send only well-formed media types, with a
+  `Content-Security-Policy` that blocks script.
+- Fix dataset row requests for several columns failing with a `422`, and list every query node and
+  predicate shape in `sixb objects query --help`.
+
+### Upgrade notes
+
+- Upgrade core, exact worker/storage consumers, server, client, and CLI together to `0.1.18`.
+  Upgrade Atlas to `0.1.15`, the app package to `0.1.11`, agent UI to `0.1.11`, and UI to `0.1.3`,
+  and rebuild application assets: the Atlas and app pages now learn whether auth is enabled from
+  the API. This release has no database migrations.
+- Upgrade `@sixb/auth-oidc` to `0.1.5` with the server: sign-in fails against the earlier version.
+  A sign-in started before the upgrade must be started again, and the provider's callback URL must
+  use the same host as the API URL your app signs in through. A custom OIDC strategy must return
+  `state` and `expiresAt` from `startOidcSignIn`.
+- Creating a personal or service-account token now requires a signed-in session: Atlas, or a CLI
+  profile signed in with `sixb login`. An access token that tries receives a `403`; it can still
+  list and revoke tokens and manage service accounts.
+- A query is denied when a link it follows or expands can reach a subtype the caller cannot view.
+  A role that excludes a subtype, such as `can.view(every.object().except([ConfidentialDocument]))`,
+  now also loses traversals to that subtype's parent type.
+- A file's `mediaType` must be a single media type such as `application/pdf`; writes reject
+  anything else. Files stored earlier with a malformed type download as
+  `application/octet-stream`. Opened directly, only common raster images, PDF, plain text,
+  Markdown, and JSON display in the browser: other types, including HTML and SVG, download.
+- In agent tools, `connector` moves to `sixb.connector`. Upgrade the Exa connector to `0.1.2` and
+  the FullEnrich connector to `0.1.1` for their agent tools.
+- A workflow AI task receives only the skills it lists in `skills`, where it received every skill
+  before. An invalid `SKILL.md` now fails `sixb check` and startup. The agent worker no longer
+  accepts `skillsDir`.
+- Files in a `scripts/` folder under `ontology/` are no longer imported as definitions: the agent
+  runs them in its sandbox instead. Move any definition out of those folders.
+- `AgentReasoningLevel` is removed: use `AgentReasoning`. A workflow AI task's `reasoning` and a
+  model's default reasoning are checked against the model's declared capabilities at startup, so
+  an unsupported effort or an out-of-range token budget now fails there. The `reasoning` binding
+  option requires Anthropic `0.1.4`, Azure AI Foundry `0.1.4`, or Vercel AI Gateway `0.1.7`.
+- Cron schedules without their own time zone keep running in UTC until you set `timeZone`.
+- If you read agent runs through the API, handle `finishReason: "interrupted"` on a cancelled run
+  and the `step_limit_reached` diagnostic with scope `run`. Continuing a cut-short answer is
+  `continue: true` on the message request, and Sixb no longer writes its own text into the
+  transcript.
+- Marked properties are optional when read in TypeScript, even if required. Shared-link sessions
+  carry no clearance, and pipeline steps cannot read marked columns yet.
+
+### Package versions
+
+- `0.1.18`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`,
+  `@sixb/pg`, `@sixb/sqlite`, `@sixb/action-worker`, `@sixb/agent-worker`, `@sixb/pipeline-worker`,
+  `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`.
+- `0.1.15`: `@sixb/atlas`.
+- `0.1.11`: `@sixb/app`, `@sixb/agent-ui`.
+- `0.1.7`: `@sixb/cli-core`, `@sixb/vercel-ai-gateway`.
+- `0.1.5`: `@sixb/auth-oidc`.
+- `0.1.4`: `@sixb/anthropic`, `@sixb/azure-ai-foundry`, `create-sixb`.
+- `0.1.3`: `@sixb/ui`.
+- `0.1.2`: `@sixb/connector-exa`.
+- `0.1.1`: `@sixb/connector-fullenrich`.
+
 ## 2026-10-09 — Framework 0.1.17
 
 ### Highlights
