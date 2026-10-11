@@ -6,7 +6,7 @@ import type {
 } from "../actions"
 import type { ActionsRuntime } from "../actions/execution"
 import type { AgentRuntime } from "../agents/execution"
-import type { AgentReasoningLevel, AgentToolDefinition } from "../agents/types"
+import type { AgentReasoning, AgentToolDefinition } from "../agents/types"
 import type { Principal } from "../auth"
 import type { BlobsRuntime } from "../blob-storage/execution"
 import type { ConnectorRuntime } from "../connectors/execution"
@@ -140,7 +140,7 @@ export type AgentStepPrompt<TInput extends Record<string, unknown>> = (
 /** Runtime configuration owned directly by a workflow Agent step. */
 export interface DefineAgentStepConfig {
   readonly model?: LanguageModel
-  readonly reasoning?: AgentReasoningLevel
+  readonly reasoning?: AgentReasoning
   readonly instructions: string
   readonly groups?: readonly GroupDefinition[]
   /** Project tools this workflow task may call. Defaults to none. */
@@ -159,7 +159,7 @@ export interface AgentStepDefinition<
   readonly kind: "agentStep"
   readonly id: TId
   readonly model?: LanguageModel
-  readonly reasoning?: AgentReasoningLevel
+  readonly reasoning?: AgentReasoning
   readonly instructions: string
   readonly groupIds: readonly string[]
   readonly toolNames: readonly string[]

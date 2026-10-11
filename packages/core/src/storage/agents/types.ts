@@ -1,5 +1,5 @@
 import type { AgentMessage, AgentMessagePart, AgentMessageRole } from "../../agents/message"
-import type { AgentReasoningLevel } from "../../agents/types"
+import type { AgentReasoning } from "../../agents/types"
 import type { Principal } from "../../auth"
 import type { FileRef } from "../../blob-storage"
 import type { SixbErrorCode, SixbFailure } from "../../errors/types"
@@ -229,13 +229,13 @@ export interface ConversationAgentRunRecord extends AgentRunRecordBase {
 /** Immutable, serialisable model selection for one conversational turn. */
 export interface ConversationAgentRunSpec {
   readonly model: LanguageModelRef
-  readonly reasoning?: AgentReasoningLevel
+  readonly reasoning?: AgentReasoning
 }
 
 /** Immutable, serialisable child configuration captured before dispatch. */
 export interface SubagentRunSpec {
   readonly model: LanguageModelRef
-  readonly reasoning?: AgentReasoningLevel
+  readonly reasoning?: AgentReasoning
   /** Focused task supplied by the parent Agent. */
   readonly task: string
   /** Project tools available when the child was admitted. Runtime tools are injected separately. */

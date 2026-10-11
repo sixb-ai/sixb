@@ -154,7 +154,6 @@ export { isAgentToolResult } from "./tool-result"
 export type {
   AgentDescriptor,
   AgentReasoning,
-  AgentReasoningLevel,
   AgentReference,
   AgentToolArtifact,
   AgentToolArtifactPutInput,

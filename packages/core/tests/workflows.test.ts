@@ -26,6 +26,7 @@ import {
   type WorkflowDefinition,
   WorkflowDefinitionError,
 } from "../src"
+import type { AgentReasoning } from "../src/agents"
 import type { LanguageModel } from "../src/models"
 import { schemaFieldsToJsonSchema, schemaRecordToJsonSchema } from "../src/ontology/internal"
 import { createTestSixb } from "../src/testing"
@@ -773,6 +774,42 @@ describe("SixbHost workflow registration", () => {
           ...createTestRuntimeDeps(),
         })
     ).toThrow(/uses unknown language model "test\/unavailable-model"/)
+  })
+
+  test("checks an agent step's reasoning against its model's declared capabilities", () => {
+    // Proven by removal: drop the reasoning check from validateWorkflowAgentStepRuntimeReferences.
+    const budgeted: LanguageModel = {
+      ...workflowModel,
+      definition: {
+        ...workflowModel.definition,
+        capabilities: {
+          reasoning: { efforts: ["low"], budgetTokens: { min: 1_024, max: 8_192 } },
+        },
+      },
+    }
+    const host = (reasoning: AgentReasoning) =>
+      new SixbHost({
+        ontology: [Transaction, Invoice],
+        models: { language: [budgeted] },
+        workflows: [
+          defineWorkflow("reasoning-workflow")
+            .input({ transaction: ref(Transaction) })
+            .then(
+              defineAgentStep("reasoning-step", { instructions: "Resolve invoices.", reasoning })
+                .input({ transaction: ref(Transaction) })
+                .output({ invoice: ref(Invoice) })
+                .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
+            ),
+        ],
+        ...createTestRuntimeDeps(),
+      })
+
+    expect(() => host({ budgetTokens: 4_096 })).not.toThrow()
+    expect(() => host("low")).not.toThrow()
+    expect(() => host({ budgetTokens: 16_384 })).toThrow(
+      'Workflow "reasoning-workflow" agent step "reasoning-step" cannot use its reasoning with language model "test/workflow-model": reasoning token budget must not exceed 8192.'
+    )
+    expect(() => host("high")).toThrow(/reasoning effort 'high' is not supported/)
   })
 
   test("rejects an agent-step tool outside the project catalog", () => {

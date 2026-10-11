@@ -1,5 +1,5 @@
 import type {
-  AgentReasoningLevel,
+  AgentReasoning,
   AgentSkillCatalog,
   AgentSkillDefinition,
   AgentStepDefinition,
@@ -22,7 +22,7 @@ const SUBAGENT_INSTRUCTIONS =
  */
 export interface ResolvedAgentExecutionPlan {
   readonly model: LanguageModel
-  readonly reasoning?: AgentReasoningLevel
+  readonly reasoning?: AgentReasoning
   readonly instructions?: string
   readonly tools: readonly AgentToolDefinition[]
   /** Agent Skills installed in the sandbox and listed in the prompt. */

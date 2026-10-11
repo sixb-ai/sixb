@@ -54,6 +54,10 @@ startup; if the provider later reports that the model does not support it, the c
 the provider default. A provider you write yourself sets the level as `defaultReasoning` on the
 `LanguageModel` it returns.
 
+The default is an effort level. An AI workflow step can instead set its own `reasoning` to a level
+or a token budget such as `{ budgetTokens: 4096 }`; Sixb checks it against the step's model the same
+way at startup, budget range included.
+
 Chat follows the project defaults until a user picks a model or an effort. Choosing a model starts
 from that model's default reasoning, and **Reset to default** forgets the choice, so later changes
 to your defaults reach the user again. The chosen reasoning is fixed when a message is sent, so a
