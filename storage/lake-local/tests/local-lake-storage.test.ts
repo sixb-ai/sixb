@@ -9,6 +9,13 @@ import { LocalLakeStorage } from "../src"
 const roots = new WeakMap<LocalLakeStorage, string>()
 
 runLakeStorageContractSuite("LocalLakeStorage", {
+  reopen(storage: LocalLakeStorage) {
+    const rootDir = roots.get(storage)
+    if (!rootDir) throw new Error("Missing test root")
+    const reopened = new LocalLakeStorage({ path: join(rootDir, "lake") })
+    roots.set(reopened, rootDir)
+    return reopened
+  },
   async createStorage() {
     const rootDir = await mkdtemp(join(tmpdir(), "sixb-lake-local-contract-"))
     const storage = new LocalLakeStorage({ path: join(rootDir, "lake") })

@@ -285,6 +285,44 @@ export function runLakeMergeStorageContractSuite<TStorage extends LakeStorage>(
         expect(await storage.listVersions(invoices.id)).toHaveLength(1)
       })
     })
+
+    test("a merge keeps its parent's lineage", async () => {
+      await withStorage(async (storage) => {
+        await storage.createDataset(invoices)
+
+        const source = (column: string) => ({ datasetId: "contract.source", column })
+        const lineage = {
+          rows: [source("tenant")],
+          columns: { id: [source("id")], note: [source("amount")], status: [source("state")] },
+        }
+
+        const pipeline = { kind: "pipeline", id: "contract-pipeline" } as const
+        const seed = await storage.beginWrite({ dataset: invoices, producer: pipeline, lineage })
+        await seed.writeRows([{ id: "inv_1", status: "open", note: "120.00" }])
+        await seed.commit()
+
+        const sync = { kind: "sync", id: "sync-invoices" } as const
+        const merge = await storage.beginMerge({ dataset: invoices, producer: sync })
+        await merge.writeChanges([change.upsert({ id: "inv_2", status: "paid", note: null })])
+        const merged = expectCreated(await merge.commit())
+
+        // Its own rows depend on its own columns only; the rows it keeps, on what they did.
+        expect(merged.lineage).toEqual(lineage)
+        expect((await storage.getVersion(invoices.id, merged.versionId))?.lineage).toEqual(lineage)
+
+        // A parent that records no lineage could hold anything, and so could the merge.
+        const unanalyzed = await storage.beginWrite({ dataset: invoices, producer: pipeline })
+        await unanalyzed.writeRows([{ id: "inv_1", status: "open", note: "120.00" }])
+        const legacy = await unanalyzed.commit()
+
+        const next = await storage.beginMerge({ dataset: invoices, producer: sync })
+        await next.writeChanges([change.upsert({ id: "inv_3", status: "open", note: null })])
+
+        expect(expectCreated(await next.commit()).lineage).toEqual({
+          unknown: `version '${legacy.versionId}' of '${invoices.id}' recorded no column lineage`,
+        })
+      })
+    })
   })
 }
 

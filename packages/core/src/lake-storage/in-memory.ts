@@ -5,6 +5,7 @@ import { getDatasetRowValidationFailure } from "../datasets/validation"
 import { resolveDatasetChangeColumns } from "./changes"
 import { mergeStrictDatasetDefinition } from "./definition-updates"
 import { LakeConcurrencyError, LakeStorageError } from "./errors"
+import { lineageAtCommit } from "./lineage"
 import type {
   BeginDatasetMergeInput,
   CommitDatasetMergeInput,
@@ -42,7 +43,7 @@ import type {
   ReadDatasetChangesInput,
   ReadDatasetRowsInput,
 } from "./types"
-import { hasDatasetInputChanges } from "./version-inputs"
+import { hasDatasetProvenanceChanges } from "./version-inputs"
 
 function cloneDatasetDefinition(definition: DatasetDefinition): DatasetDefinition {
   return structuredClone(definition)
@@ -230,6 +231,7 @@ class InMemoryLakeMergeSession implements LakeMergeSession {
 }
 
 export class InMemoryLakeStorage implements LakeStorage {
+  readonly recordsLineage = true
   private readonly datasets = new Map<string, DatasetDefinition>()
   private readonly versionsByDataset = new Map<string, DatasetVersion[]>()
   private readonly rowsByVersionId = new Map<string, readonly DatasetRow[]>()
@@ -568,6 +570,12 @@ export class InMemoryLakeStorage implements LakeStorage {
 
       const visibleRows = [...nextByKey.values()]
       const versionId = `ver_${randomUUID()}`
+      const lineage = lineageAtCommit({
+        mode: "merge",
+        schema: definition.schema,
+        producer: options.merge.producer,
+        parent: latestVersion,
+      })
       const version: DatasetVersion = {
         datasetId: options.merge.dataset.id,
         versionId,
@@ -577,6 +585,7 @@ export class InMemoryLakeStorage implements LakeStorage {
         schema: definition.schema,
         producer: options.merge.producer ? structuredClone(options.merge.producer) : undefined,
         inputs: options.merge.inputs ? structuredClone(options.merge.inputs) : undefined,
+        ...(lineage && { lineage }),
         rowCount: visibleRows.length,
         sizeBytes: new TextEncoder().encode(
           visibleRows.map((row) => JSON.stringify(row)).join("\n")
@@ -623,11 +632,24 @@ export class InMemoryLakeStorage implements LakeStorage {
 
     this.assertKeyedWriteIsUnique(mode, options.rows, latestVersion, definition)
 
+    const lineage = lineageAtCommit({
+      mode,
+      schema: definition.schema,
+      producer: options.write.producer,
+      written: options.write.lineage,
+      parent: latestVersion,
+    })
+
     // Content-identical snapshots and empty appends reuse the latest version
-    // unless explicitly supplied input lineage has changed.
+    // unless explicitly supplied provenance has changed.
     if (
       latestVersion &&
-      !hasDatasetInputChanges(latestVersion.inputs, options.write.inputs) &&
+      !hasDatasetProvenanceChanges(latestVersion, {
+        ...options.write,
+        datasetId: definition.id,
+        schema: definition.schema,
+        lineage,
+      }) &&
       this.isUnchangedWrite(mode, latestVersion, options.rows, definition.schema)
     ) {
       return { ...latestVersion, outcome: "unchanged" }
@@ -652,6 +674,7 @@ export class InMemoryLakeStorage implements LakeStorage {
       schema: definition.schema,
       producer: options.write.producer ? structuredClone(options.write.producer) : undefined,
       inputs: options.write.inputs ? structuredClone(options.write.inputs) : undefined,
+      ...(lineage && { lineage }),
       rowCount: visibleRows.length,
       sizeBytes,
     }

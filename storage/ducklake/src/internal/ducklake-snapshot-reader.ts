@@ -1,8 +1,10 @@
-import type { DatasetDefinition } from "@sixb/core"
+import type { DatasetDefinition, DatasetSchema } from "@sixb/core"
 import type {
   DatasetCatalogState,
   DatasetLatestVersionSummary,
+  DatasetProducer,
   DatasetVersion,
+  DatasetVersionLineage,
   DatasetVersionMode,
   DatasetVersionRef,
   LatestVersionsSince,
@@ -14,10 +16,22 @@ import { getBigIntLike, getBoolean, getDate, getOptionalString, getString } from
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
-import { type DatasetTableRef, resolveDatasetTableRef } from "./ducklake-dataset-table-ref"
-import { decodeDatasetTableName, encodeDatasetTableName } from "./names"
+import {
+  type DatasetTableRef,
+  datasetTableIds,
+  resolveDatasetTableRef,
+  resolveDatasetTableRefAtCurrentSnapshot,
+} from "./ducklake-dataset-table-ref"
+import type { LatestVersionAtSnapshot } from "./ducklake-version-transaction"
+import { decodeLineage } from "./lineage-encoding"
+import {
+  decodeDatasetTableName,
+  encodeDatasetSequenceTableName,
+  encodeDatasetTableName,
+} from "./names"
 import { buildDuckLakeMetadataQuery, duckLakeMetadataTableName, quoteSqlString } from "./sql"
 import {
+  changesTouchTables,
   parseCommitMetadata,
   parseInlineDataChange,
   parseVersionId,
@@ -25,7 +39,7 @@ import {
   toVersionId,
 } from "./versions"
 
-interface DatasetSnapshotRow {
+export interface DatasetSnapshotRow {
   readonly snapshotId: string
   readonly tableId: bigint
   readonly createdAt: Date
@@ -56,25 +70,33 @@ interface MissingSnapshotCandidate {
 }
 
 interface SnapshotCandidateQueryInput {
-  readonly datasetId: string
-  readonly tableId: bigint
+  readonly table: DatasetTableRef
   readonly exactSnapshotId?: string
   readonly beforeSnapshotId?: string
   readonly limit: number
 }
 
 interface VisibleSnapshotRowsInput {
-  readonly datasetId: string
-  readonly tableId: bigint
+  readonly table: DatasetTableRef
   readonly exactSnapshotId?: string
   readonly beforeSnapshotId?: string
   readonly visibleRowLimit?: number
 }
 
+/** A version reference, with the DuckLake table and snapshot it was resolved through. */
+export interface DuckLakeTableVersionRef extends DatasetVersionRef {
+  readonly table: DatasetTableRef
+  readonly snapshot: DatasetSnapshotRow
+}
+
+/** What a commit needs of the version it builds on. */
 export interface DuckLakeVersionSummary {
   readonly datasetId: string
   readonly versionId: string
+  readonly schema: DatasetSchema
+  readonly producer?: DatasetProducer
   readonly inputs?: readonly DatasetVersionRef[]
+  readonly lineage?: DatasetVersionLineage
   readonly rowCount?: number
   readonly validatedPrimaryKeyColumns?: readonly string[]
 }
@@ -84,7 +106,6 @@ interface CatalogScanSnapshot {
   readonly snapshotId: string
   readonly createdAt: Date
   readonly changesMade: string
-  readonly metadata?: SixbCommitMetadata
 }
 
 /** Per (snapshot, table) file-change flags merged into the catalog scan. */
@@ -96,6 +117,11 @@ interface FileChangeFlags {
 const SNAPSHOT_ROW_BATCH_SIZE = 128
 // One feed read covers at most this many commits; the next read continues from its cursor.
 const FEED_PAGE_SIZE = 512
+
+// A read of the latest version, or of the one before a version, usually finds it among the
+// dataset's most recent snapshots. It first reads only a few of them: each carries the commit
+// metadata of its version, whose lineage may be large.
+const SHORT_READ_BATCH_SIZE = 8
 
 // The bulk catalog scan shares one descending walk of recent snapshots across
 // all requested datasets, so its cost is bounded by this window rather than by
@@ -189,11 +215,11 @@ export class DuckLakeSnapshotReader {
     datasetIds: readonly string[]
   ): Promise<readonly DatasetCatalogState[]> {
     const uniqueIds = [...new Set(datasetIds)]
-    const tableIdsByDatasetId = await this.resolveDatasetTableIds(runtime, uniqueIds)
-    const latestRowByDatasetId = await this.resolveLatestSnapshotRows(runtime, tableIdsByDatasetId)
+    const tablesByDatasetId = await this.resolveDatasetTables(runtime, uniqueIds)
+    const latestRowByDatasetId = await this.resolveLatestSnapshotRows(runtime, tablesByDatasetId)
 
     return uniqueIds.map((datasetId) => {
-      if (!tableIdsByDatasetId.has(datasetId)) {
+      if (!tablesByDatasetId.has(datasetId)) {
         return { datasetId, materialized: false, latestVersion: null }
       }
 
@@ -405,19 +431,21 @@ export class DuckLakeSnapshotReader {
     }
   }
 
-  private async resolveDatasetTableIds(
+  private async resolveDatasetTables(
     runtime: DuckDbQueryRuntime,
     datasetIds: readonly string[]
-  ): Promise<Map<string, bigint>> {
+  ): Promise<Map<string, DatasetTableRef>> {
     // Encoded table names are a collision-free bijection with dataset ids, so a
-    // single `ducklake_table` read maps every requested id to its current table.
+    // single `ducklake_table` read maps every requested id to its current tables.
     const datasetIdByTableName = new Map<string, string>()
+    const datasetIdBySequenceTableName = new Map<string, string>()
     for (const datasetId of datasetIds) {
       datasetIdByTableName.set(encodeDatasetTableName(datasetId), datasetId)
+      datasetIdBySequenceTableName.set(encodeDatasetSequenceTableName(datasetId), datasetId)
     }
 
     const ducklakeTable = duckLakeMetadataTableName(this.options, "ducklake_table")
-    const tableNameList = [...datasetIdByTableName.keys()]
+    const tableNameList = [...datasetIdByTableName.keys(), ...datasetIdBySequenceTableName.keys()]
       .map((name) => quoteSqlString(name))
       .join(", ")
     const rows = await runtime.query(`
@@ -427,15 +455,31 @@ export class DuckLakeSnapshotReader {
         AND end_snapshot IS NULL
     `)
 
-    const tableIdsByDatasetId = new Map<string, bigint>()
+    const tablesByDatasetId = new Map<string, DatasetTableRef>()
     for (const row of rows) {
-      const datasetId = datasetIdByTableName.get(getString(row, "table_name"))
+      const tableName = getString(row, "table_name")
+      const datasetId = datasetIdByTableName.get(tableName)
       if (datasetId !== undefined) {
-        tableIdsByDatasetId.set(datasetId, getBigIntLike(row, "table_id"))
+        tablesByDatasetId.set(datasetId, {
+          datasetId,
+          tableName,
+          tableId: getBigIntLike(row, "table_id"),
+        })
       }
     }
 
-    return tableIdsByDatasetId
+    for (const row of rows) {
+      const datasetId = datasetIdBySequenceTableName.get(getString(row, "table_name"))
+      const table = datasetId === undefined ? undefined : tablesByDatasetId.get(datasetId)
+      if (datasetId !== undefined && table !== undefined) {
+        tablesByDatasetId.set(datasetId, {
+          ...table,
+          sequenceTableId: getBigIntLike(row, "table_id"),
+        })
+      }
+    }
+
+    return tablesByDatasetId
   }
 
   /**
@@ -447,15 +491,15 @@ export class DuckLakeSnapshotReader {
    */
   private async resolveLatestSnapshotRows(
     runtime: DuckDbQueryRuntime,
-    tableIdsByDatasetId: ReadonlyMap<string, bigint>
+    tablesByDatasetId: ReadonlyMap<string, DatasetTableRef>
   ): Promise<Map<string, DatasetSnapshotRow>> {
     const result = new Map<string, DatasetSnapshotRow>()
-    if (tableIdsByDatasetId.size === 0) {
+    if (tablesByDatasetId.size === 0) {
       return result
     }
 
-    const unresolved = new Map<string, bigint>(tableIdsByDatasetId)
-    const tableIds = [...new Set(tableIdsByDatasetId.values())]
+    const unresolved = new Map<string, DatasetTableRef>(tablesByDatasetId)
+    const tableIds = [...new Set([...tablesByDatasetId.values()].map((table) => table.tableId))]
 
     let beforeSnapshotId: string | undefined
     let scanned = 0
@@ -474,18 +518,32 @@ export class DuckLakeSnapshotReader {
         candidates.map((candidate) => candidate.snapshotId),
         tableIds
       )
+      const tables = [...unresolved.values()]
+      const metadata = await this.readCommitMetadata(
+        runtime,
+        candidates
+          .filter((candidate) =>
+            tables.some(
+              (table) =>
+                fileFlags.has(fileChangeKey(candidate.snapshotId, table.tableId)) ||
+                changesTouchTables(candidate.changesMade, datasetTableIds(table))
+            )
+          )
+          .map((candidate) => candidate.snapshotId)
+      )
 
       for (const candidate of candidates) {
         scanned += 1
-        for (const [datasetId, tableId] of [...unresolved]) {
-          const flags = fileFlags.get(fileChangeKey(candidate.snapshotId, tableId))
-          const row = this.candidateToSnapshotRow(datasetId, tableId, {
+        const candidateMetadata = metadata.get(candidate.snapshotId)
+        for (const [datasetId, table] of [...unresolved]) {
+          const flags = fileFlags.get(fileChangeKey(candidate.snapshotId, table.tableId))
+          const row = this.candidateToSnapshotRow(datasetId, table.tableId, {
             snapshotId: candidate.snapshotId,
             createdAt: candidate.createdAt,
             changesMade: candidate.changesMade,
             hasFileChange: flags?.hasFileChange ?? false,
             hasFileDeleteChange: flags?.hasFileDeleteChange ?? false,
-            ...(candidate.metadata !== undefined ? { metadata: candidate.metadata } : {}),
+            ...(candidateMetadata !== undefined ? { metadata: candidateMetadata } : {}),
           })
           if (row) {
             result.set(datasetId, row)
@@ -528,8 +586,7 @@ export class DuckLakeSnapshotReader {
       SELECT
         snapshot.snapshot_id,
         snapshot.snapshot_time,
-        changes.changes_made,
-        changes.commit_extra_info
+        changes.changes_made
       FROM ${ducklakeSnapshot} snapshot
       JOIN ${ducklakeSnapshotChanges} changes ON changes.snapshot_id = snapshot.snapshot_id
       ${whereSql}
@@ -537,15 +594,11 @@ export class DuckLakeSnapshotReader {
       LIMIT ${Math.max(0, Math.trunc(limit))}
     `)
 
-    return rows.map((row) => {
-      const metadata = parseCommitMetadata(getOptionalString(row, "commit_extra_info"))
-      return {
-        snapshotId: String(getBigIntLike(row, "snapshot_id")),
-        createdAt: getDate(row, "snapshot_time"),
-        changesMade: getString(row, "changes_made"),
-        ...(metadata !== undefined ? { metadata } : {}),
-      }
-    })
+    return rows.map((row) => ({
+      snapshotId: String(getBigIntLike(row, "snapshot_id")),
+      createdAt: getDate(row, "snapshot_time"),
+      changesMade: getString(row, "changes_made"),
+    }))
   }
 
   private async queryFileChangeFlags(
@@ -626,9 +679,14 @@ export class DuckLakeSnapshotReader {
   async getLatestVersionRefForDefinition(
     runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition
-  ): Promise<DatasetVersionRef | null> {
-    const summary = await this.getLatestVersionSummaryForDefinition(runtime, dataset)
-    return summary ? { datasetId: summary.datasetId, versionId: summary.versionId } : null
+  ): Promise<DuckLakeTableVersionRef | null> {
+    const tableRef = await resolveDatasetTableRef(this.options, runtime, dataset.id)
+    if (!tableRef) {
+      return null
+    }
+
+    const row = await this.getLatestSnapshotRowForTableRef(runtime, tableRef)
+    return row ? tableVersionRef(tableRef, row) : null
   }
 
   async getLatestVersionSummaryForDefinition(
@@ -636,19 +694,49 @@ export class DuckLakeSnapshotReader {
     dataset: DatasetDefinition
   ): Promise<DuckLakeVersionSummary | null> {
     const tableRef = await resolveDatasetTableRef(this.options, runtime, dataset.id)
-    if (!tableRef) {
-      return null
-    }
+    return tableRef ? this.getLatestVersionSummaryForTableRef(runtime, tableRef) : null
+  }
 
+  /**
+   * The latest version a commit builds on, with the lake's snapshot it was read at. Its first
+   * read fixes the snapshot of a transaction it runs in (see `beginTransactionOnLatestVersion`).
+   */
+  async getLatestVersionSummaryAtCurrentSnapshot(
+    runtime: DuckDbQueryRuntime,
+    dataset: DatasetDefinition
+  ): Promise<LatestVersionAtSnapshot<DuckLakeVersionSummary>> {
+    const { snapshotId, table } = await resolveDatasetTableRefAtCurrentSnapshot(
+      this.options,
+      runtime,
+      dataset.id
+    )
+
+    return {
+      snapshotId,
+      latestVersion: table ? await this.getLatestVersionSummaryForTableRef(runtime, table) : null,
+    }
+  }
+
+  private async getLatestVersionSummaryForTableRef(
+    runtime: DuckDbQueryRuntime,
+    tableRef: DatasetTableRef
+  ): Promise<DuckLakeVersionSummary | null> {
     const row = await this.getLatestSnapshotRowForTableRef(runtime, tableRef)
     if (!row) {
       return null
     }
 
+    const [schema] = await this.datasets.getDatasetSchemasAtSnapshots(runtime, [
+      { table: tableRef, snapshotId: row.snapshotId },
+    ])
+
     return {
       datasetId: tableRef.datasetId,
       versionId: toVersionId(row.snapshotId),
+      schema,
+      producer: row.metadata?.producer,
       inputs: row.metadata?.inputs,
+      ...storedLineage(tableRef.datasetId, row),
       ...(row.metadata?.rowCount !== undefined ? { rowCount: row.metadata.rowCount } : {}),
       ...(row.metadata?.validatedPrimaryKeyColumns !== undefined
         ? { validatedPrimaryKeyColumns: row.metadata.validatedPrimaryKeyColumns }
@@ -675,14 +763,14 @@ export class DuckLakeSnapshotReader {
     const match = await this.getSnapshotRowForTableRef(runtime, tableRef, snapshotId, {
       includeParent: true,
     })
-    return match ? this.snapshotToVersion(runtime, tableRef, match) : null
+    return match ? (await this.snapshotsToVersions(runtime, tableRef, [match]))[0] : null
   }
 
   async getVersionRefForSnapshot(
     runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition,
     snapshotId: string
-  ): Promise<DatasetVersionRef | null> {
+  ): Promise<DuckLakeTableVersionRef | null> {
     assertDuckLakeSnapshotId(snapshotId)
 
     const tableRef = await resolveDatasetTableRef(this.options, runtime, dataset.id)
@@ -693,7 +781,23 @@ export class DuckLakeSnapshotReader {
     const row = await this.getSnapshotRowForTableRef(runtime, tableRef, snapshotId, {
       includeParent: false,
     })
-    return row ? { datasetId: tableRef.datasetId, versionId: toVersionId(row.snapshotId) } : null
+    return row ? tableVersionRef(tableRef, row) : null
+  }
+
+  /**
+   * The versions resolved refs point to, with their schemas from one catalog read. Refs resolve
+   * without their parent, so these versions carry no `parentVersionId`.
+   */
+  async getVersionsForRefs(
+    runtime: DuckDbQueryRuntime,
+    refs: readonly DuckLakeTableVersionRef[]
+  ): Promise<DatasetVersion[]> {
+    const schemas = await this.datasets.getDatasetSchemasAtSnapshots(
+      runtime,
+      refs.map((ref) => ({ table: ref.table, snapshotId: ref.snapshot.snapshotId }))
+    )
+
+    return refs.map((ref, index) => snapshotToVersion(ref.table, ref.snapshot, schemas[index]))
   }
 
   async listVersionsForDefinition(
@@ -711,13 +815,7 @@ export class DuckLakeSnapshotReader {
     limit?: number
   ): Promise<readonly DatasetVersion[]> {
     const limitedRows = await this.getSnapshotRowsForTableRef(runtime, tableRef, limit)
-    const versions: DatasetVersion[] = []
-
-    for (const row of limitedRows) {
-      versions.push(await this.snapshotToVersion(runtime, tableRef, row))
-    }
-
-    return versions
+    return this.snapshotsToVersions(runtime, tableRef, limitedRows)
   }
 
   async getLatestVersionForTableRef(
@@ -733,8 +831,7 @@ export class DuckLakeSnapshotReader {
     tableRef: DatasetTableRef
   ): Promise<DatasetSnapshotRow | null> {
     const [row] = await this.collectVisibleSnapshotRows(runtime, {
-      datasetId: tableRef.datasetId,
-      tableId: tableRef.tableId,
+      table: tableRef,
       visibleRowLimit: 1,
     })
     return row ?? null
@@ -749,8 +846,7 @@ export class DuckLakeSnapshotReader {
     assertDuckLakeSnapshotId(snapshotId)
 
     const [row] = await this.collectVisibleSnapshotRows(runtime, {
-      datasetId: tableRef.datasetId,
-      tableId: tableRef.tableId,
+      table: tableRef,
       exactSnapshotId: snapshotId,
       visibleRowLimit: 1,
     })
@@ -766,8 +862,7 @@ export class DuckLakeSnapshotReader {
     }
 
     const [parent] = await this.collectVisibleSnapshotRows(runtime, {
-      datasetId: tableRef.datasetId,
-      tableId: tableRef.tableId,
+      table: tableRef,
       beforeSnapshotId: snapshotId,
       visibleRowLimit: 1,
     })
@@ -786,8 +881,7 @@ export class DuckLakeSnapshotReader {
     }
 
     const rows = await this.collectVisibleSnapshotRows(runtime, {
-      datasetId: tableRef.datasetId,
-      tableId: tableRef.tableId,
+      table: tableRef,
       visibleRowLimit: visibleLimit === undefined ? undefined : visibleLimit + 1,
     })
     const rowsWithParents = this.withParentSnapshotIds(rows)
@@ -804,15 +898,19 @@ export class DuckLakeSnapshotReader {
 
     const snapshots: DatasetSnapshotRow[] = []
     let beforeSnapshotId = input.beforeSnapshotId
+    let shortRead =
+      input.exactSnapshotId !== undefined ||
+      (input.visibleRowLimit !== undefined && input.visibleRowLimit <= 2)
 
     while (input.visibleRowLimit === undefined || snapshots.length < input.visibleRowLimit) {
+      const batchSize = shortRead ? SHORT_READ_BATCH_SIZE : SNAPSHOT_ROW_BATCH_SIZE
       const candidates = await this.querySnapshotCandidates(runtime, {
-        datasetId: input.datasetId,
-        tableId: input.tableId,
+        table: input.table,
         exactSnapshotId: input.exactSnapshotId,
         beforeSnapshotId,
-        limit: input.exactSnapshotId === undefined ? SNAPSHOT_ROW_BATCH_SIZE : 1,
+        limit: input.exactSnapshotId === undefined ? batchSize : 1,
       })
+      shortRead = false
       if (candidates.length === 0) {
         break
       }
@@ -821,7 +919,11 @@ export class DuckLakeSnapshotReader {
         if ("missing" in candidate) {
           continue
         }
-        const snapshot = this.candidateToSnapshotRow(input.datasetId, input.tableId, candidate)
+        const snapshot = this.candidateToSnapshotRow(
+          input.table.datasetId,
+          input.table.tableId,
+          candidate
+        )
         if (snapshot) {
           snapshots.push(snapshot)
         }
@@ -831,7 +933,7 @@ export class DuckLakeSnapshotReader {
         }
       }
 
-      if (input.exactSnapshotId !== undefined || candidates.length < SNAPSHOT_ROW_BATCH_SIZE) {
+      if (input.exactSnapshotId !== undefined || candidates.length < batchSize) {
         break
       }
 
@@ -855,7 +957,7 @@ export class DuckLakeSnapshotReader {
     runtime: DuckDbQueryRuntime,
     input: SnapshotCandidateQueryInput
   ): Promise<readonly (DatasetSnapshotCandidateRow | MissingSnapshotCandidate)[]> {
-    const tableId = input.tableId.toString()
+    const tableId = input.table.tableId.toString()
     const limit = Math.max(0, Math.trunc(input.limit))
     if (limit === 0) {
       return []
@@ -873,6 +975,10 @@ export class DuckLakeSnapshotReader {
         // a rename may create a newer record with the same table id and must not hide older
         // versions.
         const tableStart = `(SELECT min(begin_snapshot) FROM ${table("ducklake_table")} WHERE table_id = ${tableId})`
+        const changesTouchDataset = (changesMade: string) =>
+          datasetTableIds(input.table)
+            .map((id) => `strpos(',' || ${changesMade} || ',', ${quoteSqlString(`:${id},`)}) > 0`)
+            .join(" OR ")
         const candidateIds =
           input.exactSnapshotId !== undefined
             ? `SELECT CAST(${input.exactSnapshotId} AS BIGINT) AS snapshot_id
@@ -895,10 +1001,10 @@ export class DuckLakeSnapshotReader {
                  UNION ALL
                  SELECT snapshot_id
                  FROM ${table("ducklake_snapshot_changes")}
-                 WHERE strpos(',' || changes_made || ',', ${quoteSqlString(`:${tableId},`)}) > 0
+                 WHERE ${changesTouchDataset("changes_made")}
                    OR strpos(
                      commit_extra_info,
-                     ${quoteSqlString(`"datasetId":${JSON.stringify(input.datasetId)}`)}
+                     ${quoteSqlString(`"datasetId":${JSON.stringify(input.table.datasetId)}`)}
                    ) > 0
                ) touched
                WHERE snapshot_id >= ${tableStart}
@@ -953,11 +1059,17 @@ export class DuckLakeSnapshotReader {
             GROUP BY snapshot_id
           )
           SELECT
-            -- Keep metadata-only candidates; Sixb filters them with commit_extra_info.
             candidate_ids.snapshot_id,
             candidate.snapshot_time,
             candidate.changes_made,
-            candidate.commit_extra_info,
+            -- Only a snapshot that changed one of the dataset's tables can be its version. Others,
+            -- such as a later version that names the dataset among its inputs, keep their
+            -- metadata, which carries that version's possibly large lineage, in the catalog.
+            CASE
+              WHEN coalesce(file_changes.has_file_change, false)
+                OR ${changesTouchDataset("candidate.changes_made")}
+              THEN candidate.commit_extra_info
+            END AS commit_extra_info,
             coalesce(file_changes.has_file_change, false) AS has_file_change,
             coalesce(file_changes.has_file_delete_change, false) AS has_file_delete_change
           FROM candidate_ids
@@ -986,6 +1098,44 @@ export class DuckLakeSnapshotReader {
         ...(metadata !== undefined ? { metadata } : {}),
       }
     })
+  }
+
+  /**
+   * Sixb commit metadata of the snapshots that changed a scanned dataset. Each one carries the
+   * lineage of its version, which can be large: scans read it only for the snapshots they keep,
+   * never for the other datasets' snapshots they page past.
+   */
+  private async readCommitMetadata(
+    runtime: DuckDbQueryRuntime,
+    snapshotIds: readonly string[]
+  ): Promise<Map<string, SixbCommitMetadata>> {
+    const metadata = new Map<string, SixbCommitMetadata>()
+    if (snapshotIds.length === 0) {
+      return metadata
+    }
+
+    for (const snapshotId of snapshotIds) {
+      assertDuckLakeSnapshotId(snapshotId)
+    }
+
+    const ducklakeSnapshotChanges = duckLakeMetadataTableName(
+      this.options,
+      "ducklake_snapshot_changes"
+    )
+    const rows = await runtime.query(`
+      SELECT snapshot_id, commit_extra_info
+      FROM ${ducklakeSnapshotChanges}
+      WHERE snapshot_id IN (${snapshotIds.join(", ")})
+    `)
+
+    for (const row of rows) {
+      const parsed = parseCommitMetadata(getOptionalString(row, "commit_extra_info"))
+      if (parsed !== undefined) {
+        metadata.set(String(getBigIntLike(row, "snapshot_id")), parsed)
+      }
+    }
+
+    return metadata
   }
 
   private candidateToSnapshotRow(
@@ -1029,36 +1179,17 @@ export class DuckLakeSnapshotReader {
     }
   }
 
-  private async snapshotToVersion(
+  /** One catalog read for the schemas of every listed version, not one per version. */
+  private async snapshotsToVersions(
     runtime: DuckDbQueryRuntime,
     tableRef: DatasetTableRef,
-    row: DatasetSnapshotRow
-  ): Promise<DatasetVersion> {
-    const schemaAtSnapshot = await this.datasets.getDatasetSchemaAtSnapshot(
+    rows: readonly DatasetSnapshotRow[]
+  ): Promise<DatasetVersion[]> {
+    const schemas = await this.datasets.getDatasetSchemasAtSnapshots(
       runtime,
-      tableRef.datasetId,
-      tableRef.tableName,
-      tableRef.tableId,
-      row.snapshotId
+      rows.map((row) => ({ table: tableRef, snapshotId: row.snapshotId }))
     )
-
-    // DuckLake gives us version id, timestamp, and time travel. Sixb metadata
-    // fills in caller intent such as append vs snapshot and producer lineage.
-    // Version listing is a metadata path, so it only carries row counts already
-    // stored in Sixb commit metadata and never counts historical table contents.
-
-    return {
-      datasetId: tableRef.datasetId,
-      versionId: toVersionId(row.snapshotId),
-      parentVersionId:
-        row.parentSnapshotId === undefined ? undefined : toVersionId(row.parentSnapshotId),
-      mode: row.mode,
-      createdAt: row.createdAt,
-      schema: schemaAtSnapshot,
-      producer: row.metadata?.producer,
-      inputs: row.metadata?.inputs,
-      ...(row.metadata?.rowCount !== undefined ? { rowCount: row.metadata.rowCount } : {}),
-    }
+    return rows.map((row, index) => snapshotToVersion(tableRef, row, schemas[index]))
   }
 
   private withParentSnapshotIds(
@@ -1073,6 +1204,66 @@ export class DuckLakeSnapshotReader {
           : undefined
       return parentSnapshotId === undefined ? snapshot : { ...snapshot, parentSnapshotId }
     })
+  }
+}
+
+function snapshotToVersion(
+  tableRef: DatasetTableRef,
+  row: DatasetSnapshotRow,
+  schema: DatasetVersion["schema"]
+): DatasetVersion {
+  // DuckLake gives us version id, timestamp, and time travel. Sixb metadata
+  // fills in caller intent such as append vs snapshot and producer lineage.
+  // Version listing is a metadata path, so it only carries row counts already
+  // stored in Sixb commit metadata and never counts historical table contents.
+
+  return {
+    datasetId: tableRef.datasetId,
+    versionId: toVersionId(row.snapshotId),
+    parentVersionId:
+      row.parentSnapshotId === undefined ? undefined : toVersionId(row.parentSnapshotId),
+    mode: row.mode,
+    createdAt: row.createdAt,
+    schema,
+    producer: row.metadata?.producer,
+    inputs: row.metadata?.inputs,
+    ...storedLineage(tableRef.datasetId, row),
+    ...(row.metadata?.rowCount !== undefined ? { rowCount: row.metadata.rowCount } : {}),
+  }
+}
+
+/**
+ * A data snapshot without Sixb metadata was written outside Sixb, by any DuckLake client. It may
+ * keep rows of its parent whatever change it made, and nothing says where its own rows come from:
+ * its lineage is unknown.
+ */
+function storedLineage(
+  datasetId: string,
+  row: DatasetSnapshotRow
+): Pick<DatasetVersion, "lineage"> {
+  const metadata = row.metadata
+  if (metadata === undefined) {
+    return {
+      lineage: {
+        unknown: `version '${toVersionId(row.snapshotId)}' of '${datasetId}' was written outside Sixb`,
+      },
+    }
+  }
+
+  return metadata.lineage === undefined
+    ? {}
+    : { lineage: decodeLineage(metadata.datasetId, metadata.lineage) }
+}
+
+function tableVersionRef(
+  table: DatasetTableRef,
+  snapshot: DatasetSnapshotRow
+): DuckLakeTableVersionRef {
+  return {
+    datasetId: table.datasetId,
+    versionId: toVersionId(snapshot.snapshotId),
+    table,
+    snapshot,
   }
 }
 

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto"
 import type { DatasetColumnDefinition, DatasetDefinition, DatasetRow } from "@sixb/core"
 import {
+  type DatasetProducer,
+  type DatasetVersionLineage,
   type DatasetVersionRef,
   type DatasetWriteCommitResult,
   type DatasetWriteMode,
@@ -116,6 +118,7 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
         commitMessage: input.commitMessage ?? `execute SQL transform for dataset ${target.id}`,
         producer: input.producer,
         inputs: sources.inputs,
+        lineage: unanalyzedLineage(target, input.producer),
         applyChanges: (runtime, context) =>
           this.applySqlTransform({
             runtime,
@@ -299,6 +302,20 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
     await input.runtime.run(`DROP TABLE IF EXISTS ${tempTable}`)
     return result
   }
+}
+
+/**
+ * This provider does not analyze the SQL it executes yet. A pipeline write without lineage is
+ * classified with every marking. Any other write without it would depend on its own columns only,
+ * so it records that its lineage is unknown.
+ */
+function unanalyzedLineage(
+  target: DatasetDefinition,
+  producer: DatasetProducer | undefined
+): DatasetVersionLineage | undefined {
+  return producer?.kind === "pipeline"
+    ? undefined
+    : { unknown: `a SQL transform into '${target.id}' could not be analyzed` }
 }
 
 function previewLimit(limit: number | undefined): number {
