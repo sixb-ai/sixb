@@ -4,7 +4,15 @@ import type { ObjectRef } from "../../ontology/refs"
 import { AgentRequestError } from "../errors"
 
 export type AgentContextInput =
-  | { readonly kind: "object"; readonly ref: ObjectRef }
+  | {
+      readonly kind: "object"
+      readonly ref: ObjectRef
+      /**
+       * What the chat shows for this object instead of its title. Display only: it is not part of
+       * the context's identity and is never sent to the model.
+       */
+      readonly label?: string
+    }
   | {
       readonly kind: "app-state"
       readonly id: string
@@ -28,16 +36,25 @@ export interface AgentContextPart extends AgentContextEntryInput {
 export const MAX_AGENT_CONTEXT_ENTRIES = 12
 export const MAX_AGENT_APP_STATE_ENTRY_BYTES = 16 * 1024
 export const MAX_AGENT_APP_STATE_TOTAL_BYTES = 64 * 1024
+export const MAX_AGENT_CONTEXT_LABEL_LENGTH = 200
 
 /** Typed constructors for context values shared by custom apps and agent clients. */
 export const agentContext = {
   object<const TObjectTypeId extends string>(
     objectType: { readonly id: TObjectTypeId },
-    primaryId: string
+    primaryId: string,
+    options: { readonly label?: string } = {}
   ) {
+    const label =
+      options.label === undefined
+        ? undefined
+        : objectContextLabel(options.label, "agentContext.object() label", (message) => {
+            throw new TypeError(`[Sixb] ${message}.`)
+          })
     return {
       kind: "object" as const,
       ref: { objectTypeId: objectType.id, primaryId },
+      ...(label === undefined ? {} : { label }),
     }
   },
 
@@ -85,7 +102,13 @@ export function normalizeAgentContextEntries(
   for (const [index, rawEntry] of input.entries()) {
     const entry = normalizeEntry(rawEntry, index)
     const identity = agentContextIdentity(entry.context)
-    const serialized = stableJsonStringify(entry)
+    // A label is display only, so two entries that differ only by label are the same entry; the
+    // first one's label is kept.
+    const serialized = stableJsonStringify(
+      entry.context.kind === "object"
+        ? { ...entry, context: { kind: "object", ref: entry.context.ref } }
+        : entry
+    )
     const existing = byIdentity.get(identity)
 
     if (existing !== undefined) {
@@ -133,8 +156,16 @@ function normalizeEntry(rawEntry: unknown, index: number): AgentContextEntryInpu
       context.ref.primaryId,
       `context[${index}].context.ref.primaryId`
     )
+    const label =
+      context.label === undefined
+        ? undefined
+        : objectContextLabel(context.label, `context[${index}].context.label`, invalidContext)
     return {
-      context: { kind: "object", ref: { objectTypeId, primaryId } },
+      context: {
+        kind: "object",
+        ref: { objectTypeId, primaryId },
+        ...(label === undefined ? {} : { label }),
+      },
       origin: rawEntry.origin,
     }
   }
@@ -163,6 +194,19 @@ function normalizeEntry(rawEntry: unknown, index: number): AgentContextEntryInpu
   }
 
   invalidContext(`context[${index}].context.kind must be 'object' or 'app-state'`)
+}
+
+function objectContextLabel(
+  value: unknown,
+  label: string,
+  fail: (message: string) => never
+): string {
+  const trimmed = typeof value === "string" ? value.trim() : ""
+  if (!trimmed) fail(`${label} must be a non-empty string`)
+  if (trimmed.length > MAX_AGENT_CONTEXT_LABEL_LENGTH) {
+    fail(`${label} must be at most ${MAX_AGENT_CONTEXT_LABEL_LENGTH} characters`)
+  }
+  return trimmed
 }
 
 function requireNonEmptyString(value: unknown, label: string): string {

@@ -413,6 +413,7 @@ describe("agent routes", () => {
         context: {
           kind: "object",
           ref: { objectTypeId: "Invoice", primaryId: "inv-123" },
+          label: "July maintenance",
         },
         origin: "ambient",
       },
@@ -448,6 +449,37 @@ describe("agent routes", () => {
         { type: "context", ...context[1] },
         { type: "text", text: "What should I do next?" },
       ],
+    })
+  })
+
+  test("rejects a blank object context label with the field it names", async () => {
+    const { app, storage, sixb } = createApp()
+    const thread = await storage.agents.threads.create({
+      id: "thread-blank-label",
+      projectId: sixb.id,
+      ownerPrincipal: { type: "system", id: "system" },
+    })
+
+    const response = await app.fetch(
+      jsonRequest(`/api/agent-threads/${thread.id}/messages`, "POST", {
+        text: "Check this invoice",
+        context: [
+          {
+            context: {
+              kind: "object",
+              ref: { objectTypeId: "Invoice", primaryId: "inv-123" },
+              label: "   ",
+            },
+            origin: "ambient",
+          },
+        ],
+      })
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      error: "[Sixb] Invalid agent context: context[0].context.label must be a non-empty string.",
+      code: "invalid_context",
     })
   })
 

@@ -5,6 +5,7 @@ import {
   agentContextFingerprint,
   agentContextIdentity,
   MAX_AGENT_CONTEXT_ENTRIES,
+  MAX_AGENT_CONTEXT_LABEL_LENGTH,
 } from "@sixb/core/agents/context"
 import type { ModelReasoningLevel } from "@sixb/core/models"
 import { Marker, MarkerContent, MarkerIcon, Spinner, Textarea } from "@sixb/ui/components"
@@ -182,17 +183,19 @@ export function Composer({
     const local = ambientContext.filter((context) =>
       agentContextLabel(context, unnamedContext).toLowerCase().includes(normalizedQuery)
     )
+    // A picked result keeps the label it was listed with, so its chip and its history entry show
+    // what the user chose.
     const remote = (contextSearch.data?.items ?? []).map(
-      (item) => ({ kind: "object", ref: item.ref }) as const satisfies AgentContextInput
+      (item) =>
+        ({
+          kind: "object",
+          ref: item.ref,
+          ...contextLabel(item.label),
+        }) as const satisfies AgentContextInput
     )
     return mergeAgentContext(local, remote).map((context) => ({
       context,
-      label:
-        contextSearch.data?.items.find(
-          (item) =>
-            agentContextIdentity({ kind: "object", ref: item.ref }) ===
-            agentContextIdentity(context)
-        )?.label ?? agentContextLabel(context, unnamedContext),
+      label: agentContextLabel(context, unnamedContext),
     }))
   }, [ambientContext, contextSearch.data?.items, mention, unnamedContext])
 
@@ -853,4 +856,15 @@ function mentionKey(candidate: AgentContextMention): string {
 
 function hasDraggedFiles(event: DragEvent): boolean {
   return Array.from(event.dataTransfer?.types ?? []).includes("Files")
+}
+
+function contextLabel(label: string): { readonly label?: string } {
+  const trimmed = label.trim()
+  if (!trimmed) return {}
+  return {
+    label:
+      trimmed.length > MAX_AGENT_CONTEXT_LABEL_LENGTH
+        ? `${trimmed.slice(0, MAX_AGENT_CONTEXT_LABEL_LENGTH - 1).trimEnd()}…`
+        : trimmed,
+  }
 }
