@@ -1163,13 +1163,14 @@ describe("DuckLakeStorage remote catalogs", () => {
         "after read rows"
       )
 
-      await runBudgetStep("execute SQL transform", () =>
+      const projected = await runBudgetStep("execute SQL transform", () =>
         storage.sql.execute({
           sources: {
             orders: { dataset },
           },
           target: projectionDataset,
           mode: "snapshot",
+          producer: { kind: "pipeline", id: "projection" },
           sql: ({ orders }) => `SELECT orderId FROM ${orders} ORDER BY orderId`,
         })
       )
@@ -1179,6 +1180,14 @@ describe("DuckLakeStorage remote catalogs", () => {
         catalogConnectionBudget,
         "after SQL transform commit"
       )
+      const orderIdRef = { datasetId: dataset.id, column: "orderId" }
+      expect(
+        (
+          await runBudgetStep("read SQL transform version", () =>
+            storage.getVersion(projectionDataset.id, projected.versionId)
+          )
+        )?.lineage
+      ).toEqual({ rows: [orderIdRef], columns: { orderId: [] } })
       expect(
         await runBudgetStep("read projected rows", () =>
           collectRows(storage.readRows({ datasetId: projectionDataset.id }))
