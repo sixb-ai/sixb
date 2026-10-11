@@ -58,6 +58,8 @@ export async function applyDatasetMergeFromRelation(
           dataChangeExpected: orderingChanged,
           sourceRowCount,
           resultingRowCount: { kind: "exact", value: previousRowCount },
+          targetWasEmpty: previousRowCount === 0,
+          changedTableRows: false,
         }
       }
 
@@ -103,6 +105,8 @@ export async function applyDatasetMergeFromRelation(
           kind: "exact",
           value: previousRowCount + effects.inserts - effects.deletes,
         },
+        targetWasEmpty: previousRowCount === 0,
+        changedTableRows: true,
       }
     }
   )

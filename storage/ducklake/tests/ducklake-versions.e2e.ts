@@ -6,7 +6,7 @@ import { col, defineDataset } from "@sixb/core"
 import type { DuckLakeStorage } from "../src"
 import type { DuckDbQueryRuntime, DuckDbRuntime } from "../src/internal/duckdb-runtime"
 import { createDuckDbRuntime, setupDuckLake } from "../src/internal/duckdb-runtime"
-import { encodeDatasetTableName } from "../src/internal/names"
+import { encodeDatasetSequenceTableName, encodeDatasetTableName } from "../src/internal/names"
 import { qualifiedTableName, quoteIdentifier, quoteSqlString } from "../src/internal/sql"
 import { collectRows, createLocalDuckLakeStorage, localDuckLakeOptions } from "./test-utils"
 
@@ -159,6 +159,108 @@ describe("DuckLakeStorage versions and time travel", () => {
     expect(await collectRows(storage.readRows({ datasetId: ordersDataset.id }))).toEqual([
       { orderId: "ord_9", customerName: "Dorothy", orderCount: "9", metadata: null },
     ])
+  })
+
+  for (const catalog of ["duckdb", "sqlite"] as const) {
+    // Regression proof: read every listed schema at the newest listed snapshot, or drop either
+    // bound of a column's lifetime, and versions report columns from another point in time. Read
+    // one schema per listed version, and the single schema read count fails.
+    test(`${catalog}: lists each version with its own schema from one schema read`, async () => {
+      await storage.close()
+      storage = createLocalDuckLakeStorage(await mkdtemp(join(rootDir, `${catalog}-`)), catalog)
+      const columns = [col("id", "string"), col("attachment", "fileRef", { nullable: true })]
+      const schemas = [
+        columns,
+        [...columns, col("note", "string", { nullable: true })],
+        [
+          ...columns,
+          col("note", "string", { nullable: true }),
+          col("score", "float64", { nullable: true }),
+        ],
+      ].map((schema) => defineDataset("history.evolving", { schema }))
+
+      const committed = []
+      for (const [index, dataset] of schemas.entries()) {
+        await storage.createDataset(dataset)
+        const write = await storage.beginWrite({ dataset, mode: "append" })
+        await write.writeRows([{ id: `row_${index}` }])
+        committed.push({ version: await write.commit(), schema: dataset.schema })
+      }
+
+      const runtime = await (
+        storage as unknown as DuckLakeStorageInternals
+      ).connections.attachedRuntime()
+      // A renamed column ends its catalog row: the versions before the rename keep its old name.
+      const table = qualifiedTableName(
+        localDuckLakeOptions(rootDir),
+        encodeDatasetTableName("history.evolving")
+      )
+      await runtime.run(`ALTER TABLE ${table} RENAME COLUMN score TO rating`)
+      const renamed = defineDataset("history.evolving", {
+        schema: [...schemas[1].schema.columns, col("rating", "float64", { nullable: true })],
+      })
+      const write = await storage.beginWrite({ dataset: renamed, mode: "append" })
+      await write.writeRows([{ id: "row_3" }])
+      committed.push({ version: await write.commit(), schema: renamed.schema })
+
+      const query = spyOn(runtime, "query")
+      let versions: Awaited<ReturnType<DuckLakeStorage["listVersions"]>>
+      try {
+        versions = await storage.listVersions("history.evolving")
+        expect(query.mock.calls.filter(([sql]) => /\bducklake_column\b/.test(sql)).length).toBe(1)
+      } finally {
+        query.mockRestore()
+      }
+
+      for (const { version, schema } of committed) {
+        expect(versions.find((listed) => listed.versionId === version.versionId)?.schema).toEqual(
+          schema
+        )
+        expect((await storage.getVersion("history.evolving", version.versionId))?.schema).toEqual(
+          schema
+        )
+      }
+      expect(
+        versions.map((version) => version.schema.columns.map((column) => column.name))
+      ).toEqual([
+        ["id", "attachment", "note", "rating"],
+        ["id", "attachment", "note", "score"],
+        ["id", "attachment", "note", "score"],
+        ["id", "attachment", "note"],
+        ["id", "attachment", "note"],
+        ["id", "attachment"],
+      ])
+    })
+  }
+
+  // Regression proof: read a data snapshot without Sixb metadata as a version without lineage.
+  // A version written outside pipelines then reads as its own columns only, whatever the rows it
+  // added or kept.
+  test("reads a data snapshot written outside Sixb as an unknown lineage", async () => {
+    const seed = await storage.beginWrite({ dataset: ordersDataset, producer: { kind: "sync" } })
+    await seed.writeRows([{ orderId: "ord_1", customerName: "Ada", orderCount: 1 }])
+    await seed.commit()
+    const runtime = await (
+      storage as unknown as DuckLakeStorageInternals
+    ).connections.attachedRuntime()
+    const table = qualifiedTableName({}, encodeDatasetTableName(ordersDataset.id))
+    await runtime.run(`INSERT INTO ${table} VALUES ('ord_2', 'Grace', 2, NULL)`)
+
+    const [external] = await storage.listVersions(ordersDataset.id, 1)
+    const unknown = {
+      unknown: `version '${external?.versionId}' of '${ordersDataset.id}' was written outside Sixb`,
+    }
+    expect(external?.lineage).toEqual(unknown)
+    expect((await storage.getLatestVersion(ordersDataset.id))?.lineage).toEqual(unknown)
+
+    // A version that keeps its rows keeps the unknown history.
+    const append = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "append",
+      producer: { kind: "sync" },
+    })
+    await append.writeRows([{ orderId: "ord_3", customerName: "Katherine", orderCount: 3 }])
+    expect((await append.commit()).lineage).toEqual(unknown)
   })
 
   test("reads version metadata without catalog introspection or historical table scans", async () => {
@@ -319,6 +421,43 @@ describe("DuckLakeStorage versions and time travel", () => {
     expect(await storage.getLatestVersion(ordersDataset.id)).toEqual(versions[0])
     expect(await collectRows(storage.readRows({ datasetId: ordersDataset.id }))).toEqual([
       { orderId: "raw_1", customerName: "External", orderCount: "1", metadata: null },
+    ])
+  })
+
+  // Regression proof: read commit metadata only for snapshots that change the dataset's own
+  // table. A merge that only reordered the source sequences then drops out of the history.
+  test("lists a merge that only changed a sequenced dataset's source ordering", async () => {
+    const sequenced = defineDataset("source.sequenced", {
+      schema: [col("id", "string"), col("revision", "int64")],
+      primaryKey: "id",
+      sequenceBy: "revision",
+    })
+    await storage.createDataset(sequenced)
+    await storage.close()
+
+    // Sixb versions before table claims committed such a merge to the sequence table only.
+    const runtime = await createDuckDbRuntime()
+    try {
+      await setupDuckLake(runtime, localDuckLakeOptions(rootDir))
+      await runtime.run("BEGIN TRANSACTION")
+      await runtime.run(
+        `INSERT INTO sixb_lake.main.${encodeDatasetSequenceTableName(sequenced.id)} VALUES ('["42"]', '1', NULL)`
+      )
+      await runtime.run(
+        `CALL sixb_lake.set_commit_message('Sixb', 'merge', extra_info => ${quoteSqlString(
+          JSON.stringify({
+            sixb: { kind: "datasetVersion", datasetId: sequenced.id, mode: "merge" },
+          })
+        )})`
+      )
+      await runtime.run("COMMIT")
+    } finally {
+      await runtime.close()
+    }
+
+    storage = createLocalDuckLakeStorage(rootDir)
+    expect((await storage.listVersions(sequenced.id)).map((version) => version.mode)).toEqual([
+      "merge",
     ])
   })
 

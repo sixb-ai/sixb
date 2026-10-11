@@ -4,7 +4,9 @@ import type {
   BeginDatasetMergeInput,
   BeginDatasetWriteInput,
   DatasetMergeCommitResult,
+  DatasetProducer,
   DatasetVersion,
+  DatasetVersionLineage,
   DatasetWriteCommitResult,
   DatasetWriteMode,
   LakeMergeSession,
@@ -13,12 +15,13 @@ import type {
 import {
   assertUnsequencedDatasetWrite,
   getDatasetPrimaryKeyColumns,
-  hasDatasetInputChanges,
+  hasDatasetProvenanceChanges,
   LakeConcurrencyError,
   LakeStorageError,
+  lineageAtCommit,
   retryDatasetMergeCommit,
 } from "@sixb/core/lake-storage"
-import type { DuckLakeCatalogOptions, DuckLakeStorageOptions } from "../types"
+import type { DuckLakeStorageOptions } from "../types"
 import { localCatalogCoordinationKey } from "./catalog-key"
 import {
   type ApplyDatasetRowsResult,
@@ -33,7 +36,15 @@ import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
 import { createDuckLakeMergeSession, type DuckLakeCommitMergeInput } from "./ducklake-merge-session"
 import type { DuckLakeSnapshotReader, DuckLakeVersionSummary } from "./ducklake-snapshot-reader"
+import {
+  beginTransactionOnLatestVersion,
+  CatalogMovedError,
+  commitVersionTransaction,
+  isSqliteCatalog,
+  rerunWhenCatalogMoves,
+} from "./ducklake-version-transaction"
 import { createDuckLakeWriteSession, type DuckLakeCommitWriteInput } from "./ducklake-write-session"
+import { encodeLineage } from "./lineage-encoding"
 import { encodeDatasetTableName } from "./names"
 import {
   duckLakeAlias,
@@ -51,6 +62,8 @@ export interface DuckLakeCommitDatasetVersionInput {
   readonly commitMessage: string
   readonly producer?: BeginDatasetWriteInput["producer"]
   readonly inputs?: BeginDatasetWriteInput["inputs"]
+  /** The lineage of the rows written, as `BeginDatasetWriteInput.lineage`. */
+  readonly lineage?: BeginDatasetWriteInput["lineage"]
   applyChanges(
     runtime: DuckDbQueryRuntime,
     context: DuckLakeApplyChangesContext
@@ -63,7 +76,6 @@ interface DuckLakeCommitVersionOutcomeInput
   readonly expectedLatestVersionId?: string | null
   readonly allowInitialNoOp?: boolean
   readonly signal?: AbortSignal
-  readonly disableRetries?: boolean
   readonly optimisticOperation?: "commit" | "merge commit"
 }
 
@@ -171,6 +183,7 @@ export class DuckLakeWriteCoordinator {
       commitMessage: input.commit?.commitMessage ?? `write dataset ${input.write.dataset.id}`,
       producer: input.write.producer,
       inputs: input.write.inputs,
+      lineage: input.write.lineage,
       applyChanges: (runtime, context) =>
         this.applyStagedRows({
           ...input,
@@ -204,7 +217,6 @@ export class DuckLakeWriteCoordinator {
           expectedLatestVersionId: baseVersionId,
           allowInitialNoOp: !input.commit?.createInitialVersion,
           signal: input.commit?.signal,
-          disableRetries: true,
           optimisticOperation: "merge commit",
           commitMessage: input.commit?.commitMessage ?? `merge dataset ${definition.id}`,
           producer: input.merge.producer,
@@ -253,13 +265,7 @@ export class DuckLakeWriteCoordinator {
     input: DuckLakeCommitDatasetVersionInput
   ): Promise<DatasetWriteCommitResult> {
     assertUnsequencedDatasetWrite(input.dataset)
-    const result = await this.commitVersionOutcomeOnExclusiveRuntime(runtime, {
-      ...input,
-      // DuckLake has no primary-key constraint. Do not let its automatic retry replay a keyed
-      // append after the collision checks ran against an older transaction snapshot.
-      disableRetries:
-        input.mode === "append" && getDatasetPrimaryKeyColumns(input.dataset) !== null,
-    })
+    const result = await this.commitVersionOutcomeOnExclusiveRuntime(runtime, input)
     if (result.version === null) {
       throw new LakeStorageError(
         `[SixbDuckLake] No DuckLake changes were committed for dataset '${input.dataset.id}', and no previous version exists.`
@@ -273,53 +279,12 @@ export class DuckLakeWriteCoordinator {
     runtime: DuckDbQueryRuntime,
     input: DuckLakeCommitVersionOutcomeInput
   ): Promise<DatasetMergeCommitResult> {
-    const runtimeInput = { ...input, runtime }
-    return this.withGuardedRetrySetting(runtimeInput, () =>
-      this.commitDatasetVersionUnlocked(runtimeInput)
+    // Staged rows outlive a failed transaction, so a rerun applies exactly the same changes.
+    return rerunWhenCatalogMoves(
+      input.dataset.id,
+      () => this.commitDatasetVersionUnlocked({ ...input, runtime }),
+      input.signal
     )
-  }
-
-  private async withGuardedRetrySetting<T>(
-    input: DuckLakeCommitVersionOutcomeRuntimeInput,
-    run: () => Promise<T>
-  ): Promise<T> {
-    if (input.expectedLatestVersionId === undefined && !input.disableRetries) {
-      return run()
-    }
-
-    // DuckLake can retry transactions internally. Optimistic guards and keyed append constraint
-    // checks must not be replayed against a different snapshot, so disable retries for this
-    // exclusive commit and restore the runtime setting before releasing the queue.
-    await input.runtime.run("SET ducklake_max_retry_count = 0")
-    let outcome:
-      | { readonly kind: "success"; readonly value: T }
-      | {
-          readonly kind: "error"
-          readonly error: unknown
-        }
-
-    try {
-      outcome = { kind: "success", value: await run() }
-    } catch (error) {
-      outcome = { kind: "error", error }
-    }
-
-    try {
-      await input.runtime.run("RESET ducklake_max_retry_count")
-    } catch {
-      // The retry count is session state on a shared, long-lived connection.
-      // If it cannot be restored, recycle the connection so a leftover value of
-      // 0 cannot silently disable DuckLake auto-retry for a later unguarded
-      // commit. The commit already succeeded or failed durably, so this cleanup
-      // must never change the outcome reported to the caller.
-      this.connections.poisonRuntime()
-    }
-
-    if (outcome.kind === "error") {
-      throw outcome.error
-    }
-
-    return outcome.value
   }
 
   private async commitDatasetVersionUnlocked(
@@ -332,9 +297,6 @@ export class DuckLakeWriteCoordinator {
 
     let committed = false
     try {
-      // Guarded Sixb commits need compare-and-swap semantics. DuckLake can
-      // automatically retry non-conflicting commits, so guarded transactions
-      // disable retries and validate a head belonging to the native write snapshot.
       const latestVersion = await this.beginVersionTransaction(input)
       if (input.expectedLatestVersionId !== undefined) {
         this.assertExpectedLatestVersion({
@@ -345,20 +307,46 @@ export class DuckLakeWriteCoordinator {
         })
       }
 
+      const lineage = lineageAtCommit({
+        mode: input.mode,
+        schema: input.dataset.schema,
+        producer: input.producer,
+        written: input.lineage,
+        parent: latestVersion,
+      })
+
       const changeResult = await input.applyChanges(input.runtime, {
         previousRowCount: latestVersion?.rowCount,
         validatedPrimaryKeyColumns: latestVersion?.validatedPrimaryKeyColumns,
       })
       input.signal?.throwIfAborted()
-      await this.ensureNoOpHasSnapshot(input, changeResult, latestVersion)
+      // A commit that changes no rows is decided against the latest version, read in this
+      // transaction if beginning it did not.
+      const noOpBase = changeResult.dataChangeExpected
+        ? undefined
+        : latestVersion === undefined
+          ? await this.snapshots.getLatestVersionSummaryForDefinition(input.runtime, input.dataset)
+          : latestVersion
+      const createsVersion =
+        noOpBase === undefined || this.noOpCreatesVersion(input, noOpBase, lineage)
+      if (createsVersion && mustClaimTable(input, changeResult, lineage)) {
+        await this.claimTable(input)
+      }
       const commitId = randomUUID()
       await this.setCommitMetadata(
         input,
         commitId,
-        commitRowCount(input, changeResult, latestVersion)
+        commitRowCount(input, changeResult, latestVersion),
+        lineage
       )
 
-      await input.runtime.run("COMMIT")
+      await commitVersionTransaction(
+        input.runtime,
+        input.dataset.id,
+        createsVersion && mustCommitOnReadSnapshot(input, changeResult)
+          ? { poisonRuntime: () => this.connections.poisonRuntime() }
+          : undefined
+      )
       committed = true
 
       const committedWriteSnapshotId = await this.lastCommittedSnapshotId(input.runtime)
@@ -369,6 +357,7 @@ export class DuckLakeWriteCoordinator {
           previousWriteSnapshotId,
           committedWriteSnapshotId,
           changeResult,
+          noOpBaseVersionId: noOpBase?.versionId ?? null,
         })
       } finally {
         await this.connections.detachLocalCatalogAfterCommit(input.runtime)
@@ -376,24 +365,6 @@ export class DuckLakeWriteCoordinator {
     } catch (error) {
       if (!committed) {
         await this.rollbackTransaction(input.runtime)
-        // DuckLake's snapshot-id uniqueness constraint is its catalog commit CAS. With native
-        // retries disabled, this error proves the transaction lost to another writer. Do not
-        // classify generic connection/COMMIT errors: their durable outcome may be ambiguous.
-        if (
-          error instanceof Error &&
-          error.message.startsWith(
-            "TransactionContext Error: Failed to commit: Failed to commit DuckLake transaction."
-          ) &&
-          error.message.includes("Exceeded the maximum retry count of 0") &&
-          error.message.includes(
-            'duplicate key value violates unique constraint "ducklake_snapshot_pkey"'
-          )
-        ) {
-          throw new LakeConcurrencyError(
-            `[SixbDuckLake] Concurrent catalog commit for dataset '${input.dataset.id}'.`,
-            { cause: error }
-          )
-        }
       }
       throw error
     }
@@ -405,6 +376,8 @@ export class DuckLakeWriteCoordinator {
       readonly previousWriteSnapshotId: string | null
       readonly committedWriteSnapshotId: string | null
       readonly changeResult: ApplyDatasetRowsResult
+      /** The latest version a commit that changes no rows was compared with. */
+      readonly noOpBaseVersionId: string | null
     }
   ): Promise<DatasetMergeCommitResult> {
     // Hydrate the committed version on the same exclusive runtime. That keeps
@@ -446,6 +419,13 @@ export class DuckLakeWriteCoordinator {
           actualLatestVersionId: version?.versionId ?? null,
           operation: input.optimisticOperation ?? "commit",
         })
+      }
+      // Nothing was committed: the write matched the version this transaction read. Another
+      // writer moved the latest version since, and the write may not match that one.
+      if ((version?.versionId ?? null) !== input.noOpBaseVersionId) {
+        throw new CatalogMovedError(
+          `[SixbDuckLake] Dataset '${input.dataset.id}' changed while an unchanged write was compared with it.`
+        )
       }
       return {
         outcome: "unchanged",
@@ -492,7 +472,8 @@ export class DuckLakeWriteCoordinator {
   private async setCommitMetadata(
     input: DuckLakeCommitVersionOutcomeRuntimeInput,
     commitId: string,
-    rowCount: CommitRowCount
+    rowCount: CommitRowCount,
+    lineage: DatasetVersionLineage | undefined
   ): Promise<void> {
     // DuckLake stores this JSON on the snapshot it creates for the current
     // transaction. Version id, timestamp, and data-change detection still come
@@ -512,6 +493,7 @@ export class DuckLakeWriteCoordinator {
       ...(validatedPrimaryKeyColumns !== null
         ? { validatedPrimaryKeyColumns: [...validatedPrimaryKeyColumns] }
         : {}),
+      ...(lineage === undefined ? {} : { lineage: encodeLineage(lineage) }),
     }
 
     await input.runtime.run(
@@ -523,35 +505,46 @@ export class DuckLakeWriteCoordinator {
     )
   }
 
-  private async ensureNoOpHasSnapshot(
-    input: DuckLakeCommitVersionOutcomeRuntimeInput,
-    changeResult: ApplyDatasetRowsResult,
-    knownLatestVersion: DuckLakeVersionSummary | null | undefined
-  ): Promise<void> {
-    if (changeResult.dataChangeExpected) {
-      return
-    }
-
-    const latestVersion =
-      knownLatestVersion === undefined
-        ? await this.snapshots.getLatestVersionSummaryForDefinition(input.runtime, input.dataset)
-        : knownLatestVersion
-    if (
-      latestVersion
-        ? input.mode === "merge" || !hasDatasetInputChanges(latestVersion.inputs, input.inputs)
-        : input.allowInitialNoOp
-    ) {
-      return
-    }
-
-    // DuckLake 1.5.2 does not create a snapshot for a transaction whose data and metadata are
-    // unchanged, and set_commit_message alone cannot force one. Reapplying the current table
-    // comment is an idempotent metadata write: it leaves the visible DatasetDefinition unchanged
-    // while giving initial empty writes and changed input lineage a real DuckLake snapshot.
+  /**
+   * Claims the table for the version this transaction commits by reapplying its current comment:
+   * an idempotent metadata write, which DuckLake records as altering the table. A transaction
+   * that changes a table another one altered since it began then fails to commit, before storing
+   * anything, and reruns on the new latest version (see `mustClaimTable`).
+   *
+   * It also gives a version that changes no rows, an initial empty write or a change of
+   * provenance, a DuckLake snapshot: DuckLake 1.5.2 creates none for a transaction whose data and
+   * metadata are unchanged, and set_commit_message alone cannot force one.
+   *
+   * Altering a table bumps DuckLake's catalog-wide schema version: every connection reloads its
+   * catalog, and concurrent writers to other tables slow down. Versions claim only when needed.
+   */
+  private async claimTable(input: DuckLakeCommitVersionOutcomeRuntimeInput): Promise<void> {
     const table = qualifiedTableName(this.options, encodeDatasetTableName(input.dataset.id))
     const descriptionSql =
       input.dataset.description === undefined ? "NULL" : quoteSqlString(input.dataset.description)
     await input.runtime.run(`COMMENT ON TABLE ${table} IS ${descriptionSql}`)
+  }
+
+  /** A commit that changes no rows still creates a version for a first version or new provenance. */
+  private noOpCreatesVersion(
+    input: DuckLakeCommitVersionOutcomeRuntimeInput,
+    latestVersion: DuckLakeVersionSummary | null,
+    lineage: DatasetVersionLineage | undefined
+  ): boolean {
+    if (!latestVersion) {
+      return !input.allowInitialNoOp
+    }
+
+    return (
+      input.mode !== "merge" &&
+      hasDatasetProvenanceChanges(latestVersion, {
+        datasetId: input.dataset.id,
+        schema: input.dataset.schema,
+        producer: input.producer,
+        inputs: input.inputs,
+        lineage,
+      })
+    )
   }
 
   private async versionForNoOpCommit(
@@ -582,49 +575,31 @@ export class DuckLakeWriteCoordinator {
     }
   }
 
+  /**
+   * Every version but a snapshot keeps its parent's rows, and the lineage it records merges the
+   * parent's. A snapshot replaces its parent: it reads it only to guard on it, or on SQLite, whose
+   * later reads inside the transaction would block its commit.
+   */
   private async beginVersionTransaction(
     input: DuckLakeCommitVersionOutcomeRuntimeInput
   ): Promise<DuckLakeVersionSummary | null | undefined> {
-    if (!isSqliteCatalog(this.options.catalog)) {
+    if (
+      input.mode === "snapshot" &&
+      input.expectedLatestVersionId === undefined &&
+      !isSqliteCatalog(this.options.catalog)
+    ) {
       await input.runtime.run("BEGIN TRANSACTION")
-      if (input.expectedLatestVersionId === undefined && input.mode !== "append") {
-        return undefined
-      }
-      return this.snapshots.getLatestVersionSummaryForDefinition(input.runtime, input.dataset)
+      return undefined
     }
 
-    // Direct metadata reads enlist a second SQLite transaction on the outer DuckDB connection.
-    // Its read lock blocks DuckLake's own metadata connection at COMMIT. Read in autocommit,
-    // then pin the native DuckLake snapshot and verify nothing changed in between. The summary
-    // is now valid for this write transaction, including null (no previous version).
-    // Only preparation can repeat: staged mutations and COMMIT are never replayed here.
-    for (let attempt = 0; attempt < 3; attempt++) {
-      input.signal?.throwIfAborted()
-      const snapshotId = await this.currentSnapshotId(input.runtime)
-      const latestVersion = await this.snapshots.getLatestVersionSummaryForDefinition(
-        input.runtime,
-        input.dataset
-      )
-      await input.runtime.run("BEGIN TRANSACTION")
-      if ((await this.currentSnapshotId(input.runtime)) === snapshotId) {
-        return latestVersion
-      }
-      await input.runtime.run("ROLLBACK")
-    }
-
-    throw new LakeConcurrencyError(
-      `[SixbDuckLake] Catalog changed during three write preparations for dataset '${input.dataset.id}'. Retry the write.`
-    )
-  }
-
-  private async currentSnapshotId(runtime: DuckDbQueryRuntime): Promise<string> {
-    const [row] = await runtime.query(
-      `SELECT id FROM ${quoteIdentifier(duckLakeAlias(this.options))}.current_snapshot()`
-    )
-    if (row === undefined) {
-      throw new LakeStorageError("[SixbDuckLake] DuckLake did not return a current snapshot.")
-    }
-    return String(getBigIntLike(row, "id"))
+    return beginTransactionOnLatestVersion({
+      options: this.options,
+      runtime: input.runtime,
+      datasetId: input.dataset.id,
+      signal: input.signal,
+      readLatestVersion: () =>
+        this.snapshots.getLatestVersionSummaryAtCurrentSnapshot(input.runtime, input.dataset),
+    })
   }
 
   private async lastCommittedSnapshotId(runtime: DuckDbQueryRuntime): Promise<string | null> {
@@ -716,11 +691,89 @@ export class DuckLakeWriteCoordinator {
   }
 }
 
-function isSqliteCatalog(catalog: DuckLakeCatalogOptions): boolean {
+/**
+ * Whether a version must claim its table so that a concurrent commit cannot build on it unseen.
+ *
+ * DuckLake commits a transaction on top of snapshots committed since it began unless one of them
+ * altered the table or deleted rows it held. Only the earlier commit decides: a claim protects the
+ * version that makes it from concurrent commits that land after it, never the reverse. A commit
+ * that builds on a version it did not see keeps that version's rows, but stores the lineage of
+ * the parent it read. For lineage, that is only wrong when the unseen version's stored lineage
+ * carries dependencies: rows that depend on their own columns only add nothing to any lineage, so
+ * two unkeyed appends to a dataset no pipeline writes may commit in any order. Commits that record
+ * more of their parent than its lineage do not build on unseen versions (see
+ * `mustCommitOnReadSnapshot`).
+ *
+ * - A version that changes no rows claims: it is also how it gets a snapshot.
+ * - A write into an empty table claims, whatever it holds. It deletes nothing, so a snapshot that
+ *   also read the table empty would delete nothing either, and keep the rows it replaces.
+ * - A snapshot that deleted rows needs no claim: any concurrent change to the table conflicts with
+ *   its deletes.
+ * - A keyed append or merge claims. DuckLake has no primary key: two writes that insert one new
+ *   key both commit unless the earlier one claims.
+ * - An unkeyed append into a table with rows claims when the lineage it stores carries a
+ *   dependency, or is unknown. A concurrent snapshot of that table deletes rows, and conflicts.
+ */
+function mustClaimTable(
+  input: DuckLakeCommitVersionOutcomeRuntimeInput,
+  changeResult: ApplyDatasetRowsResult,
+  lineage: DatasetVersionLineage | undefined
+): boolean {
+  if (!changeResult.dataChangeExpected || changeResult.targetWasEmpty) {
+    return true
+  }
+
+  if (input.mode === "snapshot") {
+    return false
+  }
+
   return (
-    catalog.type === "sqlite" ||
-    (catalog.type === "custom" && catalog.uri.toLowerCase().startsWith("sqlite:"))
+    getDatasetPrimaryKeyColumns(input.dataset) !== null ||
+    carriesDependencies(input.producer, lineage)
   )
+}
+
+/**
+ * Whether a version must fail on any snapshot committed since its transaction began, rather than
+ * commit on top of one that does not conflict with it. A version that did not claim its table (see
+ * `mustClaimTable`) can only be built on unseen by a commit that records nothing of its parent but
+ * its lineage, which that version cannot change. Two kinds of commit record more:
+ *
+ * - One that inserts and deletes no rows of its table, such as a version of new provenance, a
+ *   merge that only advances source ordering, or a schema change. DuckLake checks it against
+ *   nothing, and it would stand for rows it never compared.
+ * - An unkeyed append guarded on the version it read, which an unclaimed append could move.
+ */
+function mustCommitOnReadSnapshot(
+  input: DuckLakeCommitVersionOutcomeRuntimeInput,
+  changeResult: ApplyDatasetRowsResult
+): boolean {
+  if (!changeResult.changedTableRows) {
+    return true
+  }
+
+  return (
+    input.expectedLatestVersionId !== undefined &&
+    input.mode === "append" &&
+    getDatasetPrimaryKeyColumns(input.dataset) === null
+  )
+}
+
+/** Whether a stored lineage says the version's rows depend on any column but their own. */
+function carriesDependencies(
+  producer: DatasetProducer | undefined,
+  lineage: DatasetVersionLineage | undefined
+): boolean {
+  if (lineage === undefined) {
+    // A pipeline version without lineage could hold anything.
+    return producer?.kind === "pipeline"
+  }
+
+  if ("unknown" in lineage) {
+    return true
+  }
+
+  return lineage.rows.length > 0 || Object.values(lineage.columns).some((refs) => refs.length > 0)
 }
 
 function commitRowCount(

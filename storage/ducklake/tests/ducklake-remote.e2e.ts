@@ -4,10 +4,13 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { change, col, type DatasetDefinition, defineDataset } from "@sixb/core"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { SQL } from "bun"
 import { type DuckDbSecretOptions, DuckLakeStorage, type DuckLakeStorageOptions } from "../src"
 import type { DuckDbRuntime } from "../src/internal/duckdb-runtime"
+import type { DuckLakeSnapshotReader } from "../src/internal/ducklake-snapshot-reader"
 import { encodeDatasetTableName } from "../src/internal/names"
+import { duckLakeMetadataTableName } from "../src/internal/sql"
 import { collectRows } from "./test-utils"
 
 describe("DuckLakeStorage remote catalogs", () => {
@@ -370,6 +373,629 @@ describe("DuckLakeStorage remote catalogs", () => {
       await first.close()
       await second.close()
       await rm(rootDir, { recursive: true, force: true })
+    }
+  })
+
+  describe("a version commits on the version it read", () => {
+    const events = () =>
+      defineDataset(`raw.pg.events.${randomId()}`, {
+        schema: [col("id", "string"), col("v", "string")],
+      })
+    const secret = { datasetId: "hr.secret", column: "ssn" }
+    const leaked = { rows: [], columns: { id: [], v: [secret] } }
+
+    /**
+     * Two provider instances on one catalog. `other` commits a pipeline append that copies a
+     * secret into `v` while `run` is between reading its parent and committing.
+     */
+    async function race<T>(
+      run: (input: {
+        readonly storage: DuckLakeStorage
+        readonly dataset: ReturnType<typeof events>
+        readonly concurrently: () => Promise<void>
+      }) => Promise<T>
+    ): Promise<{ readonly result: T; readonly concurrent: DatasetVersion }> {
+      const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-race-"))
+      const options: DuckLakeStorageOptions = {
+        catalog: postgresCatalog(),
+        dataPath: join(rootDir, "data"),
+      }
+      const storage = new DuckLakeStorage(options)
+      const other = new DuckLakeStorage(options)
+      const dataset = events()
+      try {
+        await storage.createDataset(dataset)
+        await other.createDataset(dataset)
+        const seed = await storage.beginWrite({ dataset, producer: { kind: "sync", id: "erp" } })
+        await seed.writeRows([{ id: "1", v: "seed" }])
+        const parent = await seed.commit()
+
+        let concurrent: DatasetVersion | undefined
+        const result = await run({
+          storage,
+          dataset,
+          concurrently: async () => {
+            if (concurrent) return
+            const write = await other.beginWrite({
+              dataset,
+              mode: "append",
+              producer: { kind: "pipeline", id: "copy", stepId: "ssn" },
+              lineage: leaked,
+            })
+            await write.writeRows([{ id: "2", v: "123-45-6789" }])
+            concurrent = await write.commit({ expectedLatestVersionId: parent.versionId })
+          },
+        })
+        if (!concurrent) throw new Error("[Test] The concurrent commit never ran.")
+        return { result, concurrent }
+      } finally {
+        await storage.close()
+        await other.close()
+        await rm(rootDir, { recursive: true, force: true })
+      }
+    }
+
+    /** Runs `concurrently` right after `storage` read its parent inside the transaction. */
+    function afterParentRead(storage: DuckLakeStorage, concurrently: () => Promise<void>) {
+      const reader = (storage as unknown as { snapshotReader: DuckLakeSnapshotReader })
+        .snapshotReader
+      const read = reader.getLatestVersionSummaryAtCurrentSnapshot.bind(reader)
+      return spyOn(reader, "getLatestVersionSummaryAtCurrentSnapshot").mockImplementation(
+        async (...args) => {
+          const summary = await read(...args)
+          await concurrently()
+          return summary
+        }
+      )
+    }
+
+    /** Two provider instances on one catalog, over one new dataset without versions. */
+    async function twoWriters<T, D extends DatasetDefinition = ReturnType<typeof events>>(
+      run: (input: {
+        readonly storage: DuckLakeStorage
+        readonly other: DuckLakeStorage
+        readonly dataset: D
+        readonly schemaVersion: () => Promise<bigint>
+      }) => Promise<T>,
+      dataset: D = events() as D
+    ): Promise<T> {
+      const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-writers-"))
+      const options: DuckLakeStorageOptions = {
+        catalog: postgresCatalog(),
+        dataPath: join(rootDir, "data"),
+      }
+      const storage = new DuckLakeStorage(options)
+      const other = new DuckLakeStorage(options)
+      try {
+        await storage.createDataset(dataset)
+        await other.createDataset(dataset)
+        const schemaVersion = async () => {
+          const runtime = await (
+            storage as unknown as { connections: { attachedRuntime(): Promise<DuckDbRuntime> } }
+          ).connections.attachedRuntime()
+          const [row] = await runtime.query(
+            `SELECT max(schema_version) AS version FROM ${duckLakeMetadataTableName(options, "ducklake_snapshot")}`
+          )
+          return BigInt(String(row?.version))
+        }
+        return await run({ storage, other, dataset, schemaVersion })
+      } finally {
+        await storage.close()
+        await other.close()
+        await rm(rootDir, { recursive: true, force: true })
+      }
+    }
+
+    /** Runs `concurrently` once, right before `storage` stores its commit metadata. */
+    function beforeCommitMetadata(storage: DuckLakeStorage, concurrently: () => Promise<void>) {
+      const writes = (
+        storage as unknown as { writes: { setCommitMetadata(...args: unknown[]): Promise<void> } }
+      ).writes
+      const setCommitMetadata = writes.setCommitMetadata.bind(writes)
+      let ran = false
+      return spyOn(writes, "setCommitMetadata").mockImplementation(async (...args) => {
+        if (!ran) {
+          ran = true
+          await concurrently()
+        }
+        return setCommitMetadata(...args)
+      })
+    }
+
+    const write = async (
+      storage: DuckLakeStorage,
+      dataset: DatasetDefinition,
+      input: Omit<Parameters<DuckLakeStorage["beginWrite"]>[0], "dataset">,
+      rows: readonly { id: string; v: string }[]
+    ) => {
+      const session = await storage.beginWrite({ dataset, ...input })
+      await session.writeRows(rows)
+      return session.commit()
+    }
+
+    // Regression proof: let a snapshot that deleted no rows commit without its claim. The later
+    // snapshot then commits over the earlier one and keeps its rows, which it replaces.
+    test("two snapshots of an empty dataset replace each other", async () => {
+      const rows = await twoWriters(async ({ storage, other, dataset }) => {
+        const spy = beforeCommitMetadata(storage, async () => {
+          await write(other, dataset, { producer: { kind: "sync", id: "b" } }, [
+            { id: "b", v: "other" },
+          ])
+        })
+        try {
+          await write(storage, dataset, { producer: { kind: "sync", id: "a" } }, [
+            { id: "a", v: "mine" },
+          ])
+        } finally {
+          spy.mockRestore()
+        }
+        return collectRows(storage.readRows({ datasetId: dataset.id }))
+      })
+
+      expect(rows).toEqual([{ id: "a", v: "mine" }])
+    }, 60_000)
+
+    // Regression proof: let an append into an empty dataset commit without its claim. The
+    // snapshot, which read the dataset empty too, then deletes nothing and keeps the appended rows.
+    test("a snapshot of an empty dataset replaces the rows of a concurrent append", async () => {
+      const rows = await twoWriters(async ({ storage, other, dataset }) => {
+        const spy = beforeCommitMetadata(storage, async () => {
+          await write(other, dataset, { mode: "append", producer: { kind: "sync", id: "b" } }, [
+            { id: "b", v: "other" },
+          ])
+        })
+        try {
+          await write(storage, dataset, { producer: { kind: "sync", id: "a" } }, [
+            { id: "a", v: "mine" },
+          ])
+        } finally {
+          spy.mockRestore()
+        }
+        return collectRows(storage.readRows({ datasetId: dataset.id }))
+      })
+
+      expect(rows).toEqual([{ id: "a", v: "mine" }])
+    }, 60_000)
+
+    // Regression proof: let a snapshot that deleted no rows commit without its claim. The append
+    // then commits over it unseen, and records no lineage for the rows it copied from a secret.
+    test("an append over a snapshot of an empty dataset keeps that snapshot's lineage", async () => {
+      const appended = await twoWriters(async ({ storage, other, dataset }) => {
+        const spy = afterParentRead(storage, async () => {
+          await write(
+            other,
+            dataset,
+            { producer: { kind: "pipeline", id: "copy", stepId: "ssn" }, lineage: leaked },
+            [{ id: "1", v: "123-45-6789" }]
+          )
+        })
+        try {
+          return await write(
+            storage,
+            dataset,
+            { mode: "append", producer: { kind: "sync", id: "ingest" } },
+            [{ id: "2", v: "x" }]
+          )
+        } finally {
+          spy.mockRestore()
+        }
+      })
+
+      expect(appended.lineage).toEqual(leaked)
+    }, 60_000)
+
+    // Regression proof: let a keyed append or merge into a dataset with rows commit without its
+    // claim. DuckLake has no primary key, and both writes of the new key commit.
+    for (const mode of ["append", "merge"] as const) {
+      test(`keyed ${mode}s of one new key over each other keep the key unique`, async () => {
+        const keyed = defineDataset(`raw.pg.keyed.${randomId()}`, {
+          schema: [col("id", "string"), col("v", "string")],
+          primaryKey: "id",
+        })
+        const sync = { producer: { kind: "sync", id: "erp" } } as const
+        const upsert = async (storage: DuckLakeStorage, v: string) => {
+          if (mode === "append") {
+            return write(storage, keyed, { ...sync, mode: "append" }, [{ id: "2", v }])
+          }
+          const merge = await storage.beginMerge({ dataset: keyed, ...sync })
+          await merge.writeChanges([change.upsert({ id: "2", v })])
+          return merge.commit()
+        }
+        const { error, rows } = await twoWriters(async ({ storage, other, dataset }) => {
+          await write(storage, dataset, sync, [{ id: "1", v: "seed" }])
+          const spy = beforeCommitMetadata(storage, async () => {
+            await upsert(other, "theirs")
+          })
+          try {
+            const error = await upsert(storage, "mine").then(
+              () => undefined,
+              (failure: unknown) => failure
+            )
+            return { error, rows: await collectRows(storage.readRows({ datasetId: dataset.id })) }
+          } finally {
+            spy.mockRestore()
+          }
+        }, keyed)
+
+        // The rerun finds the key: an append rejects it, a merge on its stale base gives up.
+        expect(String(error)).toContain(
+          mode === "append" ? "duplicate primary key" : "Optimistic merge commit failed"
+        )
+        expect(rows).toEqual([
+          { id: "1", v: "seed" },
+          { id: "2", v: "theirs" },
+        ])
+      }, 60_000)
+    }
+
+    // Regression proof: commit versions that change no rows on top of unseen snapshots. The
+    // version of new provenance then lands on the concurrent snapshot, which deleted rows but did
+    // not claim the table, and stands for rows it never compared.
+    test("a version of new provenance over a concurrent snapshot that replaced rows reruns", async () => {
+      const notes = {
+        rows: [],
+        columns: { id: [], v: [{ datasetId: "crm.notes", column: "text" }] },
+      }
+      const { version, rows } = await twoWriters(async ({ storage, other, dataset }) => {
+        await write(storage, dataset, { producer: { kind: "sync", id: "erp" } }, [
+          { id: "1", v: "seed" },
+        ])
+        const spy = beforeCommitMetadata(storage, async () => {
+          await write(other, dataset, { producer: { kind: "sync", id: "erp" } }, [
+            { id: "2", v: "other" },
+          ])
+        })
+        try {
+          const version = await write(
+            storage,
+            dataset,
+            { producer: { kind: "pipeline", id: "copy", stepId: "notes" }, lineage: notes },
+            [{ id: "1", v: "seed" }]
+          )
+          const rows = await collectRows(
+            storage.readRows({ datasetId: dataset.id, versionId: version.versionId })
+          )
+          return { version, rows }
+        } finally {
+          spy.mockRestore()
+        }
+      })
+
+      expect(version).toMatchObject({ outcome: "created", lineage: notes })
+      expect(rows).toEqual([{ id: "1", v: "seed" }])
+    }, 60_000)
+
+    // Regression proof: commit schema changes on top of unseen snapshots. The schema change then
+    // lands on the concurrent pipeline snapshot, which did not claim the table, and keeps the
+    // lineage of the rows that snapshot replaced.
+    test("a schema change over a concurrent snapshot that replaced rows keeps its lineage", async () => {
+      const result = await twoWriters(async ({ storage, other, dataset }) => {
+        await write(storage, dataset, { producer: { kind: "sync", id: "erp" } }, [
+          { id: "1", v: "seed" },
+        ])
+        let concurrent: DatasetVersion | undefined
+        const spy = afterParentRead(storage, async () => {
+          if (concurrent) return
+          concurrent = await write(
+            other,
+            dataset,
+            { producer: { kind: "pipeline", id: "copy", stepId: "ssn" }, lineage: leaked },
+            [{ id: "2", v: "123-45-6789" }]
+          )
+        })
+        try {
+          await storage.createDataset(
+            defineDataset(dataset.id, {
+              schema: [...dataset.schema.columns, col("note", "string", { nullable: true })],
+            })
+          )
+          return { schema: (await storage.listVersions(dataset.id, 1))[0], concurrent }
+        } finally {
+          spy.mockRestore()
+        }
+      })
+
+      expect(result.schema).toMatchObject({
+        mode: "schema",
+        parentVersionId: result.concurrent?.versionId,
+      })
+      expect(result.schema?.lineage).toEqual({
+        rows: [],
+        columns: { id: [], note: [], v: [secret] },
+      })
+    }, 60_000)
+
+    // Regression proof: commit guarded unkeyed appends on top of unseen snapshots. The guarded
+    // append then lands on the concurrent append, which did not claim the table, although its
+    // guard named the version before it.
+    test("an unkeyed append guarded on its parent fails over a concurrent append", async () => {
+      const { error, rows } = await twoWriters(async ({ storage, other, dataset }) => {
+        const sync = { producer: { kind: "sync", id: "erp" } } as const
+        const parent = await write(storage, dataset, sync, [{ id: "1", v: "seed" }])
+        const spy = beforeCommitMetadata(storage, async () => {
+          await write(other, dataset, { ...sync, mode: "append" }, [{ id: "2", v: "theirs" }])
+        })
+        try {
+          const session = await storage.beginWrite({ dataset, ...sync, mode: "append" })
+          await session.writeRows([{ id: "3", v: "mine" }])
+          const error = await session.commit({ expectedLatestVersionId: parent.versionId }).then(
+            () => undefined,
+            (failure: unknown) => failure
+          )
+          return { error, rows: await collectRows(storage.readRows({ datasetId: dataset.id })) }
+        } finally {
+          spy.mockRestore()
+        }
+      })
+
+      expect(String(error)).toContain("Optimistic commit failed")
+      expect(rows.map((row) => row.id).sort()).toEqual(["1", "2"])
+    }, 60_000)
+
+    // Regression proof: claim the table on every commit. Each sync append then bumps DuckLake's
+    // catalog-wide schema version, and concurrent writers to the dataset conflict and rerun.
+    test("sync writes to a dataset no pipeline writes commit concurrently without a claim", async () => {
+      const result = await twoWriters(async ({ storage, other, dataset, schemaVersion }) => {
+        const sync = { producer: { kind: "sync", id: "erp" } } as const
+        await write(storage, dataset, sync, [{ id: "1", v: "seed" }])
+        const before = await schemaVersion()
+        const metadata = spyOn(
+          (storage as unknown as { writes: { setCommitMetadata(): Promise<void> } }).writes,
+          "setCommitMetadata"
+        )
+        const spy = afterParentRead(storage, async () => {
+          if (metadata.mock.calls.length > 0) return
+          await write(other, dataset, { ...sync, mode: "append" }, [{ id: "2", v: "theirs" }])
+        })
+        try {
+          const appended = await write(storage, dataset, { ...sync, mode: "append" }, [
+            { id: "3", v: "mine" },
+          ])
+          const attempts = metadata.mock.calls.length
+          const rows = await collectRows(storage.readRows({ datasetId: dataset.id }))
+          // A snapshot that replaces rows conflicts with any concurrent change without a claim.
+          await write(storage, dataset, sync, [{ id: "4", v: "replaced" }])
+          return {
+            appended,
+            attempts,
+            schemaVersionChange: (await schemaVersion()) - before,
+            rows,
+          }
+        } finally {
+          spy.mockRestore()
+          metadata.mockRestore()
+        }
+      })
+
+      expect(result.schemaVersionChange).toBe(0n)
+      expect(result.attempts).toBe(1)
+      expect(result.appended.lineage).toEqual({ rows: [], columns: { id: [], v: [] } })
+      expect(result.rows.map((row) => row.id).sort()).toEqual(["1", "2", "3"])
+    }, 60_000)
+
+    // Regression proof: claim only the versions of datasets that hold nothing but their own
+    // columns, never a pipeline append. Two pipeline appends then commit over each other, and
+    // the later one drops the lineage of the earlier one's rows.
+    test("pipeline appends claim, conflict, and rerun on each other's lineage", async () => {
+      const notes = { datasetId: "crm.notes", column: "text" }
+      const result = await twoWriters(async ({ storage, other, dataset }) => {
+        await write(storage, dataset, { producer: { kind: "sync", id: "erp" } }, [
+          { id: "1", v: "seed" },
+        ])
+        const metadata = spyOn(
+          (storage as unknown as { writes: { setCommitMetadata(): Promise<void> } }).writes,
+          "setCommitMetadata"
+        )
+        const spy = afterParentRead(storage, async () => {
+          if (metadata.mock.calls.length > 0) return
+          await write(
+            other,
+            dataset,
+            {
+              mode: "append",
+              producer: { kind: "pipeline", id: "copy", stepId: "ssn" },
+              lineage: leaked,
+            },
+            [{ id: "2", v: "123-45-6789" }]
+          )
+        })
+        try {
+          const appended = await write(
+            storage,
+            dataset,
+            {
+              mode: "append",
+              producer: { kind: "pipeline", id: "copy", stepId: "notes" },
+              lineage: { rows: [], columns: { id: [], v: [notes] } },
+            },
+            [{ id: "3", v: "note" }]
+          )
+          return { appended, attempts: metadata.mock.calls.length }
+        } finally {
+          spy.mockRestore()
+          metadata.mockRestore()
+        }
+      })
+
+      expect(result.attempts).toBe(2)
+      expect(result.appended.lineage).toEqual({ rows: [], columns: { id: [], v: [notes, secret] } })
+    }, 60_000)
+
+    // Regression proof: drop the table claim, or fix the transaction's snapshot after the parent
+    // read. DuckLake then commits the append on top of the concurrent one without a conflict,
+    // and the append records the lineage of a parent it no longer sits on.
+    // Regression proof: rerun 5 times without waiting between attempts. A writer that loses to
+    // another starts its rerun behind it, loses again, and runs out of attempts. Each write
+    // claims its keyed table, so every commit conflicts with every concurrent one.
+    test("concurrent keyed appends to one dataset all commit", async () => {
+      const writers = 6
+      const writesPerWriter = 5
+      const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-liveness-"))
+      const options: DuckLakeStorageOptions = {
+        catalog: postgresCatalog(),
+        dataPath: join(rootDir, "data"),
+      }
+      const dataset = defineDataset(`raw.pg.liveness.${randomId()}`, {
+        schema: [col("id", "string"), col("writer", "int64")],
+        primaryKey: "id",
+      })
+      const storages = Array.from({ length: writers }, () => new DuckLakeStorage(options))
+      // Seeded jitter: the same backoff sequence on every run.
+      let seed = 0x5eed
+      const random = spyOn(Math, "random").mockImplementation(() => {
+        seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31
+        return seed / 2 ** 31
+      })
+      try {
+        for (const storage of storages) await storage.createDataset(dataset)
+        await Promise.all(
+          storages.map(async (storage, writer) => {
+            for (let write = 0; write < writesPerWriter; write++) {
+              const session = await storage.beginWrite({
+                dataset,
+                mode: "append",
+                producer: { kind: "sync", id: `writer-${writer}` },
+              })
+              await session.writeRows([{ id: `${writer}-${write}`, writer }])
+              await session.commit()
+            }
+          })
+        )
+        const rows = await collectRows(storages[0]!.readRows({ datasetId: dataset.id }))
+        expect(rows.length).toBe(writers * writesPerWriter)
+      } finally {
+        random.mockRestore()
+        for (const storage of storages) await storage.close()
+        await rm(rootDir, { recursive: true, force: true })
+      }
+    }, 120_000)
+
+    test("an append over a concurrent append reruns and keeps its lineage", async () => {
+      const { result, concurrent } = await race(async ({ storage, dataset, concurrently }) => {
+        const spy = afterParentRead(storage, concurrently)
+        try {
+          const write = await storage.beginWrite({
+            dataset,
+            mode: "append",
+            producer: { kind: "sync", id: "ingest" },
+          })
+          await write.writeRows([{ id: "3", v: "x" }])
+          const version = await write.commit()
+          return { version, rows: await collectRows(storage.readRows({ datasetId: dataset.id })) }
+        } finally {
+          spy.mockRestore()
+        }
+      })
+
+      expect(result.version.parentVersionId).toBe(concurrent.versionId)
+      expect(result.version.lineage).toEqual(leaked)
+      expect(result.rows.map((row) => row.id)).toEqual(["1", "2", "3"])
+    }, 60_000)
+
+    // Regression proof: drop the rerun of a schema change the catalog moved under. The schema
+    // change then fails on the conflict, or with the snapshot fixed late, keeps a stale lineage.
+    test("a schema change over a concurrent append reruns and keeps its lineage", async () => {
+      const { result, concurrent } = await race(async ({ storage, dataset, concurrently }) => {
+        const spy = afterParentRead(storage, concurrently)
+        try {
+          await storage.createDataset(
+            defineDataset(dataset.id, {
+              schema: [...dataset.schema.columns, col("note", "string", { nullable: true })],
+            })
+          )
+          return (await storage.listVersions(dataset.id, 1))[0]
+        } finally {
+          spy.mockRestore()
+        }
+      })
+
+      expect(result).toMatchObject({ mode: "schema", parentVersionId: concurrent.versionId })
+      expect(result?.lineage).toEqual({ rows: [], columns: { id: [], note: [], v: [secret] } })
+    }, 60_000)
+
+    // Regression proof: rerun a schema change with the plan of its first attempt. The rerun then
+    // adds a column the concurrent host already added, and the update fails.
+    test("a schema change another host applied concurrently leaves nothing to apply", async () => {
+      const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-schema-"))
+      const options: DuckLakeStorageOptions = {
+        catalog: postgresCatalog(),
+        dataPath: join(rootDir, "data"),
+      }
+      const storage = new DuckLakeStorage(options)
+      const other = new DuckLakeStorage(options)
+      const dataset = events()
+      const widened = defineDataset(dataset.id, {
+        schema: [...dataset.schema.columns, col("note", "string", { nullable: true })],
+      })
+      try {
+        await storage.createDataset(dataset)
+        await other.createDataset(dataset)
+        const seed = await storage.beginWrite({ dataset })
+        await seed.writeRows([{ id: "1", v: "seed" }])
+        await seed.commit()
+
+        let applied = false
+        const spy = afterParentRead(storage, async () => {
+          if (applied) return
+          applied = true
+          await other.createDataset(widened)
+        })
+        try {
+          expect(await storage.createDataset(widened)).toMatchObject({ schema: widened.schema })
+        } finally {
+          spy.mockRestore()
+        }
+        expect((await storage.listVersions(dataset.id)).map((version) => version.mode)).toEqual([
+          "schema",
+          "snapshot",
+        ])
+      } finally {
+        await storage.close()
+        await other.close()
+        await rm(rootDir, { recursive: true, force: true })
+      }
+    }, 60_000)
+
+    // Regression proof, with new provenance: drop the table claim. The snapshot only reapplies the
+    // table comment, which commits over the concurrent append. Without: drop the check that the
+    // latest version is still the one the rows matched. The write then reports itself unchanged
+    // and returns the concurrent version. Either way it stands for rows it did not write.
+    for (const [provenance, lineage] of [
+      ["new", { rows: [], columns: { id: [], v: [{ datasetId: "crm.notes", column: "text" }] } }],
+      ["the same", { rows: [], columns: { id: [], v: [] } }],
+    ] as const) {
+      test(`a snapshot with ${provenance} provenance that rewrites no rows over a concurrent append reruns`, async () => {
+        const { result } = await race(async ({ storage, dataset, concurrently }) => {
+          const writes = (
+            storage as unknown as {
+              writes: { setCommitMetadata(...args: unknown[]): Promise<void> }
+            }
+          ).writes
+          const setCommitMetadata = writes.setCommitMetadata.bind(writes)
+          const spy = spyOn(writes, "setCommitMetadata").mockImplementation(async (...args) => {
+            await concurrently()
+            return setCommitMetadata(...args)
+          })
+          try {
+            const write = await storage.beginWrite({
+              dataset,
+              producer: { kind: "pipeline", id: "seed", stepId: "copy" },
+              lineage,
+            })
+            await write.writeRows([{ id: "1", v: "seed" }])
+            const version = await write.commit()
+            const rows = await collectRows(
+              storage.readRows({ datasetId: dataset.id, versionId: version.versionId })
+            )
+            return { version, rows }
+          } finally {
+            spy.mockRestore()
+          }
+        })
+
+        expect(result.rows).toEqual([{ id: "1", v: "seed" }])
+        expect(result.version).toMatchObject({ outcome: "created", lineage })
+      }, 60_000)
     }
   })
 
