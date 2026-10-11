@@ -69,6 +69,21 @@ export interface GetActiveOntologySourceInput {
   readonly source: ProjectionSourceRef
 }
 
+export interface ListActiveOntologySourcesInput {
+  readonly projectId: string
+}
+
+/**
+ * What one source applied: the dataset version its active materialization replaced the source
+ * with, under which projection revision. A delta applies like a full replacement by its version,
+ * so the version describes every value of the source.
+ */
+export interface ActiveOntologySource {
+  readonly source: ProjectionSourceRef
+  readonly datasetVersion: PinnedDatasetVersion
+  readonly projectionRevision: string
+}
+
 export interface BeginSourceMaterializationInput {
   readonly projectId: string
   readonly source: ProjectionSourceRef
@@ -210,6 +225,8 @@ export interface OntologySourceStorage {
   stageRows(input: StageSourceRowsInput): Promise<StageSourceRowsResult>
   markReady(input: MarkSourceMaterializationReadyInput): Promise<OntologySourceRecord>
   getActive(input: GetActiveOntologySourceInput): Promise<OntologySourceRecord | null>
+  /** Every source of the project with an active materialization, in no particular order. */
+  listActive(input: ListActiveOntologySourcesInput): Promise<readonly ActiveOntologySource[]>
   /** Hands a redelivered run's candidate to its current execution; null when it has none. */
   adopt(input: AdoptSourceMaterializationInput): Promise<AdoptedSourceMaterialization | null>
   abandon(input: AbandonSourceMaterializationCandidateInput): Promise<OntologySourceRecord>

@@ -8,7 +8,7 @@ import {
   normalizeRuntimeLink,
   runtimeOperationId,
 } from "../materializer-adapter"
-import { assertCanWriteLink } from "./authorization"
+import { assertCanWriteLinks } from "./authorization"
 import { collectEndpointLookups, loadEndpointExistence, requireEndpoints } from "./endpoints"
 
 export async function upsertLink(
@@ -23,7 +23,7 @@ export async function upsertLink(
 ): Promise<void> {
   const { objectType, linkDefinition, ontology } = ctx
   const { sourceId, linkId, targetTypeId, targetId, properties } = params
-  assertCanWriteLink(ctx, { sourceTypeId: objectType.id, targetTypeId })
+  await assertCanWriteLinks(ctx, [{ sourceTypeId: objectType.id, linkId, targetTypeId }])
   const endpoints = { objectType, sourceId, targetTypeId, targetId }
 
   // Endpoint reads keep the public `ObjectNotFoundError` contract; the Materializer independently

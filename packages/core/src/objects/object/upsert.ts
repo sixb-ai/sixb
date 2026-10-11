@@ -20,6 +20,7 @@ export async function upsertObject(
 ): Promise<ObjectRow> {
   assertCanEdit(ctx, ctx.objectType.id)
   const { objectType, primaryPropertyId, ontology } = ctx
+  const redact = await ctx.objectReader.writtenRowRedactor(objectType.id)
 
   const normalized = normalizeRuntimeObject({
     objectType,
@@ -34,7 +35,5 @@ export async function upsertObject(
   const commit = await commitRuntimeOperations(ctx, [
     objectUpsertOperation({ id: runtimeOperationId(0), ref, properties: normalized.properties }),
   ])
-  return ctx.objectReader.redactWrittenRow(
-    toObjectRow(ctx.projectId, requireEffectiveObject(commit.outcomes[0]))
-  )
+  return redact(toObjectRow(ctx.projectId, requireEffectiveObject(commit.outcomes[0])))
 }
