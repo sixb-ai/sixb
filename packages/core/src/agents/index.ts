@@ -149,6 +149,7 @@ export type {
   AgentToolArtifact,
   AgentToolArtifactPutInput,
   AgentToolArtifacts,
+  AgentToolAttachments,
   AgentToolContent,
   AgentToolDefinition,
   AgentToolDescriptionBuilder,

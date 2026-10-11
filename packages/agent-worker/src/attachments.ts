@@ -56,6 +56,8 @@ export interface PreparedAgentToolFileProjection {
   readonly modelFileData?: AgentFileDataProjection
 }
 
+type MessageAttachmentFile = Omit<AttachmentWorkItem, "message" | "inlineContent">
+
 interface AttachmentWorkItem {
   readonly message: AgentMessageRecord
   readonly fileRef: FileRef
@@ -220,38 +222,16 @@ function fileWorkItems(messages: readonly AgentMessageRecord[]): AttachmentWorkI
   const items: AttachmentWorkItem[] = []
   const currentUserMessageId = latestUserMessageId(messages)
   for (const message of messages) {
-    message.parts.forEach((part, partIndex) => {
-      if (part.type === "file") {
-        items.push({
-          message,
-          fileRef: part.fileRef,
-          partIndex,
-          key: attachmentKey(message.id, partIndex),
-          contentPath: `/parts/${partIndex}/fileRef`,
-          sandboxName: String(partIndex),
-          inlineContent: message.role === "user" && message.id === currentUserMessageId,
-          origin: "message-file",
-        })
-      } else if (
-        part.type === "tool-call" &&
-        part.state === "output-available" &&
-        isAgentToolResult(part.output)
-      ) {
-        part.output.content.forEach((contentPart, contentIndex) => {
-          if (contentPart.type !== "file") return
-          items.push({
-            message,
-            fileRef: contentPart.fileRef,
-            partIndex,
-            key: toolResultAttachmentKey(message.id, partIndex, contentIndex),
-            contentPath: `/parts/${partIndex}/output/content/${contentIndex}/fileRef`,
-            sandboxName: `tool-${partIndex}-${contentIndex}`,
-            inlineContent: false,
-            origin: "tool-result-file",
-          })
-        })
-      }
-    })
+    for (const file of listMessageAttachments(message)) {
+      items.push({
+        message,
+        ...file,
+        inlineContent:
+          file.origin === "message-file" &&
+          message.role === "user" &&
+          message.id === currentUserMessageId,
+      })
+    }
   }
 
   const toolFilesByMessage = new Set(
@@ -704,11 +684,66 @@ export function toolResultAttachmentKey(
   return `${messageId}:${partIndex}:tool-result:${contentIndex}`
 }
 
+/** The id of the message an attachment key names, or null when the key is malformed. */
+export function attachmentKeyMessageId(key: string): string | null {
+  return /^(.+?):\d+(?::tool-result:\d+)?$/.exec(key)?.[1] ?? null
+}
+
+/** The attachment with this key in a message, as `$SIXB_ATTACHMENTS` would list it, or null. */
+export function findMessageAttachment(message: AgentMessageRecord, key: string): FileRef | null {
+  return listMessageAttachments(message).find((file) => file.key === key)?.fileRef ?? null
+}
+
+/**
+ * Lists the files a message exposes as attachments: the user's file parts, and the files of real
+ * agent tool results, each with its key, its path in the message and its sandbox name. The
+ * `$SIXB_ATTACHMENTS` manifest and `ctx.attachments.open` both use it, so a key opens only what the
+ * manifest lists.
+ */
+function listMessageAttachments(message: AgentMessageRecord): MessageAttachmentFile[] {
+  return message.parts.flatMap((part, partIndex): MessageAttachmentFile[] => {
+    if (part.type === "file") {
+      return [
+        {
+          fileRef: part.fileRef,
+          partIndex,
+          key: attachmentKey(message.id, partIndex),
+          contentPath: `/parts/${partIndex}/fileRef`,
+          sandboxName: String(partIndex),
+          origin: "message-file",
+        },
+      ]
+    }
+    if (
+      part.type !== "tool-call" ||
+      part.state !== "output-available" ||
+      !isAgentToolResult(part.output)
+    ) {
+      return []
+    }
+    return part.output.content.flatMap((contentPart, contentIndex) =>
+      contentPart.type === "file"
+        ? [
+            {
+              fileRef: contentPart.fileRef,
+              partIndex,
+              key: toolResultAttachmentKey(message.id, partIndex, contentIndex),
+              contentPath: `/parts/${partIndex}/output/content/${contentIndex}/fileRef`,
+              sandboxName: `tool-${partIndex}-${contentIndex}`,
+              origin: "tool-result-file",
+            },
+          ]
+        : []
+    )
+  })
+}
+
 function attachmentPromptText(
   entry: PreparedAgentAttachment,
   textExcerpt: string | undefined
 ): string {
   const attrs = [
+    `key="${escapeXmlAttribute(entry.key)}"`,
     `messageId="${escapeXmlAttribute(entry.messageId)}"`,
     `partIndex="${entry.partIndex}"`,
     `name="${escapeXmlAttribute(entry.fileName)}"`,

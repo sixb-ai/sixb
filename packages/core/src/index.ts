@@ -1061,6 +1061,7 @@ export type {
   AgentToolArtifact,
   AgentToolArtifactPutInput,
   AgentToolArtifacts,
+  AgentToolAttachments,
   AgentToolCallPart,
   AgentToolCallState,
   AgentToolCatalog,

@@ -32,13 +32,37 @@ in the handler keeps its credentials on the server.
 
 A tool is one specific operation that has to run on the server, such as a call to an API whose
 key stays there; reading and searching data is work the agent does on its own. In the handler,
-`sixb` reads objects and requests actions as the requester:
+`sixb` reads objects and requests actions as the requester, and `attachments.open(key)` opens a
+file of the run by the key the agent sees in `$SIXB_ATTACHMENTS`:
+
+File: `agent-tools/extract-document.ts`
+
+```ts
+import { AgentToolPublicError, defineAgentTool } from "@sixb/core"
+import { documentExtraction } from "../connectors/document-extraction"
+
+export const extractDocument = defineAgentTool("extract_document")
+  .description("Extract the text and tables of an attachment. Pass its key.")
+  .input({ key: "string" })
+  .run(async ({ input, signal, sixb, attachments }) => {
+    const file = await attachments.open(input.key)
+    if (!file) throw new AgentToolPublicError("The attachment is no longer available.")
+    const extraction = await sixb.connector(documentExtraction)
+    const { text, tables } = await extraction.extract(file.body, {
+      fileName: file.fileRef.fileName,
+      signal,
+    })
+    return { text, tables }
+  })
+```
 
 | Run | Permissions |
 | --- | --- |
 | Chat | The signed-in user's. |
 | Child agent (delegation is currently disabled) | The parent chat's user's. |
 | Workflow AI task | Those granted through the step's `groups`. |
+
+An action a tool requests runs at once, without the confirmation the agent asks for itself.
 
 ## Register the tool
 

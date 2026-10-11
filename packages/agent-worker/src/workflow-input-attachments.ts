@@ -13,8 +13,7 @@ export async function prepareWorkflowInputAttachments(input: {
   readonly blobStorage: BlobStorage
   readonly signal?: AbortSignal
 }): Promise<PreparedAgentAttachmentContext> {
-  const refs: Array<{ readonly path: string; readonly fileRef: FileRef }> = []
-  collectFileRefs(input.input, "input", refs)
+  const refs = workflowInputFileRefs(input.input)
   const sandboxFiles: PreparedAgentAttachmentContext["sandboxFiles"] extends readonly (infer T)[]
     ? T[]
     : never = []
@@ -31,7 +30,7 @@ export async function prepareWorkflowInputAttachments(input: {
       stat.sizeBytes > MAX_WORKFLOW_ATTACHMENT_BYTES ||
       totalBytes + stat.sizeBytes > MAX_WORKFLOW_ATTACHMENTS_TOTAL_BYTES
     ) {
-      manifest.push({ path: item.path, fileRef: item.fileRef, materialized: false })
+      manifest.push({ key: item.path, path: item.path, fileRef: item.fileRef, materialized: false })
       continue
     }
 
@@ -45,6 +44,7 @@ export async function prepareWorkflowInputAttachments(input: {
     sandboxFiles.push({ key: item.path, path: sandboxPath, bytes, fileRef: item.fileRef })
     totalBytes += bytes.byteLength
     manifest.push({
+      key: item.path,
       path: item.path,
       fileRef: item.fileRef,
       materialized: true,
@@ -59,6 +59,15 @@ export async function prepareWorkflowInputAttachments(input: {
     sandboxFiles,
     manifestJson: JSON.stringify({ attachments: manifest }, null, 2),
   }
+}
+
+/** Every FileRef in a workflow input, keyed by its path such as `input.documents[0]`. */
+export function workflowInputFileRefs(
+  input: WorkflowIOSnapshot
+): readonly { readonly path: string; readonly fileRef: FileRef }[] {
+  const refs: Array<{ readonly path: string; readonly fileRef: FileRef }> = []
+  collectFileRefs(input, "input", refs)
+  return refs
 }
 
 function collectFileRefs(

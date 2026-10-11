@@ -29,6 +29,11 @@ const toolRuntime = {
   toolResultToModelOutput() {
     return { type: "text" as const, value: "unused" }
   },
+  attachments: {
+    async open() {
+      throw new Error("unused")
+    },
+  },
 }
 
 function modelStep(content: readonly ModelAssistantPart[]): ModelStep {
@@ -99,12 +104,13 @@ describe("owned model adapters", () => {
     const definition = defineAgentTool("search_knowledge")
       .description("Search project knowledge.")
       .input({ query: "string", limit: "integer", mode: stringEnum(["quick", "deep"]) })
-      .run(async ({ input, signal, run, sixb }) => ({
+      .run(async ({ input, signal, run, sixb, attachments }) => ({
         results: (await sixb.connector(connectorDefinition)).search(input.query),
         limit: input.limit,
         mode: input.mode,
         aborted: signal.aborted,
         run,
+        runAttachments: attachments === toolRuntime.attachments,
       }))
     const run = { kind: "conversation" as const, id: "run-1", threadId: "thread-1" }
     const [tool] = modelToolsFromAgentDefinitions({
@@ -140,6 +146,7 @@ describe("owned model adapters", () => {
       mode: "quick",
       aborted: false,
       run,
+      runAttachments: true,
     })
   })
 
