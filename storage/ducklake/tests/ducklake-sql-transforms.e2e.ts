@@ -1,11 +1,24 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, type DatasetDefinition, type DatasetRow, defineDataset } from "@sixb/core"
-import type { DatasetVersion } from "@sixb/core/lake-storage"
+import {
+  col,
+  type DatasetDefinition,
+  type DatasetRow,
+  type DatasetSchema,
+  defineDataset,
+} from "@sixb/core"
+import {
+  type DatasetColumnLineage,
+  type DatasetProducer,
+  type DatasetVersion,
+  LakeStorageError,
+  type SqlTransformBody,
+} from "@sixb/core/lake-storage"
 import type { DuckLakeStorage } from "../src"
 import type { DuckDbExclusiveRuntime, DuckDbRuntime } from "../src/internal/duckdb-runtime"
+import type { DuckLakeDatasetCatalog } from "../src/internal/ducklake-dataset-catalog"
 import type { DuckLakeSnapshotReader } from "../src/internal/ducklake-snapshot-reader"
 import { encodeDatasetTableName } from "../src/internal/names"
 import { qualifiedTableName } from "../src/internal/sql"
@@ -16,6 +29,7 @@ interface DuckLakeStorageInternals {
     runtime(): Promise<DuckDbRuntime>
   }
   readonly snapshotReader: DuckLakeSnapshotReader
+  readonly datasets: DuckLakeDatasetCatalog
 }
 
 describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (catalog) => {
@@ -573,6 +587,478 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
       { customerId: "cust_2", orders: "1", revenue: "20" },
       { customerId: "cust_3", orders: "1", revenue: "30" },
     ])
+  })
+
+  describe("column lineage", () => {
+    const pipeline = { kind: "pipeline", id: "customer-insights", stepId: "aggregate" } as const
+    const customerRef = (column: string) => ({ datasetId: customersDataset.id, column })
+    const orderRef = (column: string) => ({ datasetId: ordersDataset.id, column })
+
+    const insightsSql: SqlTransformBody<"duckdb"> = ({ customers, orders }) => `
+      SELECT
+        c.customerId,
+        count(o.orderId)::BIGINT AS orders,
+        sum(o.amount)::BIGINT AS revenue
+      FROM ${customers} c
+      LEFT JOIN ${orders} o ON o.customerId = c.customerId
+      GROUP BY c.customerId
+      ORDER BY c.customerId
+    `
+    // A column lists only what its values add to what decides the rows.
+    const insightsLineage = {
+      rows: [customerRef("customerId"), orderRef("customerId")],
+      columns: {
+        customerId: [],
+        orders: [orderRef("orderId")],
+        revenue: [orderRef("amount")],
+      },
+    }
+
+    async function seedSources(): Promise<void> {
+      await commitRows(storage, customersDataset, [
+        { customerId: "cust_1", name: "Ada" },
+        { customerId: "cust_2", name: "Grace" },
+      ])
+      await commitRows(storage, ordersDataset, [
+        { orderId: "ord_1", customerId: "cust_1", amount: 10 },
+        { orderId: "ord_2", customerId: "cust_2", amount: 20 },
+      ])
+    }
+
+    function executeInsights(
+      sql: SqlTransformBody<"duckdb">,
+      producer: DatasetProducer = { ...pipeline, runId: "run_1" }
+    ) {
+      return storage.sql.execute({
+        sources: {
+          customers: { dataset: customersDataset },
+          orders: { dataset: ordersDataset },
+        },
+        target: customerInsightsDataset,
+        mode: "snapshot",
+        producer,
+        sql,
+      })
+    }
+
+    test("records lineage on the committed version and reads it back", async () => {
+      await seedSources()
+
+      const version = await executeInsights(insightsSql)
+      expect(version.producer).toEqual({ ...pipeline, runId: "run_1" })
+      expect(version.lineage).toEqual(insightsLineage)
+
+      const read = (versions: readonly DatasetVersion[]) =>
+        versions.find((candidate) => candidate.versionId === version.versionId)?.lineage
+      expect(
+        (await storage.getVersion(customerInsightsDataset.id, version.versionId))?.lineage
+      ).toEqual(insightsLineage)
+      expect(read(await storage.listVersions(customerInsightsDataset.id))).toEqual(insightsLineage)
+
+      await storage.close()
+      storage = createLocalDuckLakeStorage(rootDir, catalog)
+      expect(
+        (await storage.getVersion(customerInsightsDataset.id, version.versionId))?.lineage
+      ).toEqual(insightsLineage)
+      expect(read(await storage.listVersions(customerInsightsDataset.id))).toEqual(insightsLineage)
+    })
+
+    // Regression proof: record the SQL's own lineage without resolving it through the source
+    // versions. The output then loses the upstream columns its sources were computed from.
+    test("resolves the lineage through the source versions it reads", async () => {
+      const raw = (column: string) => ({ datasetId: "raw.erp.extract", column })
+      const totalsDataset = defineDataset("analytics.customer_totals", {
+        schema: [col("customerId", "string"), col("total", "int64")],
+      })
+      await storage.createDataset(totalsDataset)
+      const writeOrders = async (lineage?: DatasetColumnLineage) => {
+        const write = await storage.beginWrite({
+          dataset: ordersDataset,
+          producer: { kind: "pipeline", id: "orders", stepId: "extract" },
+          lineage,
+        })
+        await write.writeRows([{ orderId: "ord_1", customerId: "cust_1", amount: 10 }])
+        return write.commit()
+      }
+      const executeTotals = () =>
+        storage.sql.execute({
+          sources: { orders: { dataset: ordersDataset } },
+          target: totalsDataset,
+          mode: "snapshot",
+          producer: { ...pipeline, runId: "run_1" },
+          sql: ({ orders }) =>
+            `SELECT customerId, sum(amount)::BIGINT AS total FROM ${orders} GROUP BY customerId`,
+        })
+
+      await writeOrders({
+        rows: [raw("tenant")],
+        columns: {
+          orderId: [raw("id")],
+          customerId: [raw("customer")],
+          amount: [raw("amount_cents")],
+        },
+      })
+      expect((await executeTotals()).lineage).toEqual({
+        rows: [raw("customer"), raw("tenant"), orderRef("customerId")],
+        columns: {
+          customerId: [],
+          total: [raw("amount_cents"), orderRef("amount")],
+        },
+      })
+
+      // A source version that recorded no lineage could hold anything, and so could the output.
+      const unanalyzed = await writeOrders()
+      expect((await executeTotals()).lineage).toEqual({
+        unknown: `version '${unanalyzed.versionId}' of '${ordersDataset.id}' recorded no column lineage`,
+      })
+    })
+
+    // Regression proof: compare only inputs in the coordinator's no-op branch. The second
+    // execute then reuses the first version, which keeps the lineage of SQL that no longer runs.
+    test("creates a new version when only the lineage changes", async () => {
+      await seedSources()
+      const first = await executeInsights(insightsSql)
+
+      const rewritten = await executeInsights(
+        ({ customers, orders }) => `
+        SELECT
+          c.customerId,
+          count(o.orderId)::BIGINT AS orders,
+          sum(o.amount + 0 * length(c.name))::BIGINT AS revenue
+        FROM ${customers} c
+        LEFT JOIN ${orders} o ON o.customerId = c.customerId
+        GROUP BY c.customerId
+        ORDER BY c.customerId
+      `
+      )
+
+      expect(rewritten.outcome).toBe("created")
+      expect(rewritten.versionId).not.toBe(first.versionId)
+      expect(rewritten.lineage).toMatchObject({
+        columns: { revenue: [customerRef("name"), orderRef("amount")] },
+      })
+      expect(
+        await collectRows(storage.readRows({ datasetId: customerInsightsDataset.id }))
+      ).toEqual([
+        { customerId: "cust_1", orders: "1", revenue: "10" },
+        { customerId: "cust_2", orders: "1", revenue: "20" },
+      ])
+
+      const repeated = await executeInsights(insightsSql)
+      expect(repeated.outcome).toBe("created")
+      expect(repeated.lineage).toEqual(insightsLineage)
+      expect((await executeInsights(insightsSql)).outcome).toBe("unchanged")
+    })
+
+    // Regression proof: record no lineage for unanalyzed SQL whatever its producer. A transform
+    // outside pipelines then reads as depending on its own columns only.
+    test("executes SQL it cannot analyze and records no lineage", async () => {
+      const totals = (id: string) =>
+        defineDataset(id, {
+          schema: [col("customerId", "string"), col("total", "int64", { nullable: true })],
+        })
+      const totalsDataset = totals("analytics.customer_totals")
+      const unattributedDataset = totals("analytics.unattributed_totals")
+      await storage.createDataset(totalsDataset)
+      await storage.createDataset(unattributedDataset)
+      await seedSources()
+      const executePivot = (target: DatasetDefinition, producer?: DatasetProducer) =>
+        storage.sql.execute({
+          sources: { orders: { dataset: ordersDataset } },
+          target,
+          mode: "snapshot",
+          producer,
+          sql: ({ orders }) => `
+            SELECT customerId, "ord_1"::BIGINT AS total
+            FROM (PIVOT ${orders} ON orderId IN ('ord_1') USING sum(amount) GROUP BY customerId)
+            ORDER BY customerId
+          `,
+        })
+
+      const version = await executePivot(totalsDataset, { ...pipeline, runId: "run_1" })
+      expect(version.producer).toEqual({ ...pipeline, runId: "run_1" })
+      expect(version.lineage).toBeUndefined()
+      expect(await collectRows(storage.readRows({ datasetId: totalsDataset.id }))).toEqual([
+        { customerId: "cust_1", total: "10" },
+        { customerId: "cust_2", total: null },
+      ])
+
+      // Outside pipelines, a write without lineage would depend on its own columns only.
+      expect((await executePivot(unattributedDataset)).lineage).toEqual({
+        unknown: `a SQL transform into '${unattributedDataset.id}' could not be analyzed`,
+      })
+    })
+
+    // Regression proof: build the analysis tables from today's definitions instead of the pinned
+    // version's schema. `label` then resolves to the column added after that version rather than
+    // to the lateral alias that runs, and `shout` loses its dependency on `name`.
+    test("binds the pinned version's schema, where a later column would capture an alias", async () => {
+      const pinned = await commitRows(storage, customersDataset, [
+        { customerId: "cust_1", name: "Ada" },
+      ])
+      await storage.createDataset(
+        defineDataset(customersDataset.id, {
+          schema: [...customersDataset.schema.columns, col("label", "string", { nullable: true })],
+        })
+      )
+      const labelsDataset = defineDataset("analytics.customer_labels", {
+        schema: [col("customerId", "string"), col("label", "string"), col("shout", "string")],
+      })
+      await storage.createDataset(labelsDataset)
+
+      const version = await storage.sql.execute({
+        sources: { customers: { dataset: customersDataset, versionId: pinned.versionId } },
+        target: labelsDataset,
+        mode: "snapshot",
+        producer: { ...pipeline, runId: "run_1" },
+        sql: ({ customers }) => `
+          SELECT customerId, upper(name) AS label, label || '!' AS shout FROM ${customers}
+        `,
+      })
+
+      expect(version.lineage).toEqual({
+        rows: [],
+        columns: {
+          customerId: [customerRef("customerId")],
+          label: [customerRef("name")],
+          shout: [customerRef("name")],
+        },
+      })
+      expect(await collectRows(storage.readRows({ datasetId: labelsDataset.id }))).toEqual([
+        { customerId: "cust_1", label: "ADA", shout: "ADA!" },
+      ])
+    })
+
+    /** Runs with the analysis reading `pinnedSchema(schema)` as each source's version schema. */
+    async function withPinnedSchema<T>(
+      pinnedSchema: (schema: DatasetSchema) => DatasetSchema,
+      run: () => Promise<T>
+    ): Promise<T> {
+      const sourceIds = new Set<string>([customersDataset.id, ordersDataset.id])
+      const datasets = (storage as unknown as DuckLakeStorageInternals).datasets
+      const getSchemasAtSnapshots = datasets.getDatasetSchemasAtSnapshots.bind(datasets)
+      datasets.getDatasetSchemasAtSnapshots = async (runtime, requests) => {
+        const schemas = await getSchemasAtSnapshots(runtime, requests)
+        return schemas.map((schema, index) =>
+          sourceIds.has(requests[index].table.datasetId) ? pinnedSchema(schema) : schema
+        )
+      }
+
+      try {
+        return await run()
+      } finally {
+        datasets.getDatasetSchemasAtSnapshots = getSchemasAtSnapshots
+      }
+    }
+
+    // Regression proof: drop the check that the analyzed result has the target's columns. The
+    // version then records lineage for a column it does not have.
+    test("records no lineage when the analysis tables diverge from what runs", async () => {
+      await seedSources()
+      const copyDataset = defineDataset("analytics.customer_copy", {
+        schema: customersDataset.schema.columns,
+      })
+      await storage.createDataset(copyDataset)
+
+      const version = await withPinnedSchema(
+        (schema) => ({
+          columns: [...schema.columns, col("segment", "string", { nullable: true })],
+        }),
+        () =>
+          storage.sql.execute({
+            sources: { customers: { dataset: customersDataset } },
+            target: copyDataset,
+            mode: "snapshot",
+            producer: { ...pipeline, runId: "run_1" },
+            sql: ({ customers }) => `SELECT * FROM ${customers}`,
+          })
+      )
+
+      expect(version.producer).toEqual({ ...pipeline, runId: "run_1" })
+      expect(version.lineage).toBeUndefined()
+    })
+
+    // Regression proof: let a failed read of a source's version schema escape. The transform then
+    // fails, although only its lineage could not be analyzed.
+    test("executes without lineage when a source's version schema cannot be read", async () => {
+      await seedSources()
+      const warn = spyOn(console, "warn").mockImplementation(() => {})
+
+      try {
+        const version = await withPinnedSchema(
+          () => {
+            throw new LakeStorageError("[SixbDuckLake] Could not reconstruct schema.")
+          },
+          () => executeInsights(insightsSql)
+        )
+
+        expect(version.producer).toEqual({ ...pipeline, runId: "run_1" })
+        expect(version.lineage).toBeUndefined()
+        expect(warn).toHaveBeenCalledWith(
+          `[SixbDuckLake] SQL transform into dataset '${customerInsightsDataset.id}' records no column lineage: [SixbDuckLake] Could not reconstruct schema.`
+        )
+      } finally {
+        warn.mockRestore()
+      }
+
+      expect(
+        await collectRows(storage.readRows({ datasetId: customerInsightsDataset.id }))
+      ).toEqual([
+        { customerId: "cust_1", orders: "1", revenue: "10" },
+        { customerId: "cust_2", orders: "1", revenue: "20" },
+      ])
+    })
+
+    // Regression proof: let the analysis's own pick check throw. A pick that binds on the lake
+    // then fails the transform.
+    test("executes without lineage when the analysis cannot build its tables", async () => {
+      const namesDataset = defineDataset("analytics.customer_names", {
+        schema: [col("name", "string")],
+      })
+      await storage.createDataset(namesDataset)
+      await seedSources()
+      const warn = spyOn(console, "warn").mockImplementation(() => {})
+
+      try {
+        const version = await withPinnedSchema(
+          (schema) => ({ columns: schema.columns.filter((column) => column.name !== "name") }),
+          () =>
+            storage.sql.execute({
+              sources: { customers: { dataset: customersDataset, columns: ["name"] } },
+              target: namesDataset,
+              mode: "snapshot",
+              producer: { ...pipeline, runId: "run_1" },
+              sql: ({ customers }) => `SELECT * FROM ${customers} ORDER BY name`,
+            })
+        )
+
+        expect(version.producer).toEqual({ ...pipeline, runId: "run_1" })
+        expect(version.lineage).toBeUndefined()
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("picks column 'name'"))
+      } finally {
+        warn.mockRestore()
+      }
+
+      expect(await collectRows(storage.readRows({ datasetId: namesDataset.id }))).toEqual([
+        { name: "Ada" },
+        { name: "Grace" },
+      ])
+    })
+
+    test("renders a pick as the only columns the transform can read", async () => {
+      const namesDataset = defineDataset("analytics.customer_names", {
+        schema: [col("name", "string")],
+      })
+      await storage.createDataset(namesDataset)
+      await seedSources()
+      const picked = { customers: { dataset: customersDataset, columns: ["name"] } }
+
+      const version = await storage.sql.execute({
+        sources: picked,
+        target: namesDataset,
+        mode: "snapshot",
+        producer: { ...pipeline, runId: "run_1" },
+        sql: ({ customers }) => `SELECT * FROM ${customers} ORDER BY name`,
+      })
+
+      expect(version.lineage).toEqual({ rows: [customerRef("name")], columns: { name: [] } })
+      await expect(
+        collectRows(
+          storage.sql.preview({
+            sources: picked,
+            sql: ({ customers }) => `SELECT * FROM ${customers} ORDER BY name`,
+          })
+        )
+      ).resolves.toEqual([{ name: "Ada" }, { name: "Grace" }])
+      await expect(
+        collectRows(
+          storage.sql.preview({
+            sources: picked,
+            sql: ({ customers }) => `SELECT customerId FROM ${customers}`,
+          })
+        )
+      ).rejects.toThrow('Referenced column "customerId" not found')
+      await expect(
+        storage.sql.execute({
+          sources: { customers: { dataset: customersDataset, columns: ["email"] } },
+          target: namesDataset,
+          mode: "snapshot",
+          sql: ({ customers }) => `SELECT * FROM ${customers}`,
+        })
+      ).rejects.toThrow(
+        "[SixbDuckLake] SQL transform source 'customers' picks column 'email', which dataset 'raw.crm.customers' does not have."
+      )
+    })
+
+    test("maps sources reading the same dataset to one set of dataset column refs", async () => {
+      const previous = await commitRows(storage, ordersDataset, [
+        { orderId: "ord_1", customerId: "cust_1", amount: 10 },
+      ])
+      const latest = await commitRows(storage, ordersDataset, [
+        { orderId: "ord_1", customerId: "cust_1", amount: 15 },
+      ])
+      const deltas = defineDataset("analytics.order_deltas", {
+        schema: [col("orderId", "string"), col("delta", "int64")],
+      })
+      await storage.createDataset(deltas)
+
+      const version = await storage.sql.execute({
+        sources: {
+          before: { dataset: ordersDataset, versionId: previous.versionId },
+          after: { dataset: ordersDataset, versionId: latest.versionId },
+        },
+        target: deltas,
+        mode: "snapshot",
+        producer: { ...pipeline, runId: "run_1" },
+        sql: ({ before, after }) => `
+          SELECT a.orderId, a.amount - b.amount AS delta
+          FROM ${after} a JOIN ${before} b USING (orderId)
+        `,
+      })
+
+      expect(version.lineage).toEqual({
+        rows: [orderRef("orderId")],
+        columns: { orderId: [], delta: [orderRef("amount")] },
+      })
+      expect(await collectRows(storage.readRows({ datasetId: deltas.id }))).toEqual([
+        { orderId: "ord_1", delta: "5" },
+      ])
+    })
+
+    test("analyzes a transform on a lake without any version", async () => {
+      const unknownDataset = defineDataset("raw.not_created.refunds", {
+        schema: [col("orderId", "string"), col("refunded", "decimal")],
+      })
+
+      expect(
+        await storage.sql.analyze({
+          sources: {
+            orders: { dataset: ordersDataset, columns: ["orderId", "amount"] },
+            refunds: { dataset: unknownDataset },
+          },
+          sql: ({ orders, refunds }) => `
+            SELECT o.orderId, o.amount - coalesce(r.refunded, 0) AS net
+            FROM ${orders} o LEFT JOIN ${refunds} r USING (orderId)
+          `,
+        })
+      ).toEqual({
+        supported: true,
+        lineage: {
+          rows: [
+            { source: "orders", column: "orderId" },
+            { source: "refunds", column: "orderId" },
+          ],
+          columns: {
+            orderId: [{ source: "orders", column: "orderId" }],
+            net: [
+              { source: "orders", column: "amount" },
+              { source: "refunds", column: "refunded" },
+            ],
+          },
+        },
+      })
+      expect(await storage.listVersions(ordersDataset.id)).toEqual([])
+    })
   })
 
   // Regression: remove the null guard or lineage-only snapshot creation; this test must fail.

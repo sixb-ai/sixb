@@ -308,6 +308,28 @@ new rows to the existing target. Omitting a source `versionId` resolves the late
 committed version at execution time; providing a `versionId` pins that source for
 repeatable transforms.
 
+A source can pick the columns a transform may read with `columns`. The relation then exposes only
+those columns, in that order, and referencing any other column fails:
+
+```ts
+sources: {
+  orders: { dataset: rawOrdersDataset, columns: ["customerId", "total"] },
+}
+```
+
+The committed version records its lineage in `DatasetVersion.lineage`: which columns each output
+column was computed from, and which ones decide the result's rows and their order, traced through
+what the source versions read record themselves. An append also keeps the lineage of the rows it
+keeps. `analyze(...)` returns the SQL's own lineage, by source name, without reading any data or
+requiring a committed source version. The provider binds the SQL in an isolated DuckDB instance
+against empty tables shaped like the sources. SQL it cannot analyze exactly, such as `PIVOT`, still
+executes: a pipeline version then records no lineage, and any other one records an unknown lineage.
+Either way, the version is classified with every marking.
+
+Lineage only covers the sources. Data the SQL reads any other way is not tracked, and its markings
+do not follow: a lake table read by its name, or a table function that reads files or other tables,
+such as `read_parquet`, `read_csv`, or `query_table`. Read data only through the sources.
+
 DuckDB promotes `sum(BIGINT)` results to `HUGEINT`. When the matching target column is a Sixb
 `int64`, the executor applies a checked conversion back to `BIGINT` before comparing or writing
 rows. Values outside the signed 64-bit range fail the transform instead of being truncated.
