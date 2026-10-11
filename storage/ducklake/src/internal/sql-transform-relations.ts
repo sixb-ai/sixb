@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import type { DatasetColumnDefinition, DatasetDefinition } from "@sixb/core"
 import {
   LakeStorageError,
   type SqlTransformBody,
@@ -6,7 +7,7 @@ import {
 } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { encodeDatasetTableName } from "./names"
-import { qualifiedTableName } from "./sql"
+import { qualifiedTableName, quoteIdentifier } from "./sql"
 import { parseVersionId } from "./versions"
 
 const RELATION_PLACEHOLDER_PREFIX = "__sixb_sql_transform_relation_"
@@ -15,17 +16,17 @@ const RELATION_PLACEHOLDER_PATTERN = /__sixb_sql_transform_relation_[0-9a-f]{32}
 export interface DuckLakeSqlTransformSourceRelation {
   readonly datasetId: string
   readonly versionId: string
+  /** The only columns the transform may read, in order. Every column when omitted. */
+  readonly columns?: readonly string[]
 }
 
-export interface RenderDuckLakeSqlTransformSqlInput {
-  readonly options: Pick<DuckLakeStorageOptions, "alias">
-  readonly sources: Readonly<Record<string, DuckLakeSqlTransformSourceRelation>>
-  readonly sql: SqlTransformBody<"duckdb">
-}
-
-interface DuckLakeSqlTransformRelationContext {
-  readonly relations: Readonly<Record<string, SqlTransformRelation>>
-  render(sql: string): string
+/**
+ * The SQL a transform body returned, with a placeholder where each source relation belongs. The
+ * body runs once; the same SQL then renders against the lake and against the lineage analysis.
+ */
+export interface DuckLakeSqlTransformTemplate {
+  /** Replaces each placeholder with its source's relation SQL, keyed by source name. */
+  render(relations: ReadonlyMap<string, string>): string
 }
 
 class DuckLakeSqlTransformRelation implements SqlTransformRelation {
@@ -36,42 +37,35 @@ class DuckLakeSqlTransformRelation implements SqlTransformRelation {
   }
 }
 
-export function renderDuckLakeSqlTransformSql(input: RenderDuckLakeSqlTransformSqlInput): string {
-  const context = createDuckLakeSqlTransformRelationContext(input)
-  const sql = input.sql(context.relations)
+export function createDuckLakeSqlTransformTemplate(
+  sourceNames: readonly string[],
+  body: SqlTransformBody<"duckdb">
+): DuckLakeSqlTransformTemplate {
+  const token = randomUUID().replaceAll("-", "")
+  const relations: Record<string, SqlTransformRelation> = Object.create(null)
+  const sourceNamesByPlaceholder = new Map<string, string>()
 
+  sourceNames.forEach((sourceName, index) => {
+    const placeholder = `${RELATION_PLACEHOLDER_PREFIX}${token}_${index}__`
+    relations[sourceName] = Object.freeze(new DuckLakeSqlTransformRelation(placeholder))
+    sourceNamesByPlaceholder.set(placeholder, sourceName)
+  })
+
+  const sql = body(Object.freeze(relations))
   if (typeof sql !== "string") {
     throw new LakeStorageError("[SixbDuckLake] SQL transform body must return a SQL string.")
   }
 
-  return context.render(sql)
-}
-
-function createDuckLakeSqlTransformRelationContext(
-  input: Omit<RenderDuckLakeSqlTransformSqlInput, "sql">
-): DuckLakeSqlTransformRelationContext {
-  const token = randomUUID().replaceAll("-", "")
-  const relations: Record<string, SqlTransformRelation> = Object.create(null)
-  const replacements = new Map<string, string>()
-
-  let index = 0
-  for (const [sourceName, source] of Object.entries(input.sources)) {
-    const placeholder = `${RELATION_PLACEHOLDER_PREFIX}${token}_${index}__`
-    relations[sourceName] = Object.freeze(new DuckLakeSqlTransformRelation(placeholder))
-    replacements.set(placeholder, renderDuckLakeSourceRelation(input.options, source))
-    index += 1
-  }
-
   return {
-    relations: Object.freeze(relations),
-    render(sql) {
+    render(relationSql) {
       const rendered = sql.replace(RELATION_PLACEHOLDER_PATTERN, (placeholder) => {
-        const replacement = replacements.get(placeholder)
-        if (replacement === undefined) {
+        const sourceName = sourceNamesByPlaceholder.get(placeholder)
+        const relation = sourceName === undefined ? undefined : relationSql.get(sourceName)
+        if (relation === undefined) {
           throwUnresolvedPlaceholder()
         }
 
-        return replacement
+        return relation
       })
 
       if (rendered.includes(RELATION_PLACEHOLDER_PREFIX)) {
@@ -83,13 +77,69 @@ function createDuckLakeSqlTransformRelationContext(
   }
 }
 
-function renderDuckLakeSourceRelation(
+/** Each source as DuckLake time travel to its resolved version. */
+export function renderDuckLakeSourceRelations(
   options: Pick<DuckLakeStorageOptions, "alias">,
-  source: DuckLakeSqlTransformSourceRelation
-): string {
-  const snapshotId = parseVersionId(source.versionId)
-  const tableName = encodeDatasetTableName(source.datasetId)
-  return `(SELECT * FROM ${qualifiedTableName(options, tableName)} AT (VERSION => ${snapshotId}))`
+  sources: Readonly<Record<string, DuckLakeSqlTransformSourceRelation>>
+): ReadonlyMap<string, string> {
+  return new Map(
+    Object.entries(sources).map(([sourceName, source]) => {
+      const snapshotId = parseVersionId(source.versionId)
+      const table = qualifiedTableName(options, encodeDatasetTableName(source.datasetId))
+      return [
+        sourceName,
+        renderSourceRelation(`${table} AT (VERSION => ${snapshotId})`, source.columns),
+      ]
+    })
+  )
+}
+
+/**
+ * The shape of every source relation. A pick lists its columns, so the transform cannot read any
+ * other column of the source.
+ */
+export function renderSourceRelation(tableSql: string, columns?: readonly string[]): string {
+  const columnsSql =
+    columns === undefined ? "*" : columns.map((column) => quoteIdentifier(column)).join(", ")
+  return `(SELECT ${columnsSql} FROM ${tableSql})`
+}
+
+/** The columns a source exposes to a transform: its pick, in order, or every column. */
+export function pickSourceColumns(
+  sourceName: string,
+  dataset: DatasetDefinition,
+  columns?: readonly string[]
+): readonly DatasetColumnDefinition[] {
+  if (columns === undefined) {
+    return dataset.schema.columns
+  }
+
+  if (columns.length === 0) {
+    throw new LakeStorageError(
+      `[SixbDuckLake] SQL transform source '${sourceName}' must pick at least one column.`
+    )
+  }
+
+  const columnsByName = new Map(dataset.schema.columns.map((column) => [column.name, column]))
+  const picked = new Set<string>()
+
+  return columns.map((columnName) => {
+    const column = columnsByName.get(columnName)
+    if (column === undefined) {
+      throw new LakeStorageError(
+        `[SixbDuckLake] SQL transform source '${sourceName}' picks column '${columnName}', which dataset '${dataset.id}' does not have.`
+      )
+    }
+
+    if (picked.has(columnName)) {
+      throw new LakeStorageError(
+        `[SixbDuckLake] SQL transform source '${sourceName}' picks column '${columnName}' more than once.`
+      )
+    }
+
+    picked.add(columnName)
+    return column
+  })
 }
 
 function throwUnresolvedPlaceholder(): never {
