@@ -21,6 +21,8 @@ export {
 } from "./definition-updates"
 export { LakeConcurrencyError, LakeStorageError } from "./errors"
 export { InMemoryLakeStorage } from "./in-memory"
+export type { LineageAtCommitInput } from "./lineage"
+export { lineageAtCommit, resolveStepLineage } from "./lineage"
 export type {
   BeginDatasetMergeInput,
   CommitDatasetMergeInput,
@@ -41,13 +43,18 @@ export {
   reconcileDatasetSequences,
 } from "./source-ordering"
 export type {
+  AnalyzeSqlTransformInput,
+  AnalyzeSqlTransformSource,
   ExecuteSqlTransformInput,
   LakeSqlExecutor,
   LakeSqlTransformCapabilities,
   LakeStorageWithSql,
   PreviewSqlTransformInput,
   SqlDialect,
+  SqlTransformAnalysis,
   SqlTransformBody,
+  SqlTransformColumnRef,
+  SqlTransformLineage,
   SqlTransformRelation,
   SqlTransformSource,
 } from "./sql-transforms"
@@ -56,11 +63,15 @@ export type {
   CommitDatasetWriteInput,
   DatasetCatalogState,
   DatasetChanges,
+  DatasetColumnLineage,
+  DatasetColumnRef,
   DatasetLatestVersionSummary,
   DatasetProducer,
   DatasetRow,
   DatasetRowChange,
+  DatasetUnknownLineage,
   DatasetVersion,
+  DatasetVersionLineage,
   DatasetVersionMode,
   DatasetVersionRef,
   DatasetWriteCommitResult,
@@ -74,4 +85,5 @@ export type {
   ReadDatasetChangesInput,
   ReadDatasetRowsInput,
 } from "./types"
-export { hasDatasetInputChanges } from "./version-inputs"
+export type { DatasetCommitProvenance } from "./version-inputs"
+export { hasDatasetProvenanceChanges } from "./version-inputs"

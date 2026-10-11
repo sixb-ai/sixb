@@ -172,17 +172,18 @@ describe("DuckLake SQLite writes", () => {
         const external = await createDuckDbRuntime({ config: { threads: "1" } })
         const snapshots = (storage as unknown as { snapshotReader: DuckLakeSnapshotReader })
           .snapshotReader
-        const original = snapshots.getLatestVersionSummaryForDefinition.bind(snapshots)
+        const original = snapshots.getLatestVersionSummaryAtCurrentSnapshot.bind(snapshots)
         let preparations = 0
         const table = qualifiedTableName(options, encodeDatasetTableName(dataset.id))
-        const read = spyOn(snapshots, "getLatestVersionSummaryForDefinition").mockImplementation(
-          async (...args) => {
-            const summary = await original(...args)
-            if (++preparations === 1)
-              await external.run(`INSERT INTO ${table} VALUES ('external', 2)`)
-            return summary
-          }
-        )
+        const read = spyOn(
+          snapshots,
+          "getLatestVersionSummaryAtCurrentSnapshot"
+        ).mockImplementation(async (...args) => {
+          const summary = await original(...args)
+          if (++preparations === 1)
+            await external.run(`INSERT INTO ${table} VALUES ('external', 2)`)
+          return summary
+        })
         try {
           await setupDuckLake(external, options)
           if (guarded) {
@@ -213,9 +214,9 @@ describe("DuckLake SQLite writes", () => {
     const external = await createDuckDbRuntime({ config: { threads: "1" } })
     const snapshots = (storage as unknown as { snapshotReader: DuckLakeSnapshotReader })
       .snapshotReader
-    const original = snapshots.getLatestVersionSummaryForDefinition.bind(snapshots)
+    const original = snapshots.getLatestVersionSummaryAtCurrentSnapshot.bind(snapshots)
     let preparations = 0
-    const read = spyOn(snapshots, "getLatestVersionSummaryForDefinition").mockImplementation(
+    const read = spyOn(snapshots, "getLatestVersionSummaryAtCurrentSnapshot").mockImplementation(
       async (...args) => {
         const summary = await original(...args)
         await external.run(
@@ -224,11 +225,16 @@ describe("DuckLake SQLite writes", () => {
         return summary
       }
     )
+    // No wait between reruns: every rerun loses anyway.
+    const random = spyOn(Math, "random").mockReturnValue(0)
     try {
       await setupDuckLake(external, options)
-      await expect(append.commit()).rejects.toThrow("three write preparations")
-      expect(preparations).toBe(3)
+      await expect(append.commit()).rejects.toThrow(
+        "[SixbDuckLake] Concurrent writers moved the catalog during 16 attempts to commit dataset"
+      )
+      expect(preparations).toBe(16)
     } finally {
+      random.mockRestore()
       read.mockRestore()
       await external.close()
     }
@@ -237,6 +243,6 @@ describe("DuckLake SQLite writes", () => {
     await retry.commit()
     expect(
       (await collectRows(storage.readRows({ datasetId: dataset.id }))).map((row) => row.id)
-    ).toEqual(["external-1", "external-2", "external-3", "local"])
+    ).toEqual([...Array.from({ length: 16 }, (_, index) => `external-${index + 1}`), "local"])
   })
 })
