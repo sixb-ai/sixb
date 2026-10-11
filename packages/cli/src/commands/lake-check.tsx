@@ -1,6 +1,10 @@
 import { loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
-import { checkRuntimeLakeDefinitions, stopSixbProviders } from "../lib/runtime"
+import {
+  checkRuntimeLakeDefinitions,
+  checkRuntimePipelineMarkings,
+  stopSixbProviders,
+} from "../lib/runtime"
 import { LakeCheckView, renderStatic } from "../ui"
 
 export interface LakeCheckOptions {
@@ -13,6 +17,7 @@ export async function runLakeCheck(options: LakeCheckOptions = {}) {
 
   try {
     await checkRuntimeLakeDefinitions(sixb)
+    await checkRuntimePipelineMarkings(sixb)
     await renderStatic(<LakeCheckView projectId={sixb.id} status="ok" />)
   } finally {
     await stopSixbProviders(sixb)

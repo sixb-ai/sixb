@@ -58,6 +58,7 @@ describe("sixb check", () => {
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("Sixb is healthy")
     expect(result.stdout).toContain("Project")
+    expect(result.stdout).toMatch(/Markings\s+ok/)
     expect(result.stdout).not.toContain("validation error(s)")
     expect(result.stderr).toBe("")
   })

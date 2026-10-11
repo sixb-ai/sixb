@@ -122,6 +122,7 @@ export async function executeSqlStep(input: {
         {
           dataset: input.dataset,
           versionId: input.version.versionId,
+          ...(input.pick && { columns: input.pick.columns }),
         },
       ])
     ),
