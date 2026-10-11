@@ -80,6 +80,8 @@ import type {
   RoleDefinition,
   SecurityDefinitionCatalog,
 } from "../security"
+import { type AppliedMarkings, createAppliedMarkings } from "../security/applied-markings"
+import { registerAppliedMarkings } from "../security/applied-markings-host"
 import {
   createDatasetVersionMarkings,
   type DatasetVersionMarkings,
@@ -176,6 +178,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   private readonly connectorService: ConnectorService
   private readonly materializer: OntologyMaterializerContract
   private readonly datasetVersionMarkings: DatasetVersionMarkings
+  private readonly appliedMarkings: AppliedMarkings
   readonly sandboxDefinition?: SandboxDefinition
   readonly definitions: SixbDefinitions
   readonly broker: Broker
@@ -229,6 +232,19 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       lakeStorage: this.lakeStorage,
     })
     registerDatasetVersionMarkings(this, this.datasetVersionMarkings)
+
+    this.appliedMarkings = createAppliedMarkings({
+      projectId: this.projectId,
+      ontology: definitions.ontology,
+      projections: definitions.projections,
+      revisionOf: (projectionId) =>
+        definitions.projections.resolveDispatch(projectionId).projectionRevision,
+      pipelines: definitions.pipelines.list(),
+      versionMarkings: this.datasetVersionMarkings,
+      lakeStorage: this.lakeStorage,
+      sources: this.storage.ontology.sources,
+    })
+    registerAppliedMarkings(this, this.appliedMarkings)
 
     this.auth = new AuthRuntime({
       projectId: this.projectId,
@@ -342,6 +358,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       objectStorage: this.storage.objects,
       embeddingModels,
       rerankingModels,
+      appliedMarkings: this.appliedMarkings,
     })
 
     const runtime: SixbRuntimeContext = {
@@ -361,6 +378,8 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
           this.committedFacts.notify()
           this.vectorIndexing?.notify()
         },
+        // A projection this process applies is visible to its next read.
+        onProjectionApplied: () => this.appliedMarkings.invalidate(),
       })
     )
     return createBoundSixb<InferSandboxParams<TParams>>(

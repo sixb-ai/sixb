@@ -21,7 +21,7 @@ import {
 } from "../storage/objects/execution-limits"
 import { admitDelegatedObjectAction, assertDelegatedActionTarget } from "./delegated-admission"
 import { getActionRunExecutor } from "./run/executor"
-import { actionRunBelongsToShareGrant } from "./run-authorization"
+import { actionRunBelongsToShareGrant, canReadActionRunSubject } from "./run-authorization"
 import { createActionRunId } from "./run-id"
 import { type ExistingActionRun, persistActionRun } from "./run-persistence"
 import type { ActionDefinition, ActionSubject } from "./types"
@@ -112,6 +112,12 @@ export async function requestAction(
 
   validateActionSubject(action, subject)
 
+  // A run names its subject: a principal cannot request one on a type it cannot read. The action
+  // itself runs as trusted code.
+  if (authorization.type !== "delegated" && subject.kind === "object") {
+    await objectReader.assertReadable({ objectTypeIds: [subject.objectTypeId] })
+  }
+
   let pathPrefix = action.id
   let objectType: ObjectTypeWithPropertyTokens | null = null
 
@@ -141,7 +147,13 @@ export async function requestAction(
 
   const payload = { actionId, subject, params: actionParams }
   const assertCanReuse = (run: ExistingActionRun) =>
-    assertCallerMayHaveRun({ storage: runtime.storage, projectId, authorization, run })
+    assertCallerMayHaveRun({
+      storage: runtime.storage,
+      projectId,
+      authorization,
+      objectReader,
+      run,
+    })
   const persist = () =>
     persistActionRun({
       projectId,
@@ -201,6 +213,7 @@ async function assertCallerMayHaveRun(input: {
   readonly storage: SixbRuntimeContext["storage"]
   readonly projectId: string
   readonly authorization: ResolvedRuntimeAuthorization
+  readonly objectReader: SixbRuntimeContext["objectReader"]
   readonly run: ExistingActionRun
 }): Promise<void> {
   const { authorization, run } = input
@@ -213,7 +226,9 @@ async function assertCallerMayHaveRun(input: {
           run,
           grantId: authorization.delegation.grantId,
         }))
-      : authorization.type !== "principal" || canViewActionRun(authorization.context, run)
+      : authorization.type !== "principal" ||
+        (canViewActionRun(authorization.context, run) &&
+          (await canReadActionRunSubject(input.objectReader, run)))
   if (!visible) {
     throw new AuthorizationError(
       `apply:action:${run.actionId}`,

@@ -30,10 +30,13 @@ export interface HubSource<T extends HubRecord> {
 export interface HubSubscription<T extends HubRecord> {
   matches(record: T): boolean
   /**
-   * The matching record as this socket may read it, or `undefined` to withhold it. It keeps the
-   * record's cursor. Omit to deliver matching records unchanged.
+   * The matching records of one outgoing batch as this socket may read them, in order: withheld
+   * records are left out, the others keep their cursor. It is applied as the batch is sent, so it
+   * reflects what the socket may read then, and may wait for what decides it. A batch it fails on
+   * is never sent unviewed: the stream closes there, so the client resumes from the last cursor it
+   * received. Omit to deliver matching records unchanged.
    */
-  view?(record: T): T | undefined
+  view?(records: readonly T[]): readonly T[] | Promise<readonly T[]>
   /** Replays retained records after `afterCursor` (or from the oldest) before live ones. */
   readonly replay?: {
     readonly afterCursor: string | undefined
@@ -56,6 +59,8 @@ interface ClientState<T extends HubRecord> {
   queuedBytes: number
   pendingBytes: number
   flushTimer: ReturnType<typeof setTimeout> | null
+  /** A batch is waiting for its view: the next one is sent after it, never before. */
+  sending: boolean
   readonly queueProgressWaiters: Set<() => void>
   catchingUp: boolean
   closed: boolean
@@ -108,6 +113,7 @@ export class SubscriptionHub<T extends HubRecord> {
       queuedBytes: 0,
       pendingBytes: 0,
       flushTimer: null,
+      sending: false,
       queueProgressWaiters: new Set(),
       catchingUp: subscription.replay !== undefined,
       closed: false,
@@ -179,10 +185,9 @@ export class SubscriptionHub<T extends HubRecord> {
   private deliverLive(records: readonly T[]): void {
     for (const state of this.clients.values()) {
       for (const record of records) {
-        const visible = visibleRecord(state.subscription, record)
-        if (!visible) continue
-        if (state.catchingUp) this.enqueuePendingLive(state, visible)
-        else this.enqueue(state, visible)
+        if (!state.subscription.matches(record)) continue
+        if (state.catchingUp) this.enqueuePendingLive(state, record)
+        else this.enqueue(state, record)
       }
     }
   }
@@ -203,9 +208,8 @@ export class SubscriptionHub<T extends HubRecord> {
           if (state.pendingCursors.has(record.cursor)) {
             state.replayedPendingCursors.add(record.cursor)
           }
-          const visible = visibleRecord(state.subscription, record)
-          if (!visible) continue
-          if (!(await this.enqueueReplay(state, visible))) return
+          if (!state.subscription.matches(record)) continue
+          if (!(await this.enqueueReplay(state, record))) return
         }
         if (state.closed) return
         afterCursor = page.cursor ?? afterCursor
@@ -311,7 +315,7 @@ export class SubscriptionHub<T extends HubRecord> {
   }
 
   private flush(state: ClientState<T>): void {
-    if (state.closed || state.queue.length === 0) return
+    if (state.closed || state.sending || state.queue.length === 0) return
     if (socketBufferedAmount(state.ws) > MAX_SOCKET_BUFFERED_BYTES) {
       this.scheduleFlush(state)
       return
@@ -323,8 +327,45 @@ export class SubscriptionHub<T extends HubRecord> {
       state.queuedBytes -= encodedBytes(record)
     }
     this.notifyQueueProgress(state)
+
+    const view = state.subscription.view
+    if (!view) {
+      this.sendFrames(state, records)
+      if (state.queue.length > 0) this.scheduleFlush(state)
+      return
+    }
+
+    state.sending = true
+    void this.sendViewed(state, records, view).finally(() => {
+      state.sending = false
+      if (state.queue.length > 0) this.scheduleFlush(state)
+    })
+  }
+
+  private async sendViewed(
+    state: ClientState<T>,
+    records: readonly T[],
+    view: NonNullable<HubSubscription<T>["view"]>
+  ): Promise<void> {
+    let visible: readonly T[]
+    try {
+      visible = await view(records)
+    } catch (error) {
+      // Fail closed, and close: a client resumes after the last cursor it received, so delivering
+      // later batches would skip this one for good. Reconnecting reads it again.
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(
+        `[SixbServer] Closed a stream subscription at cursor '${records[0]?.cursor}': ${records.length} record(s) could not be viewed: ${message}`
+      )
+      this.fail(state, "Stream records could not be viewed; reconnect from the last cursor.", 1011)
+      return
+    }
+
+    if (visible.length > 0) this.sendFrames(state, visible)
+  }
+
+  private sendFrames(state: ClientState<T>, records: readonly T[]): void {
     for (const frame of this.source.frames(records)) this.send(state, frame)
-    if (state.queue.length > 0) this.scheduleFlush(state)
   }
 
   private waitForQueueProgress(state: ClientState<T>): Promise<void> {
@@ -365,14 +406,6 @@ export class SubscriptionHub<T extends HubRecord> {
       // Socket is already gone.
     }
   }
-}
-
-function visibleRecord<T extends HubRecord>(
-  subscription: HubSubscription<T>,
-  record: T
-): T | undefined {
-  if (!subscription.matches(record)) return undefined
-  return subscription.view ? subscription.view(record) : record
 }
 
 function hasQueueCapacity(state: ClientState<HubRecord>, bytes: number): boolean {
