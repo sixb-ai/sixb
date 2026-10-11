@@ -1,4 +1,4 @@
-import { client, type ProjectInfo } from "@sixb/client"
+import { client, createSignInCode, getSignInCode, type ProjectInfo } from "@sixb/client"
 import { getAuthSessionOptions, signOutMutation } from "@sixb/client/hooks"
 import {
   Sidebar as ShadcnSidebar,
@@ -15,6 +15,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
   SidebarUserMenu,
+  SignInOnAnotherDeviceDialog,
 } from "@sixb/ui/components"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
@@ -35,6 +36,7 @@ import {
   Settings,
   Workflow,
 } from "lucide-react"
+import { useState } from "react"
 
 export type ViewMode =
   | "home"
@@ -228,6 +230,7 @@ export function AtlasSidebarHeader({ selectedProject }: { selectedProject: Proje
 export function AtlasSidebarFooter() {
   const session = useQuery(getAuthSessionOptions()).data
   const signOut = useMutation(signOutMutation())
+  const [signInCodeOpen, setSignInCodeOpen] = useState(false)
   const user =
     session?.authenticated === true
       ? {
@@ -243,6 +246,15 @@ export function AtlasSidebarFooter() {
         user={user}
         apiHref={apiDocsUrl()}
         onSignOut={() => signOut.mutate({}, { onSettled: () => window.location.reload() })}
+        onSignInOnAnotherDevice={() => setSignInCodeOpen(true)}
+      />
+      <SignInOnAnotherDeviceDialog
+        open={signInCodeOpen}
+        onOpenChange={setSignInCodeOpen}
+        createCode={async () => (await createSignInCode({ throwOnError: true })).data}
+        getCodeStatus={async (codeId) =>
+          (await getSignInCode({ path: { codeId }, throwOnError: true })).data.status
+        }
       />
     </SidebarFooter>
   )

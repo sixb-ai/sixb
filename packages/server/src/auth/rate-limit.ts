@@ -1,13 +1,12 @@
 import { isIPv4 } from "node:net"
 
 /**
- * Fixed-window request limit per client address, held in process memory.
+ * Fixed-window request limit per key, held in process memory.
  *
- * IPv6 addresses share one window per /64, the block a single host is usually assigned.
  * Windows all have the same length, so insertion order is expiry order and pruning stops at the
  * first live window.
  */
-export class ClientAddressRateLimiter {
+export class FixedWindowRateLimiter {
   private readonly windows = new Map<string, { count: number; readonly resetAt: number }>()
 
   constructor(
@@ -15,13 +14,12 @@ export class ClientAddressRateLimiter {
     private readonly windowMs: number
   ) {}
 
-  tryConsume(address: string | undefined, nowMs = Date.now()): boolean {
-    for (const [key, window] of this.windows) {
+  tryConsume(key: string, nowMs = Date.now()): boolean {
+    for (const [expired, window] of this.windows) {
       if (window.resetAt > nowMs) break
-      this.windows.delete(key)
+      this.windows.delete(expired)
     }
 
-    const key = rateLimitKey(address)
     const window = this.windows.get(key)
     if (!window) {
       this.windows.set(key, { count: 1, resetAt: nowMs + this.windowMs })
@@ -30,6 +28,22 @@ export class ClientAddressRateLimiter {
     if (window.count >= this.limit) return false
     window.count += 1
     return true
+  }
+}
+
+/**
+ * Fixed-window request limit per client address. IPv6 addresses share one window per /64, the
+ * block a single host is usually assigned.
+ */
+export class ClientAddressRateLimiter {
+  private readonly limiter: FixedWindowRateLimiter
+
+  constructor(limit: number, windowMs: number) {
+    this.limiter = new FixedWindowRateLimiter(limit, windowMs)
+  }
+
+  tryConsume(address: string | undefined, nowMs = Date.now()): boolean {
+    return this.limiter.tryConsume(rateLimitKey(address), nowMs)
   }
 }
 

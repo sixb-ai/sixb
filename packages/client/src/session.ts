@@ -42,6 +42,13 @@ export interface SixbDeviceLogin {
   complete(options?: { readonly signal?: AbortSignal }): Promise<SixbSessionTokens>
 }
 
+/** A sign-in code from another device, as a `sixb://connect` link carries it. */
+export interface SixbSignInLink {
+  /** The API the code signs in to. */
+  readonly baseUrl: string
+  readonly code: string
+}
+
 // Refresh this long before the access token expires, so no request goes out with one about to lapse.
 const REFRESH_MARGIN_MS = 60_000
 
@@ -139,6 +146,43 @@ export async function getSixbSessionAccessToken(
     if (!(error instanceof SixbSessionEndedError) && remainingMs > 0) return tokens.accessToken
     throw error
   }
+}
+
+const SIGN_IN_LINK_PREFIX = "sixb://connect?"
+
+/**
+ * Read a scanned sign-in link: `sixb://connect?api=<API origin>&code=<code>`, the link a signed-in
+ * browser shows as a QR code under "Sign in on another device". Anything else is null.
+ */
+export function parseSixbSignInLink(value: string): SixbSignInLink | null {
+  const link = value.trim()
+  // Parsed by hand: URL support for custom schemes varies across the runtimes that scan these.
+  if (!link.toLowerCase().startsWith(SIGN_IN_LINK_PREFIX)) return null
+  const params = new URLSearchParams(link.slice(SIGN_IN_LINK_PREFIX.length))
+  const baseUrl = nonblank(params.get("api"))
+  const code = nonblank(params.get("code"))
+  if (!baseUrl || !code || !/^https?:\/\//i.test(baseUrl)) return null
+  return { baseUrl, code }
+}
+
+/**
+ * Sign this device in with a code from another device's signed-in browser. A code works once, for a
+ * couple of minutes; `clientName` names the new session on the user's sessions list.
+ */
+export async function exchangeSixbSignInCode(
+  options: SixbSessionRequestOptions & { readonly code: string; readonly clientName: string }
+): Promise<SixbSessionTokens> {
+  const post = sessionRequester(options)
+  const response = await post("/api/auth/device-authorizations/token", {
+    deviceCode: options.code,
+    clientName: options.clientName,
+  })
+  if (!response.ok) throw await requestError(response, "sign in with the code")
+  const result = asRecord(await response.json())
+  if (result.status === "approved") return parseSessionTokens(result)
+  throw new Error(
+    "[SixbClient] This sign-in code has expired or was already used. Show a new one and scan it again."
+  )
 }
 
 /** End the stored session on the server, then clear the store. */

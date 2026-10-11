@@ -1,5 +1,6 @@
 import { getAuthSessionOptions, listObjectsOptions } from "@sixb/client/hooks"
 import { useQuery } from "@tanstack/react-query"
+import { DeviceSignIn } from "./device-sign-in"
 
 const notesQueryOptions = listObjectsOptions({
   query: { objectTypeId: "note", order: "asc", limit: "20" },
@@ -46,6 +47,8 @@ export default function AuthExampleApp() {
               <span>No groups</span>
             )}
           </div>
+
+          <DeviceSignIn />
         </article>
 
         <article className="auth-app-card">

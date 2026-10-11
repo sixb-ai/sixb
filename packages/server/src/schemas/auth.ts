@@ -335,6 +335,11 @@ export const CreateDeviceAuthorizationResponseSchema = z.object({
 
 export const ExchangeDeviceAuthorizationBodySchema = z.object({
   deviceCode: z.string().min(1),
+  /**
+   * Names the new session on the sessions list in place of the name given when the authorization
+   * started. A device that scanned a sign-in code names itself here.
+   */
+  clientName: z.string().trim().min(1).max(100).optional(),
 })
 
 export const ExchangeDeviceAuthorizationResponseSchema = z.union([
@@ -343,6 +348,24 @@ export const ExchangeDeviceAuthorizationResponseSchema = z.union([
   z.object({ status: z.literal("expired") }),
   BearerSessionTokensSchema.extend({ status: z.literal("approved") }),
 ])
+
+export const CreateSignInCodeResponseSchema = z.object({
+  id: z.string(),
+  /** Single use. The other device exchanges it at `POST /api/auth/device-authorizations/token`. */
+  code: z.string(),
+  /** A `sixb://connect` link that carries the API origin and the code, to show as a QR code. */
+  url: z.string(),
+  expiresAt: z.string(),
+})
+
+export const SignInCodeParamsSchema = z.object({
+  codeId: z.string().min(1),
+})
+
+export const SignInCodeStatusResponseSchema = z.object({
+  /** `pending` until another device exchanges the code, then `used`; `expired` if none did. */
+  status: z.enum(["pending", "used", "expired"]),
+})
 
 export const DeviceAuthorizationDecisionBodySchema = z.object({
   userCode: z.string().trim().min(1),

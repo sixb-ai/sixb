@@ -346,6 +346,7 @@ export type CreateDeviceAuthorizationResponse =
 export type ExchangeDeviceAuthorizationData = {
   body: {
     deviceCode: string
+    clientName?: string
   }
   path?: never
   query?: never
@@ -376,6 +377,87 @@ export type ExchangeDeviceAuthorizationResponses = {
 
 export type ExchangeDeviceAuthorizationResponse =
   ExchangeDeviceAuthorizationResponses[keyof ExchangeDeviceAuthorizationResponses]
+
+export type CreateSignInCodeData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/auth/sign-in-codes"
+}
+
+export type CreateSignInCodeErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+  }
+}
+
+export type CreateSignInCodeError = CreateSignInCodeErrors[keyof CreateSignInCodeErrors]
+
+export type CreateSignInCodeResponses = {
+  /**
+   * Response for status 201
+   */
+  201: {
+    id: string
+    code: string
+    url: string
+    expiresAt: string
+  }
+}
+
+export type CreateSignInCodeResponse = CreateSignInCodeResponses[keyof CreateSignInCodeResponses]
+
+export type GetSignInCodeData = {
+  body?: never
+  path: {
+    codeId: string
+  }
+  query?: never
+  url: "/api/auth/sign-in-codes/{codeId}"
+}
+
+export type GetSignInCodeErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetSignInCodeError = GetSignInCodeErrors[keyof GetSignInCodeErrors]
+
+export type GetSignInCodeResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    status: "pending" | "used" | "expired"
+  }
+}
+
+export type GetSignInCodeResponse = GetSignInCodeResponses[keyof GetSignInCodeResponses]
 
 export type RefreshAuthSessionData = {
   body: {

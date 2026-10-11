@@ -1409,6 +1409,57 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
+    // The guard is the approving-session check in `completeDeviceAuthorization`. Without it the
+    // completion below succeeds and starts `ses_cli`.
+    test("withdraws a device approval when the session that gave it ends", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await storage.sessions.create({
+          id: "ses_browser",
+          projectId,
+          userId: "usr_1",
+          strategyId: "magic-link",
+          audience: "atlas",
+          tokenHash: "session-hash",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+          expiresAt: at("2026-05-21T10:00:00.000Z"),
+        })
+        await storage.deviceAuthorizations.create({
+          id: "dva_1",
+          projectId,
+          deviceCodeHash: "device-code-hash",
+          userCode: "BCDF-HJKM",
+          clientName: "sixb CLI",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+          expiresAt: at("2026-05-14T10:10:00.000Z"),
+        })
+        await storage.deviceAuthorizations.approve({
+          projectId,
+          id: "dva_1",
+          userId: "usr_1",
+          sessionId: "ses_browser",
+          approvedAt: at("2026-05-14T10:01:00.000Z"),
+        })
+        await storage.sessions.revoke({
+          projectId,
+          id: "ses_browser",
+          revokedAt: at("2026-05-14T10:01:30.000Z"),
+        })
+
+        await expectAuthError(
+          storage.completeDeviceAuthorization({
+            projectId,
+            id: "dva_1",
+            deviceCodeHash: "device-code-hash",
+            completedAt: at("2026-05-14T10:02:00.000Z"),
+            session: bearerSessionInput("ses_cli"),
+          }),
+          "invalid_device_authorization"
+        )
+        await expect(storage.sessions.getById({ projectId, id: "ses_cli" })).resolves.toBeNull()
+      })
+    })
+
     test("keeps bearer and cookie session credentials apart", async () => {
       await withStorage(async (storage) => {
         await createUser(storage)

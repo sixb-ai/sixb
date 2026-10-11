@@ -38,6 +38,7 @@ import {
   getUserByEmail,
   identityKey,
   invitationKey,
+  isActiveSession,
   magicLinkKey,
   normalizeClaims,
   normalizeEmail,
@@ -45,6 +46,7 @@ import {
   oidcAttemptKey,
   removeGroupMembershipRecord,
   revokeActiveSessionsForUser,
+  sessionKey,
   upsertGroupMembershipRecord,
   userKey,
   validateCompleteSessionInput,
@@ -145,6 +147,17 @@ export class InMemoryAuthStorage implements AuthStorage {
       throw new AuthStorageError(
         "invalid_device_authorization",
         "[Sixb] Device session is invalid."
+      )
+    }
+    // An approval lasts only as long as the session that gave it: signing that session out
+    // withdraws the approvals it has not yet handed over.
+    const approver = this.state.sessions.get(
+      sessionKey(input.projectId, authorization.approvedSessionId)
+    )
+    if (!approver || !isActiveSession(approver, input.completedAt)) {
+      throw new AuthStorageError(
+        "invalid_device_authorization",
+        "[Sixb] The session that approved this device authorization has ended."
       )
     }
     const session = createSessionRecord(this.state, input.session)

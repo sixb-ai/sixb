@@ -15,6 +15,7 @@
     "@sixb/client": "workspace:*",
     "@sixb/core": "workspace:*",
     "@sixb/sqlite": "workspace:*",
+    "@sixb/ui": "workspace:*",
     "@tanstack/react-query": "^5.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

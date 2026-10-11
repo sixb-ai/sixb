@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
   createSixbClient,
+  exchangeSixbSignInCode,
   getAuthSession,
   getSixbSessionAccessToken,
+  parseSixbSignInLink,
   type SixbSessionStore,
   type SixbSessionTokens,
   signOutSixbSession,
@@ -99,6 +101,42 @@ describe("native sessions", () => {
       refreshToken: "refresh-1",
     })
     expect(polls).toBe(2)
+  })
+
+  test("reads a sign-in link and nothing else", () => {
+    const code = "dva_1.secret"
+    expect(
+      parseSixbSignInLink(`sixb://connect?api=${encodeURIComponent(baseUrl)}&code=${code}`)
+    ).toEqual({ baseUrl, code })
+    expect(parseSixbSignInLink(`https://evil.example/?api=${baseUrl}&code=${code}`)).toBeNull()
+    expect(parseSixbSignInLink(`sixb://connect?api=javascript:alert(1)&code=${code}`)).toBeNull()
+    expect(parseSixbSignInLink(`sixb://connect?api=${baseUrl}`)).toBeNull()
+  })
+
+  test("signs a device in with a code from another device, named by the device", async () => {
+    let sent: unknown
+    const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe(`${baseUrl}/api/auth/device-authorizations/token`)
+      sent = JSON.parse(String(init?.body))
+      return Response.json(
+        (sent as { deviceCode: string }).deviceCode === "dva_1.secret"
+          ? {
+              status: "approved",
+              accessToken: "access-1",
+              refreshToken: "refresh-1",
+              expiresIn: 900,
+            }
+          : { status: "expired" }
+      )
+    }) as typeof globalThis.fetch
+
+    await expect(
+      exchangeSixbSignInCode({ baseUrl, code: "dva_1.secret", clientName: "Acme scanner", fetch })
+    ).resolves.toMatchObject({ accessToken: "access-1", refreshToken: "refresh-1" })
+    expect(sent).toEqual({ deviceCode: "dva_1.secret", clientName: "Acme scanner" })
+    await expect(
+      exchangeSixbSignInCode({ baseUrl, code: "dva_2.used", clientName: "Acme scanner", fetch })
+    ).rejects.toThrow("expired or was already used")
   })
 
   test("refuses a login page on another origin", async () => {

@@ -120,13 +120,34 @@ export class SqliteAuthStorage implements AuthStorage {
       }
       assertCompletableDeviceAuthorization(authorization, input)
       const session = createSession(this.db, input.session)
-      this.db
+      // An approval lasts only as long as the session that gave it: signing that session out
+      // withdraws the approvals it has not yet handed over.
+      const consumed = this.db
         .query(`
         UPDATE auth_device_authorizations
         SET status = 'consumed', consumed_at = ?
         WHERE project_id = ? AND id = ? AND status = 'approved'
+          AND EXISTS (
+            SELECT 1 FROM auth_sessions
+            WHERE project_id = ? AND id = auth_device_authorizations.approved_session_id
+              AND revoked_at IS NULL AND expires_at > ?
+              AND (absolute_expires_at IS NULL OR absolute_expires_at > ?)
+          )
       `)
-        .run(toIso(input.completedAt), input.projectId, input.id)
+        .run(
+          toIso(input.completedAt),
+          input.projectId,
+          input.id,
+          input.projectId,
+          toIso(input.completedAt),
+          toIso(input.completedAt)
+        )
+      if (consumed.changes !== 1) {
+        throw new AuthStorageError(
+          "invalid_device_authorization",
+          "[Sixb] The session that approved this device authorization has ended."
+        )
+      }
       return {
         authorization: {
           ...authorization,

@@ -7,6 +7,7 @@ import {
   LaptopMinimal,
   LogOut,
   MoonStar,
+  QrCode,
   Settings2,
   SunMedium,
 } from "lucide-react"
@@ -41,6 +42,8 @@ interface SidebarUserMenuProps {
   apiHref?: string
   /** Sign-out handler. Only shown when a user and handler are both present. */
   onSignOut?: () => void
+  /** Opens a sign-in code for another device. Only shown when a user and handler are both present. */
+  onSignInOnAnotherDevice?: () => void
 }
 
 function initials(name: string): string {
@@ -55,7 +58,12 @@ function initials(name: string): string {
  * reference link, and sign-out, all folded into a single dropdown off the avatar
  * row. When no user is present it degrades to a preferences menu (theme + API).
  */
-export function SidebarUserMenu({ user, apiHref, onSignOut }: SidebarUserMenuProps) {
+export function SidebarUserMenu({
+  user,
+  apiHref,
+  onSignOut,
+  onSignInOnAnotherDevice,
+}: SidebarUserMenuProps) {
   const { theme, setTheme } = useTheme()
   const { isMobile } = useSidebar()
 
@@ -149,14 +157,18 @@ export function SidebarUserMenu({ user, apiHref, onSignOut }: SidebarUserMenuPro
               </>
             ) : null}
 
+            {user && (onSignInOnAnotherDevice || onSignOut) ? <DropdownMenuSeparator /> : null}
+            {user && onSignInOnAnotherDevice ? (
+              <DropdownMenuItem onClick={onSignInOnAnotherDevice}>
+                <QrCode />
+                <span>Sign in on another device</span>
+              </DropdownMenuItem>
+            ) : null}
             {user && onSignOut ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={onSignOut}>
-                  <LogOut />
-                  <span>Log out</span>
-                </DropdownMenuItem>
-              </>
+              <DropdownMenuItem onClick={onSignOut}>
+                <LogOut />
+                <span>Log out</span>
+              </DropdownMenuItem>
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
