@@ -79,6 +79,8 @@ import type {
   RoleDefinition,
   SecurityDefinitionCatalog,
 } from "../security"
+import { type AppliedMarkings, createAppliedMarkings } from "../security/applied-markings"
+import { registerAppliedMarkings } from "../security/applied-markings-host"
 import {
   createDatasetVersionMarkings,
   type DatasetVersionMarkings,
@@ -158,6 +160,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   private readonly connectorService: ConnectorService
   private readonly materializer: OntologyMaterializerContract
   private readonly datasetVersionMarkings: DatasetVersionMarkings
+  private readonly appliedMarkings: AppliedMarkings
   readonly sandboxDefinition?: SandboxDefinition
   readonly definitions: SixbDefinitions
   readonly broker: Broker
@@ -205,6 +208,18 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     registerProjectionRegistry(this, definitions.projections)
     this.datasetVersionMarkings = createDatasetVersionMarkings({ datasets: definitions.datasets })
     registerDatasetVersionMarkings(this, this.datasetVersionMarkings)
+    this.appliedMarkings = createAppliedMarkings({
+      projectId: this.projectId,
+      ontology: definitions.ontology,
+      projections: definitions.projections,
+      revisionOf: (projectionId) =>
+        definitions.projections.resolveDispatch(projectionId).projectionRevision,
+      pipelines: definitions.pipelines.list(),
+      versionMarkings: this.datasetVersionMarkings,
+      lakeStorage: this.lakeStorage,
+      sources: this.storage.ontology.sources,
+    })
+    registerAppliedMarkings(this, this.appliedMarkings)
 
     this.auth = new AuthRuntime({
       projectId: this.projectId,
@@ -313,6 +328,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       objectStorage: this.storage.objects,
       embeddingModels,
       rerankingModels,
+      appliedMarkings: this.appliedMarkings,
     })
 
     const runtime: SixbRuntimeContext = {
@@ -332,6 +348,8 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
           this.committedFacts.notify()
           this.vectorIndexing?.notify()
         },
+        // A projection this process applies is visible to its next read.
+        onProjectionApplied: () => this.appliedMarkings.invalidate(),
       })
     )
     return createBoundSixb<InferSandboxParams<TParams>>(
@@ -382,6 +400,14 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   /** Close blob-provider resources owned by this host. */
   async closeBlobs(): Promise<void> {
     await this.blobStorage.close?.()
+  }
+
+  /**
+   * Stop refreshing the markings of the dataset versions projections applied. Readers start it
+   * again when they next need them; a host no read needs stops on its own after a minute.
+   */
+  stopAppliedMarkingsRefresh(): void {
+    this.appliedMarkings.stopRefreshing()
   }
 
   /** Close the runtime broker provider if it owns external resources. */

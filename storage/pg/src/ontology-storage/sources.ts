@@ -19,6 +19,7 @@ import type {
   AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,
+  ActiveOntologySource,
   AdoptedSourceMaterialization,
   AdoptSourceMaterializationInput,
   AssertSourceMaterializationExecutionInput,
@@ -26,6 +27,7 @@ import type {
   CleanupTerminalSourceMaterializationsInput,
   CleanupTerminalSourceMaterializationsResult,
   GetActiveOntologySourceInput,
+  ListActiveOntologySourcesInput,
   MarkSourceMaterializationReadyInput,
   OntologySourceRecord,
   OntologySourceStorage,
@@ -234,6 +236,30 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
           AND status = 'active'
       `
       return row ? sourceRecord(row) : null
+    })
+  }
+
+  async listActive(
+    input: ListActiveOntologySourcesInput
+  ): Promise<readonly ActiveOntologySource[]> {
+    return this.runRootOperation(async (sql) => {
+      assertNonblank(input.projectId, "Source project id")
+      // Served by the partial index on active sources.
+      const rows = await sql<ActiveSourceRow[]>`
+        SELECT source_id, dataset_id, dataset_version_id, dataset_version_created_at,
+          projection_revision
+        FROM ontology_sources
+        WHERE project_id = ${input.projectId} AND status = 'active'
+      `
+      return rows.map((row) => ({
+        source: { projectionId: row.source_id },
+        datasetVersion: {
+          datasetId: row.dataset_id,
+          versionId: row.dataset_version_id,
+          createdAt: toIsoString(row.dataset_version_created_at),
+        },
+        projectionRevision: row.projection_revision,
+      }))
     })
   }
 
@@ -620,3 +646,12 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
 function numberOrNull(value: number | string | null): number | null {
   return value === null ? null : Number(value)
 }
+
+type ActiveSourceRow = Pick<
+  PgOntologySourceRow,
+  | "source_id"
+  | "dataset_id"
+  | "dataset_version_id"
+  | "dataset_version_created_at"
+  | "projection_revision"
+>

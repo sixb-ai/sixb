@@ -20,6 +20,7 @@ import type {
   AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,
+  ActiveOntologySource,
   AdoptedSourceMaterialization,
   AdoptSourceMaterializationInput,
   AssertSourceMaterializationExecutionInput,
@@ -27,6 +28,7 @@ import type {
   CleanupTerminalSourceMaterializationsInput,
   CleanupTerminalSourceMaterializationsResult,
   GetActiveOntologySourceInput,
+  ListActiveOntologySourcesInput,
   MarkSourceMaterializationReadyInput,
   OntologySourceRecord,
   OntologySourceStorage,
@@ -235,6 +237,34 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
         )
         .get(input.projectId, input.source.projectionId) as SqliteOntologySourceRow | null
       return row ? sourceRecord(row) : null
+    })
+  }
+
+  async listActive(
+    input: ListActiveOntologySourcesInput
+  ): Promise<readonly ActiveOntologySource[]> {
+    return this.runRootOperation(() => {
+      assertNonblank(input.projectId, "Source project id")
+      // Served by the partial index on active sources.
+      const rows = this.db
+        .query(
+          `
+            SELECT source_id, dataset_id, dataset_version_id, dataset_version_created_at,
+              projection_revision
+            FROM ontology_sources
+            WHERE project_id = ? AND status = 'active'
+          `
+        )
+        .all(input.projectId) as ActiveSourceRow[]
+      return rows.map((row) => ({
+        source: { projectionId: row.source_id },
+        datasetVersion: {
+          datasetId: row.dataset_id,
+          versionId: row.dataset_version_id,
+          createdAt: row.dataset_version_created_at,
+        },
+        projectionRevision: row.projection_revision,
+      }))
     })
   }
 
@@ -626,3 +656,12 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
     return row
   }
 }
+
+type ActiveSourceRow = Pick<
+  SqliteOntologySourceRow,
+  | "source_id"
+  | "dataset_id"
+  | "dataset_version_id"
+  | "dataset_version_created_at"
+  | "projection_revision"
+>

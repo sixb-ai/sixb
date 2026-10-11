@@ -1,7 +1,30 @@
 import type { ResolvedRuntimeAuthorization } from "../execution/authorization"
+import { type AuthorizedObjectReader, readerClearance } from "../execution/authorized-object-reader"
 import type { Storage } from "../storage"
 import type { ActionRunRecord } from "../storage/action-runs"
 import { findPrimitiveParentRequestExecution } from "../storage/executions/run-link"
+
+/**
+ * Whether the reader can read the object type of a run's subject under the markings of the
+ * versions projections applied. A run names its subject's id, so a run on a type the reader
+ * cannot read is hidden like one on a type it has no view grant for.
+ */
+export async function canReadActionRunSubject(
+  objectReader: AuthorizedObjectReader,
+  run: Pick<ActionRunRecord, "subject">
+): Promise<boolean> {
+  if (run.subject.kind !== "object") return true
+  const clearance = await readerClearance(objectReader)
+  return clearance?.unreadableType(run.subject.objectTypeId) === undefined
+}
+
+/** The object types whose runs the reader cannot read, to leave out of a run listing. */
+export async function unreadableActionRunTypes(
+  objectReader: AuthorizedObjectReader
+): Promise<ReadonlySet<string>> {
+  const clearance = await readerClearance(objectReader)
+  return new Set(clearance?.unreadable().types.keys())
+}
 
 /** Check both current grant scope and immutable request provenance for a delegated Action run. */
 export async function canDelegationAccessActionRun(input: {

@@ -4,7 +4,7 @@ import type { OntologyMaintenanceHandle, SixbHostView } from "@sixb/core"
 import { CSRF_HEADER_NAME, setRequestClientAddress } from "@sixb/core/internal/auth"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { setApiPublicOrigin } from "@sixb/core/internal/runtime"
-import { checkPipelineMarkings } from "@sixb/core/internal/security"
+import { checkPipelineMarkings, warmAppliedMarkings } from "@sixb/core/internal/security"
 import type { Server } from "bun"
 import { Elysia } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
@@ -175,6 +175,9 @@ export class SixbServer {
       definitions: this.hostRuntime.definitions,
       lakeStorage: this.hostRuntime.lakeStorage,
     })
+    // Objects keep the markings of the versions they were projected from. The first read that
+    // needs them waits for them; reading them now spares that read the wait.
+    warmAppliedMarkings(this.hostRuntime)
 
     const maintenance = await this.hostRuntime.startOntologyMaintenance()
     this.maintenance = maintenance
@@ -216,6 +219,8 @@ export class SixbServer {
     const maintenance = this.maintenance
     this.maintenance = null
     await maintenance?.stop()
+    // Started by the warm-up and kept up by reads; a later start or read resumes it.
+    this.hostRuntime.stopAppliedMarkingsRefresh()
   }
 }
 

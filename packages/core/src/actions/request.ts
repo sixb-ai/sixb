@@ -23,7 +23,11 @@ import {
 } from "../storage"
 import { assertObjectReadOutputWithinLimit } from "../storage/objects/execution-limits"
 import { admitDelegatedObjectAction, assertDelegatedActionTarget } from "./delegated-admission"
-import { actionRunBelongsToShareGrant, canDelegationAccessActionRun } from "./run-authorization"
+import {
+  actionRunBelongsToShareGrant,
+  canDelegationAccessActionRun,
+  canReadActionRunSubject,
+} from "./run-authorization"
 import { dispatchActionRun } from "./run-dispatch"
 import { createActionRunId } from "./run-id"
 import type { ActionDefinition, ActionSubject } from "./types"
@@ -135,6 +139,11 @@ export async function requestAction(
   }
 
   validateActionSubject(action, subject)
+  // A run names its subject: a principal cannot request one on a type it cannot read. The action
+  // itself runs as trusted code.
+  if (authorization.type !== "delegated" && subject?.kind === "object") {
+    await objectReader.assertReadable({ objectTypeIds: [subject.objectTypeId] })
+  }
 
   let pathPrefix = action.id
   let objectType: ObjectTypeWithPropertyTokens | null = null
@@ -256,6 +265,7 @@ export async function waitForActionRun(
 ): Promise<ActionRunRecord> {
   const projectId = runtime.projectId
   const runtimeAuthorization = runtime.runtimeAuthorization
+  const objectReader = runtime.objectReader
   const request = {
     runId: input.runId,
     timeoutMs: input.timeoutMs,
@@ -342,7 +352,8 @@ export async function waitForActionRun(
                 projectId,
                 authority: authorization,
                 run: record,
-              }))))
+              })))) &&
+          (await canReadActionRunSubject(objectReader, record))
         if (visible && isTerminalActionRun(record)) {
           if (authorization.type === "delegated") {
             assertObjectReadOutputWithinLimit(record, authorization.objectRead.limits)

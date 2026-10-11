@@ -1,26 +1,55 @@
 import { AuthorizationError } from "../authorization/errors"
-import type { StoredDomainEvent } from "../events/types"
 import type { OntologyDefinitionCatalog } from "../ontology/registry"
+import {
+  type AppliedMarkingsSnapshot,
+  type AppliedSeal,
+  appliedLinkKey,
+  NO_APPLIED_MARKINGS,
+} from "../security/applied-markings-snapshot"
 import { missingClearanceRedactions } from "../security/redactions"
 import type { Redactions } from "../security/types"
-import type { ExpandedLinkValue, ExpandedObjectRow, ObjectRow } from "../storage"
-import type {
-  ObjectQueryAdmissionState,
-  ObjectQueryPropertyUse,
-  ObjectQuerySemanticAdmission,
-} from "./query/validate"
 
 /**
  * The marked properties one reader cannot read, resolved once from its clearances.
  *
  * A property is readable when the reader clears every one of its markings. Unreadable properties
  * are omitted from rows and cannot be used to select, order, or aggregate objects.
+ *
+ * Markings a projection's applied dataset version still carries extend this: its properties keep
+ * them, and an object type or link whose key column carries markings the reader lacks is
+ * unreadable, like a type it has no view grant for.
  */
 export interface PropertyClearance {
   /** What the reader cannot read on this object type; `undefined` when it reads every property. */
   hiddenProperties(objectTypeId: string): HiddenProperties | undefined
   /** First marking on the property that the reader is not cleared for. */
   missingMarking(objectTypeId: string, propertyId: string): string | undefined
+  /** Why the reader cannot read this object type at all; `undefined` when it can. */
+  unreadableType(objectTypeId: string): Unreadable | undefined
+  /** Why the reader cannot read this link, keyed by its source type; `undefined` when it can. */
+  unreadableLink(objectTypeId: string, linkId: string): Unreadable | undefined
+  /** Every object type and link the reader cannot read, for link queries that name none. */
+  unreadable(): UnreadableTargets
+}
+
+/** A marking the reader lacks on what makes an object type or link unreadable, and why. */
+export interface Unreadable {
+  readonly marking: string
+  readonly message: string
+}
+
+export interface UnreadableTargets {
+  readonly types: ReadonlyMap<string, Unreadable>
+  readonly links: readonly (Unreadable & {
+    readonly objectTypeId: string
+    readonly linkId: string
+    readonly targetObjectTypeId: string
+  })[]
+}
+
+/** The error a read of an unreadable object type or link fails with: a 403. */
+export function unreadableError(unreadable: Unreadable): AuthorizationError {
+  return new AuthorizationError(`clearance:marking:${unreadable.marking}`, unreadable.message)
 }
 
 /**
@@ -43,35 +72,75 @@ const clearancesByOntology = new WeakMap<
   OntologyDefinitionCatalog,
   Map<string, PropertyClearance | undefined>
 >()
+// Applied markings change rarely, and a snapshot is replaced only when its content changes.
+const appliedClearancesByOntology = new WeakMap<
+  OntologyDefinitionCatalog,
+  WeakMap<AppliedMarkingsSnapshot, Map<string, PropertyClearance | undefined>>
+>()
+
+const NO_UNREADABLE_TARGETS: UnreadableTargets = Object.freeze({
+  types: new Map(),
+  links: Object.freeze([]),
+})
 
 /**
  * Resolve what a reader with these clearances cannot read. Returns `undefined` when it can read
  * every property, so callers skip redaction entirely.
+ *
+ * A reader cleared for every marking the applied versions add receives the clearance of the code
+ * alone, the same object whatever the snapshot.
  */
 export function resolvePropertyClearance(
   ontology: OntologyDefinitionCatalog,
-  clearances: ReadonlySet<string>
+  clearances: ReadonlySet<string>,
+  applied: AppliedMarkingsSnapshot = NO_APPLIED_MARKINGS
 ): PropertyClearance | undefined {
-  let resolved = clearancesByOntology.get(ontology)
+  const key = JSON.stringify([...clearances].sort())
+  if (applied === NO_APPLIED_MARKINGS || clearsEvery(clearances, applied.markings)) {
+    let resolved = clearancesByOntology.get(ontology)
+    if (!resolved) {
+      resolved = new Map()
+      clearancesByOntology.set(ontology, resolved)
+    }
+    if (!resolved.has(key)) resolved.set(key, createPropertyClearance(ontology, clearances))
+    return resolved.get(key)
+  }
+
+  let bySnapshot = appliedClearancesByOntology.get(ontology)
+  if (!bySnapshot) {
+    bySnapshot = new WeakMap()
+    appliedClearancesByOntology.set(ontology, bySnapshot)
+  }
+  let resolved = bySnapshot.get(applied)
   if (!resolved) {
     resolved = new Map()
-    clearancesByOntology.set(ontology, resolved)
+    bySnapshot.set(applied, resolved)
   }
-  const key = JSON.stringify([...clearances].sort())
-  if (!resolved.has(key)) resolved.set(key, createPropertyClearance(ontology, clearances))
+  if (!resolved.has(key)) {
+    resolved.set(key, createPropertyClearance(ontology, clearances, applied))
+  }
   return resolved.get(key)
+}
+
+function clearsEvery(clearances: ReadonlySet<string>, markings: ReadonlySet<string>): boolean {
+  for (const markingId of markings) if (!clearances.has(markingId)) return false
+  return true
 }
 
 function createPropertyClearance(
   ontology: OntologyDefinitionCatalog,
-  clearances: ReadonlySet<string>
+  clearances: ReadonlySet<string>,
+  applied: AppliedMarkingsSnapshot = NO_APPLIED_MARKINGS
 ): PropertyClearance | undefined {
   const missingByType = new Map<string, ReadonlyMap<string, string>>()
   const hiddenByType = new Map<string, HiddenProperties>()
   for (const objectType of ontology.listObjectTypes()) {
+    const surplus = applied.properties.get(objectType.id)
     const missing = new Map<string, string>()
     for (const property of objectType.properties) {
-      const marking = property.markings?.find((markingId) => !clearances.has(markingId))
+      const marking =
+        property.markings?.find((markingId) => !clearances.has(markingId)) ??
+        firstMissing(surplus?.get(property.id), clearances)
       if (marking !== undefined) missing.set(property.id, marking)
     }
     if (missing.size === 0) continue
@@ -84,203 +153,67 @@ function createPropertyClearance(
       })
     )
   }
-  if (hiddenByType.size === 0) return undefined
 
+  const types = new Map<string, Unreadable>()
+  for (const [objectTypeId, seals] of applied.types) {
+    const unreadable = unreadableBy(seals, clearances, `'${objectTypeId}'`)
+    if (unreadable) types.set(objectTypeId, unreadable)
+  }
+  const links: UnreadableTargets["links"][number][] = []
+  const linksByKey = new Map<string, Unreadable>()
+  for (const [key, link] of applied.links) {
+    const name = `link '${link.objectTypeId}.${link.linkId}'`
+    const unreadable = unreadableBy(link.seals, clearances, name)
+    if (!unreadable) continue
+    linksByKey.set(key, unreadable)
+    links.push(
+      Object.freeze({
+        ...unreadable,
+        objectTypeId: link.objectTypeId,
+        linkId: link.linkId,
+        targetObjectTypeId: link.targetObjectTypeId,
+      })
+    )
+  }
+  if (hiddenByType.size === 0 && types.size === 0 && links.length === 0) return undefined
+
+  const unreadable: UnreadableTargets =
+    types.size === 0 && links.length === 0
+      ? NO_UNREADABLE_TARGETS
+      : Object.freeze({ types, links: Object.freeze(links) })
   return Object.freeze({
     hiddenProperties: (objectTypeId: string) => hiddenByType.get(objectTypeId),
     missingMarking: (objectTypeId: string, propertyId: string) =>
       missingByType.get(objectTypeId)?.get(propertyId),
+    unreadableType: (objectTypeId: string) => types.get(objectTypeId),
+    unreadableLink: (objectTypeId: string, linkId: string) =>
+      linksByKey.get(appliedLinkKey(objectTypeId, linkId)),
+    unreadable: () => unreadable,
   })
 }
 
-/**
- * Omit unreadable properties from a row and the objects expanded under it, and list them in
- * `redactions`. The row is not modified: what changes is copied, the rest is shared.
- */
-export function redactObjectRow<TRow extends ObjectRow>(
-  row: TRow,
-  clearance: PropertyClearance
-): TRow {
-  return redactRow(row, clearance, true)
+function firstMissing(
+  markings: ReadonlySet<string> | undefined,
+  clearances: ReadonlySet<string>
+): string | undefined {
+  if (!markings) return undefined
+  for (const markingId of [...markings].sort()) if (!clearances.has(markingId)) return markingId
+  return undefined
 }
 
-/**
- * {@link redactObjectRow} without the `redactions` records, for rows about to be deep-copied.
- *
- * Omitting hidden values before the copy keeps them out of it and copies each row once. The copy
- * then receives its records from {@link attachRedactions}: they are frozen and owned by the
- * clearance, so they are shared rather than copied with each row.
- */
-export function omitHiddenProperties<TRow extends ObjectRow>(
-  row: TRow,
-  clearance: PropertyClearance
-): TRow {
-  return redactRow(row, clearance, false)
-}
-
-/**
- * Set `redactions` on a row returned by {@link omitHiddenProperties} and since deep-copied, and on
- * the objects expanded under it. It modifies the row, so it only accepts the caller's own copy.
- */
-export function attachRedactions(row: ObjectRow, clearance: PropertyClearance): void {
-  const hidden = clearance.hiddenProperties(row.objectTypeId)
-  if (hidden !== undefined) row.redactions = hidden.redactions
-  if (row.links === undefined) return
-  for (const value of Object.values(row.links)) {
-    if (value === null) continue
-    if (Array.isArray(value)) {
-      for (const linked of value) attachRedactions(linked, clearance)
-    } else {
-      attachRedactions(value as ExpandedObjectRow, clearance)
-    }
+/** The first seal the reader lacks a marking for, as the message a denied read returns. */
+function unreadableBy(
+  seals: readonly AppliedSeal[],
+  clearances: ReadonlySet<string>,
+  name: string
+): Unreadable | undefined {
+  for (const seal of seals) {
+    const marking = firstMissing(seal.markings, clearances)
+    if (marking === undefined) continue
+    return Object.freeze({
+      marking,
+      message: `[Sixb] Cannot read ${name} until projection '${seal.projectionId}' applies a compliant version: ${seal.reason} carries marking '${marking}'.`,
+    })
   }
-}
-
-function redactRow<TRow extends ObjectRow>(
-  row: TRow,
-  clearance: PropertyClearance,
-  withRedactions: boolean
-): TRow {
-  const hidden = clearance.hiddenProperties(row.objectTypeId)
-  const links = row.links
-  if (hidden === undefined && links === undefined) return row
-
-  const redacted: TRow = { ...row }
-  if (hidden !== undefined) {
-    redacted.properties = withoutKeys(row.properties, hidden.ids)
-    if (withRedactions) redacted.redactions = hidden.redactions
-  }
-  if (links !== undefined) {
-    redacted.links = Object.fromEntries(
-      Object.entries(links).map(([linkId, value]) => [
-        linkId,
-        redactLinkValue(value, clearance, withRedactions),
-      ])
-    )
-  }
-  return redacted
-}
-
-function redactLinkValue(
-  value: ExpandedLinkValue,
-  clearance: PropertyClearance,
-  withRedactions: boolean
-): ExpandedLinkValue {
-  if (value === null) return null
-  if (Array.isArray(value)) {
-    return value.map((row) => redactRow(row, clearance, withRedactions))
-  }
-  // Array.isArray does not narrow a readonly[] away, so assert the single-object case.
-  return redactRow(value as ExpandedObjectRow, clearance, withRedactions)
-}
-
-/**
- * Omit unreadable properties from an object event, under the same contract as rows. Other events
- * carry no markable value: link properties and telemetry properties cannot be marked.
- */
-export function redactDomainEvent(
-  event: StoredDomainEvent,
-  clearance: PropertyClearance
-): StoredDomainEvent {
-  if (event.topic !== "objects") return event
-  const hidden = clearance.hiddenProperties(event.payload.objectTypeId)
-  if (hidden === undefined) return event
-
-  if (event.type === "object.deleted") {
-    return {
-      ...event,
-      payload: {
-        ...event.payload,
-        propertyChanges: withoutKeys(event.payload.propertyChanges, hidden.ids),
-        redactions: hidden.redactions,
-      },
-    }
-  }
-  return {
-    ...event,
-    payload: {
-      ...event.payload,
-      properties: withoutKeys(event.payload.properties, hidden.ids),
-      propertyChanges: withoutKeys(event.payload.propertyChanges, hidden.ids),
-      redactions: hidden.redactions,
-    },
-  }
-}
-
-/**
- * A copy of the record's own properties without the hidden keys.
- *
- * Spreading the record and deleting the few hidden keys is several times faster than assigning
- * each kept key, and the spread defines every key as an own property, even `__proto__`.
- */
-function withoutKeys<TValue>(
-  record: Readonly<Record<string, TValue>>,
-  hidden: ReadonlySet<string>
-): Record<string, TValue> {
-  const kept: Record<string, TValue> = { ...record }
-  for (const key of hidden) delete kept[key]
-  return kept
-}
-
-/**
- * Reject every query use of a property the reader cannot read, except projection.
- *
- * Filtering, ordering, searching, or faceting by a hidden value would reveal it through which
- * objects match and in what order. Projection only shapes the output, which is redacted anyway.
- */
-export function createClearanceQueryAdmission(
-  clearance: PropertyClearance
-): ObjectQuerySemanticAdmission {
-  // Each state stands for the object types a query has reached so far. A property without an
-  // explicit type is checked against all of them.
-  const reachedTypes = new WeakMap<ObjectQueryAdmissionState, readonly string[]>()
-  const state = (objectTypeIds: readonly string[]): ObjectQueryAdmissionState => {
-    const created = Object.freeze({})
-    reachedTypes.set(created, Object.freeze([...objectTypeIds]))
-    return created
-  }
-  const reached = (input: ObjectQueryAdmissionState): readonly string[] => {
-    const objectTypeIds = reachedTypes.get(input)
-    if (!objectTypeIds) {
-      throw new Error("[Sixb] Clearance query admission received a state it did not create.")
-    }
-    return objectTypeIds
-  }
-  const empty = state([])
-
-  const admission: ObjectQuerySemanticAdmission = {
-    empty: () => empty,
-    source: (input) => ({ state: state(input.result.objectTypeIds) }),
-    edge: (input) => ({ state: state(input.result.objectTypeIds) }),
-    // A difference only returns objects of its first input.
-    set: (input) =>
-      input.op === "subtract"
-        ? (input.states[0] ?? empty)
-        : state([...new Set(input.states.flatMap(reached))]),
-    property: (input) => {
-      if (input.use === "project") return undefined
-      const objectTypeIds =
-        input.objectTypeId === undefined ? reached(input.state) : [input.objectTypeId]
-      for (const objectTypeId of objectTypeIds) {
-        const marking = clearance.missingMarking(objectTypeId, input.propertyId)
-        if (marking === undefined) continue
-        return new AuthorizationError(
-          `clearance:marking:${marking}`,
-          `[Sixb] Cannot ${PROPERTY_USE_VERBS[input.use]} '${objectTypeId}.${input.propertyId}' at '${input.path}': it requires clearance for marking '${marking}'.`
-        )
-      }
-      return undefined
-    },
-  }
-  return Object.freeze(admission)
-}
-
-const PROPERTY_USE_VERBS: Readonly<Record<ObjectQueryPropertyUse, string>> = {
-  filter: "filter by",
-  text: "search",
-  vector: "run a vector search over",
-  sort: "sort by",
-  project: "project",
-  "expand.orderBy": "order expanded objects by",
-  facet: "facet by",
+  return undefined
 }

@@ -19,6 +19,7 @@ import type {
   AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,
+  ActiveOntologySource,
   AdoptedSourceMaterialization,
   AdoptSourceMaterializationInput,
   AssertSourceMaterializationExecution,
@@ -26,6 +27,7 @@ import type {
   CleanupTerminalSourceMaterializationsInput,
   CleanupTerminalSourceMaterializationsResult,
   GetActiveOntologySourceInput,
+  ListActiveOntologySourcesInput,
   MarkSourceMaterializationReadyInput,
   OntologySourceRecord,
   OntologySourceStorage,
@@ -190,6 +192,25 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
         input.source.projectionId
       )
       return active ? sourceMaterializationRecord(active) : null
+    })
+  }
+
+  async listActive(
+    input: ListActiveOntologySourcesInput
+  ): Promise<readonly ActiveOntologySource[]> {
+    return this.runRootOperation(() => {
+      assertNonblank(input.projectId, "Source project id")
+      const active: ActiveOntologySource[] = []
+      for (const materialization of this.state.sourceMaterializations.values()) {
+        if (materialization.projectId !== input.projectId) continue
+        if (materialization.status !== "active") continue
+        active.push({
+          source: { projectionId: materialization.source.projectionId },
+          datasetVersion: { ...materialization.datasetVersion },
+          projectionRevision: materialization.projectionRevision,
+        })
+      }
+      return active
     })
   }
 

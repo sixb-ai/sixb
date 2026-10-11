@@ -121,6 +121,20 @@ Markings themselves are read from your code. Removing a marking from a source co
 
 Reading a dataset version applies that version's markings. A projection refuses a version whose columns carry markings the mapped properties do not declare, and says why. Add the markings to the property, or, if the step's code no longer derives them, rerun its pipeline.
 
+### Objects keep the markings of the version they were projected from
+
+Objects hold the values of the dataset version their projection last applied. Until the projection applies a version your code allows, each property keeps the markings that version carries on its column, whatever the property declares today.
+
+Say `normalize-invoices` computed `title` from `amount`, and `Invoice.title` declared `financial`. You fix the SQL and remove the marking from `Invoice.title`. The new code passes every check, but the invoices still hold titles computed from amounts, so readers without `financial` keep receiving `title` redacted and cannot filter, sort, or search by it. Rerun the pipeline: once the projection applies the new version, `title` is readable.
+
+A column that becomes the object id or a link key, or decides a `mostRecent` conflict, cannot carry markings. When it does in the applied version, for instance in a version written before Sixb recorded column lineage, readers lacking those markings cannot read the object type, or the link, at all, as for a type they have no view grant for: reads and writes fail with `403`, lists that name no type leave it out, and so do action runs on it, which these readers cannot request either. So does a projection whose mapping changed since the version it applied. The actions themselves, and other trusted code, read everything.
+
+The server logs a warning for each projection that makes a type or link unreadable, and `sixb check` and `sixb lake check` list every projection whose applied version adds markings. After adding a marking to a source column, rerun the pipelines that read it.
+
+An API server reads the applied versions when it starts, then every few seconds; `sixb dev` sees a version as soon as its projection applies it. When a server cannot read them for a few seconds, reads fail rather than return what might be marked, and an event subscription skips the events it cannot redact, with a warning: read them again with `read({ afterCursor })`. Deploy projection workers with or before the API: they refuse the versions the new code does not allow, so none is applied before every server knows about it.
+
+Telemetry points keep no record of the version they came from, so they are read under the markings of the code.
+
 ## Grant a clearance
 
 Add `clearances` to a [role](authorization.md). A role can carry clearances alone; its members still need a view grant from any role to read the object.
@@ -162,6 +176,7 @@ An omitted property is absent, never `null`, so `null` keeps meaning an empty va
 | Filter, sort, facet, or search by `amount` | Rejected with `403` |
 | Search without `fields` | Searches the other default text fields |
 | Object events | `amount` omitted from `properties` and `propertyChanges` |
+| Events of a type or link the reader cannot read | Not delivered |
 | File stored in `amount` | Not found |
 
 Dataset rows follow the same contract. Marked columns are left out of `columns` and of every row, even when requested:
@@ -176,7 +191,9 @@ Dataset rows follow the same contract. Marked columns are left out of `columns` 
 
 [Shared access](shared-access.md) links carry no clearance for now: marked properties are always omitted from shared sessions.
 
-In TypeScript, a marked property is optional when read, even if it is required. Writes still require it.
+Events are redacted with the markings in force when they are read, not when they were emitted. Once a projection applies a compliant version and `title` becomes readable, so does `title` in earlier events, including its `before` value in the event of that change.
+
+In TypeScript, a marked property is optional when read, even if it is required. Writes still require it. A property that keeps a marking from its applied version can be absent too, although its type does not say so.
 
 ## Rules
 

@@ -3,8 +3,17 @@
  *
  * `checkPipelineMarkings` is the SQL preflight the API server and CLI run before serving. The
  * projection worker shares the host's version classifier with `shareDatasetVersionMarkings`, then
- * classifies each pinned version and refuses one with `assertProjectionVersionMarkings`.
+ * classifies each pinned version and refuses one with `assertProjectionVersionMarkings`. The API
+ * server reads the versions projections applied ahead of its first request with
+ * `warmAppliedMarkings`, and the CLI reports what they add with `getAppliedMarkings`. Tests that
+ * rely on in-process invalidation alone lengthen the refresh with
+ * `setAppliedMarkingsRefreshInterval`.
  */
+export {
+  getAppliedMarkings,
+  setAppliedMarkingsRefreshInterval,
+  warmAppliedMarkings,
+} from "./applied-markings-host"
 export type {
   DatasetVersionMarkings,
   VersionClassification,

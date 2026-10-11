@@ -1,7 +1,8 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { InMemoryBroker } from "@sixb/core"
 import { LOGS_STREAM, LoggingService } from "@sixb/core/internal/logging"
 import { createLogSubscriptionHub, logSubscription } from "../src/routes/ws/logs"
+import { SubscriptionHub } from "../src/routes/ws/subscription-hub"
 
 const PROJECT_ID = "log-subscription-hub-test"
 const REPLAY_COUNT = 1_001
@@ -228,7 +229,125 @@ describe("SubscriptionHub", () => {
     }
     await waitFor(() => broker.active === 0)
   })
+
+  // Reproduce: drop the `sending` check from `flush` in subscription-hub.ts; the second batch is
+  // sent while the first one still waits for its view.
+  test("sends batches in order while a view waits", async () => {
+    const { deliver, hub } = await createManualHub()
+    const socket = new TestRecordSocket()
+    const firstView = new Deferred<void>()
+    let views = 0
+
+    try {
+      await hub.subscribe(
+        {},
+        socket,
+        {
+          matches: () => true,
+          view: async (records) => {
+            views += 1
+            if (views === 1) await firstView.promise
+            return records.map((record) => ({ ...record, value: `viewed ${record.value}` }))
+          },
+        },
+        () => undefined
+      )
+      deliver([{ cursor: "1", value: "first" }])
+      await waitFor(() => views === 1)
+      deliver([{ cursor: "2", value: "second" }])
+      await Bun.sleep(30)
+      expect(socket.values).toEqual([])
+
+      firstView.resolve()
+      await waitFor(() => socket.values.length === 2)
+      expect(socket.values).toEqual(["viewed first", "viewed second"])
+    } finally {
+      await hub.close()
+    }
+  })
+
+  // Reproduce: send `records` instead of returning in the `catch` of `sendViewed` in
+  // subscription-hub.ts; the batch is sent unviewed.
+  test("withholds a batch its view fails on and keeps delivering", async () => {
+    const { deliver, hub } = await createManualHub()
+    const socket = new TestRecordSocket()
+    const warn = spyOn(console, "warn").mockImplementation(() => undefined)
+    let fail = true
+
+    try {
+      await hub.subscribe(
+        {},
+        socket,
+        {
+          matches: () => true,
+          view: async (records) => {
+            if (fail) throw new Error("clearance unavailable")
+            return records
+          },
+        },
+        () => undefined
+      )
+      deliver([{ cursor: "1", value: "secret" }])
+      await waitFor(() => warn.mock.calls.length === 1)
+      expect(String(warn.mock.calls[0]?.[0])).toBe(
+        "[SixbServer] Withheld 1 record(s) from cursor '1' of a stream subscription, which could not be viewed: clearance unavailable"
+      )
+
+      fail = false
+      deliver([{ cursor: "2", value: "visible" }])
+      await waitFor(() => socket.values.length === 1)
+      expect(socket.values).toEqual(["visible"])
+      expect(socket.closeCode).toBeUndefined()
+    } finally {
+      warn.mockRestore()
+      await hub.close()
+    }
+  })
 })
+
+interface TestRecord {
+  readonly cursor: string
+  readonly value: string
+}
+
+class TestRecordSocket {
+  readonly values: string[] = []
+  closeCode: number | undefined
+
+  send(message: string): void {
+    const frame = JSON.parse(message) as { readonly records?: readonly TestRecord[] }
+    this.values.push(...(frame.records ?? []).map((record) => record.value))
+  }
+
+  close(code?: number): void {
+    this.closeCode = code
+  }
+}
+
+/** A hub over a source whose records the test delivers itself. */
+async function createManualHub(): Promise<{
+  readonly deliver: (records: readonly TestRecord[]) => void
+  readonly hub: SubscriptionHub<TestRecord>
+}> {
+  let deliverTo: ((records: readonly TestRecord[]) => void) | undefined
+  const hub = new SubscriptionHub<TestRecord>({
+    subscribe: async (deliver) => {
+      deliverTo = deliver
+      return () => {
+        deliverTo = undefined
+      }
+    },
+    frames: (records) => [{ type: "records", records }],
+    expired: async () => ({ type: "expired" }),
+  })
+  return {
+    deliver: (records) => {
+      if (!deliverTo) throw new Error("[Test] The hub is not subscribed.")
+      deliverTo(records)
+    },
+    hub,
+  }
+}
 
 async function createReplayHub(): Promise<{
   readonly anchorCursor: string

@@ -2,12 +2,14 @@ import { expect, spyOn, test } from "bun:test"
 import { waitForActionRun } from "../src/actions/request"
 import { AuthorizationError, emptyGrantIndex } from "../src/authorization"
 import { createDisabledRuntimeAuthorization } from "../src/execution/authorization"
+import { createAuthorizedObjectReader } from "../src/execution/authorized-object-reader"
 import { createDelegatedRequestScope, createTestingScope } from "../src/execution/scopes"
 import type { ExecutionScope } from "../src/execution/types"
 import { ActionRunTimeoutError } from "../src/objects/action/errors"
+import { OntologyRegistry } from "../src/ontology"
 import type { SixbRuntimeContext } from "../src/runtime/types"
 import type { ShareAccessPlan } from "../src/shares/access-plan"
-import type { ActionRunRecord, ExecutionRecord } from "../src/storage"
+import { type ActionRunRecord, type ExecutionRecord, InMemoryStorage } from "../src/storage"
 import { createSharedTestScope } from "./shared-test-scope"
 
 function runtimeWithSubscription(subscribe: () => Promise<() => void>): SixbRuntimeContext {
@@ -24,10 +26,20 @@ function runtimeWithSubscription(subscribe: () => Promise<() => void>): SixbRunt
   } as unknown as SixbRuntimeContext
 }
 
+/** A wait reads a run's subject through the execution's object reader. */
+function objectReaderFor(scope: ExecutionScope) {
+  return createAuthorizedObjectReader({
+    scope,
+    ontology: new OntologyRegistry({ sources: [] }),
+    objectStorage: new InMemoryStorage().objects,
+  })
+}
+
 function runtimeWithRecord(scope: ExecutionScope, record: ActionRunRecord): SixbRuntimeContext {
   return {
     projectId: "test",
     runtimeAuthorization: scope.authorization,
+    objectReader: objectReaderFor(scope),
     storage: { actionRuns: { getById: async () => record } },
     events: { subscribe: async () => () => undefined },
   } as unknown as SixbRuntimeContext
@@ -226,6 +238,7 @@ function delegatedRuntimeForRun(
   return {
     projectId: "test",
     runtimeAuthorization: scope.authorization,
+    objectReader: objectReaderFor(scope),
     storage: {
       actionRuns: { getById: async () => run },
       executions: {

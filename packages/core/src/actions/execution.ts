@@ -21,7 +21,11 @@ import {
   requestAction,
   requestActionAndWait,
 } from "./request"
-import { canDelegationAccessActionRun } from "./run-authorization"
+import {
+  canDelegationAccessActionRun,
+  canReadActionRunSubject,
+  unreadableActionRunTypes,
+} from "./run-authorization"
 import type { ActionDefinition } from "./types"
 
 export interface ActionRunsRuntime {
@@ -130,27 +134,27 @@ export function createActionsRuntime(
                 projectId,
                 authority: authorization,
                 run,
-              }))))
+              })))) &&
+          (await canReadActionRunSubject(runtime.objectReader, run))
           ? release(run)
           : null
       },
-      list: (input = {}) => {
+      list: async (input = {}) => {
         if (authorization.type === "denied" || authorization.type === "delegated") {
-          return Promise.resolve({ runs: [], hasMore: false, total: 0 })
+          return { runs: [], hasMore: false, total: 0 }
         }
         const storage = runtime.storage.actionRuns
-        if (!storage) return Promise.resolve({ runs: [], hasMore: false, total: 0 })
+        if (!storage) return { runs: [], hasMore: false, total: 0 }
+        if (authorization.type === "unrestricted") return storage.list({ ...input, projectId })
+        // Storage filters, so its pages and totals only count runs the reader can see.
+        const unreadable = await unreadableActionRunTypes(runtime.objectReader)
         return storage.list({
           ...input,
           projectId,
-          actionIds:
-            authorization.type === "principal"
-              ? [...authorization.context.grants["apply:action"]]
-              : undefined,
-          objectTypeIds:
-            authorization.type === "principal"
-              ? [...authorization.context.grants["view:object"]]
-              : undefined,
+          actionIds: [...authorization.context.grants["apply:action"]],
+          objectTypeIds: [...authorization.context.grants["view:object"]].filter(
+            (objectTypeId) => !unreadable.has(objectTypeId)
+          ),
         })
       },
     },

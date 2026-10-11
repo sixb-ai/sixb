@@ -8,7 +8,7 @@ import {
   ProjectionRunDispatcher,
 } from "@sixb/core/internal/projections"
 import { setApiPublicOrigin } from "@sixb/core/internal/runtime"
-import { checkPipelineMarkings } from "@sixb/core/internal/security"
+import { checkPipelineMarkings, getAppliedMarkings } from "@sixb/core/internal/security"
 import { SyncRunDispatcher } from "@sixb/core/internal/syncs"
 import type { Worker } from "@sixb/core/internal/workers"
 import { WorkflowRunDispatcher } from "@sixb/core/internal/workflows"
@@ -104,10 +104,22 @@ export async function checkRuntimePipelineMarkings(sixb: LoadedSixbHost): Promis
   await checkPipelineMarkings({ definitions: sixb.definitions, lakeStorage: sixb.lakeStorage })
 }
 
+/**
+ * What the dataset versions projections applied add to the code's markings, one line per
+ * projection: properties that keep a marking, and object types or links readers cannot read,
+ * until the projection applies a version the code allows. Reads the projections' active sources.
+ */
+export async function readAppliedMarkingNotices(sixb: LoadedSixbHost): Promise<readonly string[]> {
+  const { notices } = await getAppliedMarkings(sixb).current()
+  return notices.map((notice) => notice.message)
+}
+
 export async function stopSixbProviders(sixb: LoadedSixbHost): Promise<void> {
   await stopQuietly(() => flushSixbErrors(sixb))
   await stopQuietly(() => sixb.closeConnectors())
   await stopQuietly(() => closeProvider(sixb.queues))
+  // Stop refreshing applied markings before closing the storage and lake it reads.
+  sixb.stopAppliedMarkingsRefresh()
   // Stop tracked outbox publication before closing the storage it claims from.
   await stopQuietly(() => sixb.closeBroker())
   // The final outbox drain can report delivery failures after the initial error flush.
