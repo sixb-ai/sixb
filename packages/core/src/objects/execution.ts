@@ -1,3 +1,4 @@
+import type { BlobStorage } from "../blob-storage"
 import { shareSixbErrorReporter } from "../error-reporting/capability"
 import type { ExecutionContext } from "../execution"
 import {
@@ -147,7 +148,8 @@ export interface ObjectsRuntime extends ExecutionObjectOperations {
 
 export function createObjectsRuntime(
   runtime: SixbRuntimeContext,
-  execution: ExecutionContext
+  execution: ExecutionContext,
+  blobStorage: Pick<BlobStorage, "stat" | "open">
 ): ObjectsRuntime {
   const runtimeAuthorization = runtime.runtimeAuthorization
   const objectReader = runtime.objectReader
@@ -180,6 +182,7 @@ export function createObjectsRuntime(
         ...capturedRuntime,
         execution,
         objectType,
+        blobStorage,
       }) as ExecutionObjectSet<TObjectType>
     },
     {

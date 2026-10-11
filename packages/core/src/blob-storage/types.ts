@@ -22,6 +22,16 @@ export interface FileRef {
 
 export type BlobBody = ArrayBuffer | Uint8Array | Blob | ReadableStream<Uint8Array>
 
+/** A FileRef opened through the record that references it. */
+export interface OpenedFileRef {
+  readonly fileRef: FileRef
+  /**
+   * The file's bytes. The stored blob is opened on the first read: read the body to its end or
+   * cancel it, and a body never read holds nothing.
+   */
+  readonly body: ReadableStream<Uint8Array>
+}
+
 export interface PutBlobInput {
   readonly body: BlobBody
   /** Reject the write when the consumed byte count differs from this value. */

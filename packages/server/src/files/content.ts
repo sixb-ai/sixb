@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto"
-import { type BlobInfo, type BlobStorage, type FileRef, isFileRef } from "@sixb/core"
+import { type BlobInfo, type BlobStorage, type FileRef, fileNameFor } from "@sixb/core"
 import { BlobStorageError, supportsRangeRead } from "@sixb/core/blob-storage/server"
-import { canonicalMediaType } from "@sixb/core/internal/blob-storage"
+import {
+  canonicalMediaType,
+  resolveFileRefAtPath,
+  statFileRef,
+} from "@sixb/core/internal/blob-storage"
 import { ZodError } from "zod"
 
 export type FileContentDisposition = "inline" | "attachment"
@@ -149,8 +153,8 @@ export function fileContentHeadResponses(options: FileContentResponsesOptions = 
 export async function createFileContentResponse(
   input: FileContentResponseInput
 ): Promise<Response | null> {
-  const stat = await input.blobStorage.stat(input.fileRef.blobId)
-  if (!stat || !blobMatchesFileRef(stat, input.fileRef)) {
+  const stat = await statFileRef(input.blobStorage, input.fileRef)
+  if (!stat) {
     return null
   }
 
@@ -256,11 +260,6 @@ export async function createContextualFileContentResponse<TQuery extends FileCon
   }
 }
 
-export function resolveFileRefAtPath(root: unknown, path: string): FileRef | null {
-  const value = resolveJsonPointer(root, path)
-  return isFileRef(value) ? value : null
-}
-
 function fileContentNotFound(
   set: { status?: number | string },
   message: string
@@ -269,57 +268,11 @@ function fileContentNotFound(
   return { error: message }
 }
 
-function blobMatchesFileRef(stat: BlobInfo, fileRef: FileRef): boolean {
-  return (
-    stat.blobId === fileRef.blobId &&
-    stat.digest === fileRef.digest &&
-    stat.sizeBytes === fileRef.sizeBytes
-  )
-}
-
 function matchesIfNoneMatch(header: string | null | undefined, etag: string): boolean {
   return (
     header?.trim() === "*" ||
     (header?.split(",").some((value) => value.trim().replace(/^W\//, "") === etag) ?? false)
   )
-}
-
-function resolveJsonPointer(root: unknown, pointer: string): unknown {
-  if (pointer === "") {
-    return root
-  }
-
-  if (!pointer.startsWith("/")) {
-    return undefined
-  }
-
-  let current = root
-  for (const rawSegment of pointer.slice(1).split("/")) {
-    const segment = decodeJsonPointerSegment(rawSegment)
-    if (Array.isArray(current)) {
-      const index = Number.parseInt(segment, 10)
-      if (!Number.isInteger(index) || index < 0 || index.toString() !== segment) {
-        return undefined
-      }
-      if (!Object.hasOwn(current, segment)) {
-        return undefined
-      }
-      current = current[index]
-      continue
-    }
-
-    if (typeof current !== "object" || current === null || !Object.hasOwn(current, segment)) {
-      return undefined
-    }
-
-    current = (current as Record<string, unknown>)[segment]
-  }
-
-  return current
-}
-
-function decodeJsonPointerSegment(segment: string): string {
-  return segment.replaceAll("~1", "/").replaceAll("~0", "~")
 }
 
 /**
@@ -457,16 +410,6 @@ function rangeNotSatisfiableResponse(sizeBytes: number): Response {
   headers.set("accept-ranges", "bytes")
   headers.set("content-range", `bytes */${sizeBytes}`)
   return new Response(null, { status: 416, headers })
-}
-
-function fileNameFor(fileRef: FileRef): string {
-  const fromFileName = fileRef.fileName?.split(/[\\/]/).filter(Boolean).at(-1)
-  if (fromFileName) {
-    return fromFileName
-  }
-
-  const fromLogicalPath = fileRef.logicalPath?.split(/[\\/]/).filter(Boolean).at(-1)
-  return fromLogicalPath || `${fileRef.blobId}.bin`
 }
 
 function contentDispositionHeader(disposition: FileContentDisposition, fileName: string): string {

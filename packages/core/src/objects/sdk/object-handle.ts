@@ -5,26 +5,27 @@
  */
 
 import type { ActionDefinition } from "../../actions"
-import type { ObjectLink, ObjectRef } from "../../ontology"
+import type { ObjectLink, ObjectRef, Property } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
-import type { LinkToken, ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
+import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
 import { assertLinkTokenBelongsToObjectType } from "../../ontology/validation"
 import type { ObjectByIdHandle, TwinObject } from "../../runtime/types"
 import {
   requestActionAndWait as requestActionAndWaitLeaf,
   requestAction as requestActionLeaf,
 } from "../action"
-import type { ExecutionObjectContext, ResolvedLinkContext } from "../context"
+import type { ObjectSetContext, ResolvedLinkContext } from "../context"
 import { removeLink as removeLinkLeaf, upsertLink as upsertLinkLeaf } from "../link"
 import { deleteObject, restoreObject } from "../object"
 import { createObjectVectorHandle } from "../vectors/handle"
+import { createObjectFileHandle } from "./file-handle"
 import { createTelemetryChannel } from "./telemetry-channel"
 
 type ObjectRefInput = ObjectRef
 type AnyLinkToken = LinkToken<string, string, string | readonly string[], ObjectLink>
 
 export function createObjectByIdHandle<TObjectType extends ObjectTypeWithPropertyTokens>(
-  ctx: ExecutionObjectContext,
+  ctx: ObjectSetContext,
   primaryId: string
 ): ObjectByIdHandle<TObjectType> {
   const objectHandle = {
@@ -130,6 +131,9 @@ export function createObjectByIdHandle<TObjectType extends ObjectTypeWithPropert
     },
 
     telemetry: createTelemetryChannel<TObjectType>(ctx, primaryId),
+
+    file: (property: PropertyToken<string, string, Property>, index?: number) =>
+      createObjectFileHandle(ctx, primaryId, property, index),
   }
 
   return objectHandle as unknown as ObjectByIdHandle<TObjectType>

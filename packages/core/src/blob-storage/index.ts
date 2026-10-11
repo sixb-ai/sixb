@@ -21,6 +21,7 @@ export type {
   DirectPutBlobUploadSession,
   DirectUploadBlobStorage,
   MultipartBlobUploadSession,
+  OpenedFileRef,
   PutBlobInput,
   RangeReadableBlobStorage,
   SignBlobUploadPartInput,
