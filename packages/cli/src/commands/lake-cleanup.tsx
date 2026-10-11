@@ -16,6 +16,7 @@ interface LakeMaintenanceOptions {
   readonly dryRun?: boolean
   readonly expireOlderThan?: string
   readonly deleteOlderThan?: string
+  readonly protect?: readonly { readonly datasetId: string; readonly versionId: string }[]
 }
 
 export interface LakeMaintenanceReport {
@@ -23,6 +24,8 @@ export interface LakeMaintenanceReport {
   readonly expireOlderThan: string
   readonly deleteOlderThan: string
   readonly snapshots: number
+  /** Old snapshots kept because a version they hold is still needed, when the provider says. */
+  readonly keptSnapshots?: number
   readonly oldFiles: number
   readonly orphanedFiles: number
 }
@@ -43,10 +46,17 @@ export async function runLakeCleanup(options: LakeCleanupOptions = {}) {
 
     const expireOlderThan = options.expireOlderThan ?? DEFAULT_RETENTION
     const deleteOlderThan = options.deleteOlderThan ?? expireOlderThan
+    // Objects hold the rows of the version each projection applied, and their markings are read
+    // from it: the lake keeps those versions too. Without them, cleanup does not run.
+    const applied = await sixb.storage.ontology.sources.listActive({ projectId: sixb.projectId })
     const report = await lakeStorage.runMaintenance({
       dryRun: options.dryRun ?? false,
       expireOlderThan,
       deleteOlderThan,
+      protect: applied.map(({ datasetVersion }) => ({
+        datasetId: datasetVersion.datasetId,
+        versionId: datasetVersion.versionId,
+      })),
     })
     await renderStatic(<LakeCleanupView projectId={sixb.id} report={report} />)
   } finally {

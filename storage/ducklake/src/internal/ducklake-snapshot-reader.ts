@@ -418,6 +418,32 @@ export class DuckLakeSnapshotReader {
     return latest
   }
 
+  /**
+   * The snapshot of every dataset's latest version, however old, from one shared walk down the
+   * whole history: maintenance must never expire one.
+   */
+  async latestVersionSnapshotIds(runtime: DuckDbQueryRuntime): Promise<readonly string[]> {
+    const tables = await runtime.query(`
+      SELECT table_name
+      FROM ${duckLakeMetadataTableName(this.options, "ducklake_table")}
+      WHERE end_snapshot IS NULL
+    `)
+    const datasetIds = tables.flatMap((table) => {
+      const datasetId = decodeDatasetTableName(getString(table, "table_name"))
+      return datasetId === null ? [] : [datasetId]
+    })
+    if (datasetIds.length === 0) {
+      return []
+    }
+
+    const latest = await this.resolveLatestSnapshotRows(
+      runtime,
+      await this.resolveDatasetTables(runtime, datasetIds),
+      Number.POSITIVE_INFINITY
+    )
+    return [...latest.values()].map((row) => row.snapshotId)
+  }
+
   private snapshotRowToSummary(
     datasetId: string,
     row: DatasetSnapshotRow
@@ -490,7 +516,8 @@ export class DuckLakeSnapshotReader {
    */
   private async resolveLatestSnapshotRows(
     runtime: DuckDbQueryRuntime,
-    tablesByDatasetId: ReadonlyMap<string, DatasetTableRef>
+    tablesByDatasetId: ReadonlyMap<string, DatasetTableRef>,
+    scanLimit = CATALOG_SNAPSHOT_SCAN_LIMIT
   ): Promise<Map<string, DatasetSnapshotRow>> {
     const result = new Map<string, DatasetSnapshotRow>()
     if (tablesByDatasetId.size === 0) {
@@ -502,7 +529,7 @@ export class DuckLakeSnapshotReader {
 
     let beforeSnapshotId: string | undefined
     let scanned = 0
-    while (unresolved.size > 0 && scanned < CATALOG_SNAPSHOT_SCAN_LIMIT) {
+    while (unresolved.size > 0 && scanned < scanLimit) {
       const candidates = await this.queryCatalogSnapshotBatch(
         runtime,
         beforeSnapshotId,

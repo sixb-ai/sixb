@@ -291,6 +291,49 @@ describe("DuckLakeStorage remote catalogs", () => {
     }
   })
 
+  // Regression proof: in DuckLakeMaintenance, stop keeping each dataset's latest version, or
+  // ignore `protect`. The idle dataset's version, or the protected one, then expires.
+  test("keeps needed versions during maintenance of a PostgreSQL catalog", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-maintenance-"))
+    const idle = defineDataset(`raw.pg.idle.${randomId()}`, { schema: [col("id", "string")] })
+    const busy = defineDataset(`raw.pg.busy.${randomId()}`, { schema: [col("id", "string")] })
+    const storage = new DuckLakeStorage({
+      catalog: postgresCatalog(),
+      dataPath: join(rootDir, "data"),
+    })
+    const commit = async (dataset: DatasetDefinition, id: string) => {
+      const write = await storage.beginWrite({ dataset, mode: "snapshot" })
+      await write.writeRows([{ id }])
+      return write.commit()
+    }
+
+    try {
+      await storage.createDataset(idle)
+      await storage.createDataset(busy)
+      const idleVersion = await commit(idle, "room_1")
+      const replaced = await commit(busy, "reading_1")
+      const applied = await commit(busy, "reading_2")
+      await commit(busy, "reading_3")
+
+      const report = await storage.runMaintenance({
+        expireOlderThan: "0 seconds",
+        deleteOlderThan: "0 seconds",
+        protect: [{ datasetId: busy.id, versionId: applied.versionId }],
+      })
+
+      expect(report.keptSnapshots).toBe(2)
+      expect(await storage.getVersion(busy.id, replaced.versionId)).toBeNull()
+      expect(await storage.getVersion(busy.id, applied.versionId)).not.toBeNull()
+      expect((await storage.getLatestVersion(idle.id))?.versionId).toBe(idleVersion.versionId)
+      expect(await collectRows(storage.readRows({ datasetId: idle.id }))).toEqual([
+        { id: "room_1" },
+      ])
+    } finally {
+      await storage.close()
+      await rm(rootDir, { recursive: true, force: true })
+    }
+  })
+
   test("uses a PostgreSQL catalog with an S3-compatible data path", async () => {
     const dataset = defineDataset(`raw.pg.s3.${randomId()}`, {
       schema: [col("orderId", "string")],
