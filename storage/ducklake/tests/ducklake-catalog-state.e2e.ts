@@ -110,9 +110,10 @@ describe("DuckLakeStorage bulk catalog state", () => {
       latestVersion: null,
     })
 
-    // Table-id map + one snapshot-batch scan (candidates + file flags). A
-    // per-dataset getLatestVersion loop would scale with datasetCount instead.
-    expect(queries.length).toBeLessThanOrEqual(3)
+    // Table-id map + one snapshot-batch scan (candidates, file flags, and the commit metadata of
+    // the snapshots that changed a requested dataset). A per-dataset getLatestVersion loop would
+    // scale with datasetCount instead.
+    expect(queries.length).toBeLessThanOrEqual(4)
     for (const sql of queries) {
       expect(sql.toLowerCase()).not.toContain("count(*)")
       expect(sql).not.toContain("AT (VERSION")

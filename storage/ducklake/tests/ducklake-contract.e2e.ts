@@ -11,9 +11,19 @@ import { createLocalDuckLakeStorage } from "./test-utils"
 const roots = new WeakMap<DuckLakeStorage, string>()
 
 for (const catalog of ["duckdb", "sqlite"] as const) {
+  const reopen = async (storage: DuckLakeStorage) => {
+    const rootDir = roots.get(storage)
+    if (!rootDir) throw new Error("Missing test root")
+    await storage.close()
+    const reopened = createLocalDuckLakeStorage(rootDir, catalog)
+    roots.set(reopened, rootDir)
+    return reopened
+  }
+
   runLakeStorageContractSuite(`DuckLakeStorage ${catalog} LakeStorage contract`, {
     schemaEvolution: "addNullableColumns",
     missingVersionId: "ducklake:999999",
+    reopen,
     async createStorage() {
       const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-contract-"))
       const storage = createLocalDuckLakeStorage(rootDir, catalog)
@@ -31,14 +41,7 @@ for (const catalog of ["duckdb", "sqlite"] as const) {
   })
 
   runLakeMergeStorageContractSuite(`DuckLakeStorage ${catalog} merge contract`, {
-    async reopen(storage: DuckLakeStorage) {
-      const rootDir = roots.get(storage)
-      if (!rootDir) throw new Error("Missing test root")
-      await storage.close()
-      const reopened = createLocalDuckLakeStorage(rootDir, catalog)
-      roots.set(reopened, rootDir)
-      return reopened
-    },
+    reopen,
     async createStorage() {
       const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-merge-contract-"))
       const storage = createLocalDuckLakeStorage(rootDir, catalog)

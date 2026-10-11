@@ -35,7 +35,7 @@ import {
   encodeDatasetPrimaryKey,
   getDatasetMergeChangeValidationError,
   getDatasetPrimaryKeyColumns,
-  hasDatasetInputChanges,
+  hasDatasetProvenanceChanges,
   LakeConcurrencyError,
   type LakeMergeSession,
   type LakeStorage,
@@ -43,6 +43,7 @@ import {
   type LakeWriteSession,
   type LatestVersionsSince,
   type ListLatestVersionsSinceInput,
+  lineageAtCommit,
   mergeStrictDatasetDefinition,
   type ReadDatasetRowsInput,
   reconcileDatasetSequences,
@@ -230,6 +231,7 @@ class LocalLakeMergeSession implements LakeMergeSession {
  * - one JSONL row file per committed version
  */
 export class LocalLakeStorage implements LakeStorage {
+  readonly recordsLineage = true
   private readonly rootPath: string
 
   constructor(options: LocalLakeStorageOptions) {
@@ -599,6 +601,12 @@ export class LocalLakeStorage implements LakeStorage {
         await rename(resultRowsPath, versionRowsPath)
 
         const versionRowsStat = await stat(versionRowsPath)
+        const lineage = lineageAtCommit({
+          mode: "merge",
+          schema: definition.schema,
+          producer: options.merge.producer,
+          parent: latestVersion,
+        })
         const version: DatasetVersion = {
           datasetId: options.merge.dataset.id,
           versionId,
@@ -608,6 +616,7 @@ export class LocalLakeStorage implements LakeStorage {
           schema: definition.schema,
           producer: options.merge.producer ? structuredClone(options.merge.producer) : undefined,
           inputs: options.merge.inputs ? structuredClone(options.merge.inputs) : undefined,
+          ...(lineage && { lineage }),
           rowCount: visibleRows.length,
           sizeBytes: versionRowsStat.size,
         }
@@ -674,11 +683,24 @@ export class LocalLakeStorage implements LakeStorage {
       }
     }
 
+    const lineage = lineageAtCommit({
+      mode,
+      schema: definition.schema,
+      producer: options.write.producer,
+      written: options.write.lineage,
+      parent: latestVersion,
+    })
+
     // Content-identical snapshots and empty appends reuse the latest version
-    // unless explicitly supplied input lineage has changed.
+    // unless explicitly supplied provenance has changed.
     if (
       latestVersion &&
-      !hasDatasetInputChanges(latestVersion.inputs, options.write.inputs) &&
+      !hasDatasetProvenanceChanges(latestVersion, {
+        ...options.write,
+        datasetId: definition.id,
+        schema: definition.schema,
+        lineage,
+      }) &&
       (await this.isUnchangedWrite(mode, options, latestVersion, definition))
     ) {
       await rm(options.sessionDir, { recursive: true, force: true })
@@ -711,6 +733,7 @@ export class LocalLakeStorage implements LakeStorage {
       schema: definition.schema,
       producer: options.write.producer ? structuredClone(options.write.producer) : undefined,
       inputs: options.write.inputs ? structuredClone(options.write.inputs) : undefined,
+      ...(lineage && { lineage }),
       rowCount:
         mode === "append"
           ? (latestVersion?.rowCount ?? 0) + options.rowKeys.length

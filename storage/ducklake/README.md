@@ -193,12 +193,36 @@ Explicit `expectedLatestVersionId` guards are never relaxed.
 See [source ordering](../../docs/datasets/source-ordering.md).
 
 Local catalogs serialize commits within one process. PostgreSQL catalogs support concurrent
-writer processes; known snapshot-ID conflicts are retried from the retained staging table.
-Other provider/connection failures propagate without an automatic retry.
+writer processes. DuckLake commits a transaction on top of versions committed since it began
+unless one of them altered the table or deleted rows it touches, so a write that missed a
+concurrent version could keep that version's rows but record what it read before them. Such a
+version claims its table, an idempotent comment update that makes any later concurrent write
+conflict:
+
+- a version whose lineage carries dependencies on other datasets, or is unknown, so no later
+  write records a lineage without them;
+- a keyed append or merge, because DuckLake has no primary key and two writes of one new key
+  would both commit;
+- a write into an empty dataset, because a snapshot that also read it empty would keep its rows;
+- a version that changes no rows (new provenance), which also gives it a DuckLake snapshot.
+
+Each claim bumps DuckLake's catalog-wide schema version, which every connection then reloads. On
+PostgreSQL with two writers appending 100 rows each, claiming every commit cut throughput by a
+quarter to a third in our measurements, writers to two different datasets included. Snapshots that
+replace rows conflict through their deletes and do not claim, nor do unkeyed appends to a dataset
+that holds only its own columns, such as a sync target: those commit concurrently.
+
+A version that changes no rows, a schema change, a merge that only advances source ordering, and
+an unkeyed append guarded on `expectedLatestVersionId` also fail on a concurrent commit to any
+dataset of the catalog. The writer that loses reruns its whole commit from the retained staging
+table: up to 16 attempts, the first rerun at once, later ones after a random wait in a window
+that doubles from 20 ms up to 1 s (at most 9.3 s of waiting in all). A merge's
+`commit({ signal })` also stops the wait, and a writer that runs out of attempts fails with
+`LakeConcurrencyError`. Other provider/connection failures propagate without an automatic retry.
 
 SQLite reads commit metadata before the write transaction, then verifies the native snapshot
-has not changed. Preparation retries up to three times on a race; data writes are not replayed.
-The catalog's existing journal mode is preserved.
+has not changed; a race reruns the commit the same way, and data writes are applied once per
+attempt. The catalog's existing journal mode is preserved.
 
 Snapshot, append, and SQL-transform writes to keyed datasets also enforce unique keys so a later
 merge never starts from an ambiguous baseline. Application authors normally use
