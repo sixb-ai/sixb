@@ -39,6 +39,7 @@ import {
   shareProjectionRegistry,
 } from "@sixb/core/internal/projections"
 import { registerOntologyMutationRuntime } from "@sixb/core/internal/runtime"
+import { shareDatasetVersionMarkings } from "@sixb/core/internal/security"
 import { decorateOperationScopedMethodForTesting } from "@sixb/core/internal/storage-operation-scope"
 import type {
   BeginDatasetMergeInput,
@@ -341,6 +342,7 @@ function createRuntime(
     projections: catalogs.projections ?? host.definitions.projections,
   } satisfies TestProjectionWorkerContext
   shareProjectionRegistry(host, runtime)
+  shareDatasetVersionMarkings(host, runtime)
   return runtime
 }
 
@@ -367,6 +369,7 @@ async function bindRuntimeToRun(
   const bound = { ...runtime }
   registerOntologyMutationRuntime(bound, execution.ontologyMutations)
   shareProjectionRegistry(runtime.host, bound)
+  shareDatasetVersionMarkings(runtime.host, bound)
   return bound
 }
 

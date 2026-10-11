@@ -659,6 +659,7 @@ export function CheckView({
   broker,
   queues,
   projectValidation,
+  markings,
   ontology,
   warnings,
 }: {
@@ -668,12 +669,17 @@ export function CheckView({
   broker: { ok: boolean; message?: string }
   queues: { ok: boolean; message?: string }
   projectValidation?: { ok: boolean; message?: string }
+  /** The pipeline markings preflight: what SQL steps derive, checked against projections. */
+  markings?: { ok: boolean; message?: string }
   ontology?: { enabled: boolean; source: string; errors: number; warnings: number }
   warnings: readonly string[]
 }) {
   const validation = projectValidation ?? { ok: true, message: "ok" }
   const ontologyOk = (ontology?.errors ?? 0) === 0
-  const allOk = [storage, timeseries, broker, queues, validation].every((row) => row.ok)
+  const markingsCheck = markings ?? { ok: true, message: "ok" }
+  const allOk = [storage, timeseries, broker, queues, validation, markingsCheck].every(
+    (row) => row.ok
+  )
   const healthy = allOk && ontologyOk
 
   // The message wins when there is one, pass or fail: a probe that succeeded still says which
@@ -714,6 +720,10 @@ export function CheckView({
         <Text>
           <Text dimColor>{padLabel("Project", 14)}</Text>
           <Text color={statusColor(validation.ok)}>{statusText(validation)}</Text>
+        </Text>
+        <Text>
+          <Text dimColor>{padLabel("Markings", 14)}</Text>
+          <Text color={statusColor(markingsCheck.ok)}>{statusText(markingsCheck)}</Text>
         </Text>
       </Box>
       {ontology ? (

@@ -4,6 +4,7 @@ import {
   can,
   change,
   col,
+  type DatasetDefinition,
   type DatasetRow,
   defineDataset,
   defineGroup,
@@ -333,26 +334,35 @@ describe("markings at startup", () => {
       .fromDataset(readings)
       .points({ objectId: "customer_id", at: "at", value: "score" })
     expect(start({ datasets: [readings], projections: [projection] })).toThrow(
-      "[Sixb] Projection 'scores' reads column 'readings.score', which carries [financial]. Telemetry projections cannot read marked columns yet."
+      "[Sixb] Projection 'scores': column 'readings.score' carries [financial], and telemetry projections cannot read marked columns yet."
     )
   })
 
+  // Reproduce: drop rejectPipelineStepsOverMarkedColumns from validateMarkingsAtStartup; the
+  // first start succeeds.
   test("pipeline steps cannot read marked columns yet", () => {
     const normalized = defineDataset("normalized_invoices", {
       schema: [col("id", "string"), col("title", "string")],
     })
-    const step = definePipelineStep("normalize")
-      .inputs({ invoices: rawInvoices })
-      .output(normalized)
-      .sql(({ invoices }) => `SELECT id, title FROM ${invoices}`)
-    expect(
+    const startWith = (invoices: DatasetDefinition) =>
       start({
         datasets: [rawInvoices, normalized],
-        pipelines: [definePipeline("invoices").then(step)],
+        pipelines: [
+          definePipeline("invoices").then(
+            definePipelineStep("normalize")
+              .inputs({ invoices })
+              .output(normalized)
+              .sql(({ invoices }) => `SELECT id, title FROM ${invoices}`)
+          ),
+        ],
       })
-    ).toThrow(
+
+    expect(startWith(rawInvoices)).toThrow(
       "[Sixb] Pipeline 'invoices' step 'normalize' reads column 'raw_invoices.amount', which carries [financial]. Pipeline steps cannot read marked columns yet."
     )
+
+    // A pick that leaves the marked columns out reads none of them.
+    expect(startWith(rawInvoices.pick("id", "title"))).not.toThrow()
 
     // A step may still mark the columns it produces.
     const scored = defineDataset("scored", {
