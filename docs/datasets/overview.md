@@ -155,7 +155,9 @@ for await (const row of result?.rows ?? []) {
 ```
 
 The caller needs a view grant on the dataset. Columns it is not cleared for are left out of
-`columns` and of every row, and listed in `redactions`. See [Markings](../auth/markings.md).
+`columns` and of every row, and listed in `redactions`. A version whose rows were selected by
+columns the caller is not cleared for cannot be read at all: which rows it holds would reveal
+those columns. See [Markings](../auth/markings.md).
 
 ## File location
 

@@ -46,7 +46,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerConnectorRoutes(app, host)
   registerConnectorConnectionRoutes(app, host)
   registerConnectorConnectionRunRoutes(app, host, options.connectorConnections)
-  registerDatasetRoutes(app, host)
+  registerDatasetRoutes(app)
   registerSyncRoutes(app, host)
   registerPipelineRoutes(app, host)
   registerWorkflowRoutes(app, host)

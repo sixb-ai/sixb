@@ -80,6 +80,11 @@ import type {
   RoleDefinition,
   SecurityDefinitionCatalog,
 } from "../security"
+import {
+  createDatasetVersionMarkings,
+  type DatasetVersionMarkings,
+  registerDatasetVersionMarkings,
+} from "../security/dataset-version-markings"
 import type { ParamsConfig } from "../shared/params/types"
 import type { ShareDefinition } from "../shares"
 import type { Storage } from "../storage"
@@ -170,6 +175,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   private readonly storageReadiness: StorageReadiness
   private readonly connectorService: ConnectorService
   private readonly materializer: OntologyMaterializerContract
+  private readonly datasetVersionMarkings: DatasetVersionMarkings
   readonly sandboxDefinition?: SandboxDefinition
   readonly definitions: SixbDefinitions
   readonly broker: Broker
@@ -217,6 +223,11 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
         ? undefined
         : createSandboxDefinition(options.sandboxes.configuration, definitions.ontology)
     registerProjectionRegistry(this, definitions.projections)
+    this.datasetVersionMarkings = createDatasetVersionMarkings({
+      datasets: definitions.datasets,
+      lakeStorage: this.lakeStorage,
+    })
+    registerDatasetVersionMarkings(this, this.datasetVersionMarkings)
 
     this.auth = new AuthRuntime({
       projectId: this.projectId,
@@ -424,6 +435,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       blobStorage: this.blobStorage,
       apiPublicOrigin: () => getApiPublicOrigin(this),
       lakeStorage: this.lakeStorage,
+      datasetVersionMarkings: this.datasetVersionMarkings,
     }
   }
 }

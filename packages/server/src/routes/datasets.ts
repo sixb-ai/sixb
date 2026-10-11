@@ -1,4 +1,4 @@
-import type { DatasetDefinition, SixbHostView } from "@sixb/core"
+import type { DatasetDefinition } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type {
   DatasetCatalogState,
@@ -151,12 +151,11 @@ function serializeDatasetCatalogItem(
 }
 
 async function serializeDatasetCatalogItems(
-  host: SixbHostView,
   definitions: readonly DatasetDefinition[],
   sixb: ReturnType<typeof requireRequestSixb>
 ) {
   const references = buildDatasetReferenceIndex(sixb)
-  const states = await host.lakeStorage.listDatasetCatalogState(definitions.map((d) => d.id))
+  const states = await sixb.datasets.listCatalogState(definitions)
   const stateByDatasetId = new Map(states.map((state) => [state.datasetId, state]))
 
   return definitions.map((definition) =>
@@ -192,7 +191,7 @@ async function collectRows(rows: AsyncIterable<Readonly<Record<string, unknown>>
   return collected
 }
 
-export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
+export function registerDatasetRoutes(app: Elysia) {
   return app
     .get(
       "/api/datasets",
@@ -201,7 +200,7 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
         const sixb = requireRequestSixb(context)
         try {
           const definitions = sixb.datasets.list()
-          return await serializeDatasetCatalogItems(host, definitions, sixb)
+          return await serializeDatasetCatalogItems(definitions, sixb)
         } catch (error) {
           set.status = 400
           return { error: error instanceof Error ? error.message : String(error) }
@@ -223,7 +222,7 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
         const sixb = requireRequestSixb(context)
         try {
           const dataset = requireDataset(sixb, params.datasetId)
-          const [state] = await host.lakeStorage.listDatasetCatalogState([dataset.id])
+          const [state] = await sixb.datasets.listCatalogState([dataset])
           const references = buildDatasetReferenceIndex(sixb).get(dataset.id)
           return serializeDatasetCatalogItem(dataset, state, references ?? EMPTY_DATASET_REFERENCES)
         } catch (error) {
@@ -250,10 +249,10 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
         const { params, query, set } = context
         const sixb = requireRequestSixb(context)
         try {
-          requireDataset(sixb, params.datasetId)
+          const dataset = requireDataset(sixb, params.datasetId)
           const parsed = DatasetVersionsQuerySchema.parse(query)
           const limit = parseLimit(parsed.limit, DEFAULT_VERSION_LIMIT, MAX_VERSION_LIMIT)
-          const versions = await host.lakeStorage.listVersions(params.datasetId, limit)
+          const versions = await sixb.datasets.listVersions(dataset, { limit })
 
           return DatasetVersionListResponseSchema.parse({
             versions: versions.map(serializeDatasetVersion),
@@ -284,8 +283,8 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
         const { params, set } = context
         const sixb = requireRequestSixb(context)
         try {
-          requireDataset(sixb, params.datasetId)
-          const version = await host.lakeStorage.getVersion(params.datasetId, params.versionId)
+          const dataset = requireDataset(sixb, params.datasetId)
+          const version = await sixb.datasets.getVersion(dataset, params.versionId)
           if (!version) {
             throw datasetVersionNotFound(params.datasetId, params.versionId)
           }

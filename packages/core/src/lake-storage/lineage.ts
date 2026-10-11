@@ -49,19 +49,31 @@ export type LineageRecord = Pick<
  * The lineage a version stands for, with the rules for versions that record none applied. A
  * stored value that is not a lineage is unknown: reading it as absent could declassify it.
  *
- * Reading no other version is what makes those rules approximate for versions written before
+ * Only a provider that declares `recordsLineage` stores lineage on every version it commits, so
+ * only its versions without lineage are known to predate it. Any other provider may have dropped
+ * the lineage it was given, and a version of it that records none is unknown, whatever wrote it.
+ *
+ * Reading no other version is what makes the rules approximate for versions written before
  * Sixb recorded lineage: one written outside a pipeline (a sync, an ingestion, a schema change)
  * on top of a pipeline version holds that version's rows, yet reads as its own columns only.
  * Treating every such version as unknown instead would classify every older sync dataset with
  * every marking, for good, since a merge keeps its parent's rows.
  */
-export function versionLineage(version: LineageRecord): DatasetVersionLineage {
+export function versionLineage(
+  version: LineageRecord,
+  provider: { readonly recordsLineage?: boolean }
+): DatasetVersionLineage {
   const stored: unknown = version.lineage
   const subject =
     version.versionId === undefined
       ? `a version of '${version.datasetId}'`
       : `version '${version.versionId}' of '${version.datasetId}'`
   if (stored === undefined) {
+    if (provider.recordsLineage !== true) {
+      return {
+        unknown: `${subject} recorded no column lineage, and its lake provider does not declare that it records lineage`,
+      }
+    }
     return version.producer?.kind === "pipeline"
       ? { unknown: `${subject} recorded no column lineage` }
       : ownColumns(version.schema)
@@ -70,6 +82,13 @@ export function versionLineage(version: LineageRecord): DatasetVersionLineage {
     ? stored
     : { unknown: `${subject} records a column lineage Sixb cannot read` }
 }
+
+/**
+ * What a provider committing a version, or a pipeline step resolving the lineage it passes to one,
+ * reads its own versions as. Whatever a provider that does not record lineage commits stays
+ * without lineage, so it is classified as unknown regardless.
+ */
+export const COMMITTING_PROVIDER = { recordsLineage: true } as const
 
 export interface LineageAtCommitInput {
   readonly mode: DatasetVersionMode
@@ -150,7 +169,7 @@ export function resolveStepLineage(
   const lineageOf = (version: DatasetVersion) => {
     let lineage = lineages.get(version)
     if (!lineage) {
-      lineage = versionLineage(version)
+      lineage = versionLineage(version, COMMITTING_PROVIDER)
       lineages.set(version, lineage)
     }
     return lineage
@@ -233,7 +252,7 @@ function lineageKey(lineage: DatasetVersionLineage): string {
 
 /** What the version keeps of its parent, restricted to the columns it has. */
 function keptLineage(parent: LineageRecord, schema: DatasetSchema): DatasetVersionLineage {
-  const lineage = versionLineage(parent)
+  const lineage = versionLineage(parent, COMMITTING_PROVIDER)
   if (isUnknownLineage(lineage)) return lineage
   const parentColumns = new Set(parent.schema.columns.map(({ name }) => name))
   return canonicalLineage(

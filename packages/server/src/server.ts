@@ -4,6 +4,7 @@ import type { OntologyMaintenanceHandle, SixbHostView } from "@sixb/core"
 import { CSRF_HEADER_NAME, setRequestClientAddress } from "@sixb/core/internal/auth"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { setApiPublicOrigin } from "@sixb/core/internal/runtime"
+import { checkPipelineMarkings } from "@sixb/core/internal/security"
 import type { Server } from "bun"
 import { Elysia, ParseError } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
@@ -173,6 +174,12 @@ export class SixbServer {
     if (this.app !== null || this.bunServer !== null || this.maintenance !== null) {
       throw new Error("[SixbServer] Server is already running.")
     }
+
+    // Startup cannot see through SQL steps: check what they derive before serving any request.
+    await checkPipelineMarkings({
+      definitions: this.hostRuntime.definitions,
+      lakeStorage: this.hostRuntime.lakeStorage,
+    })
 
     const maintenance = await this.hostRuntime.startOntologyMaintenance()
     this.maintenance = maintenance

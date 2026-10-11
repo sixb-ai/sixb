@@ -75,7 +75,11 @@ function createSixbStub(
 function createTestApp(lakeStorage: LakeStorage, definitions: readonly DatasetDefinition[]) {
   const sixb = createSixbStub(lakeStorage, definitions)
   const sixbExecution = {
-    datasets: sixb.definitions.datasets,
+    datasets: {
+      ...sixb.definitions.datasets,
+      listCatalogState: (datasets: readonly DatasetDefinition[]) =>
+        lakeStorage.listDatasetCatalogState(datasets.map(({ id }) => id)),
+    },
     syncs: sixb.definitions.syncs,
     pipelines: sixb.definitions.pipelines,
     projections: sixb.definitions.projections,
@@ -83,7 +87,7 @@ function createTestApp(lakeStorage: LakeStorage, definitions: readonly DatasetDe
   const app = new Elysia()
   app.derive(() => ({ sixb: sixbExecution }))
 
-  return registerDatasetRoutes(app, sixb)
+  return registerDatasetRoutes(app)
 }
 
 const definitions: DatasetDefinition[] = [

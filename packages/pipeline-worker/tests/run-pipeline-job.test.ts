@@ -473,6 +473,15 @@ describe("runPipelineJob", () => {
       runId: "run_clean",
       stepId: "clean-customers",
     })
+    // Every column of the output depends on every column the step reads.
+    expect(result.version?.lineage).toEqual({
+      rows: [
+        { datasetId: "raw.customers", column: "email" },
+        { datasetId: "raw.customers", column: "id" },
+        { datasetId: "raw.customers", column: "name" },
+      ],
+      columns: { id: [], name: [] },
+    })
 
     const rows = await collectRows(lakeStorage.readRows({ datasetId: "customers" }))
     expect(rows).toEqual([
@@ -508,6 +517,77 @@ describe("runPipelineJob", () => {
         versionId: result.version?.versionId,
       },
     })
+  })
+
+  test("reads only the picked columns of an input and records only those", async () => {
+    const lakeStorage = new InMemoryLakeStorage()
+    await seedDatasetVersion(lakeStorage, rawCustomersDataset, [
+      { id: "cust_1", name: "Ada", email: "ada@example.com" },
+    ])
+    const picked = rawCustomersDataset.pick("name", "id")
+    let seenDataset: DatasetDefinition | undefined
+    const seenRows: DatasetRow[][] = []
+    const cleanStep = definePipelineStep("clean-customers")
+      .inputs({ rawCustomers: picked })
+      .output(customersDataset)
+      .run(async ({ inputs, output }) => {
+        const { rawCustomers } = inputs
+        seenDataset = rawCustomers.dataset
+        seenRows.push(await collectRows(rawCustomers.readRows()))
+        seenRows.push(await collectRows(rawCustomers.readRows({ columns: [] })))
+        seenRows.push(await collectRows(rawCustomers.readRows({ columns: ["id"] })))
+        await output.writeRows(rawCustomers.readRows())
+      })
+    const runtime = createRuntime({
+      pipelines: [definePipeline("customers").then(cleanStep)],
+      datasets: [rawCustomersDataset, customersDataset],
+      lakeStorage,
+    })
+
+    const result = await runPipelineJob({
+      runtime,
+      job: { id: "run_pick", pipelineId: "customers" },
+    })
+
+    expect(seenDataset).toEqual(picked)
+    expect(seenRows).toEqual([
+      [{ name: "Ada", id: "cust_1" }],
+      [{ name: "Ada", id: "cust_1" }],
+      [{ id: "cust_1" }],
+    ])
+    expect(result.version?.lineage).toEqual({
+      rows: [
+        { datasetId: "raw.customers", column: "id" },
+        { datasetId: "raw.customers", column: "name" },
+      ],
+      columns: { id: [], name: [] },
+    })
+  })
+
+  // Reproduce: let `readPickedColumns` return what is requested; the step then commits `email`.
+  test("fails a step that reads a column its pick leaves out", async () => {
+    const lakeStorage = new InMemoryLakeStorage()
+    await seedDatasetVersion(lakeStorage, rawCustomersDataset, [
+      { id: "cust_1", name: "Ada", email: "ada@example.com" },
+    ])
+    const cleanStep = definePipelineStep("clean-customers")
+      .inputs({ rawCustomers: rawCustomersDataset.pick("id", "name") })
+      .output(customersDataset)
+      .run(async ({ inputs, output }) => {
+        await output.writeRows(inputs.rawCustomers.readRows({ columns: ["id", "email"] }))
+      })
+    const runtime = createRuntime({
+      pipelines: [definePipeline("customers").then(cleanStep)],
+      datasets: [rawCustomersDataset, customersDataset],
+      lakeStorage,
+    })
+
+    await expect(
+      runPipelineJob({ runtime, job: { id: "run_unpicked", pipelineId: "customers" } })
+    ).rejects.toThrow(
+      "[SixbPipelineWorker] Pipeline 'customers' step 'clean-customers' input 'rawCustomers' reads column 'email', which its pick leaves out. Add 'email' to the pick to read it."
+    )
+    expect(await lakeStorage.getLatestVersion(customersDataset.id)).toBeNull()
   })
 
   test("writes a marked output without storing its markings", async () => {
@@ -790,6 +870,31 @@ describe("runPipelineJob", () => {
     // Removing the worker's output guard must fail these assertions.
     await runPipelineJob({ runtime, job: { id: "run_sql_second", pipelineId: "customers" } })
     expect(lakeStorage.executeCalls[1]?.expectedLatestVersionId).toBe(result.version?.versionId)
+  })
+
+  // The test above pins whole inputs: they pass no columns, exactly as before picks existed.
+  test("passes the columns a SQL step picks to its source", async () => {
+    const lakeStorage = new SqlTransformLakeStorage()
+    const seededVersion = await seedDatasetVersion(lakeStorage, rawCustomersDataset, [
+      { id: "cust_1", name: "Ada", email: "ada@example.com" },
+    ])
+    const statsStep = definePipelineStep("customer-stats")
+      .inputs({ rawCustomers: rawCustomersDataset.pick("name", "id") })
+      .output(customerStatsDataset)
+      .sql(({ rawCustomers }) => `select count(*) as value from ${rawCustomers}`)
+    const runtime = createRuntime({
+      pipelines: [definePipeline("customers").then(statsStep)],
+      datasets: [rawCustomersDataset, customerStatsDataset],
+      lakeStorage,
+    })
+
+    await runPipelineJob({ runtime, job: { id: "run_sql_pick", pipelineId: "customers" } })
+
+    expect(lakeStorage.executeCalls[0]?.sources.rawCustomers).toEqual({
+      dataset: rawCustomersDataset,
+      versionId: seededVersion.versionId,
+      columns: ["name", "id"],
+    })
   })
 
   test("fails SQL steps clearly when lake storage has no SQL transform support", async () => {

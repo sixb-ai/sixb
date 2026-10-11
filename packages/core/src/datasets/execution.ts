@@ -1,4 +1,5 @@
 import {
+  AuthorizationError,
   assertAuthorized,
   assertPrivileged,
   assertRuntimeAuthorizationBound,
@@ -9,8 +10,17 @@ import type { ExecutionContext } from "../execution"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import type { DatasetMergeCommitResult } from "../lake-storage/merge"
 import { getDatasetPrimaryKeyColumns } from "../lake-storage/merge-validation"
-import type { DatasetRow, DatasetVersion, LakeStorage } from "../lake-storage/types"
+import type {
+  DatasetCatalogState,
+  DatasetRow,
+  DatasetVersion,
+  LakeStorage,
+} from "../lake-storage/types"
 import type { SixbRuntimeContext } from "../runtime/types"
+import type {
+  DatasetVersionMarkings,
+  VersionClassification,
+} from "../security/dataset-version-markings"
 import { missingClearanceRedactions } from "../security/redactions"
 import type { Redactions } from "../security/types"
 import type { MergeChange } from "./changes"
@@ -42,7 +52,7 @@ export interface DatasetRows {
   /** Columns each row holds. Redacted columns are left out. */
   readonly columns: readonly string[]
   /**
-   * Every column of the dataset the reader cannot read, whether or not it was requested. Absent
+   * Every column of the version the reader cannot read, whether or not it was requested. Absent
    * when the reader can read every column.
    */
   readonly redactions?: Redactions
@@ -54,9 +64,25 @@ export interface DatasetsRuntime {
   getById(datasetId: string): DatasetDefinition | null
   /**
    * Read rows of one version. Returns null when the dataset has no version yet or the requested
-   * version does not exist.
+   * version does not exist. Refused when the reader is not cleared for a marking that decided
+   * which rows the version holds: which rows it holds, and how many, would reveal it.
    */
   readRows(dataset: DatasetDefinition, input?: DatasetReadRowsInput): Promise<DatasetRows | null>
+  /**
+   * Versions of the dataset, newest first. `rowCount` and `sizeBytes` are left out of a version
+   * whose rows the reader cannot read, as `readRows` refuses them.
+   */
+  listVersions(
+    dataset: DatasetDefinition,
+    input?: { readonly limit?: number }
+  ): Promise<readonly DatasetVersion[]>
+  /** One version, described like `listVersions` does. Null when it does not exist. */
+  getVersion(dataset: DatasetDefinition, versionId: string): Promise<DatasetVersion | null>
+  /**
+   * Whether each dataset was materialized, and a summary of its latest version, whose `rowCount`
+   * is left out like `listVersions` does.
+   */
+  listCatalogState(datasets: readonly DatasetDefinition[]): Promise<readonly DatasetCatalogState[]>
   ingest(dataset: DatasetDefinition, input: DatasetIngestInput): Promise<DatasetIngestResult>
 }
 
@@ -65,11 +91,43 @@ export function createDatasetsRuntime(
   execution: ExecutionContext,
   source: Pick<DatasetsRuntime, "list" | "getById">,
   lakeStorage: LakeStorage,
-  blobStorage: Pick<BlobStorage, "stat">
+  blobStorage: Pick<BlobStorage, "stat">,
+  versionMarkings: DatasetVersionMarkings
 ): DatasetsRuntime {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
   const allowed = (datasetId: string) =>
     isRuntimeAllowed(runtime, { kind: "dataset.view", datasetId })
+
+  /** The reader's clearances; undefined for trusted code, which reads everything. */
+  const readerClearances = (): ReadonlySet<string> | undefined => {
+    const authority = assertRuntimeAuthorizationBound(runtime)
+    if (authority.type === "unrestricted") return undefined
+    return authority.type === "principal" ? (authority.context.clearances ?? new Set()) : new Set()
+  }
+  /**
+   * The version classified for this reader; undefined when the reader is cleared for every
+   * marking it may carry. No version carries a marking the project does not declare on a column,
+   * so a reader cleared for every declared marking (all readers, when none is declared) reads
+   * the version without classifying it.
+   */
+  const classifyForReader = (version: DatasetVersion): ReaderClassification | undefined => {
+    const clearances = readerClearances()
+    if (!clearances) return undefined
+    if ([...versionMarkings.everyMarking()].every((id) => clearances.has(id))) return undefined
+    return { classification: versionMarkings.classify(version), clearances }
+  }
+  /** Without its row count and size when the reader cannot read its rows. */
+  const describeVersion = (version: DatasetVersion): DatasetVersion => {
+    if (missingRowMarking(classifyForReader(version)) === undefined) return version
+    const { rowCount: _rowCount, sizeBytes: _sizeBytes, ...described } = version
+    return described
+  }
+  const assertViewable = (dataset: DatasetDefinition): DatasetDefinition => {
+    assertAuthorized(runtime, { kind: "dataset.view", datasetId: dataset.id })
+    const registered = source.getById(dataset.id)
+    if (!registered) throw new Error(`[Sixb] Dataset '${dataset.id}' is not registered.`)
+    return registered
+  }
 
   return {
     list: () =>
@@ -82,16 +140,16 @@ export function createDatasetsRuntime(
       return dataset && allowed(datasetId) ? dataset : null
     },
     async readRows(dataset, input = {}) {
-      assertAuthorized(runtime, { kind: "dataset.view", datasetId: dataset.id })
-      const registered = source.getById(dataset.id)
-      if (!registered) throw new Error(`[Sixb] Dataset '${dataset.id}' is not registered.`)
+      const registered = assertViewable(dataset)
       const version =
         input.versionId === undefined
           ? await lakeStorage.getLatestVersion(registered.id)
           : await lakeStorage.getVersion(registered.id, input.versionId)
       if (!version) return null
 
-      const redacted = redactedColumns(registered, assertRuntimeAuthorizationBound(runtime))
+      const classified = classifyForReader(version)
+      assertRowsReadable(version, classified)
+      const redacted = redactedColumns(classified)
       const selected = selectColumns(version, input.columns)
       const columns = selected.filter((column) => !redacted.has(column))
       const read = (readColumns: readonly string[] | undefined) =>
@@ -118,6 +176,35 @@ export function createDatasetsRuntime(
         ...(redacted.size > 0 ? { redactions: missingClearanceRedactions(redacted) } : {}),
         rows,
       }
+    },
+    async listVersions(dataset, input = {}) {
+      const registered = assertViewable(dataset)
+      const versions = await lakeStorage.listVersions(registered.id, input.limit)
+      return versions.map(describeVersion)
+    },
+    async getVersion(dataset, versionId) {
+      const registered = assertViewable(dataset)
+      const version = await lakeStorage.getVersion(registered.id, versionId)
+      return version && describeVersion(version)
+    },
+    async listCatalogState(datasets) {
+      const registered = datasets.map(assertViewable)
+      const states = await lakeStorage.listDatasetCatalogState(registered.map(({ id }) => id))
+      const clearances = readerClearances()
+      if (!clearances || [...versionMarkings.everyMarking()].every((id) => clearances.has(id))) {
+        return states
+      }
+      // A summary records no lineage: read the versions whose row count the reader would see.
+      return Promise.all(
+        states.map(async (state) => {
+          const latest = state.latestVersion
+          if (latest?.rowCount === undefined) return state
+          const version = await lakeStorage.getVersion(latest.datasetId, latest.versionId)
+          if (version && describeVersion(version).rowCount !== undefined) return state
+          const { rowCount: _rowCount, ...summary } = latest
+          return { ...state, latestVersion: summary }
+        })
+      )
     },
     async ingest(dataset, input) {
       assertPrivileged(runtime, "datasets.ingest")
@@ -180,21 +267,42 @@ function selectColumns(version: DatasetVersion, requested: readonly string[] | u
   return [...requested]
 }
 
-/**
- * Columns the reader cannot read. Trusted code reads every column, a principal reads what its roles
- * clear, and any other authority is cleared for nothing.
- */
-function redactedColumns(
-  dataset: DatasetDefinition,
-  authority: ReturnType<typeof assertRuntimeAuthorizationBound>
-): ReadonlySet<string> {
-  if (authority.type === "unrestricted") return new Set()
-  const clearances =
-    authority.type === "principal" ? (authority.context.clearances ?? new Set()) : new Set()
+/** A version classified for a reader that some of its markings may affect. */
+interface ReaderClassification {
+  readonly classification: VersionClassification
+  readonly clearances: ReadonlySet<string>
+}
+
+/** Columns of the version the reader cannot read. */
+function redactedColumns(classified: ReaderClassification | undefined): ReadonlySet<string> {
+  if (!classified) return new Set()
+  const { classification, clearances } = classified
   return new Set(
-    dataset.schema.columns
-      .filter((column) => column.markings?.some((markingId) => !clearances.has(markingId)))
-      .map((column) => column.name)
+    [...classification.columns]
+      .filter(([, columnMarkings]) => [...columnMarkings].some((id) => !clearances.has(id)))
+      .map(([column]) => column)
+  )
+}
+
+/** A marking that decided which rows the version holds, which the reader is not cleared for. */
+function missingRowMarking(classified: ReaderClassification | undefined): string | undefined {
+  if (!classified) return undefined
+  return [...classified.classification.rows].find((id) => !classified.clearances.has(id))
+}
+
+/**
+ * Every column of such a version is redacted, but its rows would still say how many rows the
+ * filter kept, and which: `WHERE amount > 100` reveals amounts through `id` alone.
+ */
+function assertRowsReadable(
+  version: DatasetVersion,
+  classified: ReaderClassification | undefined
+): void {
+  const marking = missingRowMarking(classified)
+  if (marking === undefined) return
+  throw new AuthorizationError(
+    `clearance:marking:${marking}`,
+    `[Sixb] Cannot read the rows of version '${version.versionId}' of dataset '${version.datasetId}': which rows it holds was decided by columns that require clearance for marking '${marking}'.`
   )
 }
 

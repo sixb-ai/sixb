@@ -30,12 +30,16 @@ const rawInvoices = defineDataset("raw_invoices", {
   ],
   primaryKey: "id",
 })
+/** `SELECT id, title FROM raw_invoices WHERE amount > 100` */
+const largeInvoices = defineDataset("large_invoices", {
+  schema: [col("id", "string"), col("title", "string")],
+})
 
 const staff = defineGroup("staff")
 const finance = defineGroup("finance")
 const reader = defineRole("reader", {
   grantedTo: [staff, finance],
-  grants: [can.view(rawInvoices)],
+  grants: [can.view([rawInvoices, largeInvoices])],
 })
 const financeClearance = defineRole("finance-clearance", {
   grantedTo: [finance],
@@ -47,7 +51,7 @@ async function createApp() {
   const host = new SixbHost({
     id: projectId,
     ontology: [],
-    datasets: [rawInvoices],
+    datasets: [rawInvoices, largeInvoices],
     broker: new InMemoryBroker(),
     storage,
     lakeStorage: new InMemoryLakeStorage(),
@@ -61,10 +65,20 @@ async function createApp() {
   await createTestSixb(host).datasets.ingest(rawInvoices, {
     changes: [change.upsert({ id: "inv-1", title: "July", amount: "120.00" })],
   })
+  const raw = (column: string) => ({ datasetId: rawInvoices.id, column })
+  await host.lakeStorage.createDataset(largeInvoices)
+  const write = await host.lakeStorage.beginWrite({
+    dataset: largeInvoices,
+    mode: "snapshot",
+    producer: { kind: "pipeline", id: "invoices", stepId: "large-invoices" },
+    lineage: { rows: [raw("amount")], columns: { id: [raw("id")], title: [raw("title")] } },
+  })
+  await write.writeRows([{ id: "inv-1", title: "July" }])
+  const { versionId } = await write.commit()
   const app = createSixbApi(
     new SixbServer({ host, quiet: true, browser: createTestBrowserPolicy() })
   )
-  return { app, storage }
+  return { app, storage, versionId }
 }
 
 async function seedSession(storage: InMemoryStorage, userId: string, groupIds: readonly string[]) {
@@ -113,5 +127,51 @@ describe("dataset routes with markings", () => {
     expect(body.columns).toEqual(["id", "title", "amount"])
     expect(body.rows).toEqual([{ id: "inv-1", title: "July", amount: "120.00" }])
     expect(body.redactions).toBeUndefined()
+  })
+
+  // Reproduce: drop assertRowsReadable from readRows in createDatasetsRuntime; the rows route
+  // answers 200 with one empty row. Make describeVersion return the version unchanged; the
+  // version routes and the catalog show its row count.
+  test("a version whose rows a marked column selected hides its rows and their count", async () => {
+    const { app, storage, versionId } = await createApp()
+    const staffHeaders = await seedSession(storage, "usr_staff", [staff.id])
+    const financeHeaders = await seedSession(storage, "usr_finance", [finance.id])
+    const base = "http://localhost/api/datasets/large_invoices"
+    const get = async (url: string, headers: { cookie: string }) => {
+      const response = await app.fetch(new Request(url, { headers }))
+      return { status: response.status, body: await response.json() }
+    }
+
+    const rows = await get(`${base}/rows`, staffHeaders)
+    expect(rows.status).toBe(403)
+    expect(rows.body.error).toBe(
+      `[Sixb] Cannot read the rows of version '${versionId}' of dataset 'large_invoices': which rows it holds was decided by columns that require clearance for marking 'financial'.`
+    )
+    const versions = await get(`${base}/versions`, staffHeaders)
+    expect(versions.body.versions.map((version: object) => "rowCount" in version)).toEqual([false])
+    const version = await get(`${base}/versions/${versionId}`, staffHeaders)
+    expect(version.body.versionId).toBe(versionId)
+    expect(version.body.rowCount).toBeUndefined()
+    expect(version.body.sizeBytes).toBeUndefined()
+    const catalog = await get(base, staffHeaders)
+    expect(catalog.body.latestVersion.versionId).toBe(versionId)
+    expect(catalog.body.latestVersion.rowCount).toBeUndefined()
+    const list = await get("http://localhost/api/datasets", staffHeaders)
+    expect(
+      list.body.map((item: { id: string; latestVersion: { rowCount?: number } }) => [
+        item.id,
+        item.latestVersion.rowCount,
+      ])
+    ).toEqual([
+      ["raw_invoices", 1],
+      ["large_invoices", undefined],
+    ])
+
+    expect((await get(`${base}/rows`, financeHeaders)).body).toMatchObject({
+      rows: [{ id: "inv-1", title: "July" }],
+      total: 1,
+    })
+    expect((await get(`${base}/versions/${versionId}`, financeHeaders)).body.rowCount).toBe(1)
+    expect((await get(base, financeHeaders)).body.latestVersion.rowCount).toBe(1)
   })
 })
