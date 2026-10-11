@@ -292,6 +292,12 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
       expect(await object("a")).toMatchObject({ properties: { name: "A" } })
       await replace([], await active())
       expect(await object("a")).toMatchObject({ properties: { name: "A" } })
+      // Reproduce: read only the roots of the active version in getActiveTarget; this empty delta
+      // staged none, and every live row belongs to an earlier version.
+      expect(await storage.ontology.sources.getActiveTarget({ projectId, source })).toEqual({
+        kind: "object",
+        objectTypeId: Device.id,
+      })
       await expect(replace([remove("a")], stale)).rejects.toMatchObject({
         kind: "source-materialization",
       })
@@ -306,6 +312,7 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
       expect(await object("b")).toMatchObject({ properties: { name: "B3" } })
       await replace([])
       expect(await object("b")).toBeNull()
+      expect(await storage.ontology.sources.getActiveTarget({ projectId, source })).toBeNull()
 
       // A different run commits after base validation but before this candidate is sealed.
       // Only checking the base before reading the delta would allow a stale publication here.
@@ -942,6 +949,13 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
           }))
         ),
       })
+
+      expect(
+        await storage.ontology.sources.getActiveTarget({
+          projectId: "materializer-storage-contract",
+          source: { projectionId: devicePeersProjection.id },
+        })
+      ).toEqual({ kind: "link", sourceTypeId: Device.id, linkId: "peers", targetTypeId: Device.id })
 
       const observedLinks = await storage.objects.listLinks({
         projectId: "materializer-storage-contract",

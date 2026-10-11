@@ -22,6 +22,7 @@ import {
  */
 export async function deleteObject(ctx: ResolvedObjectContext, primaryId: string): Promise<void> {
   assertCanEdit(ctx, ctx.objectType.id)
+  await ctx.objectReader.assertReadable({ objectTypeIds: [ctx.objectType.id] })
   await commitRuntimeOperations(ctx, [
     objectDeleteOperation({
       id: runtimeOperationId(0),
@@ -38,6 +39,7 @@ export async function deleteObject(ctx: ResolvedObjectContext, primaryId: string
  */
 export async function restoreObject(ctx: ResolvedObjectContext, primaryId: string): Promise<void> {
   assertCanEdit(ctx, ctx.objectType.id)
+  await ctx.objectReader.assertReadable({ objectTypeIds: [ctx.objectType.id] })
   await commitRuntimeOperations(ctx, [
     objectRestoreOperation({
       id: runtimeOperationId(0),

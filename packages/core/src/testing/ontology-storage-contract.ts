@@ -721,6 +721,57 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
       })
     })
 
+    test("lists the dataset version each active source applied, in one read", async () => {
+      await withStorage(async (storage) => {
+        expect(
+          await storage.ontology.sources.listActive({ projectId: "contract-project" })
+        ).toEqual([])
+        const devices = await createReadyEmptyCandidate(storage, "run-a", "candidate-a", "01")
+        await activateEmptyCandidate(storage, devices, null, "commit-a", "2026-01-03T00:00:00.000Z")
+        const others = await createReadyEmptyCandidate(
+          storage,
+          "run-b",
+          "candidate-b",
+          "02",
+          "contract.others"
+        )
+        await activateEmptyCandidate(storage, others, null, "commit-b", "2026-01-04T00:00:00.000Z")
+        // A newer version supersedes the first one; a ready candidate is not active yet.
+        const newer = await createReadyEmptyCandidate(storage, "run-c", "candidate-c", "05")
+        const activeDevices = await storage.ontology.sources.getActive({
+          projectId: "contract-project",
+          source: devices.source,
+        })
+        await activateEmptyCandidate(
+          storage,
+          newer,
+          activeDevices,
+          "commit-c",
+          "2026-01-06T00:00:00.000Z"
+        )
+        await createReadyEmptyCandidate(storage, "run-d", "candidate-d", "07", "contract.pending")
+
+        const active = await storage.ontology.sources.listActive({ projectId: "contract-project" })
+        expect(
+          [...active].sort((a, b) => a.source.projectionId.localeCompare(b.source.projectionId))
+        ).toEqual([
+          {
+            source: { projectionId: "contract.devices" },
+            datasetVersion: newer.identity.datasetVersion,
+            projectionRevision: "projection-contract-revision",
+          },
+          {
+            source: { projectionId: "contract.others" },
+            datasetVersion: others.identity.datasetVersion,
+            projectionRevision: "projection-contract-revision",
+          },
+        ])
+        expect(await storage.ontology.sources.listActive({ projectId: "other-project" })).toEqual(
+          []
+        )
+      })
+    })
+
     test("rolls back exact rows, commits, and outbox writes through one transaction facade", async () => {
       await withStorage(async (storage) => {
         await expect(
@@ -1025,9 +1076,10 @@ async function createReadyEmptyCandidate(
   storage: OntologyStorageContractStorage,
   runId: string,
   materializationId: string,
-  versionId: string
+  versionId: string,
+  projectionId?: string
 ): Promise<ReadyCandidate> {
-  const identity = replacementIdentity(versionId)
+  const identity = replacementIdentity(versionId, projectionId)
   const run = await startTestProjectionRun(storage, {
     id: runId,
     projectId: "contract-project",

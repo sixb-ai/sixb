@@ -69,6 +69,31 @@ export interface GetActiveOntologySourceInput {
   readonly source: ProjectionSourceRef
 }
 
+export interface ListActiveOntologySourcesInput {
+  readonly projectId: string
+}
+
+/**
+ * What one source applied: the dataset version its active materialization replaced the source
+ * with, under which projection revision. A delta applies like a full replacement by its version,
+ * so the version describes every value of the source.
+ */
+export interface ActiveOntologySource {
+  readonly source: ProjectionSourceRef
+  readonly datasetVersion: PinnedDatasetVersion
+  readonly projectionRevision: string
+}
+
+/** What a source's live rows assert: the object type of an object projection, or a link. */
+export type ActiveSourceTarget =
+  | { readonly kind: "object"; readonly objectTypeId: string }
+  | {
+      readonly kind: "link"
+      readonly sourceTypeId: string
+      readonly linkId: string
+      readonly targetTypeId: string
+    }
+
 export interface BeginSourceMaterializationInput {
   readonly projectId: string
   readonly source: ProjectionSourceRef
@@ -210,6 +235,13 @@ export interface OntologySourceStorage {
   stageRows(input: StageSourceRowsInput): Promise<StageSourceRowsResult>
   markReady(input: MarkSourceMaterializationReadyInput): Promise<OntologySourceRecord>
   getActive(input: GetActiveOntologySourceInput): Promise<OntologySourceRecord | null>
+  /** Every source of the project with an active materialization, in no particular order. */
+  listActive(input: ListActiveOntologySourcesInput): Promise<readonly ActiveOntologySource[]>
+  /**
+   * What the source's live rows assert, read from one of them; null when it asserts nothing. For
+   * a source the code no longer declares, whose definition cannot say.
+   */
+  getActiveTarget(input: GetActiveOntologySourceInput): Promise<ActiveSourceTarget | null>
   /** Hands a redelivered run's candidate to its current execution; null when it has none. */
   adopt(input: AdoptSourceMaterializationInput): Promise<AdoptedSourceMaterialization | null>
   abandon(input: AbandonSourceMaterializationCandidateInput): Promise<OntologySourceRecord>

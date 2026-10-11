@@ -156,8 +156,9 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
               (!filter.types?.length || filter.types.includes(event.type)) &&
               eventMatchesScope(event, filter),
             // The execution facade owns per-event visibility: it withholds events the caller
-            // cannot view and omits marked properties the caller is not cleared for.
-            view: (event) => sixb.events.readable(event),
+            // cannot view and omits marked properties the caller is not cleared for, as markings
+            // are when each batch is sent.
+            view: (batch) => sixb.events.visible(batch),
             replay: replayFrom
               ? {
                   afterCursor: replayFrom.afterCursor,

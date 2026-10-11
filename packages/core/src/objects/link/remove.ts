@@ -8,7 +8,7 @@ import {
   linkDeleteOperation,
   runtimeOperationId,
 } from "../materializer-adapter"
-import { assertCanWriteLink } from "./authorization"
+import { assertCanWriteLinks } from "./authorization"
 
 export async function removeLink(
   ctx: ResolvedLinkContext,
@@ -21,7 +21,7 @@ export async function removeLink(
 ): Promise<void> {
   const { objectType, linkDefinition, ontology } = ctx
   const { sourceId, linkId, targetTypeId, targetId } = params
-  assertCanWriteLink(ctx, { sourceTypeId: objectType.id, targetTypeId })
+  await assertCanWriteLinks(ctx, [{ sourceTypeId: objectType.id, linkId, targetTypeId }])
 
   assertLinkTargetType(objectType.id, linkId, linkDefinition, targetTypeId, (expected, actual) =>
     ontology.isValidLinkTarget(expected, actual)

@@ -17,15 +17,34 @@ type OntologyLookup = Pick<OntologyDefinitionCatalog, "getObjectTypeById">
 /** Markings of one column of the projection's dataset. */
 type ColumnMarkingsLookup = (column: string) => readonly string[]
 
-/** The first marking rule a projection breaks. */
+/** What a marked key column makes unreadable: the objects it identifies, or the link it keys. */
+export type ProjectionKeyTarget =
+  | { readonly kind: "type"; readonly objectTypeId: string }
+  | {
+      readonly kind: "link"
+      readonly objectTypeId: string
+      readonly linkId: string
+      readonly targetObjectTypeId: string
+    }
+
+/** A marking rule a projection breaks. */
 type ProjectionMarkingViolation =
   | {
       readonly kind: "undeclared"
       readonly property: string
+      readonly objectTypeId: string
+      readonly propertyId: string
       readonly column: string
       readonly missing: readonly string[]
     }
-  | { readonly kind: "markedKeyColumn"; readonly column: string; readonly role: string }
+  | {
+      readonly kind: "markedKeyColumn"
+      readonly column: string
+      readonly role: string
+      readonly targets: readonly ProjectionKeyTarget[]
+      /** The property the column fills, when the key is a property. */
+      readonly property?: { readonly objectTypeId: string; readonly propertyId: string }
+    }
   | { readonly kind: "markedKeyProperty"; readonly property: string; readonly role: string }
   | { readonly kind: "telemetry"; readonly column: string }
 
@@ -50,7 +69,7 @@ export function validateProjectionMarkings(
   ]
   for (const projection of all) {
     const originsOf = (column: string) => markings.of({ datasetId: projection.datasetId, column })
-    const violation = findProjectionMarkingViolation(projection, ontology, (column) => [
+    const violation = firstViolation(projection, ontology, (column) => [
       ...originsOf(column).keys(),
     ])
     if (!violation) continue
@@ -86,7 +105,7 @@ export function assertProjectionVersionMarkings(input: {
 }): void {
   const { projection, version, classification } = input
   const markingsOf = (column: string) => [...(classification.columns.get(column) ?? [])].sort()
-  const violation = findProjectionMarkingViolation(projection, input.ontology, markingsOf)
+  const violation = firstViolation(projection, input.ontology, markingsOf)
   if (!violation) return
 
   const subject = `[Sixb] Projection '${projection.id}' cannot read version '${version.versionId}' of dataset '${version.datasetId}'`
@@ -104,30 +123,103 @@ export function assertProjectionVersionMarkings(input: {
   )
 }
 
+/** Markings an applied version gives a projection's targets beyond what the ontology declares. */
+export interface ProjectionSurplus {
+  /** Markings a mapped column carries that its property does not declare. */
+  readonly properties: readonly {
+    readonly objectTypeId: string
+    readonly propertyId: string
+    readonly column: string
+    readonly markings: readonly string[]
+  }[]
+  /** Marked key columns, with what each one makes unreadable and why. */
+  readonly keys: readonly {
+    readonly target: ProjectionKeyTarget
+    readonly column: string
+    readonly role: string
+    readonly markings: readonly string[]
+  }[]
+}
+
+/**
+ * What a projection's targets carry beyond their declarations when read from columns with these
+ * markings: every rule it breaks, as markings to add to properties and to key targets. A property
+ * that keys a link keeps its markings on the property as well.
+ */
+export function projectionSurplus(
+  projection: ProjectionDefinition,
+  ontology: OntologyLookup,
+  markingsOf: ColumnMarkingsLookup
+): ProjectionSurplus {
+  const properties: ProjectionSurplus["properties"][number][] = []
+  const keys: ProjectionSurplus["keys"][number][] = []
+  for (const violation of projectionMarkingViolations(projection, ontology, markingsOf)) {
+    switch (violation.kind) {
+      case "undeclared":
+        properties.push({
+          objectTypeId: violation.objectTypeId,
+          propertyId: violation.propertyId,
+          column: violation.column,
+          markings: violation.missing,
+        })
+        break
+      case "markedKeyColumn": {
+        const markings = markingsOf(violation.column)
+        for (const target of violation.targets) {
+          keys.push({ target, column: violation.column, role: violation.role, markings })
+        }
+        const property = violation.property
+        if (property && violation.targets.some((target) => target.kind === "link")) {
+          properties.push({ ...property, column: violation.column, markings })
+        }
+        break
+      }
+      // Startup refuses a marked key property and a marked telemetry column from the code alone.
+      case "markedKeyProperty":
+      case "telemetry":
+        break
+    }
+  }
+  return { properties, keys }
+}
+
 // ── Rules ───────────────────────────────────────────────────
 
-function findProjectionMarkingViolation(
+function firstViolation(
   projection: ProjectionDefinition,
   ontology: OntologyLookup,
   markingsOf: ColumnMarkingsLookup
 ): ProjectionMarkingViolation | null {
+  const first = projectionMarkingViolations(projection, ontology, markingsOf).next()
+  return first.done ? null : first.value
+}
+
+/** Every marking rule the projection breaks, the first one being the one messages report. */
+function* projectionMarkingViolations(
+  projection: ProjectionDefinition,
+  ontology: OntologyLookup,
+  markingsOf: ColumnMarkingsLookup
+): Generator<ProjectionMarkingViolation> {
   switch (projection._tag) {
     case "ObjectProjectionDefinition": {
       const objectType = ontology.getObjectTypeById(projection.objectTypeId)
-      return objectType ? objectProjectionViolation(projection, objectType, markingsOf) : null
+      if (objectType) yield* objectProjectionViolations(projection, objectType, markingsOf)
+      return
     }
     case "LinkProjectionDefinition":
-      return linkProjectionViolation(projection, markingsOf)
+      yield* linkProjectionViolations(projection, markingsOf)
+      return
     case "TelemetryProjectionDefinition":
-      return telemetryProjectionViolation(projection, markingsOf)
+      yield* telemetryProjectionViolations(projection, markingsOf)
+      return
   }
 }
 
-function objectProjectionViolation(
+function* objectProjectionViolations(
   projection: ObjectProjectionDefinition,
   objectType: ObjectType,
   markingsOf: ColumnMarkingsLookup
-): ProjectionMarkingViolation | null {
+): Generator<ProjectionMarkingViolation> {
   const keyRoles = objectProjectionKeyRoles(projection, objectType)
 
   for (const [propertyId, column] of Object.entries(projection.properties)) {
@@ -135,20 +227,38 @@ function objectProjectionViolation(
     const path = `${objectType.id}.${propertyId}`
     const keyRole = keyRoles.get(propertyId)
     if (keyRole) {
-      if (markingsOf(column).length > 0) return { kind: "markedKeyColumn", column, role: keyRole }
-      if (property?.markings) return { kind: "markedKeyProperty", property: path, role: keyRole }
+      if (markingsOf(column).length > 0) {
+        yield {
+          kind: "markedKeyColumn",
+          column,
+          role: keyRole.role,
+          targets: keyRole.targets,
+          property: { objectTypeId: objectType.id, propertyId },
+        }
+      } else if (property?.markings) {
+        yield { kind: "markedKeyProperty", property: path, role: keyRole.role }
+      }
       continue
     }
     const declared = new Set(property?.markings ?? [])
     const missing = markingsOf(column).filter((markingId) => !declared.has(markingId))
-    if (missing.length > 0) return { kind: "undeclared", property: path, column, missing }
+    if (missing.length > 0) {
+      yield {
+        kind: "undeclared",
+        property: path,
+        objectTypeId: objectType.id,
+        propertyId,
+        column,
+        missing,
+      }
+    }
   }
 
   for (const [linkId, link] of Object.entries(projection.links)) {
     if (link.sourceField === undefined) continue
     const role = `keys link '${objectType.id}.${linkId}'`
-    const violation = markedKeyColumn(link.sourceField, role, markingsOf)
-    if (violation) return violation
+    const target = linkTarget(objectType.id, linkId, link.targetObjectTypeId)
+    yield* markedKeyColumn(link.sourceField, role, [target], markingsOf)
   }
 
   // The timestamp decides whether the source value or an app edit wins, which reveals how they
@@ -156,26 +266,27 @@ function objectProjectionViolation(
   const conflictResolution = projection.conflictResolution
   if (conflictResolution?.strategy === "mostRecent") {
     const role = "decides which value wins under 'mostRecent'"
-    return markedKeyColumn(conflictResolution.sourceTimestamp, role, markingsOf)
+    const target: ProjectionKeyTarget = { kind: "type", objectTypeId: objectType.id }
+    yield* markedKeyColumn(conflictResolution.sourceTimestamp, role, [target], markingsOf)
   }
-  return null
 }
 
-function linkProjectionViolation(
+function* linkProjectionViolations(
   projection: LinkProjectionDefinition,
   markingsOf: ColumnMarkingsLookup
-): ProjectionMarkingViolation | null {
+): Generator<ProjectionMarkingViolation> {
   const role = `keys link '${projection.sourceObjectTypeId}.${projection.linkId}'`
-  return (
-    markedKeyColumn(projection.sourceField, role, markingsOf) ??
-    markedKeyColumn(projection.targetField, role, markingsOf)
-  )
+  const targets = [
+    linkTarget(projection.sourceObjectTypeId, projection.linkId, projection.targetObjectTypeId),
+  ]
+  yield* markedKeyColumn(projection.sourceField, role, targets, markingsOf)
+  yield* markedKeyColumn(projection.targetField, role, targets, markingsOf)
 }
 
-function telemetryProjectionViolation(
+function* telemetryProjectionViolations(
   projection: TelemetryProjectionDefinition,
   markingsOf: ColumnMarkingsLookup
-): ProjectionMarkingViolation | null {
+): Generator<ProjectionMarkingViolation> {
   const columns = [
     projection.objectIdField,
     projection.atField,
@@ -185,32 +296,58 @@ function telemetryProjectionViolation(
         : [mapping.valueField, mapping.unitField]
     ),
   ]
-  const column = columns.find((candidate) => markingsOf(candidate).length > 0)
-  return column === undefined ? null : { kind: "telemetry", column }
+  for (const column of columns) {
+    if (markingsOf(column).length > 0) yield { kind: "telemetry", column }
+  }
+}
+
+interface KeyRole {
+  readonly role: string
+  readonly targets: readonly ProjectionKeyTarget[]
 }
 
 /** Properties whose value becomes an object id or a link key, with the role they play. */
 function objectProjectionKeyRoles(
   projection: ObjectProjectionDefinition,
   objectType: ObjectType
-): ReadonlyMap<string, string> {
-  const roles = new Map<string, string>()
+): ReadonlyMap<string, KeyRole> {
+  const roles = new Map<string, KeyRole>()
   for (const property of objectType.properties) {
-    if (property.primary) roles.set(property.id, `becomes the id of '${objectType.id}'`)
+    if (!property.primary) continue
+    roles.set(property.id, {
+      role: `becomes the id of '${objectType.id}'`,
+      targets: [{ kind: "type", objectTypeId: objectType.id }],
+    })
   }
   for (const [linkId, link] of Object.entries(projection.links)) {
     if (link.sourcePropertyId === undefined) continue
-    roles.set(link.sourcePropertyId, `keys link '${objectType.id}.${linkId}'`)
+    // An id that also keys a link plays both roles; messages name the link.
+    roles.set(link.sourcePropertyId, {
+      role: `keys link '${objectType.id}.${linkId}'`,
+      targets: [
+        ...(roles.get(link.sourcePropertyId)?.targets ?? []),
+        linkTarget(objectType.id, linkId, link.targetObjectTypeId),
+      ],
+    })
   }
   return roles
 }
 
-function markedKeyColumn(
+function linkTarget(
+  objectTypeId: string,
+  linkId: string,
+  targetObjectTypeId: string
+): ProjectionKeyTarget {
+  return { kind: "link", objectTypeId, linkId, targetObjectTypeId }
+}
+
+function* markedKeyColumn(
   column: string,
   role: string,
+  targets: readonly ProjectionKeyTarget[],
   markingsOf: ColumnMarkingsLookup
-): ProjectionMarkingViolation | null {
-  return markingsOf(column).length > 0 ? { kind: "markedKeyColumn", column, role } : null
+): Generator<ProjectionMarkingViolation> {
+  if (markingsOf(column).length > 0) yield { kind: "markedKeyColumn", column, role, targets }
 }
 
 // ── Messages ────────────────────────────────────────────────

@@ -1,21 +1,12 @@
 import { assertNever } from "../assert-never"
-import { assertAuthorized, isAllowed } from "../authorization"
-import { AuthorizationError } from "../authorization/errors"
-import type { AuthorizationContext } from "../authorization/types"
 import type { EmbeddingModelCatalog, RerankingModelCatalog } from "../models/catalog"
-import {
-  type AuthorizedOntologySelection,
-  type AuthorizedOntologyView,
-  createAuthorizedOntologyView,
-} from "../objects/authorized-ontology-view"
+import type { AuthorizedOntologyView } from "../objects/authorized-ontology-view"
 import {
   attachRedactions,
-  createClearanceQueryAdmission,
   omitHiddenProperties,
-  type PropertyClearance,
   redactObjectRow,
-  resolvePropertyClearance,
-} from "../objects/property-clearance"
+} from "../objects/clearance-redaction"
+import { unreadableError } from "../objects/property-clearance"
 import {
   countObjects,
   type ExecuteObjectCountInput,
@@ -33,14 +24,12 @@ import {
   existsObjects,
   facetObjects,
 } from "../objects/query"
+import { createClearanceQueryAdmission } from "../objects/query/clearance-admission"
 import { ObjectQueryValidationError } from "../objects/query/errors"
 import { validateObjectFacetRequests } from "../objects/query/executor"
 import type { ObjectQuery } from "../objects/query/ir"
+import { assertLinkQueryReadable } from "../objects/query/link-query-clearance"
 import { preflightObjectQueryLinks } from "../objects/query/links"
-import {
-  createSelectedObjectQueryAdmission,
-  type SelectedObjectQueryAdmission,
-} from "../objects/query/selected-read-admission"
 import {
   type AdmittedObjectQuery,
   composeObjectQueryAdmissions,
@@ -54,8 +43,9 @@ import {
   type TelemetryHistoryReadWorkloadInput,
 } from "../objects/telemetry/workload"
 import type { OntologyRegistry } from "../ontology"
+import type { AppliedMarkings } from "../security/applied-markings"
+import type { EventOriginRef } from "../security/applied-markings-contribution"
 import type {
-  CompiledObjectReadStep,
   LinkBatchKey,
   ObjectFacetRequest,
   ObjectLinkRow,
@@ -65,15 +55,11 @@ import type {
 } from "../storage"
 import { assertObjectReadOutputWithinLimit, MAX_OBJECT_READ_FACETS } from "../storage"
 import { captureExecutionScope, resolveExecutionScopeAuthorization } from "./authorization"
-import type { ExecutionScope, RuntimeAuthorization } from "./types"
+import type { Clearance } from "./object-reader-clearance"
+import { ObjectReaderOntology } from "./object-reader-ontology"
+import { ObjectReaderSecurity, type ResolvedExecutionAuthority } from "./object-reader-security"
+import type { ExecutionScope } from "./types"
 
-type RuntimeReadAuthorization = {
-  readonly projectId: string
-  readonly runtimeAuthorization: RuntimeAuthorization
-  readonly authorization?: AuthorizationContext
-}
-
-type ResolvedExecutionAuthority = ReturnType<typeof resolveExecutionScopeAuthorization>
 type GetObjectInput = Omit<Parameters<ObjectReadStorage["getByPrimaryId"]>[0], "projectId">
 type GetObjectsInput = Omit<Parameters<ObjectReadStorage["getByPrimaryIdBatch"]>[0], "projectId">
 type SelectObjectPropertiesInput = Parameters<ObjectReadStorage["selectsObjectProperties"]>[0]
@@ -83,6 +69,12 @@ type ListObjectsInput = Omit<Parameters<ObjectReadStorage["list"]>[0], "projectI
 type ListLinksInput = Omit<Parameters<ObjectReadStorage["listLinks"]>[0], "projectId">
 type ListLinksBatchInput = Omit<Parameters<ObjectReadStorage["listLinksBatch"]>[0], "projectId">
 
+/** The model catalogs semantic and reranked search use. */
+interface ObjectReaderModels {
+  readonly embedding?: EmbeddingModelCatalog
+  readonly reranking?: RerankingModelCatalog
+}
+
 const readerConstructionKey = Object.freeze({})
 
 /**
@@ -91,91 +83,65 @@ const readerConstructionKey = Object.freeze({})
  * The implementation class is intentionally private to this module. Its private fields make the
  * exported instance type nominal, while the construction key prevents code that discovers the
  * JavaScript constructor through an instance from manufacturing another reader.
+ *
+ * Its state is grouped as a project is: the ontology it resolves against, the security of the
+ * authority (its delegation and clearance included), the model catalogs search uses, and the
+ * storage it reads. Each group decides what belongs to it; the reader composes them.
  */
 class AuthorizedObjectReaderImpl {
-  readonly #authorization: RuntimeAuthorization
-  readonly #authority: ResolvedExecutionAuthority
-  readonly #runtime: RuntimeReadAuthorization
-  readonly #ontology: OntologyRegistry
-  readonly #embeddingModels?: EmbeddingModelCatalog
-  readonly #rerankingModels?: RerankingModelCatalog
-  #ontologyView?: AuthorizedOntologyView
+  readonly #ontology: ObjectReaderOntology
+  readonly #security: ObjectReaderSecurity
+  readonly #models: ObjectReaderModels
   readonly #storage: ObjectReadStorage
-  readonly #delegatedObjectTypeIds?: ReadonlySet<string>
-  readonly #delegatedLinkDefinitions?: ReadonlySet<string>
-  readonly #delegatedQueryAdmission?: SelectedObjectQueryAdmission
-  /** Marked properties this authority cannot read; absent when it reads every property. */
-  readonly #clearance?: PropertyClearance
 
   constructor(
     key: typeof readerConstructionKey,
     input: {
-      readonly scope: ExecutionScope
-      readonly ontology: OntologyRegistry
-      readonly embeddingModels?: EmbeddingModelCatalog
-      readonly rerankingModels?: RerankingModelCatalog
+      readonly ontology: ObjectReaderOntology
+      readonly security: ObjectReaderSecurity
+      readonly models: ObjectReaderModels
       readonly storage: ObjectReadStorage
-      readonly authority: ResolvedExecutionAuthority
     }
   ) {
     if (key !== readerConstructionKey) {
       throw new Error("[Sixb] AuthorizedObjectReader can only be created by Core.")
     }
-
-    this.#authorization = input.scope.authorization
-    this.#authority = input.authority
     this.#ontology = input.ontology
-    this.#embeddingModels = input.embeddingModels
-    this.#rerankingModels = input.rerankingModels
+    this.#security = input.security
+    this.#models = input.models
     this.#storage = input.storage
-    this.#delegatedObjectTypeIds =
-      input.authority.type === "delegated"
-        ? new Set(input.authority.objectRead.scope.objects.map((object) => object.objectTypeId))
-        : undefined
-    this.#delegatedLinkDefinitions =
-      input.authority.type === "delegated"
-        ? new Set(input.authority.objectRead.scope.steps.map(delegatedLinkDefinitionKey))
-        : undefined
-    this.#delegatedQueryAdmission =
-      input.authority.type === "delegated"
-        ? createSelectedObjectQueryAdmission(input.authority.objectRead.scope)
-        : undefined
-    this.#clearance = clearanceForAuthority(input.authority, input.ontology)
-    this.#runtime = Object.freeze({
-      projectId: input.scope.execution.projectId,
-      runtimeAuthorization: input.scope.authorization,
-      ...(input.authority.type === "principal" ? { authorization: input.authority.context } : {}),
-    })
   }
 
   static assertBound(reader: AuthorizedObjectReaderImpl, scope: ExecutionScope): void {
     const capturedScope = captureExecutionScope(scope)
-    resolveExecutionScopeAuthorization(reader.#runtime.projectId, capturedScope)
-    if (capturedScope.authorization !== reader.#authorization) {
+    resolveExecutionScopeAuthorization(reader.#security.runtime.projectId, capturedScope)
+    if (capturedScope.authorization !== reader.#security.authorization) {
       throw new Error(
         "[Sixb] AuthorizedObjectReader is not bound to this exact execution authority."
       )
     }
   }
 
+  /** What the reader cannot read now, for surfaces such as events that redact on their own. */
+  static async clearance(reader: AuthorizedObjectReaderImpl): Promise<Clearance> {
+    return reader.#security.clearance.current()
+  }
+
+  /** What the reader cannot read in an object event a projection emitted. */
+  static eventOriginClearance(
+    reader: AuthorizedObjectReaderImpl,
+    origin: EventOriginRef
+  ): Clearance | Promise<Clearance> {
+    return reader.#security.clearance.forEventOrigin(origin)
+  }
+
   static ontologyView(reader: AuthorizedObjectReaderImpl): AuthorizedOntologyView {
-    const authority = reader.#authority
-    reader.#ontologyView ??= createAuthorizedOntologyView({
-      ontology: reader.#ontology,
-      selection: ontologySelectionForAuthority(authority, reader.#ontology),
-      ...(authority.type === "delegated"
-        ? {
-            assertOutputWithinLimit: (value: unknown) =>
-              assertObjectReadOutputWithinLimit(value, authority.objectRead.limits),
-          }
-        : {}),
-    })
-    return reader.#ontologyView
+    return reader.#ontology.view()
   }
 
   /** Project identity carried by this nominal reader capability. */
   get projectId(): string {
-    return this.#runtime.projectId
+    return this.#security.runtime.projectId
   }
 
   async getByPrimaryId(input: GetObjectInput): ReturnType<ObjectReadStorage["getByPrimaryId"]> {
@@ -183,12 +149,17 @@ class AuthorizedObjectReaderImpl {
       objectTypeId: input.objectTypeId,
       primaryId: input.primaryId,
     })
-    this.#assertObjectTypesViewable([request.objectTypeId])
+    const clearance = await this.#security.clearance.current()
+    this.#security.assertObjectTypesViewable([request.objectTypeId], clearance)
     const row = await this.#storage.getByPrimaryId({
       ...request,
-      projectId: this.#runtime.projectId,
+      projectId: this.#security.runtime.projectId,
     })
-    return this.#detachRows(row && this.#omitHidden(row), (detached) => [detached])
+    return this.#detachRows(
+      row && this.#omitHidden(row, clearance),
+      (detached) => [detached],
+      clearance
+    )
   }
 
   async getByPrimaryIdBatch(
@@ -200,14 +171,19 @@ class AuthorizedObjectReaderImpl {
         primaryId: item.primaryId,
       })),
     })
-    this.#assertObjectTypesViewable(request.items.map((item) => item.objectTypeId))
+    const clearance = await this.#security.clearance.current()
+    this.#security.assertObjectTypesViewable(
+      request.items.map((item) => item.objectTypeId),
+      clearance
+    )
     const rows = await this.#storage.getByPrimaryIdBatch({
       ...request,
-      projectId: this.#runtime.projectId,
+      projectId: this.#security.runtime.projectId,
     })
     return this.#detachRows(
-      new Map([...rows].map(([key, row]) => [key, this.#omitHidden(row)] as const)),
-      (detached) => detached.values()
+      new Map([...rows].map(([key, row]) => [key, this.#omitHidden(row, clearance)] as const)),
+      (detached) => detached.values(),
+      clearance
     )
   }
 
@@ -217,11 +193,12 @@ class AuthorizedObjectReaderImpl {
       primaryId: input.primaryId,
       propertyId: input.propertyId,
     })
-    this.#assertObjectTypesViewable([request.objectTypeId])
-    if (this.#hidesProperty(request)) return false
-    if (this.#authority.type !== "delegated") return true
+    const clearance = await this.#security.clearance.current()
+    this.#security.assertObjectTypesViewable([request.objectTypeId], clearance)
+    if (hidesProperty(request, clearance)) return false
+    if (this.#security.authority.type !== "delegated") return true
     const [readable] = await this.#storage.selectsObjectProperties({
-      projectId: this.#runtime.projectId,
+      projectId: this.#security.runtime.projectId,
       items: [request],
     })
     return readable ?? false
@@ -237,16 +214,20 @@ class AuthorizedObjectReaderImpl {
         propertyId: item.propertyId,
       })),
     })
-    this.#assertObjectTypesViewable(request.items.map((item) => item.objectTypeId))
+    const clearance = await this.#security.clearance.current()
+    this.#security.assertObjectTypesViewable(
+      request.items.map((item) => item.objectTypeId),
+      clearance
+    )
     const selected =
-      this.#authority.type === "delegated"
+      this.#security.authority.type === "delegated"
         ? await this.#storage.selectsObjectProperties({
             ...request,
-            projectId: this.#runtime.projectId,
+            projectId: this.#security.runtime.projectId,
           })
         : request.items.map(() => true)
     return request.items.map(
-      (item, index) => !this.#hidesProperty(item) && selected[index] === true
+      (item, index) => !hidesProperty(item, clearance) && selected[index] === true
     )
   }
 
@@ -269,7 +250,8 @@ class AuthorizedObjectReaderImpl {
       orderBy: input.orderBy,
       order: input.order,
     })
-    const objectTypeId = this.#resolveListObjectTypes(request.objectTypeId)
+    const clearance = await this.#security.clearance.current()
+    const objectTypeId = this.#resolveListObjectTypes(request.objectTypeId, clearance)
 
     // An empty type selection means "none", never "all". Short-circuiting here prevents a
     // provider with different empty-array semantics from turning a principal read into a broad one.
@@ -280,11 +262,12 @@ class AuthorizedObjectReaderImpl {
     const page = await this.#storage.list({
       ...request,
       ...(objectTypeId === undefined ? {} : { objectTypeId }),
-      projectId: this.#runtime.projectId,
+      projectId: this.#security.runtime.projectId,
     })
     return this.#detachRows(
-      { ...page, objects: page.objects.map((row) => this.#omitHidden(row)) },
-      (detached) => detached.objects
+      { ...page, objects: page.objects.map((row) => this.#omitHidden(row, clearance)) },
+      (detached) => detached.objects,
+      clearance
     )
   }
 
@@ -295,14 +278,15 @@ class AuthorizedObjectReaderImpl {
       linkId: input.linkId,
       direction: input.direction,
     })
-    this.#assertObjectTypesViewable([request.objectTypeId])
+    const clearance = await this.#security.clearance.current()
+    this.#security.assertObjectTypesViewable([request.objectTypeId], clearance)
     const links = detachReadResult(
       await this.#storage.listLinks({
         ...request,
-        projectId: this.#runtime.projectId,
+        projectId: this.#security.runtime.projectId,
       })
     )
-    return links.filter((link) => this.#isLinkViewable(link))
+    return links.filter((link) => this.#security.isLinkViewable(link, clearance))
   }
 
   async listLinksBatch(
@@ -316,18 +300,22 @@ class AuthorizedObjectReaderImpl {
         linkId: item.linkId,
       })),
     })
-    this.#assertObjectTypesViewable(request.items.map((item) => item.objectTypeId))
+    const clearance = await this.#security.clearance.current()
+    this.#security.assertObjectTypesViewable(
+      request.items.map((item) => item.objectTypeId),
+      clearance
+    )
     const pages = detachReadResult(
       await this.#storage.listLinksBatch({
         ...request,
-        projectId: this.#runtime.projectId,
+        projectId: this.#security.runtime.projectId,
       })
     )
     const filtered = new Map<LinkBatchKey, ObjectLinkRow[]>()
     for (const [key, links] of pages) {
       filtered.set(
         key,
-        links.filter((link) => this.#isLinkViewable(link))
+        links.filter((link) => this.#security.isLinkViewable(link, clearance))
       )
     }
     return filtered
@@ -339,18 +327,20 @@ class AuthorizedObjectReaderImpl {
     const query = snapshotAuthoredQuery(input.query)
     const includeTotal = snapshotReadValue(input.includeTotal)
     const executionQuery = this.#admitDelegatedQuery(query)?.query ?? query
+    const clearance = await this.#security.clearance.current()
     const result = await executeObjectQuery(
       {
         query: executionQuery,
         ...(includeTotal === undefined ? {} : { includeTotal }),
-        projectId: this.#runtime.projectId,
+        projectId: this.#security.runtime.projectId,
         signal: input.signal,
       },
-      this.#queryExecutorOptions()
+      this.#queryExecutorOptions(clearance)
     )
     return this.#detachRows(
-      { ...result, objects: result.objects.map((row) => this.#omitHidden(row)) },
-      (detached) => detached.objects
+      { ...result, objects: result.objects.map((row) => this.#omitHidden(row, clearance)) },
+      (detached) => detached.objects,
+      clearance
     )
   }
 
@@ -366,15 +356,15 @@ class AuthorizedObjectReaderImpl {
       pageToken: input.pageToken,
     })
     let executionQuery = query
-    const admission = this.#delegatedQueryAdmission
+    const admission = this.#security.delegation?.queryAdmission
     if (admission) {
       const preflight = preflightObjectQueryLinks(
-        { query, ...request, projectId: this.#runtime.projectId },
-        { ontology: this.#ontology }
+        { query, ...request, projectId: this.#security.runtime.projectId },
+        { ontology: this.#ontology.registry }
       )
       const admitted = validateObjectQueryWithAdmission(
         preflight.validated.query,
-        { ontology: this.#ontology, normalize: false },
+        { ontology: this.#ontology.registry, normalize: false },
         admission
       )
       admission.assertIncidentEdgeSelected({
@@ -385,10 +375,21 @@ class AuthorizedObjectReaderImpl {
       })
       executionQuery = admitted.query
     }
+    const clearance = await this.#security.clearance.current()
+    if (clearance) {
+      assertLinkQueryReadable({
+        ontology: this.#ontology.registry,
+        clearance,
+        query,
+        request: { ...request, projectId: this.#security.runtime.projectId },
+        viewableByGrants: (objectTypeId) =>
+          this.#security.isObjectTypeViewable(objectTypeId, undefined),
+      })
+    }
     const result = detachReadResult(
       await executeObjectQueryLinks(
-        { query: executionQuery, ...request, projectId: this.#runtime.projectId },
-        this.#queryExecutorOptions()
+        { query: executionQuery, ...request, projectId: this.#security.runtime.projectId },
+        this.#queryExecutorOptions(clearance)
       )
     )
 
@@ -396,12 +397,17 @@ class AuthorizedObjectReaderImpl {
     // its cursor and hasMore metadata describe hidden rows, so a provider contract violation must
     // fail closed instead of returning a partially filtered page.
     if (
-      result.objects.some((row) => !this.#isObjectTypeViewable(row.objectTypeId)) ||
-      result.links.some((link) => !this.#isLinkViewable(link))
+      result.objects.some(
+        (row) => !this.#security.isObjectTypeViewable(row.objectTypeId, clearance)
+      ) ||
+      result.links.some((link) => !this.#security.isLinkViewable(link, clearance))
     ) {
       throw new Error("[Sixb] Object storage returned a link page outside its authorized scope.")
     }
-    return { ...result, objects: result.objects.map((row) => this.#redact(row)) }
+    return {
+      ...result,
+      objects: result.objects.map((row) => (clearance ? redactObjectRow(row, clearance) : row)),
+    }
   }
 
   async count(
@@ -409,10 +415,11 @@ class AuthorizedObjectReaderImpl {
   ): Promise<ExecuteObjectCountResult> {
     const query = snapshotAuthoredQuery(input.query)
     const executionQuery = this.#admitDelegatedQuery(query)?.query ?? query
+    const clearance = await this.#security.clearance.current()
     return detachReadResult(
       await countObjects(
-        { query: executionQuery, projectId: this.#runtime.projectId },
-        this.#queryExecutorOptions()
+        { query: executionQuery, projectId: this.#security.runtime.projectId },
+        this.#queryExecutorOptions(clearance)
       )
     )
   }
@@ -422,10 +429,11 @@ class AuthorizedObjectReaderImpl {
   ): Promise<ExecuteObjectExistsResult> {
     const query = snapshotAuthoredQuery(input.query)
     const executionQuery = this.#admitDelegatedQuery(query)?.query ?? query
+    const clearance = await this.#security.clearance.current()
     return detachReadResult(
       await existsObjects(
-        { query: executionQuery, projectId: this.#runtime.projectId },
-        this.#queryExecutorOptions()
+        { query: executionQuery, projectId: this.#security.runtime.projectId },
+        this.#queryExecutorOptions(clearance)
       )
     )
   }
@@ -437,17 +445,17 @@ class AuthorizedObjectReaderImpl {
     const facets = snapshotFacetRequests(input.facets)
     let executionQuery = query
     let executionFacets = facets
-    const admission = this.#delegatedQueryAdmission
+    const admission = this.#security.delegation?.queryAdmission
     if (admission) {
       // Terminal arguments are ordinary validation errors, not an authorization oracle. Validate
       // them against the canonical result shape before raising any delegated-scope denial.
-      const validated = validateObjectQuery(query, { ontology: this.#ontology })
+      const validated = validateObjectQuery(query, { ontology: this.#ontology.registry })
       const normalizedFacets = validateObjectFacetRequests(facets, validated.result.objectTypeIds, {
-        ontology: this.#ontology,
+        ontology: this.#ontology.registry,
       })
       const admitted = validateObjectQueryWithAdmission(
         validated.query,
-        { ontology: this.#ontology, normalize: false },
+        { ontology: this.#ontology.registry, normalize: false },
         admission
       )
       normalizedFacets.forEach((facet, index) => {
@@ -461,62 +469,77 @@ class AuthorizedObjectReaderImpl {
       executionQuery = admitted.query
       executionFacets = normalizedFacets
     }
+    const clearance = await this.#security.clearance.current()
     return detachReadResult(
       await facetObjects(
         {
           query: executionQuery,
           facets: executionFacets,
-          projectId: this.#runtime.projectId,
+          projectId: this.#security.runtime.projectId,
         },
-        this.#queryExecutorOptions()
+        this.#queryExecutorOptions(clearance)
       )
     )
   }
 
   /**
-   * Redact a row returned by a write. An upsert returns the merged effective row, which may hold
-   * marked values the writer never sent and cannot read.
+   * Redact the rows a write of this object type returns. An upsert returns the merged effective
+   * row, which may hold marked values the writer never sent and cannot read. Resolved before the
+   * write, which it refuses when the writer cannot read the type at all.
    */
-  redactWrittenRow<TRow extends ObjectRow>(row: TRow): TRow {
-    return this.#redact(row)
+  async writtenRowRedactor(
+    objectTypeId: string
+  ): Promise<<TRow extends ObjectRow>(row: TRow) => TRow> {
+    const clearance = await this.#security.clearance.current()
+    assertTargetsReadable(clearance, { objectTypeIds: [objectTypeId] })
+    return (row) => (clearance ? redactObjectRow(row, clearance) : row)
+  }
+
+  /**
+   * Refuse a write or a request that names an object type or link this authority cannot read,
+   * before any lookup: it would answer whether what it names exists, and land where the reader
+   * cannot see.
+   */
+  async assertReadable(targets: ReadTargets): Promise<void> {
+    assertTargetsReadable(await this.#security.clearance.current(), targets)
   }
 
   /** Enforce the delegated response budget without exposing or recombining its limits. */
   assertVisibleOutputWithinLimit(value: unknown): void {
-    if (this.#authority.type !== "delegated") return
-    assertObjectReadOutputWithinLimit(value, this.#authority.objectRead.limits)
+    if (this.#security.authority.type !== "delegated") return
+    assertObjectReadOutputWithinLimit(value, this.#security.authority.objectRead.limits)
   }
 
   /** Admit adjacent telemetry work without exposing which authority policy was selected. */
   admitTelemetryHistoryRead(
     input: TelemetryHistoryReadWorkloadInput
   ): TelemetryHistoryReadAdmission {
-    return admitTelemetryHistoryReadWorkload(input, this.#authority.type === "delegated")
+    return admitTelemetryHistoryReadWorkload(input, this.#security.authority.type === "delegated")
   }
 
-  #queryExecutorOptions() {
-    const admission = this.#executorAdmission()
-    if (this.#authority.type === "delegated") {
+  #queryExecutorOptions(clearance: Clearance) {
+    const admission = this.#executorAdmission(clearance)
+    if (this.#security.authority.type === "delegated") {
       // The selected storage instance is the private execution capability. Passing the delegated
       // runtime token into the generic executor would either reject this admitted query or tempt a
       // forgeable bypass flag; neither is needed at this nominal boundary.
       return {
-        ontology: this.#ontology,
+        ontology: this.#ontology.registry,
         storage: this.#storage,
-        embeddingModels: this.#embeddingModels,
-        rerankingModels: this.#rerankingModels,
+        embeddingModels: this.#models.embedding,
+        rerankingModels: this.#models.reranking,
         ...(admission === undefined ? {} : { admission }),
       }
     }
     return {
-      ontology: this.#ontology,
-      embeddingModels: this.#embeddingModels,
-      rerankingModels: this.#rerankingModels,
+      ontology: this.#ontology.registry,
+      embeddingModels: this.#models.embedding,
+      rerankingModels: this.#models.reranking,
       storage: this.#storage,
-      runtimeAuthorization: this.#runtime.runtimeAuthorization,
-      ...(this.#runtime.authorization === undefined
+      runtimeAuthorization: this.#security.runtime.runtimeAuthorization,
+      ...(this.#security.runtime.authorization === undefined
         ? {}
-        : { authorization: this.#runtime.authorization }),
+        : { authorization: this.#security.runtime.authorization }),
       ...(admission === undefined ? {} : { admission }),
     }
   }
@@ -525,19 +548,15 @@ class AuthorizedObjectReaderImpl {
    * The executor validates the query it runs, and that validation resolves default text fields.
    * Every admission that narrows those fields must therefore apply there, not only beforehand.
    */
-  #executorAdmission(): ObjectQuerySemanticAdmission | undefined {
-    const clearance = this.#clearance && createClearanceQueryAdmission(this.#clearance)
-    const selected = this.#delegatedQueryAdmission
-    if (selected && clearance) return composeObjectQueryAdmissions(selected, clearance)
-    return selected ?? clearance
+  #executorAdmission(clearance: Clearance): ObjectQuerySemanticAdmission | undefined {
+    const admission = clearance && createClearanceQueryAdmission(clearance)
+    const selected = this.#security.delegation?.queryAdmission
+    if (selected && admission) return composeObjectQueryAdmissions(selected, admission)
+    return selected ?? admission
   }
 
-  #redact<TRow extends ObjectRow>(row: TRow): TRow {
-    return this.#clearance ? redactObjectRow(row, this.#clearance) : row
-  }
-
-  #omitHidden<TRow extends ObjectRow>(row: TRow): TRow {
-    return this.#clearance ? omitHiddenProperties(row, this.#clearance) : row
+  #omitHidden<TRow extends ObjectRow>(row: TRow, clearance: Clearance): TRow {
+    return clearance ? omitHiddenProperties(row, clearance) : row
   }
 
   /**
@@ -546,83 +565,40 @@ class AuthorizedObjectReaderImpl {
    */
   #detachRows<TResult>(
     result: TResult,
-    rows: (detached: TResult) => Iterable<ObjectRow | null>
+    rows: (detached: TResult) => Iterable<ObjectRow | null>,
+    clearance: Clearance
   ): TResult {
     const detached = detachReadResult(result)
-    const clearance = this.#clearance
     if (clearance) {
       for (const row of rows(detached)) if (row) attachRedactions(row, clearance)
     }
     return detached
   }
 
-  #hidesProperty(item: { readonly objectTypeId: string; readonly propertyId: string }): boolean {
-    return this.#clearance?.missingMarking(item.objectTypeId, item.propertyId) !== undefined
-  }
-
   #admitDelegatedQuery(query: ObjectQuery): AdmittedObjectQuery | undefined {
-    if (!this.#delegatedQueryAdmission) return undefined
-    return validateObjectQueryWithAdmission(
-      query,
-      { ontology: this.#ontology },
-      this.#delegatedQueryAdmission
-    )
-  }
-
-  #assertObjectTypesViewable(objectTypeIds: readonly string[]): void {
-    if (this.#authority.type === "delegated") {
-      for (const objectTypeId of new Set(objectTypeIds)) {
-        if (this.#delegatedObjectTypeIds?.has(objectTypeId)) continue
-        throw new AuthorizationError(
-          `delegated:object.view:${objectTypeId}`,
-          `[Sixb] Delegated authorization does not select object type '${objectTypeId}'.`
-        )
-      }
-      return
-    }
-
-    for (const objectTypeId of new Set(objectTypeIds)) {
-      assertAuthorized(this.#runtime, { kind: "object.view", objectTypeId })
-    }
+    const admission = this.#security.delegation?.queryAdmission
+    if (!admission) return undefined
+    return validateObjectQueryWithAdmission(query, { ontology: this.#ontology.registry }, admission)
   }
 
   #resolveListObjectTypes(
-    requested: ListObjectsInput["objectTypeId"]
+    requested: ListObjectsInput["objectTypeId"],
+    clearance: Clearance
   ): ListObjectsInput["objectTypeId"] {
     if (requested !== undefined) {
       const objectTypeIds = typeof requested === "string" ? [requested] : [...new Set(requested)]
       for (const objectTypeId of objectTypeIds) {
-        this.#ontology.resolveObjectType(objectTypeId)
+        this.#ontology.registry.resolveObjectType(objectTypeId)
       }
-      this.#assertObjectTypesViewable(objectTypeIds)
+      this.#security.assertObjectTypesViewable(objectTypeIds, clearance)
       return typeof requested === "string" ? requested : objectTypeIds
     }
 
-    if (this.#authority.type === "unrestricted") return undefined
-    return this.#ontology
+    if (this.#security.authority.type === "unrestricted") return undefined
+    return this.#ontology.registry
       .listObjectTypes()
       .map((objectType) => objectType.id)
-      .filter((objectTypeId) => this.#isObjectTypeViewable(objectTypeId))
-  }
-
-  #isObjectTypeViewable(objectTypeId: string): boolean {
-    if (this.#authority.type === "delegated") {
-      return this.#delegatedObjectTypeIds?.has(objectTypeId) ?? false
-    }
-    return isAllowed(this.#runtime.authorization, { kind: "object.view", objectTypeId })
-  }
-
-  #isLinkViewable(link: ObjectLinkRow): boolean {
-    if (
-      !this.#isObjectTypeViewable(link.sourceTypeId) ||
-      !this.#isObjectTypeViewable(link.targetTypeId)
-    ) {
-      return false
-    }
-    return (
-      this.#delegatedLinkDefinitions?.has(delegatedLinkDefinitionKey(link)) ??
-      this.#authority.type !== "delegated"
-    )
+      .filter((objectTypeId) => this.#security.isObjectTypeViewable(objectTypeId, clearance))
   }
 }
 
@@ -638,18 +614,27 @@ export function createAuthorizedObjectReader(input: {
   readonly embeddingModels?: EmbeddingModelCatalog
   readonly rerankingModels?: RerankingModelCatalog
   readonly objectStorage: ObjectStorage
+  /** Markings of the dataset versions projections applied; the code's markings alone without. */
+  readonly appliedMarkings?: AppliedMarkings
 }): AuthorizedObjectReader {
   const scope = captureExecutionScope(input.scope)
   const projectId = scope.execution.projectId
   const authority = resolveExecutionScopeAuthorization(projectId, scope)
   const storage = objectStorageForAuthority(authority, input.objectStorage)
   const reader = new AuthorizedObjectReaderImpl(readerConstructionKey, {
-    scope,
-    ontology: input.ontology,
-    embeddingModels: input.embeddingModels,
-    rerankingModels: input.rerankingModels,
+    ontology: new ObjectReaderOntology(input.ontology, authority),
+    security: new ObjectReaderSecurity({
+      authorization: scope.authorization,
+      authority,
+      projectId,
+      ontology: input.ontology,
+      ...(input.appliedMarkings === undefined ? {} : { appliedMarkings: input.appliedMarkings }),
+    }),
+    models: Object.freeze({
+      ...(input.embeddingModels === undefined ? {} : { embedding: input.embeddingModels }),
+      ...(input.rerankingModels === undefined ? {} : { reranking: input.rerankingModels }),
+    }),
     storage,
-    authority,
   })
   Object.freeze(reader)
   return reader
@@ -669,21 +654,48 @@ export function getAuthorizedOntologyView(reader: AuthorizedObjectReader): Autho
 }
 
 /**
- * Unrestricted authority reads every property. A principal reads what its roles clear; delegated
- * shared access carries no clearance, so no share can expose a marked property.
+ * What a reader resolved for this authority cannot read now. Events redact with it: an event of an
+ * object type the reader cannot read is not delivered, and the others are redacted like rows.
  */
-function clearanceForAuthority(
-  authority: ResolvedExecutionAuthority,
-  ontology: OntologyRegistry
-): PropertyClearance | undefined {
-  switch (authority.type) {
-    case "unrestricted":
-      return undefined
-    case "principal":
-      return resolvePropertyClearance(ontology, authority.context.clearances ?? new Set())
-    case "delegated":
-      return resolvePropertyClearance(ontology, new Set())
+export function readerClearance(reader: AuthorizedObjectReader): Promise<Clearance> {
+  return AuthorizedObjectReaderImpl.clearance(reader)
+}
+
+/**
+ * What a reader cannot read in an object event a projection emitted: it holds the values of its
+ * origin version, so that version's markings apply on top of the current ones. A plain value for
+ * a reader those markings cannot affect, which reads no version.
+ */
+export function readerEventOriginClearance(
+  reader: AuthorizedObjectReader,
+  origin: EventOriginRef
+): Clearance | Promise<Clearance> {
+  return AuthorizedObjectReaderImpl.eventOriginClearance(reader, origin)
+}
+
+/** What a write or a request names: object types, and links by their source type. */
+interface ReadTargets {
+  readonly objectTypeIds: readonly string[]
+  readonly links?: readonly { readonly objectTypeId: string; readonly linkId: string }[]
+}
+
+function assertTargetsReadable(clearance: Clearance, targets: ReadTargets): void {
+  if (!clearance) return
+  for (const objectTypeId of targets.objectTypeIds) {
+    const unreadable = clearance.unreadableType(objectTypeId)
+    if (unreadable) throw unreadableError(unreadable)
   }
+  for (const link of targets.links ?? []) {
+    const unreadable = clearance.unreadableLink(link.objectTypeId, link.linkId)
+    if (unreadable) throw unreadableError(unreadable)
+  }
+}
+
+function hidesProperty(
+  item: { readonly objectTypeId: string; readonly propertyId: string },
+  clearance: Clearance
+): boolean {
+  return clearance?.missingMarking(item.objectTypeId, item.propertyId) !== undefined
 }
 
 function objectStorageForAuthority(
@@ -706,41 +718,6 @@ function objectStorageForAuthority(
         `[Sixb] Unsupported object reader authority '${String((authority as { type?: unknown }).type)}'.`
       )
   }
-}
-
-function ontologySelectionForAuthority(
-  authority: ResolvedExecutionAuthority,
-  ontology: OntologyRegistry
-): AuthorizedOntologySelection {
-  switch (authority.type) {
-    case "unrestricted":
-      return { kind: "all" }
-    case "principal":
-      return {
-        kind: "types",
-        objectTypeIds: ontology
-          .listObjectTypes()
-          .filter((objectType) =>
-            isAllowed(authority.context, {
-              kind: "object.view",
-              objectTypeId: objectType.id,
-            })
-          )
-          .map((objectType) => objectType.id),
-      }
-    case "delegated":
-      return { kind: "selected", scope: authority.objectRead.scope }
-  }
-}
-
-function delegatedLinkDefinitionKey(
-  input:
-    | Pick<CompiledObjectReadStep, "sourceObjectTypeId" | "linkId" | "targetObjectTypeId">
-    | Pick<ObjectLinkRow, "sourceTypeId" | "linkId" | "targetTypeId">
-): string {
-  return "sourceObjectTypeId" in input
-    ? JSON.stringify([input.sourceObjectTypeId, input.linkId, input.targetObjectTypeId])
-    : JSON.stringify([input.sourceTypeId, input.linkId, input.targetTypeId])
 }
 
 /**

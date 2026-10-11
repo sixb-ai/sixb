@@ -56,17 +56,23 @@ export function shareOntologyMutationRuntime(source: object, target: object): vo
 export function createOntologyMutationRuntime(input: {
   readonly materializer: BoundOntologyMaterializer
   readonly notifyCommittedFacts: () => void
+  /** Called once a projection may have changed the dataset version its source applied. */
+  readonly onProjectionApplied?: () => void
 }): OntologyMutationRuntime {
+  const applied = <TResult>(work: Promise<TResult>): Promise<TResult> =>
+    work.finally(() => notifyWithoutAffecting(input.onProjectionApplied))
   const runtime: OntologyMutationRuntime = {
     getProjectionSource: (source) => input.materializer.projections.getActive(source),
     commitEdits: (command) =>
       commitAndNotify(() => input.materializer.edits.commit(command), input.notifyCommittedFacts),
     replaceProjection: (command) =>
-      commitAndNotify(
-        () => input.materializer.projections.replace(command),
-        input.notifyCommittedFacts
+      applied(
+        commitAndNotify(
+          () => input.materializer.projections.replace(command),
+          input.notifyCommittedFacts
+        )
       ),
-    finishProjection: (command) => input.materializer.projections.finishRun(command),
+    finishProjection: (command) => applied(input.materializer.projections.finishRun(command)),
     appendTelemetry: (command) =>
       commitAndNotify(
         () => input.materializer.telemetry.append(command),
@@ -92,5 +98,13 @@ function notifyWithoutAffectingCommit(notify: () => void): void {
     // The ontology commit is already durable. A wake-up failure must never turn it into an apparent
     // mutation failure; API-hosted ontology maintenance remains the correctness fallback.
     console.error("[Sixb] Failed to wake the ontology outbox dispatcher:", error)
+  }
+}
+
+function notifyWithoutAffecting(notify: (() => void) | undefined): void {
+  try {
+    notify?.()
+  } catch (error) {
+    console.error("[Sixb] Failed to report an applied projection:", error)
   }
 }

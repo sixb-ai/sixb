@@ -20,6 +20,8 @@ import type {
   AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,
+  ActiveOntologySource,
+  ActiveSourceTarget,
   AdoptedSourceMaterialization,
   AdoptSourceMaterializationInput,
   AssertSourceMaterializationExecutionInput,
@@ -27,6 +29,7 @@ import type {
   CleanupTerminalSourceMaterializationsInput,
   CleanupTerminalSourceMaterializationsResult,
   GetActiveOntologySourceInput,
+  ListActiveOntologySourcesInput,
   MarkSourceMaterializationReadyInput,
   OntologySourceRecord,
   OntologySourceStorage,
@@ -235,6 +238,63 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
         )
         .get(input.projectId, input.source.projectionId) as SqliteOntologySourceRow | null
       return row ? sourceRecord(row) : null
+    })
+  }
+
+  async listActive(
+    input: ListActiveOntologySourcesInput
+  ): Promise<readonly ActiveOntologySource[]> {
+    return this.runRootOperation(() => {
+      assertNonblank(input.projectId, "Source project id")
+      // Served by the partial index on active sources.
+      const rows = this.db
+        .query(
+          `
+            SELECT source_id, dataset_id, dataset_version_id, dataset_version_created_at,
+              projection_revision
+            FROM ontology_sources
+            WHERE project_id = ? AND status = 'active'
+          `
+        )
+        .all(input.projectId) as ActiveSourceRow[]
+      return rows.map((row) => ({
+        source: { projectionId: row.source_id },
+        datasetVersion: {
+          datasetId: row.dataset_id,
+          versionId: row.dataset_version_id,
+          createdAt: row.dataset_version_created_at,
+        },
+        projectionRevision: row.projection_revision,
+      }))
+    })
+  }
+
+  /**
+   * Any one live row of the kind the source projects. Live rows may belong to superseded versions:
+   * a delta keeps the roots it did not restage in the version that staged them.
+   */
+  async getActiveTarget(input: GetActiveOntologySourceInput): Promise<ActiveSourceTarget | null> {
+    return this.runRootOperation(() => {
+      assertProjectAndSource(input)
+      const row = this.db
+        .query(
+          `
+            SELECT rows.entity_kind, rows.object_type_id, rows.source_type_id, rows.link_id,
+              rows.target_type_id
+            FROM ontology_sources AS active
+            JOIN ontology_sources AS versions ON versions.project_id = active.project_id
+              AND versions.source_id = active.source_id
+              AND versions.status IN ('active', 'superseded')
+            JOIN ontology_source_roots AS roots ON roots.version_id = versions.version_id
+              AND roots.retired_at IS NULL AND roots.deleted = 0
+            JOIN ontology_source_rows AS rows ON rows.root_id = roots.id
+              AND rows.entity_kind = active.projection_kind
+            WHERE active.project_id = ? AND active.source_id = ? AND active.status = 'active'
+            LIMIT 1
+          `
+        )
+        .get(input.projectId, input.source.projectionId) as TargetRow | null
+      return activeSourceTarget(row ?? undefined)
     })
   }
 
@@ -626,3 +686,36 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
     return row
   }
 }
+
+interface TargetRow {
+  readonly entity_kind: "object" | "link"
+  readonly object_type_id: string | null
+  readonly source_type_id: string | null
+  readonly link_id: string | null
+  readonly target_type_id: string | null
+}
+
+function activeSourceTarget(row: TargetRow | undefined): ActiveSourceTarget | null {
+  if (!row) return null
+  if (row.entity_kind === "object" && row.object_type_id !== null) {
+    return { kind: "object", objectTypeId: row.object_type_id }
+  }
+  if (row.source_type_id === null || row.link_id === null || row.target_type_id === null) {
+    throw new MaterializationValidationError("A live source link row has no link identity.")
+  }
+  return {
+    kind: "link",
+    sourceTypeId: row.source_type_id,
+    linkId: row.link_id,
+    targetTypeId: row.target_type_id,
+  }
+}
+
+type ActiveSourceRow = Pick<
+  SqliteOntologySourceRow,
+  | "source_id"
+  | "dataset_id"
+  | "dataset_version_id"
+  | "dataset_version_created_at"
+  | "projection_revision"
+>

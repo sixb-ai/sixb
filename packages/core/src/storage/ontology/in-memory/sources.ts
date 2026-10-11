@@ -19,6 +19,8 @@ import type {
   AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,
+  ActiveOntologySource,
+  ActiveSourceTarget,
   AdoptedSourceMaterialization,
   AdoptSourceMaterializationInput,
   AssertSourceMaterializationExecution,
@@ -26,6 +28,7 @@ import type {
   CleanupTerminalSourceMaterializationsInput,
   CleanupTerminalSourceMaterializationsResult,
   GetActiveOntologySourceInput,
+  ListActiveOntologySourcesInput,
   MarkSourceMaterializationReadyInput,
   OntologySourceRecord,
   OntologySourceStorage,
@@ -41,6 +44,7 @@ import {
   type InMemorySourceMaterialization,
   type InMemorySourceRoot,
   insertBounded,
+  projectEntityKey,
   sourceMaterializationKey,
   sourceMaterializationRecord,
 } from "./shared-state"
@@ -190,6 +194,56 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
         input.source.projectionId
       )
       return active ? sourceMaterializationRecord(active) : null
+    })
+  }
+
+  async listActive(
+    input: ListActiveOntologySourcesInput
+  ): Promise<readonly ActiveOntologySource[]> {
+    return this.runRootOperation(() => {
+      assertNonblank(input.projectId, "Source project id")
+      const active: ActiveOntologySource[] = []
+      for (const materialization of this.state.sourceMaterializations.values()) {
+        if (materialization.projectId !== input.projectId) continue
+        if (materialization.status !== "active") continue
+        active.push({
+          source: { projectionId: materialization.source.projectionId },
+          datasetVersion: { ...materialization.datasetVersion },
+          projectionRevision: materialization.projectionRevision,
+        })
+      }
+      return active
+    })
+  }
+
+  async getActiveTarget(input: GetActiveOntologySourceInput): Promise<ActiveSourceTarget | null> {
+    return this.runRootOperation(() => {
+      assertProjectAndSource(input)
+      const { projectId, source } = input
+      const active = findActiveSourceMaterialization(this.state, projectId, source.projectionId)
+      if (!active) return null
+      // A delta keeps the roots it did not restage in the version that staged them.
+      const roots = this.state.activeSourceRoots.get(
+        projectEntityKey(projectId, source.projectionId)
+      )
+      for (const [rootKey, materializationId] of roots ?? []) {
+        const materialization = this.state.sourceMaterializations.get(
+          sourceMaterializationKey(projectId, source.projectionId, materializationId)
+        )
+        for (const entityKey of materialization?.roots.get(rootKey)?.entityKeys ?? []) {
+          const assertion = materialization?.rowsByEntity.get(entityKey)?.assertion
+          if (assertion?.kind !== active.projectionKind) continue
+          return assertion.kind === "object"
+            ? { kind: "object", objectTypeId: assertion.ref.objectTypeId }
+            : {
+                kind: "link",
+                sourceTypeId: assertion.ref.source.objectTypeId,
+                linkId: assertion.ref.linkId,
+                targetTypeId: assertion.ref.target.objectTypeId,
+              }
+        }
+      }
+      return null
     })
   }
 
