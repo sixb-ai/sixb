@@ -19,6 +19,16 @@ export interface ApplyDatasetRowsResult {
   readonly dataChangeExpected: boolean
   readonly sourceRowCount: number
   readonly resultingRowCount: CommitRowCount
+  /**
+   * The table held no rows when this transaction read it. A write into an empty table deletes
+   * nothing, so DuckLake lets it commit alongside a concurrent one that also read the table empty.
+   */
+  readonly targetWasEmpty: boolean
+  /**
+   * The write inserted or deleted rows of the dataset table, which DuckLake checks against
+   * concurrent changes to the table. A merge that only advances source ordering changes none.
+   */
+  readonly changedTableRows: boolean
 }
 
 export function assertDatasetWriteMode(
@@ -46,6 +56,7 @@ export async function applyDatasetRowsFromRelation(input: {
   const columnsSql = datasetSchemaColumnNamesSql(input.dataset.schema)
   const primaryKeyColumns = getDatasetPrimaryKeyColumns(input.dataset)
 
+  let baselineRowCount: number | undefined
   if (primaryKeyColumns !== null) {
     await inspectUniqueKeyedRelation({
       runtime: input.runtime,
@@ -55,7 +66,7 @@ export async function applyDatasetRowsFromRelation(input: {
     })
 
     if (input.mode === "append") {
-      await inspectUniqueKeyedRelation({
+      baselineRowCount = await inspectUniqueKeyedRelation({
         runtime: input.runtime,
         dataset: input.dataset,
         relationSql: table,
@@ -80,6 +91,8 @@ export async function applyDatasetRowsFromRelation(input: {
         dataChangeExpected: false,
         sourceRowCount: source.rowCount,
         resultingRowCount: { kind: "exact", value: target.rowCount },
+        targetWasEmpty: target.rowCount === 0,
+        changedTableRows: false,
       }
     }
 
@@ -88,20 +101,28 @@ export async function applyDatasetRowsFromRelation(input: {
       `INSERT INTO ${table} (${columnsSql}) SELECT ${columnsSql} FROM ${input.sourceRelationSql}`
     )
 
+    const changedTableRows = source.rowCount > 0 || target.rowCount > 0
     return {
-      dataChangeExpected: source.rowCount > 0 || target.rowCount > 0,
+      dataChangeExpected: changedTableRows,
       sourceRowCount: source.rowCount,
       resultingRowCount: { kind: "exact", value: source.rowCount },
+      targetWasEmpty: target.rowCount === 0,
+      changedTableRows,
     }
   }
 
   const sourceRowCount = await countRows(input.runtime, input.sourceRelationSql)
+  const knownRowCount = baselineRowCount ?? input.previousRowCount
+  const targetWasEmpty =
+    knownRowCount === undefined ? await isEmptyRelation(input.runtime, table) : knownRowCount === 0
   await input.runtime.run(
     `INSERT INTO ${table} (${columnsSql}) SELECT ${columnsSql} FROM ${input.sourceRelationSql}`
   )
 
   return {
     dataChangeExpected: sourceRowCount > 0,
+    targetWasEmpty,
+    changedTableRows: sourceRowCount > 0,
     sourceRowCount,
     resultingRowCount:
       input.previousRowCount === undefined
@@ -218,4 +239,9 @@ async function countRows(runtime: DuckDbQueryRuntime, relationSql: string): Prom
   }
 
   return Number(getBigIntLike(row, "row_count"))
+}
+
+async function isEmptyRelation(runtime: DuckDbQueryRuntime, relationSql: string): Promise<boolean> {
+  const rows = await runtime.query(`SELECT 1 AS present FROM ${relationSql} LIMIT 1`)
+  return rows.length === 0
 }

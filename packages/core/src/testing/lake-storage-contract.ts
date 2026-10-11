@@ -2,7 +2,14 @@ import { describe, expect, test } from "bun:test"
 import type { FileRef } from "../blob-storage"
 import { col, type DatasetDefinition, defineDataset } from "../datasets"
 import { LakeStorageError } from "../lake-storage/errors"
-import type { DatasetRow, LakeStorage } from "../lake-storage/types"
+import type {
+  BeginDatasetWriteInput,
+  DatasetColumnRef,
+  DatasetProducer,
+  DatasetRow,
+  DatasetWriteCommitResult,
+  LakeStorage,
+} from "../lake-storage/types"
 
 export type LakeStorageSchemaEvolutionCapability = "strict" | "addNullableColumns"
 
@@ -16,6 +23,8 @@ export interface LakeStorageContractSuiteOptions<TStorage extends LakeStorage = 
    * `strict`, which allows metadata-only merges but rejects schema evolution.
    */
   readonly schemaEvolution?: LakeStorageSchemaEvolutionCapability
+  /** Open the same lake again, to check what a provider persists. */
+  readonly reopen?: (storage: TStorage) => TStorage | Promise<TStorage>
   /**
    * Version id that is syntactically valid for the provider but should not
    * exist. Defaults to a generic id accepted by providers without format
@@ -63,6 +72,29 @@ const invoiceRef: FileRef = {
   fileName: "invoice.txt",
   mediaType: "text/plain",
   logicalPath: "invoices/invoice.txt",
+}
+
+const pipeline: DatasetProducer = { kind: "pipeline", id: "contract-pipeline", stepId: "copy" }
+const source = (column: string): DatasetColumnRef => ({ datasetId: "contract.source", column })
+/** A step that copies `contract.source` columns, as resolved lineage. */
+const copied = {
+  rows: [],
+  columns: { customerName: [source("name")], orderId: [source("id")] },
+}
+/** The same step, before a fix: it wrote amounts into `customerName`. */
+const fromAmount = {
+  rows: [],
+  columns: { customerName: [source("amount")], orderId: [source("id")] },
+}
+
+async function write(
+  storage: LakeStorage,
+  input: Pick<BeginDatasetWriteInput, "producer" | "lineage" | "mode">,
+  rows: readonly DatasetRow[]
+): Promise<DatasetWriteCommitResult> {
+  const session = await storage.beginWrite({ dataset: writeDataset, ...input })
+  await session.writeRows(rows)
+  return session.commit()
 }
 
 /**
@@ -612,7 +644,7 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
 
       test("versions changed input lineage even when output rows are identical", () =>
         withStorage(async (storage) => {
-          // Regression proof: omit hasDatasetInputChanges in the provider's no-op branch.
+          // Regression proof: omit hasDatasetProvenanceChanges in the provider's no-op branch.
           // The updated input reference is lost and the stale writer is no longer fenced.
           await storage.createDataset(writeDataset)
           await storage.createDataset(definitionDataset)
@@ -642,6 +674,65 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
           const unchanged = await same.commit({ expectedLatestVersionId: newer.versionId })
           expect(unchanged).toMatchObject({ outcome: "unchanged", versionId: newer.versionId })
           expect(await collectRows(storage.readRows({ datasetId: writeDataset.id }))).toEqual(rows)
+        }))
+
+      test("versions changed column lineage even when output rows are identical", () =>
+        withStorage(async (storage) => {
+          // Regression proof: compare only inputs in the provider's no-op branch. The rerun
+          // reuses the version without lineage, and its rows stay classified with every marking.
+          await storage.createDataset(writeDataset)
+          const rows = [{ orderId: "ord_1", customerName: "Ada" }]
+          const commit = async (
+            write: Pick<BeginDatasetWriteInput, "producer" | "lineage" | "mode">,
+            expectedLatestVersionId: string | null,
+            written: readonly DatasetRow[] = rows
+          ) => {
+            const session = await storage.beginWrite({ dataset: writeDataset, ...write })
+            await session.writeRows(written)
+            return session.commit({ expectedLatestVersionId })
+          }
+
+          const initial = await commit({ producer: pipeline }, null)
+          expect(initial.lineage).toBeUndefined()
+          const analyzed = await commit({ producer: pipeline, lineage: copied }, initial.versionId)
+          expect(analyzed).toMatchObject({ outcome: "created", lineage: copied })
+
+          // Order and repetition do not change a lineage.
+          const reordered = {
+            rows: [],
+            columns: {
+              orderId: [...copied.columns.orderId, ...copied.columns.orderId],
+              customerName: copied.columns.customerName,
+            },
+          }
+          expect(
+            await commit({ producer: pipeline, lineage: reordered }, analyzed.versionId)
+          ).toMatchObject({ outcome: "unchanged", versionId: analyzed.versionId })
+
+          // A run that recorded no lineage is a change too: reusing the analyzed version would
+          // classify its rows by a lineage the run did not record.
+          const unanalyzed = await commit({ producer: pipeline }, analyzed.versionId)
+          expect(unanalyzed).toMatchObject({ outcome: "created" })
+          expect(
+            (await storage.getVersion(writeDataset.id, unanalyzed.versionId))?.lineage
+          ).toBeUndefined()
+
+          // An empty append compares what it would store, after merging its parent's lineage.
+          const analyzedAgain = await commit(
+            { producer: pipeline, lineage: copied },
+            unanalyzed.versionId
+          )
+          const append = { producer: pipeline, mode: "append" } as const
+          const narrower = { rows: [], columns: { ...copied.columns, customerName: [] } }
+          expect(
+            await commit({ ...append, lineage: narrower }, analyzedAgain.versionId, [])
+          ).toMatchObject({ outcome: "unchanged", versionId: analyzedAgain.versionId })
+          const wider = { rows: [source("tenant")], columns: copied.columns }
+          const widened = await commit({ ...append, lineage: wider }, analyzedAgain.versionId, [])
+          expect(widened).toMatchObject({
+            outcome: "created",
+            lineage: { rows: [source("tenant")], columns: copied.columns },
+          })
         }))
 
       test("creates an initial empty append version", async () => {
@@ -938,6 +1029,140 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
           ])
         })
       })
+    })
+
+    describe("resolved column lineage", () => {
+      test("stores the lineage of every version, in a canonical form, across reopening", async () => {
+        let storage = await options.createStorage()
+        try {
+          await storage.createDataset(writeDataset)
+          const synced = await write(storage, { producer: { kind: "sync", id: "contract-sync" } }, [
+            { orderId: "ord_1", customerName: "Ada" },
+          ])
+          // Outside pipelines, a version depends on its own columns only.
+          expect(synced.lineage).toEqual({ rows: [], columns: { customerName: [], orderId: [] } })
+
+          const repeated = {
+            rows: [source("tenant"), source("tenant")],
+            columns: {
+              orderId: [source("id")],
+              customerName: [source("name"), source("amount"), source("name")],
+              dropped: [source("id")],
+            },
+          }
+          const computed = await write(storage, { producer: pipeline, lineage: repeated }, [
+            { orderId: "ord_1", customerName: "Ada" },
+          ])
+          const canonical = {
+            rows: [source("tenant")],
+            columns: {
+              customerName: [source("amount"), source("name")],
+              orderId: [source("id")],
+            },
+          }
+          expect(computed.lineage).toEqual(canonical)
+
+          if (options.reopen) storage = await options.reopen(storage)
+          expect((await storage.getVersion(writeDataset.id, computed.versionId))?.lineage).toEqual(
+            canonical
+          )
+          expect((await storage.getLatestVersion(writeDataset.id))?.lineage).toEqual(canonical)
+          const listed = await storage.listVersions(writeDataset.id)
+          expect(Object.fromEntries(listed.map((v) => [v.versionId, v.lineage]))).toEqual({
+            [computed.versionId]: canonical,
+            [synced.versionId]: synced.lineage,
+          })
+        } finally {
+          await options.teardown?.(storage)
+        }
+      })
+
+      test("an append keeps its parent's lineage and a snapshot replaces it", () =>
+        withStorage(async (storage) => {
+          await storage.createDataset(writeDataset)
+          await write(storage, { producer: pipeline, lineage: fromAmount }, [
+            { orderId: "ord_1", customerName: "120.00" },
+          ])
+          const appended = await write(
+            storage,
+            { producer: pipeline, lineage: copied, mode: "append" },
+            [{ orderId: "ord_2", customerName: "Grace" }]
+          )
+          expect(appended.lineage).toEqual({
+            rows: [],
+            columns: {
+              customerName: [source("amount"), source("name")],
+              orderId: [source("id")],
+            },
+          })
+
+          const replaced = await write(storage, { producer: pipeline, lineage: copied }, [
+            { orderId: "ord_2", customerName: "Grace" },
+          ])
+          expect(replaced.lineage).toEqual(copied)
+        }))
+
+      test("a version that keeps rows of an unknown history records it as unknown", () =>
+        withStorage(async (storage) => {
+          await storage.createDataset(writeDataset)
+          const unanalyzed = await write(storage, { producer: pipeline }, [
+            { orderId: "ord_1", customerName: "Ada" },
+          ])
+          expect(unanalyzed.lineage).toBeUndefined()
+
+          const unknown = {
+            unknown: `version '${unanalyzed.versionId}' of '${writeDataset.id}' recorded no column lineage`,
+          }
+          const synced = await write(
+            storage,
+            { producer: { kind: "sync", id: "contract-sync" }, mode: "append" },
+            [{ orderId: "ord_2", customerName: "Grace" }]
+          )
+          expect(synced.lineage).toEqual(unknown)
+          // The reason keeps naming where the lineage was lost.
+          const computed = await write(
+            storage,
+            { producer: pipeline, lineage: copied, mode: "append" },
+            [{ orderId: "ord_3", customerName: "Katherine" }]
+          )
+          expect(computed.lineage).toEqual(unknown)
+          expect((await storage.getVersion(writeDataset.id, computed.versionId))?.lineage).toEqual(
+            unknown
+          )
+
+          const replaced = await write(storage, { producer: pipeline, lineage: copied }, [
+            { orderId: "ord_3", customerName: "Katherine" },
+          ])
+          expect(replaced.lineage).toEqual(copied)
+        }))
+
+      test("a schema change keeps its parent's lineage", () =>
+        withStorage(async (storage) => {
+          if (schemaEvolution === "strict") return
+          const initial = defineDataset("contract.lineage.schema_evolution", {
+            schema: [col("invoiceId", "string")],
+          })
+          const widened = defineDataset("contract.lineage.schema_evolution", {
+            schema: [col("invoiceId", "string"), col("currency", "string", { nullable: true })],
+          })
+          await storage.createDataset(initial)
+          const session = await storage.beginWrite({
+            dataset: initial,
+            producer: pipeline,
+            lineage: { rows: [source("tenant")], columns: { invoiceId: [source("id")] } },
+          })
+          await session.writeRows([{ invoiceId: "inv_1" }])
+          await session.commit()
+
+          await storage.createDataset(widened)
+          const [schemaVersion] = await storage.listVersions(initial.id, 1)
+          expect(schemaVersion?.mode).toBe("schema")
+          // Its rows hold no currency yet.
+          expect(schemaVersion?.lineage).toEqual({
+            rows: [source("tenant")],
+            columns: { currency: [], invoiceId: [source("id")] },
+          })
+        }))
     })
   })
 }

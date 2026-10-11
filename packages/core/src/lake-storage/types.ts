@@ -26,6 +26,37 @@ export interface DatasetProducer {
   readonly stepId?: string
 }
 
+/** A column of a dataset, by dataset id and column name. */
+export interface DatasetColumnRef {
+  readonly datasetId: string
+  readonly column: string
+}
+
+/**
+ * Which dataset columns the values of a version, or of one transform, come from.
+ *
+ * A column depends on the columns `rows` lists and on the ones `columns` lists for it. A column
+ * missing from `columns` could depend on anything.
+ */
+export interface DatasetColumnLineage {
+  /** Columns that decide which rows exist or their order. Every column depends on them. */
+  readonly rows: readonly DatasetColumnRef[]
+  /** Columns whose values flow into each column. Lists every column. */
+  readonly columns: Readonly<Record<string, readonly DatasetColumnRef[]>>
+}
+
+/**
+ * A version whose rows come, at least in part, from a version whose lineage is unknown, such as
+ * a pipeline version written before Sixb recorded lineage. Every column could hold anything.
+ */
+export interface DatasetUnknownLineage {
+  /** Names the version or write the lineage was lost at, for diagnostics. */
+  readonly unknown: string
+}
+
+/** What a dataset version records about where everything it holds comes from. */
+export type DatasetVersionLineage = DatasetColumnLineage | DatasetUnknownLineage
+
 export interface DatasetVersion {
   readonly datasetId: string
   readonly versionId: string
@@ -35,6 +66,17 @@ export interface DatasetVersion {
   readonly schema: DatasetSchema
   readonly producer?: DatasetProducer
   readonly inputs?: readonly DatasetVersionRef[]
+  /**
+   * Every dataset column the values of this version come from, across every upstream step, and
+   * including the rows it keeps from its parent. Markings are read from it, so classifying a
+   * version reads no other version.
+   *
+   * Providers store the value `lineageAtCommit` returns, and return it as stored: Sixb validates
+   * it when it reads it. Absent on a version written before Sixb recorded it, and on a pipeline
+   * version whose writer passed none: such a pipeline version could hold anything, and any other
+   * version holds only what its own columns declare.
+   */
+  readonly lineage?: DatasetVersionLineage
   readonly rowCount?: number
   readonly sizeBytes?: number
 }
@@ -76,6 +118,13 @@ export interface BeginDatasetWriteInput {
   readonly mode?: DatasetWriteMode
   readonly producer?: DatasetProducer
   readonly inputs?: readonly DatasetVersionRef[]
+  /**
+   * The resolved lineage of the rows this write adds: for a pipeline step, its own lineage mapped
+   * through its input versions with `resolveStepLineage`. The provider merges in what the version
+   * keeps of its parent at commit (`lineageAtCommit`). A pipeline write without it is classified
+   * with every marking; any other write without it depends on its own columns only.
+   */
+  readonly lineage?: DatasetVersionLineage
 }
 
 export interface ReadDatasetRowsInput {
@@ -137,7 +186,7 @@ export interface DatasetWriteCommitResult extends DatasetVersion {
    * Whether this operation created the returned version or reused the
    * unchanged latest version. When a latest version exists, providers must
    * report `unchanged` and reuse it for commits that change neither visible
-   * dataset content nor explicitly supplied input lineage: a snapshot whose
+   * dataset content nor provenance (`hasDatasetProvenanceChanges`): a snapshot whose
    * rows equal the latest visible rows
    * (order-insensitive, with equal duplicate counts), or an append of zero
    * rows. Without a latest version, an empty snapshot or append still creates

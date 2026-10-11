@@ -80,6 +80,7 @@ export function toDatasetVersion(manifest: StoredDatasetVersionManifest): Datase
     schema: manifest.schema,
     producer: manifest.producer,
     inputs: manifest.inputs,
+    ...(manifest.lineage !== undefined && { lineage: manifest.lineage }),
     rowCount: manifest.rowCount,
     sizeBytes: manifest.sizeBytes,
   }
@@ -95,6 +96,7 @@ export function toStoredManifest(options: StoredManifestInput): StoredDatasetVer
     schema: options.version.schema,
     producer: options.version.producer,
     inputs: options.version.inputs,
+    lineage: options.version.lineage,
     rowCount: options.version.rowCount,
     sizeBytes: options.version.sizeBytes,
     rowFile: options.rowFile,

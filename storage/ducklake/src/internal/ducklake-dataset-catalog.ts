@@ -1,9 +1,14 @@
 import { randomUUID } from "node:crypto"
 import type { DatasetDefinition, DatasetSchema } from "@sixb/core"
-import type { DatasetDefinitionUpdatePlan, DatasetSchemaUpdatePlan } from "@sixb/core/lake-storage"
+import type {
+  DatasetDefinitionUpdatePlan,
+  DatasetSchemaUpdatePlan,
+  DatasetVersionLineage,
+} from "@sixb/core/lake-storage"
 import {
   assertDatasetDefinition,
   LakeStorageError,
+  lineageAtCommit,
   planDatasetDefinitionUpdate,
 } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
@@ -17,6 +22,15 @@ import {
 } from "./ducklake-catalog-schema"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import { readCurrentDatasetDefinitions } from "./ducklake-current-dataset-definitions"
+import type { DatasetTableRef } from "./ducklake-dataset-table-ref"
+import type { DuckLakeVersionSummary } from "./ducklake-snapshot-reader"
+import {
+  beginTransactionOnLatestVersion,
+  commitVersionTransaction,
+  type LatestVersionAtSnapshot,
+  rerunWhenCatalogMoves,
+} from "./ducklake-version-transaction"
+import { encodeLineage } from "./lineage-encoding"
 import { encodeDatasetSequenceTableName, encodeDatasetTableName } from "./names"
 import { datasetColumnToDuckDbSql, datasetSchemaToDuckDbColumnsSql } from "./schema"
 import {
@@ -26,6 +40,28 @@ import {
   quoteIdentifier,
   quoteSqlString,
 } from "./sql"
+
+/**
+ * Reads the latest version of a dataset, which a schema change keeps the rows of, as
+ * `BeginVersionTransactionInput.readLatestVersion`.
+ */
+export type LatestDatasetVersionReader = (
+  runtime: DuckDbQueryRuntime,
+  definition: DatasetDefinition
+) => Promise<LatestVersionAtSnapshot<DuckLakeVersionSummary>>
+
+export interface DatasetSchemaAtSnapshotRequest {
+  readonly table: DatasetTableRef
+  readonly snapshotId: string
+}
+
+/** A row of `ducklake_column`: one column of one table, alive over a snapshot range. */
+interface DuckLakeColumnVersion {
+  readonly tableId: bigint
+  readonly beginSnapshot: bigint
+  readonly endSnapshot?: bigint
+  readonly column: Omit<DuckLakeCatalogColumn, "tableName">
+}
 
 /**
  * Translates between Sixb dataset definitions and DuckLake table metadata.
@@ -40,7 +76,10 @@ export class DuckLakeDatasetCatalog {
     private readonly connections: DuckLakeConnectionManager
   ) {}
 
-  async createDataset(definition: DatasetDefinition): Promise<DatasetDefinition> {
+  async createDataset(
+    definition: DatasetDefinition,
+    readLatestVersion: LatestDatasetVersionReader
+  ): Promise<DatasetDefinition> {
     this.assertSchema(definition)
 
     // Step 1: read the current DuckLake table back into Sixb shape. The
@@ -49,9 +88,23 @@ export class DuckLakeDatasetCatalog {
     const existing = await this.getDataset(definition.id)
 
     if (existing) {
-      const plan = planDatasetDefinitionUpdate(existing, definition)
+      // A schema change the catalog moved under, such as one another host applied concurrently,
+      // reruns from the stored definition: it may have nothing left to change.
+      const plan = await rerunWhenCatalogMoves(definition.id, async (attempt) => {
+        const current = attempt === 1 ? existing : await this.getDataset(definition.id)
+        if (!current) {
+          throw new LakeStorageError(
+            `[SixbDuckLake] Dataset '${definition.id}' was removed while its definition was updated.`
+          )
+        }
+
+        const plan = planDatasetDefinitionUpdate(current, definition)
+        if (plan.changed) {
+          await this.applyExistingDatasetUpdate(plan, readLatestVersion)
+        }
+        return plan
+      })
       if (plan.changed) {
-        await this.applyExistingDatasetUpdate(plan)
         this.connections.markLocalCatalogChanged()
         await this.connections.resetRuntime()
       }
@@ -201,23 +254,50 @@ export class DuckLakeDatasetCatalog {
     })
   }
 
-  async getDatasetSchemaAtSnapshot(
+  /**
+   * Dataset schemas at DuckLake snapshots, in request order, from one catalog read: a column row
+   * is visible from its begin_snapshot until its end_snapshot, so the rows alive anywhere between
+   * the oldest and the newest requested snapshot answer every request.
+   */
+  async getDatasetSchemasAtSnapshots(
     runtime: DuckDbQueryRuntime,
-    datasetId: string,
-    tableName: string,
-    tableId: bigint,
-    snapshotId: string
-  ): Promise<DatasetSchema> {
-    assertDuckLakeSnapshotId(snapshotId)
-
-    const columns = await this.readDatasetColumnsAtSnapshot(runtime, tableName, tableId, snapshotId)
-    if (columns.length === 0) {
-      throw new LakeStorageError(
-        `[SixbDuckLake] Could not reconstruct schema for dataset '${datasetId}' at DuckLake snapshot '${snapshotId}'.`
-      )
+    requests: readonly DatasetSchemaAtSnapshotRequest[]
+  ): Promise<readonly DatasetSchema[]> {
+    if (requests.length === 0) {
+      return []
     }
 
-    return duckLakeCatalogColumnsToDatasetSchema(tableName, columns)
+    for (const request of requests) {
+      assertDuckLakeSnapshotId(request.snapshotId)
+    }
+
+    const snapshots = requests.map((request) => BigInt(request.snapshotId))
+    const rows = await this.readDatasetColumnsBetweenSnapshots(
+      runtime,
+      requests.map((request) => request.table),
+      snapshots.reduce((oldest, snapshot) => (snapshot < oldest ? snapshot : oldest)),
+      snapshots.reduce((newest, snapshot) => (snapshot > newest ? snapshot : newest))
+    )
+
+    return requests.map(({ table, snapshotId }, index) => {
+      const snapshot = snapshots[index]
+      const columns = rows
+        .filter(
+          (row) =>
+            row.tableId === table.tableId &&
+            row.beginSnapshot <= snapshot &&
+            (row.endSnapshot === undefined || row.endSnapshot > snapshot)
+        )
+        .map((row) => ({ tableName: table.tableName, ...row.column }))
+
+      if (columns.length === 0) {
+        throw new LakeStorageError(
+          `[SixbDuckLake] Could not reconstruct schema for dataset '${table.datasetId}' at DuckLake snapshot '${snapshotId}'.`
+        )
+      }
+
+      return duckLakeCatalogColumnsToDatasetSchema(table.tableName, columns)
+    })
   }
 
   assertSchema(definition: DatasetDefinition): void {
@@ -227,27 +307,47 @@ export class DuckLakeDatasetCatalog {
     )
   }
 
-  private async applyExistingDatasetUpdate(plan: DatasetDefinitionUpdatePlan): Promise<void> {
+  private async applyExistingDatasetUpdate(
+    plan: DatasetDefinitionUpdatePlan,
+    readLatestVersion: LatestDatasetVersionReader
+  ): Promise<void> {
     const tableName = encodeDatasetTableName(plan.definition.id)
     const qualifiedName = qualifiedTableName(this.options, tableName)
+    const { schema } = plan
 
+    if (schema.kind === "none") {
+      await this.connections.withExclusiveAttached((runtime) =>
+        this.applyMetadataDelta(runtime, qualifiedName, plan)
+      )
+      return
+    }
+
+    // Schema-only DuckLake snapshots still matter to Sixb. Apply schema and
+    // compatible metadata DDL atomically, then tag the commit so versions can
+    // treat it as this dataset's schema-change version. It keeps the rows of
+    // the latest version, and so its lineage. ALTER TABLE claims the table, and
+    // changes no rows: it commits on the snapshot it read, or fails and reruns.
     await this.connections.withExclusiveAttached(async (runtime) => {
-      if (plan.schema.kind === "none") {
-        await this.applyMetadataDelta(runtime, qualifiedName, plan)
-        return
-      }
-
-      // Schema-only DuckLake snapshots still matter to Sixb. Apply schema and
-      // compatible metadata DDL atomically, then tag the commit so versions can
-      // treat it as this dataset's schema-change version.
-      await runtime.run("BEGIN TRANSACTION")
       let committed = false
       try {
-        await this.applySchemaEvolutionDdl(runtime, qualifiedName, plan.schema)
+        const parent = await beginTransactionOnLatestVersion({
+          options: this.options,
+          runtime,
+          datasetId: plan.definition.id,
+          readLatestVersion: () => readLatestVersion(runtime, plan.definition),
+        })
+        await this.applySchemaEvolutionDdl(runtime, qualifiedName, schema)
         await this.applyMetadataDelta(runtime, qualifiedName, plan)
-        await this.setSchemaEvolutionCommitMetadata(runtime, plan.definition.id, plan.schema)
+        await this.setSchemaEvolutionCommitMetadata(
+          runtime,
+          plan.definition.id,
+          schema,
+          lineageAtCommit({ mode: "schema", schema: plan.definition.schema, parent })
+        )
 
-        await runtime.run("COMMIT")
+        await commitVersionTransaction(runtime, plan.definition.id, {
+          poisonRuntime: () => this.connections.poisonRuntime(),
+        })
         committed = true
       } catch (error) {
         if (!committed) {
@@ -338,7 +438,8 @@ export class DuckLakeDatasetCatalog {
   private async setSchemaEvolutionCommitMetadata(
     runtime: DuckDbQueryRuntime,
     datasetId: string,
-    plan: Extract<DatasetSchemaUpdatePlan, { readonly kind: "addNullableColumns" }>
+    plan: Extract<DatasetSchemaUpdatePlan, { readonly kind: "addNullableColumns" }>,
+    lineage: DatasetVersionLineage | undefined
   ): Promise<void> {
     await runtime.run(
       `CALL ${quoteIdentifier(duckLakeAlias(this.options))}.set_commit_message(${quoteSqlString(
@@ -353,6 +454,7 @@ export class DuckLakeDatasetCatalog {
             schemaChange: {
               addColumns: plan.columns.map((column) => column.name),
             },
+            ...(lineage === undefined ? {} : { lineage: encodeLineage(lineage) }),
           },
         })
       )})`
@@ -368,36 +470,44 @@ export class DuckLakeDatasetCatalog {
     }
   }
 
-  private async readDatasetColumnsAtSnapshot(
+  private async readDatasetColumnsBetweenSnapshots(
     runtime: DuckDbQueryRuntime,
-    tableName: string,
-    tableId: bigint,
-    snapshotId: string
-  ): Promise<readonly DuckLakeCatalogColumn[]> {
+    tables: readonly DatasetTableRef[],
+    oldestSnapshot: bigint,
+    newestSnapshot: bigint
+  ): Promise<readonly DuckLakeColumnVersion[]> {
+    const tableIds = new Set(tables.map((table) => table.tableId))
     const ducklakeColumn = duckLakeMetadataTableName(this.options, "ducklake_column")
     const rows = await runtime.query(`
       SELECT
+        table_id,
         column_id,
         column_order,
         column_name,
         column_type,
         CAST(nulls_allowed AS BOOLEAN) AS nulls_allowed,
-        parent_column
+        parent_column,
+        begin_snapshot,
+        end_snapshot
       FROM ${ducklakeColumn}
-      WHERE table_id = ${tableId}
-        AND begin_snapshot <= ${snapshotId}
-        AND (end_snapshot IS NULL OR end_snapshot > ${snapshotId})
-      ORDER BY column_order
+      WHERE table_id IN (${[...tableIds].join(", ")})
+        AND begin_snapshot <= ${newestSnapshot}
+        AND (end_snapshot IS NULL OR end_snapshot > ${oldestSnapshot})
+      ORDER BY column_order, column_id
     `)
 
     return rows.map((row) => ({
-      tableName,
-      columnId: getBigIntLike(row, "column_id"),
-      columnOrder: getBigIntLike(row, "column_order"),
-      columnName: getString(row, "column_name"),
-      columnType: getString(row, "column_type"),
-      nullsAllowed: getBoolean(row, "nulls_allowed"),
-      parentColumnId: getOptionalBigIntLike(row, "parent_column"),
+      tableId: getBigIntLike(row, "table_id"),
+      beginSnapshot: getBigIntLike(row, "begin_snapshot"),
+      endSnapshot: getOptionalBigIntLike(row, "end_snapshot"),
+      column: {
+        columnId: getBigIntLike(row, "column_id"),
+        columnOrder: getBigIntLike(row, "column_order"),
+        columnName: getString(row, "column_name"),
+        columnType: getString(row, "column_type"),
+        nullsAllowed: getBoolean(row, "nulls_allowed"),
+        parentColumnId: getOptionalBigIntLike(row, "parent_column"),
+      },
     }))
   }
 }
