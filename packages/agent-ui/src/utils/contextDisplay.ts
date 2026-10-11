@@ -7,6 +7,7 @@ export function agentContextLabel(
   unnamed: string = en.context.unnamed
 ): string {
   if (context.kind === "app-state") return context.label
+  if (context.label !== undefined) return context.label
 
   const typeLabel = displayWords(context.ref.objectTypeId) || unnamed
   const primaryId = stripObjectTypePrefix(context.ref.primaryId, context.ref.objectTypeId)

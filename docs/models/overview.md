@@ -114,6 +114,14 @@ export function InvoiceAssistant({ invoiceId }: { invoiceId: string }) {
 
 Context tells the agent what the user is looking at. It does not grant additional access.
 
+The chat labels an object by the property its type declares as `search.title`, or by its id when
+there is none. Pass a `label` to show your own text instead. It is only displayed: the agent still
+reads the object itself.
+
+```tsx
+agentContext.object(Project, project.id, { label: project.name })
+```
+
 ## Use in a workflow
 
 An [AI workflow step](../workflows/overview.md#add-an-ai-task) gives the same harness a specific

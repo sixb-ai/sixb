@@ -7057,6 +7057,10 @@ export type GetWorkflowAgentNodeExecutionResponses = {
                   objectTypeId: string
                   primaryId: string
                 }
+                /**
+                 * Shown in the chat instead of the object's title. Never sent to the model.
+                 */
+                label?: string
               }
             | {
                 kind: "app-state"
@@ -10485,6 +10489,10 @@ export type ListAgentThreadMessagesResponses = {
                     objectTypeId: string
                     primaryId: string
                   }
+                  /**
+                   * Shown in the chat instead of the object's title. Never sent to the model.
+                   */
+                  label?: string
                 }
               | {
                   kind: "app-state"
@@ -10666,6 +10674,10 @@ export type PostAgentThreadMessageData = {
               objectTypeId: string
               primaryId: string
             }
+            /**
+             * Shown in the chat instead of the object's title. Never sent to the model.
+             */
+            label?: string
           }
         | {
             kind: "app-state"

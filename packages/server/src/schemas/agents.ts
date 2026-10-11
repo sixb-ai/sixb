@@ -1,4 +1,5 @@
 import { MAX_AGENT_CONTEXT_ENTRIES } from "@sixb/core"
+import { MAX_AGENT_CONTEXT_LABEL_LENGTH } from "@sixb/core/agents/context"
 import {
   AGENT_RUN_DIAGNOSTIC_CODES,
   AGENT_RUN_FAILURE_CODES,
@@ -44,6 +45,12 @@ export const AgentObjectContextSchema = z.object({
     objectTypeId: z.string().min(1),
     primaryId: z.string().min(1),
   }),
+  label: z
+    .string()
+    .min(1)
+    .max(MAX_AGENT_CONTEXT_LABEL_LENGTH)
+    .optional()
+    .describe("Shown in the chat instead of the object's title. Never sent to the model."),
 })
 
 export const AgentAppStateContextSchema = z.object({

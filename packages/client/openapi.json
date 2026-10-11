@@ -21134,6 +21134,12 @@
                                         },
                                         "required": ["objectTypeId", "primaryId"],
                                         "additionalProperties": false
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 200,
+                                        "description": "Shown in the chat instead of the object's title. Never sent to the model."
                                       }
                                     },
                                     "required": ["kind", "ref"],
@@ -31090,6 +31096,12 @@
                                               },
                                               "required": ["objectTypeId", "primaryId"],
                                               "additionalProperties": false
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 200,
+                                              "description": "Shown in the chat instead of the object's title. Never sent to the model."
                                             }
                                           },
                                           "required": ["kind", "ref"],
@@ -31665,6 +31677,12 @@
                                   },
                                   "required": ["objectTypeId", "primaryId"],
                                   "additionalProperties": false
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200,
+                                  "description": "Shown in the chat instead of the object's title. Never sent to the model."
                                 }
                               },
                               "required": ["kind", "ref"],
@@ -31859,6 +31877,12 @@
                                   },
                                   "required": ["objectTypeId", "primaryId"],
                                   "additionalProperties": false
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200,
+                                  "description": "Shown in the chat instead of the object's title. Never sent to the model."
                                 }
                               },
                               "required": ["kind", "ref"],
@@ -32053,6 +32077,12 @@
                                   },
                                   "required": ["objectTypeId", "primaryId"],
                                   "additionalProperties": false
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200,
+                                  "description": "Shown in the chat instead of the object's title. Never sent to the model."
                                 }
                               },
                               "required": ["kind", "ref"],
