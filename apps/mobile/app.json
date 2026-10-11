@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "Sixb",
+    "slug": "sixb",
+    "scheme": "sixb",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/app-icon.png",
+    "ios": {
+      "bundleIdentifier": "ai.sixb.app",
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "ai.sixb.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 96,
+          "resizeMode": "contain",
+          "backgroundColor": "#F4F4F2",
+          "dark": {
+            "image": "./assets/splash-icon-dark.png",
+            "backgroundColor": "#0B0B0C"
+          }
+        }
+      ],
+      "expo-web-browser",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Sixb uses the camera to scan sign-in codes and take photos for your messages.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Sixb uses the camera to scan sign-in codes and take photos for your messages.",
+          "photosPermission": "Sixb attaches the photos you choose to your messages.",
+          "microphonePermission": false
+        }
+      ]
+    ]
+  }
+}

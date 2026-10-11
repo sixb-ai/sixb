@@ -34,7 +34,7 @@
     "typecheck": "bun run build:types && bun run typecheck:tests && bun run typecheck:template && bun run typecheck:examples",
     "typecheck:tests": "tsc -p tsconfig.tests.json && bun sixb typegen --entry packages/client/tests/type-programs/ontology-registry/sixb.config.ts && tsc -p packages/client/tests/type-programs/ontology-registry",
     "typecheck:template": "tsc -p packages/create-sixb/tsconfig.json",
-    "typecheck:examples": "bun --filter '@sixb/docs' --filter '@sixb/example-*' typecheck",
+    "typecheck:examples": "bun --filter '@sixb/docs' --filter '@sixb/mobile' --filter '@sixb/example-*' typecheck",
     "link-cli": "ln -sf \"$(pwd)/packages/cli/src/index.tsx\" ~/.bun/bin/sixb && echo 'Linked sixb CLI to ~/.bun/bin/sixb'",
     "sixb": "bun packages/cli/src/index.tsx",
     "create-sixb": "bun packages/create-sixb/src/index.ts",

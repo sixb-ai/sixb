@@ -17,6 +17,8 @@
   "include": [
     // Release tooling and its tests are not a package, so they check against source directly.
     "scripts/**/*.ts",
+    // An app's tests import its own source, which is checked here along with them.
+    "apps/*/tests/**/*.ts",
     "packages/*/tests/**/*.ts",
     "packages/*/tests/**/*.tsx",
     "models/*/tests/**/*.ts",
