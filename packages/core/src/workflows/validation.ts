@@ -1,7 +1,7 @@
 import { isActionDefinition } from "../actions"
 import type { AgentSkillCatalog, AgentToolCatalog } from "../agents"
 import type { ModelCatalog } from "../models"
-import { isModelReasoning } from "../models/language-model"
+import { isModelReasoning, modelReasoningSupportIssue } from "../models/language-model"
 import type { SchemaOrRef, ValueType } from "../ontology"
 import { validateSchemaOrRefValue } from "../ontology/refs"
 import type { ScheduleDefinition } from "../schedules"
@@ -188,6 +188,20 @@ function validateWorkflowAgentStepRuntimeReferences(
     if (options.models.language?.getByRef(ref) == null) {
       throw new WorkflowDefinitionError(
         `Workflow "${workflowId}" agent step "${step.id}" uses unknown language model "${ref.provider}/${ref.modelId}". Add it to 'models.language' in createSixb().`
+      )
+    }
+  }
+  // Same rule as a catalog default: checked against the capabilities the model declares, so an
+  // effort or token budget outside them fails at startup rather than on the step's first run.
+  const model = step.model ?? options.models?.language?.default?.model
+  if (step.reasoning !== undefined && model !== undefined) {
+    const issue = modelReasoningSupportIssue(
+      model.definition.capabilities.reasoning,
+      step.reasoning
+    )
+    if (issue !== undefined) {
+      throw new WorkflowDefinitionError(
+        `Workflow "${workflowId}" agent step "${step.id}" cannot use its reasoning with language model "${model.providerId}/${model.modelId}": ${issue}.`
       )
     }
   }

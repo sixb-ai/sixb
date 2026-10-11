@@ -35,9 +35,6 @@ export interface AgentDescriptor {
 
 export type AgentReasoning = ModelReasoning
 
-/** @deprecated Use {@link AgentReasoning}. */
-export type AgentReasoningLevel = AgentReasoning
-
 export const AGENT_REASONING_LEVELS = MODEL_REASONING_LEVELS
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}

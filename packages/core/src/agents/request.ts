@@ -37,7 +37,7 @@ import { AgentRequestError } from "./errors"
 import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
 import { assertNoAgentSelector } from "./retired-config"
 import { publishAgentRunActivity } from "./streams/protocol"
-import { AGENT_REASONING_LEVELS, type AgentReasoningLevel } from "./types"
+import { AGENT_REASONING_LEVELS, type AgentReasoning } from "./types"
 
 export interface RequestAgentRunInput {
   /** The user's message that triggers the turn. */
@@ -50,8 +50,8 @@ export interface RequestAgentRunInput {
   readonly threadId?: string
   /** Configured language model selected for this turn. Omitted uses the agent default. */
   readonly model?: LanguageModelRef
-  /** Provider-neutral reasoning effort selected for this turn. Omitted uses the model's default. */
-  readonly reasoning?: AgentReasoningLevel
+  /** Reasoning effort or token budget for this turn. Omitted uses the model's default. */
+  readonly reasoning?: AgentReasoning
   /** Title to stamp on the thread when one is created. */
   readonly title?: string
   /** Explicit id for the trigger (user) message. Defaults to a generated id. */

@@ -1,6 +1,6 @@
 import {
   AGENT_REASONING_LEVELS,
-  type AgentReasoningLevel,
+  type AgentReasoning,
   AgentToolPublicError,
   type FileRef,
   type LanguageModelCatalog,
@@ -41,7 +41,7 @@ export interface SpawnSubagentInput {
   readonly key: string
   readonly task: string
   readonly model?: LanguageModelRef
-  readonly reasoning?: AgentReasoningLevel
+  readonly reasoning?: AgentReasoning
 }
 
 export interface SpawnSubagentOutput {

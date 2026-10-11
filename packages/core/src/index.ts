@@ -1056,7 +1056,6 @@ export type {
   AgentProjectFile,
   AgentProviderStatePart,
   AgentReasoning,
-  AgentReasoningLevel,
   AgentReasoningPart,
   AgentReference,
   AgentRequestErrorCode,
