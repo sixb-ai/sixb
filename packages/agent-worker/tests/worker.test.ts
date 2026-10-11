@@ -10,6 +10,7 @@ import {
   type AgentRuntime,
   type AgentToolArtifact,
   type AgentToolDefinition,
+  AgentToolPublicError,
   type AgentToolResult,
   type AgentToolRunInfo,
   AuthorizationError,
@@ -105,7 +106,11 @@ import { resolveAgentExecutionPlan } from "../src/execution-plan"
 import { finishRunOrThrow } from "../src/finalize"
 import { runAgentTurn } from "../src/run-agent-turn"
 import * as agentEnvironment from "../src/run-environment"
-import { createConversationAgentEnvironment } from "../src/run-environment"
+import {
+  createConversationAgentEnvironment,
+  createSubagentEnvironment,
+  createWorkflowAgentNodeEnvironment,
+} from "../src/run-environment"
 import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
 import { SubagentCoordinator } from "../src/subagent-tools"
 import type {
@@ -10164,6 +10169,109 @@ describe("agent tools act as the requester", () => {
       })
     } finally {
       await worker.stop()
+    }
+  })
+
+  const readAttachment = defineAgentTool("read_attachment")
+    .description("Read a file attached to the run.")
+    .input({ key: "string" })
+    .run(async ({ input, attachments }) => {
+      const file = await attachments.open(input.key)
+      if (!file) return null
+      return { fileName: file.fileRef.fileName ?? null, text: await new Response(file.body).text() }
+    })
+
+  async function putQuote(host: TestSixb) {
+    return host.blobStorage.put({
+      body: new TextEncoder().encode("Quote 42"),
+      fileName: "quote.txt",
+      mediaType: "text/plain",
+    })
+  }
+
+  // Regression proof: give conversations NO_TOOL_ATTACHMENTS in run-environment.ts; the tool then
+  // cannot open the chat's file.
+  test("lets a chat tool open the chat's attachment by the key the Agent sees", async () => {
+    const sixb = buildSixb(
+      toolCallThenAnswerModel(readAttachment.name, { key: "msg-quote:1" }),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      { projectTools: [readAttachment] }
+    )
+    const quote = await putQuote(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, {
+        text: "Extract the attached quote.",
+        attachments: [quote],
+        messageId: "msg-quote",
+      })
+      const run = await finishedRun(sixb, request.run.id)
+      expect(run.status).toBe("succeeded")
+      const messages = await listMessages(agentStorageOf(sixb), request.run.threadId)
+      expect(
+        toolOutput(
+          messages.flatMap((message) => message.parts),
+          readAttachment.name
+        )
+      ).toEqual({ fileName: "quote.txt", text: "Quote 42" })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Regression proof: swap the subagent's and the workflow task's `toolAttachments` in
+  // run-environment.ts; the child opens the input file and the task cannot.
+  test("gives a workflow task's tools its input files and a child Agent's tools none", async () => {
+    const sixb = buildSixb(answerModel(), new InMemoryBroker(), new RecordingSandboxFactory(), {
+      projectTools: [readAttachment],
+    })
+    const quote = await putQuote(sixb)
+    const context = await buildAgentWorkerContext(sixb)
+    const plan = executionPlanFor(sixb)
+    const execution = freshTestExecution()
+    const task = await createWorkflowAgentNodeEnvironment({
+      context,
+      plan,
+      run: {
+        projectId: PROJECT_ID,
+        nodeRunId: "task-run:node:0",
+        executionId: "task-execution",
+        actorId: "task-actor",
+        status: "running",
+        prompt: "Read the quote.",
+        attempt: 1,
+        execution,
+        createdAt: new Date(),
+      },
+      workflowId: "quotes",
+      stepId: "read-quote",
+      nodeInput: { quote: JSON.parse(JSON.stringify(quote)) },
+      errorDetails: { workflowId: "quotes", agentStepId: "read-quote", runId: "task-run:node:0" },
+    })
+    // The environment reads only the run's identity and execution token.
+    const childRun = {
+      id: "child-run",
+      parentRunId: "parent-run",
+      execution,
+    } as unknown as SubagentRunRecord
+    const child = await createSubagentEnvironment({ context, plan, run: childRun })
+    const openQuote = (environment: typeof task) => {
+      const tool = environment.turnContext.tools.find(({ name }) => name === readAttachment.name)
+      return tool?.execute(
+        { key: "input.quote" },
+        { signal: new AbortController().signal, callId: "call", toolCallId: "call" }
+      )
+    }
+    try {
+      expect(JSON.parse(task.turnContext.attachmentContext?.manifestJson ?? "{}")).toMatchObject({
+        attachments: [{ key: "input.quote", path: "input.quote" }],
+      })
+      await expect(openQuote(task)).resolves.toEqual({ fileName: "quote.txt", text: "Quote 42" })
+      await expect(openQuote(child)).rejects.toThrow(AgentToolPublicError)
+    } finally {
+      await Promise.all([task.dispose(), child.dispose()])
     }
   })
 

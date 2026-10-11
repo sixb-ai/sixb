@@ -1,4 +1,4 @@
-import type { AgentToolRunInfo, Sandbox, SandboxDefinition } from "@sixb/core"
+import type { AgentToolAttachments, AgentToolRunInfo, Sandbox, SandboxDefinition } from "@sixb/core"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
@@ -31,6 +31,11 @@ import type { AgentSandboxHandle } from "./sandbox-handle"
 import { type AgentSandboxLifecycle, openThreadSandbox } from "./sandbox-lifecycle"
 import type { LoadedAgentThreadModelContext } from "./thread-context"
 import { AgentToolArtifactBudget, createAgentToolArtifacts } from "./tools/artifacts"
+import {
+  NO_TOOL_ATTACHMENTS,
+  threadToolAttachments,
+  workflowInputToolAttachments,
+} from "./tools/attachments"
 import { createBashTool } from "./tools/bash"
 import { createReadTool } from "./tools/read"
 import { AgentToolResultMediaBridge } from "./tools/result-media"
@@ -161,6 +166,12 @@ export async function createConversationAgentEnvironment(
       runId: run.id,
       threadId: run.threadId,
       toolRun: { kind: "conversation", id: run.id, threadId: run.threadId },
+      toolAttachments: threadToolAttachments({
+        storage: context.storage.agents,
+        projectId: context.id,
+        threadId: run.threadId,
+        blobStorage: context.blobStorage,
+      }),
       apiBaseUrl,
       attachmentContext,
       skills,
@@ -206,6 +217,7 @@ export async function createSubagentEnvironment(
     runId: run.id,
     parentRunId: run.parentRunId,
     toolRun: { kind: "subagent", id: run.id, parentRunId: run.parentRunId },
+    toolAttachments: NO_TOOL_ATTACHMENTS,
     apiBaseUrl: createAgentApiGatewayBaseUrl({
       apiBaseUrl: context.apiBaseUrl,
       projectId: context.id,
@@ -251,6 +263,10 @@ export async function createWorkflowAgentNodeEnvironment(
       workflowId: input.workflowId,
       stepId: input.stepId,
     },
+    toolAttachments: workflowInputToolAttachments({
+      input: input.nodeInput,
+      blobStorage: context.blobStorage,
+    }),
     apiBaseUrl: createAgentApiGatewayBaseUrl({
       apiBaseUrl: context.apiBaseUrl,
       projectId: context.id,
@@ -268,6 +284,7 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
   readonly failureSignal?: AbortSignal
   readonly persistentSandbox?: AgentSandboxLifecycle
   readonly toolRun: AgentToolRunInfo
+  readonly toolAttachments: AgentToolAttachments
   readonly actorId?: string
   readonly parentRunId?: string
   readonly mode: AgentExecutionMode
@@ -322,6 +339,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       valueTypesById: context.valueTypesById,
       run: input.toolRun,
       sixb: context.sixb,
+      attachments: input.toolAttachments,
       logger,
       artifactsForToolCall,
       toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),

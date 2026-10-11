@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   type AgentToolArtifacts,
+  type AgentToolAttachments,
   AgentToolPublicError,
   type AgentToolRunContext,
   defineConnector,
@@ -24,6 +25,12 @@ import {
 const unusedArtifacts: AgentToolArtifacts = {
   async put() {
     throw new Error("Artifacts are unused by Exa agent tools.")
+  },
+}
+
+const unusedAttachments: AgentToolAttachments = {
+  async open() {
+    throw new Error("Attachments are unused by Exa agent tools.")
   },
 }
 
@@ -638,6 +645,7 @@ function harness(
         sixb: { connector } as AgentToolRunContext["sixb"],
         logger: noopLogger,
         artifacts: unusedArtifacts,
+        attachments: unusedAttachments,
       })
     },
   }
@@ -674,6 +682,7 @@ function fetchHarness(
         sixb: { connector } as AgentToolRunContext["sixb"],
         logger: noopLogger,
         artifacts: unusedArtifacts,
+        attachments: unusedAttachments,
       })
     },
   }

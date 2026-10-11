@@ -1,6 +1,7 @@
 import type {
   AgentMessagePart,
   AgentToolArtifacts,
+  AgentToolAttachments,
   AgentToolDefinition,
   AgentToolRunInfo,
   AgentToolRuntimeFacade,
@@ -40,6 +41,7 @@ interface ModelToolsFromAgentDefinitionsInput {
   readonly valueTypesById: ReadonlyMap<string, ValueType>
   readonly run: AgentToolRunInfo
   readonly sixb: AgentToolRuntimeFacade
+  readonly attachments: AgentToolAttachments
   readonly logger: Logger
   readonly artifactsForToolCall: (input: {
     readonly toolName: string
@@ -104,6 +106,7 @@ function modelToolFromAgentDefinition(
             toolCallId,
             signal,
           }),
+          attachments: context.attachments,
         })
       } catch (error) {
         if (error instanceof AgentToolResultValidationError) {

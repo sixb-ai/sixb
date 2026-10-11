@@ -1,5 +1,5 @@
 import type { ActionsRuntime } from "../actions/execution"
-import type { BlobBody, FileRef } from "../blob-storage"
+import type { BlobBody, FileRef, OpenedFileRef } from "../blob-storage"
 import type { ConnectorRuntime } from "../connectors"
 import type { JsonPrimitive, JsonValue, ReadonlyJsonValue } from "../json"
 import type { Logger } from "../logging"
@@ -101,6 +101,19 @@ export interface AgentToolArtifacts {
   put(input: AgentToolArtifactPutInput): Promise<AgentToolArtifact>
 }
 
+/**
+ * The files attached to the run that invoked a tool: the messages of a chat's thread, or the input
+ * files of a workflow AI task. A child Agent has none.
+ */
+export interface AgentToolAttachments {
+  /**
+   * Open an attachment by the `key` the Agent sees in `$SIXB_ATTACHMENTS`. Returns null when its
+   * stored file is gone, and throws an `AgentToolPublicError` for a key that is not one of this
+   * run's attachments.
+   */
+  open(key: string): Promise<OpenedFileRef | null>
+}
+
 export type AgentToolTextContent = {
   readonly type: "text"
   readonly text: string
@@ -150,6 +163,7 @@ export interface AgentToolRunContext<
   readonly sixb: AgentToolRuntimeFacade
   readonly logger: Logger
   readonly artifacts: AgentToolArtifacts
+  readonly attachments: AgentToolAttachments
 }
 
 /** Agent tool handlers may return only values safe to persist in agent messages. */

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   type AgentToolArtifacts,
+  type AgentToolAttachments,
   type AgentToolDefinition,
   AgentToolPublicError,
   type AgentToolRunContext,
@@ -27,6 +28,12 @@ type ClientStub = { [K in keyof FullEnrichClient]?: Partial<FullEnrichClient[K]>
 const unusedArtifacts: AgentToolArtifacts = {
   async put() {
     throw new Error("Artifacts are unused by FullEnrich agent tools.")
+  },
+}
+
+const unusedAttachments: AgentToolAttachments = {
+  async open() {
+    throw new Error("Attachments are unused by FullEnrich agent tools.")
   },
 }
 
@@ -57,6 +64,7 @@ function run(
       sixb: { connector } as AgentToolRunContext["sixb"],
       logger: noopLogger,
       artifacts: unusedArtifacts,
+      attachments: unusedAttachments,
     })
   )
 }

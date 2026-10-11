@@ -49,6 +49,8 @@ with the authority the gateway resolves; its type shows only object reads, actio
 connectors. The model supplies only ids, and the SDK checks every read and request against the
 requester. Tool authority is resolved once, at turn start, while the gateway re-resolves it on every
 request. Their model calls use the run's accounting recorder.
+Their `attachments` open a manifest key only in a message of the run's own thread, like the
+gateway's message file route, or among a workflow task's input files.
 
 Workflow run detail includes the run's top-level output after success. Agent gateway responses omit
 the route's internal node records, and only top-level input/output file paths are available.
