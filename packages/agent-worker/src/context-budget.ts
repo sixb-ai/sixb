@@ -29,7 +29,7 @@ export async function prepareAgentModel(selection: AgentModelSelection): Promise
 }> {
   const model = await resolveLanguageModel(selection.model)
   const definition = defineLanguageModel(model.definition)
-  const budget = resolveAgentContextBudget({ model, reasoning: selection.reasoning }, definition)
+  const budget = resolveAgentContextBudget(selection, definition)
   if (budget.source === "fallback") {
     console.warn(
       `[SixbAgentWorker] No context limit is available for '${model.providerId}/${model.modelId}'; using the ${DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS.toLocaleString("en-US")}-token fallback.`
@@ -64,21 +64,33 @@ export async function prepareAgentModel(selection: AgentModelSelection): Promise
   }
 }
 
-/** Input-only limits are a conservative window: leave the same reserve without inventing a total. */
+/**
+ * Input-only limits are a conservative window: leave the same reserve without inventing a total.
+ * The reserve is the output allowance, so a larger binding `maxOutputTokens` shrinks the input budget.
+ */
 export function resolveAgentContextBudget(
   selection: AgentModelSelection,
   definition: LanguageModelDefinition = selection.model.definition
 ): AgentContextBudget {
   const modelWindow = definition.contextWindow ?? definition.maxInputTokens
   const windowTokens = modelWindow ?? DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS
+  const bindingOutputTokens = selection.model.maxOutputTokens
+  const outputTokens =
+    bindingOutputTokens === undefined
+      ? Math.min(16_384, Math.floor(windowTokens * 0.25))
+      : Math.min(bindingOutputTokens, definition.maxOutputTokens ?? bindingOutputTokens)
   const reserveTokens = Math.max(
-    Math.min(16_384, Math.floor(windowTokens * 0.25)),
+    outputTokens,
     typeof selection.reasoning === "object" ? selection.reasoning.budgetTokens + 1 : 0
   )
   assertPositiveSafeInteger(windowTokens, "windowTokens")
   assertPositiveSafeInteger(reserveTokens, "reserveTokens")
   if (reserveTokens >= windowTokens) {
-    throw invalidBudget("reserveTokens must be less than the resolved context window.")
+    throw invalidBudget(
+      bindingOutputTokens === undefined || reserveTokens !== outputTokens
+        ? "reserveTokens must be less than the resolved context window."
+        : bindingFillsWindow(selection.model, outputTokens, windowTokens)
+    )
   }
   const inputBudgetTokens = Math.min(
     definition.maxInputTokens ?? Number.POSITIVE_INFINITY,
@@ -98,6 +110,19 @@ export function resolveAgentContextBudget(
     keepRecentTokens,
     source: modelWindow === undefined ? "fallback" : "model",
   })
+}
+
+function bindingFillsWindow(
+  model: LanguageModel,
+  outputTokens: number,
+  windowTokens: number
+): string {
+  return [
+    "reserveTokens must be less than the resolved context window:",
+    `'${model.providerId}/${model.modelId}' sets maxOutputTokens to ${outputTokens.toLocaleString("en-US")}`,
+    `in a ${windowTokens.toLocaleString("en-US")}-token window.`,
+    "Lower maxOutputTokens on the model binding.",
+  ].join(" ")
 }
 
 function invalidBudget(message: string): AgentDefinitionError {

@@ -296,7 +296,9 @@ class AnthropicLanguageModel implements LanguageModel {
   readonly definition: LanguageModelDefinition
   readonly costEstimator: ModelCostEstimator
   readonly defaultReasoning?: ModelReasoningLevel
-  private readonly maxOutputTokens: number
+  readonly maxOutputTokens?: number
+  /** Messages requires `max_tokens` on every request: the binding's limit, else the model's. */
+  private readonly outputCeiling: number
 
   constructor(
     private readonly transport: AnthropicTransport,
@@ -323,7 +325,8 @@ class AnthropicLanguageModel implements LanguageModel {
         `[SixbAnthropic] maxOutputTokens must not exceed model '${modelId}' maximum (${modelMaxOutputTokens}).`
       )
     }
-    this.maxOutputTokens = maxOutputTokens
+    this.outputCeiling = maxOutputTokens
+    if (options.maxOutputTokens !== undefined) this.maxOutputTokens = options.maxOutputTokens
     if (options.request !== undefined) assertJsonObject(options.request, "model request options")
     if (options.reasoning !== undefined) {
       if (!(MODEL_REASONING_LEVELS as readonly unknown[]).includes(options.reasoning)) {
@@ -464,8 +467,8 @@ class AnthropicLanguageModel implements LanguageModel {
       throw new TypeError("[SixbAnthropic] maxOutputTokens must be a positive safe integer.")
     }
     const maxOutputTokens = Math.min(
-      request.maxOutputTokens ?? this.maxOutputTokens,
-      this.maxOutputTokens
+      request.maxOutputTokens ?? this.outputCeiling,
+      this.outputCeiling
     )
     const reasoning = anthropicReasoningRequest(
       request.reasoning,
