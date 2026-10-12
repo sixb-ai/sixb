@@ -66,6 +66,7 @@ retry runs with the same setting.
 Chat answers and AI workflow steps get 16,384 output tokens (or a quarter of the context window),
 reasoning included. Give a reasoning model more room with `maxOutputTokens` on its binding, such as
 `vercelGateway("zai/glm-5.3-flash", { maxOutputTokens: 32_000 })`; it comes out of the input budget.
+A chat answer cut short by this limit says so and can be continued; an AI workflow step fails.
 
 ## Generate a response
 

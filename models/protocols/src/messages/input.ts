@@ -8,6 +8,7 @@ import {
 import { object } from "../json"
 
 const IMAGE_MEDIA_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+const THINKING_BLOCK_TYPES = ["thinking", "redacted_thinking"]
 
 /** Serialize portable messages and the calling provider's native signed/opaque blocks. */
 export function messagesInput(
@@ -78,6 +79,9 @@ export function messagesInput(
       }
       // Reasoning from another provider is not portable and must not be synthesized as thinking.
     }
+    // Messages rejects an assistant turn that ends on thinking. An answer cut short by the output
+    // limit, or cancelled, can end there: its trailing thinking is not replayed.
+    while (THINKING_BLOCK_TYPES.includes(String(content.at(-1)?.type))) content.pop()
     if (content.length > 0) mapped.push({ role: "assistant", content })
   }
   return { system, messages: coalesceRoles(mapped) }

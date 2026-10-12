@@ -11235,7 +11235,7 @@ export type ListAgentThreadMessagesResponses = {
           }
       >
       annotations: Array<{
-        code: "step_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached"
         severity: "warning" | "error"
         scope: "run"
         message: string
@@ -11472,7 +11472,7 @@ export type PostAgentThreadMessageResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code: "step_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached"
         severity: "warning" | "error"
         scope: "run"
         message: string
@@ -11734,7 +11734,7 @@ export type CancelAgentRunResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code: "step_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached"
         severity: "warning" | "error"
         scope: "run"
         message: string
@@ -11913,7 +11913,7 @@ export type RetryAgentRunResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code: "step_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached"
         severity: "warning" | "error"
         scope: "run"
         message: string
@@ -12059,7 +12059,7 @@ export type ListAgentThreadRunsResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code: "step_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached"
         severity: "warning" | "error"
         scope: "run"
         message: string
@@ -12202,7 +12202,7 @@ export type GetAgentRunResponses = {
       unvaluedCallCount: number
     }
     diagnostics?: Array<{
-      code: "step_limit_reached"
+      code: "step_limit_reached" | "output_limit_reached"
       severity: "warning" | "error"
       scope: "run"
       message: string
@@ -12590,7 +12590,7 @@ export type ListObservedAgentThreadMessagesResponses = {
           }
       >
       annotations: Array<{
-        code: "step_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached"
         severity: "warning" | "error"
         scope: "run"
         message: string
@@ -12793,7 +12793,7 @@ export type ListObservedAgentThreadRunsResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code: "step_limit_reached"
+        code: "step_limit_reached" | "output_limit_reached"
         severity: "warning" | "error"
         scope: "run"
         message: string
