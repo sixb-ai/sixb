@@ -31376,7 +31376,8 @@
                                     "output_collection_failed",
                                     "output_file_changed",
                                     "output_storage_failed",
-                                    "step_limit_reached"
+                                    "step_limit_reached",
+                                    "output_limit_reached"
                                   ]
                                 },
                                 "severity": {
@@ -32362,7 +32363,8 @@
                                   "output_collection_failed",
                                   "output_file_changed",
                                   "output_storage_failed",
-                                  "step_limit_reached"
+                                  "step_limit_reached",
+                                  "output_limit_reached"
                                 ]
                               },
                               "severity": {
@@ -33139,7 +33141,8 @@
                                   "output_collection_failed",
                                   "output_file_changed",
                                   "output_storage_failed",
-                                  "step_limit_reached"
+                                  "step_limit_reached",
+                                  "output_limit_reached"
                                 ]
                               },
                               "severity": {
@@ -33570,7 +33573,8 @@
                                   "output_collection_failed",
                                   "output_file_changed",
                                   "output_storage_failed",
-                                  "step_limit_reached"
+                                  "step_limit_reached",
+                                  "output_limit_reached"
                                 ]
                               },
                               "severity": {
@@ -34065,7 +34069,8 @@
                                     "output_collection_failed",
                                     "output_file_changed",
                                     "output_storage_failed",
-                                    "step_limit_reached"
+                                    "step_limit_reached",
+                                    "output_limit_reached"
                                   ]
                                 },
                                 "severity": {
@@ -34466,7 +34471,8 @@
                               "output_collection_failed",
                               "output_file_changed",
                               "output_storage_failed",
-                              "step_limit_reached"
+                              "step_limit_reached",
+                              "output_limit_reached"
                             ]
                           },
                           "severity": {

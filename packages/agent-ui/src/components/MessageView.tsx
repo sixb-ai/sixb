@@ -17,6 +17,7 @@ import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
 import { isAwaitingFirstToken, type LiveRunState } from "../liveRun"
 import { normalizeDurableParts } from "../parts"
+import { isContinuableDiagnostic } from "../runPresentation"
 import type {
   AgentContextEntryInput,
   AgentContextInput,
@@ -28,10 +29,23 @@ import { ContextChips } from "./ContextChips"
 import { FileAttachmentCard } from "./FileAttachmentCard"
 import { AssistantBody } from "./MessageParts"
 
-/** Render a single durable message. System messages are not shown in the reading transcript. */
-export const MessageView = memo(function MessageView({ message }: { message: AgentMessage }) {
+/**
+ * Render a single durable message. System messages are not shown in the reading transcript.
+ * `onContinue` offers to finish an answer whose diagnostic says it stopped short.
+ */
+export const MessageView = memo(function MessageView({
+  message,
+  onContinue,
+  continuing = false,
+}: {
+  message: AgentMessage
+  onContinue?: () => void
+  continuing?: boolean
+}) {
   if (message.role === "user") return <UserMessage message={message} />
-  if (message.role === "assistant") return <AssistantMessage message={message} />
+  if (message.role === "assistant") {
+    return <AssistantMessage message={message} onContinue={onContinue} continuing={continuing} />
+  }
   return null
 })
 
@@ -67,7 +81,15 @@ function UserMessage({ message }: { message: AgentMessage }) {
   )
 }
 
-function AssistantMessage({ message }: { message: AgentMessage }) {
+function AssistantMessage({
+  message,
+  onContinue,
+  continuing,
+}: {
+  message: AgentMessage
+  onContinue?: () => void
+  continuing: boolean
+}) {
   const messages = useAgentMessages()
   return (
     <div className="flex flex-col gap-2">
@@ -78,29 +100,40 @@ function AssistantMessage({ message }: { message: AgentMessage }) {
         })}
       />
       {message.annotations.map((annotation, index) => (
-        <Marker
+        // Laid out like the timeout and interrupted markers: notice, then its action.
+        <div
           key={`${annotation.code}:${annotation.path ?? "run"}:${index}`}
-          className={
-            annotation.severity === "error"
-              ? "text-destructive"
-              : "text-amber-700 dark:text-amber-400"
-          }
+          className="flex flex-wrap items-center gap-2"
           role="status"
         >
-          <MarkerIcon>
-            <AlertTriangle
-              className={
-                annotation.severity === "error"
-                  ? "text-destructive"
-                  : "text-amber-600 dark:text-amber-400"
-              }
-            />
-          </MarkerIcon>
-          <MarkerContent>
-            {annotation.path ? `${annotation.path}: ` : ""}
-            {diagnosticMessage(annotation.code, messages.diagnostics)}
-          </MarkerContent>
-        </Marker>
+          <Marker
+            className={
+              annotation.severity === "error"
+                ? "text-destructive"
+                : "text-amber-700 dark:text-amber-400"
+            }
+          >
+            <MarkerIcon>
+              <AlertTriangle
+                className={
+                  annotation.severity === "error"
+                    ? "text-destructive"
+                    : "text-amber-600 dark:text-amber-400"
+                }
+              />
+            </MarkerIcon>
+            <MarkerContent>
+              {annotation.path ? `${annotation.path}: ` : ""}
+              {diagnosticMessage(annotation.code, messages.diagnostics)}
+            </MarkerContent>
+          </Marker>
+          {onContinue && isContinuableDiagnostic(annotation.code) ? (
+            <Button size="sm" onClick={onContinue} disabled={continuing}>
+              <ArrowRight aria-hidden="true" />
+              {continuing ? messages.transcript.continuing : messages.transcript.continue}
+            </Button>
+          ) : null}
+        </div>
       ))}
     </div>
   )

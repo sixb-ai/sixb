@@ -246,17 +246,21 @@ export async function runModelLoop(
     if (input.signal.aborted && !accumulator.isFinished()) {
       return { status: "aborted", steps, partialContent: accumulator.partialContent() }
     }
-    const response = accumulator.complete()
-    const responseId = response.responseId ?? `${callId}:response`
+    const completed = accumulator.complete()
+    const responseId = completed.responseId ?? `${callId}:response`
     if (terminalStreamError) throw terminalStreamError.error
-    if (response.projectionError) throw response.projectionError
+    if (completed.projectionError) throw completed.projectionError
     if (input.signal.aborted) {
-      return { status: "aborted", steps, partialContent: response.content }
+      return { status: "aborted", steps, partialContent: completed.content }
     }
 
-    const localCalls = response.toolCalls.filter((call) => call.part.providerExecuted !== true)
     // Closed tool arguments are not proof of a successful response. In particular,
     // providers can close valid JSON before reporting truncation or content filtering.
+    // A response cut short by the output limit still ends the loop with what it produced:
+    // its local tool calls are dropped, never executed. Other unsuccessful finishes fail.
+    const response =
+      completed.finishReason === "length" ? withoutLocalToolCalls(completed) : completed
+    const localCalls = response.toolCalls.filter((call) => call.part.providerExecuted !== true)
     if (localCalls.length > 0 && !["stop", "tool-calls", "pause"].includes(response.finishReason)) {
       throw new ModelStreamError(
         `[SixbModels] Cannot execute local tools after '${response.finishReason}'.`
@@ -398,6 +402,22 @@ function indexTools(tools: readonly ModelTool[]): ReadonlyMap<string, ModelTool>
     result.set(tool.name, tool)
   }
   return result
+}
+
+function withoutLocalToolCalls(response: CompletedResponse): CompletedResponse {
+  const dropped = new Set(
+    response.toolCalls
+      .filter((call) => call.part.providerExecuted !== true)
+      .map((call) => call.part.toolCallId)
+  )
+  if (dropped.size === 0) return response
+  return {
+    ...response,
+    content: response.content.filter(
+      (part) => part.type !== "tool-call" || !dropped.has(part.toolCallId)
+    ),
+    toolCalls: response.toolCalls.filter((call) => !dropped.has(call.part.toolCallId)),
+  }
 }
 
 function responseText(response: CompletedResponse): string {
@@ -715,6 +735,7 @@ class StreamAccumulator {
     if (!this.finished || !this.finishReason) {
       throw new ModelStreamError("[SixbModels] Stream ended without a finish event.")
     }
+    if (this.finishReason === "length") this.settleTruncatedParts()
     for (const part of this.parts) {
       if ("complete" in part && !part.complete) {
         throw new ModelStreamError(
@@ -741,6 +762,23 @@ class StreamAccumulator {
       ...(this.responseModelId === undefined ? {} : { responseModelId: this.responseModelId }),
       ...(this.reportedCost === undefined ? {} : { reportedCost: this.reportedCost }),
       ...(this.route === undefined ? {} : { route: this.route }),
+    }
+  }
+
+  /**
+   * The output limit explains spans a provider left open: streamed text and reasoning are kept as
+   * written, and an unfinished tool call is dropped, never executed.
+   */
+  private settleTruncatedParts(): void {
+    for (let index = this.parts.length - 1; index >= 0; index -= 1) {
+      const part = this.parts[index]
+      if (part === undefined || !("complete" in part) || part.complete) continue
+      if (part.type === "tool-call") {
+        this.parts.splice(index, 1)
+        this.toolCalls.delete(part.toolCallId)
+      } else {
+        part.complete = true
+      }
     }
   }
 

@@ -347,3 +347,88 @@ test("preserves the calling provider's error identity and closes an abandoned HT
   expect(cancelled).toBe(true)
   expect(body.locked).toBe(false)
 })
+
+// Removal proof: drop the trailing-thinking loop in messagesInput; the assistant turns then end on
+// thinking, which Messages rejects.
+test("does not replay thinking an answer cut short ended on", () => {
+  const thinking = (signature: string): ModelAssistantPart => ({
+    type: "reasoning",
+    text: "Hmm",
+    providerData: {
+      [options.providerId]: { block: { type: "thinking", thinking: "Hmm", signature } },
+    },
+  })
+  const question = { role: "user" as const, content: [{ type: "text" as const, text: "Go" }] }
+  expect(
+    messagesInput(
+      [
+        question,
+        // The output limit was reached while thinking.
+        { role: "assistant", content: [thinking("alone")] },
+        question,
+        // The tool call this thinking led to was cut short and dropped; the text before it stays.
+        {
+          role: "assistant",
+          content: [thinking("kept"), { type: "text", text: "Partial" }, thinking("dropped-call")],
+        },
+        question,
+      ],
+      options.providerId,
+      options.errorPrefix
+    ).messages
+  ).toEqual([
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "Go" },
+        { type: "text", text: "Go" },
+      ],
+    },
+    {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Hmm", signature: "kept" },
+        { type: "text", text: "Partial" },
+      ],
+    },
+    { role: "user", content: [{ type: "text", text: "Go" }] },
+  ])
+})
+
+// Removal proof: drop `closeTruncatedBlocks` (or restore the open-block check for 'length'); the
+// stream fails with "Message stopped with open content blocks."
+test("closes the text and thinking a max_tokens stop left open, never an unfinished tool call", async () => {
+  const events = await collect(
+    messagesEvents(
+      stream([
+        { type: "message_start", message: { id: "message", model: "claude" } },
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "thinking", thinking: "Hmm" },
+        },
+        { type: "content_block_start", index: 1, content_block: { type: "text", text: "Part" } },
+        {
+          type: "content_block_start",
+          index: 2,
+          content_block: { type: "tool_use", id: "call", name: "act", input: {} },
+        },
+        {
+          type: "content_block_delta",
+          index: 2,
+          delta: { type: "input_json_delta", partial_json: '{"a":' },
+        },
+        { type: "message_delta", delta: { stop_reason: "max_tokens" } },
+        { type: "message_stop" },
+      ]),
+      new AbortController().signal,
+      options
+    )
+  )
+  expect(events.slice(-3)).toMatchObject([
+    { type: "reasoning-end", id: "content:0" },
+    { type: "text-end", id: "content:1" },
+    { type: "finish", finishReason: "length" },
+  ])
+  expect(events.some((event) => event.type === "tool-input-end")).toBe(false)
+})

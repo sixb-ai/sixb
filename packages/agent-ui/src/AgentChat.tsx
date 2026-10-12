@@ -8,6 +8,7 @@ import { DocumentPreviewRoot } from "./document-preview/DocumentPreviewRoot"
 import type { AgentDocumentPreviewRenderer } from "./document-preview/types"
 import { useAgentConversation } from "./hooks/useAgentConversation"
 import { useAgentMessages } from "./i18n"
+import { offersContinue } from "./runPresentation"
 import type { AgentContextInput } from "./types"
 
 export interface AgentChatProps {
@@ -134,9 +135,12 @@ export function AgentChat({
             : undefined
         }
         onContinue={
-          !conversation.sandboxRecovery &&
-          (presentation.kind === "timeout" || presentation.kind === "interrupted") &&
-          presentation.hasProgress
+          offersContinue({
+            presentation,
+            isRunning: conversation.isRunning,
+            sandboxRecovery: Boolean(conversation.sandboxRecovery),
+            messages: conversation.messages,
+          })
             ? conversation.continueAfterTimeout
             : undefined
         }

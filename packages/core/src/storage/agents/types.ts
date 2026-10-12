@@ -165,6 +165,7 @@ export const AGENT_RUN_DIAGNOSTIC_CODES = [
   "output_file_changed",
   "output_storage_failed",
   "step_limit_reached",
+  "output_limit_reached",
 ] as const
 
 /**

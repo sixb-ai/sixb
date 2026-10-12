@@ -168,3 +168,60 @@ test("rejects an unterminated stream with the calling provider's diagnostic iden
     message: "[Independent] Provider stream ended without a terminal response event.",
   })
 })
+
+// Removal proof: drop the trailing-reasoning loop in responsesInput; the request then carries a
+// reasoning item without its following item, which Responses rejects.
+test("does not replay reasoning an answer cut short ended on", () => {
+  const reasoning = (id: string): ModelAssistantPart => ({
+    type: "provider-state",
+    providerId: "test",
+    data: { item: { type: "reasoning", id, encrypted_content: "opaque" } },
+  })
+  const functionCall = { type: "function_call", call_id: "call", name: "act", arguments: "{}" }
+  const question = { role: "user" as const, content: [{ type: "text" as const, text: "Go" }] }
+  const input = responsesInput(
+    [
+      question,
+      // The output limit was reached while reasoning.
+      { role: "assistant", content: [{ type: "reasoning", text: "Hmm" }, reasoning("alone")] },
+      question,
+      {
+        role: "assistant",
+        content: [
+          reasoning("led"),
+          {
+            type: "tool-call",
+            toolCallId: "call",
+            toolName: "act",
+            input: {},
+            providerData: { test: { item: functionCall } },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call",
+            toolName: "act",
+            output: { type: "text", value: "ok" },
+          },
+        ],
+      },
+      // The tool call this reasoning led to was cut short and dropped.
+      { role: "assistant", content: [reasoning("dropped-call")] },
+      question,
+    ],
+    "test"
+  )
+  const go = { role: "user", content: [{ type: "input_text", text: "Go" }] }
+  expect(input).toEqual([
+    go,
+    go,
+    { type: "reasoning", id: "led", encrypted_content: "opaque" },
+    functionCall,
+    { type: "function_call_output", call_id: "call", output: "ok" },
+    go,
+  ])
+})

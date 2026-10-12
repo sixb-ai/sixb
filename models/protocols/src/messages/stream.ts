@@ -112,13 +112,15 @@ class MessageState {
       return []
     }
     if (type === "message_stop") {
-      if (this.blocks.size > 0)
+      const reason = finishReason(this.stopReason)
+      if (this.blocks.size > 0 && reason !== "length")
         throw this.protocolError("Message stopped with open content blocks.")
       this.finished = true
       return [
+        ...this.closeTruncatedBlocks(),
         {
           type: "finish",
-          finishReason: finishReason(this.stopReason),
+          finishReason: reason,
           ...(this.stopReason ? { rawFinishReason: this.stopReason } : {}),
           usage: (this.options.usage ?? messagesUsage)(this.usage),
         },
@@ -284,6 +286,23 @@ class MessageState {
       }
     }
     return [{ type: "provider-state", providerId: this.providerId, data: { block: block.raw } }]
+  }
+
+  /**
+   * The output limit can stop a message mid-block. Text and thinking keep what was streamed; an
+   * unfinished tool call stays open, and the core loop drops it unexecuted.
+   */
+  private closeTruncatedBlocks(): LanguageModelStreamEvent[] {
+    const events: LanguageModelStreamEvent[] = []
+    for (const block of this.blocks.values()) {
+      const providerData = blockData(this.providerId, block.raw)
+      if (block.type === "text") events.push({ type: "text-end", id: block.id, providerData })
+      if (block.type === "thinking") {
+        events.push({ type: "reasoning-end", id: block.id, providerData })
+      }
+    }
+    this.blocks.clear()
+    return events
   }
 
   private protocolError(message: string): ModelProviderError {

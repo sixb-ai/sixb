@@ -79,7 +79,6 @@ describe("runModelLoop", () => {
   // Removal proof: remove the unsuccessful-finish guard before executeToolCall.
   // Complete, valid JSON must not make an interrupted response executable.
   test.each([
-    "length",
     "content-filter",
     "error",
     "other",
@@ -117,6 +116,126 @@ describe("runModelLoop", () => {
     expect(executed).toBe(0)
     expect(accounting).toHaveLength(1)
     expect(accounting[0]?.usage).toEqual(USAGE)
+  })
+
+  // Removal proof: drop the `withoutLocalToolCalls` branch; the loop throws instead of completing.
+  test("ends on 'length' with what was produced, dropping its tool calls unexecuted", async () => {
+    let executed = 0
+    const model = modelFromCalls([
+      [
+        { type: "stream-start" },
+        { type: "reasoning-start", id: "reasoning" },
+        { type: "reasoning-delta", id: "reasoning", delta: "Thinking" },
+        { type: "reasoning-end", id: "reasoning" },
+        { type: "text-start", id: "text" },
+        { type: "text-delta", id: "text", delta: "Partial" },
+        { type: "text-end", id: "text" },
+        { type: "tool-call", toolCallId: "call", toolName: "echo", input: '{"value":"ok"}' },
+        {
+          type: "tool-call",
+          toolCallId: "search",
+          toolName: "web",
+          input: "{}",
+          providerExecuted: true,
+        },
+        { type: "finish", finishReason: "length", usage: USAGE },
+      ],
+    ])
+    const result = await runModelLoop({
+      model,
+      messages: [],
+      maxSteps: 3,
+      signal: new AbortController().signal,
+      tools: [
+        {
+          ...echo,
+          execute: async () => {
+            executed++
+            return "executed"
+          },
+        },
+      ],
+    })
+    expect(executed).toBe(0)
+    expect(result).toMatchObject({ status: "completed", output: "Partial", finishReason: "length" })
+    expect(result.steps).toHaveLength(1)
+    expect(result.steps[0]?.content.map((part) => part.type)).toEqual([
+      "reasoning",
+      "text",
+      "tool-call",
+    ])
+    expect(result.steps[0]?.content[2]).toMatchObject({
+      toolCallId: "search",
+      providerExecuted: true,
+    })
+  })
+
+  test("keeps spans the output limit left open, except an unfinished tool call", async () => {
+    // Removal proof: drop `settleTruncatedParts` from StreamAccumulator.complete; the loop fails
+    // with "Stream finished with incomplete … content".
+    let executed = 0
+    const unfinished: LanguageModelStreamEvent[] = [
+      { type: "stream-start" },
+      { type: "reasoning-start", id: "reasoning" },
+      { type: "reasoning-delta", id: "reasoning", delta: "Thinking" },
+      { type: "text-start", id: "text" },
+      { type: "text-delta", id: "text", delta: "Partial" },
+      { type: "tool-input-start", id: "call", toolName: "echo" },
+      { type: "tool-input-delta", id: "call", delta: '{"value":' },
+    ]
+    const result = await runModelLoop({
+      model: modelFromCalls([
+        [...unfinished, { type: "finish", finishReason: "length", usage: USAGE }],
+      ]),
+      messages: [],
+      maxSteps: 2,
+      signal: new AbortController().signal,
+      tools: [{ ...echo, execute: async () => `${++executed}` }],
+    })
+    expect(executed).toBe(0)
+    expect(result).toMatchObject({ status: "completed", output: "Partial", finishReason: "length" })
+    expect(result.steps[0]?.content).toEqual([
+      { type: "reasoning", text: "Thinking" },
+      { type: "text", text: "Partial" },
+    ])
+    // Any other finish still has to close what it opened.
+    await expect(
+      runModelLoop({
+        model: modelFromCalls([[...unfinished.slice(0, 5), finish()]]),
+        messages: [],
+        maxSteps: 1,
+        signal: new AbortController().signal,
+      })
+    ).rejects.toThrow("Stream finished with incomplete")
+  })
+
+  test("keeps structured output failing on 'length', tool calls or not", async () => {
+    // Removal proof: drop the `withoutLocalToolCalls` branch and a plain ModelStreamError escapes;
+    // drop the structured branch's finish check and the truncated JSON validates.
+    const model = modelFromCalls([
+      [
+        { type: "stream-start" },
+        { type: "text-start", id: "text" },
+        { type: "text-delta", id: "text", delta: '{"value":"ok"}' },
+        { type: "text-end", id: "text" },
+        { type: "tool-call", toolCallId: "call", toolName: "echo", input: '{"value":"ok"}' },
+        { type: "finish", finishReason: "length", usage: USAGE },
+      ],
+    ])
+    await expect(
+      runModelLoop({
+        model,
+        messages: [],
+        maxSteps: 2,
+        signal: new AbortController().signal,
+        tools: [echo],
+        output: {
+          name: "value",
+          schema: { type: "object" },
+          validate: (value) => value,
+        },
+      })
+    ).rejects.toBeInstanceOf(StructuredOutputError)
   })
 
   test("normalizes metadata before completed steps, partial traces, and continuation requests", async () => {

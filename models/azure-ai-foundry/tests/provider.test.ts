@@ -12,8 +12,8 @@ import { createAzureAIFoundry } from "./provider-fixture"
 
 const endpoint = "https://resource.services.ai.azure.com/api/projects/test"
 
-// Removal proof: restore tool-calls precedence in Responses finishReason, or remove
-// the unsuccessful-finish guard from runModelLoop. This valid tool then executes.
+// Removal proof: restore tool-calls precedence in Responses finishReason, or drop
+// `withoutLocalToolCalls` from runModelLoop. This valid tool then executes, or the loop throws.
 test("does not execute an incomplete Responses tool and retains its usage", async () => {
   const item = { id: "fc", type: "function_call", call_id: "call", name: "act", arguments: "{}" }
   let executed = 0
@@ -39,32 +39,32 @@ test("does not execute an incomplete Responses tool and retains its usage", asyn
         },
       ]),
   })
-  await expect(
-    runModelLoop({
-      model: provider.responses("deployment", {
-        definition: { capabilities: { localTools: true } },
-      }),
-      messages: [],
-      maxSteps: 1,
-      signal: new AbortController().signal,
-      tools: [
-        {
-          name: "act",
-          description: "Act",
-          inputSchema: { type: "object", properties: {} },
-          parseInput: (input) => input,
-          execute: async () => {
-            executed++
-            return "ok"
-          },
-          errorText: String,
+  const result = await runModelLoop({
+    model: provider.responses("deployment", {
+      definition: { capabilities: { localTools: true } },
+    }),
+    messages: [],
+    maxSteps: 2,
+    signal: new AbortController().signal,
+    tools: [
+      {
+        name: "act",
+        description: "Act",
+        inputSchema: { type: "object", properties: {} },
+        parseInput: (input) => input,
+        execute: async () => {
+          executed++
+          return "ok"
         },
-      ],
-      onModelCallEnd: (event) => {
-        accounted = event.usage
+        errorText: String,
       },
-    })
-  ).rejects.toThrow("Cannot execute local tools after 'length'")
+    ],
+    onModelCallEnd: (event) => {
+      accounted = event.usage
+    },
+  })
+  expect(result).toMatchObject({ status: "completed", finishReason: "length" })
+  expect(result.steps.flatMap((step) => step.content)).toEqual([])
   expect(executed).toBe(0)
   expect(accounted).toMatchObject({ inputTokens: 1, outputTokens: 2 })
 })
