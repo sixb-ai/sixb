@@ -63,6 +63,10 @@ from that model's default reasoning, and **Reset** forgets the choice, so later 
 to your defaults reach the user again. The chosen reasoning is fixed when a message is sent, so a
 retry runs with the same setting.
 
+Chat answers and AI workflow steps get 16,384 output tokens (or a quarter of the context window),
+reasoning included. Give a reasoning model more room with `maxOutputTokens` on its binding, such as
+`vercelGateway("zai/glm-5.3-flash", { maxOutputTokens: 32_000 })`; it comes out of the input budget.
+
 ## Generate a response
 
 Use `sixb.models.language.generate()` inside an action or workflow step when your code supplies

@@ -193,6 +193,15 @@ describe("language generation", () => {
     expect(second.requests[0]?.reasoning).toBeUndefined()
   })
 
+  test("applies a catalog model's output limit only when the call omits one", async () => {
+    // Proven by removal: drop `?? selected.maxOutputTokens`; the model maximum (1000) is requested.
+    const first = fakeModel()
+    const { sixb } = setup([{ ...first.model, maxOutputTokens: 600 }])
+    await sixb.models.language.generate({ prompt: "Hi" })
+    await sixb.models.language.generate({ prompt: "Hi", maxOutputTokens: 800 })
+    expect(first.requests.map((request) => request.maxOutputTokens)).toEqual([600, 800])
+  })
+
   test("embedding-only catalogs reject language generation before inference", async () => {
     const { model, requests } = fakeModel()
     const host = new SixbHost({
