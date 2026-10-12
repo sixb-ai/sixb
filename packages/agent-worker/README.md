@@ -166,6 +166,12 @@ The terminal run state is stored on the run record:
   assistant message before the thread is released. This controlled limit is not emitted as an
   unhandled runtime failure
 - User cancel during a turn: `cancelled`
+- Step limit reached before an answer: `succeeded` with `finishReason: "tool-calls"` and a
+  `step_limit_reached` diagnostic
+- Model output limit reached: a conversation turn is `succeeded` with `finishReason: "length"` and
+  an `output_limit_reached` diagnostic. It keeps what the model produced; tool calls the model was
+  still writing are dropped, never executed. A workflow agent node or subagent fails instead with
+  `agent.execution_failed`, naming the cause, so a cut-short answer is never passed on as complete
 - Worker shutdown during a conversation turn: `cancelled` with `finishReason: "interrupted"`,
   coherent partial work kept as the assistant message so the user can continue from it
 - Queue ownership lost mid-turn: the turn is aborted and stale durable writes are fenced

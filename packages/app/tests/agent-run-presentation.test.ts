@@ -4,11 +4,14 @@ import {
   type ActiveTurnPresentation,
   type ActiveTurnSources,
   EXTENDED_WAITING_STATUS_MS,
+  offersContinue,
   presentActiveTurn,
   selectActiveRunId,
   shouldShowExtendedWaitingStatus,
 } from "../src/agent/run-presentation"
 import type { AgentMessage, AgentRun } from "../src/agent/types"
+
+type DiagnosticCode = AgentMessage["annotations"][number]["code"]
 
 function run(input: Partial<AgentRun> & Pick<AgentRun, "id" | "status">): AgentRun {
   const { id, status, ...overrides } = input
@@ -315,4 +318,54 @@ test.each<[string, Partial<ActiveTurnSources>, ActiveTurnPresentation]>([
   ],
 ])("presentActiveTurn: %s", (_name, overrides, expected) => {
   expect(presentActiveTurn(sources(overrides))).toEqual(expected)
+})
+
+test("offers to continue only the newest answer that stopped short, once nothing runs", () => {
+  // Removal proof: drop the `idle`/`isRunning` checks or read every message's diagnostics in
+  // offersContinue; a running thread or an older notice then offers Continue.
+  const cutShort = (code: DiagnosticCode): AgentMessage => ({
+    ...assistantMessage("cut-short"),
+    annotations: [{ code, severity: "warning", scope: "run", message: "Developer copy." }],
+  })
+  const user: AgentMessage = { ...assistantMessage("next"), role: "user" }
+  const idle = {
+    presentation: { kind: "idle" } as const,
+    isRunning: false,
+    sandboxRecovery: false,
+  }
+
+  for (const code of ["output_limit_reached", "step_limit_reached"] as const) {
+    expect(offersContinue({ ...idle, messages: [cutShort(code)] })).toBe(true)
+  }
+  expect(offersContinue({ ...idle, messages: [cutShort("output_limit_reached"), user] })).toBe(
+    false
+  )
+  expect(
+    offersContinue({ ...idle, isRunning: true, messages: [cutShort("output_limit_reached")] })
+  ).toBe(false)
+  expect(
+    offersContinue({
+      ...idle,
+      presentation: { kind: "responding", queuedRun: null },
+      messages: [cutShort("output_limit_reached")],
+    })
+  ).toBe(false)
+  expect(
+    offersContinue({ ...idle, sandboxRecovery: true, messages: [cutShort("step_limit_reached")] })
+  ).toBe(false)
+  const stopped = { kind: "interrupted" as const, run: run({ id: "stopped", status: "cancelled" }) }
+  expect(
+    offersContinue({
+      ...idle,
+      presentation: { ...stopped, hasProgress: true } as const,
+      messages: [],
+    })
+  ).toBe(true)
+  expect(
+    offersContinue({
+      ...idle,
+      presentation: { ...stopped, hasProgress: false } as const,
+      messages: [],
+    })
+  ).toBe(false)
 })
