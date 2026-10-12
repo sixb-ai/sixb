@@ -163,7 +163,8 @@ the endpoint, deployment, and protocol. Chat compatibility is selected with `pro
 DeepSeek reasoning replay uses `reasoningReplay: "tool-continuation"`.
 
 Every protocol accepts `reasoning`, the level Sixb applies when the model runs without an explicit
-choice, such as `foundry.chat("production", { reasoning: "low" })`.
+choice, such as `foundry.chat("production", { reasoning: "low" })`. Agents use a binding's
+`maxOutputTokens` as their output allowance instead of Sixb's 16,384-token default.
 
 Messages `thinkingMode` selects manual or adaptive thinking. Manual budgets start at 1024 tokens
 and must stay below the output ceiling. Inline media has a 20 MiB aggregate default limit,

@@ -150,6 +150,7 @@ function createLanguageCatalog(
   const index = indexModelBindings(models, "language", (model, position) => {
     assertLanguageModel(model, position)
     assertDefaultReasoning(model, position)
+    assertMaxOutputTokens(model, position)
   })
   const [defaultEntry] = index.list()
   if (!defaultEntry) {
@@ -185,6 +186,26 @@ function assertDefaultReasoning(model: LanguageModel, index: number): void {
   const issue = modelReasoningSupportIssue(model.definition.capabilities.reasoning, reasoning)
   if (issue !== undefined) {
     throw invalidLanguageModel(index, `default reasoning '${reasoning}' cannot be used: ${issue}`)
+  }
+}
+
+// Providers validate their own options; this holds the same rule for providers written elsewhere.
+function assertMaxOutputTokens(model: LanguageModel, index: number): void {
+  const maxOutputTokens: unknown = model.maxOutputTokens
+  if (maxOutputTokens === undefined) return
+  if (
+    typeof maxOutputTokens !== "number" ||
+    !Number.isSafeInteger(maxOutputTokens) ||
+    maxOutputTokens <= 0
+  ) {
+    throw invalidLanguageModel(index, "expected 'maxOutputTokens' to be a positive safe integer")
+  }
+  const modelMaximum = model.definition.maxOutputTokens
+  if (modelMaximum !== undefined && maxOutputTokens > modelMaximum) {
+    throw invalidLanguageModel(
+      index,
+      `'maxOutputTokens' (${maxOutputTokens}) exceeds the model maximum (${modelMaximum})`
+    )
   }
 }
 

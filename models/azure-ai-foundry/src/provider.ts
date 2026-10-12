@@ -249,6 +249,7 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
   private readonly scope: string
   private readonly reliableReasoning: boolean | undefined
   readonly defaultReasoning?: ModelReasoningLevel
+  readonly maxOutputTokens?: number
 
   constructor(
     private readonly requestedProtocol: Protocol | undefined,
@@ -287,6 +288,7 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
     if (protocol === "messages") validateMessagesOptions(options)
     else if (protocol === "chat") validateChatOptions(options)
     else validateOptions(options)
+    if (options.maxOutputTokens !== undefined) this.maxOutputTokens = options.maxOutputTokens
     const { costEstimator, ...serializable } = options
     this.options = {
       ...structuredClone(serializable),

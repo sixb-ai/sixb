@@ -224,6 +224,28 @@ describe("createModelCatalog", () => {
     ).toThrow("expected 'defaultReasoning' to be one of")
   })
 
+  test("rejects an output limit that is not a positive integer or exceeds the model maximum", () => {
+    // Proven by removal: drop `assertMaxOutputTokens` from the catalog's validator.
+    const model = {
+      ...gpt,
+      definition: defineLanguageModel({ ...gpt.definition, maxOutputTokens: 32_000 }),
+    }
+    expect(
+      createModelCatalog({ language: [{ ...model, maxOutputTokens: 32_000 }] }).language.default
+        .model.maxOutputTokens
+    ).toBe(32_000)
+    expect(() => createModelCatalog({ language: [{ ...model, maxOutputTokens: 32_001 }] })).toThrow(
+      "[Sixb] Invalid language model at 'models.language[0]': 'maxOutputTokens' (32001) exceeds the model maximum (32000)."
+    )
+    for (const maxOutputTokens of [0, 1.5, "1000"]) {
+      expect(() =>
+        createModelCatalog({
+          language: [{ ...gpt, maxOutputTokens } as unknown as LanguageModel],
+        })
+      ).toThrow("expected 'maxOutputTokens' to be a positive safe integer")
+    }
+  })
+
   test("does not freeze the provider-owned model", () => {
     const model = testModel("gateway", "openai/gpt-5.4")
 

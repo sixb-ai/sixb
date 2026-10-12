@@ -79,8 +79,11 @@ export function createModelsRuntime(
         "[SixbModels] Model does not support native structured output."
       )
     }
+    // Like its reasoning, the binding's output limit applies unless the call sets its own.
     const maxOutputTokens = Math.min(
-      aiModelCallOutputTokenAllowance(input.maxOutputTokens ?? model.definition.maxOutputTokens),
+      aiModelCallOutputTokenAllowance(
+        input.maxOutputTokens ?? selected.maxOutputTokens ?? model.definition.maxOutputTokens
+      ),
       model.definition.maxOutputTokens ?? Infinity
     )
     if (typeof reasoning === "object" && reasoning.budgetTokens >= maxOutputTokens) {

@@ -32,7 +32,8 @@ const model = gateway("anthropic/claude-sonnet-4.5", {
 - **Default reasoning:** `reasoning` is the level Sixb applies when the model runs without an
   explicit choice. It is checked against the model's capabilities at startup.
 - **Caching:** automatic by default; set per-call `caching: "off"` to disable it.
-- **Output limits:** the strictest per-call, configured, or model limit wins.
+- **Output limits:** the strictest per-call, configured, or model limit wins. Agents use a
+  configured `maxOutputTokens` as their output allowance instead of Sixb's 16,384-token default.
 - **Retries:** `429` and `5xx` responses are retried before streaming starts. Configure
   `maxRetries` and `maxRetryDelayMs` on `createVercelGateway`.
 - **Custom transport:** supply `baseUrl`, `headers`, or `fetch` on `createVercelGateway`.

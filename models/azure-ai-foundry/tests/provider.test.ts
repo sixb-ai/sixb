@@ -808,3 +808,15 @@ test("carries a default reasoning set on the model binding", () => {
     "[SixbAzureAIFoundry] reasoning must be one of:"
   )
 })
+
+test("exposes the binding's output limit only when the binding sets one", async () => {
+  // Proven by removal: drop the `this.maxOutputTokens` assignment from the model constructor.
+  const provider = createAzureAIFoundry({ endpoint, apiKey: "test" })
+  const model = provider("deployment", { maxOutputTokens: 4_096 })
+
+  expect(model.maxOutputTokens).toBe(4_096)
+  expect((await model.resolve()).maxOutputTokens).toBe(4_096)
+  expect(provider.messages("deployment", { maxOutputTokens: 2_048 }).maxOutputTokens).toBe(2_048)
+  expect(provider.chat("deployment", { maxOutputTokens: 1_024 }).maxOutputTokens).toBe(1_024)
+  expect(provider("deployment").maxOutputTokens).toBeUndefined()
+})

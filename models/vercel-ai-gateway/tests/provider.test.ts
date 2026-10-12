@@ -1660,3 +1660,16 @@ test("carries a default reasoning set on the model binding", async () => {
     gateway("openai/gpt-5.5", { reasoning: { budgetTokens: 1_000 } as unknown as "low" })
   ).toThrow("[SixbVercelGateway] reasoning must be one of:")
 })
+
+test("exposes the binding's output limit only when the binding sets one", async () => {
+  // Proven by removal: drop the `this.maxOutputTokens` assignment from the model constructor.
+  const gateway = createVercelGateway({ fetch: async () => Response.json({ data: [] }) })
+  const model = gateway("zai/glm-5.3-flash", { maxOutputTokens: 32_000 })
+
+  expect(model.maxOutputTokens).toBe(32_000)
+  expect((await model.resolve?.({ offline: true }))?.maxOutputTokens).toBe(32_000)
+  expect(gateway("zai/glm-5.3-flash").maxOutputTokens).toBeUndefined()
+  expect(
+    gateway("zai/glm-5.3-flash", { request: { max_output_tokens: 9_000 } }).maxOutputTokens
+  ).toBeUndefined()
+})
