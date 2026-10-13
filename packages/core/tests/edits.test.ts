@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, link, MaterializationConflictError, prop, SixbHost } from "../src"
-import { ActionReadRecorder, commitActionEdits, createActionReadFacade } from "../src/actions"
+import { commitActionEdits } from "../src/actions/commit-edits"
+import { ActionReadRecorder, createActionReadFacade } from "../src/actions/read-facade"
 import type { EditBatch } from "../src/edits"
 import { lowerEditBatch } from "../src/edits"
 import { recordEdits } from "../src/edits/recorder"

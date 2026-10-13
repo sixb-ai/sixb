@@ -1,16 +1,5 @@
 export { defineAction, optional, param } from "./builders"
-export type {
-  ActionEditCommitResult,
-  ActionReadDependencies,
-  CommitActionEditsInput,
-} from "./commit-edits"
-export { commitActionEdits } from "./commit-edits"
 export { ActionDefinitionError } from "./errors"
-export type {
-  ActionReadFacadeOptions,
-  ActionTelemetryReadSource,
-} from "./read-facade"
-export { ActionReadRecorder, createActionReadFacade } from "./read-facade"
 export type { ActionDefinitionCatalog, ActionRegistryOptions } from "./registry"
 export { ActionRegistry } from "./registry"
 export type { RequestActionInput, RequestActionOptions } from "./request"
@@ -67,9 +56,7 @@ export type {
   ObjectActionPhaseBuilder,
 } from "./types"
 export {
-  coerceActionParamsToTyped,
   isActionDefinition,
   isGlobalActionDefinition,
   isObjectActionDefinition,
 } from "./validation"
-export { runActionValidators } from "./validators"
