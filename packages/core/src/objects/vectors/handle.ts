@@ -6,7 +6,12 @@ import type { PreparedObjectVector } from "../../materialization/vectors"
 import { sameEmbeddingModel } from "../../models/embedding-model"
 import { getOntologyMutationRuntime } from "../../runtime/ontology-mutations"
 import type { ExecutionObjectContext } from "../context"
-import { normalizeVector, vectorConfiguration, vectorSources } from "./profile"
+import {
+  INDEXING_EMBEDDING_TIMEOUT_MS,
+  normalizeVector,
+  vectorConfiguration,
+  vectorSources,
+} from "./profile"
 import type { ObjectVectorHandle } from "./types"
 
 export function createObjectVectorHandle(
@@ -65,7 +70,11 @@ export function createObjectVectorHandle(
       }
 
       // Network work never holds a storage transaction or retries an obsolete computation.
-      const result = await model.embed({ texts: [input.text], purpose: "document" })
+      const result = await model.embed({
+        texts: [input.text],
+        purpose: "document",
+        signal: AbortSignal.timeout(INDEXING_EMBEDDING_TIMEOUT_MS),
+      })
       if (!Array.isArray(result?.vectors) || result.vectors.length !== 1) {
         throw new MaterializationValidationError(
           "Embedding model must return exactly one vector for one input text."

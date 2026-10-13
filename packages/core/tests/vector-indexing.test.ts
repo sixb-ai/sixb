@@ -2,6 +2,7 @@ import { describe, expect, mock, spyOn, test } from "bun:test"
 import {
   defineObjectType,
   type EmbeddingModel,
+  type EmbeddingModelRequest,
   type EmbeddingModelResult,
   OntologyRegistry,
   prop,
@@ -209,6 +210,36 @@ describe("automatic vector indexing", () => {
     await f.process(work!.id)
     expect(await f.vectors()).toHaveLength(0)
     expect((await f.due())[0]!.id).not.toBe(work!.id)
+  })
+
+  test("a provider slower than a search deadline still indexes", async () => {
+    // Removal proof: restore AbortSignal.timeout(30_000) in executeEmbedding; the work fails with
+    // a TimeoutError. Simulated time: the provider answers after 85 seconds, so every deadline
+    // requested for less than that has fired by the time it does.
+    const f = fixture()
+    const deadlines: { ms: number; controller: AbortController }[] = []
+    const timeout = spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      const controller = new AbortController()
+      deadlines.push({ ms, controller })
+      return controller.signal
+    })
+    try {
+      f.embed.mockImplementation(async (input?: EmbeddingModelRequest) => {
+        for (const { ms, controller } of deadlines) {
+          if (ms < 85_000) controller.abort(new DOMException("timed out", "TimeoutError"))
+        }
+        input?.signal?.throwIfAborted()
+        return { vectors: [[1, 0]], usage: { inputTokens: 10 } }
+      })
+      await f.write("source")
+      const [work] = await f.due()
+      await f.process(work!.id)
+    } finally {
+      timeout.mockRestore()
+    }
+    expect(f.failures).toEqual([])
+    expect(await f.vectors()).toHaveLength(1)
+    expect(await f.due()).toEqual([])
   })
 
   test("an interrupted provider attempt fails visibly without repeating inference", async () => {

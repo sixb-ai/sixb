@@ -4,6 +4,11 @@ import type { ObjectVectorSearchProfile } from "../../ontology/types"
 
 export const MAX_VECTOR_K = 1000
 export const VECTOR_INPUT_VERSION = 1
+/**
+ * Nobody waits on indexing, and the provider bills a call whose response is abandoned. The
+ * deadline only frees the worker from a dead connection, so it is far longer than a search's.
+ */
+export const INDEXING_EMBEDDING_TIMEOUT_MS = 5 * 60_000
 
 export function vectorConfiguration(profile: ObjectVectorSearchProfile): string {
   return sha256Canonical({

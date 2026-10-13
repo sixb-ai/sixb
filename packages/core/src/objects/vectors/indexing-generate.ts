@@ -11,7 +11,7 @@ import { ModelExecutionSession } from "../../models/execution/session"
 import type { SixbHostContext } from "../../runtime/types"
 import type { VectorIndexingWork } from "../../storage/ontology/vector-indexing"
 import { fail, retryAt, VectorIndexingDeferred } from "./indexing-shared"
-import { normalizeVector } from "./profile"
+import { INDEXING_EMBEDDING_TIMEOUT_MS, normalizeVector } from "./profile"
 
 export interface PreparedIndexingWork {
   readonly work: VectorIndexingWork
@@ -66,7 +66,7 @@ export async function generateVectors(
     const result = await model.embed({
       texts: entries.map((entry) => entry.input.text),
       purpose: "document",
-      signal,
+      signal: AbortSignal.any([signal, AbortSignal.timeout(INDEXING_EMBEDDING_TIMEOUT_MS)]),
     })
     const values = normalizeEmbeddingResult(
       result,
