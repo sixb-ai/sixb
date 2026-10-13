@@ -1084,6 +1084,36 @@ describe("runAction", () => {
     expect((await sixb.objects(Sensor).get("summary"))?.properties.name).toBe("Renamed mid-run")
   })
 
+  // Guard proof: drop the `state.enter(...)` that opens `commitOnce` (`actions/run/phases.ts`), and
+  // the replay fails in `commit`, the phase the conflicting attempt reached, not in the validation
+  // it started over from.
+  test("fails a replay in the phase it started over from", async () => {
+    const retire = defineAction("retire")
+      .on(Device)
+      .params({})
+      .edits(async ({ objects, subject }) => {
+        await sixb.objects(Device).byId(subject.primaryId).delete()
+        objects(Device).byId(subject.primaryId).update({ status: "retired" })
+      })
+    const { host, sixb } = createSixb([retire])
+    attachSixbErrorReporter(host, () => {})
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
+    await prepareActionRun(host, {
+      id: "act_retire",
+      actionId: "retire",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+
+    const result = await executePreparedRun({ host, runId: "act_retire" })
+
+    expect(result).toMatchObject({
+      status: "failed",
+      phase: "validation",
+      error: { code: "action.phase_failed", details: { phase: "validation" } },
+    })
+  })
+
   // Guard proof: raise `MAX_COMMIT_ATTEMPTS` in `actions/run/phases.ts` and the edits count follows.
   test("fails with action.read_conflict after three conflicting commits", async () => {
     let edits = 0
@@ -1810,5 +1840,77 @@ describe("runAction deadline and boundary", () => {
       error: { code: "action.timeout", details: { phase: "effects" } },
     })
     expect((await deviceObjects(sixb).get("device-1"))?.properties.status).toBe("ready")
+  })
+
+  // A handler that never forwards its `signal` cannot be stopped, but before the boundary the run
+  // can stop waiting for it. Guard proof: await the validators or the edits handler directly, not
+  // through `untilAborted` (`actions/run/normalize.ts`), in `commitOnce` (`actions/run/phases.ts`)
+  // or `runEditsAndCommitPhase` (`actions/run/edits-commit.ts`), and the matching run never ends:
+  // this test times out.
+  test("stops waiting at the deadline for a handler that ignores its signal", async () => {
+    const never = () => new Promise<never>(() => {})
+    const stuckValidation = defineAction("stuckValidation")
+      .params({})
+      .validate(never)
+      .edits(() => {})
+    const stuckEdits = defineAction("stuckEdits").params({}).edits(never)
+    const { host } = createSixb([stuckValidation, stuckEdits])
+    attachSixbErrorReporter(host, () => {})
+
+    for (const [actionId, phase] of [
+      ["stuckValidation", "validation"],
+      ["stuckEdits", "edits"],
+    ] as const) {
+      await prepareActionRun(host, {
+        id: `act_${actionId}`,
+        actionId,
+        subject: { kind: "none" },
+        params: {},
+      })
+      const result = await executePreparedRun({
+        host,
+        runId: `act_${actionId}`,
+        timeoutMs: DEADLINE_MS,
+      })
+
+      expect(result).toMatchObject({
+        status: "failed",
+        phase,
+        error: { code: "action.timeout", details: { phase } },
+      })
+    }
+  })
+
+  // Guard proof: await the effects handler directly in `callEffects` (`actions/run/effects.ts`),
+  // and the effects never end: this test times out, as a stopping process would wait for them.
+  test("records effects that ignore their signal as timed out", async () => {
+    const stuckEffects = defineAction("stuckEffects")
+      .on(Device)
+      .params({})
+      .edits(({ objects, subject }) => {
+        objects(Device).byId(subject.primaryId).update({ status: "ready" })
+      })
+      .effects(() => new Promise<never>(() => {}))
+    const { host, sixb } = createSixb([stuckEffects])
+    attachSixbErrorReporter(host, () => {})
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
+    await prepareActionRun(host, {
+      id: "act_stuck_effects",
+      actionId: "stuckEffects",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+
+    const result = await executePreparedRun({
+      host,
+      runId: "act_stuck_effects",
+      timeoutMs: DEADLINE_MS,
+    })
+
+    expect(result.status).toBe("succeeded")
+    expect(result.effects).toMatchObject({
+      status: "failed",
+      error: { code: "action.timeout", details: { phase: "effects" } },
+    })
   })
 })

@@ -6,7 +6,7 @@ import type { ActionEditCommitResult } from "../commit-edits"
 import type { ActionDefinition } from "../types"
 import { isObjectActionDefinition } from "../validation"
 import { createBasePhaseContext, requireObjectSubject, toActionRuntimeFacade } from "./context"
-import { toActionRunFailure, translateActionPhaseError } from "./normalize"
+import { toActionRunFailure, translateActionPhaseError, untilAborted } from "./normalize"
 import type { ActionDeadline } from "./signals"
 import type { ActionRunState } from "./state"
 import type { ActionRunContext } from "./types"
@@ -75,14 +75,16 @@ async function callEffects(
       writeback: state.writebackValue,
       commit: input.commit,
     }
-    if (isObjectActionDefinition(action)) {
-      await action.phases.effects?.({
-        ...context,
-        subject: requireObjectSubject(state.run.subject, ids),
-      })
-    } else {
-      await action.phases.effects?.(context)
-    }
+    await untilAborted(async () => {
+      if (isObjectActionDefinition(action)) {
+        await action.phases.effects?.({
+          ...context,
+          subject: requireObjectSubject(state.run.subject, ids),
+        })
+      } else {
+        await action.phases.effects?.(context)
+      }
+    }, signal)
   } catch (error) {
     const completedAt = new Date()
     const failure = toActionRunFailure(

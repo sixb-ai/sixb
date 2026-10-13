@@ -11,10 +11,33 @@ import { parseActionRunFailure } from "../../storage/action-runs/failure"
 import { isActionTimeout } from "./signals"
 
 export function throwIfAborted(signal: AbortSignal): void {
-  if (signal.aborted) {
-    throw signal.reason instanceof Error
-      ? signal.reason
-      : new DOMException("[Sixb] Action run was cancelled.", "AbortError")
+  if (signal.aborted) throw abortReason(signal)
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException("[Sixb] Action run was cancelled.", "AbortError")
+}
+
+/**
+ * Wait for a handler until the signal of its phase aborts, then reject with the abort's reason.
+ *
+ * A handler stops early only when it forwards its `signal` to what it awaits. One that does not
+ * keeps running after the abort, but the run no longer waits for it: nothing it does from then on
+ * reaches the run, and what it throws is dropped.
+ */
+export async function untilAborted<T>(work: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  throwIfAborted(signal)
+  const aborted = Promise.withResolvers<never>()
+  const abort = () => aborted.reject(abortReason(signal))
+  signal.addEventListener("abort", abort, { once: true })
+  const running = (async () => work())()
+  try {
+    return await Promise.race([running, aborted.promise])
+  } finally {
+    signal.removeEventListener("abort", abort)
+    running.catch(() => undefined)
   }
 }
 
