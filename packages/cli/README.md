@@ -100,6 +100,7 @@ supervisor disappears, so a stuck startup cannot leave its process group running
 | `--api-host <host>` | `dev`, `api` | `--host` | API bind host |
 | `--api-public-origin <origin>` | browser/API commands | dev: `http://localhost:<api-port>` | Public API origin |
 | `--agent-turn-timeout <duration>` | `dev`, agent worker/group | `SIXB_AGENT_TURN_TIMEOUT` or `10m` | Agent turn wall-clock budget, e.g. `30s`, `10m`, or `1h` |
+| `--vector-concurrency <count>` | `dev`, projection worker/group | `SIXB_VECTOR_CONCURRENCY` or `4` | Concurrent embedding calls for vector indexing |
 | `--atlas-public-origin <origin>` | `dev`, `api`, `atlas` | dev: `http://localhost:<port>` | Public Atlas UI origin |
 | `--app-public-origin <origin>` | `dev`, `api`, `app` | dev: `http://localhost:<port+1>` | Public custom app origin |
 | `--profile <name>` | remote commands | current profile | Use a saved profile without changing the current one |

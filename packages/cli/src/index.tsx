@@ -106,6 +106,7 @@ async function main(): Promise<void> {
         appPublicOrigin: getFlag("app-public-origin"),
         agentTurnTimeout: getFlag("agent-turn-timeout"),
         concurrency: getFlags("concurrency"),
+        vectorConcurrency: getFlag("vector-concurrency"),
       })
       break
     }
@@ -119,6 +120,7 @@ async function main(): Promise<void> {
         apiPublicOrigin: getFlag("api-public-origin"),
         agentTurnTimeout: getFlag("agent-turn-timeout"),
         concurrency: getFlag("concurrency"),
+        vectorConcurrency: getFlag("vector-concurrency"),
       })
       break
     }
@@ -132,6 +134,7 @@ async function main(): Promise<void> {
         apiPublicOrigin: getFlag("api-public-origin"),
         agentTurnTimeout: getFlag("agent-turn-timeout"),
         concurrency: getFlags("concurrency"),
+        vectorConcurrency: getFlag("vector-concurrency"),
       })
       break
     }

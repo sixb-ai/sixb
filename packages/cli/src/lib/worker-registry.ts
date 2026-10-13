@@ -19,6 +19,7 @@ export interface WorkerCreationOptions {
   readonly agentApiBaseUrl?: string
   readonly agentTurnTimeoutMs?: number
   readonly workerConcurrency?: WorkerConcurrency
+  readonly vectorConcurrency?: number
 }
 
 interface WorkerFactory {
@@ -62,7 +63,10 @@ const workerFactories: Record<WorkerType, WorkerFactory> = {
   },
   projection: {
     create: (sixb, options) =>
-      new ProjectionWorker(sixb, { concurrency: options.workerConcurrency?.projection }),
+      new ProjectionWorker(sixb, {
+        concurrency: options.workerConcurrency?.projection,
+        vectorConcurrency: options.vectorConcurrency,
+      }),
   },
   workflow: {
     create: (sixb, options) =>

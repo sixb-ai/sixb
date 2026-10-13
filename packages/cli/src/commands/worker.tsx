@@ -6,7 +6,7 @@ import { runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
 import { recordApiPublicOrigin, stopSixbProviders, waitForWorkerFailure } from "../lib/runtime"
 import { assertShareableProviders } from "../lib/shareable-providers"
 import { migrateStorageForRole } from "../lib/storage-migration"
-import { resolveSingleWorkerConcurrency } from "../lib/worker-concurrency"
+import { resolveSingleWorkerConcurrency, resolveVectorConcurrency } from "../lib/worker-concurrency"
 import {
   agentRuntimeRequired,
   createWorkerForType,
@@ -23,6 +23,7 @@ export interface WorkerOptions {
   apiPublicOrigin?: string
   agentTurnTimeout?: string
   concurrency?: string
+  vectorConcurrency?: string
 }
 
 export async function runWorker(options: WorkerOptions = {}) {
@@ -31,6 +32,7 @@ export async function runWorker(options: WorkerOptions = {}) {
   const workerType = resolveWorkerTypeToStart(options.workerType)
   const agentTurnTimeoutMs = resolveAgentTurnTimeoutMs(options.agentTurnTimeout)
   const workerConcurrency = resolveSingleWorkerConcurrency(workerType, options.concurrency)
+  const vectorConcurrency = resolveVectorConcurrency(options.vectorConcurrency)
   const entry = await resolveRuntimeEntry({ entry: options.entry })
 
   const app = renderPersistent(
@@ -76,6 +78,7 @@ export async function runWorker(options: WorkerOptions = {}) {
       agentApiBaseUrl: options.apiPublicOrigin,
       agentTurnTimeoutMs,
       workerConcurrency,
+      vectorConcurrency,
     })
     await worker.start()
 

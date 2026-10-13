@@ -24,9 +24,15 @@ import { VectorIndexingWorker } from "./vector-indexing-worker"
 export interface ProjectionWorkerOptions {
   /** Maximum projection run jobs this worker claims and executes at once. Defaults to 1. */
   readonly concurrency?: number
-  /** Independent embedding concurrency. Defaults to 1. */
+  /** Independent embedding concurrency. Defaults to 4. */
   readonly vectorConcurrency?: number
 }
+
+/**
+ * Embedding calls wait on the network, so they overlap cheaply. The provider's rate limit is the
+ * ceiling, and a rejected call is a terminal failure, so the default stays well below it.
+ */
+const DEFAULT_VECTOR_CONCURRENCY = 4
 
 export class ProjectionWorker extends QueueWorker<
   ProjectionRunRequestedQueueJob,
@@ -61,7 +67,10 @@ export class ProjectionWorker extends QueueWorker<
         .listObjectTypes()
         .some((type) => Object.keys(type.search?.vectors ?? {}).length > 0)
     )
-      this.vectorWorker = new VectorIndexingWorker(host, options.vectorConcurrency ?? 1)
+      this.vectorWorker = new VectorIndexingWorker(
+        host,
+        options.vectorConcurrency ?? DEFAULT_VECTOR_CONCURRENCY
+      )
   }
 
   override async start(): Promise<void> {

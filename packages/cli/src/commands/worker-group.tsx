@@ -5,7 +5,7 @@ import { runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
 import { recordApiPublicOrigin, stopSixbProviders, waitForWorkerFailure } from "../lib/runtime"
 import { assertShareableProviders } from "../lib/shareable-providers"
 import { migrateStorageForRole } from "../lib/storage-migration"
-import { resolveWorkerConcurrency } from "../lib/worker-concurrency"
+import { resolveVectorConcurrency, resolveWorkerConcurrency } from "../lib/worker-concurrency"
 import {
   agentRuntimeRequired,
   assertWorkerInputs,
@@ -23,6 +23,7 @@ export interface WorkerGroupOptions {
   apiPublicOrigin?: string
   agentTurnTimeout?: string
   concurrency?: readonly string[]
+  vectorConcurrency?: string
 }
 
 export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
@@ -33,6 +34,7 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
   const requestedTypes = (options.workerTypes ?? []).map(resolveWorkerTypeToStart)
   const agentTurnTimeoutMs = resolveAgentTurnTimeoutMs(options.agentTurnTimeout)
   const workerConcurrency = resolveWorkerConcurrency(options.concurrency)
+  const vectorConcurrency = resolveVectorConcurrency(options.vectorConcurrency)
   const entry = await resolveRuntimeEntry({ entry: options.entry })
 
   const app = renderPersistent(
@@ -92,6 +94,7 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
         agentApiBaseUrl: options.apiPublicOrigin,
         agentTurnTimeoutMs,
         workerConcurrency,
+        vectorConcurrency,
       })
     )
     await Promise.all(workers.map((worker) => worker.start()))
