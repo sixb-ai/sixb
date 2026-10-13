@@ -165,29 +165,35 @@ describe("deploy release", () => {
     )
   })
 
-  // A stopping API waits for its in-flight Actions before closing storage. Guard proof: drop the
-  // API default from `sixbService` in `src/lib/deploy-release.ts`, or raise the drain bound in core
-  // past it, and a graceful restart kills Actions the API was still running.
-  test("lets a stopping API finish the Actions it is running", () => {
-    const built = release({ services: { workers: { process: { killTimeoutMs: 5_000 } } } })
+  // The API and the workers run Actions in process, and wait for those in flight before closing
+  // storage. Guard proof: drop either service from `ACTION_HOST_SERVICES` in
+  // `src/lib/deploy-release.ts`, or raise the drain bound in core past the default, and a graceful
+  // restart kills Actions that service was still running.
+  test("lets a stopping API or worker group finish the Actions it is running", () => {
+    const built = release()
 
-    expect(service(built, "api").process.killTimeoutMs).toBeGreaterThan(ACTION_RUN_DRAIN_TIMEOUT_MS)
     expect(
-      built.services
-        .filter((entry) => entry.name !== "api")
-        .map((entry) => [entry.name, entry.process.killTimeoutMs])
+      built.services.map((entry) => [
+        entry.name,
+        entry.process.killTimeoutMs > ACTION_RUN_DRAIN_TIMEOUT_MS,
+      ])
     ).toEqual([
-      ["atlas", 10_000],
-      ["app", 10_000],
-      ["orchestrator", 10_000],
-      ["scheduler", 10_000],
-      ["rules", 10_000],
-      ["workers", 5_000],
+      ["api", true],
+      ["atlas", false],
+      ["app", false],
+      ["orchestrator", false],
+      ["scheduler", false],
+      ["rules", false],
+      ["workers", true],
     ])
-    expect(
-      release({ services: { api: { process: { killTimeoutMs: 60_000 } } } }).services[0]?.process
-        .killTimeoutMs
-    ).toBe(60_000)
+    const overridden = release({
+      services: {
+        api: { process: { killTimeoutMs: 60_000 } },
+        workers: { process: { killTimeoutMs: 5_000 } },
+      },
+    })
+    expect(service(overridden, "api").process.killTimeoutMs).toBe(60_000)
+    expect(service(overridden, "workers").process.killTimeoutMs).toBe(5_000)
   })
 
   test("gives every service the public origins, then its own environment", () => {

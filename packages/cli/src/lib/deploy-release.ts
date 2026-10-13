@@ -66,11 +66,14 @@ const DEFAULT_KILL_TIMEOUT_MS = 10_000
 const DEFAULT_RESTART_DELAY_MS = 1_000
 
 /**
- * A stopping API first waits up to 65 s for the Actions it is running and their effects
- * (`ACTION_RUN_DRAIN_TIMEOUT_MS` in core), so a graceful restart must not kill it before. A literal
- * keeps the runtime out of the deploy command; `deploy.test.ts` holds the two together.
+ * The API and the workers run Actions in process: the API for the requests it serves, the workers
+ * for workflow action nodes. Stopping, each first waits up to 65 s for the Actions it is running
+ * and their effects (`ACTION_RUN_DRAIN_TIMEOUT_MS` in core), so a graceful restart must not kill it
+ * before. A literal keeps the runtime out of the deploy command; `deploy.test.ts` holds the two
+ * together.
  */
-const API_KILL_TIMEOUT_MS = 70_000
+const ACTION_HOST_KILL_TIMEOUT_MS = 70_000
+const ACTION_HOST_SERVICES: ReadonlySet<DeployServiceName> = new Set(["api", "workers"])
 
 export interface DeployReleaseOptions {
   /** The Bun version the project runs on, from its `packageManager` or the running Bun. */
@@ -143,7 +146,9 @@ function sixbService(
     instances: processOptions.instances ?? 1,
     ...(address ? { http: address } : {}),
     process: releaseProcess(processOptions, {
-      killTimeoutMs: service === "api" ? API_KILL_TIMEOUT_MS : DEFAULT_KILL_TIMEOUT_MS,
+      killTimeoutMs: ACTION_HOST_SERVICES.has(service)
+        ? ACTION_HOST_KILL_TIMEOUT_MS
+        : DEFAULT_KILL_TIMEOUT_MS,
     }),
   }
 }
