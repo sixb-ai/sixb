@@ -208,7 +208,8 @@ History options:
 
 \`actions get\` includes inputSchema, the exact JSON shape accepted by the Action. The JSON file
 contains that parameter object; use - to read standard input. \`actions request\` runs the Action
-and prints its finished run, with its status and any error.`,
+and prints its finished run, with its status and any error. It waits at most 25 seconds: a run that
+takes longer keeps running, and the error names the run to read with \`action-runs get\`.`,
   "action-runs": `Usage:
   sixb action-runs list [options]
   sixb action-runs get <run-id>
