@@ -190,10 +190,11 @@ to the projection.
 
 ## Concurrent changes
 
-If data the action read through `read` changes before the commit, Sixb runs `.edits()` again
-against the new data. An action without a writeback also reruns `.validate()`; one with a writeback
-reuses its result and never calls the external system twice. After three conflicting attempts,
-nothing is committed and the run fails with [`action.read_conflict`](../errors/overview.md#error-catalog).
+Action runs execute at the same time, including several runs of one action. If data the action
+read through `read` changes before the commit, Sixb runs `.edits()` again against the new data.
+An action without a writeback also reruns `.validate()`; one with a writeback reuses its result
+and never calls the external system twice. After three conflicting attempts, nothing is committed
+and the run fails with [`action.read_conflict`](../errors/overview.md#error-catalog).
 Request a new run; if the action has a `.writeback()`, its external call already ran.
 
 | Checked | Not checked |
@@ -203,6 +204,8 @@ Request a new run; if the action has a `.writeback()`, its external call already
 | `listLinks()` | Telemetry history and file content |
 
 To depend on an object not existing yet, give it a deterministic ID and read it with `get()`.
+A condition on an unchecked read, such as a limit on `count()`, does not hold across runs that
+execute at the same time: both can pass it and commit.
 
 ## Request an action
 
@@ -240,8 +243,12 @@ A run has 30 seconds to get through validation and a successful writeback, or th
 and edits when it has no writeback. A run that runs out of time before then stops, commits nothing,
 and fails with [`action.timeout`](../errors/overview.md#error-catalog); if its writeback was cut
 short, check the external system before requesting a new run. Handlers receive a `signal` that
-aborts at the limit: forward it to the calls they await so they stop in time. Effects get 30 more
-seconds after the commit. Move longer work into a [workflow](../workflows/overview.md).
+aborts at the limit: forward it to the calls they await so they stop in time. The run stops waiting
+at the limit for a `.validate()` handler, and for `.edits()` when the action has no writeback, even
+if the handler keeps going. It always waits for `.writeback()`, whose result alone says whether the
+external change happened: a writeback that never returns holds its request open. Effects get 30
+more seconds after the commit, and are not waited for past them. Move longer work into a
+[workflow](../workflows/overview.md).
 
 ## Use your action
 
