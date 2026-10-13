@@ -63,11 +63,12 @@ class ApiClient {
     const url = this.url(path, query);
     return this.json(url, { method: "GET" });
   }
-  async post(path, body) {
+  async post(path, body, options = {}) {
     return this.json(this.url(path), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      ...options.signal ? { signal: options.signal } : {}
     });
   }
   async upload(path, source, logicalPath) {
@@ -118,7 +119,9 @@ class ApiClient {
       if (this.authorization)
         headers.set("authorization", this.authorization);
       response = await fetch(url, { ...init, headers });
-    } catch {
+    } catch (error) {
+      if (init.signal?.aborted)
+        throw error;
       throw new CliError({
         code: "api_unreachable",
         message: this.unavailableMessage,
@@ -270,6 +273,9 @@ function formatAlternatives(values) {
     return `${values[0]} or ${values[1]}`;
   return `${values.slice(0, -1).join(", ")}, or ${values.at(-1)}`;
 }
+// ../cli-core/src/commands/actions.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+
 // ../cli-core/src/policies.ts
 var CLI_LIMITS = {
   list: { default: 20, maximum: 1000 },
@@ -478,7 +484,8 @@ History options:
 
 \`actions get\` includes inputSchema, the exact JSON shape accepted by the Action. The JSON file
 contains that parameter object; use - to read standard input. \`actions request\` runs the Action
-and prints its finished run, with its status and any error.`,
+and prints its finished run, with its status and any error. It waits at most 25 seconds: a run that
+takes longer keeps running, and the error names the run to read with \`action-runs get\`.`,
   "action-runs": `Usage:
   sixb action-runs list [options]
   sixb action-runs get <run-id>
@@ -596,7 +603,8 @@ async function readStdin() {
 }
 
 // ../cli-core/src/commands/actions.ts
-async function actions(api, args) {
+var ACTION_REQUEST_WAIT_MS = 25000;
+async function actions(api, args, requestWaitMs = ACTION_REQUEST_WAIT_MS) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub) || requestsHelp(rest))
     return writeText(GROUP_HELP.actions);
@@ -632,11 +640,23 @@ async function actions(api, args) {
     if (Array.isArray(params) || typeof params !== "object" || params === null) {
       fail("Action params must be a JSON object.");
     }
-    return writeJson(await api.post(`/api/actions/${encodeURIComponent(actionId)}`, {
-      params,
-      ...subjectType && subjectId ? { subject: { kind: "object", objectTypeId: subjectType, primaryId: subjectId } } : {},
-      ...runId ? { runId } : {}
-    }));
+    const requestedRunId = runId ?? `act_${randomUUID2()}`;
+    const waiting = AbortSignal.timeout(requestWaitMs);
+    try {
+      return writeJson(await api.post(`/api/actions/${encodeURIComponent(actionId)}`, {
+        params,
+        ...subjectType && subjectId ? { subject: { kind: "object", objectTypeId: subjectType, primaryId: subjectId } } : {},
+        runId: requestedRunId
+      }, { signal: waiting }));
+    } catch (error) {
+      if (!waiting.aborted)
+        throw error;
+      throw new CliError({
+        code: "action_wait_timeout",
+        message: `Action run '${requestedRunId}' did not finish within ${requestWaitMs / 1000} ` + "seconds. It was not cancelled.",
+        hint: `Read it with 'sixb action-runs get ${requestedRunId}': its record exists once it ` + `has ended. A repeated request must pass '--run-id ${requestedRunId}', or the ` + "Action runs twice."
+      }, EXIT_API);
+    }
   }
   fail(`Unknown actions command '${sub}'.`);
 }

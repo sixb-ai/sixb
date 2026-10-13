@@ -27,11 +27,17 @@ export class ApiClient {
     return this.json(url, { method: "GET" })
   }
 
-  async post(path: string, body: unknown): Promise<unknown> {
+  /** `signal` stops waiting for the response; the abort is rethrown as it was raised. */
+  async post(
+    path: string,
+    body: unknown,
+    options: { readonly signal?: AbortSignal } = {}
+  ): Promise<unknown> {
     return this.json(this.url(path), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+      ...(options.signal ? { signal: options.signal } : {}),
     })
   }
 
@@ -91,7 +97,8 @@ export class ApiClient {
       const headers = new Headers(init.headers)
       if (this.authorization) headers.set("authorization", this.authorization)
       response = await fetch(url, { ...init, headers })
-    } catch {
+    } catch (error) {
+      if (init.signal?.aborted) throw error
       throw new CliError(
         {
           code: "api_unreachable",
