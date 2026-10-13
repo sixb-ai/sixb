@@ -3,12 +3,12 @@ import { getActionRunOptions, listActionsOptions } from "@sixb/client/hooks"
 import { Card, CardContent } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { CircleHelp, Loader2 } from "lucide-react"
-import { useMemo } from "react"
+import { useEffect, useMemo, useReducer } from "react"
 import { Navigate, useParams } from "react-router-dom"
 import { DataPanel, ErrorPage, LoadingPage, PageFrame } from "../components/common"
 import { SixbFailureSummary } from "../components/SixbFailureSummary"
 import { useOntologyValueTypes } from "../features/objects/hooks/useOntologyValueTypes"
-import { type EffectsState, effectsState } from "../lib/actions/effects"
+import { effectsState, effectsWaitRemainingMs } from "../lib/actions/effects"
 import { actionRunFileContentUrl } from "../lib/files"
 import { fieldRecordSchema, valueSchema } from "../lib/valueSchema"
 import { ActionRunMetaGrid, ActionRunStatusBadge, formatSubject } from "./ActionsPage"
@@ -127,14 +127,33 @@ export function ActionRunDetailPage() {
 
       <Card className="p-0">
         <CardContent className="p-5">
-          <ActionRunEffects run={run} state={effectsState(run, action?.phases.effects)} />
+          <ActionRunEffects run={run} hasEffects={action?.phases.effects} />
         </CardContent>
       </Card>
     </PageFrame>
   )
 }
 
-function ActionRunEffects({ run, state }: { run: ActionRunDetail; state: EffectsState }) {
+function ActionRunEffects({
+  run,
+  hasEffects,
+}: {
+  run: ActionRunDetail
+  hasEffects: boolean | undefined
+}) {
+  const now = Date.now()
+  const state = effectsState(run, hasEffects, now)
+  // The wait for an outcome ends on the clock alone: the last poll returns the same run, and
+  // nothing else would render the page again. A timer that fires early finds the wait shorter,
+  // and sets another.
+  const waitMs = state === "pending" ? effectsWaitRemainingMs(run, now) : null
+  const [, renderAgain] = useReducer((count: number) => count + 1, 0)
+  useEffect(() => {
+    if (waitMs === null) return
+    const timer = setTimeout(renderAgain, waitMs)
+    return () => clearTimeout(timer)
+  }, [waitMs])
+
   if (state === "pending" || state === "unrecorded") {
     return (
       <div className="space-y-2">

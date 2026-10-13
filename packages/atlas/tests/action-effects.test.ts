@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import type { ActionRunDetail } from "@sixb/client"
-import { EFFECTS_OUTCOME_WAIT_MS, effectsState } from "../src/lib/actions/effects"
+import {
+  EFFECTS_OUTCOME_WAIT_MS,
+  effectsState,
+  effectsWaitRemainingMs,
+} from "../src/lib/actions/effects"
 
 const finishedAt = "2026-06-29T12:00:00.000Z"
 const finished = Date.parse(finishedAt)
@@ -26,6 +30,18 @@ describe("effectsState", () => {
   test("waits for an effects outcome only for a while after the run ended", () => {
     expect(effectsState(run(), true, finished + 1_000)).toBe("pending")
     expect(effectsState(run(), true, finished + EFFECTS_OUTCOME_WAIT_MS)).toBe("unrecorded")
+  })
+
+  // The run page renders again after this long, since its last poll changes nothing. Guard proof:
+  // return a shorter wait from `effectsWaitRemainingMs`, and the page renders "pending" once more
+  // and then never again.
+  test("stops waiting exactly when the outcome is no longer expected", () => {
+    const now = finished + 1_000
+    const remaining = effectsWaitRemainingMs(run(), now)
+
+    expect(effectsState(run(), true, now + remaining - 1)).toBe("pending")
+    expect(effectsState(run(), true, now + remaining)).toBe("unrecorded")
+    expect(effectsWaitRemainingMs(run(), finished + EFFECTS_OUTCOME_WAIT_MS + 5_000)).toBe(0)
   })
 
   test("reads a recorded outcome, and runs without effects, as settled", () => {

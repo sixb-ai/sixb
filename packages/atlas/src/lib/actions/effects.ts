@@ -21,3 +21,11 @@ export function effectsState(
   if (run.status !== "succeeded" || run.phase !== "commit" || !hasEffects) return "none"
   return now - Date.parse(run.finishedAt) < EFFECTS_OUTCOME_WAIT_MS ? "pending" : "unrecorded"
 }
+
+/**
+ * How long from `now` a pending effects outcome is still waited for. Nothing changes on the page
+ * when that wait ends, so whoever shows the state renders again then.
+ */
+export function effectsWaitRemainingMs(run: ActionRunDetail, now = Date.now()): number {
+  return Math.max(0, Date.parse(run.finishedAt) + EFFECTS_OUTCOME_WAIT_MS - now)
+}

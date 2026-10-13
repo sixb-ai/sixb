@@ -259,9 +259,11 @@ export function ActionRunView({ parsed }: CommandViewProps) {
   const messages = useAgentMessages()
   const locale = useLocale()
   const run = isRecord(parsed.json) ? parsed.json : null
-  if (!run) return <StructuredDataView parsed={parsed} />
+  const status = run ? stringField(run, "status") : undefined
+  // Output without a status is not a run: threads from before Actions returned their finished run
+  // hold the `{ runId, queuedAt }` receipt of a request, which must not read as a run still queued.
+  if (!run || !status) return <StructuredDataView parsed={parsed} />
 
-  const status = stringField(run, "status") ?? "queued"
   const subject = subjectLabel(run.subject)
   const error = isRecord(run.error) ? run.error : null
   const params = isRecord(run.params) ? Object.entries(run.params) : []
