@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
   resolveSingleWorkerConcurrency,
+  resolveVectorConcurrency,
   resolveWorkerConcurrency,
 } from "../src/lib/worker-concurrency"
 
@@ -10,6 +11,7 @@ const environmentVariables = [
   "SIXB_PIPELINE_WORKER_CONCURRENCY",
   "SIXB_PROJECTION_WORKER_CONCURRENCY",
   "SIXB_WORKFLOW_WORKER_CONCURRENCY",
+  "SIXB_VECTOR_CONCURRENCY",
 ] as const
 
 const originalEnvironment = Object.fromEntries(
@@ -76,5 +78,15 @@ describe("worker concurrency configuration", () => {
     expect(() => resolveWorkerConcurrency(["unknown=2"])).toThrow(
       "Unknown worker concurrency type 'unknown'"
     )
+  })
+
+  test("resolves vector indexing concurrency apart from the worker types", () => {
+    expect(resolveVectorConcurrency(undefined)).toBeUndefined()
+
+    process.env.SIXB_VECTOR_CONCURRENCY = "2"
+    expect(resolveVectorConcurrency(undefined)).toBe(2)
+    expect(resolveVectorConcurrency("8")).toBe(8)
+    expect(resolveWorkerConcurrency()).toEqual({})
+    expect(() => resolveVectorConcurrency("0")).toThrow("--vector-concurrency")
   })
 })

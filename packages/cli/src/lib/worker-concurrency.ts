@@ -47,6 +47,17 @@ export function resolveWorkerConcurrency(values: readonly string[] = []): Worker
   return resolved
 }
 
+/**
+ * Resolve the projection worker's concurrent embedding calls. `undefined` leaves the worker's
+ * built-in default in authority.
+ */
+export function resolveVectorConcurrency(value: string | undefined): number | undefined {
+  const configured = value?.trim() ?? nonblank(process.env.SIXB_VECTOR_CONCURRENCY)
+  if (configured === undefined) return undefined
+
+  return parseConcurrency(configured, "--vector-concurrency or SIXB_VECTOR_CONCURRENCY")
+}
+
 function parseWorkerConcurrencyEntry(value: string): {
   readonly workerType: WorkerType
   readonly concurrency: number

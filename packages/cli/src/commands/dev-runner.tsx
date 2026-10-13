@@ -8,7 +8,7 @@ import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { stopQuietly } from "../lib/role-lifecycle"
 import { startSixbRuntime, stopSixbProviders } from "../lib/runtime"
 import { generateProjectTypes } from "../lib/typegen"
-import { resolveWorkerConcurrency } from "../lib/worker-concurrency"
+import { resolveVectorConcurrency, resolveWorkerConcurrency } from "../lib/worker-concurrency"
 import { DevView, LoadingView, renderCliError, renderPersistent } from "../ui"
 
 export interface DevOptions {
@@ -22,6 +22,7 @@ export interface DevOptions {
   appPublicOrigin?: string
   agentTurnTimeout?: string
   concurrency?: readonly string[]
+  vectorConcurrency?: string
 }
 
 export async function runDevRuntime(options: DevOptions = {}) {
@@ -29,6 +30,7 @@ export async function runDevRuntime(options: DevOptions = {}) {
 
   const agentTurnTimeoutMs = resolveAgentTurnTimeoutMs(options.agentTurnTimeout)
   const workerConcurrency = resolveWorkerConcurrency(options.concurrency)
+  const vectorConcurrency = resolveVectorConcurrency(options.vectorConcurrency)
   const entry = resolve(options.entry ?? "sixb.config.ts")
 
   const app = renderPersistent(
@@ -109,6 +111,7 @@ export async function runDevRuntime(options: DevOptions = {}) {
       agentApiBaseUrl: topology.apiPublicOrigin,
       agentTurnTimeoutMs,
       workerConcurrency,
+      vectorConcurrency,
     })
     abort.signal.throwIfAborted()
     const authEnabled = host.auth.isEnabled()

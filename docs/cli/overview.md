@@ -84,6 +84,8 @@ Agent workers default to 8 concurrent jobs; other types default to 1. The same p
 
 Set `SIXB_<TYPE>_WORKER_CONCURRENCY` to configure concurrency through the environment. Command flags take precedence. Replicas multiply the total concurrency.
 
+Projection workers also index [vector profiles](../ontology/properties.md#configure-vector-search), making up to 4 embedding calls at once independently of `--concurrency`. Raise or lower it with `--vector-concurrency 8` or `SIXB_VECTOR_CONCURRENCY=8` on `dev`, projection workers, or worker groups containing one. Your embedding provider's rate limit is the ceiling.
+
 Agent turns default to a 10-minute timeout. Override it with `--agent-turn-timeout 20m` or `SIXB_AGENT_TURN_TIMEOUT=20m` on `dev`, agent workers, or worker groups containing an agent worker.
 
 ## Deploy commands

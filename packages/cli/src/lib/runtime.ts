@@ -61,6 +61,7 @@ export interface StartSixbRuntimeOptions {
   readonly agentApiBaseUrl?: string
   readonly agentTurnTimeoutMs?: number
   readonly workerConcurrency?: WorkerConcurrency
+  readonly vectorConcurrency?: number
 }
 
 export interface RuntimeApiServer {
@@ -280,6 +281,7 @@ export async function startSixbRuntime(
       if (projectionCount > 0) {
         projectionWorker = new ProjectionWorker(sixb, {
           concurrency: options.workerConcurrency?.projection,
+          vectorConcurrency: options.vectorConcurrency,
         })
         await projectionWorker.start()
       }

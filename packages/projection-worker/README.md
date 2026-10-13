@@ -42,7 +42,7 @@ await worker.start()
 ## Vector indexing
 
 When vector profiles are declared, the same process hosts a separate `queues.vectorIndexing`
-consumer. `vectorConcurrency` bounds its concurrent calls (default 1), independently of projection
+consumer. `vectorConcurrency` bounds its concurrent calls (default 4), independently of projection
 `concurrency`. No extra worker command is needed. Both consumers participate in start/stop/wait.
 
 The Materializer records coalesced intent with each effective source change. The process that
