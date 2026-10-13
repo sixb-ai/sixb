@@ -58,9 +58,9 @@ async function executeEmbedding(
   if (purpose !== undefined && purpose !== "document" && purpose !== "query") {
     throw new TypeError("[SixbModels] Embedding purpose must be 'document' or 'query'.")
   }
+  // The caller owns the deadline: only it knows whether anyone is waiting for the result.
   const signal = session.signal(input.signal)
-  const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)])
-  requestSignal.throwIfAborted()
+  signal.throwIfAborted()
   if (!texts.length) return { vectors: [] }
 
   const accounting = await session.accounting()
@@ -72,7 +72,7 @@ async function executeEmbedding(
       "[SixbModels] Resolved embedding model identity does not match the selected model."
     )
   }
-  requestSignal.throwIfAborted()
+  signal.throwIfAborted()
   const callId = `call_${randomUUID()}`
   const tokens = texts.reduce(
     (sum, text) => sum + Math.ceil(new TextEncoder().encode(text).byteLength / 4),
@@ -92,8 +92,8 @@ async function executeEmbedding(
 
   let result: EmbeddingModelResult
   try {
-    requestSignal.throwIfAborted()
-    result = await model.embed({ texts, purpose, signal: requestSignal })
+    signal.throwIfAborted()
+    result = await model.embed({ texts, purpose, signal })
   } catch (error) {
     if (error instanceof EmbeddingModelResponseError) {
       await recordEmbedding(accounting, model, callId, error.metadata)
@@ -105,7 +105,7 @@ async function executeEmbedding(
   }
   // Account before cancellation, vector validation or the materializer's optimistic write.
   await recordEmbedding(accounting, model, callId, result ?? {})
-  requestSignal.throwIfAborted()
+  signal.throwIfAborted()
   return result
 }
 

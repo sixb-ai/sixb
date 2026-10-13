@@ -5,6 +5,10 @@ A named profile identifies a derived representation, separate from object proper
 Indexing sends embedding purpose `document`; search sends `query`. The execution wrapper preserves
 that role through model resolution, admission and accounting. Symmetric providers may ignore it.
 
+Each caller sets its own deadline; the execution wrapper adds none. A search has someone waiting
+and gives up after 30 seconds. Indexing, automatic or explicit, waits five minutes: the provider
+bills a call whose response is abandoned, and an abandoned automatic call is a terminal failure.
+
 Vector candidates may come from filters, traversals, explicit refs or set operations. Canonical
 validation requires one concrete result type and admits every intermediate type, edge and source
 property. Model lookup uses that resolved result type, not the query's initial type. SQL ranks the
