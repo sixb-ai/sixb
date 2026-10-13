@@ -33,7 +33,9 @@ export interface ActionRunSignalsInput {
  * {@link startEffects} starts.
  *
  * Cancellation is cooperative: a handler stops early only when it forwards its `signal` to what it
- * awaits.
+ * awaits. The run stops waiting for one that does not, wherever abandoning it loses nothing:
+ * validation, edits before the boundary, and effects (`untilAborted`). A writeback is always waited
+ * for, since only its result says whether the external change happened.
  */
 export class ActionRunSignals {
   readonly beforeBoundary: AbortSignal

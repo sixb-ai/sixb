@@ -5,7 +5,7 @@ import { commitActionEdits } from "../commit-edits"
 import type { ActionReadRecorder } from "../read-facade"
 import { isObjectActionDefinition } from "../validation"
 import { type BasePhaseContext, requireObjectSubject, toActionReadFacade } from "./context"
-import { throwIfAborted, translateActionPhaseError } from "./normalize"
+import { throwIfAborted, translateActionPhaseError, untilAborted } from "./normalize"
 import type { LoadedObjectTarget, PhaseExecutionBase, RuntimePhaseHandler } from "./phase-types"
 import type { ActionRunState } from "./state"
 
@@ -70,15 +70,10 @@ export async function runEditsAndCommitPhase(
           writeback: state.writebackValue,
         }
 
-        if (isObjectActionDefinition(input.action)) {
-          await handler({
-            ...baseContext,
-            subject: requireObjectSubject(state.run.subject, ids),
-          })
-          return
-        }
-
-        await handler(baseContext)
+        const subject = isObjectActionDefinition(input.action)
+          ? { subject: requireObjectSubject(state.run.subject, ids) }
+          : {}
+        await untilAborted(async () => handler({ ...baseContext, ...subject }), input.signal)
       }
     )
   } catch (error) {

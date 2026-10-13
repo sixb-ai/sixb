@@ -6,7 +6,7 @@ import { isObjectActionDefinition } from "../validation"
 import { runActionValidators } from "../validators"
 import { createBasePhaseContext, loadObjectTarget } from "./context"
 import { type CommittedActionRun, runEditsAndCommitPhase } from "./edits-commit"
-import { throwIfAborted, translateActionPhaseError } from "./normalize"
+import { throwIfAborted, translateActionPhaseError, untilAborted } from "./normalize"
 import type { ActionRunSignals } from "./signals"
 import type { ActionRunState } from "./state"
 import type { ActionRunContext } from "./types"
@@ -76,6 +76,9 @@ async function commitOnce(
   const signal = replayingEdits ? signals.uninterruptible : signals.beforeBoundary
 
   throwIfAborted(signal)
+  // A replay starts over from the phase it repeats: what fails from here on failed there, not in
+  // the commit the previous attempt reached.
+  state.enter(replayingEdits ? "edits" : "validation")
 
   // Each attempt reads afresh, the subject included: a replay must observe the state that made the
   // previous commit conflict, and fence the commit against that state alone.
@@ -97,14 +100,17 @@ async function commitOnce(
   })
 
   if (!replayingEdits) {
-    state.enter("validation")
     try {
-      await runActionValidators({
-        action,
-        subject: state.run.subject,
-        baseContext: { ...baseContext, signal },
-        target: isObjectActionDefinition(action) ? objectTarget?.snapshot : undefined,
-      })
+      await untilAborted(
+        () =>
+          runActionValidators({
+            action,
+            subject: state.run.subject,
+            baseContext: { ...baseContext, signal },
+            target: isObjectActionDefinition(action) ? objectTarget?.snapshot : undefined,
+          }),
+        signal
+      )
     } catch (error) {
       throw translateActionPhaseError(error, "validation", { ...ids, signal })
     }
