@@ -232,10 +232,14 @@ describe("S3BlobStorage", () => {
     await expect(storage.stat(`blob_${digest.slice("sha256:".length)}`)).resolves.toBeNull()
   })
 
-  test("refuses to complete a staged upload the backend never checksum-verified", async () => {
+  test.each([
+    0,
+    16,
+    10 * 1024 * 1024,
+  ])("verifies %s bytes without backend checksum metadata", async (sizeBytes) => {
     const storage = createStorage()
     const uploadId = `upload_${randomUUID().replaceAll("-", "")}`
-    const body = encoder.encode("unverified bytes")
+    const body = new Uint8Array(sizeBytes).fill(42)
     const digest = computeBlobDigest(body)
     const upload = await storage.createUpload({
       uploadId,
@@ -248,7 +252,7 @@ describe("S3BlobStorage", () => {
     }
 
     // Stage the bytes with a plain PUT (no x-amz-checksum-sha256), so the backend stores no
-    // verified checksum. Completion must fail closed rather than trust the client-declared digest.
+    // verified checksum. Completion must hash the snapshot bytes rather than trust the digest.
     await rawS3Client().send(
       new PutObjectCommand({
         Bucket: process.env.SIXB_S3_BUCKET,
@@ -258,21 +262,47 @@ describe("S3BlobStorage", () => {
       })
     )
 
+    // A wrong declared digest must still be rejected, even without backend checksum metadata.
     await expect(
       storage.completeUpload({
         uploadId,
         stagingKey: upload.stagingKey,
         expectedSizeBytes: body.byteLength,
-        expectedDigest: digest,
+        expectedDigest: `sha256:${"0".repeat(64)}`,
       })
-    ).rejects.toBeInstanceOf(BlobStorageError)
-    await expect(
-      storage.completeUpload({
-        uploadId,
-        stagingKey: upload.stagingKey,
-        expectedSizeBytes: body.byteLength,
-        expectedDigest: digest,
-      })
-    ).rejects.toThrow("no backend-verified sha256 checksum")
+    ).rejects.toThrow("checksum mismatch")
+
+    const ref = await storage.completeUpload({
+      uploadId,
+      stagingKey: upload.stagingKey,
+      expectedSizeBytes: body.byteLength,
+      expectedDigest: digest,
+    })
+    expect(ref.digest).toBe(digest)
+    expect(await new Response(await storage.open(ref.blobId)).bytes()).toEqual(body)
+  })
+
+  test("runs the release smoke check against the local S3 service", async () => {
+    const child = Bun.spawn(
+      [process.execPath, "--no-env-file", `${import.meta.dir}/../scripts/verify-direct-upload.ts`],
+      {
+        env: {
+          PATH: process.env.PATH,
+          S3_BUCKET: process.env.SIXB_S3_BUCKET,
+          S3_ENDPOINT: process.env.SIXB_S3_ENDPOINT,
+          S3_ACCESS_KEY_ID: process.env.SIXB_S3_ACCESS_KEY_ID,
+          S3_SECRET_ACCESS_KEY: process.env.SIXB_S3_SECRET_ACCESS_KEY,
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      }
+    )
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
+    expect({ code, stderr }).toEqual({ code: 0, stderr: "" })
+    expect(stdout).toContain("PASS: direct upload verification and cleanup")
   })
 })
