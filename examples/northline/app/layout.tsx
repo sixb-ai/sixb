@@ -1,8 +1,7 @@
-import type { AppMetadata } from "@sixb/app"
+import { type AppMetadata, AppShellProvider } from "@sixb/app"
 import { SixbEventsProvider } from "@sixb/client/hooks"
-import { ThemeProvider } from "@sixb/ui/hooks"
-import type { PropsWithChildren } from "react"
-import { AppShell } from "./_components/app-shell"
+import type { CSSProperties, PropsWithChildren } from "react"
+import { NorthlineShell } from "./_components/northline-shell"
 
 export const metadata = {
   title: "Northline Operations",
@@ -14,10 +13,10 @@ export const metadata = {
 
 export default function RootLayout({ children }: PropsWithChildren) {
   return (
-    <ThemeProvider>
+    <AppShellProvider style={{ "--sidebar-width": "12.5rem" } as CSSProperties}>
       <SixbEventsProvider>
-        <AppShell>{children}</AppShell>
+        <NorthlineShell>{children}</NorthlineShell>
       </SixbEventsProvider>
-    </ThemeProvider>
+    </AppShellProvider>
   )
 }

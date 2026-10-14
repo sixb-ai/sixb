@@ -223,6 +223,25 @@ describe("generated shared application bootstrap", () => {
     expect(runtime).toContain("startApp(options: StartAppOptions = {})")
   })
 
+  test("hands the session the bootstrap loaded to the app instead of fetching it again", async () => {
+    const fixture = await createFixture()
+    roots.push(fixture.root)
+    const { mainPath, runtimePath, sharedMainPath } = await generateAppEntry(
+      fixture.root,
+      fixture.generatedDir
+    )
+    const main = await readFile(mainPath, "utf-8")
+    const runtime = await readFile(runtimePath, "utf-8")
+    const sharedMain = await readFile(sharedMainPath, "utf-8")
+
+    expect(main).toContain("startApp({ session: authSession ?? undefined })")
+    expect(runtime).toContain(
+      "if (options.session) queryClient.setQueryData(getAuthSessionQueryKey(), options.session)"
+    )
+    // A shared link has no member session to hand over.
+    expect(sharedMain).toContain("startApp({ basename })")
+  })
+
   test("keeps the shared transport in a distinct generic shell and document boundary", async () => {
     const fixture = await createFixture()
     roots.push(fixture.root)

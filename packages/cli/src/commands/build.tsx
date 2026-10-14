@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
-import { createCustomApp } from "@sixb/app"
+import { createCustomApp } from "@sixb/app/server"
 import { buildAtlasAssets } from "@sixb/atlas"
 import { buildRuntime } from "../lib/build-runtime"
 import { generateProjectTypes } from "../lib/typegen"

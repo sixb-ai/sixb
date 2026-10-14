@@ -704,6 +704,7 @@
       "version": "0.1.11",
       "dependencies": {
         "@sixb/agent-ui": "workspace:^",
+        "@sixb/client": "workspace:^",
         "@sixb/core": "workspace:^",
         "@sixb/ui": "workspace:^",
         "@tailwindcss/cli": "^4.2.2",
@@ -836,6 +837,7 @@
         "@types/bun": "latest",
         "@types/react": "^19.0.0",
         "cobe": "^2.0.1",
+        "lucide-react": "^0.562.0",
         "react": "^19.0.0",
         "satellite.js": "^7.1.0",
         "typescript": "^5.7.0",

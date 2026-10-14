@@ -1,4 +1,4 @@
-import type { AuthExperienceProps } from "@sixb/app/auth"
+import type { AuthExperienceProps } from "@sixb/app"
 import { type FormEvent, useState } from "react"
 
 export default function AuthExperience({ state, actions }: AuthExperienceProps) {

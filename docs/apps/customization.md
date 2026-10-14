@@ -105,7 +105,7 @@ actions for requesting a link, confirming sign-in, and starting again.
 File: `app/auth.tsx`
 
 ```tsx
-import type { AuthExperienceProps } from "@sixb/app/auth"
+import type { AuthExperienceProps } from "@sixb/app"
 import { useState } from "react"
 
 export default function SignIn({ state, actions }: AuthExperienceProps) {

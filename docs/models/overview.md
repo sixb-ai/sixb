@@ -99,7 +99,7 @@ or embed `AgentPanel` in a page and give it context:
 File: `app/_components/invoice-assistant.tsx`
 
 ```tsx
-import { AgentPanel, agentContext } from "@sixb/app/agents"
+import { AgentPanel, agentContext } from "@sixb/app"
 import { Invoice } from "../../ontology/invoice"
 
 export function InvoiceAssistant({ invoiceId }: { invoiceId: string }) {

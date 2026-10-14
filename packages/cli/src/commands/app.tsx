@@ -1,5 +1,5 @@
 import { basename } from "node:path"
-import { type CustomAppDevServer, createCustomApp } from "@sixb/app"
+import { type CustomAppDevServer, createCustomApp } from "@sixb/app/server"
 import { resolveBrowserTopology, servedUrl } from "../lib/browser-topology"
 import {
   builtAppOutdir,

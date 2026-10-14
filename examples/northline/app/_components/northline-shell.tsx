@@ -1,3 +1,4 @@
+import { UserMenu } from "@sixb/app"
 import { events, objectQueryKeys, useInvalidateOnEvent } from "@sixb/client/hooks"
 import {
   Sidebar,
@@ -11,9 +12,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarProvider,
   SidebarTrigger,
-  ThemeSwitcher,
 } from "@sixb/ui/components"
 import {
   CalendarClock,
@@ -25,7 +24,7 @@ import {
   Network,
   UsersRound,
 } from "lucide-react"
-import type { CSSProperties, PropsWithChildren } from "react"
+import type { PropsWithChildren } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { GlobalSearch } from "./global-search"
 import { OperationsAssistant } from "./operations-assistant"
@@ -56,7 +55,8 @@ const groups = [
   },
 ] as const
 
-export function AppShell({ children }: PropsWithChildren) {
+// Sits in `AppShellProvider` from the root layout, which also covers the full-screen agent pages.
+export function NorthlineShell({ children }: PropsWithChildren) {
   const location = useLocation()
   const agentsActive = location.pathname.startsWith("/agents")
   const homeActive = location.pathname === "/"
@@ -73,10 +73,7 @@ export function AppShell({ children }: PropsWithChildren) {
   if (agentsActive) return children
 
   return (
-    <SidebarProvider
-      style={{ "--sidebar-width": "12.5rem" } as CSSProperties}
-      className="h-svh min-h-0 overflow-hidden"
-    >
+    <>
       <Sidebar collapsible="offcanvas" className="border-sidebar-border">
         <NorthlineSidebarHeader />
         <SidebarContent className="py-2">
@@ -112,7 +109,9 @@ export function AppShell({ children }: PropsWithChildren) {
             </SidebarGroup>
           ))}
         </SidebarContent>
-        <NorthlineSidebarFooter />
+        <SidebarFooter className="border-t border-sidebar-border">
+          <UserMenu />
+        </SidebarFooter>
       </Sidebar>
       <div className="relative flex min-h-0 min-w-0 flex-1">
         <SidebarInset className="relative h-svh min-h-0 overflow-hidden">
@@ -122,9 +121,6 @@ export function AppShell({ children }: PropsWithChildren) {
             <header className="flex h-12 shrink-0 items-center gap-3 bg-background px-3 sm:px-4">
               <SidebarTrigger className="md:hidden" />
               <GlobalSearch />
-              <div className="ml-auto">
-                <ThemeSwitcher />
-              </div>
             </header>
           )}
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -141,7 +137,7 @@ export function AppShell({ children }: PropsWithChildren) {
         </SidebarInset>
         <OperationsAssistant />
       </div>
-    </SidebarProvider>
+    </>
   )
 }
 
@@ -156,21 +152,5 @@ function NorthlineSidebarHeader() {
         />
       </Link>
     </SidebarHeader>
-  )
-}
-
-function NorthlineSidebarFooter() {
-  return (
-    <SidebarFooter className="border-t border-sidebar-border p-3">
-      <div className="flex items-center gap-2.5 rounded-md px-1.5 py-1 text-xs">
-        <span className="grid size-7 place-items-center rounded-full bg-sidebar-accent font-semibold">
-          AD
-        </span>
-        <span className="min-w-0">
-          <strong className="block truncate font-medium">Alex Dawson</strong>
-          <span className="block truncate text-[11px] opacity-65">Service operations</span>
-        </span>
-      </div>
-    </SidebarFooter>
   )
 }
