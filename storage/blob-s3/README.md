@@ -98,14 +98,24 @@ if (upload.strategy === "direct-put") {
 }
 ```
 
-The signed upload includes an `x-amz-checksum-sha256` header so the storage provider validates the
-bytes uploaded by the browser. Bucket CORS must allow `PUT`, `x-amz-checksum-sha256`, and
-`content-type` for browser direct uploads.
+The signed upload includes an `x-amz-checksum-sha256` header so backends that support it can
+validate the browser's bytes during PUT. Bucket CORS must allow `PUT`, `x-amz-checksum-sha256`,
+and `content-type` for browser direct uploads.
 
-`completeUpload` fails closed on integrity: it requests checksum metadata with `HeadObject` and
-refuses to promote the staged object unless the backend reports the same
-`x-amz-checksum-sha256` it verified on upload. Backends that do not store/return object checksums
-cannot be used for direct uploads.
+`completeUpload` first creates a server-owned snapshot of the staged object. It checks the size
+and requests checksum metadata with `HeadObject`. If the backend omits the SHA-256 checksum
+(as can happen with S3-compatible services), Sixb streams the snapshot through the API server to
+compute SHA-256 and check its actual length. A reported checksum mismatch, incorrect size, or
+failed read rejects the upload; client metadata and ETags are never used as integrity proof.
+
+Only the verified snapshot is copied into the final content-addressed location. Reusing the
+browser's signed URL during verification cannot change the bytes being promoted. Completion
+requires two server-side copies; the fallback also requires one full streaming read, increasing
+completion time and storage traffic without buffering the whole file in API memory. Existing
+bucket permissions must allow `GetObject`, `PutObject` (including copies), and `DeleteObject`.
+
+Snapshot cleanup runs after both success and failure. If cleanup fails after promotion, the
+upload still succeeds and the staging lifecycle rule removes the leftover temporary objects.
 
 ### Staging cleanup
 
@@ -162,3 +172,19 @@ bun --filter @sixb/blob-s3 test:e2e
 
 Requires Docker. The suite starts a digest-pinned SeaweedFS instance on `127.0.0.1:49000`,
 creates its test bucket, and removes its containers and data afterward. No cloud credentials required.
+
+### Verify a deployed S3-compatible backend before release
+
+An operator or trusted CI can run this opt-in smoke test using the normal `S3_*` environment
+variables from the provider configuration (including `S3_BUCKET` and `S3_ENDPOINT` for Spaces):
+
+```bash
+bun storage/blob-s3/scripts/verify-direct-upload.ts
+```
+
+It uploads 10 MiB of synthetic bytes through a signed URL, completes the upload, reads the final
+blob back, and compares SHA-256. It also attempts an altered upload and requires rejection at
+PUT or completion, then checks the previously stored blob is unchanged. It uses a random
+`sixb-upload-verification/` prefix, deletes its objects, and exits unsuccessfully on validation
+or cleanup failure. Do not run this as part of the default unit suite. A passing local fixture
+does not substitute for this check against the target backend before publication/deployment.

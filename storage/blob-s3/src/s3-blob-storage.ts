@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import type { BlobByteRange, BlobDigest, BlobInfo, BlobStorage, FileRef } from "@sixb/core"
 import {
   type AbortBlobUploadInput,
@@ -243,32 +243,45 @@ export class S3BlobStorage
       )
     }
 
-    const staged = await this.headStagedObject(input.stagingKey)
-    if (staged.sizeBytes !== input.expectedSizeBytes) {
-      throw new BlobStorageError(
-        `[BlobS3] Staged upload '${input.uploadId}' size mismatch: expected ${input.expectedSizeBytes} bytes, received ${staged.sizeBytes}.`
-      )
-    }
+    assertValidExpectedBlobSize(input.expectedSizeBytes, "BlobS3")
+    // The browser can reuse its signed PUT until it expires. Verify and promote a server-owned
+    // snapshot, never the mutable upload key; otherwise an overwrite between HEAD/GET and COPY
+    // could put different bytes under the verified digest. No signed URL is issued for this key.
+    const snapshotKey = this.uploadKeyForId(`verify_${randomUUID().replaceAll("-", "")}`)
+    try {
+      await this.copyObject(input.stagingKey, snapshotKey)
+      const staged = await this.headStagedObject(snapshotKey)
+      if (staged.sizeBytes !== input.expectedSizeBytes) {
+        throw new BlobStorageError(
+          `[BlobS3] Staged upload '${input.uploadId}' size mismatch: expected ${input.expectedSizeBytes} bytes, received ${staged.sizeBytes}.`
+        )
+      }
 
-    // Fail closed on integrity: the presigned PUT required an x-amz-checksum-sha256, so the backend
-    // must report the same value it verified against the stored bytes. The bytes never transit Sixb,
-    // so this HEAD is the only proof they match the client-declared digest — without it we would be
-    // trusting unverified client input, which defeats the point of a content-addressed store.
-    const expectedChecksum = checksumBase64(input.expectedDigest)
-    if (staged.checksumSha256 === null) {
-      throw new BlobStorageError(
-        `[BlobS3] Staged upload '${input.uploadId}' has no backend-verified sha256 checksum; refusing to promote unverified bytes.`
-      )
-    }
-    if (staged.checksumSha256 !== expectedChecksum) {
-      throw new BlobStorageError(
-        `[BlobS3] Staged upload '${input.uploadId}' checksum mismatch: the stored object does not match the expected digest.`
-      )
-    }
+      // Some S3-compatible services accept the signed checksum header but omit it from HEAD.
+      // Only a missing checksum permits the streaming fallback; a reported mismatch is an error.
+      const actualChecksum =
+        staged.checksumSha256 ?? (await this.hashStagedObject(snapshotKey, input.expectedSizeBytes))
+      if (actualChecksum !== checksumBase64(input.expectedDigest)) {
+        throw new BlobStorageError(
+          `[BlobS3] Staged upload '${input.uploadId}' checksum mismatch: the stored object does not match the expected digest.`
+        )
+      }
 
-    const finalKey = this.contentKeyForHex(blobDigestHex(input.expectedDigest))
-    await this.copyObject(input.stagingKey, finalKey)
-    await this.api.deleteObject(input.stagingKey)
+      const finalKey = this.contentKeyForHex(blobDigestHex(input.expectedDigest))
+      await this.copyObject(snapshotKey, finalKey)
+      // Cleanup must not turn a successfully promoted file into an upload failure. Lifecycle
+      // expiration is the backstop if deletion fails, just as for streamed put(...) staging.
+      await this.deleteStagedObjectQuietly(input.stagingKey)
+    } catch (error) {
+      if (isMissingS3ObjectError(error)) {
+        throw new BlobStorageError(
+          `[BlobS3] Staged upload object '${input.stagingKey}' was not found.`
+        )
+      }
+      throw error
+    } finally {
+      await this.deleteStagedObjectQuietly(snapshotKey)
+    }
 
     return {
       blobId: blobIdFromDigest(input.expectedDigest),
@@ -347,6 +360,31 @@ export class S3BlobStorage
         throw new BlobStorageError(`[BlobS3] Unknown blob '${blobId}'`)
       }
       throw error
+    }
+  }
+
+  private async hashStagedObject(key: string, expectedSizeBytes: number): Promise<string> {
+    const reader = (await this.api.getObject({ key })).getReader()
+    const hash = createHash("sha256")
+    let sizeBytes = 0
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        sizeBytes += value.byteLength
+        // Stop reading an oversized response immediately, even if HEAD claimed the right size.
+        if (sizeBytes > expectedSizeBytes) {
+          assertExpectedBlobSize(expectedSizeBytes, sizeBytes, "BlobS3")
+        }
+        hash.update(value)
+      }
+      assertExpectedBlobSize(expectedSizeBytes, sizeBytes, "BlobS3")
+      return hash.digest("base64")
+    } catch (error) {
+      await reader.cancel(error).catch(() => undefined)
+      throw error
+    } finally {
+      reader.releaseLock()
     }
   }
 
