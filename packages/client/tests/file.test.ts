@@ -6,6 +6,8 @@ const encoder = new TextEncoder()
 
 // Regression: remove the partReceipt condition from the missing-ETag guard.
 // A "none" session must still complete when the upload returns no ETag.
+// Calling input.fetch(...) instead of a detached fetch must also fail these tests:
+// native browser fetch rejects an arbitrary receiver, while Bun's fetch tolerates it.
 test.each([
   ["etag", true],
   ["etag", false],
@@ -52,11 +54,13 @@ test.each([
     client,
     stagedUploadThresholdBytes: 0,
     fetch: Object.assign(
-      async () =>
-        new Response(null, {
+      async function (this: unknown) {
+        expect(this).toBeUndefined()
+        return new Response(null, {
           status: 201,
           headers: hasEtag ? { etag: '"s3-part"' } : {},
-        }),
+        })
+      },
       { preconnect: fetch.preconnect }
     ),
   })
@@ -194,7 +198,14 @@ function createDirectPutUploadClient() {
     ) satisfies typeof fetch,
   })
   const directFetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    async function (
+      this: unknown,
+      input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1]
+    ) {
+      // Regression: restore input.fetch(...) in putDirectUpload to make this fail.
+      // An arrow-function mock hides the receiver error thrown by browser fetch.
+      expect(this).toBeUndefined()
       const request = input instanceof Request && !init ? input : new Request(input, init)
       directRequests.push(request)
       return new Response(null, { status: 200 })

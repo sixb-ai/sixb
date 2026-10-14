@@ -207,9 +207,11 @@ async function putDirectUpload(input: {
   readonly url: string
   readonly signal?: AbortSignal
 }): Promise<void> {
+  // Browser fetch rejects an arbitrary receiver; invoke it as a standalone function.
+  const fetch = input.fetch
   let response: Response
   try {
-    response = await input.fetch(input.url, {
+    response = await fetch(input.url, {
       method: input.method,
       headers: input.headers,
       body: input.file,
@@ -236,6 +238,7 @@ async function uploadMultipartFile(input: {
   readonly uploadId: string
   readonly signal?: AbortSignal
 }): Promise<Array<{ partNumber: number; etag?: string }>> {
+  const fetch = input.fetch
   const parts: Array<{ partNumber: number; etag?: string }> = []
   let partNumber = 1
 
@@ -250,7 +253,7 @@ async function uploadMultipartFile(input: {
 
     let response: Response
     try {
-      response = await input.fetch(signedPart.url, {
+      response = await fetch(signedPart.url, {
         method: signedPart.method,
         headers: signedPart.headers,
         body: input.file.slice(offset, Math.min(input.file.size, offset + input.partSizeBytes)),
