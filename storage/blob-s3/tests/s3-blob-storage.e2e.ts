@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { createHash, randomUUID } from "node:crypto"
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
 import { BlobStorageError, computeBlobDigest } from "@sixb/core/blob-storage/server"
 import { runBlobStorageContractSuite } from "@sixb/core/testing"
 import { S3BlobStorage } from "../src"
@@ -262,24 +262,37 @@ describe("S3BlobStorage", () => {
       })
     )
 
-    // A wrong declared digest must still be rejected, even without backend checksum metadata.
-    await expect(
-      storage.completeUpload({
+    const send = spyOn(S3Client.prototype, "send")
+    try {
+      // A wrong declared digest must still be rejected, even without backend checksum metadata.
+      await expect(
+        storage.completeUpload({
+          uploadId,
+          stagingKey: upload.stagingKey,
+          expectedSizeBytes: body.byteLength,
+          expectedDigest: `sha256:${"0".repeat(64)}`,
+        })
+      ).rejects.toThrow("checksum mismatch")
+
+      const ref = await storage.completeUpload({
         uploadId,
         stagingKey: upload.stagingKey,
         expectedSizeBytes: body.byteLength,
-        expectedDigest: `sha256:${"0".repeat(64)}`,
+        expectedDigest: digest,
       })
-    ).rejects.toThrow("checksum mismatch")
-
-    const ref = await storage.completeUpload({
-      uploadId,
-      stagingKey: upload.stagingKey,
-      expectedSizeBytes: body.byteLength,
-      expectedDigest: digest,
-    })
-    expect(ref.digest).toBe(digest)
-    expect(await new Response(await storage.open(ref.blobId)).bytes()).toEqual(body)
+      expect(ref.digest).toBe(digest)
+      expect(await new Response(await storage.open(ref.blobId)).bytes()).toEqual(body)
+      // Prove this real-backend case exercised the streaming fallback, not just a checksum that
+      // the backend happened to add during COPY. Both rejected and accepted attempts read snapshots.
+      expect(
+        send.mock.calls.filter(
+          ([command]) =>
+            command instanceof GetObjectCommand && command.input.Key?.includes("/uploads/verify_")
+        )
+      ).toHaveLength(2)
+    } finally {
+      send.mockRestore()
+    }
   })
 
   test("runs the release smoke check against the local S3 service", async () => {
