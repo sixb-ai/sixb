@@ -2,6 +2,7 @@ import { basename } from "node:path"
 import { type AtlasAppServer, createAtlasApp } from "@sixb/atlas"
 import { resolveBrowserTopology, servedUrl } from "../lib/browser-topology"
 import { builtAtlasOutdir, resolveProductionPaths, resolveRuntimeEntry } from "../lib/production"
+import { configuredOrigin } from "../lib/public-origin"
 import { runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
 import { loadRoleView } from "../lib/role-view"
 
@@ -11,6 +12,7 @@ export interface AtlasOptions {
   host?: string
   apiPublicOrigin?: string
   atlasPublicOrigin?: string
+  appPublicOrigin?: string
 }
 
 export async function runAtlas(options: AtlasOptions = {}) {
@@ -42,6 +44,13 @@ export async function runAtlas(options: AtlasOptions = {}) {
       audience: "atlas",
       // No authEnabled: the page asks the API whether the project uses auth, so serving the
       // bundle never loads the project.
+      // Optional: without it, Atlas has no link to the sections that moved into the app.
+      appUrl:
+        configuredOrigin(
+          options.appPublicOrigin,
+          "SIXB_APP_PUBLIC_ORIGIN",
+          "custom app public origin"
+        ) ?? undefined,
     })
     atlasServer = await atlas.start({
       host: topology.host,

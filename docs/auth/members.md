@@ -6,7 +6,7 @@ Both receive access through [groups and roles](authorization.md).
 
 ## Manage members
 
-A membership policy controls who can invite users, assign groups, and suspend accounts. Export it from `security/policies/`.
+A membership policy controls who can invite users, assign groups, suspend accounts, and manage service accounts. Export it from `security/policies/`.
 
 This policy lets finance administrators manage the finance team:
 
@@ -19,7 +19,7 @@ import { financeTeam } from "../groups/finance-team"
 export const financeMembers = defineMembershipPolicy("finance-members", {
   grantedTo: [financeAdmins],
   scope: [financeTeam],
-  can: ["invite", "assignGroups", "suspend"],
+  can: ["invite", "assignGroups", "suspend", "serviceAccounts"],
 })
 ```
 
@@ -27,9 +27,9 @@ export const financeMembers = defineMembershipPolicy("finance-members", {
 | --- | --- |
 | `grantedTo` | Groups allowed to administer members. |
 | `scope` | Groups those administrators may manage. |
-| `can` | Allowed operations: `invite`, `assignGroups`, and `suspend`. Suspension also permits reactivation. |
+| `can` | Allowed operations: `invite`, `assignGroups`, `suspend`, and `serviceAccounts`. Suspension also permits reactivation. `serviceAccounts` permits creating service accounts in scope, disabling them, and managing their tokens. |
 
-Open **Settings → Members** in Atlas to invite users and manage membership. Invitations require email delivery in your [authentication strategy](authentication.md#configure-sign-in).
+Open **Settings › Members** in your [app](../apps/overview.md#settings) to invite users and manage membership. Invitations require email delivery in your [authentication strategy](authentication.md#configure-sign-in).
 
 Administrators can manage an existing user only when all of that user's current groups are in scope. Group changes also require the new groups to be in scope. A user cannot suspend themselves or remove their own groups.
 
@@ -44,11 +44,13 @@ Choose the credential that matches the caller:
 | Personal access token | Your own scripts or tools, using a subset of your groups. |
 | Service-account token | Unattended jobs or external systems with an independent identity. |
 
-Manage credentials in **Settings → Tokens** in Atlas or through the [CLI](../cli/overview.md#tokens-and-service-accounts). Tokens are shown only when created. Save them in your secret manager and revoke them when no longer needed.
+Manage credentials in your app's **Settings › Developers** and **Settings › Service accounts**, or through the [CLI](../cli/overview.md#tokens-and-service-accounts). Tokens are shown only when created. Save them in your secret manager and revoke them when no longer needed.
 
-Creating a token requires signing in, in Atlas or with `sixb login`. A personal access token can list and revoke tokens and manage service accounts but cannot create tokens, so no token can produce one with more access or a later expiry than its own.
+Creating a token requires signing in, in the app or with `sixb login`. A personal access token can list and revoke tokens and manage service accounts but cannot create tokens, so no token can produce one with more access or a later expiry than its own.
 
-For example, after signing in with the CLI, create a service account in a group you are allowed to assign, then issue its token:
+Service accounts are managed by members whose membership policy includes `serviceAccounts`. A service account may join only groups in that policy's scope, and an administrator sees and manages only service accounts whose groups are all in scope.
+
+For example, after signing in with the CLI, create a service account in a group your policy covers, then issue its token:
 
 ```bash
 sixb service-account create --id finance-integration --name "Finance integration" --group finance-team

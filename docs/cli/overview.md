@@ -67,7 +67,7 @@ Public-origin flags have matching environment variables:
 
 `sixb api` accepts `--trusted-proxies` to choose which proxies identify the client address; see [Run behind a proxy](../deployment/overview.md#run-behind-a-proxy).
 
-The API requires API and Atlas origins, plus the app origin when serving a built custom app. Atlas, the app server, agent workers, and workers that create [download URLs](../server/overview.md#share-a-file-with-an-external-service) need the API origin. Flags override environment variables.
+The API requires API and Atlas origins, plus the app origin when serving a built custom app. Atlas, the app server, agent workers, and workers that create [download URLs](../server/overview.md#share-a-file-with-an-external-service) need the API origin. With the app origin, Atlas links to the app's Settings. Flags override environment variables.
 
 Schema-using services migrate storage and prepare declared query structures at startup. Unchanged query declarations are checked without rebuilding. Use `--no-migrate` or `SIXB_SKIP_MIGRATION=1` when `sixb db migrate` ran both steps in a separate release step. Initial PostgreSQL text backfills can block writes; allow maintenance time or prepare before starting the release.
 
@@ -151,7 +151,7 @@ sixb service-account create --id finance-integration --name "Finance integration
 sixb service-account token create finance-integration --name "Production" --expires-in 30d
 ```
 
-Use `--group` to select permitted groups and `--expires-in` or `--expires-at` to set expiration. Tokens are shown only when created.
+Use `--group` to select permitted groups and `--expires-in` or `--expires-at` to set expiration. Tokens are shown only when created. Service-account commands need a [membership policy](../auth/members.md#manage-members) with the `serviceAccounts` operation.
 
 Creating a token requires that sign-in. A personal access token, whether passed with `--token`, set in `SIXB_API_TOKEN`, or saved with `--token-stdin`, can list and revoke tokens and manage service accounts but cannot create tokens, so no token can produce one with more access or a later expiry than its own. Service-account tokens cannot manage credentials at all.
 

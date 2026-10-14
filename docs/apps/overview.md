@@ -92,8 +92,8 @@ module scope. Set the page title and app icons through [Customization](customiza
 ## Add a sidebar
 
 `AppShell` frames every page with a sidebar: the app's name, your navigation, and a menu for the
-signed-in user with theme switching and sign-out. Sixb includes its styles, so it needs no
-stylesheet of yours.
+signed-in user with [Settings](#settings), theme switching, and sign-out. Sixb includes its styles,
+so it needs no stylesheet of yours.
 
 File: `app/layout.tsx`
 
@@ -127,11 +127,23 @@ export default function RootLayout({ children }: PropsWithChildren) {
 | `brand` | The app's title and icon | Top of the sidebar |
 | `header`, `footer` | none | Content below the brand and above the user menu |
 | `userMenu` | `<UserMenu />` | Pass `null` to remove it |
-| `variant`, `collapsible`, `side`, `defaultOpen` | `"inset"`, `"offcanvas"`, `"left"`, `true` | Passed to the `@sixb/ui` sidebar |
+| `variant`, `collapsible`, `side`, `defaultOpen` | `"inset"`, `"icon"`, `"left"`, `true` | Passed to the `@sixb/ui` sidebar |
+
+The sidebar collapses to icons with ⌘B or the toggle at its foot, so give each nav item an `icon`.
+A custom `brand` can show something smaller while collapsed with Tailwind's
+`group-data-[collapsible=icon]:` variant.
 
 To build your own sidebar, use the same parts with the `@sixb/ui` sidebar components:
-`AppShellProvider`, `Brand`, `NavItems`, and `UserMenu`. Add your own items to the user menu with
-`UserMenu.Item`:
+`AppShellProvider`, `Brand`, `NavItems`, `SectionNav`, and `UserMenu`.
+
+| Part | Shows |
+| --- | --- |
+| `SectionNav` | The open section's pages with a link back, and its `fallback` everywhere else |
+| `UserMenu` | The person, the sections they may open, theme switching, and sign-out |
+
+Without a `SectionNav`, a section shows its pages as tabs above the page, so a sidebar with only
+`UserMenu` still reaches every page. `useSections()` returns the same sections for drawing your
+own. Add your own items to the user menu with `UserMenu.Item`:
 
 ```tsx
 <UserMenu>
@@ -141,6 +153,56 @@ To build your own sidebar, use the same parts with the `@sixb/ui` sidebar compon
 
 Read the signed-in user with `useCurrentUser()`, which returns `null` when nobody is signed in or
 authentication is off. `useSignOut()` returns a function that signs the user out.
+
+## Settings
+
+Every app includes Settings, built from the same parts. A page of your own at the same path
+replaces the built-in one: `app/settings/members/page.tsx` replaces Members.
+
+| Group | Page | Path | Shows |
+| --- | --- | --- | --- |
+| Your account | Personal | `/settings/personal` | The person's name, email, and groups, and where they are signed in |
+| Your account | Developers | `/settings/developers` | Their [personal access tokens](../auth/members.md#service-accounts-and-tokens) |
+| Project | Members | `/settings/members` | Members and invitations their [membership policy](../auth/members.md) covers |
+| Project | Service accounts | `/settings/service-accounts` | Service accounts and their tokens, with the `serviceAccounts` policy operation |
+
+Settings needs a signed-in person, so it is absent when authentication is off.
+
+### Choose who sees a section
+
+Export `visibility` from `app/layout.tsx` to show a section only to some groups:
+
+File: `app/layout.tsx`
+
+```tsx
+import type { AppVisibility } from "@sixb/app"
+import { admins } from "../security/groups/admins"
+
+export const visibility = {
+  settings: [admins],
+} satisfies AppVisibility
+```
+
+| `visibility.settings` | Who sees Members and Service accounts |
+| --- | --- |
+| Not set | Everyone signed in |
+| `[admins, staff]` | Members of those groups |
+| `[]` | Nobody |
+
+Personal and Developers stay open to everyone signed in. A hidden page leaves the navigation,
+and its URL leads to `/`. Visibility only hides screens: the API still checks each person's
+permissions.
+
+The browser loads `app/layout.tsx`, so the group files it imports must take `defineGroup` from
+`@sixb/core/security`:
+
+File: `security/groups/admins.ts`
+
+```ts
+import { defineGroup } from "@sixb/core/security"
+
+export const admins = defineGroup("admins", { label: "Admins" })
+```
 
 ## Add styles
 

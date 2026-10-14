@@ -32,7 +32,7 @@ import {
 } from "react-router-dom"
 import { SidebarDataContext } from "../components/layout/sidebarData"
 import { KNOWN_VIEWS } from "../components/layout/viewMode"
-import { SettingsAccessGate } from "../components/SettingsAccessGate"
+import { projectAppUrl } from "../lib/app-url"
 import { objectDetailPath, objectIdFromPathSegment } from "../lib/objectRoutes"
 import {
   getObjectSortPreference,
@@ -57,10 +57,6 @@ import {
   ProjectionsPage,
   RuleDetailPage,
   RulesPage,
-  SettingsMembersPage,
-  SettingsServiceAccountsPage,
-  SettingsSessionsPage,
-  SettingsTokensPage,
   SyncDetailPage,
   SyncsPage,
   WorkflowDetailPage,
@@ -386,39 +382,7 @@ export function ProjectWorkspace() {
               <Route path="pipelines" element={<PipelinesPage />} />
               <Route path="rules" element={<RulesPage />} />
               <Route path="rules/:ruleId" element={<RuleDetailPage />} />
-              <Route path="settings" element={<Navigate to="/settings/members" replace />} />
-              <Route
-                path="settings/tokens"
-                element={
-                  <SettingsAccessGate>
-                    <SettingsTokensPage />
-                  </SettingsAccessGate>
-                }
-              />
-              <Route
-                path="settings/members"
-                element={
-                  <SettingsAccessGate>
-                    <SettingsMembersPage />
-                  </SettingsAccessGate>
-                }
-              />
-              <Route
-                path="settings/service-accounts"
-                element={
-                  <SettingsAccessGate>
-                    <SettingsServiceAccountsPage />
-                  </SettingsAccessGate>
-                }
-              />
-              <Route
-                path="settings/sessions"
-                element={
-                  <SettingsAccessGate>
-                    <SettingsSessionsPage />
-                  </SettingsAccessGate>
-                }
-              />
+              <Route path="settings/*" element={<MovedToApp />} />
               <Route
                 path="ontology"
                 element={
@@ -448,6 +412,17 @@ export function ProjectWorkspace() {
       </Routes>
     </Suspense>
   )
+}
+
+// Settings lives in the project's app now. Old links follow it there when Atlas knows the
+// app's address, and land on the Atlas home otherwise.
+function MovedToApp() {
+  const location = useLocation()
+  const target = projectAppUrl(location.pathname)
+  useEffect(() => {
+    if (target) window.location.replace(target)
+  }, [target])
+  return target ? null : <Navigate to="/" replace />
 }
 
 function OntologyTypeRedirect() {

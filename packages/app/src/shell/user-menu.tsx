@@ -1,5 +1,6 @@
 import { DropdownMenuItem, SidebarUserMenu } from "@sixb/ui/components"
 import type { ComponentType, ReactNode } from "react"
+import { useSections } from "../sections/sections"
 import { useCurrentUser, useSignOut } from "../session"
 
 export interface UserMenuProps {
@@ -14,10 +15,14 @@ export interface UserMenuItemProps {
   readonly children: ReactNode
 }
 
-/** The signed-in person, theme switching and sign-out, at the foot of any sidebar. */
+/**
+ * The signed-in person, the built-in sections they may open, theme switching and sign-out, at the
+ * foot of any sidebar. A shell with only this still reaches every section.
+ */
 function UserMenuRoot({ children }: UserMenuProps) {
   const user = useCurrentUser()
   const signOut = useSignOut()
+  const sections = useSections()
 
   return (
     <SidebarUserMenu
@@ -36,7 +41,16 @@ function UserMenuRoot({ children }: UserMenuProps) {
         })
       }}
     >
-      {children}
+      {sections.length > 0 || children ? (
+        <>
+          {sections.map((section) => (
+            <UserMenuItem key={section.id} href={section.href} icon={section.icon}>
+              {section.label}
+            </UserMenuItem>
+          ))}
+          {children}
+        </>
+      ) : null}
     </SidebarUserMenu>
   )
 }

@@ -1,18 +1,25 @@
 import {
   Sidebar,
+  SidebarCollapseToggle,
   SidebarContent,
   SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
   SidebarHeader,
   SidebarInset,
+  SidebarMenu,
+  SidebarMenuItem,
   SidebarProvider,
   SidebarRail,
   SidebarTrigger,
+  useSidebar,
 } from "@sixb/ui/components"
 import { ThemeProvider } from "@sixb/ui/hooks"
 import { cn } from "@sixb/ui/lib/utils"
 import type { CSSProperties, ReactNode } from "react"
 import { Brand } from "./brand"
 import { type NavEntry, NavItems } from "./nav-items"
+import { SectionNav } from "./section-nav"
 import { UserMenu } from "./user-menu"
 
 export interface AppShellProviderProps {
@@ -59,7 +66,9 @@ export interface AppShellProps {
 
 /**
  * The default app frame: a sidebar with the app's brand, its nav and the user menu, beside the
- * page. Sidebar props keep the `@sixb/ui` names. Every part is exported for shells built by hand.
+ * page. Inside a built-in section, such as Settings from the user menu, the sidebar shows that
+ * section's pages. Sidebar props keep the `@sixb/ui` names. Every part is exported for shells
+ * built by hand.
  */
 export function AppShell({
   nav,
@@ -68,7 +77,7 @@ export function AppShell({
   footer,
   userMenu,
   variant = "inset",
-  collapsible = "offcanvas",
+  collapsible = "icon",
   side = "left",
   defaultOpen,
   children,
@@ -80,12 +89,18 @@ export function AppShell({
           {brand === undefined ? <Brand /> : brand}
           {header}
         </SidebarHeader>
-        <SidebarContent>{isNavData(nav) ? <NavItems items={nav} /> : nav}</SidebarContent>
+        <SidebarContent>
+          <SectionNav fallback={isNavData(nav) ? <NavItems items={nav} /> : nav} />
+          {collapsible === "none" ? null : <CollapseToggle />}
+        </SidebarContent>
         <SidebarFooter>
           {footer}
           {userMenu === undefined ? <UserMenu /> : userMenu}
         </SidebarFooter>
-        {collapsible === "none" ? null : <SidebarRail />}
+        {collapsible === "none" ? null : (
+          // Beside an inset page the rail's hover line lands in the gap, so it stays invisible there.
+          <SidebarRail className={variant === "inset" ? "after:hidden" : undefined} />
+        )}
       </Sidebar>
       <SidebarInset className="min-h-0 overflow-hidden">
         {/* Phones get the sidebar as a sheet; this is the way to open it. */}
@@ -95,6 +110,23 @@ export function AppShell({
         <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </SidebarInset>
     </AppShellProvider>
+  )
+}
+
+// On phones the sidebar is a sheet that closes on its own, so it gets no collapse control.
+function CollapseToggle() {
+  const { isMobile } = useSidebar()
+  if (isMobile) return null
+  return (
+    <SidebarGroup className="mt-auto">
+      <SidebarGroupContent>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarCollapseToggle />
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
   )
 }
 

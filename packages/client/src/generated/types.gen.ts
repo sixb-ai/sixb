@@ -1532,10 +1532,16 @@ export type GetAuthMembershipOptionsResponses = {
       label?: string
       description?: string
     }>
+    serviceAccountGroups: Array<{
+      id: string
+      label?: string
+      description?: string
+    }>
     capabilities: {
       invite: boolean
       assignGroups: boolean
       suspend: boolean
+      serviceAccounts: boolean
     }
   }
 }

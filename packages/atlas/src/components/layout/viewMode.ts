@@ -15,7 +15,6 @@ export const KNOWN_VIEWS = new Set([
   "logs",
   "rules",
   "ontology",
-  "settings",
 ])
 
 export function getViewModeFromPath(pathname: string): ViewMode {

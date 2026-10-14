@@ -712,6 +712,11 @@ export class AuthRuntime {
     caller: AuthenticatedUserRequestSession
   ): Promise<ListServiceAccountsResult> {
     const storage = this.requireAuthStorage()
+    const scope = this.resolveMembershipPolicyScopeForUser(caller.groupIds)
+    if (scope.operations.serviceAccounts.policyIds.length === 0) {
+      return { serviceAccounts: [] }
+    }
+
     const result = await storage.serviceAccounts.list({
       projectId: this.projectId,
       order: "desc",
@@ -724,11 +729,11 @@ export class AuthRuntime {
       }))
     )
 
-    // A caller only sees the service accounts it is allowed to manage, so
-    // listing never leaks the groups of more-privileged accounts.
+    // A caller only sees the service accounts its membership policies cover, so
+    // listing never leaks the groups of accounts outside its scope.
     return {
       serviceAccounts: withGroups.filter(({ groupIds }) =>
-        callerCanManageServiceAccount(caller.groupIds, groupIds)
+        canPerformMembershipOperation(scope, "serviceAccounts", groupIds)
       ),
     }
   }
@@ -738,11 +743,9 @@ export class AuthRuntime {
     input: CreateServiceAccountInput
   ): Promise<CreateServiceAccountResult> {
     const storage = this.requireAuthStorage()
-    // A caller can only place a service account in groups it itself belongs to.
-    const groupIds =
-      constrainRequestedGroupIds(input.groupIds, caller.groupIds, {
-        subject: "service account",
-      }) ?? []
+    // A caller can only place a service account in groups its `serviceAccounts` policies cover.
+    const groupIds = normalizeRequestedGroupIds(input.groupIds) ?? []
+    this.assertCanManageServiceAccountGroups(caller.groupIds, groupIds)
     const now = new Date()
     const serviceAccount = await storage.serviceAccounts.create({
       id: input.id ?? `svc_${randomUUID()}`,
@@ -829,8 +832,8 @@ export class AuthRuntime {
     }
 
     // The token can only carry groups the service account already holds; the
-    // manageability check above guarantees those are a subset of the caller's
-    // own groups, so the caller can never mint privileges it lacks.
+    // manageability check above guarantees those are within the caller's
+    // `serviceAccounts` scope, so the token never reaches past that scope.
     const groupIds = constrainRequestedGroupIds(input.groupIds, serviceAccountGroupIds, {
       subject: "service account token",
     })
@@ -888,12 +891,10 @@ export class AuthRuntime {
   /**
    * Resolve a service account the caller is allowed to manage.
    *
-   * A caller may manage a service account only when it belongs to every group
-   * the account is in ("you can manage what you could have created"). This
-   * confines token minting, disabling, and revocation to privileges the caller
-   * already holds and prevents a service-account token from outliving the
-   * caller's own access. Missing and non-manageable accounts raise the same
-   * error so callers cannot probe which privileged accounts exist.
+   * A caller needs a membership policy with the `serviceAccounts` operation whose scope covers every
+   * group the account is in ("you can manage what you could have created"). This confines token
+   * minting, disabling, and revocation to the groups the project's policies hand out. Missing and
+   * out-of-scope accounts raise the same error so callers cannot probe which accounts exist.
    */
   private async requireManageableServiceAccount(
     storage: AuthStorage,
@@ -903,6 +904,11 @@ export class AuthRuntime {
     readonly serviceAccount: ServiceAccountRecord
     readonly groupIds: readonly string[]
   }> {
+    const scope = this.resolveMembershipPolicyScopeForUser(callerGroupIds)
+    if (scope.operations.serviceAccounts.policyIds.length === 0) {
+      throw missingServiceAccountsPolicyError()
+    }
+
     const serviceAccount = await storage.serviceAccounts.getById({
       projectId: this.projectId,
       id: serviceAccountId,
@@ -911,7 +917,7 @@ export class AuthRuntime {
       ? await this.listServiceAccountGroupIds(storage, serviceAccountId)
       : []
 
-    if (!serviceAccount || !callerCanManageServiceAccount(callerGroupIds, groupIds)) {
+    if (!serviceAccount || !canPerformMembershipOperation(scope, "serviceAccounts", groupIds)) {
       throw new AuthStorageError(
         "missing_service_account",
         `[Sixb] Service account '${serviceAccountId}' not found for project '${this.projectId}'.`
@@ -975,6 +981,7 @@ export class AuthRuntime {
     return {
       // The member-admin edit-groups dialog assigns from the `assignGroups` scope.
       groups: this.scopedGroupOptions(scope.operations.assignGroups.groupIds),
+      serviceAccountGroups: this.scopedGroupOptions(scope.operations.serviceAccounts.groupIds),
       capabilities: membershipCapabilities(scope).holds,
     }
   }
@@ -1524,6 +1531,27 @@ export class AuthRuntime {
     )
   }
 
+  private assertCanManageServiceAccountGroups(
+    callerGroupIds: readonly string[],
+    groupIds: readonly string[]
+  ): void {
+    const scope = this.resolveMembershipPolicyScopeForUser(callerGroupIds)
+
+    if (canPerformMembershipOperation(scope, "serviceAccounts", groupIds)) {
+      return
+    }
+
+    if (scope.operations.serviceAccounts.policyIds.length === 0) {
+      throw missingServiceAccountsPolicyError()
+    }
+
+    const missing = missingMembershipGroupIds(scope, "serviceAccounts", groupIds)
+    throw new AuthRuntimeError(
+      "authorization_denied",
+      `[Sixb] The current user is not allowed to place service accounts in group(s): ${missing.join(", ")}.`
+    )
+  }
+
   private assertCanManageInvitationGroups(
     callerGroupIds: readonly string[],
     groupIds: readonly string[]
@@ -1590,15 +1618,11 @@ function constrainTokenGroupIds(
   return principalGroupIds.filter((groupId) => allowed.has(groupId))
 }
 
-// A caller may manage a service account only when it belongs to every group the
-// account is in, so managing it can never grant more than the caller already
-// has. An account with no groups is powerless and therefore freely manageable.
-function callerCanManageServiceAccount(
-  callerGroupIds: readonly string[],
-  serviceAccountGroupIds: readonly string[]
-): boolean {
-  const callerGroups = new Set(callerGroupIds)
-  return serviceAccountGroupIds.every((groupId) => callerGroups.has(groupId))
+function missingServiceAccountsPolicyError(): AuthRuntimeError {
+  return new AuthRuntimeError(
+    "authorization_denied",
+    "[Sixb] Managing service accounts needs a membership policy with the 'serviceAccounts' operation."
+  )
 }
 
 function missingAccessTokenError(tokenId: string, projectId: string): AuthStorageError {
@@ -1701,6 +1725,7 @@ function membershipCapabilities(scope: MembershipPolicyScope): MembershipCapabil
       invite: scope.operations.invite.policyIds.length > 0,
       assignGroups: scope.operations.assignGroups.policyIds.length > 0,
       suspend: scope.operations.suspend.policyIds.length > 0,
+      serviceAccounts: scope.operations.serviceAccounts.policyIds.length > 0,
     },
     assignableGroupIds: [...scope.operations.assignGroups.groupIds],
     covers: (operation, memberGroups) =>

@@ -17,10 +17,6 @@ const loadRulesPage = () => import("./RulesPage")
 const loadSyncsPage = () => import("./SyncsPage")
 const loadWorkflowDetailPage = () => import("./WorkflowDetailPage")
 const loadWorkflowsPage = () => import("./WorkflowsPage")
-const loadSettingsMembersPage = () => import("../components/SettingsMembersPage")
-const loadSettingsServiceAccountsPage = () => import("../components/SettingsServiceAccountsPage")
-const loadSettingsSessionsPage = () => import("../components/SettingsSessionsPage")
-const loadSettingsTokensPage = () => import("../components/SettingsTokensPage")
 
 export const ActionRunDetailPage = lazy(() =>
   loadActionRunDetailPage().then((module) => ({ default: module.ActionRunDetailPage }))
@@ -83,20 +79,6 @@ export const WorkflowDetailPage = lazy(() =>
 export const WorkflowsPage = lazy(() =>
   loadWorkflowsPage().then((module) => ({ default: module.WorkflowsPage }))
 )
-export const SettingsMembersPage = lazy(() =>
-  loadSettingsMembersPage().then((module) => ({ default: module.SettingsMembersPage }))
-)
-export const SettingsServiceAccountsPage = lazy(() =>
-  loadSettingsServiceAccountsPage().then((module) => ({
-    default: module.SettingsServiceAccountsPage,
-  }))
-)
-export const SettingsSessionsPage = lazy(() =>
-  loadSettingsSessionsPage().then((module) => ({ default: module.SettingsSessionsPage }))
-)
-export const SettingsTokensPage = lazy(() =>
-  loadSettingsTokensPage().then((module) => ({ default: module.SettingsTokensPage }))
-)
 
 type WorkspaceRouteLoader = () => Promise<unknown>
 
@@ -110,7 +92,6 @@ const workspaceViewLoaders: Partial<Record<ViewMode, WorkspaceRouteLoader>> = {
   pipelines: loadPipelinesPage,
   projections: loadProjectionsPage,
   rules: loadRulesPage,
-  settings: loadSettingsMembersPage,
   syncs: loadSyncsPage,
   workflows: loadWorkflowsPage,
 }
@@ -140,10 +121,6 @@ export function preloadWorkspacePath(pathname: string): void {
     preload(loadObjectTypeDetailPage)
     return
   }
-  if (view === "settings") {
-    preload(settingsLoader(detail))
-    return
-  }
 
   if (KNOWN_VIEWS.has(view)) {
     preload(workspaceViewLoaders[view as ViewMode])
@@ -151,13 +128,6 @@ export function preloadWorkspacePath(pathname: string): void {
   }
 
   preload(loadObjectDetailPage)
-}
-
-function settingsLoader(section: string | undefined): WorkspaceRouteLoader {
-  if (section === "tokens") return loadSettingsTokensPage
-  if (section === "service-accounts") return loadSettingsServiceAccountsPage
-  if (section === "sessions") return loadSettingsSessionsPage
-  return loadSettingsMembersPage
 }
 
 function preload(loader: WorkspaceRouteLoader | undefined): void {

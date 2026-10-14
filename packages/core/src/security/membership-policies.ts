@@ -10,7 +10,7 @@ export interface MembershipPolicyScope {
   readonly operations: Readonly<Record<MembershipOperation, MembershipOperationScope>>
 }
 
-const MEMBERSHIP_OPERATIONS = ["invite", "assignGroups", "suspend"] as const
+const MEMBERSHIP_OPERATIONS = ["invite", "assignGroups", "suspend", "serviceAccounts"] as const
 
 export function resolveMembershipPolicyScope(input: {
   readonly membershipPolicies: readonly MembershipPolicyDefinition[]
@@ -40,6 +40,7 @@ export function resolveMembershipPolicyScope(input: {
       invite: freezeOperationScope(operations.invite),
       assignGroups: freezeOperationScope(operations.assignGroups),
       suspend: freezeOperationScope(operations.suspend),
+      serviceAccounts: freezeOperationScope(operations.serviceAccounts),
     },
   }
 }
@@ -83,6 +84,7 @@ function createEmptyOperationScopes(): Record<
     invite: { policyIds: [], groupIds: new Set<string>() },
     assignGroups: { policyIds: [], groupIds: new Set<string>() },
     suspend: { policyIds: [], groupIds: new Set<string>() },
+    serviceAccounts: { policyIds: [], groupIds: new Set<string>() },
   }
 }
 

@@ -31,6 +31,19 @@ export const en = {
       "The agent reads your project's objects and everything behind them: their sources, syncs and runs.",
     empty: "There's nothing here yet.",
   },
+  sections: {
+    back: "Back",
+    settings: {
+      label: "Settings",
+      groups: { account: "Your account", project: "Project" },
+      pages: {
+        personal: "Personal",
+        developers: "Developers",
+        members: "Members",
+        "service-accounts": "Service accounts",
+      },
+    },
+  },
   shared: {
     opening: "Opening shared access…",
     verifying: "Please wait while this link is verified.",
@@ -73,6 +86,19 @@ export const fr: Translation<AppMessages> = {
     description:
       "L’agent lit les objets de votre projet et tout ce qui les alimente : leurs sources, leurs synchronisations et leurs exécutions.",
     empty: "Il n’y a rien ici pour l’instant.",
+  },
+  sections: {
+    back: "Retour",
+    settings: {
+      label: "Paramètres",
+      groups: { account: "Votre compte", project: "Projet" },
+      pages: {
+        personal: "Personnel",
+        developers: "Développeurs",
+        members: "Membres",
+        "service-accounts": "Comptes de service",
+      },
+    },
   },
   shared: {
     opening: "Ouverture de l’accès partagé…",

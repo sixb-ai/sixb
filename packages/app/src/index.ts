@@ -43,6 +43,8 @@ export {
 export type { AuthExperienceActions, AuthExperienceProps, AuthExperienceState } from "./auth"
 export type { AppMetadata } from "./metadata"
 export { publicEnv } from "./public-env"
+export type { AppSectionId } from "./sections/catalog"
+export { type AppSection, type AppVisibility, useSections } from "./sections/sections"
 export { type CurrentUser, useCurrentUser, useSignOut } from "./session"
 export {
   AppShell,
@@ -58,4 +60,5 @@ export {
   NavItems,
   type NavItemsProps,
 } from "./shell/nav-items"
+export { SectionNav, type SectionNavProps } from "./shell/section-nav"
 export { UserMenu, type UserMenuItemProps, type UserMenuProps } from "./shell/user-menu"

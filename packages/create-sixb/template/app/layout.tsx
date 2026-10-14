@@ -12,8 +12,21 @@ export default function RootLayout({ children }: PropsWithChildren) {
   return (
     <AppShell
       brand={
-        <a href="/" className="flex h-10 items-center px-2">
-          <img src="/sixb-wordmark.svg" alt="Sixb" className="h-[15px] w-auto" />
+        // The wordmark, or just the mark while the sidebar is collapsed to icons.
+        <a
+          href="/"
+          className="flex h-10 items-center px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
+        >
+          <img
+            src="/sixb-wordmark.svg"
+            alt="Sixb"
+            className="h-[15px] w-auto group-data-[collapsible=icon]:hidden"
+          />
+          <img
+            src="/favicon.svg"
+            alt="Sixb"
+            className="hidden size-5 group-data-[collapsible=icon]:block"
+          />
         </a>
       }
       nav={[{ label: "Mission tracker", href: "/", icon: Satellite }]}

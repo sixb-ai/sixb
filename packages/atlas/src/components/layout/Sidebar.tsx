@@ -18,6 +18,7 @@ import {
 } from "@sixb/ui/components"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
+  ArrowUpRight,
   Bolt,
   Bot,
   Box,
@@ -35,6 +36,7 @@ import {
   Settings,
   Workflow,
 } from "lucide-react"
+import { projectAppUrl } from "../../lib/app-url"
 
 export type ViewMode =
   | "home"
@@ -50,7 +52,6 @@ export type ViewMode =
   | "logs"
   | "rules"
   | "ontology"
-  | "settings"
 
 interface NavItem {
   id: ViewMode
@@ -90,7 +91,6 @@ const projectNavGroups: { label: string; items: NavItem[] }[] = [
       { id: "ai-usage", label: "AI usage", Icon: ChartNoAxesCombined },
       { id: "logs", label: "Logs", Icon: ScrollText },
       { id: "rules", label: "Rules", Icon: ListChecks },
-      { id: "settings", label: "Settings", Icon: Settings },
     ],
   },
 ]
@@ -185,6 +185,7 @@ export function Sidebar({
                     </SidebarMenuItem>
                   )
                 })}
+                {group.label === "Operate" ? <AppSettingsItem /> : null}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -205,6 +206,26 @@ export function Sidebar({
 
       <SidebarRail />
     </ShadcnSidebar>
+  )
+}
+
+// Settings moved into the project's app; Atlas links there when it knows the app's address.
+function AppSettingsItem() {
+  const href = projectAppUrl("/settings")
+  if (!href) return null
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild tooltip="Settings">
+        <a href={href}>
+          <Settings />
+          <span className="min-w-0 flex-1 truncate">Settings</span>
+          <ArrowUpRight
+            aria-hidden="true"
+            className="ml-auto text-sidebar-foreground/55 group-data-[collapsible=icon]:hidden"
+          />
+        </a>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
   )
 }
 

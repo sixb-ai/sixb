@@ -175,7 +175,7 @@ export interface RoleDefinition<TId extends string = string> {
   readonly clearances?: readonly string[]
 }
 
-export type MembershipOperation = "invite" | "assignGroups" | "suspend"
+export type MembershipOperation = "invite" | "assignGroups" | "suspend" | "serviceAccounts"
 
 export interface MembershipPolicyDefinition<TId extends string = string> {
   readonly kind: "membershipPolicy"

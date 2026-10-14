@@ -149,7 +149,7 @@ describe("auth example Atlas authorization", () => {
     // The scope of `member-administration` is both example groups, so an admin reaches either one.
     expect([...admin.assignableGroupIds].sort()).toEqual([securityAdmins.id, teamMembers.id])
 
-    for (const operation of ["invite", "assignGroups", "suspend"] as const) {
+    for (const operation of ["invite", "assignGroups", "suspend", "serviceAccounts"] as const) {
       expect(admin.holds[operation]).toBe(true)
       expect(admin.covers(operation, [])).toBe(true)
       expect(admin.covers(operation, [teamMembers])).toBe(true)

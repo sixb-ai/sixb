@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   defineGroup,
+  defineMembershipPolicy,
   defineObjectType,
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -31,7 +32,14 @@ const Device = defineObjectType({
   ],
 })
 
-function createRuntime() {
+// Members of `agents` manage service accounts in `agents`, which is also their own group.
+const serviceAccountAdministration = defineMembershipPolicy("service-account-administration", {
+  grantedTo: [agents],
+  scope: [agents],
+  can: ["serviceAccounts"],
+})
+
+function createRuntime(options: { readonly serviceAccountPolicy?: boolean } = {}) {
   const storage = new InMemoryStorage()
   const sixb = new SixbHost({
     id: projectId,
@@ -42,6 +50,8 @@ function createRuntime() {
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     groups: [agents, admins],
+    membershipPolicies:
+      options.serviceAccountPolicy === false ? [] : [serviceAccountAdministration],
     auth: authStrategy,
   })
 
@@ -476,5 +486,46 @@ describe("access token management routes", () => {
     await expect(
       storage.auth.serviceAccounts.getById({ projectId, id: "svc_admin" })
     ).resolves.toMatchObject({ status: "active" })
+  })
+
+  test("refuses service accounts without a serviceAccounts membership policy", async () => {
+    const { app, storage } = createRuntime({ serviceAccountPolicy: false })
+    const session = await seedSession(storage)
+    await storage.auth.serviceAccounts.create({
+      id: "svc_groupless",
+      projectId,
+      name: "Group-less",
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+    })
+
+    const optionsResponse = await app.fetch(
+      jsonRequest("/api/auth/membership-options", "GET", session.headers)
+    )
+    await expect(optionsResponse.json()).resolves.toMatchObject({
+      serviceAccountGroups: [],
+      capabilities: { serviceAccounts: false },
+    })
+
+    const listResponse = await app.fetch(
+      jsonRequest("/api/auth/service-accounts", "GET", session.headers)
+    )
+    expect(listResponse.status).toBe(200)
+    await expect(listResponse.json()).resolves.toEqual({ serviceAccounts: [] })
+
+    const createResponse = await app.fetch(
+      jsonRequest("/api/auth/service-accounts", "POST", session.headers, {
+        name: "Mine",
+        groupIds: ["agents"],
+      })
+    )
+    expect(createResponse.status).toBe(403)
+    await expect(createResponse.json()).resolves.toMatchObject({
+      error: expect.stringContaining("'serviceAccounts' operation"),
+    })
+
+    const disableResponse = await app.fetch(
+      jsonRequest("/api/auth/service-accounts/svc_groupless/disable", "POST", session.headers)
+    )
+    expect(disableResponse.status).toBe(403)
   })
 })

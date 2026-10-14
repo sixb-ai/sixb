@@ -82,7 +82,7 @@ To let the identity provider decide group membership instead of inviting each pe
 
 ```ts
 // security/groups/finance-admins.ts
-import { defineGroup } from "@sixb/core"
+import { defineGroup } from "@sixb/core/security"
 
 export const financeAdmins = defineGroup("finance-admins", {
   label: "Finance admins",

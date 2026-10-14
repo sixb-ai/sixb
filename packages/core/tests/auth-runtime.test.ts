@@ -332,6 +332,14 @@ describe("SixbHost auth runtime", () => {
     const sixb = new SixbHost({
       ontology: [],
       ...deps,
+      groups: [commercial],
+      membershipPolicies: [
+        defineMembershipPolicy("service-accounts", {
+          grantedTo: [commercial],
+          scope: [commercial],
+          can: ["serviceAccounts"],
+        }),
+      ],
       auth: authStrategy,
     })
     const sessionCredential = createSessionCredential("ses_1")
@@ -341,8 +349,8 @@ describe("SixbHost auth runtime", () => {
       projectId: sixb.id,
       email: "ava@acme.com",
     })
-    // The caller must belong to a group to place a service account in it and to
-    // manage that account's tokens afterwards.
+    // The caller's group holds the policy that lets it place a service account in
+    // `commercial` and manage that account's tokens afterwards.
     await deps.storage.auth.groupMemberships.upsert({
       projectId: sixb.id,
       userId: "usr_1",
@@ -414,11 +422,19 @@ describe("SixbHost auth runtime", () => {
     ).resolves.toBeNull()
   })
 
-  test("confines service account management to the caller's own groups", async () => {
+  test("confines service account management to the serviceAccounts policy scope", async () => {
     const deps = createTestRuntimeDeps()
     const sixb = new SixbHost({
       ontology: [],
       ...deps,
+      groups: [commercial, finance],
+      membershipPolicies: [
+        defineMembershipPolicy("service-accounts", {
+          grantedTo: [commercial],
+          scope: [commercial],
+          can: ["serviceAccounts"],
+        }),
+      ],
       auth: authStrategy,
     })
     const sessionCredential = createSessionCredential("ses_low")
@@ -444,7 +460,7 @@ describe("SixbHost auth runtime", () => {
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
     })
-    // A privileged service account in a group the caller does not belong to.
+    // A privileged service account in a group outside the caller's policy scope.
     await deps.storage.auth.serviceAccounts.create({
       id: "svc_priv",
       projectId: sixb.id,
@@ -461,8 +477,8 @@ describe("SixbHost auth runtime", () => {
       headers: { cookie: `sixb_session=${sessionCredential.cookieValue}` },
     })
 
-    // Cannot escalate a personal token or a new service account beyond the
-    // caller's own groups.
+    // Cannot escalate a personal token beyond the caller's own groups, or place a
+    // new service account outside the policy's scope.
     const caller = await resolveCaller(sixb, request)
 
     await expect(
@@ -474,10 +490,10 @@ describe("SixbHost auth runtime", () => {
     ).rejects.toThrow("cannot be assigned")
     await expect(
       sixb.auth.createServiceAccount(caller, { name: "Nope", groupIds: ["finance"] })
-    ).rejects.toThrow("cannot be assigned")
+    ).rejects.toThrow("not allowed to place service accounts in group(s): finance")
 
     // Cannot mint, list, disable, or revoke tokens for a service account whose
-    // groups it does not fully hold — reported as "not found" to avoid probing.
+    // groups the scope does not fully cover — reported as "not found" to avoid probing.
     await expect(
       sixb.auth.createServiceAccountAccessToken(caller, {
         serviceAccountId: "svc_priv",
@@ -504,6 +520,14 @@ describe("SixbHost auth runtime", () => {
     const sixb = new SixbHost({
       ontology: [],
       ...deps,
+      groups: [commercial, finance],
+      membershipPolicies: [
+        defineMembershipPolicy("service-accounts", {
+          grantedTo: [commercial],
+          scope: [commercial],
+          can: ["serviceAccounts"],
+        }),
+      ],
       auth: authStrategy,
     })
     const session = await seedAuthenticatedUser(sixb, deps, {
@@ -1521,7 +1545,7 @@ function createMemberRuntime() {
         // target within scope, which is what the self-protection tests exercise.
         grantedTo: [securityAdmins, commercial],
         scope: [commercial, finance],
-        can: ["invite", "assignGroups", "suspend"],
+        can: ["invite", "assignGroups", "suspend", "serviceAccounts"],
       }),
     ],
     auth: authStrategy,
@@ -1568,7 +1592,16 @@ describe("SixbHost auth member management", () => {
     const options = await sixb.auth.getMembershipOptions(caller)
 
     expect(options.groups.map((group) => group.id).sort()).toEqual(["commercial", "finance"])
-    expect(options.capabilities).toEqual({ invite: true, assignGroups: true, suspend: true })
+    expect(options.serviceAccountGroups.map((group) => group.id).sort()).toEqual([
+      "commercial",
+      "finance",
+    ])
+    expect(options.capabilities).toEqual({
+      invite: true,
+      assignGroups: true,
+      suspend: true,
+      serviceAccounts: true,
+    })
   })
 
   test("lists members in scope, hides out-of-scope users, and includes group-less members", async () => {
@@ -1827,10 +1860,101 @@ describe("SixbHost auth member management", () => {
     })
 
     const options = await sixb.auth.getMembershipOptions(caller)
-    expect(options.capabilities).toEqual({ invite: false, assignGroups: false, suspend: false })
+    expect(options.capabilities).toEqual({
+      invite: false,
+      assignGroups: false,
+      suspend: false,
+      serviceAccounts: false,
+    })
+    expect(options.serviceAccountGroups).toEqual([])
     await expect(sixb.auth.listMembers(caller)).resolves.toMatchObject({ members: [], total: 0 })
     await expect(sixb.auth.suspendMember(caller, { userId: "usr_target" })).rejects.toThrow(
       "not found"
     )
+  })
+
+  // Reproduce: make listServiceAccounts keep every account and requireManageableServiceAccount
+  // accept any group (the old rule compared only the caller's own groups, so a group-less account
+  // was anyone's); the plain caller then lists and disables `svc_groupless`.
+  test("service accounts follow the serviceAccounts membership policy", async () => {
+    const { deps, sixb } = createMemberRuntime()
+    // The admin holds the policy without belonging to its scope groups.
+    const admin = await seedAuthenticatedUser(sixb, deps, {
+      userId: "usr_admin",
+      email: "admin@acme.com",
+      groupIds: ["security-admins"],
+    })
+    const plain = await seedAuthenticatedUser(sixb, deps, {
+      userId: "usr_plain",
+      email: "plain@acme.com",
+      groupIds: ["finance"],
+    })
+    await deps.storage.auth.serviceAccounts.create({
+      id: "svc_engineering",
+      projectId: sixb.id,
+      name: "Engineering worker",
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+    })
+    await deps.storage.auth.serviceAccountGroupMemberships.upsert({
+      projectId: sixb.id,
+      serviceAccountId: "svc_engineering",
+      groupId: "engineering",
+      source: "manual",
+    })
+
+    await sixb.auth.createServiceAccount(admin, {
+      id: "svc_commercial",
+      name: "Commercial sync",
+      groupIds: ["commercial"],
+    })
+    await sixb.auth.createServiceAccount(admin, { id: "svc_groupless", name: "Group-less" })
+    await expect(
+      sixb.auth.createServiceAccount(admin, { name: "Escalated", groupIds: ["engineering"] })
+    ).rejects.toMatchObject({
+      code: "authorization_denied",
+      message: expect.stringContaining("group(s): engineering"),
+    })
+
+    const listed = await sixb.auth.listServiceAccounts(admin)
+    expect(listed.serviceAccounts.map(({ serviceAccount }) => serviceAccount.id).sort()).toEqual([
+      "svc_commercial",
+      "svc_groupless",
+    ])
+    await expect(
+      sixb.auth.disableServiceAccount(admin, { serviceAccountId: "svc_engineering" })
+    ).rejects.toThrow("not found")
+
+    const token = await sixb.auth.createServiceAccountAccessToken(admin, {
+      serviceAccountId: "svc_commercial",
+      name: "Sync token",
+      expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+    })
+    await expect(
+      sixb.auth.listServiceAccountAccessTokens(admin, { serviceAccountId: "svc_commercial" })
+    ).resolves.toMatchObject({ accessTokens: [{ id: token.accessToken.id }] })
+    await sixb.auth.revokeServiceAccountAccessToken(admin, {
+      serviceAccountId: "svc_commercial",
+      tokenId: token.accessToken.id,
+    })
+    await expect(
+      sixb.auth.disableServiceAccount(admin, { serviceAccountId: "svc_commercial" })
+    ).resolves.toMatchObject({ serviceAccount: { status: "suspended" } })
+
+    // Without the operation, a caller sees no service account, group-less ones included, and
+    // every other service-account call is refused.
+    await expect(sixb.auth.listServiceAccounts(plain)).resolves.toEqual({ serviceAccounts: [] })
+    const needsPolicy = {
+      code: "authorization_denied",
+      message: expect.stringContaining("'serviceAccounts' operation"),
+    }
+    await expect(sixb.auth.createServiceAccount(plain, { name: "Mine" })).rejects.toMatchObject(
+      needsPolicy
+    )
+    await expect(
+      sixb.auth.disableServiceAccount(plain, { serviceAccountId: "svc_groupless" })
+    ).rejects.toMatchObject(needsPolicy)
+    await expect(
+      sixb.auth.listServiceAccountAccessTokens(plain, { serviceAccountId: "svc_groupless" })
+    ).rejects.toMatchObject(needsPolicy)
   })
 })

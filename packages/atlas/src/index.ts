@@ -22,6 +22,8 @@ export interface CreateAtlasAppOptions {
   readonly apiBaseUrl: string
   readonly audience?: AuthSessionAudience
   readonly authEnabled?: boolean
+  /** The project app's public origin, where Atlas sends the sections that moved there. */
+  readonly appUrl?: string
 }
 
 export interface AtlasAppStartOptions {
@@ -52,6 +54,7 @@ interface BuiltInUiServerOptions {
   readonly apiBaseUrl: string
   readonly audience: AuthSessionAudience
   readonly authEnabled: boolean
+  readonly appUrl?: string
   readonly outdir?: string
 }
 
@@ -67,6 +70,7 @@ export function createAtlasApp(options: CreateAtlasAppOptions): AtlasAppInstance
   const apiBaseUrl = normalizeOrigin(options.apiBaseUrl, "Atlas API base URL")
   const audience = resolveAuthSessionAudience(options.audience ?? DEFAULT_AUTH_SESSION_AUDIENCE)
   const authEnabled = options.authEnabled ?? true
+  const appUrl = options.appUrl ? normalizeOrigin(options.appUrl, "Atlas app URL") : undefined
 
   return {
     async start(startOptions: AtlasAppStartOptions = {}) {
@@ -81,7 +85,14 @@ export function createAtlasApp(options: CreateAtlasAppOptions): AtlasAppInstance
         let server: ReturnType<typeof Bun.serve>
         if (development) {
           css = await ensureBuiltInUiCss({ watch: true })
-          server = await startDevelopmentServer({ host, port, apiBaseUrl, audience, authEnabled })
+          server = await startDevelopmentServer({
+            host,
+            port,
+            apiBaseUrl,
+            audience,
+            authEnabled,
+            appUrl,
+          })
         } else {
           server = await startProductionServer({
             host,
@@ -89,6 +100,7 @@ export function createAtlasApp(options: CreateAtlasAppOptions): AtlasAppInstance
             apiBaseUrl,
             audience,
             authEnabled,
+            appUrl,
             outdir: startOptions.outdir,
           })
         }
@@ -144,6 +156,7 @@ async function startProductionServer(
     apiBaseUrl: input.apiBaseUrl,
     audience: input.audience,
     authEnabled: input.authEnabled,
+    appUrl: input.appUrl,
     scriptPath: bundle.scriptPath,
     stylesheetPath: bundle.stylesheetPath,
   })
@@ -212,6 +225,7 @@ function runtimeConfigResponse(request: Request, config: BuiltInUiServerOptions)
   const body = JSON.stringify({
     api: { baseUrl: config.apiBaseUrl },
     auth: { audience: config.audience, enabled: config.authEnabled },
+    ...(config.appUrl ? { app: { url: config.appUrl } } : {}),
   })
 
   return new Response(request.method === "HEAD" ? null : body, {

@@ -164,6 +164,7 @@ async function main(): Promise<void> {
         host: getFlag("host"),
         apiPublicOrigin: getFlag("api-public-origin"),
         atlasPublicOrigin: getFlag("atlas-public-origin"),
+        appPublicOrigin: getFlag("app-public-origin"),
       })
       break
     }

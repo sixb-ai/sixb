@@ -77,8 +77,9 @@ export default function AuthExampleApp() {
       </section>
 
       <p className="auth-app-help">
-        In Atlas, invite a member to <strong>Custom app</strong> and assign the
-        <strong> team-members</strong> group. The invitation should return here with an app session.
+        As a security admin, open <a href="/settings/members">Settings › Members</a>, invite a
+        member to <strong>Custom app</strong> and assign the <strong>team-members</strong> group.
+        The invitation should return here with an app session.
       </p>
     </main>
   )
