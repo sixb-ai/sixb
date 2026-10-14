@@ -2,6 +2,79 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-10-14 — Framework 0.1.19
+
+### Highlights
+
+- Run Actions in the process that requests them and return their finished run. There is no longer
+  an Action queue or worker to deploy. Workflows, schedules, agents, and API requests use the same
+  execution path.
+- Save a successful Action's edits and terminal run together. Concurrent edits recheck the objects
+  and links read by the Action and retry conflicts for up to three attempts, reusing a successful
+  writeback rather than calling the external system again within that run.
+- Bound waiting for validation, edits before the irreversible boundary, and effects that ignore
+  cancellation. The Action deadline is 30 seconds; effects get their own 30 seconds. A writeback is always awaited,
+  and edits and commit after a successful writeback finish even past the deadline.
+- Let API and worker processes drain Action runs and effects for up to 65 seconds at shutdown.
+  Generated deployments allow those processes 70 seconds before killing them, unless overridden.
+- Stop the CLI waiting for an Action after 25 seconds without cancelling it. The error names the
+  run and the command to inspect it; `--run-id` lets a caller retain the same identity after a lost
+  response. Atlas and agent UI also stop waiting indefinitely for an effects outcome that never
+  arrives, and distinguish old queued receipts from finished runs.
+- Limit ordinary API request bodies to 1 MiB while streaming, before parsing and authentication.
+  Authenticated file routes keep their larger limits: 25 MiB for file content, with multipart
+  overhead allowed separately. Direct blob-storage uploads do not pass through that limit.
+- Fix direct and multipart uploads failing in browsers because `fetch` received an invalid receiver.
+
+### Upgrade notes
+
+- This `0.1.x` release contains breaking Action API and storage changes. Upgrade core, its exact
+  worker/storage consumers, server, client, and CLI together to `0.1.19`. Upgrade Atlas to `0.1.16`,
+  agent UI to `0.1.12`, CLI core to `0.1.8`, and BullMQ queues to `0.1.7`; rebuild application assets.
+- Stop accepting new Actions, drain or reconcile outstanding work with the old deployment, and
+  stop all old processes before migrating. Back up and rehearse against an existing database.
+  PostgreSQL migration `061-terminal-action-runs` and SQLite migration `060-terminal-action-runs`
+  remove `queued_at` and retain only terminal runs. Old queued/running runs with committed edits
+  become succeeded; the others become failed and will not resume. Cancelled runs become failed.
+  Interrupted effects on recovered committed runs are recorded as failed. SQLite rebuilds the
+  run table. Do not roll old binaries onto the new schema; rollback requires the old database too.
+- Remove `@sixb/action-worker`, the Action worker role/concurrency configuration, and
+  `queues.actions` from your application. The old npm package remains available for older releases;
+  it must not run against this schema. Do not delete shared Redis data to retire its old queue.
+- Action requests now return a finished run, not a queued receipt. A failed run is an HTTP `200`
+  with `status: "failed"`; check the status when using the raw SDK. `useActionRunMutation` still
+  raises `ActionRunFailedError`. Replace `requestActionAndWait`/`waitForActionRun` and their removed
+  option/result types with the request API. `ActionRunTimeoutError`, queued/running/cancelled run
+  states, and `queuedAt` are removed.
+- Action lifecycle events (`action.requested`, `action.completed`, `action.failed`), their topic,
+  and Action event selectors are removed. Migrate triggers and subscriptions to the object/link
+  events of committed edits, or express dependent work in a workflow. Those edit events still
+  carry the Action's `actionId` and `runId` in their origin.
+- A run is recorded when it ends, with no durable queue, automatic redelivery, or cross-process
+  execution lock. A crash can leave no run record even after an external call. Reusing a recorded
+  run ID returns that record; a concurrent request in the same process gets `action.run_in_progress`
+  (`409`), but requests in different processes can both execute. Pass `run.idempotencyKey` to
+  external systems and reconcile uncertain outcomes before retrying. A missing run is not proof
+  that no work happened.
+- The deadline is not a hard execution limit: a writeback that ignores its signal can keep the
+  request open, and a timed-out handler can continue its own external work. Effects run after the
+  response, only when edits committed; they are not replayed, and their outcome may stay absent.
+  Use workflows for durable, long-running orchestration. Review proxy and process shutdown limits.
+- Concurrent Actions do not provide serializable isolation for every read. Object and link reads
+  are checked, but newly matching query rows, `count`/`exists`/facets, telemetry, and file reads are
+  not fenced. An `action.read_conflict` can follow a successful external writeback; a new run must
+  not blindly repeat that external operation.
+
+### Package versions
+
+- `0.1.19`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`,
+  `@sixb/pg`, `@sixb/sqlite`, `@sixb/agent-worker`, `@sixb/pipeline-worker`,
+  `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`.
+- `0.1.16`: `@sixb/atlas`.
+- `0.1.12`: `@sixb/agent-ui`.
+- `0.1.8`: `@sixb/cli-core`.
+- `0.1.7`: `@sixb/queues-bullmq`.
+
 ## 2026-10-11 — Framework 0.1.18
 
 ### Highlights
