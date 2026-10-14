@@ -281,7 +281,14 @@ const commandTree: readonly CommandNode[] = [
     ],
   }),
   command("atlas", "Start production Atlas UI server", {
-    options: ["entry", "port", "host", "api-public-origin", "atlas-public-origin"],
+    options: [
+      "entry",
+      "port",
+      "host",
+      "api-public-origin",
+      "atlas-public-origin",
+      "app-public-origin",
+    ],
   }),
   command("app", "Start production custom app server", {
     options: ["entry", "port", "host", "api-public-origin", "app-public-origin"],

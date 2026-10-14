@@ -6,11 +6,13 @@ Export groups from `security/groups/` and roles from `security/roles/`. Sixb dis
 
 ## Define a group
 
-A person or service account can belong to more than one group.
+A person or service account can belong to more than one group. Import `defineGroup` from
+`@sixb/core/security`: your app's layout can import groups, and that subpath also loads in the
+browser.
 
 ```ts
 // security/groups/finance-team.ts
-import { defineGroup } from "@sixb/core"
+import { defineGroup } from "@sixb/core/security"
 
 export const financeTeam = defineGroup("finance-team", {
   label: "Finance team",

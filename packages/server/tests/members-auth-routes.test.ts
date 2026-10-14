@@ -204,7 +204,8 @@ describe("auth member routes", () => {
     expect(options.status).toBe(200)
     expect(await options.json()).toEqual({
       groups: [{ id: "commercial" }],
-      capabilities: { invite: true, assignGroups: true, suspend: true },
+      serviceAccountGroups: [],
+      capabilities: { invite: true, assignGroups: true, suspend: true, serviceAccounts: false },
     })
     expect(list.status).toBe(200)
     expect(body.members.map((member) => member.user.id)).toEqual([

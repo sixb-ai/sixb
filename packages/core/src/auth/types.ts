@@ -277,11 +277,14 @@ export interface MembershipOperationCapabilities {
   readonly invite: boolean
   readonly assignGroups: boolean
   readonly suspend: boolean
+  readonly serviceAccounts: boolean
 }
 
 export interface GetMembershipOptionsResult {
   /** Groups the caller may assign to a member (the `assignGroups` scope). */
   readonly groups: readonly InvitationGroupOption[]
+  /** Groups the caller may place a service account in (the `serviceAccounts` scope). */
+  readonly serviceAccountGroups: readonly InvitationGroupOption[]
   readonly capabilities: MembershipOperationCapabilities
 }
 

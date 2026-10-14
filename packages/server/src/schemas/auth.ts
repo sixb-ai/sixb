@@ -196,10 +196,12 @@ export const GetAuthInvitationOptionsResponseSchema = z.object({
 
 export const GetAuthMembershipOptionsResponseSchema = z.object({
   groups: z.array(AuthGroupOptionSchema),
+  serviceAccountGroups: z.array(AuthGroupOptionSchema),
   capabilities: z.object({
     invite: z.boolean(),
     assignGroups: z.boolean(),
     suspend: z.boolean(),
+    serviceAccounts: z.boolean(),
   }),
 })
 

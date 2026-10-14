@@ -102,7 +102,7 @@ function assertMembershipOperationArray(
   for (const item of value) {
     if (!isMembershipOperation(item)) {
       throw createError(
-        `[Sixb] ${field} must contain only membership operations: invite, assignGroups, suspend.`
+        `[Sixb] ${field} must contain only membership operations: invite, assignGroups, suspend, serviceAccounts.`
       )
     }
   }

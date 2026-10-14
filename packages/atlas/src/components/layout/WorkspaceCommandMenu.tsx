@@ -20,7 +20,6 @@ import {
   ListChecks,
   RefreshCw,
   ScrollText,
-  Settings,
   Workflow,
 } from "lucide-react"
 import { useEffect } from "react"
@@ -68,7 +67,6 @@ const commandGroups = [
       { label: "AI usage", path: "/ai-usage", Icon: ChartNoAxesCombined },
       { label: "Logs", path: "/logs", Icon: ScrollText },
       { label: "Rules", path: "/rules", Icon: ListChecks },
-      { label: "Settings", path: "/settings/members", Icon: Settings },
     ],
   },
 ] as const

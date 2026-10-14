@@ -120,6 +120,7 @@ export async function runDevRuntime(options: DevOptions = {}) {
       apiBaseUrl: topology.apiPublicOrigin,
       audience: "atlas",
       authEnabled,
+      appUrl: topology.appPublicOrigin ?? undefined,
     })
     atlasServer = await atlas.start({
       host: topology.host,

@@ -23,6 +23,7 @@ import {
 import { devReloadResponse } from "./dev-reload"
 import { collectPublicEnv, renderCustomAppRuntimeScript } from "./runtime"
 import { type PageRoute, routePatternKey, scanAppRoutes } from "./scanner"
+import { sectionCatalog } from "./sections/catalog"
 import { type CustomAppStylesheet, resolveCustomAppStylesheet } from "./styles"
 import { createTailwindCssCompiler, type TailwindCssCompiler } from "./tailwind"
 
@@ -276,6 +277,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       publicDir,
       frameworkStylesheetPaths: stylesheets.frameworkStylesheetPaths,
       stylesheetPath: stylesheets.stylesheetPath,
+      sections: agentRoutesEnabled,
     })
     return { ...entry, routes }
   }
@@ -684,6 +686,18 @@ function builtInRoutesFor(routes: readonly PageRoute[]): BuiltInRouteManifestEnt
     ...builtInAgentRoutePaths.map((path) => ({ path, moduleSpecifier: builtInAgentRouteModule })),
     // Home starts conversations that continue on the agent routes, so it ships with them.
     { path: "/", moduleSpecifier: builtInPageModule, exportName: "HomePage" },
+    ...sectionCatalog.flatMap((section) => [
+      {
+        path: section.path,
+        moduleSpecifier: builtInPageModule,
+        exportName: section.indexExportName,
+      },
+      ...section.pages.map((page) => ({
+        path: page.path,
+        moduleSpecifier: builtInPageModule,
+        exportName: page.exportName,
+      })),
+    ]),
   ]
 
   return builtInRoutes.filter((route) => !projectRoutePatterns.has(routePatternKey(route.path)))

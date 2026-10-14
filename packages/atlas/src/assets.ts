@@ -32,6 +32,7 @@ export interface BuiltInUiDevBundle {
 export interface BuiltInUiShellConfig extends BuiltInUiRuntimeConfig {
   readonly scriptPath: string
   readonly stylesheetPath: string
+  readonly appUrl?: string
 }
 
 /**
@@ -166,6 +167,9 @@ export function renderBuiltInUiShell(config: BuiltInUiShellConfig): string {
     api: { baseUrl: config.apiBaseUrl },
     auth: { audience: config.audience, enabled: config.authEnabled },
   })
+  const atlasConfigScript = config.appUrl
+    ? `<script>window.__SIXB_ATLAS__ = ${JSON.stringify({ appUrl: config.appUrl }).replaceAll("<", "\\u003c")};</script>`
+    : ""
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -186,6 +190,7 @@ export function renderBuiltInUiShell(config: BuiltInUiShellConfig): string {
     </style>
     <link rel="stylesheet" href="${config.stylesheetPath}" />
     ${runtimeConfigScript}
+    ${atlasConfigScript}
     <script type="module" src="${config.scriptPath}"></script>
   </head>
   <body>

@@ -168,6 +168,30 @@ describe("custom app metadata and manifest generation", () => {
     )
   })
 
+  // Regression proof: remove validateVisibility's call in metadata.ts and both rejections fail.
+  test("rejects a visibility export with an unknown section or values that are not groups", async () => {
+    const fixture = await createFixture()
+    roots.push(fixture.root)
+    const writeVisibility = (source: string) =>
+      writeFile(
+        join(fixture.appDir, "layout.tsx"),
+        `export const visibility = ${source}\nexport default function Layout() { return null }\n`
+      )
+
+    await writeVisibility(`{ settings: [{ kind: "group", id: "admins" }] }`)
+    await generateAppEntry(fixture.root, fixture.generatedDir)
+
+    await writeVisibility(`{ data: [] }`)
+    await expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
+      "'data' is not a built-in section. Sections: settings."
+    )
+
+    await writeVisibility(`{ settings: ["admins"] }`)
+    await expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
+      "visibility.settings must be a list of groups"
+    )
+  })
+
   test("builds a stable manifest and cannot be shadowed by a public manifest", async () => {
     const fixture = await createFixture()
     roots.push(fixture.root)

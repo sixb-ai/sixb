@@ -43,10 +43,6 @@ export function AppLayout() {
       navigate("/")
       return
     }
-    if (mode === "settings") {
-      navigate("/settings/members")
-      return
-    }
     navigate(`/${mode}`)
   }
 

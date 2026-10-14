@@ -39,7 +39,12 @@ export interface DefineMembershipPolicyOptions {
   readonly can: readonly MembershipOperation[]
 }
 
-const MEMBERSHIP_OPERATIONS = new Set<MembershipOperation>(["invite", "assignGroups", "suspend"])
+const MEMBERSHIP_OPERATIONS = new Set<MembershipOperation>([
+  "invite",
+  "assignGroups",
+  "suspend",
+  "serviceAccounts",
+])
 
 function assertNonEmptyArray<T>(value: readonly T[], field: string): void {
   if (value.length === 0) {
@@ -65,7 +70,7 @@ function membershipOperationsFrom(
   return operations.map((operation) => {
     if (!MEMBERSHIP_OPERATIONS.has(operation)) {
       throw new SecurityValidationError(
-        `[Sixb] ${field} must contain only membership operations: invite, assignGroups, suspend.`
+        `[Sixb] ${field} must contain only membership operations: invite, assignGroups, suspend, serviceAccounts.`
       )
     }
 

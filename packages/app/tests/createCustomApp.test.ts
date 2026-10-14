@@ -918,7 +918,7 @@ describe("createCustomApp.dev", () => {
       expect(manifest).toContain('{ path: ":agentId", element: createElement(BuiltInPage1) },')
       expect(manifest).toContain('{ path: ":threadId", element: createElement(BuiltInPage2) },')
       // The project's app/page.tsx owns the root, so the built-in home stays out.
-      expect(manifest).not.toContain("@sixb/app/pages")
+      expect(manifest).not.toContain("HomePage")
 
       const runtime = await readFile(
         join(tempRoot, ".sixb", "generated", "app-runtime.tsx"),
@@ -950,6 +950,55 @@ describe("createCustomApp.dev", () => {
       expect(manifest).toContain('import { HomePage as BuiltInPage3 } from "@sixb/app/pages"')
       expect(manifest).toContain('"/quotes"')
       expect(manifest).toContain("element: createElement(BuiltInPage3)")
+    } finally {
+      await server.stop()
+    }
+  }, 30_000)
+
+  test("serves the Settings pages until the project adds its own at the same path", async () => {
+    await mkdir(join(tempRoot, "app", "settings", "members"), { recursive: true })
+    await writeFile(
+      join(tempRoot, "app", "settings", "members", "page.tsx"),
+      "export default function Members() { return null }\n"
+    )
+    await writeFile(
+      join(tempRoot, "app", "layout.tsx"),
+      [
+        'export const visibility = { settings: [{ kind: "group", id: "admins" }] }',
+        "export default function RootLayout({ children }) { return children }",
+        "",
+      ].join("\n")
+    )
+    const app = await createCustomApp({
+      rootDir: tempRoot,
+      apiBaseUrl: "http://127.0.0.1:3000",
+      authEnabled: false,
+    })
+    const server = await app.dev({ host: "127.0.0.1", port: await getFreePort() })
+
+    try {
+      const manifest = await readFile(join(tempRoot, ".sixb", "generated", "routes.ts"), "utf-8")
+      for (const page of [
+        "SettingsIndexPage",
+        "SettingsPersonalPage",
+        "SettingsServiceAccountsPage",
+      ]) {
+        expect(manifest).toContain(`import { ${page} as BuiltInPage`)
+      }
+      // The project's members page replaces the built-in one.
+      expect(manifest).not.toContain("SettingsMembersPage")
+      expect(manifest).toContain('import Page1 from "../../app/settings/members/page.tsx"')
+
+      // The layout's visibility export reaches the sections.
+      const runtime = await readFile(
+        join(tempRoot, ".sixb", "generated", "app-runtime.tsx"),
+        "utf-8"
+      )
+      expect(runtime).toContain(
+        'import RootLayout, * as rootLayoutModule from "../../app/layout.tsx"'
+      )
+      expect(runtime).toContain('Reflect.get(rootLayoutModule, "visibility")')
+      expect(runtime).toContain("<SectionsProvider visibility={visibility} enabled={!basename}>")
     } finally {
       await server.stop()
     }
@@ -1017,9 +1066,6 @@ describe("createCustomApp.dev", () => {
       expect(manifest).toContain('"/agents/:thread"')
       expect(manifest).toContain("createElement(Page")
       expect(manifest).not.toContain("@sixb/app/agents")
-      expect(await Bun.file(join(tempRoot, ".sixb", "generated", "agent-ui.css")).exists()).toBe(
-        false
-      )
     } finally {
       await server.stop()
     }

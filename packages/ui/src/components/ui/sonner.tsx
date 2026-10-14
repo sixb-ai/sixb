@@ -1,4 +1,3 @@
-import { useTheme } from "@sixb/ui/hooks"
 import {
   CircleCheckIcon,
   InfoIcon,
@@ -7,13 +6,15 @@ import {
   TriangleAlertIcon,
 } from "lucide-react"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
+import { useOptionalTheme } from "../../hooks/useTheme"
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { resolvedTheme } = useTheme()
+  // Outside a ThemeProvider the toasts follow the system theme.
+  const theme = useOptionalTheme()
 
   return (
     <Sonner
-      theme={resolvedTheme}
+      theme={theme?.resolvedTheme ?? "system"}
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,

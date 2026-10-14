@@ -4500,6 +4500,25 @@
                         "additionalProperties": false
                       }
                     },
+                    "serviceAccountGroups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["id"],
+                        "additionalProperties": false
+                      }
+                    },
                     "capabilities": {
                       "type": "object",
                       "properties": {
@@ -4511,13 +4530,16 @@
                         },
                         "suspend": {
                           "type": "boolean"
+                        },
+                        "serviceAccounts": {
+                          "type": "boolean"
                         }
                       },
-                      "required": ["invite", "assignGroups", "suspend"],
+                      "required": ["invite", "assignGroups", "suspend", "serviceAccounts"],
                       "additionalProperties": false
                     }
                   },
-                  "required": ["groups", "capabilities"],
+                  "required": ["groups", "serviceAccountGroups", "capabilities"],
                   "additionalProperties": false
                 }
               }

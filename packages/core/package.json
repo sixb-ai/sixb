@@ -455,6 +455,12 @@
       "import": "./dist/sandboxes/index.js",
       "default": "./dist/sandboxes/index.js"
     },
+    "./security": {
+      "types": "./dist/security/public.d.ts",
+      "bun": "./src/security/public.ts",
+      "import": "./dist/security/public.js",
+      "default": "./dist/security/public.js"
+    },
     "./storage": {
       "types": "./dist/storage/index.d.ts",
       "bun": "./src/storage/index.ts",
@@ -472,7 +478,7 @@
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "test:e2e": "bun ../../scripts/ci-guard.ts --stall 120 --max 600 bun test ./tests/published-artifacts.e2e.ts",
+    "test:e2e": "bun ../../scripts/ci-guard.ts --stall 120 --max 600 bun test ./tests/published-artifacts.e2e.ts ./tests/browser-entries.e2e.ts",
     "prepack": "bun run build"
   },
   "devDependencies": {

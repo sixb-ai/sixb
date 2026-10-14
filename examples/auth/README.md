@@ -50,13 +50,15 @@ whole flow, not just sign-in:
 
 Try the complete flow:
 
-1. Sign in to Atlas at `http://localhost:3000` as `admin@example.com`.
-2. Go to **Settings → Members** and invite a teammate into `team-members`, choosing
-   **Custom app** as the destination.
+1. Sign in to the custom app at `http://localhost:3001` as `admin@example.com`.
+2. Open **Settings › Members** at `http://localhost:3001/settings/members` and invite a teammate
+   into `team-members`, choosing **Custom app** as the destination.
 3. Open the sign-in link for the teammate. It should create an `app` session and land at
    `http://localhost:3001`, where the page shows the teammate, their groups, and granted notes.
-4. Try signing that teammate into Atlas. Atlas should show the application access-denied page.
-5. Return as the admin to edit the teammate's groups, suspend them, or reactivate them.
+4. As the teammate, `/settings/members` sends you home: `app/layout.tsx` shows Members and Service
+   accounts only to `security-admins`. Personal and Developers stay open to everyone.
+5. Try signing that teammate into Atlas. Atlas should show the application access-denied page.
+6. Return as the admin to edit the teammate's groups, suspend them, or reactivate them.
    Suspending revokes active sessions immediately; reactivation does not restore old sessions.
 
 The custom app is intentionally small: it proves the selected invitation destination, audience

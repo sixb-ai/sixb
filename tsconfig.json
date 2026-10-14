@@ -169,6 +169,7 @@
       "@sixb/core/query": ["./packages/core/src/query.ts"],
       "@sixb/core/queues": ["./packages/core/src/queues/index.ts"],
       "@sixb/core/sandboxes": ["./packages/core/src/sandboxes/index.ts"],
+      "@sixb/core/security": ["./packages/core/src/security/public.ts"],
       "@sixb/core/storage": ["./packages/core/src/storage/index.ts"],
       "@sixb/core/testing": ["./packages/core/src/testing/index.ts"],
       "@sixb/deploy-ssh": ["./deploy/ssh/src/index.ts"],

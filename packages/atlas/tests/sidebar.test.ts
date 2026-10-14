@@ -54,3 +54,38 @@ test("presents a single Agent destination without a catalog count", () => {
     client.setConfig(previousConfig)
   }
 })
+
+test("links Settings to the project's app only when Atlas knows the app's address", () => {
+  // Regression proof: drop <AppSettingsItem /> from the Operate group and the first case fails.
+  const render = () =>
+    renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(
+          SidebarProvider,
+          null,
+          createElement(Sidebar, {
+            selectedProject: { name: "northline" },
+            viewMode: "home",
+            onViewChange: () => undefined,
+            onOpenCommand: () => undefined,
+          })
+        )
+      )
+    )
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+  try {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __SIXB_ATLAS__: { appUrl: "https://app.example.test" } },
+    })
+    expect(render()).toContain('href="https://app.example.test/settings"')
+
+    Object.defineProperty(globalThis, "window", { configurable: true, value: {} })
+    expect(render()).not.toMatch(/<span[^>]*>Settings<\/span>/)
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow)
+    else Reflect.deleteProperty(globalThis, "window")
+  }
+})

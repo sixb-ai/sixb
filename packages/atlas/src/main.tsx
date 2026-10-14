@@ -211,6 +211,10 @@ async function loadDevRuntimeConfig(): Promise<void> {
   }
 
   const config: unknown = await response.json()
+  // Where the sections that moved into the project's app live, when the dev server knows.
+  if (isRecord(config) && isRecord(config.app) && typeof config.app.url === "string") {
+    window.__SIXB_ATLAS__ = { appUrl: config.app.url }
+  }
   if (isSixbBrowserRuntimeConfig(config)) {
     window.__SIXB_RUNTIME__ = config
     if (!document.querySelector("script[data-sixb-dev-reload]")) {

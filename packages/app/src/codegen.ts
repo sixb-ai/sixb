@@ -453,6 +453,8 @@ export async function generateAppEntry(
     stylesheetPath?: string | null
     /** Framework-owned stylesheets imported before the app stylesheet. */
     frameworkStylesheetPaths?: readonly string[]
+    /** The built-in section pages are routed, so the app draws their navigation. */
+    sections?: boolean
   } = {}
 ): Promise<{
   htmlPath: string
@@ -488,7 +490,27 @@ export async function generateAppEntry(
   const globalsCssImport = stylesheetPaths
     .map((path) => `import ${JSON.stringify(relativeTo(generatedDir, path))}`)
     .join("\n")
-  const layoutImport = hasLayout ? `import RootLayout from ${JSON.stringify(layoutRel)}\n` : ""
+  const sections = options.sections ?? false
+  // The namespace import reads the optional `visibility` export without naming it, so a layout
+  // that leaves it out still bundles without a missing-export warning.
+  const layoutImport = !hasLayout
+    ? ""
+    : sections
+      ? `import RootLayout, * as rootLayoutModule from ${JSON.stringify(layoutRel)}\n`
+      : `import RootLayout from ${JSON.stringify(layoutRel)}\n`
+  const sectionsImport = sections
+    ? `import type { AppVisibility } from "@sixb/app"\nimport { SectionsProvider } from "@sixb/app/pages"\n`
+    : ""
+  // Who sees each built-in section, from the project's app/layout.tsx.
+  const sectionsSetup = !sections
+    ? ""
+    : hasLayout
+      ? `const visibility = Reflect.get(rootLayoutModule, "visibility") as AppVisibility | undefined`
+      : "const visibility = undefined"
+  const sectionsStart = sections
+    ? `<SectionsProvider visibility={visibility} enabled={!basename}>`
+    : ""
+  const sectionsEnd = sections ? "</SectionsProvider>" : ""
   const layoutWrapperStart = hasLayout ? "<RootLayout>" : "<>"
   const layoutWrapperEnd = hasLayout ? "</RootLayout>" : "</>"
   const runtimeConfigScript = options.apiBaseUrl
@@ -514,7 +536,7 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import { isSixbApiError } from "@sixb/client/browser"
 import { getAuthSessionQueryKey, getProjectInfoOptions } from "@sixb/client/hooks"
 import { LocaleProvider, useAppMessages } from "@sixb/app/locale"
-import { routePaths, routes } from "./routes"
+${sectionsImport}import { routePaths, routes } from "./routes"
 ${globalsCssImport}
 ${layoutImport}
 
@@ -908,6 +930,7 @@ function RoutedErrorBoundary({
 }
 
 const appRoutes = [...routes, { path: "*", element: <NotFoundView /> }]
+${sectionsSetup}
 
 function AppRoutes() {
   return useRoutes(appRoutes)
@@ -951,6 +974,7 @@ function App({ basename }: StartAppOptions) {
   return (
     <QueryClientProvider client={queryClient}>
       <ProjectLocale shared={Boolean(basename)}>
+        ${sectionsStart}
         <BrowserRouter basename={basename}>
           <SharedDocumentLinkInterceptor basename={basename} />
           <InternalLinkInterceptor basename={basename} />
@@ -962,6 +986,7 @@ function App({ basename }: StartAppOptions) {
             </SharedDocumentBoundary>
           )}
         </BrowserRouter>
+        ${sectionsEnd}
       </ProjectLocale>
     </QueryClientProvider>
   )
