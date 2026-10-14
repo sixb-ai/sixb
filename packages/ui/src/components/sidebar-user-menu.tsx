@@ -10,7 +10,8 @@ import {
   Settings2,
   SunMedium,
 } from "lucide-react"
-import { useTheme } from "../hooks/useTheme"
+import type { ReactNode } from "react"
+import { useOptionalTheme } from "../hooks/useTheme"
 import { useUiMessages } from "../lib/i18n/ui"
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar"
 import {
@@ -42,6 +43,8 @@ interface SidebarUserMenuProps {
   apiHref?: string
   /** Sign-out handler. Only shown when a user and handler are both present. */
   onSignOut?: () => void
+  /** Extra menu items, shown above sign-out. */
+  children?: ReactNode
 }
 
 function initials(name: string): string {
@@ -56,8 +59,9 @@ function initials(name: string): string {
  * reference link, and sign-out, all folded into a single dropdown off the avatar
  * row. When no user is present it degrades to a preferences menu (theme + API).
  */
-export function SidebarUserMenu({ user, apiHref, onSignOut }: SidebarUserMenuProps) {
-  const { theme, setTheme } = useTheme()
+export function SidebarUserMenu({ user, apiHref, onSignOut, children }: SidebarUserMenuProps) {
+  // Theme switching appears only where the app provides a theme.
+  const themeControls = useOptionalTheme()
   const { isMobile } = useSidebar()
   const messages = useUiMessages()
 
@@ -127,17 +131,22 @@ export function SidebarUserMenu({ user, apiHref, onSignOut }: SidebarUserMenuPro
               </>
             ) : null}
 
-            {themes.map((option) => {
-              const Icon = option.Icon
-              const selected = option.value === theme
-              return (
-                <DropdownMenuItem key={option.value} onClick={() => setTheme(option.value)}>
-                  <Icon />
-                  <span className="flex-1">{messages.theme[option.value]}</span>
-                  {selected ? <Check className="text-muted-foreground" /> : null}
-                </DropdownMenuItem>
-              )
-            })}
+            {themeControls
+              ? themes.map((option) => {
+                  const Icon = option.Icon
+                  const selected = option.value === themeControls.theme
+                  return (
+                    <DropdownMenuItem
+                      key={option.value}
+                      onClick={() => themeControls.setTheme(option.value)}
+                    >
+                      <Icon />
+                      <span className="flex-1">{messages.theme[option.value]}</span>
+                      {selected ? <Check className="text-muted-foreground" /> : null}
+                    </DropdownMenuItem>
+                  )
+                })
+              : null}
 
             {apiHref ? (
               <>
@@ -148,6 +157,13 @@ export function SidebarUserMenu({ user, apiHref, onSignOut }: SidebarUserMenuPro
                     <span>{messages.sidebar.apiReference}</span>
                   </a>
                 </DropdownMenuItem>
+              </>
+            ) : null}
+
+            {children ? (
+              <>
+                <DropdownMenuSeparator />
+                {children}
               </>
             ) : null}
 

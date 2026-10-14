@@ -1,6 +1,6 @@
 import { watch } from "node:fs"
 import { join } from "node:path"
-import { createTailwindCssCompiler, type TailwindCssCompiler } from "@sixb/app"
+import { createTailwindCssCompiler, type TailwindCssCompiler } from "@sixb/app/server"
 
 export interface BuiltInUiCssHandle {
   stop(): Promise<void>

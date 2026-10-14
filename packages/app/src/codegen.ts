@@ -502,7 +502,7 @@ export async function generateAppEntry(
   // shared entry imports it only after establishing a grant-bound session.
   const runtimeContent = `import React from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { signOut } from "@sixb/client"
+import { type GetAuthSessionResponse, signOut } from "@sixb/client"
 import {
   BrowserRouter,
   matchPath,
@@ -512,7 +512,7 @@ import {
 } from "react-router-dom"
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query"
 import { isSixbApiError } from "@sixb/client/browser"
-import { getProjectInfoOptions } from "@sixb/client/hooks"
+import { getAuthSessionQueryKey, getProjectInfoOptions } from "@sixb/client/hooks"
 import { LocaleProvider, useAppMessages } from "@sixb/app/locale"
 import { routePaths, routes } from "./routes"
 ${globalsCssImport}
@@ -525,6 +525,8 @@ interface CustomAppHotData {
 
 export interface StartAppOptions {
   readonly basename?: string
+  /** The session the bootstrap already loaded, so useCurrentUser does not fetch it again. */
+  readonly session?: GetAuthSessionResponse
 }
 
 if (import.meta.hot) import.meta.hot.accept()
@@ -966,6 +968,7 @@ function App({ basename }: StartAppOptions) {
 }
 
 export function startApp(options: StartAppOptions = {}) {
+  if (options.session) queryClient.setQueryData(getAuthSessionQueryKey(), options.session)
   // The HTML is built without loading the project: declare the project's language on the document
   // as soon as the API answers, without waiting for the page tree to render.
   if (!options.basename) {
@@ -1058,7 +1061,7 @@ if (authSession === "unavailable") {
   (authSession?.authenticated === false && authSession.authEnabled === false) ||
   (authSession?.authenticated === true && authSession.applicationAccess.allowed)
 ) {
-  startApp()
+  startApp({ session: authSession ?? undefined })
 } else if (authSession?.authenticated === true && !authSession.applicationAccess.allowed) {
   renderAccessDenied()
 }

@@ -1,5 +1,5 @@
 import { dirname, resolve } from "node:path"
-import { type CustomAppDevServer, createCustomApp } from "@sixb/app"
+import { type CustomAppDevServer, createCustomApp } from "@sixb/app/server"
 import { type AtlasAppServer, createAtlasApp } from "@sixb/atlas"
 import { createSixbServer } from "@sixb/server"
 import { resolveAgentTurnTimeoutMs } from "../lib/agent-turn-timeout"

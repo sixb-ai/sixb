@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import { devReloadResponse } from "@sixb/app"
+import { devReloadResponse } from "@sixb/app/server"
 import {
   type AuthSessionAudience,
   DEFAULT_AUTH_SESSION_AUDIENCE,

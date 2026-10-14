@@ -86,3 +86,8 @@ export function useTheme() {
   }
   return context
 }
+
+/** The theme controls, or `null` outside a ThemeProvider, for parts that work either way. */
+export function useOptionalTheme(): ThemeContextValue | null {
+  return useContext(ThemeContext)
+}

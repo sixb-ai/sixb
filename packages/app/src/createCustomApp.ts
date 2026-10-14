@@ -87,6 +87,10 @@ const packageRoot = resolve(import.meta.dir, "..")
 const builtInAgentRouteModule = "@sixb/app/agents"
 const builtInAgentRoutePaths = ["/agents", "/agents/new/:agentId", "/agents/:threadId"] as const
 const builtInAgentRouteSourcePath = join(packageRoot, "src", "agents.ts")
+// The shell parts a layout imports from `@sixb/app` style themselves with the same Tailwind build.
+const shellSourcePath = join(packageRoot, "src", "shell")
+const builtInPageModule = "@sixb/app/pages"
+const builtInPageSourcePath = join(packageRoot, "src", "pages")
 const customAppManifestRoute = "/app.webmanifest"
 const internalAppShellRoute = "/__sixb/generated/app-shell"
 const internalSharedAppShellRoute = "/__sixb/generated/shared-app-shell"
@@ -105,6 +109,13 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
   async function scanRoutes(): Promise<PageRoute[]> {
     return [...(await scanAppRoutes(appDir)).pages]
+  }
+
+  // A root layout alone is an app: the built-in pages, Home included, fill its routes.
+  async function servesApp(routes: readonly PageRoute[]): Promise<boolean> {
+    return (
+      routes.length > 0 || (agentRoutesEnabled && (await pathExists(join(appDir, "layout.tsx"))))
+    )
   }
 
   let tailwindCompiler: TailwindCssCompiler | null = null
@@ -163,6 +174,8 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       [
         `@import ${JSON.stringify(uiGlobalsPath)};`,
         `@source ${JSON.stringify(builtInAgentRouteSourcePath)};`,
+        `@source ${JSON.stringify(shellSourcePath)};`,
+        `@source ${JSON.stringify(builtInPageSourcePath)};`,
         `@import ${JSON.stringify(stylesheet.sourcePath)};`,
         `@import ${JSON.stringify(agentUiGlobalsPath)};`,
         "",
@@ -216,6 +229,8 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       [
         `@import ${JSON.stringify(uiGlobalsPath)};`,
         `@source ${JSON.stringify(builtInAgentRouteSourcePath)};`,
+        `@source ${JSON.stringify(shellSourcePath)};`,
+        `@source ${JSON.stringify(builtInPageSourcePath)};`,
         `@import ${JSON.stringify(agentUiGlobalsPath)};`,
         "",
       ].join("\n")
@@ -243,11 +258,11 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
   }> {
     const discovery = await scanAppRoutes(appDir)
     const routes = [...discovery.pages]
-    if (routes.length === 0) {
+    if (!(await servesApp(routes))) {
       throw new Error(`[SixbCustomApp] No app routes found in ${appDir}`)
     }
 
-    const builtInRoutes = agentRoutesEnabled ? builtInAgentRoutesFor(routes) : []
+    const builtInRoutes = agentRoutesEnabled ? builtInRoutesFor(routes) : []
     const stylesheets = await prepareStylesheets(builtInRoutes)
     await generateRouteManifest(routes, generatedDir, {
       builtInRoutes,
@@ -323,8 +338,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     },
 
     async hasRoutes() {
-      const routes = await scanRoutes()
-      return routes.length > 0
+      return await servesApp(await scanRoutes())
     },
 
     async prepareAuthExperience(options) {
@@ -664,15 +678,15 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-function builtInAgentRoutesFor(routes: readonly PageRoute[]): BuiltInRouteManifestEntry[] {
+function builtInRoutesFor(routes: readonly PageRoute[]): BuiltInRouteManifestEntry[] {
   const projectRoutePatterns = new Set(routes.map((route) => routePatternKey(route.path)))
+  const builtInRoutes: BuiltInRouteManifestEntry[] = [
+    ...builtInAgentRoutePaths.map((path) => ({ path, moduleSpecifier: builtInAgentRouteModule })),
+    // Home starts conversations that continue on the agent routes, so it ships with them.
+    { path: "/", moduleSpecifier: builtInPageModule, exportName: "HomePage" },
+  ]
 
-  return builtInAgentRoutePaths
-    .filter((path) => !projectRoutePatterns.has(routePatternKey(path)))
-    .map((path) => ({
-      path,
-      moduleSpecifier: builtInAgentRouteModule,
-    }))
+  return builtInRoutes.filter((route) => !projectRoutePatterns.has(routePatternKey(route.path)))
 }
 
 async function writeFileIfChanged(path: string, content: string): Promise<void> {

@@ -1,4 +1,4 @@
-import { AgentSurface, agentContext } from "@sixb/app/agents"
+import { AgentSurface, agentContext } from "@sixb/app"
 import { useEffect, useRef } from "react"
 import { useLocation, useMatch, useNavigate } from "react-router-dom"
 import { CustomerAccount } from "../../ontology/customer-account"

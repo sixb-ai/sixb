@@ -142,8 +142,8 @@ console.log(result.textContent + "|" + window.document.documentElement.lang)
     // startApp; the document keeps no language because the HTML was built without the project.
     // Regression proof for public env: remove the publicEnv export or runtime read and this
     // fails to bundle or loses the value captured before the page module evaluates.
-    // On Bun 1.4.2, removing sideEffects: false also breaks the workspace-path build by
-    // retaining server imports; dev HTML bundles need the browser export condition instead.
+    // On Bun 1.4.2, removing sideEffects: false also breaks this build: the bundle keeps the
+    // agent exports of @sixb/app and splits them into a chunk this harness cannot load.
     // Regression proof: on Bun 1.3.14, restoring the resolver hook's old /^\.\.?\// filter
     // makes this child fail with an undefined superclass before React can mount, while the build
     // child still exits successfully.

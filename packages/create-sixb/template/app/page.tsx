@@ -210,12 +210,9 @@ export default function HomePage() {
   const positionLoading = query.isLoading || (syncing && !satellite)
 
   return (
-    <main className="min-h-screen bg-background px-0 sm:px-5">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1280px] flex-col overflow-hidden border-x border-border">
+    <main className="min-h-full bg-background">
+      <div className="flex min-h-full w-full flex-col overflow-hidden">
         <header className="flex h-14 items-stretch border-b border-border">
-          <div className="flex items-center border-r border-border px-5 sm:px-7">
-            <img src="/sixb-wordmark.svg" alt="Sixb" className="h-[15px] w-auto" />
-          </div>
           <div className="flex flex-1 items-center px-4 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground sm:px-6">
             <span className="hidden sm:inline">Sentinel-6B&nbsp; / &nbsp;</span>Mission tracker
           </div>

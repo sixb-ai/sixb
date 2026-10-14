@@ -1,4 +1,4 @@
-import { AgentPanel, setAgentSurfaceMode } from "@sixb/app/agents"
+import { AgentPanel, setAgentSurfaceMode } from "@sixb/app"
 import { useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { NorthlineWordmark } from "./_components/northline-wordmark"

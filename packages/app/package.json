@@ -24,11 +24,6 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "browser": {
-        "types": "./dist/browser.d.ts",
-        "bun": "./src/browser.ts",
-        "default": "./dist/browser.js"
-      },
       "bun": "./src/index.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
@@ -38,6 +33,18 @@
       "bun": "./src/agents.ts",
       "import": "./dist/agents.js",
       "default": "./dist/agents.js"
+    },
+    "./pages": {
+      "types": "./dist/pages.d.ts",
+      "bun": "./src/pages.ts",
+      "import": "./dist/pages.js",
+      "default": "./dist/pages.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "bun": "./src/server.ts",
+      "import": "./dist/server.js",
+      "default": "./dist/server.js"
     },
     "./locale": {
       "types": "./dist/locale.d.ts",
@@ -54,12 +61,13 @@
   },
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",
-    "test:e2e": "bun ../../scripts/ci-guard.ts --stall 60 --max 180 bun test ./tests/build-browser.e2e.ts ./tests/shared-shell.e2e.ts",
+    "test:e2e": "bun ../../scripts/ci-guard.ts --stall 60 --max 180 bun test ./tests/app-entry.e2e.ts ./tests/build-browser.e2e.ts ./tests/shared-shell.e2e.ts",
     "typecheck": "tsc --noEmit",
     "prepack": "bun run build"
   },
   "dependencies": {
     "@sixb/agent-ui": "workspace:^",
+    "@sixb/client": "workspace:^",
     "@sixb/core": "workspace:^",
     "@sixb/ui": "workspace:^",
     "@tailwindcss/cli": "^4.2.2",

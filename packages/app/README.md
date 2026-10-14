@@ -97,7 +97,9 @@ Custom apps automatically receive the shared Sixb agent chat UI at:
 
 These routes are generated only when the project has at least one `app/` page, so projects without a custom app are not turned into an app server just for agents. Project-authored pages win by exact path: define `app/agents/page.tsx` to replace the gallery, `app/agents/new/[agentId]/page.tsx` to replace the blank chat route, and `app/agents/[threadId]/page.tsx` to replace the thread route.
 
-The default agent UI is imported through `@sixb/app/agents`, so app projects do not need to import `@sixb/agent-ui` directly. A framework-owned `agent-ui.css` bundle is generated before the app stylesheet and imports normal `@sixb/ui` styles, which means app-level token overrides in `app/globals.css` still apply in the usual way.
+With them comes a home page at `/` (`HomePage` from `@sixb/app/pages`), served until the project adds `app/page.tsx`. It starts a conversation that continues on `/agents/:threadId`, and shows the app's name when `GET /api/agent` finds no agent the caller may use. Because these pages fill the routes, an `app/layout.tsx` with no pages is enough for `hasRoutes()` to serve the app.
+
+The built-in agent pages and the agent components both come from `@sixb/app`, so app projects do not need to import `@sixb/agent-ui` directly. A framework-owned `agent-ui.css` bundle is generated before the app stylesheet and imports normal `@sixb/ui` styles, which means app-level token overrides in `app/globals.css` still apply in the usual way.
 
 The routed page uses the same conversation header, history dialog, and new-thread flow as an
 embedded agent panel. Applications that want a conversation to move between a full page and an
@@ -123,7 +125,7 @@ import {
   AgentPanel,
   agentContext,
   useAgentContext,
-} from "@sixb/app/agents"
+} from "@sixb/app"
 
 function InvoicePage({ invoiceId }: { invoiceId: string }) {
   useAgentContext(agentContext.object(Invoice, invoiceId))
@@ -163,7 +165,7 @@ For an assistant that lives beside the app, keep one `AgentSurface` mounted next
 outlet:
 
 ```tsx
-import { AgentSurface } from "@sixb/app/agents"
+import { AgentSurface } from "@sixb/app"
 
 function AppAssistant() {
   return (
@@ -217,10 +219,10 @@ and no eager asset loading. App and API must be same-site (`SameSite=Strict` coo
 
 ## Usage
 
-Preferred high-level API:
+The `sixb` CLI drives this; most projects never call it directly:
 
 ```typescript
-import { createCustomApp } from "@sixb/app"
+import { createCustomApp } from "@sixb/app/server"
 
 const app = await createCustomApp({
   rootDir: process.cwd(),
@@ -260,10 +262,12 @@ A file at `app/public/app.webmanifest` is ignored because the generated manifest
 
 ## Exports
 
-| Export | Description |
-| --- | --- |
-| `createCustomApp(options)` | High-level custom app toolkit for dev/build/start |
-| `AppMetadata` | Metadata shape exported by `app/layout.tsx` |
-| `@sixb/app/auth` | Custom auth experience states, actions, and component props |
-| `createTailwindCssCompiler(options)` | Shared Tailwind v4 build pipeline (also used by Atlas) |
-| `@sixb/app/agents` | Full-page agent route plus `AgentPanel`, context provider/hooks, and helpers |
+Two entries, split by where the code runs:
+
+| Entry | Runs in | Exports |
+| --- | --- | --- |
+| `@sixb/app` | The browser, and Bun when the build imports `app/layout.tsx` | `AppMetadata`, `publicEnv`, the auth experience props, the shell (`AppShell`, `AppShellProvider`, `Brand`, `NavItems`, `UserMenu`), `useCurrentUser` and `useSignOut`, and the agent components, context and hooks |
+| `@sixb/app/server` | Bun only, for the `sixb` CLI | `createCustomApp(options)`, `createTailwindCssCompiler(options)` (also used by Atlas), `devReloadResponse` |
+
+The generated entry also imports `@sixb/app/agents` (the built-in agent route), `@sixb/app/pages`
+(the built-in home page), `@sixb/app/auth` and `@sixb/app/locale`. App code should use `@sixb/app`.

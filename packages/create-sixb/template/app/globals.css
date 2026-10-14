@@ -22,6 +22,14 @@
   --input: #dcdfe4;
   --ring: #007aff;
   --radius: 0;
+  --sidebar: #f3f4f7;
+  --sidebar-foreground: #4b4e56;
+  --sidebar-primary: #17181c;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ffffff;
+  --sidebar-accent-foreground: #17181c;
+  --sidebar-border: #dcdfe4;
+  --sidebar-ring: #007aff;
 }
 
 body {

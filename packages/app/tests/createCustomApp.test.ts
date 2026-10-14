@@ -917,12 +917,70 @@ describe("createCustomApp.dev", () => {
       expect(manifest).toContain("{ index: true, element: createElement(BuiltInPage0) },")
       expect(manifest).toContain('{ path: ":agentId", element: createElement(BuiltInPage1) },')
       expect(manifest).toContain('{ path: ":threadId", element: createElement(BuiltInPage2) },')
+      // The project's app/page.tsx owns the root, so the built-in home stays out.
+      expect(manifest).not.toContain("@sixb/app/pages")
 
       const runtime = await readFile(
         join(tempRoot, ".sixb", "generated", "app-runtime.tsx"),
         "utf-8"
       )
       expect(runtime).toContain('import "./agent-ui.css"')
+    } finally {
+      await server.stop()
+    }
+  }, 30_000)
+
+  test("serves the built-in home until the project adds app/page.tsx", async () => {
+    await rm(join(tempRoot, "app", "page.tsx"))
+    await mkdir(join(tempRoot, "app", "quotes"), { recursive: true })
+    await writeFile(
+      join(tempRoot, "app", "quotes", "page.tsx"),
+      "export default function Quotes() { return null }\n"
+    )
+    const port = await getFreePort()
+    const app = await createCustomApp({
+      rootDir: tempRoot,
+      apiBaseUrl: "http://127.0.0.1:3000",
+      authEnabled: false,
+    })
+    const server = await app.dev({ host: "127.0.0.1", port })
+
+    try {
+      const manifest = await readFile(join(tempRoot, ".sixb", "generated", "routes.ts"), "utf-8")
+      expect(manifest).toContain('import { HomePage as BuiltInPage3 } from "@sixb/app/pages"')
+      expect(manifest).toContain('"/quotes"')
+      expect(manifest).toContain("element: createElement(BuiltInPage3)")
+    } finally {
+      await server.stop()
+    }
+  }, 30_000)
+
+  // Regression proof: make servesApp in createCustomApp return routes.length > 0 and this fails.
+  test("serves the built-in pages from a root layout alone", async () => {
+    await rm(join(tempRoot, "app", "page.tsx"))
+    const app = await createCustomApp({
+      rootDir: tempRoot,
+      apiBaseUrl: "http://127.0.0.1:3000",
+      authEnabled: false,
+    })
+    expect(await app.hasRoutes()).toBe(false)
+
+    await writeFile(
+      join(tempRoot, "app", "layout.tsx"),
+      "export default function RootLayout({ children }) { return children }\n"
+    )
+    expect(await app.hasRoutes()).toBe(true)
+    expect(
+      await (
+        await createCustomApp({ rootDir: tempRoot, agentRoutes: false, authEnabled: false })
+      ).hasRoutes()
+    ).toBe(false)
+
+    const server = await app.dev({ host: "127.0.0.1", port: await getFreePort() })
+    try {
+      const manifest = await readFile(join(tempRoot, ".sixb", "generated", "routes.ts"), "utf-8")
+      expect(manifest).toContain('import { HomePage as BuiltInPage3 } from "@sixb/app/pages"')
+      expect(manifest).toContain("@sixb/app/agents")
     } finally {
       await server.stop()
     }

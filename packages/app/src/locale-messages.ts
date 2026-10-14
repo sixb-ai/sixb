@@ -24,6 +24,13 @@ export const en = {
     detail: (apiBaseUrl: string) =>
       `This app could not load your session from ${apiBaseUrl}. Check that the API is running and allows this origin, then retry.`,
   },
+  home: {
+    title: "Ask your project.",
+    subtitle: "Then make it yours.",
+    description:
+      "The agent reads your project's objects and everything behind them: their sources, syncs and runs.",
+    empty: "There's nothing here yet.",
+  },
   shared: {
     opening: "Opening shared access…",
     verifying: "Please wait while this link is verified.",
@@ -59,6 +66,13 @@ export const fr: Translation<AppMessages> = {
     title: "Impossible de joindre l’API Sixb",
     detail: (apiBaseUrl) =>
       `L’application n’a pas pu charger la session depuis ${apiBaseUrl}. Vérifiez que l’API est démarrée et autorise cette origine, puis réessayez.`,
+  },
+  home: {
+    title: "Interrogez votre projet.",
+    subtitle: "Puis faites-en le vôtre.",
+    description:
+      "L’agent lit les objets de votre projet et tout ce qui les alimente : leurs sources, leurs synchronisations et leurs exécutions.",
+    empty: "Il n’y a rien ici pour l’instant.",
   },
   shared: {
     opening: "Ouverture de l’accès partagé…",
