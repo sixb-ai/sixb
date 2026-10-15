@@ -282,7 +282,7 @@ describe("section navigation", () => {
   // reads the same hook. Regression proof: give AppShell's SectionNav a fallback that lists the
   // sections and the sidebar links to Data; drop `signedOut` from UserMenu and the button reads
   // Preferences.
-  test("Data and Settings open from the user menu, and the sidebar holds the app's own nav", () => {
+  test("the sections open from the user menu, and the sidebar holds the app's own nav", () => {
     function MenuSections() {
       return (
         <p>
@@ -300,14 +300,20 @@ describe("section navigation", () => {
 
     const view = renderApp(shell, { path: "/quotes" })
     expect(sidebarLinks(view.container)).toEqual(["/quotes"])
-    expect(view.getByText("Data /data/connectors, Settings /settings/personal")).toBeDefined()
+    expect(
+      view.getByText(
+        "Data /data/connectors, Observability /observability/runs, Settings /settings/personal"
+      )
+    ).toBeDefined()
     expect(view.getByRole("button", { name: /Morgan Reyes/ })).toBeDefined()
     cleanup()
 
-    // With auth off nobody signs in: the button says so, Settings is gone and Data stays.
+    // With auth off nobody signs in: the button says so, Settings is gone, Data and Observability stay.
     const signedOut = renderApp(shell, { path: "/quotes", session: null })
     expect(sidebarLinks(signedOut.container)).toEqual(["/quotes"])
-    expect(signedOut.getByText("Data /data/connectors")).toBeDefined()
+    expect(
+      signedOut.getByText("Data /data/connectors, Observability /observability/runs")
+    ).toBeDefined()
     expect(signedOut.getByRole("button", { name: "Sign-in off" })).toBeDefined()
   })
 

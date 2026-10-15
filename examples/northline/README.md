@@ -103,8 +103,8 @@ PriorityCare 24/7 contract requires a response within 90 minutes. From Northline
 5. Approve the repair quote for customer authorization.
 6. Complete field work, verify telemetry recovery, and close the case.
 
-The same objects, links, action runs, rule state, and workflow runs remain inspectable in Atlas, and
-the datasets and projections under **Data** in the app.
+The same objects, links and rule state remain inspectable in Atlas, the action and workflow runs
+under **Observability** in the app, and the datasets and projections under **Data**.
 
 ## Demo commands
 

@@ -7,7 +7,7 @@
  * signed-in person, because they are about that person rather than the project.
  */
 
-export type AppSectionId = "data" | "settings"
+export type AppSectionId = "data" | "observability" | "settings"
 
 export interface SectionPageDefinition {
   readonly id: string
@@ -17,8 +17,8 @@ export interface SectionPageDefinition {
   /** Pages sharing a group sit under one heading in the section's navigation. */
   readonly group?: string
   readonly always?: boolean
-  /** One item's page below this one, such as a single sync under Syncs. */
-  readonly detail?: { readonly path: string; readonly exportName: string }
+  /** Pages for one item below this one, such as a single sync under Syncs. */
+  readonly details?: readonly { readonly path: string; readonly exportName: string }[]
 }
 
 export interface SectionDefinition {
@@ -43,32 +43,54 @@ export const sectionCatalog: readonly SectionDefinition[] = [
         id: "connectors",
         path: "/data/connectors",
         exportName: "DataConnectorsPage",
-        detail: { path: "/data/connectors/:connectorId", exportName: "DataConnectorPage" },
+        details: [{ path: "/data/connectors/:connectorId", exportName: "DataConnectorPage" }],
       },
       {
         id: "syncs",
         path: "/data/syncs",
         exportName: "DataSyncsPage",
-        detail: { path: "/data/syncs/:syncId", exportName: "DataSyncPage" },
+        details: [{ path: "/data/syncs/:syncId", exportName: "DataSyncPage" }],
       },
       {
         id: "datasets",
         path: "/data/datasets",
         exportName: "DataDatasetsPage",
-        detail: { path: "/data/datasets/:datasetId", exportName: "DataDatasetPage" },
+        details: [{ path: "/data/datasets/:datasetId", exportName: "DataDatasetPage" }],
       },
       {
         id: "pipelines",
         path: "/data/pipelines",
         exportName: "DataPipelinesPage",
-        detail: { path: "/data/pipelines/:pipelineId", exportName: "DataPipelinePage" },
+        details: [{ path: "/data/pipelines/:pipelineId", exportName: "DataPipelinePage" }],
       },
       {
         id: "projections",
         path: "/data/projections",
         exportName: "DataProjectionsPage",
-        detail: { path: "/data/projections/:projectionId", exportName: "DataProjectionPage" },
+        details: [{ path: "/data/projections/:projectionId", exportName: "DataProjectionPage" }],
       },
+    ],
+  },
+  {
+    id: "observability",
+    path: "/observability",
+    indexExportName: "ObservabilityIndexPage",
+    requiresUser: false,
+    pages: [
+      {
+        id: "runs",
+        path: "/observability/runs",
+        exportName: "ObservabilityRunsPage",
+        details: [
+          {
+            path: "/observability/runs/workflows/:runId",
+            exportName: "ObservabilityWorkflowRunPage",
+          },
+          { path: "/observability/runs/actions/:runId", exportName: "ObservabilityActionRunPage" },
+        ],
+      },
+      { id: "logs", path: "/observability/logs", exportName: "ObservabilityLogsPage" },
+      { id: "ai-usage", path: "/observability/ai-usage", exportName: "ObservabilityAiUsagePage" },
     ],
   },
   {

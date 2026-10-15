@@ -15,6 +15,7 @@ import {
   ChartNoAxesCombined,
   Database,
   GitBranch,
+  History,
   Layers,
   LayoutGrid,
   ListChecks,
@@ -65,12 +66,17 @@ const commandGroups = [
     ],
   },
   {
-    label: "Operate",
+    label: "Observability",
+    inApp: true,
     commands: [
-      { label: "AI usage", path: "/ai-usage", Icon: ChartNoAxesCombined },
-      { label: "Logs", path: "/logs", Icon: ScrollText },
-      { label: "Rules", path: "/rules", Icon: ListChecks },
+      { label: "Runs", path: "/observability/runs", Icon: History },
+      { label: "Logs", path: "/observability/logs", Icon: ScrollText },
+      { label: "AI usage", path: "/observability/ai-usage", Icon: ChartNoAxesCombined },
     ],
+  },
+  {
+    label: "Operate",
+    commands: [{ label: "Rules", path: "/rules", Icon: ListChecks }],
   },
 ] as const
 

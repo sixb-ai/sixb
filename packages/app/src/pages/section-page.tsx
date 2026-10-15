@@ -1,7 +1,7 @@
 import { Toaster, toast } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { ChevronLeft } from "lucide-react"
-import type { ReactNode } from "react"
+import type { ComponentType, ReactNode } from "react"
 import { Link, Navigate, useLocation } from "react-router-dom"
 import type { AppSectionId } from "../sections/catalog"
 import {
@@ -10,6 +10,7 @@ import {
   useSectionNavMounted,
   useSections,
 } from "../sections/sections"
+import { Panel, PanelEmpty, PanelSkeleton, useLoadFailure } from "./section-ui"
 
 // Section pages draw their own toasts so they never double up with a toaster of the project's.
 const SECTION_TOASTER = "sixb-sections"
@@ -30,6 +31,8 @@ export interface SectionPageProps {
   readonly actions?: ReactNode
   /** On a detail page, the list it belongs to. */
   readonly back?: { readonly href: string; readonly label: string }
+  /** `wide` gives a page of charts and tables more room. */
+  readonly width?: "default" | "wide"
   /** A mark before the title, such as a connector's logo. */
   readonly icon?: ReactNode
   /** Facts under the title, such as a status pill. */
@@ -50,6 +53,7 @@ export function SectionPage({
   back,
   icon,
   meta,
+  width = "default",
   children,
 }: SectionPageProps) {
   const allowed = usePageAllowed(section, page)
@@ -58,7 +62,12 @@ export function SectionPage({
   if (!allowed) return <Navigate to="/" replace />
 
   return (
-    <div className="mx-auto flex w-full max-w-[50rem] flex-col gap-8 px-5 pt-8 pb-20 md:px-10 md:pt-14">
+    <div
+      className={cn(
+        "mx-auto flex w-full flex-col gap-8 px-5 pt-8 pb-20 md:px-10 md:pt-14",
+        width === "wide" ? "max-w-6xl" : "max-w-[50rem]"
+      )}
+    >
       {showTabs ? <SectionTabs section={section} /> : null}
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
@@ -131,7 +140,8 @@ export function SectionWorkspace({ section, page, children }: SectionWorkspacePr
 }
 
 export interface WorkspaceHeaderProps {
-  readonly back: { readonly href: string; readonly label: string }
+  /** On a detail page, the list it belongs to. */
+  readonly back?: { readonly href: string; readonly label: string }
   readonly icon?: ReactNode
   readonly title: ReactNode
   /** One line of facts under the title. */
@@ -143,14 +153,16 @@ export interface WorkspaceHeaderProps {
 export function WorkspaceHeader({ back, icon, title, meta, actions }: WorkspaceHeaderProps) {
   return (
     <header className="flex shrink-0 items-center gap-3 border-b border-border px-3 py-2.5 md:px-4">
-      <Link
-        to={back.href}
-        aria-label={back.label}
-        title={back.label}
-        className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-      >
-        <ChevronLeft className="size-4" />
-      </Link>
+      {back ? (
+        <Link
+          to={back.href}
+          aria-label={back.label}
+          title={back.label}
+          className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <ChevronLeft className="size-4" />
+        </Link>
+      ) : null}
       {icon ? <div className="shrink-0">{icon}</div> : null}
       <div className="min-w-0 flex-1">
         <h1 className="truncate text-[0.9375rem] leading-5 font-semibold tracking-[-0.01em]">
@@ -209,5 +221,47 @@ function SectionTabs({ section }: { readonly section: AppSectionId }) {
         })}
       </div>
     </nav>
+  )
+}
+
+/**
+ * A detail page while its subject loads, or once it could not be: "Not found" for a 404 alone, so
+ * a refusal or an outage says what it is.
+ */
+export function DetailFallback({
+  section,
+  page,
+  back,
+  name,
+  id,
+  icon,
+  error,
+}: {
+  readonly section: AppSectionId
+  readonly page: string
+  readonly back: { readonly href: string; readonly label: string }
+  /** The title while it loads. */
+  readonly name: string
+  readonly id: string
+  readonly icon: ComponentType<{ readonly className?: string }>
+  /** `null` while it loads. */
+  readonly error: unknown
+}) {
+  const failure = useLoadFailure(error, { id })
+  return (
+    <SectionPage section={section} page={page} back={back} title={error ? failure.title : name}>
+      <Panel>
+        {error ? (
+          <PanelEmpty
+            tone="error"
+            icon={icon}
+            title={failure.title}
+            description={failure.description}
+          />
+        ) : (
+          <PanelSkeleton rows={2} />
+        )}
+      </Panel>
+    </SectionPage>
   )
 }

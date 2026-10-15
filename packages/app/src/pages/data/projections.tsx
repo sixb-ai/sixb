@@ -10,10 +10,15 @@ import { useQuery } from "@tanstack/react-query"
 import { Activity, ArrowRight, Box, ChevronRight, Layers, Link2 } from "lucide-react"
 import { type ComponentType, type ReactNode, useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { SectionPage } from "../section-page"
+import { DetailFallback, SectionPage } from "../section-page"
 import {
   apiErrorMessage,
+  Facts,
+  FailureSummary,
+  formatDuration,
+  humanize,
   IconTile,
+  isUnrecorded,
   MetaDot,
   PageSection,
   Panel,
@@ -21,22 +26,15 @@ import {
   PanelRow,
   PanelSkeleton,
   Pill,
-  ToolbarTabs,
-  useFormat,
-} from "../section-ui"
-import { useDataMessages } from "./messages"
-import {
-  DetailFallback,
-  Facts,
-  FailureSummary,
-  formatDuration,
-  humanize,
-  isUnrecorded,
   RunStatusPill,
   Stats,
+  ToolbarTabs,
   UnrecordedHistory,
+  useFormat,
   useNumbers,
-} from "./shared"
+  useRunStatusLabels,
+} from "../section-ui"
+import { useDataMessages } from "./messages"
 
 type Projection =
   | ListProjectionsResponse["objectProjections"][number]
@@ -180,6 +178,7 @@ export function DataProjectionsPage() {
 
 /** One projection: what it reads and fills, field by field, and its runs. */
 export function DataProjectionPage() {
+  const statusLabels = useRunStatusLabels()
   const messages = useDataMessages()
   const format = useFormat()
   const numbers = useNumbers()
@@ -210,6 +209,7 @@ export function DataProjectionPage() {
   if (!projection) {
     return (
       <DetailFallback
+        section="data"
         page="projections"
         back={back}
         name={humanize(projectionId)}
@@ -262,7 +262,7 @@ export function DataProjectionPage() {
           {
             label: messages.common.lastRun,
             value: latestRun ? (
-              messages.status[latestRun.status]
+              statusLabels[latestRun.status]
             ) : (
               <span className="text-muted-foreground">{messages.common.neverRun}</span>
             ),

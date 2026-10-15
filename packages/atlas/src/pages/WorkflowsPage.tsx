@@ -1,47 +1,29 @@
 import { listWorkflowsOptions } from "@sixb/client/hooks"
-import { Card, EmptyState, Tabs, TabsContent, TabsList, TabsTrigger } from "@sixb/ui/components"
+import { Card, EmptyState } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { Search, Workflow } from "lucide-react"
 import { useMemo } from "react"
 import { useSearchParams } from "react-router-dom"
 import { CollectionSearchInput } from "../components/CollectionPageHeader"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"
-import { WorkflowRunHistoryTab } from "../features/workflows/components/runs/WorkflowRunHistoryTab"
+import { MovedToApp } from "../components/MovedToApp"
 import { WorkflowCard } from "../features/workflows/components/workflows/WorkflowCard"
 import { useWorkflowLiveUpdates } from "../features/workflows/hooks/useWorkflowLiveUpdates"
 import type { WorkflowSummary } from "../features/workflows/utils/workflows"
+import { projectAppUrl, workflowRunsInApp } from "../lib/app-url"
 import { humanizeIdentifier } from "../lib/labels"
 
-type WorkflowsPageTab = "workflows" | "runs"
-
 export function WorkflowsPage() {
-  const [searchParams, setSearchParams] = useSearchParams()
-  const activeTab: WorkflowsPageTab = searchParams.get("tab") === "runs" ? "runs" : "workflows"
+  const [searchParams] = useSearchParams()
   useWorkflowLiveUpdates()
-
-  const handleTabChange = (value: string) => {
-    const nextTab: WorkflowsPageTab = value === "runs" ? "runs" : "workflows"
-    setSearchParams((previous) => {
-      const params = new URLSearchParams(previous)
-      params.set("tab", nextTab)
-      return params
-    })
+  // Run history moved into the project's app; without its address the list stays here.
+  if (searchParams.get("tab") === "runs" && projectAppUrl("/")) {
+    return <MovedToApp to={(location) => workflowRunsInApp(location.search)} />
   }
 
   return (
     <PageFrame title="Workflows" headerDivider={false}>
-      <Tabs value={activeTab} onValueChange={handleTabChange} className="gap-4">
-        <TabsList variant="line">
-          <TabsTrigger value="workflows">Workflows</TabsTrigger>
-          <TabsTrigger value="runs">Runs</TabsTrigger>
-        </TabsList>
-        <TabsContent value="workflows" className="mt-0">
-          <WorkflowDefinitionsTab />
-        </TabsContent>
-        <TabsContent value="runs" className="mt-0">
-          <WorkflowRunHistoryTab />
-        </TabsContent>
-      </Tabs>
+      <WorkflowDefinitionsTab />
     </PageFrame>
   )
 }

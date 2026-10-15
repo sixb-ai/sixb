@@ -2,9 +2,14 @@ import { getSyncOptions, listSyncRunsOptions, listSyncsOptions } from "@sixb/cli
 import { useQuery } from "@tanstack/react-query"
 import { CalendarClock, ChevronRight, RefreshCw } from "lucide-react"
 import { Link, useParams } from "react-router-dom"
-import { SectionPage } from "../section-page"
+import { DetailFallback, SectionPage } from "../section-page"
 import {
   apiErrorMessage,
+  Facts,
+  FailureSummary,
+  formatDuration,
+  humanize,
+  isUnrecorded,
   MetaDot,
   PageSection,
   Panel,
@@ -12,25 +17,17 @@ import {
   PanelRow,
   PanelSkeleton,
   Pill,
+  RunStatusPill,
+  Stats,
+  UnrecordedHistory,
   useFormat,
+  useNumbers,
+  useRunStatusLabels,
 } from "../section-ui"
 import { useSyncLiveUpdates } from "./live-updates"
 import { useDataMessages } from "./messages"
 import { SchemaPanel } from "./schema"
-import {
-  ConnectorIcon,
-  DetailFallback,
-  Facts,
-  FailureSummary,
-  formatDuration,
-  humanize,
-  isUnrecorded,
-  RunStatusPill,
-  ScheduleMeta,
-  Stats,
-  UnrecordedHistory,
-  useNumbers,
-} from "./shared"
+import { ConnectorIcon, ScheduleMeta } from "./shared"
 import { SyncButton } from "./sync-button"
 
 /** Data › Syncs: what copies each connector's data into the project, and how it last went. */
@@ -109,6 +106,7 @@ export function DataSyncsPage() {
 
 /** One sync: run it, how its runs went, and what it writes. */
 export function DataSyncPage() {
+  const statusLabels = useRunStatusLabels()
   const messages = useDataMessages()
   const format = useFormat()
   const numbers = useNumbers()
@@ -130,6 +128,7 @@ export function DataSyncPage() {
   if (!sync) {
     return (
       <DetailFallback
+        section="data"
         page="syncs"
         back={back}
         name={humanize(syncId)}
@@ -174,7 +173,7 @@ export function DataSyncPage() {
           {
             label: messages.common.lastRun,
             value: latestRun ? (
-              messages.status[latestRun.status]
+              statusLabels[latestRun.status]
             ) : (
               <span className="text-muted-foreground">{messages.common.neverRun}</span>
             ),

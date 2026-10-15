@@ -45,6 +45,10 @@ export const en = {
         projections: "Projections",
       },
     },
+    observability: {
+      label: "Observability",
+      pages: { runs: "Runs", logs: "Logs", "ai-usage": "AI usage" },
+    },
     settings: {
       label: "Settings",
       groups: { account: "Your account", project: "Project" },
@@ -111,6 +115,10 @@ export const fr: Translation<AppMessages> = {
         pipelines: "Pipelines",
         projections: "Projections",
       },
+    },
+    observability: {
+      label: "Observabilité",
+      pages: { runs: "Exécutions", logs: "Journaux", "ai-usage": "Usage de l’IA" },
     },
     settings: {
       label: "Paramètres",

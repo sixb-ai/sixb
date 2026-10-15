@@ -172,7 +172,7 @@ function answerWith(answer: (request: Request) => Response) {
   client.setConfig({ fetch: Object.assign(api, { preconnect: fetch.preconnect }) })
 }
 
-// Removal proof: make `missing` in DetailFallback always true and the outage reads "Not found".
+// Removal proof: drop `error.status === 404` from useLoadFailure and the outage reads "Not found".
 test("a detail page says Not found for a 404 alone", async () => {
   for (const [status, heading, text] of [
     [404, "Not found", "Nothing is called “github”. It may have been renamed or removed."],

@@ -1,12 +1,14 @@
 # Usage and limits
 
 Sixb records model usage across generation, conversations, AI workflow steps, embeddings, decisions, transcription, and reranking.
-View consumption in Atlas and set monthly limits for your project or specific users and groups.
+View consumption in your app and set monthly limits for your project or specific users and groups.
 
 ## View usage
 
-Open **AI usage** in Atlas to see token usage and costs. Filter by date, provider, or model, and
-open **Model calls** to inspect individual calls.
+Open **Observability › AI usage** from your app's user menu to see token usage and costs. Filter
+by date range, provider, or model, and open an execution under **Model calls** to inspect its
+individual calls. Seeing usage requires `can.observe(agent.usage)` in a
+[role](../auth/authorization.md); adding and changing limits requires `can.manage(agent.usage)`.
 
 Usage and cost depend on what the provider reports and the available pricing. Missing values
 remain unknown rather than being counted as zero.
@@ -18,7 +20,7 @@ for projects that only use decision, embedding, or audio models. Accounting reco
 
 ## Set a monthly limit
 
-In **AI usage**, choose **Add limit** under **Monthly usage limits**:
+In **AI usage**, choose **Add limit** under **Monthly limits**:
 
 1. Choose the project, user, service account, or group the limit applies to.
 2. Select **Cost** or **Tokens** and enter the monthly amount.
@@ -46,7 +48,7 @@ generation waits while projections continue updating objects.
 
 ## Audio transcription
 
-Calls to `sixb.models.audio.transcribe()` appear in Atlas with their cost and audio duration,
+Calls to `sixb.models.audio.transcribe()` appear in **AI usage** with their cost and audio duration,
 when available.
 
 Vercel Gateway transcription is currently blocked when a cost limit applies, because Sixb

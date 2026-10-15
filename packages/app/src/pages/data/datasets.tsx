@@ -39,10 +39,12 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { ChevronLeft, ChevronRight, Columns3, Database, Info, Search } from "lucide-react"
 import { type ReactNode, useMemo, useState } from "react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
-import { SectionPage, SectionWorkspace, WorkspaceHeader } from "../section-page"
+import { DetailFallback, SectionPage, SectionWorkspace, WorkspaceHeader } from "../section-page"
 import {
   apiErrorMessage,
   CopyButton,
+  Facts,
+  humanize,
   IconTile,
   MetaDot,
   Panel,
@@ -51,11 +53,11 @@ import {
   PanelSkeleton,
   Pill,
   useFormat,
+  useNumbers,
 } from "../section-ui"
 import { useDatasetLiveUpdates } from "./live-updates"
 import { useDataMessages } from "./messages"
 import { SchemaPanel } from "./schema"
-import { DetailFallback, Facts, humanize, useNumbers } from "./shared"
 
 const pageSize = 100
 const numericTypes = new Set(["int64", "float64", "decimal"])
@@ -216,6 +218,7 @@ function DatasetDetail({ datasetId }: { readonly datasetId: string }) {
   if (!dataset) {
     return (
       <DetailFallback
+        section="data"
         page="datasets"
         back={back}
         name={datasetId}

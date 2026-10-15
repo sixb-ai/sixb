@@ -21,13 +21,13 @@ import {
 import { cn } from "@sixb/ui/lib/utils"
 import { Loader2 } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
 import {
   type ActionParamFormValue,
   type ActionParamFormValues,
   actionNeedsParamDialog,
   buildObjectActionParams,
 } from "../lib/actions/params"
+import { openActionRun } from "../lib/app-url"
 import { ActionParamNullControl } from "./ActionParamNullControl"
 import {
   FileRefUploadField,
@@ -250,7 +250,6 @@ export function ActionButton({
   size = "compact",
   requireConfirm,
 }: ActionButtonProps) {
-  const navigate = useNavigate()
   const [showParams, setShowParams] = useState(false)
   const [result, setResult] = useState<{ success: boolean; message?: string } | null>(null)
   const requestAction = useActionRunMutation({
@@ -258,7 +257,7 @@ export function ActionButton({
     onSuccess: (run) => {
       setResult({ success: true })
       setShowParams(false)
-      navigate(`/actions/runs/${run.id}`)
+      openActionRun(run.id)
     },
     onError: (error) => {
       setShowParams(false)

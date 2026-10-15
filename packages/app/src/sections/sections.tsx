@@ -1,10 +1,14 @@
 import type { GroupDefinition } from "@sixb/core"
 import {
+  Activity,
   Braces,
   Cable,
+  ChartNoAxesCombined,
   Database,
+  History,
   Layers,
   RefreshCw,
+  ScrollText,
   Settings,
   ShieldCheck,
   UserRound,
@@ -115,6 +119,7 @@ export function useOpenSections(): readonly OpenSection[] {
 const sectionIcons: Record<AppSectionId, ComponentType<{ readonly className?: string }>> = {
   settings: Settings,
   data: Database,
+  observability: Activity,
 }
 
 const pageIcons: Record<string, ComponentType<{ readonly className?: string }>> = {
@@ -127,6 +132,9 @@ const pageIcons: Record<string, ComponentType<{ readonly className?: string }>> 
   datasets: Database,
   pipelines: Workflow,
   projections: Layers,
+  runs: History,
+  logs: ScrollText,
+  "ai-usage": ChartNoAxesCombined,
 }
 
 /**

@@ -1,6 +1,6 @@
 # Logging
 
-Use handler logs to understand what your project did during a run. Sixb attaches the run and step context automatically, so you can inspect the output in Atlas.
+Use handler logs to understand what your project did during a run. Sixb attaches the run and step context automatically, so you can inspect the output in your app.
 
 ## Write a log
 
@@ -32,7 +32,7 @@ Keep fields JSON-serializable and avoid logging credentials. Let failures propag
 
 ## View logs
 
-Open **Logs** in Atlas to filter by run, kind, or level. Individual run pages also include their logs. Reading logs requires `can.observe("logs")` in a [role](../auth/authorization.md).
+Open **Observability › Logs** from your app's user menu to follow logs live and filter them by kind or level. Workflow and action run pages include their own logs. Reading logs requires `can.observe("logs")` in a [role](../auth/authorization.md).
 
 Capture is enabled at `info` level by default. Stored logs have bounded retention; use an external output provider when you need longer retention.
 

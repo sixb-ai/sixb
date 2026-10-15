@@ -92,9 +92,9 @@ module scope. Set the page title and app icons through [Customization](customiza
 ## Add a sidebar
 
 `AppShell` frames every page with a sidebar: the app's name, your navigation, and a menu for the
-signed-in user with [Data](#data), [Settings](#settings), theme switching, and sign-out. Opening Data
-or Settings swaps the sidebar for that section's pages, with a link back. Sixb includes its styles,
-so it needs no stylesheet of yours.
+signed-in user with [Data](#data), [Observability](#observability), [Settings](#settings), theme
+switching, and sign-out. Opening a section swaps the sidebar for its pages, with a link back. Sixb
+includes its styles, so it needs no stylesheet of yours.
 
 File: `app/layout.tsx`
 
@@ -236,6 +236,27 @@ import { SyncButton } from "@sixb/app"
 | `showStatus` | `false` | Shows when it last synced, or that it failed, beside the button |
 | `variant`, `size` | `"outline"`, `"sm"` | Passed to the `@sixb/ui` button |
 
+## Observability
+
+Every app includes Observability, in the user menu: what ran, what it wrote while it worked, and
+what its model calls cost.
+
+| Page | Path | Shows |
+| --- | --- | --- |
+| Runs | `/observability/runs` | Every run, a tab per kind: workflows, actions, syncs, pipelines, projections and webhook deliveries, filtered by what ran and its status |
+| Logs | `/observability/logs` | Logs as runs write them, filtered by kind and level and searchable |
+| AI usage | `/observability/ai-usage` | This month's [usage limits](../models/usage-and-limits.md), then cost, tokens and every model call for a date range |
+
+A workflow or action run opens its own page, such as `/observability/runs/workflows/run_123`: its
+input and output, each step with what it read and wrote, and its logs. A step that waits for
+someone's response is answered from the workflow's page in Atlas. A sync, pipeline, projection or
+webhook run opens the page under [Data](#data) that shows it.
+
+Each page shows what the API lets the person read. Runs follow the grants of what ran, such as
+`can.run` on a workflow or `can.apply` on an action. Logs need `can.observe("logs")`, AI usage
+needs `can.observe(agent.usage)`, and changing limits needs `can.manage(agent.usage)`. See
+[Authorization](../auth/authorization.md).
+
 ## Choose who sees a section
 
 Export `visibility` from `app/layout.tsx` to show a section only to some groups:
@@ -249,6 +270,7 @@ import { admins } from "../security/groups/admins"
 export const visibility = {
   settings: [admins],
   data: [admins],
+  observability: [admins],
 } satisfies AppVisibility
 ```
 
@@ -256,6 +278,7 @@ export const visibility = {
 | --- | --- |
 | `settings` | Members and Service accounts |
 | `data` | Every Data page |
+| `observability` | Every Observability page |
 
 | Value | Who sees them |
 | --- | --- |
@@ -264,8 +287,9 @@ export const visibility = {
 | `[]` | Nobody |
 
 Personal and Developers stay open to everyone signed in. With authentication off nobody is signed
-in, so `visibility` does not apply and Data is open. A hidden page leaves the navigation, and its
-URL leads to `/`. Visibility only hides screens: the API still checks each person's permissions.
+in, so `visibility` does not apply and Data and Observability are open. A hidden page leaves the
+navigation, and its URL leads to `/`. Visibility only hides screens: the API still checks each
+person's permissions.
 
 The browser loads `app/layout.tsx`, so the group files it imports must take `defineGroup` from
 `@sixb/core/security`:

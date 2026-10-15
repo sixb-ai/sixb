@@ -1,7 +1,6 @@
 import type { ObjectSummary } from "@sixb/client"
 import {
   getProjectInfoOptions,
-  getWorkflowRunOptions,
   listActionsOptions,
   listObjectsPageOptions,
   listObjectTypesOptions,
@@ -32,7 +31,8 @@ import {
 } from "react-router-dom"
 import { SidebarDataContext } from "../components/layout/sidebarData"
 import { KNOWN_VIEWS } from "../components/layout/viewMode"
-import { projectAppUrl } from "../lib/app-url"
+import { MovedToApp } from "../components/MovedToApp"
+import { workflowRunsInApp } from "../lib/app-url"
 import { objectDetailPath, objectIdFromPathSegment } from "../lib/objectRoutes"
 import {
   getObjectSortPreference,
@@ -41,10 +41,7 @@ import {
 } from "../lib/userPreferences"
 import { ObjectsWorkbench, type ObjectTypePreviewSection } from "./ObjectsWorkbench"
 import {
-  ActionRunDetailPage,
   ActionsPage,
-  AiUsagePage,
-  LogsPage,
   ObjectDetailPage,
   OntologyExplorer,
   RuleDetailPage,
@@ -327,12 +324,34 @@ export function ProjectWorkspace() {
     <Suspense fallback={null}>
       <Routes>
         <Route path="actions" element={<ActionsPage />} />
-        <Route path="actions/runs/:runId" element={<ActionRunDetailPage />} />
+        <Route
+          path="actions/runs/:runId"
+          element={
+            <MovedToApp
+              to={(location) =>
+                `/observability/runs/actions${location.pathname.slice("/actions/runs".length)}`
+              }
+            />
+          }
+        />
         <Route path="workflows" element={<WorkflowsPage />} />
         <Route path="workflows/:workflowId" element={<WorkflowDetailPage />} />
-        <Route path="logs" element={<LogsPage />} />
-        <Route path="runs" element={<RunsTabRedirect />} />
-        <Route path="runs/:runId" element={<RunRedirect />} />
+        <Route path="logs" element={<MovedToApp prefix="/observability" />} />
+        <Route path="ai-usage" element={<MovedToApp prefix="/observability" />} />
+        <Route
+          path="runs"
+          element={<MovedToApp to={(location) => workflowRunsInApp(location.search)} />}
+        />
+        <Route
+          path="runs/:runId"
+          element={
+            <MovedToApp
+              to={(location) =>
+                `/observability/runs/workflows${location.pathname.slice("/runs".length)}`
+              }
+            />
+          }
+        />
         <Route
           path="*"
           element={constrained(
@@ -359,7 +378,6 @@ export function ProjectWorkspace() {
               />
               <Route path="home" element={<Navigate to="/" replace />} />
               <Route path="objects" element={<Navigate to="/" replace />} />
-              <Route path="ai-usage" element={<AiUsagePage />} />
               {dataViews.map((view) => (
                 <Route key={view} path={`${view}/*`} element={<MovedToApp prefix="/data" />} />
               ))}
@@ -397,62 +415,13 @@ export function ProjectWorkspace() {
   )
 }
 
-// Settings and Data live in the project's app now, Data's pages under `/data`. Old links follow
-// them there when Atlas knows the app's address, and land on the Atlas home otherwise.
+// Settings, Data and Observability live in the project's app now: Data's pages under `/data`,
+// Logs, AI usage and run pages under `/observability`.
 const dataViews = ["connectors", "syncs", "datasets", "pipelines", "projections"] as const
-
-function MovedToApp({ prefix = "" }: { readonly prefix?: string }) {
-  const location = useLocation()
-  const target = projectAppUrl(`${prefix}${location.pathname}${location.search}`)
-  useEffect(() => {
-    if (target) window.location.replace(target)
-  }, [target])
-  return target ? null : <Navigate to="/" replace />
-}
 
 function OntologyTypeRedirect() {
   const { typeId } = useParams<{ typeId: string }>()
   if (!typeId) return <Navigate to="/ontology" replace />
   const params = new URLSearchParams({ type: typeId, view: "details" })
   return <Navigate to={`/ontology?${params.toString()}`} replace />
-}
-
-function RunsTabRedirect() {
-  const [searchParams] = useSearchParams()
-  const params = new URLSearchParams(searchParams)
-  params.set("tab", "runs")
-
-  return <Navigate to={`/workflows?${params.toString()}`} replace />
-}
-
-// A run is inspected on its workflow's canvas, so resolve the run's workflow and
-// hand off to `/workflows/:workflowId?run=:runId`.
-function RunRedirect() {
-  const { runId = "" } = useParams()
-  const runQuery = useQuery({
-    ...getWorkflowRunOptions({ path: { runId } }),
-    enabled: runId.length > 0,
-  })
-
-  if (!runId) {
-    return <Navigate to="/workflows?tab=runs" replace />
-  }
-
-  if (runQuery.isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="flex items-center gap-3 text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" />
-          <span className="text-sm">Loading run...</span>
-        </div>
-      </div>
-    )
-  }
-
-  const workflowId = runQuery.data?.run.workflowId
-  if (!workflowId) {
-    return <Navigate to="/workflows?tab=runs" replace />
-  }
-
-  return <Navigate to={`/workflows/${workflowId}?run=${runId}`} replace />
 }

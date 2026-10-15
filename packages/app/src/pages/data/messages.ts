@@ -2,14 +2,6 @@ import { defineMessages, type MessageTree, plural, type Translation } from "@six
 
 /** Source catalog of the Data section. */
 export const en = {
-  status: {
-    queued: "Queued",
-    running: "Running",
-    succeeded: "Succeeded",
-    failed: "Failed",
-    cancelled: "Cancelled",
-    superseded: "Superseded",
-  },
   common: {
     neverRun: "Never run",
     lastRun: "Last run",
@@ -21,10 +13,6 @@ export const en = {
     loadFailed: "This list could not be loaded.",
     writes: (dataset: string) => `Writes ${dataset}`,
     lastRunFailed: "The last run failed",
-    notFoundTitle: "Not found",
-    notFound: (id: string) => `Nothing is called “${id}”. It may have been renamed or removed.`,
-    unavailableTitle: "Could not load",
-    tryAgain: "Try again in a moment.",
     schedule: "Schedule",
     schedules: "Schedules",
     details: "Details",
@@ -45,23 +33,6 @@ export const en = {
       merge: "Merge",
       schema: "Schema change",
     },
-  },
-  unrecorded: {
-    title: (what: string) => `${what} are not recorded`,
-    description:
-      "This project's storage keeps no run history. Runs still happen; configure storage that records them to see them here.",
-  },
-  failure: {
-    viewDetails: "Details",
-    title: "What went wrong",
-    occurredAt: "Occurred",
-    upstreamStatus: "Upstream status",
-    retry: "Retry",
-    retryable: "Sixb retries this",
-    notRetryable: "Not retried",
-    redacted: "Some details were removed because they may hold secrets.",
-    truncated: "The details were cut short because they were too long.",
-    copyHint: "Copy everything to share it.",
   },
   syncButton: {
     syncNow: "Sync now",
@@ -197,14 +168,6 @@ export const en = {
 export type DataMessages = typeof en
 
 export const fr: Translation<DataMessages> = {
-  status: {
-    queued: "En file",
-    running: "En cours",
-    succeeded: "Réussi",
-    failed: "Échec",
-    cancelled: "Annulé",
-    superseded: "Remplacé",
-  },
   common: {
     neverRun: "Jamais exécuté",
     lastRun: "Dernière exécution",
@@ -216,11 +179,6 @@ export const fr: Translation<DataMessages> = {
     loadFailed: "Impossible de charger cette liste.",
     writes: (dataset: string) => `Écrit ${dataset}`,
     lastRunFailed: "La dernière exécution a échoué",
-    notFoundTitle: "Introuvable",
-    notFound: (id: string) =>
-      `Rien ne s’appelle « ${id} ». Il a peut-être été renommé ou supprimé.`,
-    unavailableTitle: "Chargement impossible",
-    tryAgain: "Réessayez dans un instant.",
     schedule: "Planification",
     schedules: "Planifications",
     details: "Détails",
@@ -241,23 +199,6 @@ export const fr: Translation<DataMessages> = {
       merge: "Fusion",
       schema: "Changement de schéma",
     },
-  },
-  unrecorded: {
-    title: (what: string) => `${what} : non enregistrées`,
-    description:
-      "Le stockage de ce projet ne conserve pas l’historique des exécutions. Elles ont bien lieu ; configurez un stockage qui les enregistre pour les voir ici.",
-  },
-  failure: {
-    viewDetails: "Détails",
-    title: "Ce qui s’est mal passé",
-    occurredAt: "Survenu",
-    upstreamStatus: "Statut du service",
-    retry: "Nouvel essai",
-    retryable: "Sixb réessaie",
-    notRetryable: "Pas de nouvel essai",
-    redacted: "Certains détails ont été retirés car ils pouvaient contenir des secrets.",
-    truncated: "Les détails ont été tronqués car ils étaient trop longs.",
-    copyHint: "Copiez le tout pour le partager.",
   },
   syncButton: {
     syncNow: "Synchroniser",
