@@ -75,20 +75,6 @@ export function formatFileSize(sizeBytes: number): string {
   return `${value.toLocaleString(undefined, { maximumFractionDigits })} ${units[unitIndex]}`
 }
 
-export function actionRunFileContentUrl(input: {
-  readonly baseUrl: string
-  readonly runId: string
-  readonly pathSegments: readonly string[]
-  readonly disposition?: "attachment" | "inline"
-}): string {
-  return contextualFileContentUrl({
-    baseUrl: input.baseUrl,
-    routePath: `/api/action-runs/${encodeURIComponent(input.runId)}/files/content`,
-    jsonPointerPath: ["params", ...input.pathSegments],
-    disposition: input.disposition,
-  })
-}
-
 export function workflowRunFileContentUrl(input: {
   readonly baseUrl: string
   readonly runId: string

@@ -73,6 +73,7 @@
     "@tailwindcss/cli": "^4.2.2",
     "@xyflow/react": "^12.10.2",
     "lucide-react": "^0.562.0",
+    "recharts": "^3.8.0",
     "tailwindcss": "^4.1.18"
   },
   "peerDependencies": {
@@ -85,6 +86,7 @@
     "@testing-library/react": "^16.3.2",
     "@types/bun": "latest",
     "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "happy-dom": "^20.11.6",
     "libphonenumber-js": "1.13.9",
     "typescript": "^5.7.0"

@@ -1,4 +1,3 @@
-import { isSixbApiError } from "@sixb/client"
 import {
   getDatasetOptions,
   getPipelineOptions,
@@ -27,32 +26,37 @@ import {
 } from "lucide-react"
 import { lazy, type ReactNode, Suspense, useMemo, useState } from "react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
-import { notify, SectionPage, SectionWorkspace, WorkspaceHeader } from "../section-page"
+import {
+  DetailFallback,
+  notify,
+  SectionPage,
+  SectionWorkspace,
+  WorkspaceHeader,
+} from "../section-page"
 import {
   apiErrorMessage,
+  FailureSummary,
+  formatDuration,
+  humanize,
   IconTile,
+  isUnrecorded,
   MetaDot,
   Panel,
   PanelEmpty,
   PanelRow,
   PanelSkeleton,
   Pill,
+  RunStatusPill,
+  UnrecordedHistory,
   useFormat,
+  useLoadFailure,
+  useNumbers,
+  useRunStatusLabels,
 } from "../section-ui"
 import { datasetGridColumns } from "./datasets"
 import { useDatasetLiveUpdates, usePipelineLiveUpdates } from "./live-updates"
 import { useDataMessages } from "./messages"
-import {
-  DetailFallback,
-  FailureSummary,
-  formatDuration,
-  humanize,
-  isUnrecorded,
-  RunStatusPill,
-  ScheduleMeta,
-  UnrecordedHistory,
-  useNumbers,
-} from "./shared"
+import { ScheduleMeta } from "./shared"
 
 /** Data › Pipelines: what turns datasets into new ones, and how each last ran. */
 export function DataPipelinesPage() {
@@ -154,6 +158,7 @@ export function DataPipelinePage() {
 }
 
 function PipelineDetail({ pipelineId }: { readonly pipelineId: string }) {
+  const statusLabels = useRunStatusLabels()
   const messages = useDataMessages()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -210,6 +215,7 @@ function PipelineDetail({ pipelineId }: { readonly pipelineId: string }) {
   if (!pipeline) {
     return (
       <DetailFallback
+        section="data"
         page="pipelines"
         back={back}
         name={humanize(pipelineId)}
@@ -267,7 +273,7 @@ function PipelineDetail({ pipelineId }: { readonly pipelineId: string }) {
               {request.isPending
                 ? messages.pipelines.starting
                 : running
-                  ? messages.status.running
+                  ? statusLabels.running
                   : messages.pipelines.runNow}
             </Button>
           </>
@@ -471,6 +477,7 @@ function RunPanel({
   const format = useFormat()
   const numbers = useNumbers()
   const runQuery = useQuery({ ...getPipelineRunOptions({ path: { runId } }), retry: false })
+  const failure = useLoadFailure(runQuery.error, { id: runId })
   const run = runQuery.data?.run
   const steps = runQuery.data?.steps ?? []
 
@@ -490,12 +497,8 @@ function RunPanel({
           <PanelEmpty
             tone="error"
             icon={History}
-            title={
-              isSixbApiError(runQuery.error) && runQuery.error.status === 404
-                ? messages.common.notFoundTitle
-                : messages.common.unavailableTitle
-            }
-            description={apiErrorMessage(runQuery.error, messages.common.tryAgain)}
+            title={failure.title}
+            description={failure.description}
           />
         ) : (
           <div className="flex flex-col gap-5 p-4">

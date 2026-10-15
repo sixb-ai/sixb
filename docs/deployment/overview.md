@@ -95,4 +95,4 @@ Configure your platform's health checks against the API:
 | `/health` | Check that the API process is alive. |
 | `/ready` | Check that storage is reachable and its schema is current. Returns `503` when unavailable. |
 
-Inspect failed runs in Atlas and configure [failure notifications](../logging/overview.md#report-failures). A failed external operation may have partially completed; check its outcome before retrying.
+Inspect failed runs under [Observability › Runs](../apps/overview.md#observability) in your app and configure [failure notifications](../logging/overview.md#report-failures). A failed external operation may have partially completed; check its outcome before retrying.

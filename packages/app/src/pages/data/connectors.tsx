@@ -8,11 +8,15 @@ import {
 import { useQuery } from "@tanstack/react-query"
 import { Cable, ChevronRight, RefreshCw, Webhook } from "lucide-react"
 import { useParams } from "react-router-dom"
-import { SectionPage } from "../section-page"
+import { DetailFallback, SectionPage } from "../section-page"
 import {
   apiErrorMessage,
   CopyButton,
+  FailureSummary,
+  formatDuration,
+  humanize,
   IconTile,
+  isUnrecorded,
   MetaDot,
   PageSection,
   Panel,
@@ -20,20 +24,13 @@ import {
   PanelRow,
   PanelSkeleton,
   Pill,
-  useFormat,
-} from "../section-ui"
-import { useDataMessages } from "./messages"
-import {
-  ConnectorIcon,
-  DetailFallback,
-  FailureSummary,
-  formatDuration,
-  humanize,
-  isUnrecorded,
   RunStatusPill,
   UnrecordedHistory,
+  useFormat,
   useNumbers,
-} from "./shared"
+} from "../section-ui"
+import { useDataMessages } from "./messages"
+import { ConnectorIcon } from "./shared"
 
 /** Data › Connectors: the services this project reads from. */
 export function DataConnectorsPage() {
@@ -120,6 +117,7 @@ export function DataConnectorPage() {
   if (!connector) {
     return (
       <DetailFallback
+        section="data"
         page="connectors"
         back={back}
         name={humanize(connectorId)}

@@ -12,7 +12,6 @@ import {
   Badge,
   Button,
   Card,
-  CardContent,
   Combobox,
   type ComboboxOption,
   Dialog,
@@ -30,16 +29,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
   Textarea,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
@@ -54,15 +43,8 @@ import {
   SquareActivity,
   X,
 } from "lucide-react"
-import {
-  type ReactElement,
-  type ReactNode,
-  type SyntheticEvent,
-  useCallback,
-  useMemo,
-  useState,
-} from "react"
-import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { type ReactElement, type SyntheticEvent, useCallback, useMemo, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { ActionParamNullControl } from "../components/ActionParamNullControl"
 import { CollectionSearchInput } from "../components/CollectionPageHeader"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"
@@ -71,7 +53,8 @@ import {
   parseFileRefFormValue,
   stringifyFileRefFormValue,
 } from "../components/FileRefUploadField"
-import { formatDate, formatRelativeTime } from "../features/workflows/utils/workflows"
+import { MovedToApp } from "../components/MovedToApp"
+import { formatRelativeTime } from "../features/workflows/utils/workflows"
 import {
   type ActionParamFormValue,
   type ActionParamFormValues,
@@ -79,18 +62,16 @@ import {
   buildActionParams,
   describeActionParamInput,
 } from "../lib/actions/params"
+import { openActionRun, projectAppUrl } from "../lib/app-url"
 import { humanizeIdentifier } from "../lib/labels"
 
 type ActionCatalogItem = ListActionsResponse[number]
 type ActionRunSummary = ListActionRunsResponse["runs"][number]
 type ActionRunStatus = ActionRunSummary["status"]
 
-type ActionsPageTab = "actions" | "runs"
-
 /**
- * Runs record no event, so a tab that lists them reads them again while it is displayed, to show
- * runs started elsewhere: by workflows, agents, or other users. Each tab mounts only while it is
- * displayed, so it polls only then.
+ * Runs record no event, so each action's latest run is read again while the page is displayed, to
+ * show runs started elsewhere: by workflows, agents, or other users.
  */
 const RUN_HISTORY_REFETCH_MS = 10_000
 
@@ -107,32 +88,15 @@ const actionRunStatusClasses: Record<ActionRunStatus, string> = {
 }
 
 export function ActionsPage() {
-  const [searchParams, setSearchParams] = useSearchParams()
-  const activeTab: ActionsPageTab = searchParams.get("tab") === "runs" ? "runs" : "actions"
-
-  const handleTabChange = (value: string) => {
-    const nextTab: ActionsPageTab = value === "runs" ? "runs" : "actions"
-    setSearchParams((previous) => {
-      const params = new URLSearchParams(previous)
-      params.set("tab", nextTab)
-      return params
-    })
+  const [searchParams] = useSearchParams()
+  // Run history moved into the project's app; without its address the list stays here.
+  if (searchParams.get("tab") === "runs" && projectAppUrl("/")) {
+    return <MovedToApp to={() => "/observability/runs?kind=actions"} />
   }
 
   return (
     <PageFrame title="Actions" headerDivider={false}>
-      <Tabs value={activeTab} onValueChange={handleTabChange} className="gap-4">
-        <TabsList variant="line">
-          <TabsTrigger value="actions">Actions</TabsTrigger>
-          <TabsTrigger value="runs">Runs</TabsTrigger>
-        </TabsList>
-        <TabsContent value="actions" className="mt-0">
-          <ActionDefinitionsTab />
-        </TabsContent>
-        <TabsContent value="runs" className="mt-0">
-          <ActionRunHistoryTab />
-        </TabsContent>
-      </Tabs>
+      <ActionDefinitionsTab />
     </PageFrame>
   )
 }
@@ -372,80 +336,7 @@ function ActionCard({
   )
 }
 
-function ActionRunHistoryTab() {
-  const runsQuery = useQuery({
-    ...listActionRunsOptions({ query: { limit: "50", order: "desc" } }),
-    refetchInterval: RUN_HISTORY_REFETCH_MS,
-  })
-  const runs = runsQuery.data?.runs ?? []
-
-  if (runsQuery.isLoading) {
-    return <LoadingPage label="Loading action runs..." />
-  }
-
-  if (runsQuery.isError) {
-    return (
-      <ErrorPage title="Action runs unavailable" description="Could not load action run history." />
-    )
-  }
-
-  if (runs.length === 0) {
-    return (
-      <Card>
-        <EmptyState
-          icon={<SquareActivity className="size-12 stroke-1" />}
-          title="No action runs"
-          description="Requested actions will appear here."
-        />
-      </Card>
-    )
-  }
-
-  return <ActionRunTable runs={runs} />
-}
-
-export function ActionRunTable({ runs }: { runs: readonly ActionRunSummary[] }) {
-  return (
-    <Card className="gap-0 overflow-hidden p-0">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Run</TableHead>
-            <TableHead>Action</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="hidden md:table-cell">Subject</TableHead>
-            <TableHead className="hidden text-right sm:table-cell">Started</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {runs.map((run) => (
-            <TableRow key={run.id}>
-              <TableCell className="font-mono text-xs">
-                <Link to={`/actions/runs/${run.id}`} className="underline-offset-4 hover:underline">
-                  {run.id}
-                </Link>
-              </TableCell>
-              <TableCell className="font-mono text-xs text-muted-foreground">
-                {run.actionId}
-              </TableCell>
-              <TableCell>
-                <ActionRunStatusBadge status={run.status} />
-              </TableCell>
-              <TableCell className="hidden font-mono text-xs text-muted-foreground md:table-cell">
-                {formatSubject(run.subject)}
-              </TableCell>
-              <TableCell className="hidden text-right text-xs text-muted-foreground sm:table-cell">
-                {formatRelativeTime(run.startedAt)}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </Card>
-  )
-}
-
-export function ActionRunStatusBadge({ status }: { status: ActionRunStatus }) {
+function ActionRunStatusBadge({ status }: { status: ActionRunStatus }) {
   return (
     <Badge variant="outline" className={cn("gap-1.5 rounded-md", actionRunStatusClasses[status])}>
       {status === "succeeded" ? <CheckCircle2 className="h-3 w-3" /> : null}
@@ -463,7 +354,6 @@ function ActionRequestDialog({
   subject?: { kind: "object"; objectTypeId: string; primaryId: string }
   trigger?: ReactElement
 }) {
-  const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [values, setValues] = useState<ActionParamFormValues>({})
   const [subjectPrimaryId, setSubjectPrimaryId] = useState(subject?.primaryId ?? "")
@@ -473,7 +363,7 @@ function ActionRequestDialog({
     invalidateOnCommit: true,
     onSuccess: (run) => {
       setOpen(false)
-      navigate(`/actions/runs/${run.id}`)
+      openActionRun(run.id)
     },
   })
 
@@ -850,37 +740,6 @@ function ObjectRefField({
   )
 }
 
-export function ActionRunMetaGrid({ run }: { run: ActionRunSummary }) {
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <Metric label="Status" value={<ActionRunStatusBadge status={run.status} />} />
-      <Metric label="Phase" value={run.phase} />
-      <Metric label="Started" value={formatDate(run.startedAt)} />
-      <Metric label="Subject" value={formatSubject(run.subject)} mono />
-    </div>
-  )
-}
-
-function Metric({ label, value, mono }: { label: string; value: ReactNode; mono?: boolean }) {
-  return (
-    <Card className="p-0">
-      <CardContent className="space-y-1.5 p-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <div className={cn("wrap-break-word text-sm text-foreground", mono && "font-mono text-xs")}>
-          {value}
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function formatSubject(subject: ActionRunSummary["subject"]): string {
-  if (subject.kind === "none") {
-    return "global"
-  }
-  return `${subject.objectTypeId}:${subject.primaryId}`
-}
-
 function errorToMessage(error: unknown): string | null {
   if (!error) return null
   if (isRecord(error) && typeof error.error === "string") return error.error
@@ -892,5 +751,3 @@ function errorToMessage(error: unknown): string | null {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
-
-export { ActionRequestDialog, formatSubject }

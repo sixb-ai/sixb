@@ -709,15 +709,11 @@ function builtInRoutesFor(routes: readonly PageRoute[]): BuiltInRouteManifestEnt
       },
       ...section.pages.flatMap((page) => [
         { path: page.path, moduleSpecifier: builtInPageModule, exportName: page.exportName },
-        ...(page.detail
-          ? [
-              {
-                path: page.detail.path,
-                moduleSpecifier: builtInPageModule,
-                exportName: page.detail.exportName,
-              },
-            ]
-          : []),
+        ...(page.details ?? []).map((detail) => ({
+          path: detail.path,
+          moduleSpecifier: builtInPageModule,
+          exportName: detail.exportName,
+        })),
       ]),
     ]),
   ]

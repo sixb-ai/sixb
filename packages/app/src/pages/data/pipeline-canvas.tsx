@@ -18,8 +18,8 @@ import {
 } from "@xyflow/react"
 import { Braces, Database, FileCode2, type LucideIcon } from "lucide-react"
 import { useEffect, useMemo } from "react"
+import { humanize, type RunStatus, useRunStatusLabels } from "../section-ui"
 import { useDataMessages } from "./messages"
-import { humanize, type RunStatus } from "./shared"
 
 type Step = GetPipelineResponse["graph"]["nodes"][number]["step"]
 
@@ -156,6 +156,7 @@ const statusText: Partial<Record<RunStatus, string>> = {
 
 function StepCard({ data }: NodeProps<StepNode>) {
   const messages = useDataMessages()
+  const statusLabels = useRunStatusLabels()
   const { step, status } = data
   return (
     <div
@@ -172,7 +173,7 @@ function StepCard({ data }: NodeProps<StepNode>) {
         />
         {status && statusText[status] ? (
           <span className={cn("text-[0.6875rem] font-medium", statusText[status])}>
-            {messages.status[status]}
+            {statusLabels[status]}
           </span>
         ) : null}
       </div>

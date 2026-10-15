@@ -2,10 +2,7 @@ import { lazy } from "react"
 import type { ViewMode } from "../components/layout/Sidebar"
 import { KNOWN_VIEWS } from "../components/layout/viewMode"
 
-const loadActionRunDetailPage = () => import("./ActionRunDetailPage")
 const loadActionsPage = () => import("./ActionsPage")
-const loadAiUsagePage = () => import("./AiUsagePage")
-const loadLogsPage = () => import("./LogsPage")
 const loadObjectDetailPage = () => import("./ObjectDetailPage")
 const loadObjectTypeDetailPage = () => import("./ObjectTypeDetail")
 const loadOntologyExplorer = () => import("./OntologyExplorer")
@@ -13,16 +10,9 @@ const loadRulesPage = () => import("./RulesPage")
 const loadWorkflowDetailPage = () => import("./WorkflowDetailPage")
 const loadWorkflowsPage = () => import("./WorkflowsPage")
 
-export const ActionRunDetailPage = lazy(() =>
-  loadActionRunDetailPage().then((module) => ({ default: module.ActionRunDetailPage }))
-)
 export const ActionsPage = lazy(() =>
   loadActionsPage().then((module) => ({ default: module.ActionsPage }))
 )
-export const AiUsagePage = lazy(() =>
-  loadAiUsagePage().then((module) => ({ default: module.AiUsagePage }))
-)
-export const LogsPage = lazy(() => loadLogsPage().then((module) => ({ default: module.LogsPage })))
 export const ObjectDetailPage = lazy(() =>
   loadObjectDetailPage().then((module) => ({ default: module.ObjectDetailPage }))
 )
@@ -49,8 +39,6 @@ type WorkspaceRouteLoader = () => Promise<unknown>
 
 const workspaceViewLoaders: Partial<Record<ViewMode, WorkspaceRouteLoader>> = {
   actions: loadActionsPage,
-  "ai-usage": loadAiUsagePage,
-  logs: loadLogsPage,
   ontology: loadOntologyExplorer,
   rules: loadRulesPage,
   workflows: loadWorkflowsPage,
@@ -61,19 +49,11 @@ export function preloadWorkspaceView(view: ViewMode): void {
 }
 
 export function preloadWorkspacePath(pathname: string): void {
-  const [view, detail, id] = pathname.split("/").filter(Boolean)
+  const [view, detail] = pathname.split("/").filter(Boolean)
 
   if (!view || view === "home" || view === "objects") return
 
-  if (view === "actions" && detail === "runs" && id) {
-    preload(loadActionRunDetailPage)
-    return
-  }
   if (view === "workflows" && detail) {
-    preload(loadWorkflowDetailPage)
-    return
-  }
-  if (view === "runs") {
     preload(loadWorkflowDetailPage)
     return
   }

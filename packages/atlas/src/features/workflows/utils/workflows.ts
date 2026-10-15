@@ -10,24 +10,12 @@ import { fieldRecordSchema } from "../../../lib/valueSchema"
 export type WorkflowSummary = ListWorkflowsResponse[number]
 export type WorkflowDetail = GetWorkflowResponse
 export type WorkflowNode = WorkflowDetail["nodes"][number]
-export type WorkflowRunSummary = ListWorkflowRunsResponse["runs"][number]
+type WorkflowRunSummary = ListWorkflowRunsResponse["runs"][number]
 export type WorkflowRunDetail = GetWorkflowRunResponse["run"]
 export type WorkflowRunNode = GetWorkflowRunResponse["nodes"][number]
 export type WorkflowAgentNodeExecution = GetWorkflowAgentNodeExecutionResponse
 export type WorkflowRunStatus = WorkflowRunSummary["status"]
 export type WorkflowNodeStatus = WorkflowRunNode["status"]
-export type WorkflowRunStatusFilter = WorkflowRunStatus | "all"
-
-export const RUN_HISTORY_PAGE_SIZE = 20
-export const allWorkflowRunStatuses = [
-  "queued",
-  "running",
-  "waiting",
-  "succeeded",
-  "failed",
-  "cancelled",
-] as const satisfies readonly WorkflowRunStatus[]
-
 export const statusLabels: Record<WorkflowRunStatus, string> = {
   queued: "Queued",
   running: "Running",
@@ -58,14 +46,6 @@ export const nodeStatusClasses: Record<WorkflowNodeStatus, string> = {
   succeeded: statusClasses.succeeded,
   failed: statusClasses.failed,
   cancelled: statusClasses.cancelled,
-}
-
-export function isWorkflowRunStatus(value: string | null): value is WorkflowRunStatus {
-  return allWorkflowRunStatuses.some((status) => status === value)
-}
-
-export function readStatusFilter(value: string): WorkflowRunStatusFilter {
-  return isWorkflowRunStatus(value) ? value : "all"
 }
 
 export function isActiveRunStatus(status: WorkflowRunStatus): boolean {
@@ -112,7 +92,7 @@ export function formatRelativeTime(value?: string): string {
   return formatDate(value)
 }
 
-export function formatDurationFromMs(value: number): string {
+function formatDurationFromMs(value: number): string {
   if (!Number.isFinite(value) || value < 0) return "Not recorded"
   if (value < 1000) return "<1s"
 

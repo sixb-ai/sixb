@@ -27,6 +27,7 @@ import {
   ChevronRight,
   Database,
   GitBranch,
+  History,
   Layers,
   LayoutGrid,
   ListChecks,
@@ -38,15 +39,7 @@ import {
 } from "lucide-react"
 import { projectAppUrl } from "../../lib/app-url"
 
-export type ViewMode =
-  | "home"
-  | "ai-usage"
-  | "workflows"
-  | "actions"
-  | "agents"
-  | "logs"
-  | "rules"
-  | "ontology"
+export type ViewMode = "home" | "workflows" | "actions" | "agents" | "rules" | "ontology"
 
 interface NavItem {
   id: ViewMode
@@ -88,12 +81,16 @@ const projectNavGroups: { label: string; items: (NavItem | AppLink)[] }[] = [
     ],
   },
   {
-    label: "Operate",
+    label: "Observability",
     items: [
-      { id: "ai-usage", label: "AI usage", Icon: ChartNoAxesCombined },
-      { id: "logs", label: "Logs", Icon: ScrollText },
-      { id: "rules", label: "Rules", Icon: ListChecks },
+      { appPath: "/observability/runs", label: "Runs", Icon: History },
+      { appPath: "/observability/logs", label: "Logs", Icon: ScrollText },
+      { appPath: "/observability/ai-usage", label: "AI usage", Icon: ChartNoAxesCombined },
     ],
+  },
+  {
+    label: "Operate",
+    items: [{ id: "rules", label: "Rules", Icon: ListChecks }],
   },
 ]
 

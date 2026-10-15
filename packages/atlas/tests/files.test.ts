@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { type FileRef, fileNameFor } from "@sixb/core/blob-storage"
 import {
-  actionRunFileContentUrl,
   classifyFileValue,
   fileMediaLabel,
   formatFileSize,
@@ -63,16 +62,6 @@ describe("Atlas file helpers", () => {
   })
 
   test("builds run-bound file content URLs", () => {
-    expect(
-      actionRunFileContentUrl({
-        baseUrl: "https://atlas.test/app",
-        runId: "act/1",
-        pathSegments: ["source/pdf"],
-      })
-    ).toBe(
-      "https://atlas.test/api/action-runs/act%2F1/files/content?path=%2Fparams%2Fsource%7E1pdf"
-    )
-
     expect(
       workflowRunFileContentUrl({
         baseUrl: "https://atlas.test/app",
