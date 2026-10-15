@@ -16,4 +16,4 @@ export {
   useSpeechRecognition,
   useSpeechRecognizer,
 } from "./use-speech-recognition"
-export { ThemeProvider, useTheme } from "./useTheme"
+export { ThemeProvider, useOptionalTheme, useTheme } from "./useTheme"

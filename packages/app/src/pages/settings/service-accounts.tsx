@@ -38,24 +38,26 @@ import { Bot, Check, ChevronRight, Copy, KeyRound, Loader2, Lock, Plus, Power } 
 import { type SubmitEvent, useEffect, useMemo, useState } from "react"
 import { notify, SectionPage } from "../section-page"
 import {
-  type AuthGroupOption,
   apiErrorMessage,
-  type CreatedTokenState,
   Field,
-  FormError,
-  GroupChips,
-  GroupPicker,
   MetaDot,
-  maskId,
+  PageSection,
   Panel,
   PanelEmpty,
   PanelRow,
   PanelSkeleton,
   Pill,
-  SettingsSection,
+  useFormat,
+} from "../section-ui"
+import {
+  type AuthGroupOption,
+  type CreatedTokenState,
+  FormError,
+  GroupChips,
+  GroupPicker,
+  maskId,
   TokenFormDialog,
   TokenRows,
-  useFormat,
 } from "./controls"
 import { useSettingsMessages } from "./messages"
 
@@ -329,7 +331,7 @@ export function SettingsServiceAccountsPage() {
               </div>
 
               <div className="flex flex-1 flex-col gap-5 overflow-auto p-6">
-                <SettingsSection
+                <PageSection
                   title={messages.tokens}
                   action={
                     <Button
@@ -375,7 +377,7 @@ export function SettingsServiceAccountsPage() {
                       />
                     )}
                   </Panel>
-                </SettingsSection>
+                </PageSection>
 
                 {selected.status === "active" ? (
                   <div className="mt-auto flex items-center justify-between gap-4 rounded-xl border border-destructive/20 bg-destructive/[0.03] px-4 py-3.5">

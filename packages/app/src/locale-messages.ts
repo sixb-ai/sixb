@@ -31,8 +31,20 @@ export const en = {
       "The agent reads your project's objects and everything behind them: their sources, syncs and runs.",
     empty: "There's nothing here yet.",
   },
+  // Names the user menu's button when sign-in is off and nobody is signed in.
+  signInOff: "Sign-in off",
   sections: {
     back: "Back",
+    data: {
+      label: "Data",
+      pages: {
+        connectors: "Connectors",
+        syncs: "Syncs",
+        datasets: "Datasets",
+        pipelines: "Pipelines",
+        projections: "Projections",
+      },
+    },
     settings: {
       label: "Settings",
       groups: { account: "Your account", project: "Project" },
@@ -87,8 +99,19 @@ export const fr: Translation<AppMessages> = {
       "L’agent lit les objets de votre projet et tout ce qui les alimente : leurs sources, leurs synchronisations et leurs exécutions.",
     empty: "Il n’y a rien ici pour l’instant.",
   },
+  signInOff: "Connexion désactivée",
   sections: {
     back: "Retour",
+    data: {
+      label: "Données",
+      pages: {
+        connectors: "Connecteurs",
+        syncs: "Synchronisations",
+        datasets: "Jeux de données",
+        pipelines: "Pipelines",
+        projections: "Projections",
+      },
+    },
     settings: {
       label: "Paramètres",
       groups: { account: "Votre compte", project: "Projet" },

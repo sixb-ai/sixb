@@ -1,5 +1,16 @@
 import type { GroupDefinition } from "@sixb/core"
-import { Braces, Settings, ShieldCheck, UserRound, UsersRound } from "lucide-react"
+import {
+  Braces,
+  Cable,
+  Database,
+  Layers,
+  RefreshCw,
+  Settings,
+  ShieldCheck,
+  UserRound,
+  UsersRound,
+  Workflow,
+} from "lucide-react"
 import {
   type ComponentType,
   createContext,
@@ -9,6 +20,7 @@ import {
   useMemo,
   useSyncExternalStore,
 } from "react"
+import { useLocation } from "react-router-dom"
 import { useAppMessages } from "../locale"
 import { type CurrentUser, useCurrentUser } from "../session"
 import type { NavEntry, NavItem } from "../shell/nav-items"
@@ -102,6 +114,7 @@ export function useOpenSections(): readonly OpenSection[] {
 
 const sectionIcons: Record<AppSectionId, ComponentType<{ readonly className?: string }>> = {
   settings: Settings,
+  data: Database,
 }
 
 const pageIcons: Record<string, ComponentType<{ readonly className?: string }>> = {
@@ -109,6 +122,11 @@ const pageIcons: Record<string, ComponentType<{ readonly className?: string }>> 
   developers: Braces,
   members: UsersRound,
   "service-accounts": ShieldCheck,
+  connectors: Cable,
+  syncs: RefreshCw,
+  datasets: Database,
+  pipelines: Workflow,
+  projections: Layers,
 }
 
 /**
@@ -122,29 +140,49 @@ export function useSections(): readonly AppSection[] {
     () =>
       open.map(({ definition, pages }) => {
         const labels = messages[definition.id]
-        const groups = new Map<string, NavItem[]>()
+        const pageLabels: Record<string, string> = labels.pages
+        const groupLabels: Record<string, string> = "groups" in labels ? labels.groups : {}
+        // Ungrouped pages stand alone; consecutive pages of one group share its heading.
+        const entries: NavEntry[] = []
+        let current: { readonly key: string; readonly items: NavItem[] } | undefined
         for (const page of pages) {
-          const items = groups.get(page.group) ?? []
-          items.push({
-            label: labels.pages[page.id as keyof typeof labels.pages] ?? page.id,
+          const item: NavItem = {
+            label: pageLabels[page.id] ?? page.id,
             href: page.path,
             icon: pageIcons[page.id],
-          })
-          groups.set(page.group, items)
+          }
+          if (!page.group) {
+            entries.push(item)
+            current = undefined
+            continue
+          }
+          if (current?.key !== page.group) {
+            current = { key: page.group, items: [] }
+            entries.push({ group: groupLabels[page.group] ?? page.group, items: current.items })
+          }
+          current.items.push(item)
         }
         return {
           id: definition.id,
           label: labels.label,
           href: pages[0]?.path ?? definition.path,
           icon: sectionIcons[definition.id],
-          pages: [...groups].map(([group, items]) => ({
-            group: labels.groups[group as keyof typeof labels.groups] ?? group,
-            items,
-          })),
+          pages: entries,
         }
       }),
     [open, messages]
   )
+}
+
+/**
+ * The built-in section the current page belongs to, or `null` outside one. A shell drawn by hand
+ * uses it to give section pages the whole frame: they bring their own margins, and some, such as a
+ * dataset's rows, fill the height. A project's page that replaces a section page is in the section
+ * too.
+ */
+export function useCurrentSection(): AppSection | null {
+  const { pathname } = useLocation()
+  return useSections().find((section) => sectionContains(section, pathname)) ?? null
 }
 
 /** Whether `pathname` is one of the section's pages, or below one. */

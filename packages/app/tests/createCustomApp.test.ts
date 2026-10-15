@@ -190,6 +190,29 @@ describe("createCustomApp.start", () => {
     }
   })
 
+  // Regression proof: drop the `/__sixb/assets/` branch from start() and the icon request is
+  // answered as a missing asset.
+  test("serves the built-in pages' connector icons from the package", async () => {
+    const port = await getFreePort()
+    const app = await createCustomApp({ rootDir: tempRoot })
+    const server = await app.start({ host: "127.0.0.1", port })
+
+    try {
+      const icon = await fetch(`http://127.0.0.1:${port}/__sixb/assets/connector-icons/github.svg`)
+      expect(icon.status).toBe(200)
+      expect(icon.headers.get("content-type")).toContain("image/svg+xml")
+      expect(icon.headers.get("cache-control")).toBe("public, max-age=86400")
+      for (const path of [
+        "/__sixb/assets/connector-icons/missing.svg",
+        "/__sixb/assets/connector-icons/..%2F..%2Fpackage.json",
+      ]) {
+        expect((await fetch(`http://127.0.0.1:${port}${path}`)).status).toBe(404)
+      }
+    } finally {
+      await server.stop()
+    }
+  })
+
   test("fails fast when an older build has no shared shell", async () => {
     const outdir = join(tempRoot, ".sixb", "dist", "app")
     await rm(join(outdir, "shared-index.html"))
@@ -488,6 +511,12 @@ describe("createCustomApp.dev", () => {
       const icon = await fetch(`http://127.0.0.1:${port}/icon-192.png`)
       expect(icon.status).toBe(200)
       expect(icon.headers.get("content-type")).toBe("image/png")
+      // The built-in pages' own files come from the package, not the project.
+      const connectorIcon = await fetch(
+        `http://127.0.0.1:${port}/__sixb/assets/connector-icons/stripe.svg`
+      )
+      expect(connectorIcon.status).toBe(200)
+      expect(connectorIcon.headers.get("content-type")).toContain("image/svg+xml")
       expect((await fetch(`http://127.0.0.1:${port}/missing-icon.png`)).status).toBe(404)
       expect((await fetch(`http://127.0.0.1:${port}/other.webmanifest`)).status).toBe(404)
     } finally {
@@ -985,6 +1014,11 @@ describe("createCustomApp.dev", () => {
       ]) {
         expect(manifest).toContain(`import { ${page} as BuiltInPage`)
       }
+      // Data's pages come with one page per item below each list.
+      for (const page of ["DataIndexPage", "DataConnectorsPage", "DataSyncsPage", "DataSyncPage"]) {
+        expect(manifest).toContain(`import { ${page} as BuiltInPage`)
+      }
+      expect(manifest).toContain('":syncId"')
       // The project's members page replaces the built-in one.
       expect(manifest).not.toContain("SettingsMembersPage")
       expect(manifest).toContain('import Page1 from "../../app/settings/members/page.tsx"')

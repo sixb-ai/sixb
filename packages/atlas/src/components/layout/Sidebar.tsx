@@ -41,11 +41,6 @@ import { projectAppUrl } from "../../lib/app-url"
 export type ViewMode =
   | "home"
   | "ai-usage"
-  | "datasets"
-  | "connectors"
-  | "syncs"
-  | "projections"
-  | "pipelines"
   | "workflows"
   | "actions"
   | "agents"
@@ -59,15 +54,22 @@ interface NavItem {
   Icon: React.ComponentType<{ className?: string }>
 }
 
-const projectNavGroups: { label: string; items: NavItem[] }[] = [
+interface AppLink {
+  /** The page's path in the project's app, where it moved. */
+  appPath: string
+  label: string
+  Icon: React.ComponentType<{ className?: string }>
+}
+
+const projectNavGroups: { label: string; items: (NavItem | AppLink)[] }[] = [
   {
     label: "Data",
     items: [
-      { id: "connectors", label: "Connectors", Icon: Cable },
-      { id: "datasets", label: "Datasets", Icon: Database },
-      { id: "syncs", label: "Syncs", Icon: RefreshCw },
-      { id: "pipelines", label: "Pipelines", Icon: Workflow },
-      { id: "projections", label: "Projections", Icon: Layers },
+      { appPath: "/data/connectors", label: "Connectors", Icon: Cable },
+      { appPath: "/data/datasets", label: "Datasets", Icon: Database },
+      { appPath: "/data/syncs", label: "Syncs", Icon: RefreshCw },
+      { appPath: "/data/pipelines", label: "Pipelines", Icon: Workflow },
+      { appPath: "/data/projections", label: "Projections", Icon: Layers },
     ],
   },
   {
@@ -152,44 +154,52 @@ export function Sidebar({
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {projectNavGroups.map((group) => (
-          <SidebarGroup key={group.label} className="py-1">
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {group.items.map((item) => {
-                  const count = getCount(item.id)
-                  const isActive = viewMode === item.id
-                  return (
-                    <SidebarMenuItem key={item.id}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        tooltip={item.label}
-                        onPointerEnter={() => onViewIntent?.(item.id)}
-                        onPointerDown={() => onViewIntent?.(item.id)}
-                        onFocus={() => onViewIntent?.(item.id)}
-                        onClick={() => onViewChange(item.id)}
-                      >
-                        <item.Icon />
-                        <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                        {item.id === "agents" ? (
-                          <ChevronRight
-                            aria-hidden="true"
-                            className="ml-auto text-sidebar-foreground/55 group-data-[collapsible=icon]:hidden"
-                          />
+        {projectNavGroups
+          // A group of pages that all moved to the app shows only when Atlas can link there.
+          .filter((group) => projectAppUrl("/") || group.items.some((item) => !("appPath" in item)))
+          .map((group) => (
+            <SidebarGroup key={group.label} className="py-1">
+              <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {group.items.map((item) => {
+                    if ("appPath" in item) return <AppLinkItem key={item.appPath} link={item} />
+                    const count = getCount(item.id)
+                    const isActive = viewMode === item.id
+                    return (
+                      <SidebarMenuItem key={item.id}>
+                        <SidebarMenuButton
+                          isActive={isActive}
+                          tooltip={item.label}
+                          onPointerEnter={() => onViewIntent?.(item.id)}
+                          onPointerDown={() => onViewIntent?.(item.id)}
+                          onFocus={() => onViewIntent?.(item.id)}
+                          onClick={() => onViewChange(item.id)}
+                        >
+                          <item.Icon />
+                          <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                          {item.id === "agents" ? (
+                            <ChevronRight
+                              aria-hidden="true"
+                              className="ml-auto text-sidebar-foreground/55 group-data-[collapsible=icon]:hidden"
+                            />
+                          ) : null}
+                        </SidebarMenuButton>
+                        {count !== undefined && count > 0 ? (
+                          <SidebarMenuBadge>{count}</SidebarMenuBadge>
                         ) : null}
-                      </SidebarMenuButton>
-                      {count !== undefined && count > 0 ? (
-                        <SidebarMenuBadge>{count}</SidebarMenuBadge>
-                      ) : null}
-                    </SidebarMenuItem>
-                  )
-                })}
-                {group.label === "Operate" ? <AppSettingsItem /> : null}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ))}
+                      </SidebarMenuItem>
+                    )
+                  })}
+                  {group.label === "Operate" ? (
+                    <AppLinkItem
+                      link={{ appPath: "/settings", label: "Settings", Icon: Settings }}
+                    />
+                  ) : null}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          ))}
 
         <SidebarGroup className="mt-auto">
           <SidebarGroupContent>
@@ -209,16 +219,16 @@ export function Sidebar({
   )
 }
 
-// Settings moved into the project's app; Atlas links there when it knows the app's address.
-function AppSettingsItem() {
-  const href = projectAppUrl("/settings")
+// A page that moved into the project's app; Atlas links there when it knows the app's address.
+function AppLinkItem({ link }: { link: AppLink }) {
+  const href = projectAppUrl(link.appPath)
   if (!href) return null
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton asChild tooltip="Settings">
+      <SidebarMenuButton asChild tooltip={link.label}>
         <a href={href}>
-          <Settings />
-          <span className="min-w-0 flex-1 truncate">Settings</span>
+          <link.Icon />
+          <span className="min-w-0 flex-1 truncate">{link.label}</span>
           <ArrowUpRight
             aria-hidden="true"
             className="ml-auto text-sidebar-foreground/55 group-data-[collapsible=icon]:hidden"

@@ -1,19 +1,26 @@
 import { getAuthAccessManagementOptionsOptions } from "@sixb/client/hooks"
-import { Button } from "@sixb/ui/components"
+import { Button, ThemePicker } from "@sixb/ui/components"
+import { useOptionalTheme } from "@sixb/ui/hooks"
 import { useQuery } from "@tanstack/react-query"
 import { Loader2, LogOut } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useCurrentUser, useSignOut } from "../../session"
 import { notify, SectionPage } from "../section-page"
-import { type AuthGroupOption, GroupChips, Panel, PersonAvatar, SettingsSection } from "./controls"
+import { PageSection, Panel } from "../section-ui"
+import { type AuthGroupOption, GroupChips, PersonAvatar } from "./controls"
 import { useSettingsMessages } from "./messages"
 import { SessionsSection } from "./sessions"
 
-/** Settings › Personal: who you are in this project, your groups, and where you're signed in. */
+/**
+ * Settings › Personal: who you are in this project, your groups, how the app looks, and where
+ * you're signed in.
+ */
 export function SettingsPersonalPage() {
   const messages = useSettingsMessages().personal
   const user = useCurrentUser()
   const signOut = useSignOut()
+  // A shell without the theme provider has no theme to choose.
+  const themed = useOptionalTheme() !== null
   const [signingOut, setSigningOut] = useState(false)
   // The groups this person holds, with their labels.
   const options = useQuery({ ...getAuthAccessManagementOptionsOptions(), retry: false })
@@ -38,7 +45,7 @@ export function SettingsPersonalPage() {
       description={messages.description}
     >
       {user ? (
-        <SettingsSection>
+        <PageSection>
           <Panel footer={messages.note}>
             <div className="flex items-center gap-4 px-5 py-5">
               <PersonAvatar
@@ -77,7 +84,12 @@ export function SettingsPersonalPage() {
               )}
             </div>
           </Panel>
-        </SettingsSection>
+        </PageSection>
+      ) : null}
+      {themed ? (
+        <PageSection title={messages.appearance} description={messages.appearanceDescription}>
+          <ThemePicker labels className="self-start" />
+        </PageSection>
       ) : null}
       <SessionsSection />
     </SectionPage>

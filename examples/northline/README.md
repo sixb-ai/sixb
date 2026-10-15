@@ -103,8 +103,8 @@ PriorityCare 24/7 contract requires a response within 90 minutes. From Northline
 5. Approve the repair quote for customer authorization.
 6. Complete field work, verify telemetry recovery, and close the case.
 
-The same objects, links, action runs, rule state, workflow runs, datasets, and projections remain
-inspectable in Atlas.
+The same objects, links, action runs, rule state, and workflow runs remain inspectable in Atlas, and
+the datasets and projections under **Data** in the app.
 
 ## Demo commands
 
@@ -178,8 +178,8 @@ bun run demo:sync
 
 The second sync reads only the new source event, merges the updated quote, advances the checkpoint,
 and reevaluates the existing Quote projection against the complete dataset. Run `demo:sync` again
-without another source change and the successful no-op creates no dataset version. Atlas shows the
-dataset's primary key and `merge` versions in its dataset details.
+without another source change and the successful no-op creates no dataset version. The app's
+**Data › Datasets** page shows the dataset's primary key and its `merge` versions.
 
 ## Read the code in this order
 

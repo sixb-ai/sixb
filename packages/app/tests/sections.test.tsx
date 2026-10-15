@@ -6,21 +6,25 @@ import {
   getAuthSessionQueryKey,
   listAuthServiceAccountsQueryKey,
   listAuthSessionsQueryKey,
+  listSyncsQueryKey,
 } from "@sixb/client/hooks"
 import { defineGroup } from "@sixb/core/security"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, render } from "@testing-library/react"
+import { cleanup, fireEvent, render } from "@testing-library/react"
 import { Window } from "happy-dom"
 import type { ReactNode } from "react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
-import { AppShell, type AppVisibility, useSections } from "../src"
+import { type AppSectionId, AppShell, type AppVisibility, useSections } from "../src"
 import {
+  DataSyncPage,
+  DataSyncsPage,
   SectionsProvider,
   SettingsMembersPage,
   SettingsPersonalPage,
   SettingsServiceAccountsPage,
 } from "../src/pages"
 import { resolveOpenSections } from "../src/sections/sections"
+import { stubWebSockets } from "./helpers/offline-sockets"
 
 const browser = new Window({ url: "https://app.sixb.test" })
 const globals = [
@@ -48,8 +52,10 @@ const globals = [
   "IS_REACT_ACT_ENVIRONMENT",
 ] as const
 const previous = new Map<string, PropertyDescriptor | undefined>()
+let sockets: ReturnType<typeof stubWebSockets> | undefined
 
 beforeAll(() => {
+  sockets = stubWebSockets()
   const values = browser as unknown as Record<string, unknown>
   for (const key of globals) {
     previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key))
@@ -72,6 +78,7 @@ afterEach(() => {
 })
 
 afterAll(() => {
+  sockets?.restore()
   for (const key of globals) {
     const descriptor = previous.get(key)
     if (descriptor) Object.defineProperty(globalThis, key, descriptor)
@@ -82,6 +89,7 @@ afterAll(() => {
 
 const admins = defineGroup("admins", { label: "Admins" })
 const allSettingsPages = ["personal", "developers", "members", "service-accounts"]
+const allDataPages = ["connectors", "syncs", "datasets", "pipelines", "projections"]
 
 function sessionFor(groupIds: readonly string[]): GetAuthSessionResponse {
   return {
@@ -131,6 +139,12 @@ function renderApp(
   )
 }
 
+function sidebarLinks(container: HTMLElement) {
+  return [...container.querySelectorAll('[data-sidebar="content"] a')].map((link) =>
+    link.getAttribute("href")
+  )
+}
+
 const personalData = [
   [
     getAuthAccessManagementOptionsQueryKey(),
@@ -140,8 +154,13 @@ const personalData = [
 ] as const
 
 describe("who sees each section", () => {
-  const pagesOf = (input: Parameters<typeof resolveOpenSections>[0]) =>
-    resolveOpenSections(input).flatMap((section) => section.pages.map((page) => page.id))
+  const pagesOf = (
+    input: Parameters<typeof resolveOpenSections>[0],
+    section: AppSectionId = "settings"
+  ) =>
+    resolveOpenSections(input)
+      .filter((open) => open.definition.id === section)
+      .flatMap((open) => open.pages.map((page) => page.id))
 
   test("a signed-in person sees every Settings page unless visibility narrows it", () => {
     expect(pagesOf({ user: { groupIds: [] }, visibility: undefined, enabled: true })).toEqual(
@@ -165,6 +184,59 @@ describe("who sees each section", () => {
   test("Settings needs a signed-in person, and shared links get no sections", () => {
     expect(pagesOf({ user: null, visibility: undefined, enabled: true })).toEqual([])
     expect(pagesOf({ user: { groupIds: [] }, visibility: undefined, enabled: false })).toEqual([])
+    expect(
+      resolveOpenSections({ user: { groupIds: [] }, visibility: undefined, enabled: false })
+    ).toEqual([])
+  })
+
+  test("Data is open without auth, and visibility narrows it to the listed groups", () => {
+    expect(pagesOf({ user: null, visibility: undefined, enabled: true }, "data")).toEqual(
+      allDataPages
+    )
+    expect(
+      pagesOf({ user: { groupIds: ["staff"] }, visibility: undefined, enabled: true }, "data")
+    ).toEqual(allDataPages)
+    expect(
+      pagesOf(
+        { user: { groupIds: ["staff"] }, visibility: { data: [admins] }, enabled: true },
+        "data"
+      )
+    ).toEqual([])
+    expect(
+      pagesOf(
+        { user: { groupIds: ["admins"] }, visibility: { data: [admins] }, enabled: true },
+        "data"
+      )
+    ).toEqual(allDataPages)
+  })
+})
+
+describe("appearance", () => {
+  // Regression proof: drop the `themed` check in personal.tsx and the second test finds the
+  // heading; drop ThemePicker's onClick and the first never stores "dark".
+  test("Personal picks the theme where the shell provides one", () => {
+    const view = renderApp(
+      <AppShell nav={[]}>
+        <SettingsPersonalPage />
+      </AppShell>,
+      { path: "/settings/personal", data: personalData }
+    )
+
+    expect(view.getByRole("heading", { name: "Appearance" })).toBeDefined()
+    const dark = view.getByRole("radio", { name: "Dark" })
+    expect(dark.getAttribute("aria-checked")).toBe("false")
+    fireEvent.click(dark)
+    expect(dark.getAttribute("aria-checked")).toBe("true")
+    expect(browser.localStorage.getItem("sixb-theme")).toBe("dark")
+  })
+
+  test("a shell without a theme leaves Appearance out", () => {
+    const view = renderApp(<SettingsPersonalPage />, {
+      path: "/settings/personal",
+      data: personalData,
+    })
+    expect(view.getByRole("heading", { name: "Personal" })).toBeDefined()
+    expect(view.queryByRole("heading", { name: "Appearance" })).toBeNull()
   })
 })
 
@@ -205,33 +277,54 @@ describe("section navigation", () => {
     ).toEqual(allSettingsPages.map((page) => `/settings/${page}`))
   })
 
-  // UserMenu lists what useSections returns; happy-dom cannot open its dropdown, so this reads the
-  // same hook. Regression proof: add a Settings link to AppShell's SectionNav fallback and the
-  // sidebar expectation fails.
-  test("Settings is reached from the user menu, not the sidebar", () => {
-    function SectionLinks() {
+  // UserMenu lists what useSections returns. happy-dom cannot open its dropdown (Radix picks a no-op
+  // layout effect when it loads before the DOM globals exist, so the portal never mounts), so this
+  // reads the same hook. Regression proof: give AppShell's SectionNav a fallback that lists the
+  // sections and the sidebar links to Data; drop `signedOut` from UserMenu and the button reads
+  // Preferences.
+  test("Data and Settings open from the user menu, and the sidebar holds the app's own nav", () => {
+    function MenuSections() {
       return (
         <p>
           {useSections()
             .map((section) => `${section.label} ${section.href}`)
-            .join(",")}
+            .join(", ")}
         </p>
       )
     }
-
-    const view = renderApp(
+    const shell = (
       <AppShell nav={[{ label: "Quotes", href: "/quotes" }]}>
-        <SectionLinks />
-      </AppShell>,
-      { path: "/quotes" }
+        <MenuSections />
+      </AppShell>
     )
-    expect(view.getByText("Quotes").closest("a")).not.toBeNull()
-    expect(view.queryByRole("link", { name: /Settings/ })).toBeNull()
-    expect(view.getByText("Settings /settings/personal")).toBeDefined()
+
+    const view = renderApp(shell, { path: "/quotes" })
+    expect(sidebarLinks(view.container)).toEqual(["/quotes"])
+    expect(view.getByText("Data /data/connectors, Settings /settings/personal")).toBeDefined()
+    expect(view.getByRole("button", { name: /Morgan Reyes/ })).toBeDefined()
     cleanup()
 
-    const signedOut = renderApp(<SectionLinks />, { path: "/quotes", session: null })
-    expect(signedOut.container.textContent).toBe("")
+    // With auth off nobody signs in: the button says so, Settings is gone and Data stays.
+    const signedOut = renderApp(shell, { path: "/quotes", session: null })
+    expect(sidebarLinks(signedOut.container)).toEqual(["/quotes"])
+    expect(signedOut.getByText("Data /data/connectors")).toBeDefined()
+    expect(signedOut.getByRole("button", { name: "Sign-in off" })).toBeDefined()
+  })
+
+  test("inside Data the sidebar lists its pages, without group headings", () => {
+    const view = renderApp(
+      <AppShell nav={[{ label: "Quotes", href: "/quotes" }]}>
+        <DataSyncsPage />
+      </AppShell>,
+      { path: "/data/syncs", data: [[listSyncsQueryKey(), []]] }
+    )
+    expect(view.getByRole("heading", { name: "Syncs" })).toBeDefined()
+    const nav = view.getByText("Connectors").closest('[data-slot="sidebar-group"]')
+    expect(
+      [...(nav?.querySelectorAll("a") ?? [])].map((link) => link.getAttribute("href"))
+    ).toEqual(allDataPages.map((page) => `/data/${page}`))
+    expect(view.queryByText("Quotes")).toBeNull()
+    expect(view.getByText("No syncs")).toBeDefined()
   })
 })
 
@@ -244,6 +337,21 @@ describe("visibility on section pages", () => {
       visibility: { settings: [admins] },
     })
     expect(view.getByText("Home page")).toBeDefined()
+  })
+
+  test("a Data page outside the listed groups sends its URL home, detail pages included", () => {
+    for (const [page, path] of [
+      [<DataSyncsPage key="list" />, "/data/syncs"],
+      [<DataSyncPage key="detail" />, "/data/syncs/sync-orbit"],
+    ] as const) {
+      const view = renderApp(page, {
+        path,
+        session: sessionFor(["staff"]),
+        visibility: { data: [admins] },
+      })
+      expect(view.getByText("Home page")).toBeDefined()
+      cleanup()
+    }
   })
 
   test("a page about yourself stays open outside the listed groups", () => {

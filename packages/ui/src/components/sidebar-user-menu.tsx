@@ -1,18 +1,16 @@
 import {
-  Check,
   ChevronsLeft,
   ChevronsRight,
   ChevronsUpDown,
   ExternalLink,
-  LaptopMinimal,
   LogOut,
-  MoonStar,
   Settings2,
-  SunMedium,
+  SunMoon,
 } from "lucide-react"
-import type { ReactNode } from "react"
+import type { ComponentType, ReactNode } from "react"
 import { useOptionalTheme } from "../hooks/useTheme"
 import { useUiMessages } from "../lib/i18n/ui"
+import { nextTheme, ThemePicker } from "./theme-switcher"
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar"
 import {
   DropdownMenu,
@@ -24,12 +22,6 @@ import {
 } from "./ui/dropdown-menu"
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "./ui/sidebar"
 
-const themes = [
-  { value: "light", Icon: SunMedium },
-  { value: "dark", Icon: MoonStar },
-  { value: "system", Icon: LaptopMinimal },
-] as const
-
 export interface SidebarUser {
   readonly name: string
   readonly email?: string
@@ -39,11 +31,16 @@ export interface SidebarUser {
 interface SidebarUserMenuProps {
   /** The signed-in user, or null when auth is disabled or unauthenticated. */
   user: SidebarUser | null
+  /** The button's label and icon while nobody is signed in, in place of Preferences. */
+  signedOut?: {
+    readonly label: string
+    readonly icon: ComponentType<{ readonly className?: string }>
+  }
   /** Optional link to the API reference, surfaced inside the menu. */
   apiHref?: string
   /** Sign-out handler. Only shown when a user and handler are both present. */
   onSignOut?: () => void
-  /** Extra menu items, shown above sign-out. */
+  /** Extra menu items, shown below the user and above theme switching. */
   children?: ReactNode
 }
 
@@ -59,11 +56,19 @@ function initials(name: string): string {
  * reference link, and sign-out, all folded into a single dropdown off the avatar
  * row. When no user is present it degrades to a preferences menu (theme + API).
  */
-export function SidebarUserMenu({ user, apiHref, onSignOut, children }: SidebarUserMenuProps) {
+export function SidebarUserMenu({
+  user,
+  signedOut,
+  apiHref,
+  onSignOut,
+  children,
+}: SidebarUserMenuProps) {
   // Theme switching appears only where the app provides a theme.
   const themeControls = useOptionalTheme()
   const { isMobile } = useSidebar()
   const messages = useUiMessages()
+  const SignedOutIcon = signedOut?.icon ?? Settings2
+  const signedOutLabel = signedOut?.label ?? messages.sidebar.preferences
 
   return (
     <SidebarMenu>
@@ -94,11 +99,11 @@ export function SidebarUserMenu({ user, apiHref, onSignOut, children }: SidebarU
               </SidebarMenuButton>
             ) : (
               <SidebarMenuButton
-                tooltip={messages.sidebar.preferences}
+                tooltip={signedOutLabel}
                 className="text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
               >
-                <Settings2 />
-                <span>{messages.sidebar.preferences}</span>
+                <SignedOutIcon />
+                <span>{signedOutLabel}</span>
               </SidebarMenuButton>
             )}
           </DropdownMenuTrigger>
@@ -131,22 +136,32 @@ export function SidebarUserMenu({ user, apiHref, onSignOut, children }: SidebarU
               </>
             ) : null}
 
-            {themeControls
-              ? themes.map((option) => {
-                  const Icon = option.Icon
-                  const selected = option.value === themeControls.theme
-                  return (
-                    <DropdownMenuItem
-                      key={option.value}
-                      onClick={() => themeControls.setTheme(option.value)}
-                    >
-                      <Icon />
-                      <span className="flex-1">{messages.theme[option.value]}</span>
-                      {selected ? <Check className="text-muted-foreground" /> : null}
-                    </DropdownMenuItem>
+            {children ? (
+              <>
+                {children}
+                {themeControls ? <DropdownMenuSeparator /> : null}
+              </>
+            ) : null}
+
+            {themeControls ? (
+              // One row: a click on an option picks it, and with the row focused the arrow keys
+              // step through the themes. Choosing keeps the menu open, so the change shows.
+              <DropdownMenuItem
+                aria-keyshortcuts="ArrowLeft ArrowRight"
+                onSelect={(event) => event.preventDefault()}
+                onKeyDown={(event) => {
+                  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
+                  event.preventDefault()
+                  themeControls.setTheme(
+                    nextTheme(themeControls.theme, event.key === "ArrowRight" ? 1 : -1)
                   )
-                })
-              : null}
+                }}
+              >
+                <SunMoon />
+                <span className="flex-1">{messages.theme.label}</span>
+                <ThemePicker focusable={false} />
+              </DropdownMenuItem>
+            ) : null}
 
             {apiHref ? (
               <>
@@ -157,13 +172,6 @@ export function SidebarUserMenu({ user, apiHref, onSignOut, children }: SidebarU
                     <span>{messages.sidebar.apiReference}</span>
                   </a>
                 </DropdownMenuItem>
-              </>
-            ) : null}
-
-            {children ? (
-              <>
-                <DropdownMenuSeparator />
-                {children}
               </>
             ) : null}
 

@@ -86,7 +86,7 @@ configureSixbClient(client, {
 await signOutSixbSession({ baseUrl, store })
 ```
 
-The access token lasts 15 minutes. The client refreshes it before it expires, and once more if the API rejects it, so the user stays signed in while the tool is used. The session ends after the API's idle timeout without use, or when it is signed out or revoked; the client then clears the store and calls `onSessionEnded`. The session appears under the tool's name in the user's sessions in Atlas.
+The access token lasts 15 minutes. The client refreshes it before it expires, and once more if the API rejects it, so the user stays signed in while the tool is used. The session ends after the API's idle timeout without use, or when it is signed out or revoked; the client then clears the store and calls `onSessionEnded`. The session appears under the tool's name in the user's sessions, on **Settings › Personal** in the app.
 
 ## Call the API
 

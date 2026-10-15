@@ -21,7 +21,7 @@ function InvoiceActivity({ invoiceId }: { invoiceId: string }) {
 }
 ```
 
-The hook manages subscription cleanup and reconnects. For a standalone browser app, complete [client setup](overview.md#standalone-browser-apps) first.
+The hook manages subscription cleanup and reconnects. In a Sixb app, every subscription on the page shares one connection. For a standalone browser app, complete [client setup](overview.md#standalone-browser-apps) first, and wrap it in `SixbEventsProvider` to share one connection the same way.
 
 ## Filter events
 

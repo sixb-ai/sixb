@@ -12,9 +12,9 @@ for (const doc of docsConfig) {
 }
 
 await cp(join(import.meta.dir, "../../assets"), join(publicDir, "assets"), { recursive: true })
-// Connector icons ship with Atlas; the connector library serves the same files.
+// Connector icons ship with the app's built-in pages; the connector library serves the same files.
 await cp(
-  join(import.meta.dir, "../../../../packages/atlas/src/connector-icons"),
+  join(import.meta.dir, "../../../../packages/app/assets/connector-icons"),
   join(publicDir, "assets", "connectors"),
   { recursive: true }
 )

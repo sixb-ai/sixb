@@ -87,9 +87,8 @@ export async function buildBuiltInUiBundle(
       "chunk-[name]-[hash].[ext]",
       "--asset-naming",
       "asset-[name]-[hash].[ext]",
-      // Imported files such as connector icons resolve to a URL relative to the output, which the
-      // page would read against its own path. The production server only serves build output from
-      // here.
+      // Imported files resolve to a URL relative to the output, which the page would read against
+      // its own path. The production server only serves build output from here.
       "--public-path",
       "/__sixb/",
       // React is bundled here rather than external, so without this the production Atlas bundle

@@ -5,12 +5,8 @@ export const en = {
   common: {
     cancel: "Cancel",
     done: "Done",
-    copy: "Copy",
-    copied: "Copied",
-    copyFailed: "Copying failed. Select the text above and copy it by hand.",
     revoke: "Revoke",
     revoking: "Revoking…",
-    unknown: "Unknown",
     noGroups: "No groups",
     identityProvider: "Identity provider",
     managedGroupHint:
@@ -68,6 +64,8 @@ export const en = {
     description: "Your profile, and the devices signed in to your account.",
     groups: "Groups",
     noGroups: "You're not in any group yet.",
+    appearance: "Appearance",
+    appearanceDescription: "Choose how the app looks in this browser.",
     note: "Your name and picture come from the way you sign in. Your groups are managed by admins.",
     signOut: "Sign out",
     signingOut: "Signing out…",
@@ -272,12 +270,8 @@ export const fr: Translation<SettingsMessages> = {
   common: {
     cancel: "Annuler",
     done: "Terminé",
-    copy: "Copier",
-    copied: "Copié",
-    copyFailed: "La copie a échoué. Sélectionnez le texte ci-dessus et copiez-le à la main.",
     revoke: "Révoquer",
     revoking: "Révocation…",
-    unknown: "Inconnu",
     noGroups: "Aucun groupe",
     identityProvider: "Fournisseur d’identité",
     managedGroupHint:
@@ -336,6 +330,8 @@ export const fr: Translation<SettingsMessages> = {
     description: "Votre profil, et les appareils connectés à votre compte.",
     groups: "Groupes",
     noGroups: "Vous n’appartenez encore à aucun groupe.",
+    appearance: "Apparence",
+    appearanceDescription: "Choisissez l’apparence de l’application dans ce navigateur.",
     note: "Votre nom et votre photo viennent de votre méthode de connexion. Vos groupes sont gérés par les administrateurs.",
     signOut: "Se déconnecter",
     signingOut: "Déconnexion…",

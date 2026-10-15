@@ -181,9 +181,12 @@ describe("custom app metadata and manifest generation", () => {
     await writeVisibility(`{ settings: [{ kind: "group", id: "admins" }] }`)
     await generateAppEntry(fixture.root, fixture.generatedDir)
 
-    await writeVisibility(`{ data: [] }`)
+    await writeVisibility(`{ settings: [{ kind: "group", id: "admins" }], data: [] }`)
+    await generateAppEntry(fixture.root, fixture.generatedDir)
+
+    await writeVisibility(`{ billing: [] }`)
     await expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
-      "'data' is not a built-in section. Sections: settings."
+      "'billing' is not a built-in section. Sections: data, settings."
     )
 
     await writeVisibility(`{ settings: ["admins"] }`)

@@ -7,15 +7,18 @@
  * signed-in person, because they are about that person rather than the project.
  */
 
-export type AppSectionId = "settings"
+export type AppSectionId = "data" | "settings"
 
 export interface SectionPageDefinition {
   readonly id: string
   readonly path: string
   /** The page's export from `@sixb/app/pages`. */
   readonly exportName: string
-  readonly group: string
+  /** Pages sharing a group sit under one heading in the section's navigation. */
+  readonly group?: string
   readonly always?: boolean
+  /** One item's page below this one, such as a single sync under Syncs. */
+  readonly detail?: { readonly path: string; readonly exportName: string }
 }
 
 export interface SectionDefinition {
@@ -29,12 +32,51 @@ export interface SectionDefinition {
 }
 
 export const sectionCatalog: readonly SectionDefinition[] = [
+  // In this order in the user menu, Settings last.
+  {
+    id: "data",
+    path: "/data",
+    indexExportName: "DataIndexPage",
+    requiresUser: false,
+    pages: [
+      {
+        id: "connectors",
+        path: "/data/connectors",
+        exportName: "DataConnectorsPage",
+        detail: { path: "/data/connectors/:connectorId", exportName: "DataConnectorPage" },
+      },
+      {
+        id: "syncs",
+        path: "/data/syncs",
+        exportName: "DataSyncsPage",
+        detail: { path: "/data/syncs/:syncId", exportName: "DataSyncPage" },
+      },
+      {
+        id: "datasets",
+        path: "/data/datasets",
+        exportName: "DataDatasetsPage",
+        detail: { path: "/data/datasets/:datasetId", exportName: "DataDatasetPage" },
+      },
+      {
+        id: "pipelines",
+        path: "/data/pipelines",
+        exportName: "DataPipelinesPage",
+        detail: { path: "/data/pipelines/:pipelineId", exportName: "DataPipelinePage" },
+      },
+      {
+        id: "projections",
+        path: "/data/projections",
+        exportName: "DataProjectionsPage",
+        detail: { path: "/data/projections/:projectionId", exportName: "DataProjectionPage" },
+      },
+    ],
+  },
   {
     id: "settings",
     path: "/settings",
     indexExportName: "SettingsIndexPage",
     requiresUser: true,
-    // Pages appear in this order, grouped by their first appearance.
+    // Pages appear in this order; consecutive pages of one group share its heading.
     pages: [
       {
         id: "personal",

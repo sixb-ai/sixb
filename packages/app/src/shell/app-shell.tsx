@@ -66,9 +66,8 @@ export interface AppShellProps {
 
 /**
  * The default app frame: a sidebar with the app's brand, its nav and the user menu, beside the
- * page. Inside a built-in section, such as Settings from the user menu, the sidebar shows that
- * section's pages. Sidebar props keep the `@sixb/ui` names. Every part is exported for shells
- * built by hand.
+ * page. Inside a built-in section the sidebar shows that section's pages. Sidebar props keep the
+ * `@sixb/ui` names. Every part is exported for shells built by hand.
  */
 export function AppShell({
   nav,

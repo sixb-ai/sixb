@@ -92,7 +92,8 @@ module scope. Set the page title and app icons through [Customization](customiza
 ## Add a sidebar
 
 `AppShell` frames every page with a sidebar: the app's name, your navigation, and a menu for the
-signed-in user with [Settings](#settings), theme switching, and sign-out. Sixb includes its styles,
+signed-in user with [Data](#data), [Settings](#settings), theme switching, and sign-out. Opening Data
+or Settings swaps the sidebar for that section's pages, with a link back. Sixb includes its styles,
 so it needs no stylesheet of yours.
 
 File: `app/layout.tsx`
@@ -141,9 +142,41 @@ To build your own sidebar, use the same parts with the `@sixb/ui` sidebar compon
 | `SectionNav` | The open section's pages with a link back, and its `fallback` everywhere else |
 | `UserMenu` | The person, the sections they may open, theme switching, and sign-out |
 
+Wrap your own navigation in `SectionNav` so that opening Data or Settings swaps it for the
+section's pages, and keep your header and footer around it:
+
+```tsx
+import { SectionNav, UserMenu } from "@sixb/app"
+import { Sidebar, SidebarContent, SidebarFooter } from "@sixb/ui/components"
+
+<Sidebar>
+  <SidebarContent>
+    <SectionNav fallback={<OperationsNav />} />
+  </SidebarContent>
+  <SidebarFooter>
+    <UserMenu />
+  </SidebarFooter>
+</Sidebar>
+```
+
 Without a `SectionNav`, a section shows its pages as tabs above the page, so a sidebar with only
-`UserMenu` still reaches every page. `useSections()` returns the same sections for drawing your
-own. Add your own items to the user menu with `UserMenu.Item`:
+`UserMenu` still reaches every page. With authentication off nobody signs in, and the menu's button
+reads **Sign-in off**. `useSections()` returns the same sections for drawing your own.
+
+Section pages bring their own margins, and a dataset's rows and a pipeline's canvas fill the
+height they are given. If your layout wraps pages in padding or a maximum width, leave it off while
+`useCurrentSection()` returns a section. A page of yours that replaces a section page counts as one
+too, so give it margins of its own:
+
+```tsx
+const inSection = useCurrentSection() !== null
+
+<main className="min-h-0 flex-1 overflow-y-auto">
+  <div className={inSection ? "h-full" : "mx-auto max-w-6xl px-6 py-8"}>{children}</div>
+</main>
+```
+
+Add your own items to the user menu with `UserMenu.Item`; they appear below the sections:
 
 ```tsx
 <UserMenu>
@@ -161,14 +194,49 @@ replaces the built-in one: `app/settings/members/page.tsx` replaces Members.
 
 | Group | Page | Path | Shows |
 | --- | --- | --- | --- |
-| Your account | Personal | `/settings/personal` | The person's name, email, and groups, and where they are signed in |
+| Your account | Personal | `/settings/personal` | The person's name, email, and groups, the theme, and where they are signed in |
 | Your account | Developers | `/settings/developers` | Their [personal access tokens](../auth/members.md#service-accounts-and-tokens) |
 | Project | Members | `/settings/members` | Members and invitations their [membership policy](../auth/members.md) covers |
 | Project | Service accounts | `/settings/service-accounts` | Service accounts and their tokens, with the `serviceAccounts` policy operation |
 
 Settings needs a signed-in person, so it is absent when authentication is off.
 
-### Choose who sees a section
+## Data
+
+Every app includes Data, in the user menu: how data reaches the project, from each connector to the
+objects it fills, and what failed on the way.
+
+| Page | Path | Shows |
+| --- | --- | --- |
+| Connectors | `/data/connectors` | Each connector's syncs, and its webhooks and deliveries |
+| Syncs | `/data/syncs` | Each sync's runs, with **Sync now** to start one |
+| Datasets | `/data/datasets` | Each dataset's rows at any version across the whole page; **Details** shows what writes it, what reads it, and its schema |
+| Pipelines | `/data/pipelines` | Each pipeline as a canvas of datasets and steps; select a dataset to see its rows, open **Runs** for each run's step results, and **Run now** to start one |
+| Projections | `/data/projections` | Which dataset columns fill each object, link, or telemetry field, and its runs |
+
+Each item opens a page under its list, such as `/data/syncs/crm-accounts`. As with Settings, a page
+of your own at the same path replaces the built-in one.
+
+The pages show what the API lets each person read. A connector's webhooks and their deliveries
+need [`can.manage`](../auth/authorization.md) on the connector, and **Sync now** and **Run now**
+need `can.run` on the sync or pipeline.
+
+To start a sync from your own pages, use `SyncButton`. It turns into **Syncing…** until the run
+ends.
+
+```tsx
+import { SyncButton } from "@sixb/app"
+
+<SyncButton sync="crm-accounts" showStatus />
+```
+
+| Prop | Default | Purpose |
+| --- | --- | --- |
+| `sync` | required | The sync's id |
+| `showStatus` | `false` | Shows when it last synced, or that it failed, beside the button |
+| `variant`, `size` | `"outline"`, `"sm"` | Passed to the `@sixb/ui` button |
+
+## Choose who sees a section
 
 Export `visibility` from `app/layout.tsx` to show a section only to some groups:
 
@@ -180,18 +248,24 @@ import { admins } from "../security/groups/admins"
 
 export const visibility = {
   settings: [admins],
+  data: [admins],
 } satisfies AppVisibility
 ```
 
-| `visibility.settings` | Who sees Members and Service accounts |
+| Key | Hides |
 | --- | --- |
-| Not set | Everyone signed in |
+| `settings` | Members and Service accounts |
+| `data` | Every Data page |
+
+| Value | Who sees them |
+| --- | --- |
+| Not set | Everyone |
 | `[admins, staff]` | Members of those groups |
 | `[]` | Nobody |
 
-Personal and Developers stay open to everyone signed in. A hidden page leaves the navigation,
-and its URL leads to `/`. Visibility only hides screens: the API still checks each person's
-permissions.
+Personal and Developers stay open to everyone signed in. With authentication off nobody is signed
+in, so `visibility` does not apply and Data is open. A hidden page leaves the navigation, and its
+URL leads to `/`. Visibility only hides screens: the API still checks each person's permissions.
 
 The browser loads `app/layout.tsx`, so the group files it imports must take `defineGroup` from
 `@sixb/core/security`:

@@ -55,8 +55,9 @@ test("presents a single Agent destination without a catalog count", () => {
   }
 })
 
-test("links Settings to the project's app only when Atlas knows the app's address", () => {
-  // Regression proof: drop <AppSettingsItem /> from the Operate group and the first case fails.
+test("links Settings and Data to the project's app only when Atlas knows the app's address", () => {
+  // Regression proof: drop the Settings AppLinkItem from the Operate group and the first case
+  // fails; drop the filter on projectNavGroups and the second shows an empty Data group.
   const render = () =>
     renderToStaticMarkup(
       createElement(
@@ -75,16 +76,26 @@ test("links Settings to the project's app only when Atlas knows the app's addres
       )
     )
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+  const previousConfig = client.getConfig()
+  client.setConfig({ baseUrl: "http://localhost:3002" })
   try {
     Object.defineProperty(globalThis, "window", {
       configurable: true,
       value: { __SIXB_ATLAS__: { appUrl: "https://app.example.test" } },
     })
-    expect(render()).toContain('href="https://app.example.test/settings"')
+    const linked = render()
+    expect(linked).toContain('href="https://app.example.test/settings"')
+    for (const page of ["connectors", "datasets", "syncs", "pipelines", "projections"]) {
+      expect(linked).toContain(`href="https://app.example.test/data/${page}"`)
+    }
 
     Object.defineProperty(globalThis, "window", { configurable: true, value: {} })
-    expect(render()).not.toMatch(/<span[^>]*>Settings<\/span>/)
+    const unlinked = render()
+    expect(unlinked).not.toMatch(/<span[^>]*>Settings<\/span>/)
+    expect(unlinked).not.toMatch(/>Data</)
+    expect(unlinked).not.toMatch(/<span[^>]*>Connectors<\/span>/)
   } finally {
+    client.setConfig({ baseUrl: previousConfig.baseUrl })
     if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow)
     else Reflect.deleteProperty(globalThis, "window")
   }

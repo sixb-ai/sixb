@@ -1,5 +1,6 @@
 import { Toaster, toast } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
+import { ChevronLeft } from "lucide-react"
 import type { ReactNode } from "react"
 import { Link, Navigate, useLocation } from "react-router-dom"
 import type { AppSectionId } from "../sections/catalog"
@@ -21,12 +22,18 @@ export const notify = {
 
 export interface SectionPageProps {
   readonly section: AppSectionId
-  /** The page's id in the section catalog. */
+  /** The page's id in the section catalog; a detail page uses its list page's. */
   readonly page: string
   readonly title: string
   readonly description?: string
   /** Buttons beside the title, such as "New token". */
   readonly actions?: ReactNode
+  /** On a detail page, the list it belongs to. */
+  readonly back?: { readonly href: string; readonly label: string }
+  /** A mark before the title, such as a connector's logo. */
+  readonly icon?: ReactNode
+  /** Facts under the title, such as a status pill. */
+  readonly meta?: ReactNode
   readonly children: ReactNode
 }
 
@@ -40,14 +47,13 @@ export function SectionPage({
   title,
   description,
   actions,
+  back,
+  icon,
+  meta,
   children,
 }: SectionPageProps) {
-  const open = useOpenSections()
+  const allowed = usePageAllowed(section, page)
   const showTabs = !useSectionNavMounted()
-  const allowed = open.some(
-    (candidate) =>
-      candidate.definition.id === section && candidate.pages.some((entry) => entry.id === page)
-  )
 
   if (!allowed) return <Navigate to="/" replace />
 
@@ -56,9 +62,30 @@ export function SectionPage({
       {showTabs ? <SectionTabs section={section} /> : null}
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-[1.625rem] leading-8 font-semibold tracking-[-0.025em]">{title}</h1>
+          {back ? (
+            <Link
+              to={back.href}
+              className="-ml-1 mb-3 flex w-fit items-center gap-0.5 rounded-md px-1 py-0.5 text-[0.8125rem] text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ChevronLeft className="size-4" />
+              {back.label}
+            </Link>
+          ) : null}
+          <div className="flex min-w-0 items-center gap-3.5">
+            {icon ? <div className="shrink-0">{icon}</div> : null}
+            <div className="min-w-0">
+              <h1 className="truncate text-[1.625rem] leading-8 font-semibold tracking-[-0.025em]">
+                {title}
+              </h1>
+              {meta ? (
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.8125rem] text-muted-foreground">
+                  {meta}
+                </div>
+              ) : null}
+            </div>
+          </div>
           {description ? (
-            <p className="mt-1.5 max-w-[60ch] text-sm leading-6 text-muted-foreground">
+            <p className="mt-2 max-w-[60ch] text-sm leading-6 text-muted-foreground">
               {description}
             </p>
           ) : null}
@@ -68,6 +95,82 @@ export function SectionPage({
       {children}
       <Toaster id={SECTION_TOASTER} />
     </div>
+  )
+}
+
+export interface SectionWorkspaceProps {
+  readonly section: AppSectionId
+  /** The page's id in the section catalog; a detail page uses its list page's. */
+  readonly page: string
+  /** Usually a `WorkspaceHeader`, then content that grows to fill the frame. */
+  readonly children: ReactNode
+}
+
+/**
+ * A section page that fills the frame edge to edge, for a data grid or a canvas: no page margins
+ * and a compact header, so the content gets the room. In a shell that gives the page no height it
+ * takes nearly the window's.
+ */
+export function SectionWorkspace({ section, page, children }: SectionWorkspaceProps) {
+  const allowed = usePageAllowed(section, page)
+  const showTabs = !useSectionNavMounted()
+
+  if (!allowed) return <Navigate to="/" replace />
+
+  return (
+    <div className="flex h-full min-h-[calc(100dvh-7rem)] w-full min-w-0 flex-col overflow-hidden">
+      {showTabs ? (
+        <div className="shrink-0 px-4 pt-2">
+          <SectionTabs section={section} />
+        </div>
+      ) : null}
+      {children}
+      <Toaster id={SECTION_TOASTER} />
+    </div>
+  )
+}
+
+export interface WorkspaceHeaderProps {
+  readonly back: { readonly href: string; readonly label: string }
+  readonly icon?: ReactNode
+  readonly title: ReactNode
+  /** One line of facts under the title. */
+  readonly meta?: ReactNode
+  readonly actions?: ReactNode
+}
+
+/** The one-row header of a `SectionWorkspace`. */
+export function WorkspaceHeader({ back, icon, title, meta, actions }: WorkspaceHeaderProps) {
+  return (
+    <header className="flex shrink-0 items-center gap-3 border-b border-border px-3 py-2.5 md:px-4">
+      <Link
+        to={back.href}
+        aria-label={back.label}
+        title={back.label}
+        className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <ChevronLeft className="size-4" />
+      </Link>
+      {icon ? <div className="shrink-0">{icon}</div> : null}
+      <div className="min-w-0 flex-1">
+        <h1 className="truncate text-[0.9375rem] leading-5 font-semibold tracking-[-0.01em]">
+          {title}
+        </h1>
+        {meta ? (
+          <div className="flex min-w-0 items-center gap-x-2 overflow-hidden text-xs whitespace-nowrap text-muted-foreground">
+            {meta}
+          </div>
+        ) : null}
+      </div>
+      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+    </header>
+  )
+}
+
+function usePageAllowed(section: AppSectionId, page: string): boolean {
+  return useOpenSections().some(
+    (candidate) =>
+      candidate.definition.id === section && candidate.pages.some((entry) => entry.id === page)
   )
 }
 

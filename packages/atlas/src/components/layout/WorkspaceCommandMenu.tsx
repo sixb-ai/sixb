@@ -24,6 +24,7 @@ import {
 } from "lucide-react"
 import { useEffect } from "react"
 import { useNavigate } from "react-router-dom"
+import { projectAppUrl } from "../../lib/app-url"
 
 const commandGroups = [
   {
@@ -53,12 +54,14 @@ const commandGroups = [
   },
   {
     label: "Data",
+    // These pages moved into the project's app; `path` is theirs there.
+    inApp: true,
     commands: [
-      { label: "Connectors", path: "/connectors", Icon: Cable },
-      { label: "Datasets", path: "/datasets", Icon: Database },
-      { label: "Syncs", path: "/syncs", Icon: RefreshCw },
-      { label: "Pipelines", path: "/pipelines", Icon: Workflow },
-      { label: "Projections", path: "/projections", Icon: Layers },
+      { label: "Connectors", path: "/data/connectors", Icon: Cable },
+      { label: "Datasets", path: "/data/datasets", Icon: Database },
+      { label: "Syncs", path: "/data/syncs", Icon: RefreshCw },
+      { label: "Pipelines", path: "/data/pipelines", Icon: Workflow },
+      { label: "Projections", path: "/data/projections", Icon: Layers },
     ],
   },
   {
@@ -92,10 +95,13 @@ export function WorkspaceCommandMenu({
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [onOpenChange, open])
 
-  const selectPath = (path: string) => {
+  const selectPath = (path: string, inApp: boolean) => {
     onOpenChange(false)
-    navigate(path)
+    const appUrl = inApp ? projectAppUrl(path) : null
+    if (appUrl) window.location.assign(appUrl)
+    else navigate(path)
   }
+  const groups = commandGroups.filter((group) => !("inApp" in group) || projectAppUrl("/"))
 
   return (
     <CommandDialog
@@ -108,7 +114,7 @@ export function WorkspaceCommandMenu({
       <CommandInput placeholder="Search…" />
       <CommandList className="max-h-[min(28rem,70vh)] p-1">
         <CommandEmpty>No matching workspace.</CommandEmpty>
-        {commandGroups.map((group, groupIndex) => (
+        {groups.map((group, groupIndex) => (
           <div key={group.label}>
             {groupIndex > 0 ? <CommandSeparator className="my-1" /> : null}
             <CommandGroup heading={group.label}>
@@ -116,7 +122,7 @@ export function WorkspaceCommandMenu({
                 <CommandItem
                   key={command.path}
                   value={`${command.label} ${"description" in command ? command.description : ""}`}
-                  onSelect={() => selectPath(command.path)}
+                  onSelect={() => selectPath(command.path, "inApp" in group)}
                   className="min-h-11 rounded-lg px-3"
                 >
                   <command.Icon className="size-4" />

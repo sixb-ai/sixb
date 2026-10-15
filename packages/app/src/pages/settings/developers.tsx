@@ -15,16 +15,14 @@ import { notify, SectionPage } from "../section-page"
 import {
   apiErrorMessage,
   CopyButton,
-  type CreatedTokenState,
   IconTile,
+  PageSection,
   Panel,
   PanelEmpty,
   PanelRow,
   PanelSkeleton,
-  SettingsSection,
-  TokenFormDialog,
-  TokenRows,
-} from "./controls"
+} from "../section-ui"
+import { type CreatedTokenState, TokenFormDialog, TokenRows } from "./controls"
 import { useSettingsMessages } from "./messages"
 
 /** Settings › Developers: your access tokens, and signing in to the CLI. */
@@ -93,7 +91,7 @@ export function SettingsDevelopersPage() {
       title={messages.title}
       description={messages.description}
     >
-      <SettingsSection
+      <PageSection
         title={messages.tokensTitle}
         description={messages.tokensDescription}
         action={tokens.length > 0 ? newTokenButton : null}
@@ -131,9 +129,9 @@ export function SettingsDevelopersPage() {
             />
           )}
         </Panel>
-      </SettingsSection>
+      </PageSection>
 
-      <SettingsSection title={messages.cliTitle} description={messages.cliDescription}>
+      <PageSection title={messages.cliTitle} description={messages.cliDescription}>
         <Panel>
           <PanelRow
             leading={<IconTile icon={SquareTerminal} />}
@@ -145,7 +143,7 @@ export function SettingsDevelopersPage() {
             trailing={<CopyButton value={`sixb login ${apiUrl}`} />}
           />
         </Panel>
-      </SettingsSection>
+      </PageSection>
 
       <TokenFormDialog
         open={dialogOpen}

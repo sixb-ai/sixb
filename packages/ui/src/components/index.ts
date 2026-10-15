@@ -25,7 +25,7 @@ export {
 // Sixb speech dictation
 export { DictationButton, type DictationButtonProps } from "./speech/dictation-button"
 export { DictationTextarea, type DictationTextareaProps } from "./speech/dictation-textarea"
-export { ThemeSwitcher } from "./theme-switcher"
+export { ThemePicker, ThemeSwitcher } from "./theme-switcher"
 export { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "./ui/accordion"
 export { Alert, AlertDescription, AlertTitle } from "./ui/alert"
 export {
