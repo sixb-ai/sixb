@@ -33,6 +33,15 @@ export const en = {
   },
   // Names the user menu's button when sign-in is off and nobody is signed in.
   signInOff: "Sign-in off",
+  search: {
+    label: "Search",
+    placeholder: "Search pages and objects…",
+    empty: "Nothing matches.",
+    searching: "Searching objects…",
+    objects: "Objects",
+    pages: "Pages",
+  },
+  agent: { title: "Agent", open: "Ask the agent" },
   sections: {
     back: "Back",
     data: {
@@ -48,6 +57,18 @@ export const en = {
     observability: {
       label: "Observability",
       pages: { runs: "Runs", logs: "Logs", "ai-usage": "AI usage" },
+    },
+    ontology: {
+      label: "Ontology",
+      groups: { model: "Model", logic: "Logic" },
+      pages: {
+        "object-types": "Object types",
+        objects: "Objects",
+        graph: "Graph",
+        actions: "Actions",
+        workflows: "Workflows",
+        rules: "Rules",
+      },
     },
     settings: {
       label: "Settings",
@@ -104,6 +125,15 @@ export const fr: Translation<AppMessages> = {
     empty: "Il n’y a rien ici pour l’instant.",
   },
   signInOff: "Connexion désactivée",
+  search: {
+    label: "Rechercher",
+    placeholder: "Rechercher des pages et des objets…",
+    empty: "Aucun résultat.",
+    searching: "Recherche d’objets…",
+    objects: "Objets",
+    pages: "Pages",
+  },
+  agent: { title: "Agent", open: "Demander à l’agent" },
   sections: {
     back: "Retour",
     data: {
@@ -119,6 +149,18 @@ export const fr: Translation<AppMessages> = {
     observability: {
       label: "Observabilité",
       pages: { runs: "Exécutions", logs: "Journaux", "ai-usage": "Usage de l’IA" },
+    },
+    ontology: {
+      label: "Ontologie",
+      groups: { model: "Modèle", logic: "Logique" },
+      pages: {
+        "object-types": "Types d’objets",
+        objects: "Objets",
+        graph: "Graphe",
+        actions: "Actions",
+        workflows: "Workflows",
+        rules: "Règles",
+      },
     },
     settings: {
       label: "Paramètres",

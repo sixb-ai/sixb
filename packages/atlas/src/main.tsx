@@ -13,7 +13,6 @@ import React from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { BrowserRouter } from "react-router-dom"
 import App from "./App"
-import { preloadWorkspacePath } from "./pages/workspaceRoutes"
 import "../.sixb/ui.css"
 
 let canRenderApp = false
@@ -38,7 +37,6 @@ async function start(): Promise<void> {
 
   const runtimeConfig = readSixbBrowserRuntimeConfig({ audience: "atlas" })
   browserClient = configureSixbBrowserClient(runtimeConfig)
-  preloadWorkspacePath(window.location.pathname)
   let authSession: GetAuthSessionResponse | null
   try {
     authSession = runtimeConfig.auth.enabled

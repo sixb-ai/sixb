@@ -4,12 +4,8 @@ import { ChevronLeft } from "lucide-react"
 import type { ComponentType, ReactNode } from "react"
 import { Link, Navigate, useLocation } from "react-router-dom"
 import type { AppSectionId } from "../sections/catalog"
-import {
-  sectionContains,
-  useOpenSections,
-  useSectionNavMounted,
-  useSections,
-} from "../sections/sections"
+import { useOpenSections, useSectionNavMounted, useSections } from "../sections/sections"
+import { isCurrentItem } from "../shell/nav-items"
 import { Panel, PanelEmpty, PanelSkeleton, useLoadFailure } from "./section-ui"
 
 // Section pages draw their own toasts so they never double up with a toaster of the project's.
@@ -44,9 +40,22 @@ export interface SectionPageProps {
  * The frame of every built-in section page: its title and description, its section's pages as
  * tabs when the shell has no `SectionNav`, and a redirect home for a page this person may not see.
  */
-export function SectionPage({
-  section,
-  page,
+export function SectionPage({ section, page, ...frame }: SectionPageProps) {
+  const allowed = usePageAllowed(section, page)
+  const showTabs = !useSectionNavMounted()
+
+  if (!allowed) return <Navigate to="/" replace />
+
+  return <PageFrame {...frame} tabs={showTabs ? <SectionTabs section={section} /> : undefined} />
+}
+
+export interface PageFrameProps extends Omit<SectionPageProps, "section" | "page"> {
+  /** Above the header, such as a section's pages as tabs. */
+  readonly tabs?: ReactNode
+}
+
+/** A built-in page's margins, header and toasts, for a page in a section or one outside any. */
+export function PageFrame({
   title,
   description,
   actions,
@@ -54,13 +63,9 @@ export function SectionPage({
   icon,
   meta,
   width = "default",
+  tabs,
   children,
-}: SectionPageProps) {
-  const allowed = usePageAllowed(section, page)
-  const showTabs = !useSectionNavMounted()
-
-  if (!allowed) return <Navigate to="/" replace />
-
+}: PageFrameProps) {
   return (
     <div
       className={cn(
@@ -68,7 +73,7 @@ export function SectionPage({
         width === "wide" ? "max-w-6xl" : "max-w-[50rem]"
       )}
     >
-      {showTabs ? <SectionTabs section={section} /> : null}
+      {tabs}
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           {back ? (
@@ -202,7 +207,7 @@ function SectionTabs({ section }: { readonly section: AppSectionId }) {
     <nav aria-label={current.label} className="-mb-2 overflow-x-auto border-b border-border">
       <div className="flex min-w-max gap-6">
         {pages.map((page) => {
-          const active = sectionContains({ ...current, pages: [page] }, pathname)
+          const active = isCurrentItem(pathname, page)
           return (
             <Link
               key={page.href}

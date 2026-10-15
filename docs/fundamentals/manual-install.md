@@ -69,7 +69,8 @@ Run this from your project root:
 bun sixb dev
 ```
 
-Open [Atlas](http://localhost:3000) to explore your model, or the
-[API documentation](http://localhost:3002/docs) to see its endpoints.
+Open your app at [localhost:3001](http://localhost:3001) and choose **Ontology** from the user
+menu to explore your model, or the [API documentation](http://localhost:3002/docs) to see its
+endpoints.
 
 To add a React interface, see [Building apps](../apps/overview.md).

@@ -86,8 +86,6 @@ describe("createAtlasApp", () => {
       // Agents now stays mounted in the Atlas shell so the same session can move between a full
       // page and the app dock; there is intentionally no second lazy AgentsPage bundle.
       expect(builtFiles.some((file) => /^chunk-AgentsPage-[^.]+\.js$/.test(file))).toBe(false)
-      expect(builtFiles.some((file) => /^chunk-WorkflowsPage-[^.]+\.js$/.test(file))).toBe(true)
-      // Project workspace views remain lazy so their canvas dependencies stay off the initial path.
 
       for (const assetPath of [scriptPath, stylesheetPath]) {
         const assetResponse = await fetch(`${baseUrl}${assetPath}`)

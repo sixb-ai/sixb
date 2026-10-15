@@ -17,8 +17,10 @@ import {
 import { ThemeProvider } from "@sixb/ui/hooks"
 import { cn } from "@sixb/ui/lib/utils"
 import type { CSSProperties, ReactNode } from "react"
+import { AgentDock } from "./agent-dock"
 import { Brand } from "./brand"
 import { type NavEntry, NavItems } from "./nav-items"
+import { SearchCommand } from "./search-command"
 import { SectionNav } from "./section-nav"
 import { UserMenu } from "./user-menu"
 
@@ -51,12 +53,14 @@ export interface AppShellProps {
   readonly nav?: readonly NavEntry[] | ReactNode
   /** Replaces the app's name and mark. */
   readonly brand?: ReactNode
-  /** Shown below the brand. */
+  /** Shown below the brand; ⌘K search by default, `null` removes it. */
   readonly header?: ReactNode
   /** Shown above the user menu. */
   readonly footer?: ReactNode
   /** Replaces the user menu; `null` removes it. */
   readonly userMenu?: ReactNode
+  /** Beside every page; the project's agent, docked, by default. `null` removes it. */
+  readonly agent?: ReactNode
   readonly variant?: "sidebar" | "floating" | "inset"
   readonly collapsible?: "offcanvas" | "icon" | "none"
   readonly side?: "left" | "right"
@@ -75,6 +79,7 @@ export function AppShell({
   header,
   footer,
   userMenu,
+  agent,
   variant = "inset",
   collapsible = "icon",
   side = "left",
@@ -86,7 +91,7 @@ export function AppShell({
       <Sidebar variant={variant} collapsible={collapsible} side={side}>
         <SidebarHeader>
           {brand === undefined ? <Brand /> : brand}
-          {header}
+          {header === undefined ? <SearchCommand pages={isNavData(nav) ? nav : []} /> : header}
         </SidebarHeader>
         <SidebarContent>
           <SectionNav fallback={isNavData(nav) ? <NavItems items={nav} /> : nav} />
@@ -106,7 +111,10 @@ export function AppShell({
         <div className="flex h-12 shrink-0 items-center border-b border-border px-3 md:hidden">
           <SidebarTrigger className="-ml-1" />
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+        <div className="relative flex min-h-0 flex-1">
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">{children}</div>
+          {agent === undefined ? <AgentDock /> : agent}
+        </div>
       </SidebarInset>
     </AppShellProvider>
   )

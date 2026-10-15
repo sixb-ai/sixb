@@ -1,5 +1,5 @@
 // Loaded only when a pipeline page opens, so React Flow's code stays out of every other page's
-// bundle. Its stylesheet, pipeline-canvas.css, is part of the framework's.
+// bundle. Its stylesheet, canvas.css, is part of the framework's.
 import type { GetPipelineResponse } from "@sixb/client"
 import { cn } from "@sixb/ui/lib/utils"
 import {
@@ -114,7 +114,7 @@ function Canvas({ pipeline, stepStatus, selectedDatasetId, onSelectDataset }: Pi
       elementsSelectable={false}
       panOnScroll
       proOptions={{ hideAttribution: true }}
-      className="sixb-pipeline-canvas"
+      className="sixb-canvas"
     >
       <Controls showInteractive={false} position="bottom-left" />
     </ReactFlow>

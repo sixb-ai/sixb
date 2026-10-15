@@ -9,6 +9,6 @@
     "incremental": true,
     "tsBuildInfoFile": "./.tsbuild/tsconfig.tsbuildinfo"
   },
-  "files": ["src/css.d.ts", "src/recharts-lib.d.ts"],
+  "files": ["src/css.d.ts"],
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"]
 }

@@ -52,6 +52,7 @@ export {
   useSections,
 } from "./sections/sections"
 export { type CurrentUser, useCurrentUser, useSignOut } from "./session"
+export { AgentDock } from "./shell/agent-dock"
 export {
   AppShell,
   type AppShellProps,
@@ -66,5 +67,6 @@ export {
   NavItems,
   type NavItemsProps,
 } from "./shell/nav-items"
+export { SearchCommand, type SearchCommandProps } from "./shell/search-command"
 export { SectionNav, type SectionNavProps } from "./shell/section-nav"
 export { UserMenu, type UserMenuItemProps, type UserMenuProps } from "./shell/user-menu"

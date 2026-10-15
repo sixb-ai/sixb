@@ -186,7 +186,7 @@ describe("custom app metadata and manifest generation", () => {
 
     await writeVisibility(`{ billing: [] }`)
     await expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
-      "'billing' is not a built-in section. Sections: data, observability, settings."
+      "'billing' is not a built-in section. Sections: data, observability, ontology, settings."
     )
 
     await writeVisibility(`{ settings: ["admins"] }`)

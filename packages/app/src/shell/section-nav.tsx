@@ -9,8 +9,9 @@ import { ChevronLeft } from "lucide-react"
 import type { ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { useAppMessages } from "../locale"
+import { usePageCounts } from "../sections/counts"
 import { useCurrentSection, useRegisterSectionNav } from "../sections/sections"
-import { NavItems } from "./nav-items"
+import { type NavEntry, type NavItem, NavItems } from "./nav-items"
 
 export interface SectionNavProps {
   /** What the sidebar shows outside a section, usually the app's nav. */
@@ -27,8 +28,16 @@ export function SectionNav({ fallback = null, backHref = "/" }: SectionNavProps)
   useRegisterSectionNav()
   const messages = useAppMessages().sections
   const section = useCurrentSection()
+  const counts = usePageCounts(section?.id)
 
   if (!section) return fallback
+
+  const counted = (item: NavItem): NavItem =>
+    counts[item.href] === undefined ? item : { ...item, badge: counts[item.href] }
+  const pages = section.pages.map(
+    (entry): NavEntry =>
+      "group" in entry ? { ...entry, items: entry.items.map(counted) } : counted(entry)
+  )
 
   return (
     <>
@@ -46,7 +55,7 @@ export function SectionNav({ fallback = null, backHref = "/" }: SectionNavProps)
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
-      <NavItems items={section.pages} />
+      <NavItems items={pages} />
     </>
   )
 }

@@ -19,6 +19,7 @@ import {
   Layers,
   LayoutGrid,
   ListChecks,
+  Network,
   RefreshCw,
   ScrollText,
   Workflow,
@@ -29,28 +30,22 @@ import { projectAppUrl } from "../../lib/app-url"
 
 const commandGroups = [
   {
-    label: "Explore",
+    label: "Agent",
     commands: [
-      { label: "Objects", description: "Browse the operational graph", path: "/", Icon: Box },
-      {
-        label: "Ontology",
-        description: "Inspect types and relationships",
-        path: "/ontology",
-        Icon: LayoutGrid,
-      },
+      { label: "Agents", description: "Ask the project's agent", path: "/agents", Icon: Bot },
     ],
   },
   {
-    label: "Automate",
+    label: "Ontology",
+    // These pages moved into the project's app; `path` is theirs there.
+    inApp: true,
     commands: [
-      { label: "Actions", description: "Request typed operations", path: "/actions", Icon: Bolt },
-      {
-        label: "Workflows",
-        description: "Run and supervise processes",
-        path: "/workflows",
-        Icon: GitBranch,
-      },
-      { label: "Agents", description: "Inspect registered agents", path: "/agents", Icon: Bot },
+      { label: "Object types", path: "/ontology/object-types", Icon: LayoutGrid },
+      { label: "Objects", path: "/ontology/objects", Icon: Box },
+      { label: "Graph", path: "/ontology/graph", Icon: Network },
+      { label: "Actions", path: "/ontology/actions", Icon: Bolt },
+      { label: "Workflows", path: "/ontology/workflows", Icon: GitBranch },
+      { label: "Rules", path: "/ontology/rules", Icon: ListChecks },
     ],
   },
   {
@@ -73,10 +68,6 @@ const commandGroups = [
       { label: "Logs", path: "/observability/logs", Icon: ScrollText },
       { label: "AI usage", path: "/observability/ai-usage", Icon: ChartNoAxesCombined },
     ],
-  },
-  {
-    label: "Operate",
-    commands: [{ label: "Rules", path: "/rules", Icon: ListChecks }],
   },
 ] as const
 

@@ -91,10 +91,11 @@ module scope. Set the page title and app icons through [Customization](customiza
 
 ## Add a sidebar
 
-`AppShell` frames every page with a sidebar: the app's name, your navigation, and a menu for the
-signed-in user with [Data](#data), [Observability](#observability), [Settings](#settings), theme
-switching, and sign-out. Opening a section swaps the sidebar for its pages, with a link back. Sixb
-includes its styles, so it needs no stylesheet of yours.
+`AppShell` frames every page with a sidebar: the app's name, **Search**, your navigation, and a
+menu for the signed-in user with [Data](#data), [Observability](#observability),
+[Ontology](#ontology), [Settings](#settings), theme switching, and sign-out. Opening a section swaps
+the sidebar for its pages, with a link back. When the project has an agent, it waits docked beside
+every page but Home and its own pages. Sixb includes its styles, so it needs no stylesheet of yours.
 
 File: `app/layout.tsx`
 
@@ -126,8 +127,10 @@ export default function RootLayout({ children }: PropsWithChildren) {
 | --- | --- | --- |
 | `nav` | none | Links and groups, or your own sidebar content |
 | `brand` | The app's title and icon | Top of the sidebar |
-| `header`, `footer` | none | Content below the brand and above the user menu |
+| `header` | `<SearchCommand />` | Content below the brand; pass `null` to remove search |
+| `footer` | none | Content above the user menu |
 | `userMenu` | `<UserMenu />` | Pass `null` to remove it |
+| `agent` | `<AgentDock />` | Beside every page; pass `null` to remove the docked agent |
 | `variant`, `collapsible`, `side`, `defaultOpen` | `"inset"`, `"icon"`, `"left"`, `true` | Passed to the `@sixb/ui` sidebar |
 
 The sidebar collapses to icons with ⌘B or the toggle at its foot, so give each nav item an `icon`.
@@ -135,12 +138,15 @@ A custom `brand` can show something smaller while collapsed with Tailwind's
 `group-data-[collapsible=icon]:` variant.
 
 To build your own sidebar, use the same parts with the `@sixb/ui` sidebar components:
-`AppShellProvider`, `Brand`, `NavItems`, `SectionNav`, and `UserMenu`.
+`AppShellProvider`, `Brand`, `NavItems`, `SearchCommand`, `SectionNav`, `UserMenu`, and
+`AgentDock`.
 
 | Part | Shows |
 | --- | --- |
+| `SearchCommand` | A **Search** button, and ⌘K anywhere: your `pages`, every section page the person may open, and objects as they type |
 | `SectionNav` | The open section's pages with a link back, and its `fallback` everywhere else |
 | `UserMenu` | The person, the sections they may open, theme switching, and sign-out |
+| `AgentDock` | The project's agent, collapsed beside the page until opened; nothing without an agent |
 
 Wrap your own navigation in `SectionNav` so that opening Data or Settings swaps it for the
 section's pages, and keep your header and footer around it:
@@ -249,13 +255,50 @@ what its model calls cost.
 
 A workflow or action run opens its own page, such as `/observability/runs/workflows/run_123`: its
 input and output, each step with what it read and wrote, and its logs. A step that waits for
-someone's response is answered from the workflow's page in Atlas. A sync, pipeline, projection or
-webhook run opens the page under [Data](#data) that shows it.
+someone's response links to its workflow's page under [Ontology](#ontology), which answers it, for
+those who can open Ontology. A sync, pipeline, projection or webhook run opens the page under
+[Data](#data) that shows it.
 
 Each page shows what the API lets the person read. Runs follow the grants of what ran, such as
 `can.run` on a workflow or `can.apply` on an action. Logs need `can.observe("logs")`, AI usage
 needs `can.observe(agent.usage)`, and changing limits needs `can.manage(agent.usage)`. See
 [Authorization](../auth/authorization.md).
+
+## Ontology
+
+Every app includes Ontology, in the user menu: what your project models and the logic that acts on
+it. The sidebar counts each.
+
+| Group | Page | Path | Shows |
+| --- | --- | --- | --- |
+| Model | Object types | `/ontology/object-types` | Each type with its properties, links and actions, searchable by any of them |
+| Model | Objects | `/ontology/objects` | The objects updated last and a card per type; one type's objects, searchable, filtered and sorted, as cards or a table |
+| Model | Graph | `/ontology/graph` | The types and the links between them; select one to inspect it |
+| Logic | Actions | `/ontology/actions` | Each action with its latest run; apply one from its card |
+| Logic | Workflows | `/ontology/workflows` | Each workflow with its latest run |
+| Logic | Rules | `/ontology/rules` | Each rule, what it watches, and how many objects it holds active |
+
+An object type opens its own page, such as `/ontology/object-types/Deal`: what it inherits and
+what extends it, then its properties, vectors, links, actions and the
+[projections](../projections/overview.md) that fill it. A rule opens its definition and the objects
+it holds active.
+
+A workflow opens as a canvas of its steps, such as `/ontology/workflows/review-deal`. **Run
+workflow** starts one with a form for its input. **Runs** lists its runs; selecting one draws each
+step's status on the canvas, and selecting a step shows what it read and wrote. A step waiting for
+someone's response shows the form that answers it.
+
+## Object pages
+
+Every object has a page at `/objects/:objectTypeId/:primaryId`, such as `/objects/Deal/D-48231`,
+whatever section a person can see: its properties, its telemetry live with a trend over time, the
+objects it links to and those that link to it, and its type's actions. References to an object
+anywhere in the app open its page. For those who can open [Ontology](#ontology), the sidebar stays
+on it, with Objects current. As with any built-in page, a page of your own at the same path
+replaces it.
+
+What the page shows follows the person's grants: `can.view` on the type to read the object, and
+`can.apply` on an action to run it. See [Authorization](../auth/authorization.md).
 
 ## Choose who sees a section
 
@@ -271,6 +314,7 @@ export const visibility = {
   settings: [admins],
   data: [admins],
   observability: [admins],
+  ontology: [admins],
 } satisfies AppVisibility
 ```
 
@@ -279,6 +323,7 @@ export const visibility = {
 | `settings` | Members and Service accounts |
 | `data` | Every Data page |
 | `observability` | Every Observability page |
+| `ontology` | Every Ontology page; object pages stay open |
 
 | Value | Who sees them |
 | --- | --- |
@@ -287,8 +332,8 @@ export const visibility = {
 | `[]` | Nobody |
 
 Personal and Developers stay open to everyone signed in. With authentication off nobody is signed
-in, so `visibility` does not apply and Data and Observability are open. A hidden page leaves the
-navigation, and its URL leads to `/`. Visibility only hides screens: the API still checks each
+in, so `visibility` does not apply and Data, Observability and Ontology are open. A hidden page
+leaves the navigation, and its URL leads to `/`. Visibility only hides screens: the API still checks each
 person's permissions.
 
 The browser loads `app/layout.tsx`, so the group files it imports must take `defineGroup` from

@@ -35,10 +35,10 @@ import {
 } from "lucide-react"
 import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
+import { actionRunHref, workflowRunHref } from "../routes"
 import { SectionWorkspace, WorkspaceHeader } from "../section-page"
 import { CopyButton, IconTile, PageSection, Panel, PanelEmpty } from "../section-ui"
 import { useObservabilityMessages } from "./messages"
-import { actionRunHref, workflowRunHref } from "./runs"
 
 const kinds = ["all", "sync", "pipeline", "workflow", "action", "webhook"] as const
 type Kind = (typeof kinds)[number]

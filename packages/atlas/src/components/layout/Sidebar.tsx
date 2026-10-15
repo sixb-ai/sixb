@@ -10,7 +10,6 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
@@ -31,6 +30,7 @@ import {
   Layers,
   LayoutGrid,
   ListChecks,
+  Network,
   RefreshCw,
   ScrollText,
   Search,
@@ -39,7 +39,7 @@ import {
 } from "lucide-react"
 import { projectAppUrl } from "../../lib/app-url"
 
-export type ViewMode = "home" | "workflows" | "actions" | "agents" | "rules" | "ontology"
+export type ViewMode = "agents"
 
 interface NavItem {
   id: ViewMode
@@ -68,15 +68,16 @@ const projectNavGroups: { label: string; items: (NavItem | AppLink)[] }[] = [
   {
     label: "Model",
     items: [
-      { id: "ontology", label: "Ontology", Icon: LayoutGrid },
-      { id: "home", label: "Objects", Icon: Box },
+      { appPath: "/ontology/object-types", label: "Object types", Icon: LayoutGrid },
+      { appPath: "/ontology/objects", label: "Objects", Icon: Box },
+      { appPath: "/ontology/graph", label: "Graph", Icon: Network },
     ],
   },
   {
     label: "Automate",
     items: [
-      { id: "actions", label: "Actions", Icon: Bolt },
-      { id: "workflows", label: "Workflows", Icon: GitBranch },
+      { appPath: "/ontology/actions", label: "Actions", Icon: Bolt },
+      { appPath: "/ontology/workflows", label: "Workflows", Icon: GitBranch },
       { id: "agents", label: "Agent", Icon: Bot },
     ],
   },
@@ -90,7 +91,7 @@ const projectNavGroups: { label: string; items: (NavItem | AppLink)[] }[] = [
   },
   {
     label: "Operate",
-    items: [{ id: "rules", label: "Rules", Icon: ListChecks }],
+    items: [{ appPath: "/ontology/rules", label: "Rules", Icon: ListChecks }],
   },
 ]
 
@@ -100,32 +101,12 @@ function apiDocsUrl(): string {
 
 interface SidebarProps {
   selectedProject: ProjectInfo | null
-  viewMode: ViewMode
+  viewMode: ViewMode | null
   onViewChange: (mode: ViewMode) => void
-  onViewIntent?: (mode: ViewMode) => void
   onOpenCommand: () => void
-  workflowCount?: number
-  actionCount?: number
-  objectCount?: number
 }
 
-export function Sidebar({
-  selectedProject,
-  viewMode,
-  onViewChange,
-  onViewIntent,
-  onOpenCommand,
-  workflowCount,
-  actionCount,
-  objectCount,
-}: SidebarProps) {
-  const getCount = (id: ViewMode): number | undefined => {
-    if (id === "home") return objectCount
-    if (id === "workflows") return workflowCount
-    if (id === "actions") return actionCount
-    return undefined
-  }
-
+export function Sidebar({ selectedProject, viewMode, onViewChange, onOpenCommand }: SidebarProps) {
   return (
     <ShadcnSidebar collapsible="icon">
       <AtlasSidebarHeader selectedProject={selectedProject} />
@@ -161,16 +142,12 @@ export function Sidebar({
                 <SidebarMenu>
                   {group.items.map((item) => {
                     if ("appPath" in item) return <AppLinkItem key={item.appPath} link={item} />
-                    const count = getCount(item.id)
                     const isActive = viewMode === item.id
                     return (
                       <SidebarMenuItem key={item.id}>
                         <SidebarMenuButton
                           isActive={isActive}
                           tooltip={item.label}
-                          onPointerEnter={() => onViewIntent?.(item.id)}
-                          onPointerDown={() => onViewIntent?.(item.id)}
-                          onFocus={() => onViewIntent?.(item.id)}
                           onClick={() => onViewChange(item.id)}
                         >
                           <item.Icon />
@@ -182,9 +159,6 @@ export function Sidebar({
                             />
                           ) : null}
                         </SidebarMenuButton>
-                        {count !== undefined && count > 0 ? (
-                          <SidebarMenuBadge>{count}</SidebarMenuBadge>
-                        ) : null}
                       </SidebarMenuItem>
                     )
                   })}

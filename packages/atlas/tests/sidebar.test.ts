@@ -19,8 +19,8 @@ test("keeps the Atlas name and project without a brand mark", () => {
   expect(html).not.toContain("<svg")
 })
 
-test("presents a single Agent destination without a catalog count", () => {
-  // Restoring the plural label fails this assertion; other catalog counts remain visible.
+test("presents a single Agent destination", () => {
+  // Restoring the plural label fails this assertion.
   const previousConfig = client.getConfig()
   client.setConfig({ baseUrl: "http://localhost:3002" })
   try {
@@ -36,10 +36,9 @@ test("presents a single Agent destination without a catalog count", () => {
             null,
             createElement(Sidebar, {
               selectedProject: { name: "northline" },
-              viewMode: "home",
+              viewMode: "agents",
               onViewChange: () => undefined,
               onOpenCommand: () => undefined,
-              workflowCount: 3,
             })
           )
         )
@@ -47,15 +46,13 @@ test("presents a single Agent destination without a catalog count", () => {
     )
     const agentItem = html.split("</li>").find((item) => /<span[^>]*>Agent<\/span>/.test(item))
     expect(agentItem).toBeDefined()
-    expect(agentItem).not.toContain('data-sidebar="menu-badge"')
     expect(html).not.toMatch(/<span[^>]*>Agents<\/span>/)
-    expect(html).toContain('data-sidebar="menu-badge"')
   } finally {
     client.setConfig(previousConfig)
   }
 })
 
-test("links Settings and Data to the project's app only when Atlas knows the app's address", () => {
+test("links the pages that moved to the project's app only when Atlas knows the app's address", () => {
   // Regression proof: drop the Settings AppLinkItem from the Operate group and the first case
   // fails; drop the filter on projectNavGroups and the second shows an empty Data group.
   const render = () =>
@@ -68,7 +65,7 @@ test("links Settings and Data to the project's app only when Atlas knows the app
           null,
           createElement(Sidebar, {
             selectedProject: { name: "northline" },
-            viewMode: "home",
+            viewMode: null,
             onViewChange: () => undefined,
             onOpenCommand: () => undefined,
           })
@@ -88,12 +85,16 @@ test("links Settings and Data to the project's app only when Atlas knows the app
     for (const page of ["connectors", "datasets", "syncs", "pipelines", "projections"]) {
       expect(linked).toContain(`href="https://app.example.test/data/${page}"`)
     }
+    for (const page of ["object-types", "objects", "graph", "actions", "workflows", "rules"]) {
+      expect(linked).toContain(`href="https://app.example.test/ontology/${page}"`)
+    }
 
     Object.defineProperty(globalThis, "window", { configurable: true, value: {} })
     const unlinked = render()
     expect(unlinked).not.toMatch(/<span[^>]*>Settings<\/span>/)
     expect(unlinked).not.toMatch(/>Data</)
     expect(unlinked).not.toMatch(/<span[^>]*>Connectors<\/span>/)
+    expect(unlinked).not.toMatch(/<span[^>]*>Objects<\/span>/)
   } finally {
     client.setConfig({ baseUrl: previousConfig.baseUrl })
     if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow)

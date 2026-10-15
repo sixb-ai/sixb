@@ -69,8 +69,8 @@ export const en = {
       "Each step the run reached, in order. Open one to see what it read and wrote.",
     noSteps: "No step has started yet.",
     nodeKinds: { step: "Step", action: "Action", intervention: "Intervention", agent: "Agent" },
-    waiting:
-      "Waiting for someone to respond. Answer it on the workflow's page in Atlas, where its form is.",
+    waiting: "Waiting for someone to respond.",
+    answer: "Answer it on the workflow's page",
     agentTrace: "What the agent did",
     agentLoading: "Loading what the agent did…",
     agentUnavailable: "What the agent did could not be loaded.",
@@ -238,8 +238,8 @@ export const fr: Translation<ObservabilityMessages> = {
       "Chaque étape atteinte par l’exécution, dans l’ordre. Ouvrez-en une pour voir ce qu’elle a lu et écrit.",
     noSteps: "Aucune étape n’a encore commencé.",
     nodeKinds: { step: "Étape", action: "Action", intervention: "Intervention", agent: "Agent" },
-    waiting:
-      "En attente d’une réponse. Répondez sur la page du workflow dans Atlas, où se trouve son formulaire.",
+    waiting: "En attente d’une réponse.",
+    answer: "Répondre sur la page du workflow",
     agentTrace: "Ce qu’a fait l’agent",
     agentLoading: "Chargement de ce qu’a fait l’agent…",
     agentUnavailable: "Impossible de charger ce qu’a fait l’agent.",

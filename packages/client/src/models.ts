@@ -263,10 +263,12 @@ export function toObjectSummary(
   objectType: ObjectTypeDefinition | undefined
 ): ObjectSummary {
   const properties = (object.properties ?? {}) as Record<string, unknown>
+  // What people call it: the property the type declares as its title, then `name`, then its id.
+  const titleProperty = objectType?.search?.title
   const name =
-    typeof properties.name === "string" && properties.name.length > 0
-      ? properties.name
-      : object.primaryId
+    [titleProperty ? properties[titleProperty] : undefined, properties.name].find(
+      (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0
+    ) ?? object.primaryId
   const telemetry = mapTelemetryProperties(objectType, properties)
 
   return {

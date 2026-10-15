@@ -68,4 +68,13 @@ describe("client object models", () => {
 
     expect(summary.actions.updateCategory?.params?.owner?.type).toBe("userRef")
   })
+
+  // Regression proof: drop the title property from toObjectSummary and the deal reads as its id.
+  test("names an object by its type's title property, then `name`, then its primary id", () => {
+    const deal = { ...object, primaryId: "D-1", properties: { title: "Staff kitchens", name: "x" } }
+    const titled = { ...objectType, search: { title: "title" } }
+    expect(toObjectSummary(deal, titled).name).toBe("Staff kitchens")
+    expect(toObjectSummary(deal, objectType).name).toBe("x")
+    expect(toObjectSummary({ ...deal, properties: {} }, titled).name).toBe("D-1")
+  })
 })
