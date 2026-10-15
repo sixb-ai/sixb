@@ -47,6 +47,8 @@ interface DataTableProps<TData> {
   showRowIndex?: boolean
   /** Added to the row's original index for the gutter number. */
   rowIndexOffset?: number
+  /** The gutter number for a row, in place of its index, such as its place before filtering. */
+  rowNumber?: (row: TData) => number
   onCellClick?: (cell: { columnId: string; value: unknown; row: TData; rowIndex: number }) => void
   isLoading?: boolean
   /** Shown when there are no rows (and not loading). */
@@ -63,6 +65,7 @@ export function DataTable<TData>({
   data,
   showRowIndex = false,
   rowIndexOffset = 0,
+  rowNumber,
   onCellClick,
   isLoading = false,
   empty,
@@ -207,7 +210,9 @@ export function DataTable<TData>({
                     cellPadY
                   )}
                 >
-                  <span className="block pr-2">{rowIndexOffset + row.index + 1}</span>
+                  <span className="block pr-2">
+                    {rowNumber ? rowNumber(row.original) : rowIndexOffset + row.index + 1}
+                  </span>
                 </td>
               ) : null}
               {row.getVisibleCells().map((cell) => {

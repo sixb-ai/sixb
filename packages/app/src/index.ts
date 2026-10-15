@@ -42,9 +42,15 @@ export {
 } from "./agents"
 export type { AuthExperienceActions, AuthExperienceProps, AuthExperienceState } from "./auth"
 export type { AppMetadata } from "./metadata"
+export { SyncButton, type SyncButtonProps } from "./pages/data/sync-button"
 export { publicEnv } from "./public-env"
 export type { AppSectionId } from "./sections/catalog"
-export { type AppSection, type AppVisibility, useSections } from "./sections/sections"
+export {
+  type AppSection,
+  type AppVisibility,
+  useCurrentSection,
+  useSections,
+} from "./sections/sections"
 export { type CurrentUser, useCurrentUser, useSignOut } from "./session"
 export {
   AppShell,

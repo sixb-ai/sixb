@@ -9,10 +9,11 @@ export const metadata = {
   backgroundColor: "#eef2ed",
 } satisfies AppMetadata
 
-// Everyone signed in keeps Settings › Personal and Developers; only security admins see Members
-// and Service accounts.
+// Everyone signed in keeps Settings › Personal and Developers; only security admins see Members,
+// Service accounts and the Data pages.
 export const visibility = {
   settings: [securityAdmins],
+  data: [securityAdmins],
 } satisfies AppVisibility
 
 export default function RootLayout({ children }: PropsWithChildren) {

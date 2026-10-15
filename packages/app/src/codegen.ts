@@ -534,7 +534,11 @@ import {
 } from "react-router-dom"
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query"
 import { isSixbApiError } from "@sixb/client/browser"
-import { getAuthSessionQueryKey, getProjectInfoOptions } from "@sixb/client/hooks"
+import {
+  getAuthSessionQueryKey,
+  getProjectInfoOptions,
+  SixbEventsProvider,
+} from "@sixb/client/hooks"
 import { LocaleProvider, useAppMessages } from "@sixb/app/locale"
 ${sectionsImport}import { routePaths, routes } from "./routes"
 ${globalsCssImport}
@@ -973,6 +977,8 @@ function ProjectLocale({
 function App({ basename }: StartAppOptions) {
   return (
     <QueryClientProvider client={queryClient}>
+      {/* One event socket for every live page, opened only once something subscribes. */}
+      <SixbEventsProvider>
       <ProjectLocale shared={Boolean(basename)}>
         ${sectionsStart}
         <BrowserRouter basename={basename}>
@@ -988,6 +994,7 @@ function App({ basename }: StartAppOptions) {
         </BrowserRouter>
         ${sectionsEnd}
       </ProjectLocale>
+      </SixbEventsProvider>
     </QueryClientProvider>
   )
 }

@@ -7,13 +7,13 @@ import {
 } from "@sixb/ui/components"
 import { ChevronLeft } from "lucide-react"
 import type { ReactNode } from "react"
-import { Link, useLocation } from "react-router-dom"
+import { Link } from "react-router-dom"
 import { useAppMessages } from "../locale"
-import { sectionContains, useRegisterSectionNav, useSections } from "../sections/sections"
+import { useCurrentSection, useRegisterSectionNav } from "../sections/sections"
 import { NavItems } from "./nav-items"
 
 export interface SectionNavProps {
-  /** What the sidebar shows outside a section, usually the app's own nav. */
+  /** What the sidebar shows outside a section, usually the app's nav. */
   readonly fallback?: ReactNode
   /** Where the back link leads. */
   readonly backHref?: string
@@ -25,9 +25,8 @@ export interface SectionNavProps {
  */
 export function SectionNav({ fallback = null, backHref = "/" }: SectionNavProps) {
   useRegisterSectionNav()
-  const { pathname } = useLocation()
   const messages = useAppMessages().sections
-  const section = useSections().find((candidate) => sectionContains(candidate, pathname))
+  const section = useCurrentSection()
 
   if (!section) return fallback
 

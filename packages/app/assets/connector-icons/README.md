@@ -1,7 +1,8 @@
 # Connector icons
 
-Brand marks for the connectors Sixb ships. Atlas bundles them through `ConnectorIcon`, and the docs
-connector library serves the same files. The marks belong to their respective owners.
+Brand marks for the connectors Sixb ships. The app server serves them at `/__sixb/assets/` for the
+built-in Data pages, and the docs connector library serves the same files. The marks belong to
+their respective owners.
 
 Google Ads reuses the multicolor SVG from `examples/marketing/app/public/logos/google-ads.svg`.
 GitHub, Meta, LinkedIn, Notion, QuickBooks, Stripe and TikTok use [Simple Icons](https://github.com/simple-icons/simple-icons)
@@ -25,4 +26,4 @@ The following assets were retrieved from icons linked by the services' official 
 - `plaud.png`: https://web-static.plaud.ai/plaud-web3/prod-261001-083619-main-7575c8ce1f/favicon-light.png
 
 Adding an icon: drop the file here, then key it by the connector's adapter `type` in
-`../components/ConnectorIcon.tsx` and set `icon` in `apps/docs/src/docs/connectorCatalog.ts`.
+`src/pages/data/shared.tsx` and set `icon` in `apps/docs/src/docs/connectorCatalog.ts`.

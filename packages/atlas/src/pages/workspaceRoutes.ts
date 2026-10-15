@@ -5,16 +5,11 @@ import { KNOWN_VIEWS } from "../components/layout/viewMode"
 const loadActionRunDetailPage = () => import("./ActionRunDetailPage")
 const loadActionsPage = () => import("./ActionsPage")
 const loadAiUsagePage = () => import("./AiUsagePage")
-const loadConnectorsPage = () => import("./ConnectorsPage")
-const loadDatasetsPage = () => import("./DatasetsPage")
 const loadLogsPage = () => import("./LogsPage")
 const loadObjectDetailPage = () => import("./ObjectDetailPage")
 const loadObjectTypeDetailPage = () => import("./ObjectTypeDetail")
 const loadOntologyExplorer = () => import("./OntologyExplorer")
-const loadPipelinesPage = () => import("./PipelinesPage")
-const loadProjectionsPage = () => import("./ProjectionsPage")
 const loadRulesPage = () => import("./RulesPage")
-const loadSyncsPage = () => import("./SyncsPage")
 const loadWorkflowDetailPage = () => import("./WorkflowDetailPage")
 const loadWorkflowsPage = () => import("./WorkflowsPage")
 
@@ -27,18 +22,6 @@ export const ActionsPage = lazy(() =>
 export const AiUsagePage = lazy(() =>
   loadAiUsagePage().then((module) => ({ default: module.AiUsagePage }))
 )
-export const ConnectorDetailPage = lazy(() =>
-  loadConnectorsPage().then((module) => ({ default: module.ConnectorDetailPage }))
-)
-export const ConnectorsPage = lazy(() =>
-  loadConnectorsPage().then((module) => ({ default: module.ConnectorsPage }))
-)
-export const DatasetDetailPage = lazy(() =>
-  loadDatasetsPage().then((module) => ({ default: module.DatasetDetailPage }))
-)
-export const DatasetsPage = lazy(() =>
-  loadDatasetsPage().then((module) => ({ default: module.DatasetsPage }))
-)
 export const LogsPage = lazy(() => loadLogsPage().then((module) => ({ default: module.LogsPage })))
 export const ObjectDetailPage = lazy(() =>
   loadObjectDetailPage().then((module) => ({ default: module.ObjectDetailPage }))
@@ -49,29 +32,11 @@ export const ObjectTypeDetail = lazy(() =>
 export const OntologyExplorer = lazy(() =>
   loadOntologyExplorer().then((module) => ({ default: module.OntologyExplorer }))
 )
-export const PipelineDetailPage = lazy(() =>
-  loadPipelinesPage().then((module) => ({ default: module.PipelineDetailPage }))
-)
-export const PipelinesPage = lazy(() =>
-  loadPipelinesPage().then((module) => ({ default: module.PipelinesPage }))
-)
-export const ProjectionDetailPage = lazy(() =>
-  loadProjectionsPage().then((module) => ({ default: module.ProjectionDetailPage }))
-)
-export const ProjectionsPage = lazy(() =>
-  loadProjectionsPage().then((module) => ({ default: module.ProjectionsPage }))
-)
 export const RuleDetailPage = lazy(() =>
   loadRulesPage().then((module) => ({ default: module.RuleDetailPage }))
 )
 export const RulesPage = lazy(() =>
   loadRulesPage().then((module) => ({ default: module.RulesPage }))
-)
-export const SyncDetailPage = lazy(() =>
-  loadSyncsPage().then((module) => ({ default: module.SyncDetailPage }))
-)
-export const SyncsPage = lazy(() =>
-  loadSyncsPage().then((module) => ({ default: module.SyncsPage }))
 )
 export const WorkflowDetailPage = lazy(() =>
   loadWorkflowDetailPage().then((module) => ({ default: module.WorkflowDetailPage }))
@@ -85,14 +50,9 @@ type WorkspaceRouteLoader = () => Promise<unknown>
 const workspaceViewLoaders: Partial<Record<ViewMode, WorkspaceRouteLoader>> = {
   actions: loadActionsPage,
   "ai-usage": loadAiUsagePage,
-  connectors: loadConnectorsPage,
-  datasets: loadDatasetsPage,
   logs: loadLogsPage,
   ontology: loadOntologyExplorer,
-  pipelines: loadPipelinesPage,
-  projections: loadProjectionsPage,
   rules: loadRulesPage,
-  syncs: loadSyncsPage,
   workflows: loadWorkflowsPage,
 }
 

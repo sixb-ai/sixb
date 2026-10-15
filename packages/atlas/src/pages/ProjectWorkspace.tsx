@@ -44,21 +44,11 @@ import {
   ActionRunDetailPage,
   ActionsPage,
   AiUsagePage,
-  ConnectorDetailPage,
-  ConnectorsPage,
-  DatasetDetailPage,
-  DatasetsPage,
   LogsPage,
   ObjectDetailPage,
   OntologyExplorer,
-  PipelineDetailPage,
-  PipelinesPage,
-  ProjectionDetailPage,
-  ProjectionsPage,
   RuleDetailPage,
   RulesPage,
-  SyncDetailPage,
-  SyncsPage,
   WorkflowDetailPage,
   WorkflowsPage,
 } from "./workspaceRoutes"
@@ -336,8 +326,6 @@ export function ProjectWorkspace() {
   return (
     <Suspense fallback={null}>
       <Routes>
-        <Route path="pipelines/:pipelineId" element={<PipelineDetailPage />} />
-        <Route path="datasets/:datasetId" element={<DatasetDetailPage />} />
         <Route path="actions" element={<ActionsPage />} />
         <Route path="actions/runs/:runId" element={<ActionRunDetailPage />} />
         <Route path="workflows" element={<WorkflowsPage />} />
@@ -372,14 +360,9 @@ export function ProjectWorkspace() {
               <Route path="home" element={<Navigate to="/" replace />} />
               <Route path="objects" element={<Navigate to="/" replace />} />
               <Route path="ai-usage" element={<AiUsagePage />} />
-              <Route path="datasets" element={<DatasetsPage />} />
-              <Route path="connectors" element={<ConnectorsPage />} />
-              <Route path="connectors/:connectorId" element={<ConnectorDetailPage />} />
-              <Route path="syncs" element={<SyncsPage />} />
-              <Route path="syncs/:syncId" element={<SyncDetailPage />} />
-              <Route path="projections" element={<ProjectionsPage />} />
-              <Route path="projections/:projectionId" element={<ProjectionDetailPage />} />
-              <Route path="pipelines" element={<PipelinesPage />} />
+              {dataViews.map((view) => (
+                <Route key={view} path={`${view}/*`} element={<MovedToApp prefix="/data" />} />
+              ))}
               <Route path="rules" element={<RulesPage />} />
               <Route path="rules/:ruleId" element={<RuleDetailPage />} />
               <Route path="settings/*" element={<MovedToApp />} />
@@ -414,11 +397,13 @@ export function ProjectWorkspace() {
   )
 }
 
-// Settings lives in the project's app now. Old links follow it there when Atlas knows the
-// app's address, and land on the Atlas home otherwise.
-function MovedToApp() {
+// Settings and Data live in the project's app now, Data's pages under `/data`. Old links follow
+// them there when Atlas knows the app's address, and land on the Atlas home otherwise.
+const dataViews = ["connectors", "syncs", "datasets", "pipelines", "projections"] as const
+
+function MovedToApp({ prefix = "" }: { readonly prefix?: string }) {
   const location = useLocation()
-  const target = projectAppUrl(location.pathname)
+  const target = projectAppUrl(`${prefix}${location.pathname}${location.search}`)
   useEffect(() => {
     if (target) window.location.replace(target)
   }, [target])

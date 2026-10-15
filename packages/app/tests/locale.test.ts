@@ -2,11 +2,15 @@ import { expect, test } from "bun:test"
 import { untranslatedMessages } from "@sixb/ui/lib/i18n"
 import { browserAppMessages } from "../src/locale"
 import { en, fr } from "../src/locale-messages"
+import { en as dataEn, fr as dataFr } from "../src/pages/data/messages"
+import { en as sectionUiEn, fr as sectionUiFr } from "../src/pages/section-ui"
 import { en as settingsEn, fr as settingsFr } from "../src/pages/settings/messages"
 
 test("translates every generated screen into French", () => {
   expect(untranslatedMessages(en, fr)).toEqual([])
   expect(untranslatedMessages(settingsEn, settingsFr)).toEqual([])
+  expect(untranslatedMessages(dataEn, dataFr)).toEqual([])
+  expect(untranslatedMessages(sectionUiEn, sectionUiFr)).toEqual([])
 })
 
 test("screens drawn before React follow the browser's languages", () => {

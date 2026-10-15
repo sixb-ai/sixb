@@ -1,10 +1,12 @@
 import { DropdownMenuItem, SidebarUserMenu } from "@sixb/ui/components"
+import { CircleUserRound } from "lucide-react"
 import type { ComponentType, ReactNode } from "react"
+import { useAppMessages } from "../locale"
 import { useSections } from "../sections/sections"
 import { useCurrentUser, useSignOut } from "../session"
 
 export interface UserMenuProps {
-  /** Extra items, such as `<UserMenu.Item>`, shown above sign-out. */
+  /** Extra items, such as `<UserMenu.Item>`, shown below the built-in sections. */
   readonly children?: ReactNode
 }
 
@@ -16,16 +18,18 @@ export interface UserMenuItemProps {
 }
 
 /**
- * The signed-in person, the built-in sections they may open, theme switching and sign-out, at the
- * foot of any sidebar. A shell with only this still reaches every section.
+ * The signed-in person, the built-in sections they may open, such as Data and Settings, theme
+ * switching and sign-out, at the foot of any sidebar.
  */
 function UserMenuRoot({ children }: UserMenuProps) {
   const user = useCurrentUser()
   const signOut = useSignOut()
   const sections = useSections()
+  const messages = useAppMessages()
 
   return (
     <SidebarUserMenu
+      signedOut={{ label: messages.signInOff, icon: CircleUserRound }}
       user={
         user
           ? {

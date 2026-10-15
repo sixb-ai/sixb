@@ -1,4 +1,4 @@
-import { UserMenu } from "@sixb/app"
+import { SectionNav, UserMenu, useCurrentSection } from "@sixb/app"
 import { events, objectQueryKeys, useInvalidateOnEvent } from "@sixb/client/hooks"
 import {
   Sidebar,
@@ -61,6 +61,8 @@ export function NorthlineShell({ children }: PropsWithChildren) {
   const agentsActive = location.pathname.startsWith("/agents")
   const homeActive = location.pathname === "/"
   const conversationActive = homeActive || location.pathname.startsWith("/chat/")
+  // Data and Settings pages bring their own margins, and some fill the height.
+  const sectionActive = useCurrentSection() !== null
   useInvalidateOnEvent(events.objects(), () => [objectQueryKeys.all()], {
     debounceMs: 75,
     enabled: !agentsActive,
@@ -77,37 +79,8 @@ export function NorthlineShell({ children }: PropsWithChildren) {
       <Sidebar collapsible="offcanvas" className="border-sidebar-border">
         <NorthlineSidebarHeader />
         <SidebarContent className="py-2">
-          {groups.map((group) => (
-            <SidebarGroup key={group.label} className="px-2 py-1.5">
-              <SidebarGroupLabel className="h-7 px-2 text-[10px] font-semibold tracking-[0.13em] uppercase opacity-65">
-                {group.label}
-              </SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {group.items.map((item) => {
-                    const active =
-                      item.href === "/"
-                        ? location.pathname === "/"
-                        : location.pathname.startsWith(item.href)
-                    return (
-                      <SidebarMenuItem key={item.href}>
-                        <SidebarMenuButton
-                          asChild
-                          isActive={active}
-                          className="h-9 px-2.5 text-[13px]"
-                        >
-                          <Link to={item.href}>
-                            <item.icon />
-                            <span>{item.label}</span>
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    )
-                  })}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          ))}
+          {/* Inside Data or Settings the sidebar lists that section's pages instead. */}
+          <SectionNav fallback={<NorthlineNav />} />
         </SidebarContent>
         <SidebarFooter className="border-t border-sidebar-border">
           <UserMenu />
@@ -126,7 +99,7 @@ export function NorthlineShell({ children }: PropsWithChildren) {
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div
               className={
-                conversationActive
+                conversationActive || sectionActive
                   ? "h-full w-full"
                   : "mx-auto w-full max-w-[1320px] px-6 py-8 max-sm:px-4 max-sm:py-5"
               }
@@ -139,6 +112,35 @@ export function NorthlineShell({ children }: PropsWithChildren) {
       </div>
     </>
   )
+}
+
+function NorthlineNav() {
+  const { pathname } = useLocation()
+
+  return groups.map((group) => (
+    <SidebarGroup key={group.label} className="px-2 py-1.5">
+      <SidebarGroupLabel className="h-7 px-2 text-[10px] font-semibold tracking-[0.13em] uppercase opacity-65">
+        {group.label}
+      </SidebarGroupLabel>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {group.items.map((item) => {
+            const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)
+            return (
+              <SidebarMenuItem key={item.href}>
+                <SidebarMenuButton asChild isActive={active} className="h-9 px-2.5 text-[13px]">
+                  <Link to={item.href}>
+                    <item.icon />
+                    <span>{item.label}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )
+          })}
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  ))
 }
 
 function NorthlineSidebarHeader() {

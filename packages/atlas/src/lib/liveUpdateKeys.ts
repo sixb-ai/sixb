@@ -41,15 +41,6 @@ export function objectChangedKeys(objectTypeId: string, primaryId: string): Inva
   return [objectDetailKey(objectTypeId, primaryId), ...objectCollectionKeys()]
 }
 
-export function datasetChangedKeys(datasetId: string): InvalidationKey[] {
-  return [
-    queryKey("listDatasets"),
-    queryKeyWithPath("getDataset", { datasetId }),
-    queryKeyWithPath("listDatasetVersions", { datasetId }),
-    queryKeyWithPath("listDatasetRows", { datasetId }),
-  ]
-}
-
 export function workflowChangedKeys(workflowId: string, runId: string): InvalidationKey[] {
   return [
     queryKey("listWorkflows"),

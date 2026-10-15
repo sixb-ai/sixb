@@ -71,23 +71,25 @@ import { type ReactNode, type SubmitEvent, useEffect, useMemo, useState } from "
 import { useCurrentUser } from "../../session"
 import { notify, SectionPage } from "../section-page"
 import {
-  type AuthGroupOption,
   apiErrorMessage,
-  CopyField,
   Field,
-  FormError,
-  GroupChips,
-  GroupPicker,
   IconTile,
   MetaDot,
   Panel,
   PanelEmpty,
   PanelRow,
   PanelSkeleton,
-  PersonAvatar,
   Pill,
   ToolbarTabs,
   useFormat,
+} from "../section-ui"
+import {
+  type AuthGroupOption,
+  CopyField,
+  FormError,
+  GroupChips,
+  GroupPicker,
+  PersonAvatar,
   Warning,
 } from "./controls"
 import { type SettingsMessages, useSettingsMessages } from "./messages"

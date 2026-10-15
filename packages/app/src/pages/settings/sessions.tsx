@@ -22,18 +22,17 @@ import { useState } from "react"
 import { notify } from "../section-page"
 import {
   apiErrorMessage,
-  type DeviceKind,
   IconTile,
   MetaDot,
+  PageSection,
   Panel,
   PanelEmpty,
   PanelRow,
   PanelSkeleton,
   Pill,
-  SettingsSection,
-  useDescribeDevice,
   useFormat,
-} from "./controls"
+} from "../section-ui"
+import { type DeviceKind, useDescribeDevice } from "./controls"
 import { useSettingsMessages } from "./messages"
 
 const deviceIcons: Record<DeviceKind, typeof Monitor> = {
@@ -76,7 +75,7 @@ export function SessionsSection() {
   })
 
   return (
-    <SettingsSection
+    <PageSection
       title={messages.title}
       description={messages.description}
       action={
@@ -185,6 +184,6 @@ export function SessionsSection() {
           })
         )}
       </Panel>
-    </SettingsSection>
+    </PageSection>
   )
 }

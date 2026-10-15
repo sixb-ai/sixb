@@ -67,7 +67,7 @@ Public-origin flags have matching environment variables:
 
 `sixb api` accepts `--trusted-proxies` to choose which proxies identify the client address; see [Run behind a proxy](../deployment/overview.md#run-behind-a-proxy).
 
-The API requires API and Atlas origins, plus the app origin when serving a built custom app. Atlas, the app server, agent workers, and workers that create [download URLs](../server/overview.md#share-a-file-with-an-external-service) need the API origin. With the app origin, Atlas links to the app's Settings. Flags override environment variables.
+The API requires API and Atlas origins, plus the app origin when serving a built custom app. Atlas, the app server, agent workers, and workers that create [download URLs](../server/overview.md#share-a-file-with-an-external-service) need the API origin. With the app origin, Atlas links to the app's Data and Settings pages; without it, Atlas shows neither. Flags override environment variables.
 
 Schema-using services migrate storage and prepare declared query structures at startup. Unchanged query declarations are checked without rebuilding. Use `--no-migrate` or `SIXB_SKIP_MIGRATION=1` when `sixb db migrate` ran both steps in a separate release step. Initial PostgreSQL text backfills can block writes; allow maintenance time or prepare before starting the release.
 
@@ -114,7 +114,7 @@ sixb profile list
 sixb profile use production
 ```
 
-For an authenticated API, login opens the browser for approval and signs the CLI in as you. The sign-in renews itself while you use it and ends after the API's idle timeout (30 days by default) without use. It appears in your sessions in Atlas, and `sixb logout` signs it out. Use `--token-stdin` to supply an existing token without browser approval. A local API with authentication disabled needs no token.
+For an authenticated API, login opens the browser for approval and signs the CLI in as you. The sign-in renews itself while you use it and ends after the API's idle timeout (30 days by default) without use. It appears in your sessions on **Settings › Personal** in the app, and `sixb logout` signs it out. Use `--token-stdin` to supply an existing token without browser approval. A local API with authentication disabled needs no token.
 
 Use `--profile <name>` on a remote command to select another saved instance. For automation, set `SIXB_API_URL` and `SIXB_API_TOKEN`. Use `sixb logout` to remove the selected profile.
 

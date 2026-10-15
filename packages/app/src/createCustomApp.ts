@@ -92,8 +92,14 @@ const builtInAgentRouteSourcePath = join(packageRoot, "src", "agents.ts")
 const shellSourcePath = join(packageRoot, "src", "shell")
 const builtInPageModule = "@sixb/app/pages"
 const builtInPageSourcePath = join(packageRoot, "src", "pages")
+// Styles built-in pages need beyond utilities: the pipeline canvas.
+const builtInPageStylesheetPath = join(packageRoot, "src", "pages", "data", "pipeline-canvas.css")
 const customAppManifestRoute = "/app.webmanifest"
 const internalAppShellRoute = "/__sixb/generated/app-shell"
+// Files the built-in pages show, such as connector logos, served from the package itself so they
+// need no build step of the project's.
+const frameworkAssetsRoute = "/__sixb/assets"
+const frameworkAssetsDir = join(packageRoot, "assets")
 const internalSharedAppShellRoute = "/__sixb/generated/shared-app-shell"
 
 export async function createCustomApp(options: CreateCustomAppOptions): Promise<CustomAppInstance> {
@@ -177,6 +183,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         `@source ${JSON.stringify(builtInAgentRouteSourcePath)};`,
         `@source ${JSON.stringify(shellSourcePath)};`,
         `@source ${JSON.stringify(builtInPageSourcePath)};`,
+        `@import ${JSON.stringify(builtInPageStylesheetPath)};`,
         `@import ${JSON.stringify(stylesheet.sourcePath)};`,
         `@import ${JSON.stringify(agentUiGlobalsPath)};`,
         "",
@@ -232,6 +239,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         `@source ${JSON.stringify(builtInAgentRouteSourcePath)};`,
         `@source ${JSON.stringify(shellSourcePath)};`,
         `@source ${JSON.stringify(builtInPageSourcePath)};`,
+        `@import ${JSON.stringify(builtInPageStylesheetPath)};`,
         `@import ${JSON.stringify(agentUiGlobalsPath)};`,
         "",
       ].join("\n")
@@ -380,6 +388,9 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
             ...sharedAssetRoutes,
             ...reservedSixbRoutes(),
             "/__sixb/dev-reload.js": getHeadRoute(devReloadResponse),
+            [`${frameworkAssetsRoute}/*`]: getHeadRoute((request) =>
+              frameworkAssetResponse(request, new URL(request.url).pathname)
+            ),
             [customAppManifestRoute]: manifestRoute(manifestPath),
             [privateAppShellRoute]: htmlBundleRoute(bundle),
             ...sharedAppDevRoutes(
@@ -608,6 +619,10 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
             return notFoundResponse()
           }
 
+          if (url.pathname.startsWith(`${frameworkAssetsRoute}/`)) {
+            return frameworkAssetResponse(req, url.pathname)
+          }
+
           if (isSharedAppRoute(url.pathname)) {
             if (isAssetRequest(url.pathname)) {
               return notFoundResponse()
@@ -692,11 +707,18 @@ function builtInRoutesFor(routes: readonly PageRoute[]): BuiltInRouteManifestEnt
         moduleSpecifier: builtInPageModule,
         exportName: section.indexExportName,
       },
-      ...section.pages.map((page) => ({
-        path: page.path,
-        moduleSpecifier: builtInPageModule,
-        exportName: page.exportName,
-      })),
+      ...section.pages.flatMap((page) => [
+        { path: page.path, moduleSpecifier: builtInPageModule, exportName: page.exportName },
+        ...(page.detail
+          ? [
+              {
+                path: page.detail.path,
+                moduleSpecifier: builtInPageModule,
+                exportName: page.detail.exportName,
+              },
+            ]
+          : []),
+      ]),
     ]),
   ]
 
@@ -724,6 +746,16 @@ function isFileNotFoundError(error: unknown): boolean {
     "code" in error &&
     (error as Error & { readonly code?: unknown }).code === "ENOENT"
   )
+}
+
+async function frameworkAssetResponse(request: Request, pathname: string): Promise<Response> {
+  const resolvedPath = resolveStaticPath(
+    frameworkAssetsDir,
+    pathname.slice(frameworkAssetsRoute.length)
+  )
+  if (!resolvedPath || !(await Bun.file(resolvedPath).exists())) return notFoundResponse()
+  // A release replaces the package, and with it every asset, so a day of caching is safe.
+  return staticFileResponse(request, resolvedPath, { "cache-control": "public, max-age=86400" })
 }
 
 async function createPublicRoutes(publicDir: string): Promise<BunServeRoutes> {

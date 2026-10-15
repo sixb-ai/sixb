@@ -708,6 +708,7 @@
         "@sixb/core": "workspace:^",
         "@sixb/ui": "workspace:^",
         "@tailwindcss/cli": "^4.2.2",
+        "@xyflow/react": "^12.10.2",
         "lucide-react": "^0.562.0",
         "tailwindcss": "^4.1.18",
       },

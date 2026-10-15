@@ -508,6 +508,7 @@ import {
   Marker,
   MessageScroller,
   MiniSparkline,
+  ThemePicker,
   ThemeSwitcher,
 } from "@sixb/ui/components"
 import {
@@ -518,6 +519,7 @@ import {
   useDebouncedValue,
   useDictation,
   useIsMobile,
+  useOptionalTheme,
   useSpeechRecognition,
   useTheme,
 } from "@sixb/ui/hooks"
