@@ -8,8 +8,10 @@
  * node cannot be read (an unresolved `valueTypeRef`, a field it does not name), the value is drawn
  * generically and its type is never guessed.
  */
+import { client, objectFileContentUrl } from "@sixb/client"
+import { readSixbBrowserRuntimeConfig } from "@sixb/client/browser"
 import { listObjectTypesOptions } from "@sixb/client/hooks"
-import type { UserRef } from "@sixb/core"
+import type { AuthSessionAudience, UserRef } from "@sixb/core"
 import { type FileRef, fileNameFor, isFileRef } from "@sixb/core/blob-storage"
 import {
   defineMessages,
@@ -22,6 +24,8 @@ import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import { Box, Download, Eye, FileIcon, UserRound } from "lucide-react"
 import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { Link } from "react-router-dom"
+import { objectHref } from "./routes"
 import { CopyButton } from "./section-ui"
 
 export const en = {
@@ -68,7 +72,9 @@ export interface ValueSchema {
 }
 
 type ValueSchemaNode =
-  | { readonly kind: "unknown" | "fileRef" | "userRef" | "primitive" }
+  | { readonly kind: "unknown" | "fileRef" | "userRef" }
+  /** `type` is the declared one: `"timestamp"`, `"double"`, `"enum"`. */
+  | { readonly kind: "primitive"; readonly type: string }
   | { readonly kind: "objectRef"; readonly objectTypeId: string }
   | { readonly kind: "object"; readonly fields: Readonly<Record<string, ValueSchema>> }
   | { readonly kind: "array"; readonly items: ValueSchema }
@@ -166,12 +172,12 @@ function describe({ schema, valueTypes }: ValueSchema): ValueSchemaNode {
   }
   if (resolved === "fileRef" || resolved === "userRef") return { kind: resolved }
   if (typeof resolved === "string") {
-    return { kind: primitives.has(resolved) ? "primitive" : "unknown" }
+    return primitives.has(resolved) ? { kind: "primitive", type: resolved } : { kind: "unknown" }
   }
   if (!isRecord(resolved)) return { kind: "unknown" }
   switch (resolved.type) {
     case "enum":
-      return { kind: "primitive" }
+      return { kind: "primitive", type: "enum" }
     case "objectRef":
       return typeof resolved.objectTypeId === "string"
         ? { kind: "objectRef", objectTypeId: resolved.objectTypeId }
@@ -214,6 +220,8 @@ interface Position {
   readonly objectRef: ObjectRefValue | null
   readonly fileRef: FileRef | null
   readonly userRef: UserRef | null
+  /** The declared primitive type, which decides how a date or a number reads. */
+  readonly primitive: string | null
   /** The schema of a child; `undefined` (open) below an open value. */
   readonly child: (key: string) => ValueSchema | undefined
 }
@@ -226,6 +234,7 @@ function readPosition(value: unknown, schema: ValueSchema | undefined): Position
       objectRef: isObjectRefShape(value) ? value : null,
       fileRef: isFileRef(value) ? value : null,
       userRef: null,
+      primitive: null,
       child: () => undefined,
     }
   }
@@ -247,6 +256,7 @@ function readPosition(value: unknown, schema: ValueSchema | undefined): Position
       value.id.length > 0
         ? { type: "user", id: value.id }
         : null,
+    primitive: node.kind === "primitive" ? node.type : null,
     child: (key) => childSchema(node, key),
   }
 }
@@ -257,22 +267,80 @@ export interface FileLinks {
 }
 
 /** The links to the file at a path in the value, or `null` when it cannot be opened. */
-export type FileLinksAt = (path: readonly string[]) => FileLinks | null
+export type FileLinksAt = (path: readonly string[], file: FileRef) => FileLinks | null
+
+/** Where file links point, and whose session opens them. */
+export interface FileApi {
+  readonly baseUrl: string
+  /**
+   * A file opens in a new tab, a navigation that sends no Origin, so the link names the session it
+   * belongs to: the app's, not Atlas's.
+   */
+  readonly audience: AuthSessionAudience
+}
+
+function appAudience(): AuthSessionAudience {
+  return readSixbBrowserRuntimeConfig({ audience: "app" }).auth.audience
+}
+
+function appFileApi(): FileApi {
+  return { baseUrl: client.getConfig().baseUrl ?? window.location.origin, audience: appAudience() }
+}
 
 /**
  * Links to a file inside a recorded value, served by a run's `files/content` route. `root` is the
  * value's place in the run, such as `params` or `input`.
  */
-export function runFileLinks(apiUrl: string, routePath: string, root: string): FileLinksAt {
+export function runFileLinks(api: FileApi, routePath: string, root: string): FileLinksAt {
   return (path) => {
-    const url = new URL(routePath, apiUrl)
+    const url = new URL(routePath, api.baseUrl)
     const pointer = [root, ...path].map((segment) =>
       segment.replace(/~/g, "~0").replace(/\//g, "~1")
     )
     url.searchParams.set("path", `/${pointer.join("/")}`)
+    url.searchParams.set("audience", api.audience)
     const inlineUrl = url.toString()
     url.searchParams.set("disposition", "attachment")
     return { inlineUrl, downloadUrl: url.toString() }
+  }
+}
+
+/** Links to a file in an action run's parameters or writeback. */
+export function actionRunFileLinks(runId: string, root: "params" | "writeback"): FileLinksAt {
+  const route = `/api/action-runs/${encodeURIComponent(runId)}/files/content`
+  return runFileLinks(appFileApi(), route, root)
+}
+
+/** Links to a file in a workflow run's input or output. */
+export function workflowRunFileLinks(runId: string, root: "input" | "output"): FileLinksAt {
+  const route = `/api/workflow-runs/${encodeURIComponent(runId)}/files/content`
+  return runFileLinks(appFileApi(), route, root)
+}
+
+/** Links to a file in one step's input or output, within a workflow run. */
+export function workflowStepFileLinks(
+  runId: string,
+  nodeKey: string,
+  root: "input" | "output"
+): FileLinksAt {
+  const route = `/api/workflow-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeKey)}/files/content`
+  return runFileLinks(appFileApi(), route, root)
+}
+
+/** Links to a file in one of an object's properties, served by the object's `files/content` route. */
+export function objectFileLinks(objectTypeId: string, primaryId: string): FileLinksAt {
+  return (path, file) => {
+    const source = {
+      objectTypeId,
+      objectId: primaryId,
+      pathSegments: path,
+      fileRef: file,
+      audience: appAudience(),
+    }
+    return {
+      inlineUrl: objectFileContentUrl(source),
+      downloadUrl: objectFileContentUrl({ ...source, disposition: "attachment" }),
+    }
   }
 }
 
@@ -283,6 +351,7 @@ export function ValuePanel({
   schema,
   fileLinks,
   emptyLabel,
+  labels,
 }: {
   readonly title: string
   readonly value: unknown
@@ -290,14 +359,13 @@ export function ValuePanel({
   readonly schema?: ValueSchema
   readonly fileLinks?: FileLinksAt
   readonly emptyLabel?: string
+  /** Names for the value's own fields, such as an object's property names, in place of their ids. */
+  readonly labels?: Readonly<Record<string, string>>
 }) {
   const messages = useValueMessages()
   const [raw, setRaw] = useState(false)
   // An empty record or list says so in the panel's own words, such as "No input".
-  const empty =
-    value === null ||
-    value === undefined ||
-    (Array.isArray(value) ? value.length === 0 : isRecord(value) && Object.keys(value).length === 0)
+  const empty = isEmptyValue(value)
   return (
     <section className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-[0_1px_2px_0_rgb(0_0_0/0.04)]">
       <div className="flex h-11 items-center justify-between gap-3 border-b border-border px-4">
@@ -331,26 +399,34 @@ export function ValuePanel({
             {JSON.stringify(value, null, 2)}
           </pre>
         ) : (
-          <ValueView value={value} schema={schema} fileLinks={fileLinks} />
+          <ValueTree value={value} schema={schema} fileLinks={fileLinks} labels={labels} />
         )}
       </div>
     </section>
   )
 }
 
-/** A value as a tree of labelled fields. */
-function ValueView({
+/** A value as a tree of labelled fields, without a panel around it. */
+export function ValueTree({
   value,
   schema,
   fileLinks,
+  labels,
+  emptyLabel,
   path = [],
 }: {
   readonly value: unknown
   readonly schema?: ValueSchema
   readonly fileLinks?: FileLinksAt
+  readonly labels?: Readonly<Record<string, string>>
+  /** What an empty value reads as, such as "No input". */
+  readonly emptyLabel?: string
   readonly path?: readonly string[]
 }) {
   const messages = useValueMessages()
+  if (emptyLabel !== undefined && isEmptyValue(value)) {
+    return <p className="text-[0.8125rem] text-muted-foreground">{emptyLabel}</p>
+  }
   const position = readPosition(value, schema)
   const entries = Array.isArray(value)
     ? value.map((item, index) => [String(index), item] as const)
@@ -373,7 +449,7 @@ function ValueView({
       {entries.map(([key, item]) => (
         <Field
           key={key}
-          label={Array.isArray(value) ? `${Number(key) + 1}` : key}
+          label={Array.isArray(value) ? `${Number(key) + 1}` : (labels?.[key] ?? key)}
           value={item}
           schema={position.child(key)}
           fileLinks={fileLinks}
@@ -420,7 +496,7 @@ function Field({
         </dt>
         {count > 0 ? (
           <dd className="mt-2 border-l border-border pl-3">
-            <ValueView value={value} schema={schema} fileLinks={fileLinks} path={path} />
+            <ValueTree value={value} schema={schema} fileLinks={fileLinks} path={path} />
           </dd>
         ) : null}
       </div>
@@ -453,14 +529,20 @@ function Leaf({
   readonly path: readonly string[]
 }) {
   const messages = useValueMessages()
+  const locale = useLocale()
   if (position.objectRef) {
+    const { objectTypeId, primaryId } = position.objectRef
     return (
-      <Ref icon={<Box className="size-3 text-emerald-600 dark:text-emerald-400" />}>
-        {position.objectRef.objectTypeId}
-        <span className="font-mono text-muted-foreground" title={position.objectRef.primaryId}>
-          {position.objectRef.primaryId}
+      <Link
+        to={objectHref(objectTypeId, primaryId)}
+        className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md bg-muted/60 px-2 py-0.5 text-xs font-medium transition-colors hover:bg-muted [&>span]:truncate"
+      >
+        <Box className="size-3 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        {objectTypeId}
+        <span className="font-mono text-muted-foreground" title={primaryId}>
+          {primaryId}
         </span>
-      </Ref>
+      </Link>
     )
   }
   if (position.userRef) {
@@ -472,7 +554,15 @@ function Leaf({
     )
   }
   if (position.fileRef) {
-    return <FileValue file={position.fileRef} links={fileLinks?.(path) ?? null} />
+    return <FileValue file={position.fileRef} links={fileLinks?.(path, position.fileRef) ?? null} />
+  }
+  const formatted = formatPrimitive(value, position.primitive, locale)
+  if (formatted !== null) {
+    return (
+      <span className="tabular-nums" title={String(value)}>
+        {formatted}
+      </span>
+    )
   }
   if (typeof value === "string") {
     return value.length > 80 || value.includes("\n") ? (
@@ -485,6 +575,27 @@ function Leaf({
     return <span className="font-mono text-xs text-muted-foreground/70 italic">null</span>
   }
   return <span className="font-mono text-xs break-all">{JSON.stringify(value)}</span>
+}
+
+/**
+ * A declared date, timestamp or decimal in the reader's locale; `null` for anything else, or for a
+ * value that is not what its schema says.
+ */
+function formatPrimitive(value: unknown, type: string | null, locale: string): string | null {
+  // An integer is often a year or a code, so it keeps its digits as written.
+  if (type === "double" && typeof value === "number") {
+    return new Intl.NumberFormat(locale, { maximumFractionDigits: 6 }).format(value)
+  }
+  if ((type === "date" || type === "timestamp") && typeof value === "string") {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return null
+    // A `date` is a calendar day stored as UTC midnight; the reader's zone would show the day
+    // before west of Greenwich.
+    return type === "date"
+      ? date.toLocaleDateString(locale, { dateStyle: "medium", timeZone: "UTC" })
+      : date.toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" })
+  }
+  return null
 }
 
 function Ref({ icon, children }: { readonly icon: ReactNode; readonly children: ReactNode }) {
@@ -594,4 +705,13 @@ function isObjectRefShape(value: unknown): value is ObjectRefValue {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/** Nothing recorded: no value, or an empty record or list. */
+function isEmptyValue(value: unknown): boolean {
+  return (
+    value === null ||
+    value === undefined ||
+    (Array.isArray(value) ? value.length === 0 : isRecord(value) && Object.keys(value).length === 0)
+  )
 }

@@ -10,11 +10,12 @@ export const metadata = {
 } satisfies AppMetadata
 
 // Everyone signed in keeps Settings › Personal and Developers; only security admins see Members,
-// Service accounts, and the Data and Observability pages.
+// Service accounts, and the Data, Observability and Ontology pages.
 export const visibility = {
   settings: [securityAdmins],
   data: [securityAdmins],
   observability: [securityAdmins],
+  ontology: [securityAdmins],
 } satisfies AppVisibility
 
 export default function RootLayout({ children }: PropsWithChildren) {

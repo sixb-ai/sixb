@@ -7,7 +7,7 @@
  * signed-in person, because they are about that person rather than the project.
  */
 
-export type AppSectionId = "data" | "observability" | "settings"
+export type AppSectionId = "data" | "observability" | "ontology" | "settings"
 
 export interface SectionPageDefinition {
   readonly id: string
@@ -19,6 +19,8 @@ export interface SectionPageDefinition {
   readonly always?: boolean
   /** Pages for one item below this one, such as a single sync under Syncs. */
   readonly details?: readonly { readonly path: string; readonly exportName: string }[]
+  /** Paths outside the section that open from this page and keep the section around them. */
+  readonly activeFor?: readonly string[]
 }
 
 export interface SectionDefinition {
@@ -91,6 +93,52 @@ export const sectionCatalog: readonly SectionDefinition[] = [
       },
       { id: "logs", path: "/observability/logs", exportName: "ObservabilityLogsPage" },
       { id: "ai-usage", path: "/observability/ai-usage", exportName: "ObservabilityAiUsagePage" },
+    ],
+  },
+  {
+    id: "ontology",
+    path: "/ontology",
+    indexExportName: "OntologyIndexPage",
+    requiresUser: false,
+    pages: [
+      {
+        id: "object-types",
+        path: "/ontology/object-types",
+        exportName: "OntologyObjectTypesPage",
+        group: "model",
+        details: [
+          { path: "/ontology/object-types/:objectTypeId", exportName: "OntologyObjectTypePage" },
+        ],
+      },
+      {
+        id: "objects",
+        path: "/ontology/objects",
+        exportName: "OntologyObjectsPage",
+        group: "model",
+        // An object's page lives outside the section, so people who cannot open it still can.
+        activeFor: ["/objects"],
+      },
+      { id: "graph", path: "/ontology/graph", exportName: "OntologyGraphPage", group: "model" },
+      {
+        id: "actions",
+        path: "/ontology/actions",
+        exportName: "OntologyActionsPage",
+        group: "logic",
+      },
+      {
+        id: "workflows",
+        path: "/ontology/workflows",
+        exportName: "OntologyWorkflowsPage",
+        group: "logic",
+        details: [{ path: "/ontology/workflows/:workflowId", exportName: "OntologyWorkflowPage" }],
+      },
+      {
+        id: "rules",
+        path: "/ontology/rules",
+        exportName: "OntologyRulesPage",
+        group: "logic",
+        details: [{ path: "/ontology/rules/:ruleId", exportName: "OntologyRulePage" }],
+      },
     ],
   },
   {

@@ -1,0 +1,43 @@
+/*
+ * The built-in canvases (a pipeline's steps, the ontology graph, a workflow's steps): React Flow's
+ * base styles, and its edges, handles and controls in the theme's tokens. The overrides stay on
+ * these canvases, so a project's own React Flow keeps its look.
+ */
+@import "@xyflow/react/dist/style.css";
+
+.sixb-canvas {
+  --xy-controls-button-background-color: var(--card);
+  --xy-controls-button-background-color-hover: var(--muted);
+  --xy-controls-button-color: var(--muted-foreground);
+  --xy-controls-button-color-hover: var(--foreground);
+  --xy-controls-button-border-color: var(--border);
+  --xy-controls-box-shadow: none;
+  --xy-background-color-default: transparent;
+  --xy-edge-stroke-default: var(--border);
+  --xy-edge-stroke-selected-default: var(--foreground);
+  --xy-handle-background-color-default: var(--muted-foreground);
+  --xy-handle-border-color-default: transparent;
+  --xy-background-pattern-dots-color-default: color-mix(
+    in oklch,
+    var(--muted-foreground) 35%,
+    transparent
+  );
+}
+
+.sixb-canvas .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.sixb-canvas .react-flow__controls-button {
+  border-bottom: 1px solid var(--border);
+}
+
+.sixb-canvas .react-flow__controls-button:last-child {
+  border-bottom: 0;
+}
+
+.sixb-canvas .react-flow__controls-button svg {
+  fill: currentColor;
+}

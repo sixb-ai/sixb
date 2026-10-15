@@ -106,7 +106,8 @@ For a single model call that does not need tools, use an ordinary step with
 
 ## Start a workflow
 
-Run a workflow from Atlas, or request it from your app with the
+Run a workflow from its page in your app's [Ontology](../apps/overview.md#ontology) section, such as
+`/ontology/workflows/review-deal`, or request it from your own pages with the
 [Client SDK](../client/typed-queries.md#react-hooks). Use `requestWorkflowRunMutation()` from
 `@sixb/client/hooks` to submit its input from a React component.
 

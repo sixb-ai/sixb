@@ -93,7 +93,7 @@ const shellSourcePath = join(packageRoot, "src", "shell")
 const builtInPageModule = "@sixb/app/pages"
 const builtInPageSourcePath = join(packageRoot, "src", "pages")
 // Styles built-in pages need beyond utilities: the pipeline canvas.
-const builtInPageStylesheetPath = join(packageRoot, "src", "pages", "data", "pipeline-canvas.css")
+const builtInPageStylesheetPath = join(packageRoot, "src", "pages", "canvas.css")
 const customAppManifestRoute = "/app.webmanifest"
 const internalAppShellRoute = "/__sixb/generated/app-shell"
 // Files the built-in pages show, such as connector logos, served from the package itself so they
@@ -701,6 +701,12 @@ function builtInRoutesFor(routes: readonly PageRoute[]): BuiltInRouteManifestEnt
     ...builtInAgentRoutePaths.map((path) => ({ path, moduleSpecifier: builtInAgentRouteModule })),
     // Home starts conversations that continue on the agent routes, so it ships with them.
     { path: "/", moduleSpecifier: builtInPageModule, exportName: "HomePage" },
+    // Every object has a page, outside any section: grants decide who reads it.
+    {
+      path: "/objects/:objectTypeId/:primaryId",
+      moduleSpecifier: builtInPageModule,
+      exportName: "ObjectPage",
+    },
     ...sectionCatalog.flatMap((section) => [
       {
         path: section.path,

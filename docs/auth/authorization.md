@@ -100,7 +100,7 @@ export const financeAdminAccess = defineRole("finance-admin-access", {
 
 **Application access is unrestricted for signed-in users until a role grants that application.** Once a role grants Atlas or the custom app, only groups with that application's grant may open it. This does not grant access to its data; resource permissions still apply.
 
-The custom app's Data, Observability and Settings pages follow the app's grant, not Atlas's. To show them only to some groups, set the app's [`visibility`](../apps/overview.md#choose-who-sees-a-section).
+The custom app's Data, Observability, Ontology and Settings pages follow the app's grant, not Atlas's. To show them only to some groups, set the app's [`visibility`](../apps/overview.md#choose-who-sees-a-section).
 
 Application access applies to web apps in the browser. The CLI, other tools signed in outside the browser, and access tokens belong to no web app, so resource permissions alone decide what they can do. Signing in and approving a CLI login work for every user, whichever web apps they may open.
 

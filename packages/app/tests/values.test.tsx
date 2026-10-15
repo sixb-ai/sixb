@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import type { FileRef } from "@sixb/core/blob-storage"
+import type { ReactNode } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
+import { MemoryRouter } from "react-router-dom"
 import { fieldRecordSchema, runFileLinks, ValuePanel, valueSchema } from "../src/pages/values"
 
 const fileRef: FileRef = {
@@ -16,8 +18,11 @@ const fileMarker = "lucide-file"
 const objectMarker = "lucide-box"
 const userMarker = "lucide-user-round"
 
+// An object reference links to its object's page, so the panel needs a router.
+const markup = (node: ReactNode) => renderToStaticMarkup(<MemoryRouter>{node}</MemoryRouter>)
+
 const render = (value: unknown, schema?: unknown, valueTypes?: ReadonlyMap<string, unknown>) =>
-  renderToStaticMarkup(
+  markup(
     <ValuePanel
       title="Value"
       value={value}
@@ -92,20 +97,46 @@ describe("a recorded value", () => {
 
   test("says it is empty in the panel's words when nothing was recorded", () => {
     for (const value of [null, {}, []]) {
-      expect(
-        renderToStaticMarkup(<ValuePanel title="Input" value={value} emptyLabel="No input" />)
-      ).toContain("No input")
+      expect(markup(<ValuePanel title="Input" value={value} emptyLabel="No input" />)).toContain(
+        "No input"
+      )
     }
   })
 })
 
-// Regression proof: drop the `~` and `/` escapes in runFileLinks and the server reads another path.
-test("links a file to its run as a JSON pointer below the value's root", () => {
-  const links = runFileLinks("https://app.test", "/api/workflow-runs/wf%2F1/files/content", "input")
-  expect(links(["input~file", "a/b"])).toEqual({
-    inlineUrl:
-      "https://app.test/api/workflow-runs/wf%2F1/files/content?path=%2Finput%2Finput%7E0file%2Fa%7E1b",
-    downloadUrl:
-      "https://app.test/api/workflow-runs/wf%2F1/files/content?path=%2Finput%2Finput%7E0file%2Fa%7E1b&disposition=attachment",
-  })
+test("links a file to its run as a JSON pointer below the value's root, in the app's session", () => {
+  const links = runFileLinks(
+    { baseUrl: "https://api.test", audience: "app" },
+    "/api/workflow-runs/wf%2F1/files/content",
+    "input"
+  )
+  const url = links(["input~file", "a/b"], fileRef)
+  // Regression proof: drop the `~` and `/` escapes in runFileLinks and the server reads another path.
+  expect(url?.inlineUrl).toBe(
+    "https://api.test/api/workflow-runs/wf%2F1/files/content?path=%2Finput%2Finput%7E0file%2Fa%7E1b&audience=app"
+  )
+  // A new tab sends no Origin. Regression proof: drop `audience` and the API answers with Atlas's
+  // session, which a person signed in to the app alone does not have.
+  expect(url?.downloadUrl).toBe(
+    "https://api.test/api/workflow-runs/wf%2F1/files/content?path=%2Finput%2Finput%7E0file%2Fa%7E1b&audience=app&disposition=attachment"
+  )
+})
+
+test("links a reference to the object's page, its type and id each escaped", () => {
+  const html = render(
+    { room: { objectTypeId: "Room", primaryId: "a/b c" } },
+    fieldRecordSchema({ room: { type: "objectRef", objectTypeId: "Room" } })
+  )
+  expect(html).toContain('href="/objects/Room/a%2Fb%20c"')
+})
+
+// Regression proof: format `integer` with Intl.NumberFormat in formatPrimitive and the year reads
+// "2,026".
+test("keeps an integer's digits as written, and groups a decimal's", () => {
+  const html = render(
+    { year: 2026, revenue: 1234567.5 },
+    fieldRecordSchema({ year: "integer", revenue: "double" })
+  )
+  expect(html).toContain(">2026<")
+  expect(html).toContain("1,234,567.5")
 })

@@ -1,4 +1,4 @@
-import { client, type GetActionRunResponse } from "@sixb/client"
+import type { GetActionRunResponse } from "@sixb/client"
 import { getActionRunOptions, listActionsOptions } from "@sixb/client/hooks"
 import { useQuery } from "@tanstack/react-query"
 import { CircleHelp, Loader2, Zap } from "lucide-react"
@@ -16,7 +16,13 @@ import {
   Stats,
   useFormat,
 } from "../section-ui"
-import { fieldRecordSchema, runFileLinks, useValueTypes, ValuePanel, valueSchema } from "../values"
+import {
+  actionRunFileLinks,
+  fieldRecordSchema,
+  useValueTypes,
+  ValuePanel,
+  valueSchema,
+} from "../values"
 import { RunLogs } from "./logs"
 import { useObservabilityMessages } from "./messages"
 
@@ -96,8 +102,6 @@ export function ObservabilityActionRunPage() {
     )
   }
 
-  const apiUrl = client.getConfig().baseUrl ?? window.location.origin
-
   return (
     <SectionPage
       section="observability"
@@ -164,11 +168,7 @@ export function ObservabilityActionRunPage() {
               )
             : undefined
         }
-        fileLinks={runFileLinks(
-          apiUrl,
-          `/api/action-runs/${encodeURIComponent(run.id)}/files/content`,
-          "params"
-        )}
+        fileLinks={actionRunFileLinks(run.id, "params")}
       />
 
       {/* What the handler returned: nothing declares it, so it draws as an open value. */}
@@ -176,11 +176,7 @@ export function ObservabilityActionRunPage() {
         <ValuePanel
           title={messages.action.writeback}
           value={run.writeback}
-          fileLinks={runFileLinks(
-            apiUrl,
-            `/api/action-runs/${encodeURIComponent(run.id)}/files/content`,
-            "writeback"
-          )}
+          fileLinks={actionRunFileLinks(run.id, "writeback")}
           emptyLabel={messages.action.noWriteback}
         />
         <Effects run={run} hasEffects={action?.phases.effects} />

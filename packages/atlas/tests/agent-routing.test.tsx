@@ -1,5 +1,3 @@
-// App imports every page, TelemetryChart's Recharts import among them, which needs this declaration.
-/// <reference path="../src/recharts-lib.d.ts" />
 import { expect, test } from "bun:test"
 
 import { getAgentQueryKey, getAgentThreadQueryKey } from "@sixb/client/hooks"

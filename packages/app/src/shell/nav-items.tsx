@@ -17,6 +17,8 @@ import { Link, useLocation } from "react-router-dom"
 export interface NavItem {
   readonly label: string
   readonly href: string
+  /** Paths outside `href` where this link is current too, such as an object's page under Objects. */
+  readonly activeFor?: readonly string[]
   readonly icon?: ComponentType<{ readonly className?: string }>
   /** Shown at the end of the row, such as a count. */
   readonly badge?: ReactNode
@@ -54,7 +56,7 @@ export function NavItems({ items }: NavItemsProps) {
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     asChild
-                    isActive={isCurrent(pathname, item.href)}
+                    isActive={isCurrentItem(pathname, item)}
                     tooltip={item.label}
                   >
                     {navLink(
@@ -72,7 +74,7 @@ export function NavItems({ items }: NavItemsProps) {
                     <SidebarMenuSub>
                       {item.items.map((child) => (
                         <SidebarMenuSubItem key={child.href}>
-                          <SidebarMenuSubButton asChild isActive={isCurrent(pathname, child.href)}>
+                          <SidebarMenuSubButton asChild isActive={isCurrentItem(pathname, child)}>
                             {navLink(child.href, <span>{child.label}</span>)}
                           </SidebarMenuSubButton>
                         </SidebarMenuSubItem>
@@ -116,6 +118,11 @@ function groupEntries(
   return groups
 }
 
+/** Whether `item` is the link for `pathname`: its own page or one below it, or one it claims. */
+export function isCurrentItem(pathname: string, item: Pick<NavItem, "href" | "activeFor">) {
+  return [item.href, ...(item.activeFor ?? [])].some((href) => isCurrent(pathname, href))
+}
+
 function isCurrent(pathname: string, href: string): boolean {
   if (isExternal(href)) return false
   if (href === "/") return pathname === "/"
@@ -123,6 +130,7 @@ function isCurrent(pathname: string, href: string): boolean {
   return pathname === base || pathname.startsWith(`${base}/`)
 }
 
-function isExternal(href: string): boolean {
+/** Whether `href` leaves the app, so it opens as a plain link rather than a route. */
+export function isExternal(href: string): boolean {
   return /^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith("//")
 }

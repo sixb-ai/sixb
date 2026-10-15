@@ -24,12 +24,3 @@ export function workflowRunsInApp(search: string): string {
   const query = app.toString()
   return `/observability/runs${query ? `?${query}` : ""}`
 }
-
-/**
- * Opens an action run's page in the project's app, where runs moved. Without the app's address
- * there is nowhere to show it, and the action's own page stays.
- */
-export function openActionRun(runId: string): void {
-  const url = projectAppUrl(`/observability/runs/actions/${encodeURIComponent(runId)}`)
-  if (url) window.location.assign(url)
-}

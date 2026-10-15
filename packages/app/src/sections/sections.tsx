@@ -1,15 +1,22 @@
 import type { GroupDefinition } from "@sixb/core"
 import {
   Activity,
+  Bolt,
+  Box,
   Braces,
   Cable,
   ChartNoAxesCombined,
   Database,
+  GitBranch,
   History,
   Layers,
+  LayoutGrid,
+  ListChecks,
+  Network,
   RefreshCw,
   ScrollText,
   Settings,
+  Shapes,
   ShieldCheck,
   UserRound,
   UsersRound,
@@ -27,7 +34,7 @@ import {
 import { useLocation } from "react-router-dom"
 import { useAppMessages } from "../locale"
 import { type CurrentUser, useCurrentUser } from "../session"
-import type { NavEntry, NavItem } from "../shell/nav-items"
+import { isCurrentItem, type NavEntry, type NavItem } from "../shell/nav-items"
 import {
   type AppSectionId,
   type SectionDefinition,
@@ -106,6 +113,11 @@ function admits(groups: readonly GroupDefinition[] | undefined, groupIds: readon
   return groups.some((group) => groupIds.includes(group.id))
 }
 
+/** Whether this app draws its sections; shared links open one page and get none. */
+export function useSectionsEnabled(): boolean {
+  return useContext(SectionsContext).enabled
+}
+
 /** The sections this person may open, internal shape. */
 export function useOpenSections(): readonly OpenSection[] {
   const { enabled, visibility } = useContext(SectionsContext)
@@ -120,6 +132,7 @@ const sectionIcons: Record<AppSectionId, ComponentType<{ readonly className?: st
   settings: Settings,
   data: Database,
   observability: Activity,
+  ontology: Shapes,
 }
 
 const pageIcons: Record<string, ComponentType<{ readonly className?: string }>> = {
@@ -135,6 +148,12 @@ const pageIcons: Record<string, ComponentType<{ readonly className?: string }>> 
   runs: History,
   logs: ScrollText,
   "ai-usage": ChartNoAxesCombined,
+  "object-types": LayoutGrid,
+  objects: Box,
+  graph: Network,
+  actions: Bolt,
+  workflows: GitBranch,
+  rules: ListChecks,
 }
 
 /**
@@ -157,6 +176,7 @@ export function useSections(): readonly AppSection[] {
           const item: NavItem = {
             label: pageLabels[page.id] ?? page.id,
             href: page.path,
+            activeFor: page.activeFor,
             icon: pageIcons[page.id],
           }
           if (!page.group) {
@@ -193,12 +213,10 @@ export function useCurrentSection(): AppSection | null {
   return useSections().find((section) => sectionContains(section, pathname)) ?? null
 }
 
-/** Whether `pathname` is one of the section's pages, or below one. */
-export function sectionContains(section: AppSection, pathname: string): boolean {
+/** Whether `pathname` is one of the section's pages, below one, or a page one claims. */
+function sectionContains(section: AppSection, pathname: string): boolean {
   return section.pages.some((entry) =>
-    ("group" in entry ? entry.items : [entry]).some(
-      (page) => pathname === page.href || pathname.startsWith(`${page.href}/`)
-    )
+    ("group" in entry ? entry.items : [entry]).some((page) => isCurrentItem(pathname, page))
   )
 }
 

@@ -1,5 +1,5 @@
 import { AgentExecutionTrace } from "@sixb/agent-ui"
-import { client, type GetWorkflowResponse, type GetWorkflowRunResponse } from "@sixb/client"
+import type { GetWorkflowResponse, GetWorkflowRunResponse } from "@sixb/client"
 import {
   getWorkflowAgentNodeExecutionOptions,
   getWorkflowOptions,
@@ -9,7 +9,10 @@ import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import { Bot, ChevronRight, Cog, Hand, Workflow, Zap } from "lucide-react"
 import { type ComponentType, useMemo, useState } from "react"
-import { useParams } from "react-router-dom"
+import { Link, useParams } from "react-router-dom"
+import { useSections } from "../../sections/sections"
+import { workflowNodeIoSchemas, workflowSchemas } from "../ontology/workflows/utils"
+import { workflowCanvasHref } from "../routes"
 import { DetailFallback, SectionPage } from "../section-page"
 import {
   FailureSummary,
@@ -27,11 +30,12 @@ import {
 } from "../section-ui"
 import {
   fieldRecordSchema,
-  runFileLinks,
   useValueTypes,
   ValuePanel,
   type ValueTypeSchemas,
   valueSchema,
+  workflowRunFileLinks,
+  workflowStepFileLinks,
 } from "../values"
 import { useWorkflowRunLiveUpdates } from "./live-updates"
 import { RunLogs } from "./logs"
@@ -96,7 +100,6 @@ function WorkflowRunDetail({ runId }: { readonly runId: string }) {
     a.startedAt.localeCompare(b.startedAt)
   )
   const active = run.status === "queued" || run.status === "running" || run.status === "waiting"
-  const apiUrl = client.getConfig().baseUrl ?? window.location.origin
 
   return (
     <SectionPage
@@ -150,21 +153,13 @@ function WorkflowRunDetail({ runId }: { readonly runId: string }) {
           title={messages.run.input}
           value={run.input}
           schema={workflow ? valueSchema(fieldRecordSchema(workflow.input), valueTypes) : undefined}
-          fileLinks={runFileLinks(
-            apiUrl,
-            `/api/workflow-runs/${encodeURIComponent(run.id)}/files/content`,
-            "input"
-          )}
+          fileLinks={workflowRunFileLinks(run.id, "input")}
           emptyLabel={messages.run.noInput}
         />
         <ValuePanel
           title={messages.run.output}
           value={run.output}
-          fileLinks={runFileLinks(
-            apiUrl,
-            `/api/workflow-runs/${encodeURIComponent(run.id)}/files/content`,
-            "output"
-          )}
+          fileLinks={workflowRunFileLinks(run.id, "output")}
           emptyLabel={messages.run.noOutput}
         />
       </div>
@@ -181,7 +176,6 @@ function WorkflowRunDetail({ runId }: { readonly runId: string }) {
                 node={node}
                 definition={workflow?.nodes.find((candidate) => candidate.id === node.nodeId)}
                 valueTypes={valueTypes}
-                apiUrl={apiUrl}
               />
             ))
           )}
@@ -198,26 +192,20 @@ function StepRow({
   node,
   definition,
   valueTypes,
-  apiUrl,
 }: {
   readonly run: Run
   readonly node: RunNode
   /** `undefined` once the step left the workflow's definition: its values draw as open values. */
   readonly definition: WorkflowNode | undefined
   readonly valueTypes: ValueTypeSchemas
-  readonly apiUrl: string
 }) {
   const messages = useObservabilityMessages().run
+  const workflowsOpen = useSections().some((section) => section.id === "ontology")
   // A failed or waiting step is what the reader came for, so it starts open.
   const [open, setOpen] = useState(node.status === "failed" || node.status === "waiting")
   const Icon = nodeIcons[node.nodeType]
-  const io = definition ? nodeIoSchemas(definition) : null
-  const files = (root: "input" | "output") =>
-    runFileLinks(
-      apiUrl,
-      `/api/workflow-runs/${encodeURIComponent(run.id)}/nodes/${encodeURIComponent(node.nodeKey)}/files/content`,
-      root
-    )
+  const io = definition ? workflowNodeIoSchemas(definition) : null
+  const files = (root: "input" | "output") => workflowStepFileLinks(run.id, node.nodeKey, root)
   const isIntervention = node.nodeType === "intervention"
 
   return (
@@ -255,7 +243,17 @@ function StepRow({
         <div className="flex flex-col gap-4 border-t border-border/60 bg-muted/20 px-4 py-4">
           {node.error ? <FailureSummary failure={node.error} /> : null}
           {isIntervention && node.status === "waiting" ? (
-            <p className="text-[0.8125rem] text-muted-foreground">{messages.waiting}</p>
+            <p className="text-[0.8125rem] text-muted-foreground">
+              {messages.waiting}{" "}
+              {workflowsOpen ? (
+                <Link
+                  to={workflowCanvasHref(run.workflowId, run.id, node.nodeId)}
+                  className="font-medium text-foreground underline-offset-2 hover:underline"
+                >
+                  {messages.answer}
+                </Link>
+              ) : null}
+            </p>
           ) : null}
           {node.nodeType === "agent" ? <AgentTrace run={run} node={node} /> : null}
           <div className="grid gap-4 lg:grid-cols-2">
@@ -322,35 +320,4 @@ function AgentTrace({ run, node }: { readonly run: Run; readonly node: RunNode }
       </div>
     </section>
   )
-}
-
-/** The schemas a step declares for what it reads and writes; an action writes nothing declared. */
-function nodeIoSchemas(node: WorkflowNode): { readonly input: unknown; readonly output: unknown } {
-  switch (node.type) {
-    case "step":
-    case "agent":
-      return { input: fieldRecordSchema(node.input), output: fieldRecordSchema(node.output) }
-    case "intervention":
-      return { input: fieldRecordSchema(node.input), output: fieldRecordSchema(node.response) }
-    case "action":
-      // Recorded as `{ params, subject? }`; the subject is the run's own reference, not declared.
-      return {
-        input: {
-          type: "object",
-          properties: { params: { schema: fieldRecordSchema(node.params) } },
-        },
-        output: undefined,
-      }
-  }
-}
-
-/** Every schema a workflow declares, where its value types come from. */
-function workflowSchemas(workflow: GetWorkflowResponse): unknown[] {
-  return [
-    fieldRecordSchema(workflow.input),
-    ...workflow.nodes.flatMap((node) => {
-      const io = nodeIoSchemas(node)
-      return io.output === undefined ? [io.input] : [io.input, io.output]
-    }),
-  ]
 }

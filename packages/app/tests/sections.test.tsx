@@ -4,9 +4,14 @@ import {
   getAuthAccessManagementOptionsQueryKey,
   getAuthMembershipOptionsQueryKey,
   getAuthSessionQueryKey,
+  listActionsOptions,
   listAuthServiceAccountsQueryKey,
   listAuthSessionsQueryKey,
+  listObjectTypesOptions,
+  listRulesOptions,
   listSyncsQueryKey,
+  listWorkflowsOptions,
+  objectCountOptions,
 } from "@sixb/client/hooks"
 import { defineGroup } from "@sixb/core/security"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -302,17 +307,19 @@ describe("section navigation", () => {
     expect(sidebarLinks(view.container)).toEqual(["/quotes"])
     expect(
       view.getByText(
-        "Data /data/connectors, Observability /observability/runs, Settings /settings/personal"
+        "Data /data/connectors, Observability /observability/runs, Ontology /ontology/object-types, Settings /settings/personal"
       )
     ).toBeDefined()
     expect(view.getByRole("button", { name: /Morgan Reyes/ })).toBeDefined()
     cleanup()
 
-    // With auth off nobody signs in: the button says so, Settings is gone, Data and Observability stay.
+    // With auth off nobody signs in: the button says so, Settings is gone, the rest stay.
     const signedOut = renderApp(shell, { path: "/quotes", session: null })
     expect(sidebarLinks(signedOut.container)).toEqual(["/quotes"])
     expect(
-      signedOut.getByText("Data /data/connectors, Observability /observability/runs")
+      signedOut.getByText(
+        "Data /data/connectors, Observability /observability/runs, Ontology /ontology/object-types"
+      )
     ).toBeDefined()
     expect(signedOut.getByRole("button", { name: "Sign-in off" })).toBeDefined()
   })
@@ -331,6 +338,39 @@ describe("section navigation", () => {
     ).toEqual(allDataPages.map((page) => `/data/${page}`))
     expect(view.queryByText("Quotes")).toBeNull()
     expect(view.getByText("No syncs")).toBeDefined()
+  })
+  // An object's page sits outside every section so grants alone decide who reads it, yet it opens
+  // from Objects. Regression proof: drop `activeFor` from the Objects page in the catalog and the
+  // sidebar falls back to the app's nav.
+  test("an object's page keeps the Ontology sidebar, with Objects current", () => {
+    const counts = [
+      [listObjectTypesOptions().queryKey, []],
+      [objectCountOptions().queryKey, 15],
+      [listActionsOptions().queryKey, []],
+      [listWorkflowsOptions().queryKey, []],
+      [listRulesOptions().queryKey, []],
+    ] as const
+    const objectPage = (visibility?: AppVisibility) =>
+      renderApp(
+        <AppShell nav={[{ label: "Quotes", href: "/quotes" }]}>
+          <p>Object page</p>
+        </AppShell>,
+        { path: "/objects/Account/A-1005", visibility, data: counts }
+      )
+
+    const view = objectPage()
+    expect(view.queryByText("Quotes")).toBeNull()
+    expect(view.getByText("Ontology")).toBeDefined()
+    const objects = view.getByRole("link", { name: /Objects/ })
+    expect(objects.getAttribute("href")).toBe("/ontology/objects")
+    expect(objects.getAttribute("data-active")).toBe("true")
+    cleanup()
+
+    // Without the section the page still opens, in the app's own sidebar.
+    const hidden = objectPage({ ontology: [] })
+    expect(hidden.getByText("Quotes")).toBeDefined()
+    expect(hidden.queryByText("Ontology")).toBeNull()
+    expect(hidden.getByText("Object page")).toBeDefined()
   })
 })
 

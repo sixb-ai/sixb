@@ -25,6 +25,7 @@ import { ChevronRight, Layers, Loader2, RefreshCw, Webhook, Workflow, Zap } from
 import type { ComponentType, ReactNode } from "react"
 import { useSearchParams } from "react-router-dom"
 import { usePipelineLiveUpdates, useSyncLiveUpdates } from "../data/live-updates"
+import { actionRunHref, workflowRunHref } from "../routes"
 import { SectionPage } from "../section-page"
 import {
   formatDuration,
@@ -79,16 +80,6 @@ const dataStatuses = ["queued", "running", "succeeded", "failed", "cancelled"] a
 const projectionStatuses = [...dataStatuses, "superseded"] as const
 const actionStatuses = ["succeeded", "failed"] as const
 const webhookStatuses = ["running", "succeeded", "failed"] as const
-
-/** The workflow run page; the Runs list and the logs link to it. */
-export function workflowRunHref(runId: string): string {
-  return `/observability/runs/workflows/${encodeURIComponent(runId)}`
-}
-
-/** The action run page. */
-export function actionRunHref(runId: string): string {
-  return `/observability/runs/actions/${encodeURIComponent(runId)}`
-}
 
 /**
  * Observability › Runs: every run the project records, a tab per kind, newest first, filtered by

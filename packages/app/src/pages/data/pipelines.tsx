@@ -299,7 +299,7 @@ function PipelineDetail({ pipelineId }: { readonly pipelineId: string }) {
               />
             </Suspense>
             {datasetId === null ? (
-              <p className="pointer-events-none absolute right-4 bottom-4 hidden rounded-md bg-background/80 px-2 py-1 text-xs text-muted-foreground backdrop-blur-sm sm:block">
+              <p className="pointer-events-none absolute bottom-4 left-1/2 hidden -translate-x-1/2 rounded-md bg-background/80 px-2 py-1 text-xs text-muted-foreground backdrop-blur-sm sm:block">
                 {messages.pipelines.canvasHint}
               </p>
             ) : null}

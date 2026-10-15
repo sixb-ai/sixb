@@ -22,7 +22,7 @@ Open **[localhost:3001](http://localhost:3001)** and select **Locate** to see th
 Sentinel-6B using public orbital data. Keep the terminal running; locating the satellite requires
 an internet connection.
 
-You can also explore your project in **[Atlas](http://localhost:3000)** or view the
+Open **Ontology** from the user menu to explore your model, or view the
 **[API documentation](http://localhost:3002/docs)**.
 
 <div data-build-with-ai></div>
