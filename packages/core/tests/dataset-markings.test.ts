@@ -4,14 +4,11 @@ import {
   can,
   change,
   col,
-  type DatasetDefinition,
   type DatasetRow,
   defineDataset,
   defineGroup,
   defineMarking,
   defineObjectType,
-  definePipeline,
-  definePipelineStep,
   defineProjection,
   defineRole,
   link,
@@ -336,44 +333,5 @@ describe("markings at startup", () => {
     expect(start({ datasets: [readings], projections: [projection] })).toThrow(
       "[Sixb] Projection 'scores': column 'readings.score' carries [financial], and telemetry projections cannot read marked columns yet."
     )
-  })
-
-  // Reproduce: drop rejectPipelineStepsOverMarkedColumns from validateMarkingsAtStartup; the
-  // first start succeeds.
-  test("pipeline steps cannot read marked columns yet", () => {
-    const normalized = defineDataset("normalized_invoices", {
-      schema: [col("id", "string"), col("title", "string")],
-    })
-    const startWith = (invoices: DatasetDefinition) =>
-      start({
-        datasets: [rawInvoices, normalized],
-        pipelines: [
-          definePipeline("invoices").then(
-            definePipelineStep("normalize")
-              .inputs({ invoices })
-              .output(normalized)
-              .sql(({ invoices }) => `SELECT id, title FROM ${invoices}`)
-          ),
-        ],
-      })
-
-    expect(startWith(rawInvoices)).toThrow(
-      "[Sixb] Pipeline 'invoices' step 'normalize' reads column 'raw_invoices.amount', which carries [financial]. Pipeline steps cannot read marked columns yet."
-    )
-
-    // A pick that leaves the marked columns out reads none of them.
-    expect(startWith(rawInvoices.pick("id", "title"))).not.toThrow()
-
-    // A step may still mark the columns it produces.
-    const scored = defineDataset("scored", {
-      schema: [col("id", "string"), col("risk", "float64", { markings: [financial] })],
-    })
-    const scoring = definePipelineStep("score")
-      .inputs({ invoices: normalized })
-      .output(scored)
-      .run(() => {})
-    expect(
-      start({ datasets: [normalized, scored], pipelines: [definePipeline("risk").then(scoring)] })
-    ).not.toThrow()
   })
 })

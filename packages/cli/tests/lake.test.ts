@@ -17,6 +17,7 @@ afterEach(async () => {
 async function runLakeCommand(
   subcommand: "check" | "cleanup",
   options: {
+    fixture?: string
     drift?: boolean
     noMaintenance?: boolean
     args?: readonly string[]
@@ -29,7 +30,12 @@ async function runLakeCommand(
 }> {
   const repoRoot = resolve(import.meta.dir, "..", "..", "..")
   const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
-  const fixtureEntry = resolve(import.meta.dir, "fixtures", "lake-project", "sixb.config.ts")
+  const fixtureEntry = resolve(
+    import.meta.dir,
+    "fixtures",
+    options.fixture ?? "lake-project",
+    "sixb.config.ts"
+  )
   const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-lake-"))
   const logPath = join(tempDir, "operations.log")
   tempDirs.push(tempDir)
@@ -83,6 +89,16 @@ describe("sixb lake check", () => {
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("Lake dataset definition check failed")
+  })
+
+  // Reproduce: remove `checkRuntimePipelineMarkings` from commands/lake-check.tsx; this exits 0.
+  test("fails when a SQL step gives a projected column undeclared markings", async () => {
+    const result = await runLakeCommand("check", { fixture: "misdeclared-markings-project" })
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout.replace(/[\s│]+/g, " ")).toContain(
+      "property 'Invoice.title' is projected from column 'invoices.title', which carries [financial] from 'raw_invoices.amount' through step 'invoices/normalize-invoices'."
+    )
   })
 
   test("closes providers after a failed check", async () => {
