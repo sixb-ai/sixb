@@ -252,16 +252,15 @@ async function seedSession(
     projectId: "test-project",
     userId,
     strategyId: "test",
-    audience: "atlas",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-05-16T10:00:00.000Z"),
     expiresAt: new Date("2099-05-16T10:00:00.000Z"),
   })
 
   return {
-    headers: { cookie: `sixb_session=${credential.cookieValue}` },
+    headers: { cookie: `sixb_session_app=${credential.cookieValue}` },
     csrfHeaders: {
-      cookie: `sixb_session=${credential.cookieValue}; sixb_csrf=csrf_1`,
+      cookie: `sixb_session_app=${credential.cookieValue}; sixb_csrf_app=csrf_1`,
       "x-sixb-csrf": "csrf_1",
       "content-type": "application/json",
     },
@@ -1539,7 +1538,7 @@ describe("authorized event websocket", () => {
       hostname: "127.0.0.1",
       port,
       quiet: true,
-      browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),
+      browser: createTestBrowserPolicy({ apiOrigin: baseUrl, appOrigin: baseUrl }),
     })
 
     await server.start()

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import type { AuthSessionAudience, GroupDefinition } from "@sixb/core"
+import type { GroupDefinition } from "@sixb/core"
 import type {
   InvitationDeliveryInput,
   InvitationRecipientInput,
@@ -118,7 +118,6 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
       id: attemptId,
       projectId: input.projectId,
       strategyId: this.id,
-      audience: input.audience,
       stateHash: sha256(state),
       nonceHash: sha256(nonce),
       codeVerifier,
@@ -237,10 +236,7 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
           manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
           directoryGroupIds,
           newUserId: `usr_${randomUUID()}`,
-          session: {
-            ...input.session,
-            audience: attempt.audience,
-          },
+          session: input.session,
         })
         .catch((error: unknown) => {
           throw refusalFromStorage(error, email)
@@ -248,7 +244,6 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
 
       return {
         ...signIn,
-        audience: attempt.audience,
         returnTo: attempt.returnTo ?? "/",
       }
     } catch (error) {
@@ -288,7 +283,6 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
 
   async deliverInvitation(input: InvitationDeliveryInput): Promise<InviteDeliveryResult> {
     const url = this.createSignInUrl({
-      audience: input.audience,
       requestOrigin: input.requestOrigin,
       returnTo: input.returnTo,
     })
@@ -340,14 +334,12 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
   }
 
   private createSignInUrl(input: {
-    readonly audience: AuthSessionAudience
     readonly requestOrigin: string
     readonly returnTo: string
   }): string {
     const origin =
       this.publicOrigin ?? normalizeHttpUrl(input.requestOrigin, "OIDC request origin").origin
     const url = new URL("/auth/sign-in", origin)
-    url.searchParams.set("audience", input.audience)
     url.searchParams.set("returnTo", input.returnTo)
     return url.toString()
   }

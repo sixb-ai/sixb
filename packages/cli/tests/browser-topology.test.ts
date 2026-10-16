@@ -7,11 +7,7 @@ import {
   servedUrl,
 } from "../src/lib/browser-topology"
 
-const PUBLIC_ORIGIN_ENV = [
-  "SIXB_API_PUBLIC_ORIGIN",
-  "SIXB_ATLAS_PUBLIC_ORIGIN",
-  "SIXB_APP_PUBLIC_ORIGIN",
-] as const
+const PUBLIC_ORIGIN_ENV = ["SIXB_API_PUBLIC_ORIGIN", "SIXB_APP_PUBLIC_ORIGIN"] as const
 const originalEnv = Object.fromEntries(PUBLIC_ORIGIN_ENV.map((name) => [name, process.env[name]]))
 
 describe("browser topology", () => {
@@ -27,10 +23,7 @@ describe("browser topology", () => {
   })
 
   test("derives localhost origins on separate ports for development", () => {
-    const topology = resolveBrowserTopology({
-      role: "dev",
-      hasCustomApp: true,
-    })
+    const topology = resolveBrowserTopology({ role: "dev" })
 
     expect(topology).toMatchObject({
       // Loopback, not every interface. A dev server binding 0.0.0.0 put the project's
@@ -39,39 +32,22 @@ describe("browser topology", () => {
       // changes; `--host 0.0.0.0` opts back in for reaching it from a phone.
       host: "127.0.0.1",
       apiHost: "127.0.0.1",
-      atlasPort: 3000,
-      appPort: 3001,
-      apiPort: 3002,
-      atlasPublicOrigin: "http://localhost:3000",
-      appPublicOrigin: "http://localhost:3001",
-      apiPublicOrigin: "http://localhost:3002",
+      appPort: 3000,
+      apiPort: 3001,
+      appPublicOrigin: "http://localhost:3000",
+      apiPublicOrigin: "http://localhost:3001",
     })
-    expect(topology.allowedBrowserOrigins).toEqual([
-      { origin: "http://localhost:3000", audience: "atlas" },
-      { origin: "http://localhost:3001", audience: "app" },
-    ])
-    expect(apiUrl(topology)).toBe("http://localhost:3002/api")
-    expect(apiDocsUrl(topology)).toBe("http://localhost:3002/docs")
-    expect(apiEventsUrl(topology)).toBe("ws://localhost:3002/ws/events")
-  })
-
-  test("omits the app origin when no custom app is served", () => {
-    const topology = resolveBrowserTopology({
-      role: "dev",
-      hasCustomApp: false,
-    })
-
-    expect(topology.appPublicOrigin).toBeNull()
-    expect(topology.allowedBrowserOrigins).toEqual([
-      { origin: "http://localhost:3000", audience: "atlas" },
-    ])
+    expect(topology.allowedBrowserOrigins).toEqual(["http://localhost:3000"])
+    expect(apiUrl(topology)).toBe("http://localhost:3001/api")
+    expect(apiDocsUrl(topology)).toBe("http://localhost:3001/docs")
+    expect(apiEventsUrl(topology)).toBe("ws://localhost:3001/ws/events")
   })
 
   test("binds every interface in production", () => {
     process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
-    process.env.SIXB_ATLAS_PUBLIC_ORIGIN = "https://atlas.example.com"
+    process.env.SIXB_APP_PUBLIC_ORIGIN = "https://app.example.com"
 
-    const topology = resolveBrowserTopology({ role: "api", hasCustomApp: false })
+    const topology = resolveBrowserTopology({ role: "api" })
 
     // The opposite default from development, and deliberately so: a role in a container
     // has to accept traffic from its load balancer, which is never on loopback.
@@ -79,17 +55,11 @@ describe("browser topology", () => {
   })
 
   test("requires explicit production origins", () => {
-    expect(() =>
-      resolveBrowserTopology({
-        role: "api",
-        hasCustomApp: true,
-      })
-    ).toThrow("SIXB_API_PUBLIC_ORIGIN")
+    expect(() => resolveBrowserTopology({ role: "api" })).toThrow("SIXB_API_PUBLIC_ORIGIN")
   })
 
   test("uses configured production origins and bind ports", () => {
     process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
-    process.env.SIXB_ATLAS_PUBLIC_ORIGIN = "https://atlas.example.com"
     process.env.SIXB_APP_PUBLIC_ORIGIN = "https://app.example.com"
 
     const topology = resolveBrowserTopology({
@@ -98,55 +68,48 @@ describe("browser topology", () => {
       apiHost: "127.0.0.2",
       port: "8080",
       apiPort: "8082",
-      hasCustomApp: true,
     })
 
-    // The API role binds one port. It resolves the other surfaces' *origins*, because they are
-    // its CORS allowlist, but never their ports — so those are not asserted here.
+    // The API role binds one port. It resolves the app's *origin*, because that is its CORS
+    // allowlist, but never the app's port — so that is not asserted here.
     expect(topology).toMatchObject({
       host: "127.0.0.1",
       apiHost: "127.0.0.2",
       apiPort: 8082,
-      atlasPublicOrigin: "https://atlas.example.com",
       appPublicOrigin: "https://app.example.com",
       apiPublicOrigin: "https://api.example.com",
     })
-    expect(topology.allowedBrowserOrigins).toEqual([
-      { origin: "https://atlas.example.com", audience: "atlas" },
-      { origin: "https://app.example.com", audience: "app" },
-    ])
+    expect(topology.allowedBrowserOrigins).toEqual(["https://app.example.com"])
     expect(apiEventsUrl(topology)).toBe("wss://api.example.com/ws/events")
   })
 
-  test("still requires the origin a surface's own role does not serve", () => {
+  // A deploy with `services: { app: false }` runs the API alone and never sets the app's origin.
+  // Regression proof: make the API role refuse a missing SIXB_APP_PUBLIC_ORIGIN and this throws.
+  test("starts the API without an app origin, admitting no browser origin", () => {
     process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
 
-    // The API role serves neither surface: these origins are its CORS allowlist, and an
-    // allowlist assembled from guesses is a hole. It is the one role that must refuse.
-    expect(() => resolveBrowserTopology({ role: "api", hasCustomApp: false })).toThrow(
-      "SIXB_ATLAS_PUBLIC_ORIGIN"
-    )
+    const topology = resolveBrowserTopology({ role: "api" })
+
+    // An allowlist assembled from guesses is a hole, so nothing is inferred in its place.
+    expect(topology.appPublicOrigin).toBeNull()
+    expect(topology.allowedBrowserOrigins).toEqual([])
   })
 
-  test("serves a surface without its own public origin, and prints where it bound", () => {
+  test("serves the app without its own public origin, and prints where it bound", () => {
     process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
 
-    const topology = resolveBrowserTopology({
-      role: "atlas",
-      host: "127.0.0.1",
-      port: "8080",
-    })
+    const topology = resolveBrowserTopology({ role: "app", host: "127.0.0.1", port: "8080" })
 
-    // Atlas passes its own origin to nothing but the startup panel, so demanding one only
+    // The app passes its own origin to nothing but the startup panel, so demanding one only
     // bought an operator a crash on their first production command.
-    expect(topology.atlasPublicOrigin).toBeNull()
+    expect(topology.appPublicOrigin).toBeNull()
     expect(servedUrl(topology)).toBe("http://127.0.0.1:8080")
   })
 
   test("prints a reachable address when the role bound every interface", () => {
     process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
 
-    const topology = resolveBrowserTopology({ role: "atlas" })
+    const topology = resolveBrowserTopology({ role: "app" })
 
     // The production default is `0.0.0.0`, which is where the socket listens and not
     // somewhere a browser can go. Answering "where do I go?" with it is a URL an
@@ -157,64 +120,50 @@ describe("browser topology", () => {
 
   test("prefers a configured origin over the bound address", () => {
     process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
-    process.env.SIXB_ATLAS_PUBLIC_ORIGIN = "https://atlas.example.com"
+    process.env.SIXB_APP_PUBLIC_ORIGIN = "https://app.example.com"
 
-    const topology = resolveBrowserTopology({ role: "atlas" })
-
-    expect(servedUrl(topology)).toBe("https://atlas.example.com")
+    expect(servedUrl(resolveBrowserTopology({ role: "app" }))).toBe("https://app.example.com")
   })
 
-  test("keeps the API origin required on the role that only displays a surface", () => {
-    // `sixb atlas` ships a bundle that calls the API. Guessing that address serves a UI
+  test("keeps the API origin required on the role that only serves the app", () => {
+    // `sixb app` ships a bundle that calls the API. Guessing that address serves a UI
     // that cannot talk to anything, which is worse than not starting.
-    expect(() => resolveBrowserTopology({ role: "atlas" })).toThrow("SIXB_API_PUBLIC_ORIGIN")
+    expect(() => resolveBrowserTopology({ role: "app" })).toThrow("SIXB_API_PUBLIC_ORIGIN")
   })
 
-  test("gives --port to the surface the role actually binds", () => {
+  test("gives --port to the port the role actually binds", () => {
     process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
-    process.env.SIXB_ATLAS_PUBLIC_ORIGIN = "https://atlas.example.com"
+    process.env.SIXB_APP_PUBLIC_ORIGIN = "https://app.example.com"
 
-    // `--port` used to name Atlas's port whatever the role was, and each command translated it
-    // on the way in. Only `sixb app` translated to a different field, so writing it the way its
-    // three neighbours do bound the app one port past where the operator asked.
-    //
-    // To see this fail, drop the role checks in `resolveBrowserPorts` — `appPort: base +
-    // DEFAULT_APP_PORT_OFFSET` alone puts the app on 4001 and the API back on 3002.
+    // `--port` used to name one fixed port whatever the role was, and each command translated
+    // it on the way in. To see this fail, drop the role checks in `resolveBrowserPorts` — the
+    // API then lands one port past where the operator asked.
     expect(resolveBrowserTopology({ role: "app", port: "4000" }).appPort).toBe(4000)
-    expect(resolveBrowserTopology({ role: "atlas", port: "4000" }).atlasPort).toBe(4000)
-    expect(resolveBrowserTopology({ role: "api", hasCustomApp: false, port: "4000" }).apiPort).toBe(
-      4000
-    )
+    expect(resolveBrowserTopology({ role: "api", port: "4000" }).apiPort).toBe(4000)
   })
 
-  test("keeps the offsets a role that binds every surface depends on", () => {
-    const dev = resolveBrowserTopology({ role: "dev", hasCustomApp: true, port: "8080" })
+  test("keeps the offset the role that binds both depends on", () => {
+    const dev = resolveBrowserTopology({ role: "dev", port: "8080" })
 
-    // `sixb dev` is the one role that binds all three, so its `--port` still moves the block.
-    expect(dev).toMatchObject({ atlasPort: 8080, appPort: 8081, apiPort: 8082 })
+    // `sixb dev` is the one role that binds the app and the API, so its `--port` moves both.
+    expect(dev).toMatchObject({ appPort: 8080, apiPort: 8081 })
   })
 
-  test("leaves each single-surface role on its usual port with no flag", () => {
+  test("leaves each production role on its usual port with no flag", () => {
     process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
-    process.env.SIXB_ATLAS_PUBLIC_ORIGIN = "https://atlas.example.com"
+    process.env.SIXB_APP_PUBLIC_ORIGIN = "https://app.example.com"
 
     // Unflagged, a role lands where `sixb dev` would have put it — the addresses the README and
     // the deployment page print. Making `--port` mean "mine" must not move these.
-    expect(resolveBrowserTopology({ role: "atlas" }).atlasPort).toBe(3000)
-    expect(resolveBrowserTopology({ role: "app" }).appPort).toBe(3001)
-    expect(resolveBrowserTopology({ role: "api", hasCustomApp: false }).apiPort).toBe(3002)
+    expect(resolveBrowserTopology({ role: "app" }).appPort).toBe(3000)
+    expect(resolveBrowserTopology({ role: "api" }).apiPort).toBe(3001)
   })
 
   test("lets --api-port win over --port on the role that takes both", () => {
     process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
-    process.env.SIXB_ATLAS_PUBLIC_ORIGIN = "https://atlas.example.com"
+    process.env.SIXB_APP_PUBLIC_ORIGIN = "https://app.example.com"
 
-    const topology = resolveBrowserTopology({
-      role: "api",
-      hasCustomApp: false,
-      port: "8080",
-      apiPort: "9000",
-    })
+    const topology = resolveBrowserTopology({ role: "api", port: "8080", apiPort: "9000" })
 
     expect(topology.apiPort).toBe(9000)
   })
@@ -229,11 +178,7 @@ describe("browser topology", () => {
 
   test("rejects full URLs where public origins are expected", () => {
     expect(() =>
-      resolveBrowserTopology({
-        role: "dev",
-        hasCustomApp: false,
-        apiPublicOrigin: "https://api.example.com/api",
-      })
+      resolveBrowserTopology({ role: "dev", apiPublicOrigin: "https://api.example.com/api" })
     ).toThrow("must be an origin")
   })
 })

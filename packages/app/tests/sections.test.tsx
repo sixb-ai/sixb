@@ -99,7 +99,6 @@ const allDataPages = ["connectors", "syncs", "datasets", "pipelines", "projectio
 function sessionFor(groupIds: readonly string[]): GetAuthSessionResponse {
   return {
     authenticated: true,
-    applicationAccess: { allowed: true, audience: "app" },
     user: {
       id: "user-1",
       email: "morgan@example.com",

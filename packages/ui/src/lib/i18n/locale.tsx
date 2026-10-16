@@ -18,7 +18,7 @@ interface Locales {
   readonly messages: string
 }
 
-// Without a provider the framework speaks English: Atlas and other tools never set one.
+// Without a provider the framework speaks English.
 const LocaleContext = createContext<Locales | undefined>(undefined)
 
 export interface LocaleProviderProps {

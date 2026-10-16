@@ -1499,20 +1499,6 @@
                         "csrfToken": {
                           "type": "string"
                         },
-                        "applicationAccess": {
-                          "type": "object",
-                          "properties": {
-                            "allowed": {
-                              "type": "boolean"
-                            },
-                            "audience": {
-                              "type": "string",
-                              "enum": ["atlas", "app"]
-                            }
-                          },
-                          "required": ["allowed", "audience"],
-                          "additionalProperties": false
-                        },
                         "user": {
                           "type": "object",
                           "properties": {
@@ -1552,7 +1538,7 @@
                           "additionalProperties": false
                         }
                       },
-                      "required": ["authenticated", "applicationAccess", "user", "session"],
+                      "required": ["authenticated", "user", "session"],
                       "additionalProperties": false
                     }
                   ]
@@ -1635,10 +1621,6 @@
                         "properties": {
                           "id": {
                             "type": "string"
-                          },
-                          "audience": {
-                            "type": "string",
-                            "enum": ["atlas", "app"]
                           },
                           "current": {
                             "type": "boolean"
@@ -3673,10 +3655,6 @@
                       "minLength": 1
                     }
                   },
-                  "destinationId": {
-                    "type": "string",
-                    "enum": ["atlas", "app"]
-                  },
                   "expiresAt": {
                     "type": "string"
                   },
@@ -3706,10 +3684,6 @@
                       "minLength": 1
                     }
                   },
-                  "destinationId": {
-                    "type": "string",
-                    "enum": ["atlas", "app"]
-                  },
                   "expiresAt": {
                     "type": "string"
                   },
@@ -3738,10 +3712,6 @@
                       "type": "string",
                       "minLength": 1
                     }
-                  },
-                  "destinationId": {
-                    "type": "string",
-                    "enum": ["atlas", "app"]
                   },
                   "expiresAt": {
                     "type": "string"
@@ -4187,27 +4157,6 @@
                         "additionalProperties": false
                       }
                     },
-                    "destinations": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "enum": ["atlas", "app"]
-                          },
-                          "label": {
-                            "type": "string"
-                          }
-                        },
-                        "required": ["id", "label"],
-                        "additionalProperties": false
-                      }
-                    },
-                    "defaultDestinationId": {
-                      "type": "string",
-                      "enum": ["atlas", "app"]
-                    },
                     "canInviteWithoutGroups": {
                       "type": "boolean"
                     },
@@ -4252,7 +4201,7 @@
                       "additionalProperties": false
                     }
                   },
-                  "required": ["groups", "destinations", "canInviteWithoutGroups", "capabilities"],
+                  "required": ["groups", "canInviteWithoutGroups", "capabilities"],
                   "additionalProperties": false
                 }
               }
@@ -22248,16 +22197,6 @@
             }
           },
           {
-            "name": "audience",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["atlas", "app"],
-              "description": "Session audience for file navigation without Origin; must match Origin when present"
-            }
-          },
-          {
             "name": "path",
             "in": "query",
             "required": true,
@@ -22351,16 +22290,6 @@
             "schema": {
               "type": "string",
               "minLength": 1
-            }
-          },
-          {
-            "name": "audience",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["atlas", "app"],
-              "description": "Session audience for file navigation without Origin; must match Origin when present"
             }
           },
           {
@@ -22487,16 +22416,6 @@
             }
           },
           {
-            "name": "audience",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["atlas", "app"],
-              "description": "Session audience for file navigation without Origin; must match Origin when present"
-            }
-          },
-          {
             "name": "path",
             "in": "query",
             "required": true,
@@ -22599,16 +22518,6 @@
             "schema": {
               "type": "string",
               "minLength": 1
-            }
-          },
-          {
-            "name": "audience",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["atlas", "app"],
-              "description": "Session audience for file navigation without Origin; must match Origin when present"
             }
           },
           {
@@ -26854,16 +26763,6 @@
             }
           },
           {
-            "name": "audience",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["atlas", "app"],
-              "description": "Session audience for file navigation without Origin; must match Origin when present"
-            }
-          },
-          {
             "name": "path",
             "in": "query",
             "required": true,
@@ -26967,16 +26866,6 @@
             "schema": {
               "type": "string",
               "minLength": 1
-            }
-          },
-          {
-            "name": "audience",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["atlas", "app"],
-              "description": "Session audience for file navigation without Origin; must match Origin when present"
             }
           },
           {
@@ -30057,16 +29946,6 @@
             }
           },
           {
-            "name": "audience",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["atlas", "app"],
-              "description": "Session audience for file navigation without Origin; must match Origin when present"
-            }
-          },
-          {
             "name": "path",
             "in": "query",
             "required": true,
@@ -30160,16 +30039,6 @@
             "schema": {
               "type": "string",
               "minLength": 1
-            }
-          },
-          {
-            "name": "audience",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["atlas", "app"],
-              "description": "Session audience for file navigation without Origin; must match Origin when present"
             }
           },
           {
@@ -33149,16 +33018,6 @@
             }
           },
           {
-            "name": "audience",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["atlas", "app"],
-              "description": "Session audience for file navigation without Origin; must match Origin when present"
-            }
-          },
-          {
             "name": "path",
             "in": "query",
             "required": true,
@@ -33260,16 +33119,6 @@
             "schema": {
               "type": "string",
               "minLength": 1
-            }
-          },
-          {
-            "name": "audience",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["atlas", "app"],
-              "description": "Session audience for file navigation without Origin; must match Origin when present"
             }
           },
           {

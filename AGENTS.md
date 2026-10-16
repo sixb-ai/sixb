@@ -11,12 +11,12 @@ Repo-wide agent instructions for `sixb`.
 
 - `packages/core`: runtime, ontology builders, providers, and validation
 - `packages/server`: Elysia HTTP/WebSocket API and OpenAPI generation
-- `packages/atlas`: built-in React UI (the Atlas app); pages live in `src/pages/`
-- `packages/ui`: shared React component library used by Atlas
+- `packages/ui`: shared React component library; knows nothing about Sixb, so the docs site uses it
 - `packages/client`: generated typed client artifacts
 - `packages/cli`: CLI entrypoint for `sixb`
 - `packages/create-sixb`: zero-dependency project scaffolder and template
-- `packages/app`: custom app integration
+- `packages/app`: the project app: shell, built-in pages (Home, the agent, object pages, and the
+  Settings, Data, Observability and Ontology sections in `src/pages/`), dev server and build
 - `models/`: model providers such as Anthropic and Vercel AI Gateway
 - `connectors/`, `storage/`, `broker/`: integrations and infrastructure providers
 - `examples/`: runnable sample projects
@@ -128,7 +128,7 @@ repo's `typecheck` chain reads source.
 - Package-prefixed error messages such as `[Sixb] ...`, `[SixbServer] ...`, or `[RokuTV] ...` are preferred.
 - The framework never speaks in the user's logger. Report terminal failures through `onError` and write everything else to a prefixed `console.*`. A swallowed `events.append()` is a lost trigger edge: emit through `events.emit(input, { source })` when the work that produced the events has already succeeded, and `events.append(input)` when the caller owns the outcome. Never write a bare `catch` around an append.
 - Keep builders and definitions declarative; avoid unnecessary indirection around ontology setup.
-- Preserve the existing visual language in `packages/atlas` (and `packages/ui`) and keep both desktop and mobile behavior working.
+- Preserve the existing visual language in `packages/app` (and `packages/ui`) and keep both desktop and mobile behavior working.
 
 ## Tests
 
@@ -144,9 +144,10 @@ repo's `typecheck` chain reads source.
   Bun's bundler has deadlocked on hosted runners, a wedged bundler stays wedged for the life of the
   process, and the per-test timeout stops being a bound once it does — it fired for the deadlocked
   build and then not at all for the next bundler call, which hung until the job's wall clock.
-  `packages/core/tests/published-artifacts.e2e.ts` shows the shape. The one in-process exception is
-  `atlas-app.test.ts`, which imports Bun's HTML entry because that import *is* the behavior under
-  test — it is why `test:ci` runs behind a guard at all.
+  `packages/core/tests/published-artifacts.e2e.ts` shows the shape. The in-process exception is
+  the dev-server cases in `packages/app/tests/createCustomApp.test.ts`, which serve Bun's HTML
+  entry because that bundling *is* the behavior under test — it is why `test:ci` runs behind a
+  guard at all.
 - A guard is proven by removing it. Before landing a test that locks in a fix, revert the fix and
   watch the test fail — a test that passes either way locks in nothing, and reads for years as if
   it did. Say in the test how to reproduce that check, and say it there when a toolchain version
@@ -202,4 +203,5 @@ repo's `typecheck` chain reads source.
 - `packages/core/src/ontology/`: ontology builders and types
 - `packages/server/src/routes/`: server routes
 - `packages/client/src/generated/`: generated client output
-- `packages/atlas/src/`: built-in UI (pages in `pages/`, shared components in `packages/ui/src/`)
+- `packages/app/src/`: the app (built-in pages in `pages/`, sections listed in `sections/catalog.ts`,
+  the agent in `agent/`, shared components in `packages/ui/src/`)

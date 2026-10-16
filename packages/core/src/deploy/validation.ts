@@ -55,7 +55,9 @@ function target(value: unknown): void {
 
 function services(value: unknown): void {
   const config = record(value, "services")
-  knownKeys(config, DEPLOY_SERVICES, "services")
+  knownKeys(config, DEPLOY_SERVICES, "services", {
+    atlas: "Atlas's pages are part of the app now; remove the setting and configure `app`.",
+  })
 
   for (const service of DEPLOY_SERVICES) {
     const override = config[service]

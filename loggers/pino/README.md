@@ -18,8 +18,8 @@ const sixb = await createSixb({
 ```
 
 `logger` controls process output. `observability.logs` independently controls
-the temporary broker copy consumed by Atlas, including its capture level and
-retention limits.
+the temporary broker copy shown on the app's Logs page, including its capture
+level and retention limits.
 
 - `new PinoLogger()` writes structured JSON to stdout at `info`.
 - `new PinoLogger({ instance })` reuses a configured Pino instance, including

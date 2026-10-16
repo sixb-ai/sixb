@@ -56,7 +56,7 @@ Actions have no queue and no worker.
 ### Run records
 
 Every queued execution writes a durable **run record** to `storage`, so progress
-survives restarts and is visible in [Atlas](../../../docs/deployment/overview.md#atlas-admin-ui). A
+survives restarts and is visible in the app's [Observability](../../../docs/apps/overview.md#observability) pages. A
 run moves through the same lifecycle across primitives:
 
 | Status      | Meaning                                         |

@@ -196,10 +196,11 @@ describe("generated nested layouts", () => {
 })
 
 async function linkDependencies(projectRoot: string, packages: readonly string[]): Promise<void> {
-  const atlasRoot = resolve(import.meta.dir, "..", "..", "atlas")
+  // Resolved as this package resolves them.
+  const appRoot = resolve(import.meta.dir, "..")
 
   for (const name of packages) {
-    const packageDir = dirname(Bun.resolveSync(`${name}/package.json`, atlasRoot))
+    const packageDir = dirname(Bun.resolveSync(`${name}/package.json`, appRoot))
     const target = join(projectRoot, "node_modules", ...name.split("/"))
     await mkdir(dirname(target), { recursive: true })
     await symlink(packageDir, target)

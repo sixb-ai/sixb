@@ -8,10 +8,9 @@
  * entry in `GRANT_KINDS` plus the compile errors that forces at every consumer.
  */
 
-import type { AgentRunGrant, GrantDefinition } from "../security/types"
+import type { GrantDefinition } from "../security/types"
 
 export type GrantKind =
-  | "access:application"
   | "view:object"
   | "view:dataset"
   | "edit:object"
@@ -27,12 +26,12 @@ export type GrantKind =
   | "manage:connector"
   | "manage:aiUsage"
 
-export type SingletonGrantKind = "run:agent"
+/** Capabilities over one project-wide surface: held or not, with no ids to select. */
+export type SingletonGrantKind = "run:agent" | "observe:logs" | "observe:aiUsage" | "manage:aiUsage"
 export type TargetedGrantKind = Exclude<GrantKind, SingletonGrantKind>
 
 /** Registered id universes a grant kind ranges over, plus subtype expansion. */
 export interface GrantUniverse {
-  readonly applicationIds: ReadonlySet<string>
   readonly objectTypeIds: ReadonlySet<string>
   readonly datasetIds: ReadonlySet<string>
   readonly actionIds: ReadonlySet<string>
@@ -40,9 +39,7 @@ export interface GrantUniverse {
   readonly workflowIds: ReadonlySet<string>
   readonly syncIds: ReadonlySet<string>
   readonly pipelineIds: ReadonlySet<string>
-  readonly observableIds: ReadonlySet<string>
   readonly connectorIds: ReadonlySet<string>
-  readonly manageableIds: ReadonlySet<string>
   readonly getSubTypes: (objectTypeId: string) => readonly string[]
 }
 
@@ -76,11 +73,6 @@ export const GRANT_KINDS: {
     ? SingletonGrantKindSpec
     : TargetedGrantKindSpec
 } = {
-  "access:application": {
-    universeKey: "applicationIds",
-    subject: "application",
-    fix: "Use an application exported from '@sixb/core'.",
-  },
   "view:object": {
     universeKey: "objectTypeIds",
     subject: "object type",
@@ -136,13 +128,13 @@ export const GRANT_KINDS: {
     fix: "Configure models.language and use the exported agent reference in can.run(agent).",
   },
   "observe:logs": {
-    universeKey: "observableIds",
-    subject: "observability surface",
+    singleton: true,
+    subject: "logs",
     fix: 'Use can.observe("logs").',
   },
   "observe:aiUsage": {
-    universeKey: "observableIds",
-    subject: "observability surface",
+    singleton: true,
+    subject: "AI usage",
     fix: "Use can.observe(agent.usage).",
   },
   "manage:connector": {
@@ -151,25 +143,27 @@ export const GRANT_KINDS: {
     fix: "Add it to 'connectors/' or pass it to createSixb({ connectors }).",
   },
   "manage:aiUsage": {
-    universeKey: "manageableIds",
-    subject: "management surface",
+    singleton: true,
+    subject: "AI usage",
     fix: "Use can.manage(agent.usage).",
   },
 }
 
 export const GRANT_KIND_KEYS = Object.keys(GRANT_KINDS) as readonly GrantKind[]
+export const SINGLETON_GRANT_KIND_KEYS = GRANT_KIND_KEYS.filter(
+  (kind): kind is SingletonGrantKind => "singleton" in GRANT_KINDS[kind]
+)
 export const TARGETED_GRANT_KIND_KEYS = GRANT_KIND_KEYS.filter(
-  (kind): kind is TargetedGrantKind => kind !== "run:agent"
+  (kind): kind is TargetedGrantKind => !("singleton" in GRANT_KINDS[kind])
 )
 
+export function isSingletonGrantKind(kind: GrantKind): kind is SingletonGrantKind {
+  return "singleton" in GRANT_KINDS[kind]
+}
+
 /** The grant kind a stored grant resolves to. */
-export function grantKindOf(grant: AgentRunGrant): SingletonGrantKind
-export function grantKindOf(grant: Exclude<GrantDefinition, AgentRunGrant>): TargetedGrantKind
-export function grantKindOf(grant: GrantDefinition): GrantKind
 export function grantKindOf(grant: GrantDefinition): GrantKind {
   switch (grant.capability) {
-    case "access":
-      return "access:application"
     case "view":
       return `view:${grant.target}`
     case "edit":
@@ -196,7 +190,6 @@ export type MutableGrantIndex = {
 
 export function emptyGrantSets(): MutableGrantIndex {
   return {
-    "access:application": new Set(),
     "view:object": new Set(),
     "view:dataset": new Set(),
     "edit:object": new Set(),
@@ -207,9 +200,9 @@ export function emptyGrantSets(): MutableGrantIndex {
     "run:sync": new Set(),
     "run:pipeline": new Set(),
     "run:agent": false,
-    "observe:logs": new Set(),
-    "observe:aiUsage": new Set(),
+    "observe:logs": false,
+    "observe:aiUsage": false,
     "manage:connector": new Set(),
-    "manage:aiUsage": new Set(),
+    "manage:aiUsage": false,
   }
 }

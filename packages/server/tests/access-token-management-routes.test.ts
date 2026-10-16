@@ -86,7 +86,6 @@ async function seedSession(storage: InMemoryStorage) {
     projectId,
     userId: "usr_1",
     strategyId: "test",
-    audience: "atlas",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-05-16T10:00:00.000Z"),
     expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -94,7 +93,7 @@ async function seedSession(storage: InMemoryStorage) {
 
   return {
     headers: {
-      cookie: `sixb_session=${credential.cookieValue}; sixb_csrf=csrf_1`,
+      cookie: `sixb_session_app=${credential.cookieValue}; sixb_csrf_app=csrf_1`,
       "x-sixb-csrf": "csrf_1",
     },
   }

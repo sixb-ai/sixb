@@ -105,7 +105,7 @@ async function main(): Promise<void> {
     if (counts.some((count, index) => count < requiredObjects[index][1])) {
       console.log("[Northline] Populating Northline Operations through the Sixb data plane...")
       await synchronizeDemo()
-      console.log("[Northline] Northline Operations is ready. Open http://localhost:3001")
+      console.log("[Northline] Northline Operations is ready. Open http://localhost:3000")
     }
   } catch (error) {
     child.kill("SIGTERM")

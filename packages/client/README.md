@@ -30,7 +30,7 @@ bun generate:client
 import { client, listObjects, getObject, getTelemetryHistory, listObjectTypes } from "@sixb/client"
 
 // Configure the base URL
-client.setConfig({ baseUrl: "http://localhost:3002" })
+client.setConfig({ baseUrl: "http://localhost:3001" })
 
 // List all object types
 const { data: types } = await listObjectTypes()
@@ -89,7 +89,7 @@ URL. Unchanged references keep the same URL; content and metadata edits change i
 Use `disposition: "attachment"` for downloads. The version query is a cache key, not
 a historical-file selector; the server still resolves and authorizes the current property.
 
-For separate app/API origins, select the app session explicitly for previews and downloads:
+For separate app/API origins, the link opens with the app's session cookie:
 
 ```tsx
 const url = objectFileContentUrl({
@@ -97,17 +97,14 @@ const url = objectFileContentUrl({
   objectId: attachment.primaryId,
   pathSegments: ["file"],
   fileRef: attachment.properties.file,
-  audience: "app",
   disposition: "inline", // use "attachment" for a download link
 })
 return <iframe title="Preview" src={url} />
 ```
 
-Configure the client base URL to the API and map the app origin to `audience: "app"`
-in the server's `browser.allowedOrigins`. The URL selects that audience's existing
-session cookie; it contains no credentials and grants no additional access. Without
-`audience`, requests without `Origin` still use `browser.apiOriginAudience` (default
-`"atlas"`). When `Origin` is present, it must agree with the selected audience.
+Configure the client base URL to the API and list the app origin in the server's
+`browser.allowedOrigins`. The URL contains no credentials and grants no additional
+access; the request carries the session cookie the person already has.
 Object/file authorization, streaming, byte ranges, and conditional requests still apply.
 
 The browser must send the API's session cookie. Sixb uses `SameSite=Strict`, so direct

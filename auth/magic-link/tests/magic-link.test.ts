@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import type { AuthSessionAudience } from "@sixb/core"
 import type { CompleteAuthSessionInput } from "@sixb/core/storage"
 import { InMemoryAuthStorage } from "@sixb/core/storage"
 import { magicLink, type SendMagicLinkInput } from "../src"
@@ -15,7 +14,6 @@ function at(value: string): Date {
 function sessionInput(id = "ses_1"): CompleteAuthSessionInput {
   return {
     id,
-    audience: "atlas",
     tokenHash: `${id}-hash`,
     createdAt: at("2026-05-16T10:05:00.000Z"),
     expiresAt: at("2026-05-23T10:05:00.000Z"),
@@ -49,7 +47,6 @@ async function requestMagicLink(input: {
   readonly storage: InMemoryAuthStorage
   readonly strategy: ReturnType<typeof magicLink>
   readonly email: string
-  readonly audience?: AuthSessionAudience
   readonly requesterHash?: string
   readonly now?: Date
 }) {
@@ -57,7 +54,6 @@ async function requestMagicLink(input: {
     projectId,
     authStorage: input.storage,
     email: input.email,
-    audience: input.audience ?? "atlas",
     returnTo: "/dashboard",
     requestOrigin,
     requesterHash: input.requesterHash,
@@ -204,7 +200,6 @@ describe("magicLink", () => {
     expect(record).toMatchObject({
       email: "ava@acme.com",
       strategyId: "magic-link",
-      audience: "atlas",
       returnTo: "/dashboard",
       tokenHash: hashMagicLinkToken(token ?? ""),
     })
@@ -273,7 +268,6 @@ describe("magicLink", () => {
       now: at("2026-05-16T10:02:00.000Z"),
       session: {
         id: "ses_1",
-        audience: "atlas",
         tokenHash: "session-hash",
         createdAt: at("2026-05-16T10:02:00.000Z"),
         expiresAt: at("2026-05-16T22:02:00.000Z"),
@@ -352,7 +346,6 @@ describe("magicLink", () => {
       projectId,
       authStorage: storage,
       invitation,
-      audience: "atlas",
       returnTo: "/dashboard",
       requestOrigin,
       revealLink: true,
@@ -429,7 +422,7 @@ describe("magicLink", () => {
 
     expect(result.user.email).toBe("founder@acme.com")
     expect(result.session).toMatchObject({ id: "ses_1", strategyId: "magic-link" })
-    expect(result).toMatchObject({ audience: "atlas", returnTo: "/dashboard" })
+    expect(result).toMatchObject({ returnTo: "/dashboard" })
     await expect(
       storage.groupMemberships.listForUser({ projectId, userId: result.user.id })
     ).resolves.toMatchObject([{ groupId: "security-admins", source: "manual" }])
@@ -595,35 +588,6 @@ describe("magicLink", () => {
       })
     ).resolves.toEqual({ status: "rate_limited" })
     expect(messages).toHaveLength(5)
-  })
-
-  test("allows a multi-audience login burst under defaults", async () => {
-    const storage = new InMemoryAuthStorage()
-    const { messages, sendMagicLink } = createSender()
-    const strategy = magicLink({
-      allowedDomains: ["acme.com"],
-      sendMagicLink,
-    })
-
-    await storage.users.create({
-      id: "usr_1",
-      projectId,
-      email: "ava@acme.com",
-    })
-
-    for (const audience of ["atlas", "app"] as const) {
-      await expect(
-        requestMagicLink({
-          storage,
-          strategy,
-          email: "ava@acme.com",
-          audience,
-          now: at("2026-05-16T10:00:00.000Z"),
-        })
-      ).resolves.toEqual({ status: "sent" })
-    }
-
-    expect(messages).toHaveLength(2)
   })
 
   test("revokes the created magic link if sending fails", async () => {

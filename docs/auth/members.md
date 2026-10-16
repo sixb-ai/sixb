@@ -33,7 +33,7 @@ Open **Settings › Members** in your [app](../apps/overview.md#settings) to inv
 
 Administrators can manage an existing user only when all of that user's current groups are in scope. Group changes also require the new groups to be in scope. A user cannot suspend themselves or remove their own groups.
 
-Suspending a user revokes their sessions. Reactivating them requires a new sign-in. Application access grants do not grant member-management permissions.
+Suspending a user revokes their sessions. Reactivating them requires a new sign-in. Role grants do not give member-management permissions; membership policies do.
 
 ## Service accounts and tokens
 

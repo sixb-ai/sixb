@@ -22,7 +22,6 @@ import type {
 import { createDelegatedRequestScope, createTestingScope } from "../src/execution/scopes"
 
 function context(grants: {
-  applications?: readonly string[]
   view?: readonly string[]
   datasets?: readonly string[]
   edit?: readonly string[]
@@ -39,7 +38,6 @@ function context(grants: {
     roleIds: [],
     grants: {
       ...emptyGrantIndex(),
-      "access:application": new Set(grants.applications ?? []),
       "view:object": new Set(grants.view ?? []),
       "view:dataset": new Set(grants.datasets ?? []),
       "edit:object": new Set(grants.edit ?? []),
@@ -48,7 +46,7 @@ function context(grants: {
       "run:sync": new Set(grants.syncs ?? []),
       "run:pipeline": new Set(grants.pipelines ?? []),
       "run:agent": grants.agent ?? false,
-      "observe:logs": new Set(grants.logs ? ["logs"] : []),
+      "observe:logs": grants.logs ?? false,
     },
   }
 }
@@ -111,21 +109,6 @@ describe("evaluate", () => {
       allowed: false,
       requirements: ["observe:logs"],
       missing: ["observe:logs"],
-    })
-  })
-
-  test("application.access checks application grants", () => {
-    expect(
-      evaluate(context({ applications: ["atlas"] }), {
-        kind: "application.access",
-        audience: "atlas",
-      })
-    ).toEqual({ allowed: true, requirements: ["access:application:atlas"], missing: [] })
-
-    expect(evaluate(context({}), { kind: "application.access", audience: "atlas" })).toEqual({
-      allowed: false,
-      requirements: ["access:application:atlas"],
-      missing: ["access:application:atlas"],
     })
   })
 

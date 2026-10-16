@@ -1,7 +1,6 @@
 /**
  * Language of the screens the generated runtime draws around a custom app. Imported through
- * `@sixb/app` so a project builds whether or not it depends on `@sixb/ui` itself, the same way the
- * built-in agent routes resolve `@sixb/agent-ui`.
+ * `@sixb/app` so a project builds whether or not it depends on `@sixb/ui` itself.
  */
 import { defineMessages, LocaleProvider, negotiateLocale } from "@sixb/ui/lib/i18n"
 import { type AppMessages, en, fr } from "./locale-messages"

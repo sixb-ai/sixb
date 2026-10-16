@@ -167,7 +167,7 @@ export async function resolveProfile(input: ResolveProfileInput = {}): Promise<R
   }
 
   return {
-    apiUrl: "http://localhost:3002",
+    apiUrl: "http://localhost:3001",
     ...(explicitToken ? { token: explicitToken, tokenSource: "--token" as const } : {}),
     source: "default",
   }

@@ -67,7 +67,6 @@ export interface PgAuthSessionRow {
   readonly id: string
   readonly user_id: string
   readonly strategy_id: string
-  readonly audience: SessionRecord["audience"]
   readonly token_hash: string
   readonly created_at: PgDate
   readonly expires_at: PgDate
@@ -132,7 +131,6 @@ export interface PgAuthMagicLinkRow {
   readonly project_id: string
   readonly id: string
   readonly strategy_id: string
-  readonly audience: MagicLinkRecord["audience"]
   readonly email: string
   readonly token_hash: string
   readonly return_to: string | null
@@ -146,7 +144,6 @@ export interface PgAuthOidcAttemptRow {
   readonly project_id: string
   readonly id: string
   readonly strategy_id: string
-  readonly audience: OidcAuthorizationAttemptRecord["audience"]
   readonly state_hash: string
   readonly nonce_hash: string
   readonly code_verifier: string
@@ -229,7 +226,6 @@ export function rowToSessionRecord(row: PgAuthSessionRow): SessionRecord {
     projectId: row.project_id,
     userId: row.user_id,
     strategyId: row.strategy_id,
-    audience: row.audience,
     tokenHash: row.token_hash,
     createdAt: toDate(row.created_at),
     expiresAt: toDate(row.expires_at),
@@ -306,7 +302,6 @@ export function rowToMagicLinkRecord(row: PgAuthMagicLinkRow): MagicLinkRecord {
     id: row.id,
     projectId: row.project_id,
     strategyId: row.strategy_id,
-    audience: row.audience,
     email: row.email,
     tokenHash: row.token_hash,
     returnTo: row.return_to ?? undefined,
@@ -324,7 +319,6 @@ export function rowToOidcAuthorizationAttemptRecord(
     id: row.id,
     projectId: row.project_id,
     strategyId: row.strategy_id,
-    audience: row.audience,
     stateHash: row.state_hash,
     nonceHash: row.nonce_hash,
     codeVerifier: row.code_verifier,

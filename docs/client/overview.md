@@ -41,7 +41,7 @@ import {
 
 const config = {
   api: { baseUrl: "https://api.example.com" },
-  auth: { audience: "app" as const, enabled: true },
+  auth: { enabled: true },
 }
 const controller = configureSixbBrowserClient(config)
 await requireSixbBrowserAuthSession(config, controller)

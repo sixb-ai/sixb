@@ -1,6 +1,5 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { join, relative, resolve } from "node:path"
-import type { AuthSessionAudience } from "@sixb/core"
 import { en, fr } from "./locale-messages"
 import { renderAppManifest } from "./manifest"
 import { resolveAppMetadata } from "./metadata"
@@ -10,7 +9,7 @@ import { type AppRouteLayout, type PageRoute, routePatternKey } from "./scanner"
 export interface BuiltInRouteManifestEntry {
   readonly path: string
   readonly moduleSpecifier: string
-  readonly exportName?: string
+  readonly exportName: string
 }
 
 export interface GenerateRouteManifestOptions {
@@ -40,7 +39,7 @@ function assertNoReservedSharedRoutes(routes: readonly PageRoute[]): void {
  * Generates `.sixb/generated/routes.ts` with static page/layout imports. Modules are
  * eager on purpose: project-specific apps bundle small, and a single bundle
  * (one JS file, one render-blocking CSS file) means no Suspense gap or
- * late-arriving styles when navigating — matching how Atlas routes.
+ * late-arriving styles when navigating.
  */
 export async function generateRouteManifest(
   routes: readonly PageRoute[],
@@ -62,13 +61,10 @@ export async function generateRouteManifest(
     (route) => !projectRoutePatterns.has(routePatternKey(route.path))
   )
   const builtInImports = builtInRoutes
-    .map((route, index) => {
-      if (route.exportName) {
-        return `import { ${route.exportName} as BuiltInPage${index} } from ${JSON.stringify(route.moduleSpecifier)}`
-      }
-
-      return `import BuiltInPage${index} from ${JSON.stringify(route.moduleSpecifier)}`
-    })
+    .map(
+      (route, index) =>
+        `import { ${route.exportName} as BuiltInPage${index} } from ${JSON.stringify(route.moduleSpecifier)}`
+    )
     .join("\n")
   const routePatterns = [...pages, ...builtInRoutes].map((route) => routePatternKey(route.path))
   const layouts = [...(options.layouts ?? [])]
@@ -330,7 +326,7 @@ import { createRoot } from "react-dom/client"
 import type {
   AuthExperienceActions,
   AuthExperienceState,
-} from "@sixb/app/auth"
+} from "@sixb/app"
 import AuthExperience from ${JSON.stringify(authRel)}
 ${stylesheetImport}
 
@@ -441,7 +437,6 @@ export async function generateAppEntry(
   generatedDir: string,
   options: {
     apiBaseUrl?: string
-    audience?: AuthSessionAudience
     authEnabled?: boolean
     appDir?: string
     publicDir?: string
@@ -455,6 +450,8 @@ export async function generateAppEntry(
     frameworkStylesheetPaths?: readonly string[]
     /** The built-in section pages are routed, so the app draws their navigation. */
     sections?: boolean
+    /** The project has pages of its own in `app/`. */
+    projectPages?: boolean
   } = {}
 ): Promise<{
   htmlPath: string
@@ -498,8 +495,11 @@ export async function generateAppEntry(
     : sections
       ? `import RootLayout, * as rootLayoutModule from ${JSON.stringify(layoutRel)}\n`
       : `import RootLayout from ${JSON.stringify(layoutRel)}\n`
+  // A project with no `app/` of its own gets the default shell: its user menu is the way into every
+  // section. Pages without a layout keep rendering bare, as they did before the built-in pages.
+  const defaultShell = sections && !hasLayout && !options.projectPages
   const sectionsImport = sections
-    ? `import type { AppVisibility } from "@sixb/app"\nimport { SectionsProvider } from "@sixb/app/pages"\n`
+    ? `import ${defaultShell ? "{ AppShell, type AppVisibility }" : "type { AppVisibility }"} from "@sixb/app"\nimport { SectionsProvider } from "@sixb/app/pages"\n`
     : ""
   // Who sees each built-in section, from the project's app/layout.tsx.
   const sectionsSetup = !sections
@@ -511,12 +511,12 @@ export async function generateAppEntry(
     ? `<SectionsProvider visibility={visibility} enabled={!basename}>`
     : ""
   const sectionsEnd = sections ? "</SectionsProvider>" : ""
-  const layoutWrapperStart = hasLayout ? "<RootLayout>" : "<>"
-  const layoutWrapperEnd = hasLayout ? "</RootLayout>" : "</>"
+  const layoutWrapperStart = hasLayout ? "<RootLayout>" : defaultShell ? "<AppShell>" : "<>"
+  const layoutWrapperEnd = hasLayout ? "</RootLayout>" : defaultShell ? "</AppShell>" : "</>"
   const runtimeConfigScript = options.apiBaseUrl
     ? renderCustomAppRuntimeScript({
         api: { baseUrl: options.apiBaseUrl },
-        auth: { audience: options.audience ?? "app", enabled: options.authEnabled ?? true },
+        auth: { enabled: options.authEnabled ?? true },
       })
     : ""
 
@@ -524,7 +524,7 @@ export async function generateAppEntry(
   // shared entry imports it only after establishing a grant-bound session.
   const runtimeContent = `import React from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { type GetAuthSessionResponse, signOut } from "@sixb/client"
+import type { GetAuthSessionResponse } from "@sixb/client"
 import {
   BrowserRouter,
   matchPath,
@@ -792,46 +792,6 @@ function AppFallback({
   )
 }
 
-function AccessDeniedView() {
-  const messages = useAppMessages().accessDenied
-  const [isSigningOut, setIsSigningOut] = React.useState(false)
-
-  async function handleSignOut() {
-    setIsSigningOut(true)
-    try {
-      await signOut({ throwOnError: true })
-      window.location.reload()
-    } catch {
-      setIsSigningOut(false)
-    }
-  }
-
-  return (
-    <AppFallback
-      title={messages.title}
-      detail={messages.detail}
-      showReload={false}
-      action={
-        <button
-          type="button"
-          disabled={isSigningOut}
-          onClick={handleSignOut}
-          style={{
-            padding: "0.5rem 1rem",
-            borderRadius: "var(--radius, 0.5rem)",
-            border: "1px solid var(--border, #cbd2d9)",
-            background: "transparent",
-            color: "inherit",
-            cursor: isSigningOut ? "default" : "pointer",
-          }}
-        >
-          {isSigningOut ? messages.signingOut : messages.signOut}
-        </button>
-      }
-    />
-  )
-}
-
 // The not-found view. Rendered both for unmatched client routes (the catch-all
 // route below) and for an expected 404 surfaced through a query. Apps will be
 // able to override this via app/not-found.tsx.
@@ -1014,15 +974,7 @@ export function startApp(options: StartAppOptions = {}) {
   getRoot().render(<App basename={options.basename} />)
 }
 
-// Without a session the project's locale is unknown: these speak the browser's language.
-export function renderAccessDenied() {
-  getRoot().render(
-    <LocaleProvider>
-      <AccessDeniedView />
-    </LocaleProvider>
-  )
-}
-
+// Without a session the project's locale is unknown: this speaks the browser's language.
 export function renderApiUnavailable(apiBaseUrl: string) {
   getRoot().render(
     <LocaleProvider>
@@ -1068,9 +1020,9 @@ function ApiUnavailableView({ apiBaseUrl }: { readonly apiBaseUrl: string }) {
   readSixbBrowserRuntimeConfig,
   requireSixbBrowserAuthSession,
 } from "@sixb/client/browser"
-import { renderAccessDenied, renderApiUnavailable, startApp } from "./app-runtime"
+import { renderApiUnavailable, startApp } from "./app-runtime"
 
-const runtimeConfig = readSixbBrowserRuntimeConfig({ audience: "app" })
+const runtimeConfig = readSixbBrowserRuntimeConfig()
 const browserClient = configureSixbBrowserClient(runtimeConfig)
 
 if (import.meta.hot) {
@@ -1091,11 +1043,9 @@ if (authSession === "unavailable") {
 } else if (
   !runtimeConfig.auth.enabled ||
   (authSession?.authenticated === false && authSession.authEnabled === false) ||
-  (authSession?.authenticated === true && authSession.applicationAccess.allowed)
+  authSession?.authenticated === true
 ) {
   startApp({ session: authSession ?? undefined })
-} else if (authSession?.authenticated === true && !authSession.applicationAccess.allowed) {
-  renderAccessDenied()
 }
 `
 
@@ -1149,10 +1099,7 @@ export function startSharedApp(
   activeController?.dispose()
   let controller: SixbSharedBrowserClientController
   try {
-    const runtimeConfig = readSixbBrowserRuntimeConfig({
-      audience: "app",
-      authEnabled: false,
-    })
+    const runtimeConfig = readSixbBrowserRuntimeConfig({ authEnabled: false })
     controller = configureSixbSharedBrowserClient(runtimeConfig, {
       grantId,
     })
@@ -1350,7 +1297,7 @@ ${metadataHead}
   const sharedRuntimeConfigScript = options.apiBaseUrl
     ? renderCustomAppRuntimeScript({
         api: { baseUrl: options.apiBaseUrl },
-        auth: { audience: "app", enabled: false },
+        auth: { enabled: false },
       })
     : ""
   const sharedHtmlContent = `<!DOCTYPE html>

@@ -5,6 +5,8 @@ import {
   GRANT_KINDS,
   type GrantUniverse,
   grantKindOf,
+  isSingletonGrantKind,
+  SINGLETON_GRANT_KIND_KEYS,
   TARGETED_GRANT_KIND_KEYS,
 } from "./grant-kinds"
 import type { AuthorizationContext, GrantIndex, ResolvedRole } from "./types"
@@ -14,7 +16,7 @@ import type { AuthorizationContext, GrantIndex, ResolvedRole } from "./types"
  *
  * Broad grants (`every.object().except([...])`) expand against the registered
  * universe; object-type grants also expand to subtypes. Resource grants become
- * id sets; the project Agent grant becomes a boolean.
+ * id sets; grants on one project-wide surface (the Agent, logs, AI usage) become booleans.
  * The per-kind universe and subtype rules come from the `GRANT_KINDS` table, so
  * this loop never enumerates targets by hand.
  */
@@ -22,11 +24,13 @@ export function resolveRoleGrants(role: RoleDefinition, universe: GrantUniverse)
   const grants = emptyGrantSets()
 
   for (const grant of role.grants) {
-    if (grant.capability === "run" && grant.target === "agent") {
-      grants["run:agent"] = true
+    const kind = grantKindOf(grant)
+    if (isSingletonGrantKind(kind)) {
+      grants[kind] = true
       continue
     }
-    const kind = grantKindOf(grant)
+    // Every other kind carries a selection; this narrows the grant's type to say so.
+    if (!("selection" in grant)) continue
     const spec = GRANT_KINDS[kind]
     expandSelection(
       grant.selection,
@@ -89,8 +93,8 @@ export function resolveAuthorizationContext(input: {
     }
 
     roleIds.push(role.id)
-    if (role.grants["run:agent"]) {
-      grants["run:agent"] = true
+    for (const kind of SINGLETON_GRANT_KIND_KEYS) {
+      if (role.grants[kind]) grants[kind] = true
     }
     for (const kind of TARGETED_GRANT_KIND_KEYS) {
       for (const id of role.grants[kind]) {

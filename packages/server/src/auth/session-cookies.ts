@@ -13,9 +13,7 @@ export function createSessionRenewalCookieHeaders(input: {
   readonly session: AuthenticatedAuthSession
   readonly csrfToken?: string
 }): { readonly csrfToken: string; readonly headers: readonly [string, string] } | null {
-  const cookieOptions = input.host.auth.getCookieOptions({
-    audience: input.session.session.audience,
-  })
+  const cookieOptions = input.host.auth.getCookieOptions()
   const sessionValue = getCookie(input.request, cookieOptions.sessionCookieName)
   if (!sessionValue) {
     return null

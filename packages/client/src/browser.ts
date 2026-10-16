@@ -1,4 +1,3 @@
-import type { AuthSessionAudience } from "@sixb/core"
 import {
   configureSixbClient as configureGeneratedSixbClient,
   normalizeSixbApiBaseUrl,
@@ -37,14 +36,12 @@ export interface SixbBrowserRuntimeConfig {
     readonly baseUrl: string
   }
   readonly auth: {
-    readonly audience: AuthSessionAudience
     readonly enabled: boolean
   }
 }
 
 export interface SixbBrowserRuntimeDefaults {
   readonly apiBaseUrl?: string
-  readonly audience: AuthSessionAudience
   readonly authEnabled?: boolean
 }
 
@@ -90,7 +87,7 @@ export function renderSixbBrowserRuntimeScript(config: SixbBrowserRuntimeConfig)
 }
 
 export function readSixbBrowserRuntimeConfig(
-  defaults: SixbBrowserRuntimeDefaults
+  defaults: SixbBrowserRuntimeDefaults = {}
 ): SixbBrowserRuntimeConfig {
   const runtime = window.__SIXB_RUNTIME__
   const runtimeAuthEnabled = runtime?.auth?.enabled
@@ -101,7 +98,6 @@ export function readSixbBrowserRuntimeConfig(
       ),
     },
     auth: {
-      audience: runtime?.auth?.audience ?? defaults.audience,
       enabled:
         typeof runtimeAuthEnabled === "boolean"
           ? runtimeAuthEnabled
@@ -479,7 +475,6 @@ export async function requireSixbBrowserAuthSession(
 
 export function createSixbSignInUrl(config: SixbBrowserRuntimeConfig, returnTo: string): string {
   const url = new URL("/auth/sign-in", normalizeSixbApiBaseUrl(config.api.baseUrl))
-  url.searchParams.set("audience", config.auth.audience)
   url.searchParams.set("returnTo", returnTo)
   return url.toString()
 }

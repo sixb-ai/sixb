@@ -2,11 +2,11 @@ import type { Database } from "bun:sqlite"
 import { Database as SqliteDatabase } from "bun:sqlite"
 import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
+import { freshSqliteDatabase } from "./migrations"
 
 export interface SqliteStoreConnection {
   readonly db: Database
   readonly ownsConnection: boolean
-  readonly installFreshSchema: boolean
 }
 
 export interface SqliteStoreConnectionOptions {
@@ -22,20 +22,20 @@ export function openSqliteStoreConnection(
     return {
       db: options.connection.db,
       ownsConnection: false,
-      installFreshSchema: false,
     }
   }
 
   const path = options.path ?? ":memory:"
   if (path !== ":memory:" && !options.readonly) mkdirSync(dirname(path), { recursive: true })
-  const db = new SqliteDatabase(path, options.readonly ? { readonly: true } : undefined)
+  // A file is brought up to date by its migrators; a writable in-memory database starts with the
+  // whole schema.
+  const db =
+    path === ":memory:" && !options.readonly
+      ? freshSqliteDatabase()
+      : new SqliteDatabase(path, options.readonly ? { readonly: true } : undefined)
   db.run("PRAGMA foreign_keys = ON")
   db.run("PRAGMA busy_timeout = 5000")
-  return {
-    db,
-    ownsConnection: true,
-    installFreshSchema: path === ":memory:" && !options.readonly,
-  }
+  return { db, ownsConnection: true }
 }
 
 export function closeSqliteStoreConnection(connection: SqliteStoreConnection): void {

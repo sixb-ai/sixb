@@ -294,7 +294,7 @@ async function withServer(
     hostname: "127.0.0.1",
     port,
     quiet: true,
-    browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),
+    browser: createTestBrowserPolicy({ apiOrigin: baseUrl, appOrigin: baseUrl }),
   })
 
   await server.start()
@@ -355,7 +355,7 @@ async function withAuthenticatedServer(
     hostname: "127.0.0.1",
     port,
     quiet: true,
-    browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),
+    browser: createTestBrowserPolicy({ apiOrigin: baseUrl, appOrigin: baseUrl }),
   })
 
   await server.start()
@@ -390,12 +390,11 @@ async function seedLogSession(
     projectId: "logs-test-project",
     userId,
     strategyId: "test",
-    audience: "atlas",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-07-11T00:00:00.000Z"),
     expiresAt: new Date("2099-07-11T00:00:00.000Z"),
   })
-  return { cookie: `sixb_session=${credential.cookieValue}` }
+  return { cookie: `sixb_session_app=${credential.cookieValue}` }
 }
 
 class CountingBroker extends InMemoryBroker {
@@ -423,7 +422,7 @@ function authzWithLogs(): AuthorizationContext {
   const authz = authzWithoutLogs()
   return {
     ...authz,
-    grants: { ...authz.grants, "observe:logs": new Set(["logs"]) },
+    grants: { ...authz.grants, "observe:logs": true },
   }
 }
 

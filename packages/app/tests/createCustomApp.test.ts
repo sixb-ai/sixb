@@ -12,13 +12,14 @@ import {
 import { createCustomApp } from "../src/createCustomApp"
 
 async function linkDependencies(projectRoot: string, packages: readonly string[]): Promise<void> {
-  const atlasRoot = resolve(import.meta.dir, "..", "..", "atlas")
+  // Resolved as this package resolves them.
+  const appRoot = resolve(import.meta.dir, "..")
 
   for (const name of packages) {
     const packageDir =
       name === "@sixb/app"
         ? resolve(import.meta.dir, "..")
-        : dirname(Bun.resolveSync(`${name}/package.json`, atlasRoot))
+        : dirname(Bun.resolveSync(`${name}/package.json`, appRoot))
     const target = join(projectRoot, "node_modules", ...name.split("/"))
     await mkdir(dirname(target), { recursive: true })
     await symlink(packageDir, target)
@@ -152,7 +153,7 @@ describe("createCustomApp.start", () => {
 
   test("serves the built app and injects the runtime API base URL", async () => {
     const port = await getFreePort()
-    const app = await createCustomApp({ rootDir: tempRoot, audience: "app" })
+    const app = await createCustomApp({ rootDir: tempRoot })
     const server = await app.start({
       host: "127.0.0.1",
       port,
@@ -165,7 +166,7 @@ describe("createCustomApp.start", () => {
       const html = await rootResponse.text()
       expect(html).toContain("Fixture App")
       expect(html).toContain('"api":{"baseUrl":"http://127.0.0.1:3000"}')
-      expect(html).toContain('"auth":{"audience":"app","enabled":true}')
+      expect(html).toContain('"auth":{"enabled":true}')
 
       const routeResponse = await fetch(`http://127.0.0.1:${port}/dashboard/devices`)
       expect(routeResponse.status).toBe(200)
@@ -255,7 +256,7 @@ describe("createCustomApp.start", () => {
     await writeFile(join(outdir, "chunk-ab12cd34.css.gz"), gzipSync(stylesheet))
 
     const port = await getFreePort()
-    const app = await createCustomApp({ rootDir: tempRoot, audience: "app" })
+    const app = await createCustomApp({ rootDir: tempRoot })
     const server = await app.start({
       host: "127.0.0.1",
       port,
@@ -295,7 +296,7 @@ describe("createCustomApp.start", () => {
 
   test("falls back to the SPA shell for deep routes with encoded slashes and dots", async () => {
     const port = await getFreePort()
-    const app = await createCustomApp({ rootDir: tempRoot, audience: "app" })
+    const app = await createCustomApp({ rootDir: tempRoot })
     const server = await app.start({
       host: "127.0.0.1",
       port,
@@ -322,7 +323,7 @@ describe("createCustomApp.start", () => {
 
   test("injects disabled auth state for public local apps", async () => {
     const port = await getFreePort()
-    const app = await createCustomApp({ rootDir: tempRoot, audience: "app", authEnabled: false })
+    const app = await createCustomApp({ rootDir: tempRoot, authEnabled: false })
     const server = await app.start({
       host: "127.0.0.1",
       port,
@@ -332,7 +333,7 @@ describe("createCustomApp.start", () => {
     try {
       const rootResponse = await fetch(`http://127.0.0.1:${port}/`)
       expect(rootResponse.status).toBe(200)
-      expect(await rootResponse.text()).toContain('"auth":{"audience":"app","enabled":false}')
+      expect(await rootResponse.text()).toContain('"auth":{"enabled":false}')
     } finally {
       await server.stop()
     }
@@ -340,7 +341,7 @@ describe("createCustomApp.start", () => {
 
   test("serves only canonical shared deep links through a nonce-secured shell", async () => {
     const port = await getFreePort()
-    const app = await createCustomApp({ rootDir: tempRoot, audience: "app" })
+    const app = await createCustomApp({ rootDir: tempRoot })
     const server = await app.start({
       host: "127.0.0.1",
       port,
@@ -448,7 +449,11 @@ describe("createCustomApp.dev", () => {
   test("delivers public env before the development app entry", async () => {
     const previous = process.env.SIXB_PUBLIC_TEST_KEY
     process.env.SIXB_PUBLIC_TEST_KEY = "dev-runtime-sentinel"
-    const app = await createCustomApp({ rootDir: tempRoot, authEnabled: false, agentRoutes: false })
+    const app = await createCustomApp({
+      rootDir: tempRoot,
+      authEnabled: false,
+      builtInPages: false,
+    })
     let server: Awaited<ReturnType<typeof app.dev>> | undefined
     try {
       // Unit CI runs from source without building package exports first.
@@ -486,7 +491,11 @@ describe("createCustomApp.dev", () => {
     await writeFile(join(publicDir, "app.webmanifest"), '{"name":"Shadow"}\n')
 
     const port = await getFreePort()
-    const app = await createCustomApp({ rootDir: tempRoot, authEnabled: false, agentRoutes: false })
+    const app = await createCustomApp({
+      rootDir: tempRoot,
+      authEnabled: false,
+      builtInPages: false,
+    })
     const server = await app.dev({ host: "127.0.0.1", port })
 
     try {
@@ -527,7 +536,11 @@ describe("createCustomApp.dev", () => {
   test("does not build the shared browser graph for an ordinary dev server", async () => {
     const port = await getFreePort()
     const sharedDevRoot = join(tempRoot, ".sixb", "generated", "shared-dev")
-    const app = await createCustomApp({ rootDir: tempRoot, authEnabled: false, agentRoutes: false })
+    const app = await createCustomApp({
+      rootDir: tempRoot,
+      authEnabled: false,
+      builtInPages: false,
+    })
     const server = await app.dev({ host: "127.0.0.1", port })
 
     try {
@@ -560,7 +573,7 @@ describe("createCustomApp.dev", () => {
     const app = await createCustomApp({
       rootDir: proxyRoot,
       authEnabled: false,
-      agentRoutes: false,
+      builtInPages: false,
     })
     const server = await app.dev({ host: "127.0.0.1", port })
 
@@ -614,7 +627,7 @@ describe("createCustomApp.dev", () => {
       join(tempRoot, "app", "shared", "page.tsx"),
       "export default function SharedPage() { return null }\n"
     )
-    const app = await createCustomApp({ rootDir: tempRoot, agentRoutes: false })
+    const app = await createCustomApp({ rootDir: tempRoot, builtInPages: false })
 
     await expect(app.scanRoutes()).rejects.toThrow(
       "[SixbCustomApp] app/shared is reserved for framework-managed shared links"
@@ -646,7 +659,7 @@ describe("createCustomApp.dev", () => {
     await writeFile(
       join(tempRoot, "app", "auth.tsx"),
       [
-        'import type { AuthExperienceProps } from "@sixb/app/auth"',
+        'import type { AuthExperienceProps } from "@sixb/app"',
         "export default function AuthExperience(_props: AuthExperienceProps) { return null }",
         "",
       ].join("\n")
@@ -664,20 +677,6 @@ describe("createCustomApp.dev", () => {
     expect(html).toContain('data-sixb-auth="__SIXB_AUTH_BOOTSTRAP__"')
     expect(html).toContain('src="./auth-main.tsx"')
     expect(main).not.toContain("RootLayout")
-  })
-
-  test("renders an access-denied view without starting the application", async () => {
-    const { mainPath, runtimePath } = await generateAppEntry(
-      tempRoot,
-      join(tempRoot, ".sixb", "generated")
-    )
-    const main = await readFile(mainPath, "utf-8")
-    const runtime = await readFile(runtimePath, "utf-8")
-
-    expect(main).toContain("!authSession.applicationAccess.allowed")
-    expect(runtime).toContain("function AccessDeniedView()")
-    expect(runtime).toContain("<AccessDeniedView />")
-    expect(runtime).toContain("await signOut({ throwOnError: true })")
   })
 
   test("renders an API-unavailable view instead of a blank page when the session fails", async () => {
@@ -753,9 +752,17 @@ describe("createCustomApp.dev", () => {
       generatedDir,
       {
         builtInRoutes: [
-          { path: "/agents", moduleSpecifier: "@sixb/app/agents" },
-          { path: "/agents/new/:agentId", moduleSpecifier: "@sixb/app/agents" },
-          { path: "/agents/:threadId", moduleSpecifier: "@sixb/app/agents" },
+          { path: "/agents", moduleSpecifier: "@sixb/app/pages", exportName: "AgentsPage" },
+          {
+            path: "/agents/new/:agentId",
+            moduleSpecifier: "@sixb/app/pages",
+            exportName: "AgentsPage",
+          },
+          {
+            path: "/agents/:threadId",
+            moduleSpecifier: "@sixb/app/pages",
+            exportName: "AgentsPage",
+          },
         ],
         layouts: [
           {
@@ -769,9 +776,9 @@ describe("createCustomApp.dev", () => {
     const manifest = await readFile(manifestPath, "utf-8")
 
     expect(manifest).toContain('import Page0 from "../../app/page.tsx"')
-    expect(manifest).toContain('import BuiltInPage0 from "@sixb/app/agents"')
-    expect(manifest).toContain('import BuiltInPage1 from "@sixb/app/agents"')
-    expect(manifest).toContain('import BuiltInPage2 from "@sixb/app/agents"')
+    expect(manifest).toContain('import { AgentsPage as BuiltInPage0 } from "@sixb/app/pages"')
+    expect(manifest).toContain('import { AgentsPage as BuiltInPage1 } from "@sixb/app/pages"')
+    expect(manifest).toContain('import { AgentsPage as BuiltInPage2 } from "@sixb/app/pages"')
     expect(manifest).toContain('import Layout0 from "../../app/agents/layout.tsx"')
     expect(manifest).toContain(
       "element: createElement(Layout0, { children: createElement(Outlet) })"
@@ -827,7 +834,7 @@ describe("createCustomApp.dev", () => {
   test("generated entry imports framework styles before app styles", async () => {
     const generatedDir = join(tempRoot, ".sixb", "generated")
     const appCssPath = join(tempRoot, "app", "globals.css")
-    const frameworkCssPath = join(generatedDir, "agent-ui.css")
+    const frameworkCssPath = join(generatedDir, "framework.css")
     await mkdir(generatedDir, { recursive: true })
     await writeFile(appCssPath, "body { margin: 0; }\n")
     await writeFile(frameworkCssPath, "body { color: black; }\n")
@@ -838,9 +845,9 @@ describe("createCustomApp.dev", () => {
     })
     const runtime = await readFile(runtimePath, "utf-8")
 
-    expect(runtime.indexOf('import "./agent-ui.css"')).toBeGreaterThan(-1)
+    expect(runtime.indexOf('import "./framework.css"')).toBeGreaterThan(-1)
     expect(runtime.indexOf('import "../../app/globals.css"')).toBeGreaterThan(-1)
-    expect(runtime.indexOf('import "./agent-ui.css"')).toBeLessThan(
+    expect(runtime.indexOf('import "./framework.css"')).toBeLessThan(
       runtime.indexOf('import "../../app/globals.css"')
     )
   })
@@ -953,7 +960,7 @@ describe("createCustomApp.dev", () => {
         join(tempRoot, ".sixb", "generated", "app-runtime.tsx"),
         "utf-8"
       )
-      expect(runtime).toContain('import "./agent-ui.css"')
+      expect(runtime).toContain('import "./framework.css"')
     } finally {
       await server.stop()
     }
@@ -1038,36 +1045,61 @@ describe("createCustomApp.dev", () => {
     }
   }, 30_000)
 
-  // Regression proof: make servesApp in createCustomApp return routes.length > 0 and this fails.
-  test("serves the built-in pages from a root layout alone", async () => {
-    await rm(join(tempRoot, "app", "page.tsx"))
+  // Regression proof: make servesApp in createCustomApp return routes.length > 0 and the server
+  // refuses to start; drop `defaultShell` in codegen and the pages render without a shell.
+  test("serves the built-in pages in the default shell without an app folder", async () => {
+    await rm(join(tempRoot, "app"), { recursive: true, force: true })
+    const pagesOff = await createCustomApp({
+      rootDir: tempRoot,
+      builtInPages: false,
+      authEnabled: false,
+    })
+    await expect(pagesOff.dev({ host: "127.0.0.1", port: 0 })).rejects.toThrow(
+      "No app routes found"
+    )
+
     const app = await createCustomApp({
       rootDir: tempRoot,
       apiBaseUrl: "http://127.0.0.1:3000",
       authEnabled: false,
     })
-    expect(await app.hasRoutes()).toBe(false)
-
-    await writeFile(
-      join(tempRoot, "app", "layout.tsx"),
-      "export default function RootLayout({ children }) { return children }\n"
-    )
-    expect(await app.hasRoutes()).toBe(true)
-    expect(
-      await (
-        await createCustomApp({ rootDir: tempRoot, agentRoutes: false, authEnabled: false })
-      ).hasRoutes()
-    ).toBe(false)
-
-    const server = await app.dev({ host: "127.0.0.1", port: await getFreePort() })
+    const port = await getFreePort()
+    const server = await app.dev({ host: "127.0.0.1", port })
     try {
+      // Nothing to watch until the project creates `app/`; `sixb dev` restarts then.
+      expect(server.watchesSources).toBe(false)
       const manifest = await readFile(join(tempRoot, ".sixb", "generated", "routes.ts"), "utf-8")
       expect(manifest).toContain('import { HomePage as BuiltInPage3 } from "@sixb/app/pages"')
-      expect(manifest).toContain("@sixb/app/agents")
+      expect(manifest).toContain("{ AgentsPage as BuiltInPage0 }")
+      const runtime = await readFile(
+        join(tempRoot, ".sixb", "generated", "app-runtime.tsx"),
+        "utf-8"
+      )
+      expect(runtime).toContain('import { AppShell, type AppVisibility } from "@sixb/app"')
+      expect(runtime).toContain("<AppShell>")
+      expect(runtime).not.toContain("RootLayout")
+      expect((await fetch(`http://127.0.0.1:${port}/settings/personal`)).status).toBe(200)
     } finally {
       await server.stop()
     }
   }, 30_000)
+
+  // Atlas shipped prebuilt; the app is bundled from the project, so React has to be installed
+  // there. Regression proof: drop assertAppPackagesInstalled and this fails on Bun's bare
+  // "Bundle failed" instead.
+  test("names the packages to install when the project lacks React", async () => {
+    const bare = await mkdtemp(join(tmpdir(), "sixb-app-bare-"))
+    try {
+      await linkDependencies(bare, ["@sixb/app", "react"])
+      const app = await createCustomApp({ rootDir: bare, authEnabled: false })
+      await expect(app.build({ outdir: join(bare, "dist") })).rejects.toThrow(
+        "The app needs react-dom, react-router-dom, @tanstack/react-query in this project. " +
+          "Install them with: bun add react-dom react-router-dom @tanstack/react-query"
+      )
+    } finally {
+      await rm(bare, { recursive: true, force: true })
+    }
+  })
 
   test("project-owned agent pages override the default agent routes", async () => {
     await mkdir(join(tempRoot, "app", "agents", "new", "[draft]"), { recursive: true })
@@ -1099,7 +1131,7 @@ describe("createCustomApp.dev", () => {
       expect(manifest).toContain('"/agents/new/:draft"')
       expect(manifest).toContain('"/agents/:thread"')
       expect(manifest).toContain("createElement(Page")
-      expect(manifest).not.toContain("@sixb/app/agents")
+      expect(manifest).not.toContain("AgentsPage")
     } finally {
       await server.stop()
     }

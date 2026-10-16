@@ -56,7 +56,6 @@ import type {
 } from "@sixb/core/storage"
 import { PROJECTION_RUN_FAILURE_CODES, ProjectionRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
-import { installFreshSqliteSchema } from "./migrations"
 import {
   closeSqliteStoreConnection,
   openSqliteStoreConnection,
@@ -82,10 +81,6 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
     this.executions = options.executions
-
-    if (this.connection.installFreshSchema) {
-      installFreshSqliteSchema(this.db)
-    }
   }
 
   async queue(input: QueueProjectionRunInput): Promise<ProjectionRunRecord> {

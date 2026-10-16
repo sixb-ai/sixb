@@ -1,4 +1,3 @@
-import type { AuthSessionAudience } from "../../../auth/audience"
 import { AuthStorageError } from "../errors"
 import type {
   AuthSessionStore,
@@ -11,7 +10,6 @@ import {
   cloneDate,
   cloneOptionalRecord,
   cloneRecord,
-  compareByCreatedAt,
   createSessionRecord,
   isActiveSession,
   revokeActiveSessionsForUser,
@@ -31,22 +29,6 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
   }): Promise<SessionRecord | null> {
     const record = this.state.sessions.get(sessionKey(params.projectId, params.id)) ?? null
     return cloneOptionalRecord(record)
-  }
-
-  async getActiveByUserId(params: {
-    readonly projectId: string
-    readonly userId: string
-    readonly audience: AuthSessionAudience
-    readonly now: Date
-  }): Promise<SessionRecord | null> {
-    const sessions = [...this.state.sessions.values()]
-      .filter((session) => session.projectId === params.projectId)
-      .filter((session) => session.userId === params.userId)
-      .filter((session) => session.audience === params.audience)
-      .filter((session) => isActiveSession(session, params.now))
-      .sort((a, b) => compareByCreatedAt(a, b, "desc"))
-
-    return cloneOptionalRecord(sessions[0] ?? null)
   }
 
   async listActiveByUserId(params: {
@@ -71,7 +53,6 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
   async findValidByTokenHash(params: {
     readonly projectId: string
     readonly id: string
-    readonly audience: AuthSessionAudience
     readonly tokenHash: string
     readonly now: Date
   }): Promise<SessionRecord | null> {
@@ -79,7 +60,6 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
     if (
       !session ||
       session.bearer ||
-      session.audience !== params.audience ||
       session.tokenHash !== params.tokenHash ||
       !isActiveSession(session, params.now)
     ) {
@@ -153,7 +133,6 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
   async renewIfValid(params: {
     readonly projectId: string
     readonly id: string
-    readonly audience: AuthSessionAudience
     readonly tokenHash: string
     readonly now: Date
     readonly expiresAt: Date
@@ -163,7 +142,6 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
     if (
       !session ||
       session.bearer ||
-      session.audience !== params.audience ||
       session.tokenHash !== params.tokenHash ||
       !isActiveSession(session, params.now)
     ) {
@@ -208,15 +186,13 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
   async revokeActiveForUser(params: {
     readonly projectId: string
     readonly userId: string
-    readonly audience?: AuthSessionAudience
     readonly revokedAt: Date
   }): Promise<readonly SessionRecord[]> {
     return revokeActiveSessionsForUser(
       this.state,
       params.projectId,
       params.userId,
-      params.revokedAt,
-      params.audience
+      params.revokedAt
     ).map(cloneRecord)
   }
 

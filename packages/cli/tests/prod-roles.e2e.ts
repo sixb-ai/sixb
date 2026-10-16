@@ -17,36 +17,23 @@ const reportUiLibraries = resolve(dirname(fixtureEntry), "report-ui-libraries.ts
 const ROLE_TIMEOUT_MS = 30_000
 
 /**
- * `atlas` and `app` refuse to serve without the assets `sixb build` produces, so they
- * need a build output to point at.
+ * `app` refuses to serve without the assets `sixb build` produces, so it needs a build output to
+ * point at.
  *
  * These are stand-ins, not a real build. What these tests measure is a role's startup
- * budget — which connections it opens and which it does not — and bundling Atlas to
+ * budget — which connections it opens and which it does not — and bundling the app to
  * measure that would add tens of seconds and put Bun's bundler on the path of a test
- * that has nothing to do with bundling. Atlas only requires the directory to exist with
- * exactly one `atlas-*.js` and one `atlas-*.css`; the custom app requires its ordinary and shared
- * HTML shells.
+ * that has nothing to do with bundling. The app only requires its ordinary and shared HTML
+ * shells.
  */
 const buildOutdir = resolve(dirname(fixtureEntry), ".sixb", "dist")
-
-const PREBUILT_ATLAS = [
-  join(buildOutdir, "atlas", "atlas-e2e.js"),
-  join(buildOutdir, "atlas", "atlas-e2e.css"),
-] as const
 
 const PREBUILT_APP = [
   join(buildOutdir, "app", "index.html"),
   join(buildOutdir, "app", "shared-index.html"),
 ] as const
 
-/**
- * Each test writes only what its own role needs, and the output goes away afterwards.
- *
- * Writing both up front coupled tests that should know nothing about each other: `sixb
- * api` probes for a built custom app and serves it when one is present, so an
- * `app/index.html` left in place for the `app` test made the `api` test start demanding
- * `--app-public-origin`.
- */
+/** Each test writes only what its own role needs, and the output goes away afterwards. */
 async function writePrebuiltAssets(paths: readonly string[]): Promise<void> {
   for (const path of paths) {
     await mkdir(dirname(path), { recursive: true })
@@ -157,7 +144,7 @@ async function startRole(
 }
 
 /**
- * `atlas` and `app` serve a prebuilt bundle and never load the project: the page asks the API
+ * `app` serves a prebuilt bundle and never loads the project: the page asks the API
  * whether auth is on. Holding the project for the life of a static file server cost about 150 MB
  * per process, and reading it in a short-lived copy delayed startup by a project load. To see
  * this fail, load the project again: its providers then log `storage:close`.
@@ -219,11 +206,11 @@ describe("role startup connection budget", () => {
   test(
     "sixb api migrates storage before probing the schema, without touching lake storage",
     async () => {
-      const [atlasPort, apiPort] = await getFreePorts(2)
+      const [appPort, apiPort] = await getFreePorts(2)
       const { ready, logEntries } = await startRole([
         "api",
         "--port",
-        String(atlasPort),
+        String(appPort),
         "--host",
         "127.0.0.1",
         "--api-host",
@@ -232,8 +219,8 @@ describe("role startup connection budget", () => {
         String(apiPort),
         "--api-public-origin",
         `http://localhost:${apiPort}`,
-        "--atlas-public-origin",
-        `http://localhost:${atlasPort}`,
+        "--app-public-origin",
+        `http://localhost:${appPort}`,
       ])
 
       expect(ready).toBe(true)
@@ -263,55 +250,13 @@ describe("role startup connection budget", () => {
   )
 
   test(
-    "sixb atlas serves the built UI without touching storage or the lake",
-    async () => {
-      await writePrebuiltAssets(PREBUILT_ATLAS)
-      const [atlasPort, apiPort] = await getFreePorts(2)
-      let runtimeConfig: unknown = null
-      // No `--atlas-public-origin`: Atlas passes its own origin to nothing but the startup
-      // panel, and requiring it made the documented production command exit non-zero.
-      const { ready, logEntries } = await startRole(
-        [
-          "atlas",
-          "--port",
-          String(atlasPort),
-          "--host",
-          "127.0.0.1",
-          "--api-public-origin",
-          `http://localhost:${apiPort}`,
-        ],
-        {
-          whileReady: async () => {
-            runtimeConfig = await servedRuntimeConfig(atlasPort)
-          },
-        }
-      )
-
-      expect(ready).toBe(true)
-      // The fixture disables auth, but the shell cannot know that: `enabled: true` sends the page
-      // to the API's session route, which reports that auth is off.
-      expect(runtimeConfig).toEqual({
-        api: { baseUrl: `http://localhost:${apiPort}` },
-        auth: { audience: "atlas", enabled: true },
-      })
-      expectProjectNeverLoaded(logEntries)
-      // The counterpart of every other role's assertion, and the reason `atlas` is off the
-      // `StorageSchemaRole` union: it serves a browser bundle, it is the tier that faces the
-      // internet, and a container shipping assets has no business holding a DDL grant. Until
-      // now that exclusion rested only on a compile error.
-      expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
-      expect(logEntries.some((entry) => entry.type === "storage:status")).toBe(false)
-      expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
-    },
-    ROLE_TIMEOUT_MS
-  )
-
-  test(
-    "sixb app serves the built custom app without touching storage or the lake",
+    "sixb app serves the built app without touching storage or the lake",
     async () => {
       await writePrebuiltAssets(PREBUILT_APP)
       const [appPort, apiPort] = await getFreePorts(2)
       let runtimeConfig: unknown = null
+      // No `--app-public-origin`: the app passes its own origin to nothing but the startup
+      // panel, and requiring it made the documented production command exit non-zero.
       const { ready, logEntries } = await startRole(
         [
           "app",
@@ -330,10 +275,15 @@ describe("role startup connection budget", () => {
       )
 
       expect(ready).toBe(true)
+      // The fixture disables auth, but the shell cannot know that: `enabled: true` sends the page
+      // to the API's session route, which reports that auth is off.
       expect(runtimeConfig).toMatchObject({
         api: { baseUrl: `http://localhost:${apiPort}` },
-        auth: { audience: "app", enabled: true },
+        auth: { enabled: true },
       })
+      // The counterpart of every other role's assertion, and the reason `app` is off the
+      // `StorageSchemaRole` union: it serves a browser bundle, it is the tier that faces the
+      // internet, and a container shipping assets has no business holding a DDL grant.
       expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
       expect(logEntries.some((entry) => entry.type === "storage:status")).toBe(false)
       expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
@@ -342,90 +292,84 @@ describe("role startup connection budget", () => {
     ROLE_TIMEOUT_MS
   )
 
-  for (const role of ["atlas", "app"] as const) {
-    test(
-      `sixb ${role} serves a project that cannot load in its environment`,
-      async () => {
-        // A UI container has neither the database URL nor the secrets the project reads at
-        // load time. The role must serve its bundle anyway.
-        const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-roles-"))
-        tempDirs.push(tempDir)
-        const entry = join(tempDir, "sixb.config.ts")
-        await writeFile(entry, 'throw new Error("fixture: DATABASE_URL is not set")\n')
-        const tempOutdir = join(tempDir, ".sixb", "dist")
-        await writePrebuiltAssets(
-          (role === "atlas" ? PREBUILT_ATLAS : PREBUILT_APP).map((path) =>
-            path.replace(buildOutdir, tempOutdir)
-          )
-        )
-        const [port, apiPort] = await getFreePorts(2)
+  test(
+    "sixb app serves a project that cannot load in its environment",
+    async () => {
+      // A UI container has neither the database URL nor the secrets the project reads at
+      // load time. The role must serve its bundle anyway.
+      const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-roles-"))
+      tempDirs.push(tempDir)
+      const entry = join(tempDir, "sixb.config.ts")
+      await writeFile(entry, 'throw new Error("fixture: DATABASE_URL is not set")\n')
+      const tempOutdir = join(tempDir, ".sixb", "dist")
+      await writePrebuiltAssets(PREBUILT_APP.map((path) => path.replace(buildOutdir, tempOutdir)))
+      const [port, apiPort] = await getFreePorts(2)
 
-        const { ready } = await startRole(
-          [
-            role,
-            "--port",
-            String(port),
-            "--host",
-            "127.0.0.1",
-            "--api-public-origin",
-            `http://localhost:${apiPort}`,
-          ],
-          { entry }
-        )
+      const { ready } = await startRole(
+        [
+          "app",
+          "--port",
+          String(port),
+          "--host",
+          "127.0.0.1",
+          "--api-public-origin",
+          `http://localhost:${apiPort}`,
+        ],
+        { entry }
+      )
 
-        expect(ready).toBe(true)
-      },
-      ROLE_TIMEOUT_MS
-    )
+      expect(ready).toBe(true)
+    },
+    ROLE_TIMEOUT_MS
+  )
 
-    test(
-      `sixb ${role} serves outside a terminal without loading React or Ink`,
-      async () => {
-        await writePrebuiltAssets(role === "atlas" ? PREBUILT_ATLAS : PREBUILT_APP)
-        const [port, apiPort] = await getFreePorts(2)
-        // Ink's layout engine alone keeps about 45 MB resident. To see this fail, render the
-        // startup panel with Ink outside a terminal, or put JSX back in the CLI entrypoint.
-        const { ready, logEntries } = await startRole(
-          [
-            role,
-            "--port",
-            String(port),
-            "--host",
-            "127.0.0.1",
-            "--api-public-origin",
-            `http://localhost:${apiPort}`,
-          ],
-          { preload: reportUiLibraries }
-        )
+  test(
+    "sixb app serves outside a terminal without loading React or Ink",
+    async () => {
+      await writePrebuiltAssets(PREBUILT_APP)
+      const [port, apiPort] = await getFreePorts(2)
+      // Ink's layout engine alone keeps about 45 MB resident. To see this fail, render the
+      // startup panel with Ink outside a terminal, or put JSX back in the CLI entrypoint.
+      const { ready, logEntries } = await startRole(
+        [
+          "app",
+          "--port",
+          String(port),
+          "--host",
+          "127.0.0.1",
+          "--api-public-origin",
+          `http://localhost:${apiPort}`,
+        ],
+        { preload: reportUiLibraries }
+      )
 
-        expect(ready).toBe(true)
-        expect(logEntries).toContainEqual({ type: "ui:libraries", loaded: [] })
-      },
-      ROLE_TIMEOUT_MS
-    )
+      expect(ready).toBe(true)
+      expect(logEntries).toContainEqual({ type: "ui:libraries", loaded: [] })
+    },
+    ROLE_TIMEOUT_MS
+  )
 
-    test(
-      `sixb ${role} logs why it could not start when its output is not a terminal`,
-      async () => {
-        await writePrebuiltAssets(role === "atlas" ? PREBUILT_ATLAS : PREBUILT_APP)
-        const [port] = await getFreePorts(1)
-        // Outside a terminal the role prints the failure as plain lines. To see this fail, render
-        // it with Ink there: the panel can come out empty and the role exits 1 with no reason.
-        const result = await runCliToCompletion({
-          cmd: ["bun", cliEntry, role, "--entry", fixtureEntry, "--port", String(port)],
-          cwd: repoRoot,
-          env: { SIXB_API_PUBLIC_ORIGIN: undefined },
-          timeoutMs: ROLE_TIMEOUT_MS,
-        })
+  test(
+    "sixb app logs why it could not start when its output is not a terminal",
+    async () => {
+      await writePrebuiltAssets(PREBUILT_APP)
+      const [port] = await getFreePorts(1)
+      // Outside a terminal the role prints the failure as plain lines. To see this fail, render
+      // it with Ink there: the panel can come out empty and the role exits 1 with no reason.
+      const result = await runCliToCompletion({
+        cmd: ["bun", cliEntry, "app", "--entry", fixtureEntry, "--port", String(port)],
+        cwd: repoRoot,
+        env: { SIXB_API_PUBLIC_ORIGIN: undefined },
+        timeoutMs: ROLE_TIMEOUT_MS,
+      })
 
-        expect(result.exitCode).toBe(1)
-        expect(result.stdout + result.stderr).toContain(
-          "Production serving requires SIXB_API_PUBLIC_ORIGIN or --api-public-origin."
-        )
-      },
-      ROLE_TIMEOUT_MS
-    )
-  }
+      expect(result.exitCode).toBe(1)
+      expect(result.stdout + result.stderr).toContain(
+        "Production serving requires SIXB_API_PUBLIC_ORIGIN or --api-public-origin."
+      )
+    },
+    ROLE_TIMEOUT_MS
+  )
 
   test(
     "sixb rules --no-migrate starts without migrating storage",

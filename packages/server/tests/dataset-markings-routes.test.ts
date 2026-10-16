@@ -78,12 +78,11 @@ async function seedSession(storage: InMemoryStorage, userId: string, groupIds: r
     projectId,
     userId,
     strategyId: "test",
-    audience: "atlas",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-10-09T10:00:00.000Z"),
     expiresAt: new Date("2099-10-09T10:00:00.000Z"),
   })
-  return { cookie: `sixb_session=${credential.cookieValue}` }
+  return { cookie: `sixb_session_app=${credential.cookieValue}` }
 }
 
 describe("dataset routes with markings", () => {

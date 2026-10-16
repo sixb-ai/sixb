@@ -272,6 +272,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("058-file-download-grants", fileDownloadGrantsSql),
     sqliteSql("059-drained-source-versions", drainedSourceVersionsSql),
     sqliteSql("060-terminal-action-runs", terminalActionRunsSql),
+    sqliteSql("061-drop-auth-audience", dropAuthAudienceSql),
   ],
 })
 
@@ -295,6 +296,26 @@ export function sqliteStep(
   options: MigrationStepOptions = {}
 ): MigrationStep<Database> {
   return step<Database>(id, up, options)
+}
+
+// Replaying every migration costs a few hundred milliseconds, and in-memory databases are made
+// often (each test's storage, for one). The schema is built once per process and each new database
+// starts as a copy of it.
+let freshSchema: Uint8Array | undefined
+
+/** A new in-memory database holding the current schema, as replaying every migration leaves it. */
+export function freshSqliteDatabase(): Database {
+  if (!freshSchema) {
+    const template = new Database(":memory:")
+    try {
+      template.run("PRAGMA foreign_keys = ON")
+      installFreshSqliteSchema(template)
+      freshSchema = template.serialize()
+    } finally {
+      template.close()
+    }
+  }
+  return Database.deserialize(freshSchema)
 }
 
 export function installFreshSqliteSchema(db: Database): void {
@@ -599,3 +620,4 @@ import drainedSourceVersionsSql from "./migrations/059-drained-source-versions.s
   type: "text",
 }
 import terminalActionRunsSql from "./migrations/060-terminal-action-runs.sql" with { type: "text" }
+import dropAuthAudienceSql from "./migrations/061-drop-auth-audience.sql" with { type: "text" }

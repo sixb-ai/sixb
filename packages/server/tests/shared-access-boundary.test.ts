@@ -188,13 +188,13 @@ describe("shared-access request boundary", () => {
       new Request("http://api.localhost/api/objects/shared-report/report-1", {
         headers: {
           cookie: fixture.ambient.cookie,
-          origin: "http://atlas.localhost",
+          origin: "http://app.localhost",
           [SHARED_ACCESS_GRANT_HEADER_NAME]: invitation.grant.id,
         },
       })
     )
     expect(noSharedCookie.status).toBe(401)
-    expect(noSharedCookie.headers.get("access-control-allow-origin")).toBe("http://atlas.localhost")
+    expect(noSharedCookie.headers.get("access-control-allow-origin")).toBe("http://app.localhost")
     expect(await noSharedCookie.json()).toEqual({ error: "Shared access session is invalid" })
 
     const emptySelector = await fixture.app.fetch(
@@ -395,7 +395,7 @@ describe("shared-access request boundary", () => {
     const otherBody = await sharedSessionBody(await exchange(fixture, otherInvitation))
     expect(otherBody.csrfToken).not.toBe(body.csrfToken)
     const sharedCookies = requestCookieHeader(getSetCookies(exchanged))
-    const cookies = `${sharedCookies}; ${fixture.ambient.cookie}; sixb_csrf=normal-csrf`
+    const cookies = `${sharedCookies}; ${fixture.ambient.cookie}; sixb_csrf_app=normal-csrf`
     const queryBody = JSON.stringify({
       query: { kind: "start", objectTypeId: Report.id },
     })
@@ -621,12 +621,11 @@ async function seedAmbientSession(storage: InMemoryStorage) {
     projectId: "shared-boundary-tests",
     userId: "usr_ambient_reader",
     strategyId: "test",
-    audience: "atlas",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-08-01T00:00:00.000Z"),
     expiresAt: new Date("2099-01-01T00:00:00.000Z"),
   })
-  return { cookie: `sixb_session=${credential.cookieValue}` }
+  return { cookie: `sixb_session_app=${credential.cookieValue}` }
 }
 
 interface SharedAccessFixtureSlice {

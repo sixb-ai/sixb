@@ -21,11 +21,11 @@ export const financeTeam = defineGroup("finance-team", {
 
 ## Define a role
 
-A role grants access to one or more groups. This role lets the finance team open the custom app, read invoices, and run the project's `markPaid` action.
+A role grants access to one or more groups. This role lets the finance team read invoices and run the project's `markPaid` action.
 
 ```ts
 // security/roles/finance-access.ts
-import { applications, can, defineRole } from "@sixb/core"
+import { can, defineRole } from "@sixb/core"
 import { markPaid } from "../../actions/mark-paid"
 import { Invoice } from "../../ontology/invoice"
 import { financeTeam } from "../groups/finance-team"
@@ -33,7 +33,6 @@ import { financeTeam } from "../groups/finance-team"
 export const financeAccess = defineRole("finance-access", {
   grantedTo: [financeTeam],
   grants: [
-    can.access(applications.app),
     can.view(Invoice),
     can.apply(markPaid),
   ],
@@ -48,7 +47,6 @@ Pass a definition, an array of definitions, or a selector such as `every.object(
 
 | Builder | Allows |
 | --- | --- |
-| `can.access(applications.app)` | Open the custom app. Use `applications.atlas` for Atlas. |
 | `can.view(Invoice)` | Read objects, their telemetry, and related events. Also accepts dataset definitions. |
 | `can.edit(Invoice)` | Create, update, delete, and restore objects, and change their relationships. |
 | `can.append(Sensor)` | Append telemetry without granting read access. |
@@ -58,7 +56,7 @@ Pass a definition, an array of definitions, or a selector such as `every.object(
 | `can.observe("logs")` | Read captured logs. `can.observe(agent.usage)` reads AI usage. |
 | `can.share(invoiceShare)` | Issue and revoke links from a [Share definition](shared-access.md). |
 
-`applications`, `agent`, `can`, and `every` are exported from `@sixb/core`.
+`agent`, `can`, and `every` are exported from `@sixb/core`.
 
 Use explicit definitions for focused roles. Selectors are useful for administrators who should also receive access to future definitions:
 
@@ -77,32 +75,12 @@ Use `.except([Definition])` to exclude definitions from a selector. A query is d
 
 Object writes require both `can.view(Type)` and `can.edit(Type)`. Relationship writes need edit access to the source and view access to the target. `can.view(Type)` includes its subtypes; edit and telemetry-append grants cover only the types explicitly selected.
 
-## Control application access
+## Choose who sees the app's sections
 
-To restrict Atlas to administrators, grant it to the administrator group defined during [authentication setup](authentication.md#set-up-the-first-administrator):
-
-```ts
-// security/roles/finance-admin-access.ts
-import { applications, can, defineRole } from "@sixb/core"
-import { Invoice } from "../../ontology/invoice"
-import { financeAdmins } from "../groups/finance-admins"
-
-export const financeAdminAccess = defineRole("finance-admin-access", {
-  grantedTo: [financeAdmins],
-  grants: [
-    can.access(applications.atlas),
-    can.view(Invoice),
-    can.edit(Invoice),
-    can.observe("logs"),
-  ],
-})
-```
-
-**Application access is unrestricted for signed-in users until a role grants that application.** Once a role grants Atlas or the custom app, only groups with that application's grant may open it. This does not grant access to its data; resource permissions still apply.
-
-The custom app's Data, Observability, Ontology and Settings pages follow the app's grant, not Atlas's. To show them only to some groups, set the app's [`visibility`](../apps/overview.md#choose-who-sees-a-section).
-
-Application access applies to web apps in the browser. The CLI, other tools signed in outside the browser, and access tokens belong to no web app, so resource permissions alone decide what they can do. Signing in and approving a CLI login work for every user, whichever web apps they may open.
+Every signed-in member opens the project's app. Roles decide what each member can read and do in
+it. To show the app's Data, Observability, Ontology and Settings pages only to some groups, set the
+app's [`visibility`](../apps/overview.md#choose-who-sees-a-section). Visibility only hides screens:
+the API still checks each request against the caller's grants.
 
 ## Permissions during execution
 

@@ -40,9 +40,7 @@ export const auth = magicLink({
 Delivery is yours: the strategy renders the message and expects you to send it. Failures surface as
 `MagicLinkError`.
 
-## Rate limiting is per email, not per audience
+## Rate limiting is per email
 
-The limiter is keyed by email address and shared across every audience served by one API process. A
-user who signs into Atlas and then a custom app draws from the same bucket, so set `perMinute` to at
-least the number of browser surfaces a person signs into — otherwise a normal second sign-in looks
-like abuse.
+The limiter is keyed by email address and shared by one API process. Requests past `perMinute` or
+`perHour` for one address get no link until the window passes.

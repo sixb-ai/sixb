@@ -44,7 +44,6 @@ import {
   WorkflowRunError,
 } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
-import { installFreshSqliteSchema } from "./migrations"
 import {
   appendRunListFilters,
   hasEmptyStatuses,
@@ -79,10 +78,6 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
     this.executions = options.executions
-
-    if (this.connection.installFreshSchema) {
-      installFreshSqliteSchema(this.db)
-    }
 
     this.nodes = new SqliteWorkflowNodeRunStorage(this.db)
     this.agentNodes = new SqliteWorkflowAgentNodeRunStorage(this.db, this.executions)

@@ -38,9 +38,6 @@ export const en = {
     toggle: "Toggle Sidebar",
     expand: "Expand sidebar",
     collapse: "Collapse sidebar",
-    preferences: "Preferences",
-    apiReference: "API reference",
-    logOut: "Log out",
   },
   theme: {
     label: "Theme",

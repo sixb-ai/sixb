@@ -1,10 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
-import {
-  type AuthSessionAudience,
-  DEFAULT_AUTH_SESSION_AUDIENCE,
-  type GroupDefinition,
-  type SixbHostView,
-} from "@sixb/core"
+import type { GroupDefinition, SixbHostView } from "@sixb/core"
 import {
   type AuthenticatedAuthSession,
   type AuthenticatedUserRequestSession,
@@ -38,15 +33,12 @@ import {
 } from "@sixb/core/storage"
 import { type Elysia, t } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
-import { sessionCanAccessApplication } from "../auth/application-access"
 import {
-  type AuthInvitationDestinationOptions,
   type AuthInvitationRedirectContext,
   type AuthInvitationRedirectInput,
   type AuthRedirectContext,
   BrowserOriginError,
   type ResolveAuthRedirectContext,
-  type ResolveRequestAuthContext,
 } from "../auth/browser-origin"
 import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../auth/csrf"
 import {
@@ -117,10 +109,6 @@ type ResolvedCookieOptions = Parameters<typeof createCsrfCookieHeader>[0]["optio
 type AuthenticatedAuthSessionResponse = {
   readonly authenticated: true
   readonly csrfToken: string
-  readonly applicationAccess: {
-    readonly allowed: boolean
-    readonly audience: AuthSessionAudience
-  }
   readonly user: {
     readonly id: string
     readonly email: string
@@ -135,9 +123,7 @@ type AuthenticatedAuthSessionResponse = {
 }
 
 export interface AuthRoutesOptions {
-  readonly resolveAuthContext: ResolveRequestAuthContext
   readonly resolveAuthRedirectContext: ResolveAuthRedirectContext
-  readonly getInvitationDestinationOptions: (request: Request) => AuthInvitationDestinationOptions
   readonly resolveAuthRequestOrigin: (request: Request) => string
   readonly resolveInvitationRedirectContext: (
     request: Request,
@@ -341,10 +327,9 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         ) {
           return authPageResponse("<h1>This authorization has expired</h1>", 400)
         }
-        const authOptions = resolveAuthOptions(options, request)
-        const session = await host.auth.getSession(request, authOptions)
+        const session = await host.auth.getSession(request)
         if (!session.authenticated) return authPageResponse("<h1>Authentication required</h1>", 401)
-        const cookieOptions = host.auth.getCookieOptions(authOptions)
+        const cookieOptions = host.auth.getCookieOptions()
         const csrf = resolveSessionCsrfToken({
           request,
           cookieOptions,
@@ -377,11 +362,10 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
       "/auth/device",
       async ({ body, request }) => {
         const parsed = DeviceAuthorizationDecisionBodySchema.parse(body)
-        const authOptions = resolveAuthOptions(options, request)
-        const session = await host.auth.getSession(request, authOptions)
-        // Every signed-in user may approve their own CLI login, whichever web app they may open.
+        const session = await host.auth.getSession(request)
+        // Every signed-in user may approve their own CLI login.
         if (!session.authenticated) return authPageResponse("<h1>Authentication required</h1>", 401)
-        const csrfCookieName = host.auth.getCookieOptions(authOptions).csrfCookieName
+        const csrfCookieName = host.auth.getCookieOptions().csrfCookieName
         if (!verifyCsrfToken(request, { cookieName: csrfCookieName, token: parsed.csrfToken })) {
           return authPageResponse("<h1>Invalid authorization request</h1>", 403)
         }
@@ -434,30 +418,23 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     .get(
       "/api/auth/session",
       async ({ request }) => {
-        const authOptions = resolveAuthOptions(options, request)
-        const caller = await host.auth.getSession(request, {
-          ...authOptions,
-          credentialSource: "any",
-        })
+        const caller = await host.auth.getSession(request, { credentialSource: "any" })
         // Access tokens are not sessions; a native client's session has no cookies to renew.
         if (!caller.authenticated || caller.credentialSource !== "session") {
           return signedOutSessionResponse(host)
         }
-        // A native client belongs to no web app; tell it whether its user may open Atlas.
         if (caller.session.bearer) {
-          return jsonResponse(authSessionBody(host, caller, DEFAULT_AUTH_SESSION_AUDIENCE), 200)
+          return jsonResponse(authSessionBody(caller), 200)
         }
 
-        const session =
-          hasForegroundSessionActivity(request) &&
-          sessionCanAccessApplication(host, caller, authOptions.audience)
-            ? await host.auth.getSession(request, { ...authOptions, sessionActivity: "foreground" })
-            : caller
+        const session = hasForegroundSessionActivity(request)
+          ? await host.auth.getSession(request, { sessionActivity: "foreground" })
+          : caller
         if (!session.authenticated) {
           return signedOutSessionResponse(host)
         }
 
-        const cookieOptions = host.auth.getCookieOptions(authOptions)
+        const cookieOptions = host.auth.getCookieOptions()
         const csrf = resolveSessionCsrfToken({
           request,
           cookieOptions,
@@ -473,7 +450,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
               })
             : null
         return authSessionJsonResponse(
-          { ...authSessionBody(host, session, authOptions.audience), csrfToken: csrf.token },
+          { ...authSessionBody(session), csrfToken: csrf.token },
           renewal?.headers ?? (csrf.setCookie ? [csrf.setCookie] : [])
         )
       },
@@ -490,15 +467,11 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     .post(
       "/api/auth/sign-out",
       async ({ request }) => {
-        const authOptions = resolveAuthOptions(options, request)
-        const result = await host.auth.getSession(request, {
-          ...authOptions,
-          credentialSource: "any",
-        })
+        const result = await host.auth.getSession(request, { credentialSource: "any" })
         // Access tokens are not sessions; revoke those through their own route.
         const session =
           result.authenticated && result.credentialSource === "session" ? result : null
-        const cookieOptions = host.auth.getCookieOptions(authOptions)
+        const cookieOptions = host.auth.getCookieOptions()
         if (
           session &&
           !session.session.bearer &&
@@ -541,7 +514,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           {
             sessions: sessions.map((entry) => ({
               id: entry.id,
-              audience: entry.bearer ? undefined : entry.audience,
               current: entry.id === session.session.id,
               createdAt: toIsoString(entry.createdAt),
               expiresAt: toIsoString(entry.expiresAt),
@@ -582,7 +554,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         if (sessionId !== session.session.id) {
           return jsonResponse({ success: true }, 200)
         }
-        const cookieOptions = host.auth.getCookieOptions(resolveAuthOptions(options, request))
+        const cookieOptions = host.auth.getCookieOptions()
         return signedOutResponse(request, cookieOptions, { success: true })
       },
       {
@@ -609,10 +581,10 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           return session
         }
 
-        // Other audiences' cookies stay in their browsers, but their sessions are revoked, so the
-        // next request there re-authenticates.
+        // Other browsers keep their cookies, but their sessions are revoked, so the next request
+        // there re-authenticates.
         const revokedCount = await host.auth.revokeAllSessions(session)
-        const cookieOptions = host.auth.getCookieOptions(resolveAuthOptions(options, request))
+        const cookieOptions = host.auth.getCookieOptions()
         return signedOutResponse(request, cookieOptions, { success: true, revokedCount })
       },
       {
@@ -716,7 +688,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           })
 
           // The raw token is only returned on creation. Storage keeps a hash, so
-          // Atlas can never reveal it again after this response leaves the page.
+          // nothing can reveal it again after this response leaves the page.
           return jsonResponse(
             {
               accessToken: serializeAccessToken(result.accessToken, {
@@ -1030,7 +1002,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           const caller = requireUserCaller(context)
           const parsed = CreateAuthInvitationBodySchema.parse(body)
           const deliveryContext = resolveInvitationDeliveryContext(options, request, {
-            destinationId: parsed.destinationId,
             returnTo: parsed.returnTo,
           })
           if (deliveryContext instanceof Response) {
@@ -1083,13 +1054,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
       async ({ request, ...context }) => {
         try {
           const caller = requireUserCaller(context)
-          return jsonResponse(
-            {
-              ...(await host.auth.getInvitationOptions(caller)),
-              ...options.getInvitationDestinationOptions(request),
-            },
-            200
-          )
+          return jsonResponse(await host.auth.getInvitationOptions(caller), 200)
         } catch (error) {
           return authRouteErrorResponse(error)
         }
@@ -1351,7 +1316,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
       async ({ body, request }) => {
         const strategy = host.auth.getStrategy()
         const authRedirect = resolveAuthRedirectContext(options, request, {
-          audience: body.audience,
           returnTo: body.returnTo,
         })
         if (authRedirect instanceof Response) {
@@ -1366,7 +1330,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
             projectId: host.id,
             authStorage,
             email: body.email ?? "",
-            audience: authRedirect.audience,
             returnTo: authRedirect.returnTo,
             requestOrigin: authRedirect.requestOrigin,
             requesterHash: pending.hash,
@@ -1399,7 +1362,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           const result = await strategy.startOidcSignIn({
             projectId: host.id,
             authStorage,
-            audience: authRedirect.audience,
             returnTo: authRedirect.returnTo,
             requestOrigin: authRedirect.requestOrigin,
           })
@@ -1410,7 +1372,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
       },
       {
         body: t.Object({
-          audience: t.Optional(t.String()),
           email: t.Optional(t.String()),
           returnTo: t.Optional(t.String()),
         }),
@@ -1424,7 +1385,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         const strategy = host.auth.getStrategy()
         const url = new URL(request.url)
         const authRedirect = resolveAuthRedirectContext(options, request, {
-          audience: url.searchParams.get("audience"),
           returnTo: url.searchParams.get("returnTo"),
         })
         if (authRedirect instanceof Response) {
@@ -1439,7 +1399,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           const result = await strategy.startOidcSignIn({
             projectId: host.id,
             authStorage: requireAuthStorage(host),
-            audience: authRedirect.audience,
             returnTo: authRedirect.returnTo,
             requestOrigin: authRedirect.requestOrigin,
           })
@@ -1459,11 +1418,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           const url = new URL(request.url)
           const magicLinkId = url.searchParams.get("magicLinkId")?.trim()
           const token = url.searchParams.get("token")?.trim()
-          const authRedirectHint = resolveAuthExperienceRedirectHint(
-            options,
-            request,
-            url.searchParams.get("audience")
-          )
+          const authRedirectHint = resolveAuthExperienceRedirectHint(options, request)
 
           if (!magicLinkId || !token) {
             return await invalidMagicLinkResponse(options, authRedirectHint)
@@ -1539,7 +1494,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
                 "[SixbServer] OIDC callback reached a browser that did not start this sign-in."
               )
             }
-            const authOptions = resolveAuthOptions(options, request)
             const result = await strategy.completeOidcSignIn({
               projectId: host.id,
               authStorage: requireAuthStorage(host),
@@ -1547,7 +1501,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
               requestOrigin: options.resolveAuthRequestOrigin(request),
               session: {
                 id: sessionCredential.sessionId,
-                audience: authOptions.audience,
                 tokenHash: sessionCredential.tokenHash,
                 createdAt: now,
                 ...host.auth.createSessionDeadlines(now),
@@ -1560,7 +1513,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
               request,
               apiOrigin: options.resolveAuthRequestOrigin(request),
               sessionCredential,
-              audience: result.session.audience,
               expiresAt: result.session.expiresAt,
               returnTo: result.returnTo,
             })
@@ -1602,7 +1554,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
 
         const magicLinkId = body.magicLinkId?.trim()
         const token = body.token?.trim()
-        const authRedirectHint = resolveAuthExperienceRedirectHint(options, request, body.audience)
+        const authRedirectHint = resolveAuthExperienceRedirectHint(options, request)
         if (!magicLinkId || !token) {
           return await invalidMagicLinkResponse(options, authRedirectHint)
         }
@@ -1621,7 +1573,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         body: t.Object({
           magicLinkId: t.Optional(t.String()),
           token: t.Optional(t.String()),
-          audience: t.Optional(t.String()),
         }),
         parse: "urlencoded",
         detail: { hide: true },
@@ -1727,7 +1678,6 @@ async function completeMagicLinkCallback(input: {
   readonly clearPendingCookie?: boolean
   readonly authRedirectHint?: AuthRedirectContext
 }): Promise<Response> {
-  const authOptions = resolveAuthOptions(input.options, input.request)
   const now = new Date()
   const sessionCredential = createSessionCredential()
   const device = resolveSessionDevice(input.request)
@@ -1740,7 +1690,6 @@ async function completeMagicLinkCallback(input: {
       token: input.token,
       session: {
         id: sessionCredential.sessionId,
-        audience: authOptions.audience,
         tokenHash: sessionCredential.tokenHash,
         createdAt: now,
         ...input.host.auth.createSessionDeadlines(now),
@@ -1753,7 +1702,6 @@ async function completeMagicLinkCallback(input: {
       request: input.request,
       apiOrigin: input.options.resolveAuthRequestOrigin(input.request),
       sessionCredential,
-      audience: result.session.audience,
       expiresAt: result.session.expiresAt,
       returnTo: result.returnTo,
     })
@@ -1838,11 +1786,10 @@ function sessionCallbackCompletionResponse(input: {
   readonly request: Request
   readonly apiOrigin: string
   readonly sessionCredential: ReturnType<typeof createSessionCredential>
-  readonly audience: AuthSessionAudience
   readonly expiresAt: Date
   readonly returnTo: string
 }): Response {
-  const cookieOptions = input.host.auth.getCookieOptions({ audience: input.audience })
+  const cookieOptions = input.host.auth.getCookieOptions()
   const headers = new Headers({
     "cache-control": "no-store",
   })
@@ -1928,13 +1875,6 @@ function authCallbackCompletionDocumentResponse(returnTo: string, headers: Heade
   )
 }
 
-function resolveAuthOptions(
-  options: AuthRoutesOptions,
-  request: Request
-): ReturnType<ResolveRequestAuthContext> {
-  return options.resolveAuthContext(request)
-}
-
 function resolveAuthRedirectContext(
   options: AuthRoutesOptions,
   request: Request,
@@ -1960,7 +1900,7 @@ function resolveInvitationDeliveryContext(
     return options.resolveInvitationRedirectContext(request, input)
   } catch (error) {
     if (error instanceof BrowserOriginError) {
-      return jsonResponse({ error: "Invitation destination is not allowed" }, 400)
+      return jsonResponse({ error: "Invitation return target is not allowed" }, 400)
     }
 
     throw error
@@ -1990,13 +1930,10 @@ function resolveSessionCsrfToken(input: {
 }
 
 function authSessionBody(
-  host: SixbHostView,
-  session: AuthenticatedAuthSession,
-  audience: AuthSessionAudience
+  session: AuthenticatedAuthSession
 ): Omit<AuthenticatedAuthSessionResponse, "csrfToken"> {
   return {
     authenticated: true,
-    applicationAccess: { allowed: sessionCanAccessApplication(host, session, audience), audience },
     user: {
       id: session.user.id,
       email: session.user.email,
@@ -2045,7 +1982,7 @@ function strategyNotImplementedResponse(message: string): Response {
   })
 }
 
-// Mirrors the Atlas design tokens (packages/ui/src/styles/globals.css) so the
+// Mirrors the app's design tokens (packages/ui/src/styles/globals.css) so the
 // server-rendered auth pages feel familiar. Self-contained: no external CSS, and dark mode
 // follows the system preference since these standalone pages have no client theme runtime.
 const AUTH_PAGE_STYLE = `<style>
@@ -2204,13 +2141,12 @@ async function signInFormResponse(
 ): Promise<Response> {
   return (
     (await customAuthExperienceResponse(options.authExperience, {
-      audience: context.audience,
       state: { kind: "signIn" },
       signInUrl: authExperienceSignInUrl(context),
       submission: {
         kind: "requestMagicLink",
         action: "/auth/sign-in",
-        fields: { audience: context.audience, returnTo: context.returnTo },
+        fields: { returnTo: context.returnTo },
       },
       // Native POST forms inherit the document's referrer policy when
       // constructing their Origin header. `no-referrer` produces
@@ -2222,7 +2158,6 @@ async function signInFormResponse(
         "<h1>Sign in</h1>",
         "<p>We'll email you a sign-in link.</p>",
         '<form method="post" action="/auth/sign-in">',
-        `<input type="hidden" name="audience" value="${escapeHtml(context.audience)}">`,
         `<input type="hidden" name="returnTo" value="${escapeHtml(context.returnTo)}">`,
         '<input name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-label="Email address" required autofocus>',
         '<button type="submit">Send sign-in link</button>',
@@ -2238,7 +2173,6 @@ async function magicLinkRequestedResponse(
 ): Promise<Response> {
   return (
     (await customAuthExperienceResponse(options.authExperience, {
-      audience: context.audience,
       state: { kind: "checkEmail" },
       signInUrl: authExperienceSignInUrl(context),
     })) ??
@@ -2256,7 +2190,6 @@ async function invalidMagicLinkResponse(
 ): Promise<Response> {
   if (context) {
     const custom = await customAuthExperienceResponse(options.authExperience, {
-      audience: context.audience,
       state: { kind: "invalidLink" },
       signInUrl: authExperienceSignInUrl(context),
       status: 400,
@@ -2273,7 +2206,6 @@ async function authExperienceErrorResponse(
 ): Promise<Response> {
   if (context) {
     const custom = await customAuthExperienceResponse(options.authExperience, {
-      audience: context.audience,
       state: { kind: "error" },
       signInUrl: authExperienceSignInUrl(context),
       status: 500,
@@ -2285,20 +2217,16 @@ async function authExperienceErrorResponse(
 }
 
 function authExperienceSignInUrl(context: AuthRedirectContext): string {
-  const params = new URLSearchParams({ audience: context.audience, returnTo: context.returnTo })
+  const params = new URLSearchParams({ returnTo: context.returnTo })
   return `/auth/sign-in?${params.toString()}`
 }
 
+// A magic link's own page carries no return target, so the app's custom pages get the app's home.
 function resolveAuthExperienceRedirectHint(
   options: AuthRoutesOptions,
-  request: Request,
-  audience: string | null | undefined
+  request: Request
 ): AuthRedirectContext | undefined {
-  if (audience !== "app" && audience !== "atlas") {
-    return undefined
-  }
-
-  const context = resolveInvitationDeliveryContext(options, request, { destinationId: audience })
+  const context = resolveInvitationDeliveryContext(options, request, {})
   return context instanceof Response ? undefined : context
 }
 
@@ -2322,7 +2250,6 @@ async function magicLinkConfirmResponse(
 ): Promise<Response> {
   if (input.authRedirect) {
     const custom = await customAuthExperienceResponse(options.authExperience, {
-      audience: input.authRedirect.audience,
       state: { kind: "confirm", ...(input.email ? { email: input.email } : {}) },
       signInUrl: authExperienceSignInUrl(input.authRedirect),
       submission: {
@@ -2331,7 +2258,6 @@ async function magicLinkConfirmResponse(
         fields: {
           magicLinkId: input.magicLinkId,
           token: input.token,
-          audience: input.authRedirect.audience,
         },
       },
       referrerPolicy: "same-origin",
@@ -2352,11 +2278,6 @@ async function magicLinkConfirmResponse(
       '<form method="post" action="/auth/callback" id="confirm">',
       `<input type="hidden" name="magicLinkId" value="${escapeHtml(input.magicLinkId)}">`,
       `<input type="hidden" name="token" value="${escapeHtml(input.token)}">`,
-      ...(input.authRedirect
-        ? [
-            `<input type="hidden" name="audience" value="${escapeHtml(input.authRedirect.audience)}">`,
-          ]
-        : []),
       '<button type="submit" id="confirm-button">Continue</button>',
       "</form>",
       "<script>",

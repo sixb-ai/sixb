@@ -114,7 +114,6 @@ export function HomeWalkthrough() {
               <nav aria-label="Live Northline example">
                 {[
                   ["Northline", "https://northline.sixb.ai/"],
-                  ["Atlas", "https://atlas.northline.sixb.ai/"],
                   ["API docs", "https://northline.sixb.ai/docs"],
                 ].map(([label, href]) => (
                   <a key={href} href={href} target="_blank" rel="noopener noreferrer">

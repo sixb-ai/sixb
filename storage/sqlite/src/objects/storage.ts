@@ -22,7 +22,6 @@ import type {
   QueryObjectsInput,
   QueryObjectsResult,
 } from "@sixb/core/storage"
-import { installFreshSqliteSchema } from "../migrations"
 import {
   closeSqliteStoreConnection,
   openSqliteStoreConnection,
@@ -124,10 +123,6 @@ export class SqliteObjectStorage implements ObjectStorage {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
     this.reader = new SqliteObjectReader(this.db, DEFAULT_OBJECT_QUERY_SOURCE)
-
-    if (this.connection.installFreshSchema) {
-      installFreshSqliteSchema(this.db)
-    }
   }
 
   queryCapabilities(): ObjectQueryCapabilities {

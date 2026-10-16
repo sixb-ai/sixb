@@ -1,12 +1,9 @@
-import type { AuthSessionAudience } from "@sixb/core"
-
 export interface CustomAppRuntimeConfig {
   readonly publicEnv?: Readonly<Record<string, string | undefined>>
   readonly api?: {
     readonly baseUrl: string
   }
   readonly auth: {
-    readonly audience: AuthSessionAudience
     readonly enabled: boolean
   }
 }

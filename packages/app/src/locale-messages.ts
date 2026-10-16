@@ -9,12 +9,6 @@ export const en = {
     title: "Not found",
     detail: "The page or resource you requested does not exist.",
   },
-  accessDenied: {
-    title: "Access required",
-    detail: "Your account is signed in, but it does not have permission to access this app.",
-    signOut: "Sign out",
-    signingOut: "Signing out…",
-  },
   error: {
     title: "Something went wrong",
     sharedDetail: "This shared page could not be displayed.",
@@ -31,8 +25,12 @@ export const en = {
       "The agent reads your project's objects and everything behind them: their sources, syncs and runs.",
     empty: "There's nothing here yet.",
   },
-  // Names the user menu's button when sign-in is off and nobody is signed in.
-  signInOff: "Sign-in off",
+  userMenu: {
+    // Names the menu's button when sign-in is off and nobody is signed in.
+    signInOff: "Sign-in off",
+    theme: "Theme",
+    signOut: "Sign out",
+  },
   search: {
     label: "Search",
     placeholder: "Search pages and objects…",
@@ -102,12 +100,6 @@ export const fr: Translation<AppMessages> = {
     title: "Page introuvable",
     detail: "La page ou la ressource demandée n’existe pas.",
   },
-  accessDenied: {
-    title: "Accès requis",
-    detail: "Ce compte est connecté, mais n’a pas l’autorisation d’accéder à cette application.",
-    signOut: "Se déconnecter",
-    signingOut: "Déconnexion…",
-  },
   error: {
     title: "Une erreur est survenue",
     sharedDetail: "Cette page partagée n’a pas pu être affichée.",
@@ -124,7 +116,11 @@ export const fr: Translation<AppMessages> = {
       "L’agent lit les objets de votre projet et tout ce qui les alimente : leurs sources, leurs synchronisations et leurs exécutions.",
     empty: "Il n’y a rien ici pour l’instant.",
   },
-  signInOff: "Connexion désactivée",
+  userMenu: {
+    signInOff: "Connexion désactivée",
+    theme: "Thème",
+    signOut: "Se déconnecter",
+  },
   search: {
     label: "Rechercher",
     placeholder: "Rechercher des pages et des objets…",

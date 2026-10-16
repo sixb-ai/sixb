@@ -29,7 +29,7 @@ export interface DeployConfig {
 export type DeployEnv = Readonly<Record<string, string>>
 
 /** The services a browser or client reaches through a public domain. */
-export type DeployHttpServiceName = "api" | "atlas" | "app"
+export type DeployHttpServiceName = "api" | "app"
 
 /** The services that must run as exactly one process: a second would duplicate their work. */
 export type DeploySingletonServiceName = "orchestrator" | "scheduler" | "rules"
@@ -40,7 +40,6 @@ export type DeployWorkerType = "sync" | "agent" | "pipeline" | "projection" | "w
 
 export interface DeployServicesConfig {
   readonly api?: boolean | DeployHttpServiceConfig
-  readonly atlas?: boolean | DeployHttpServiceConfig
   readonly app?: boolean | DeployHttpServiceConfig
   readonly orchestrator?: boolean | DeploySingletonServiceConfig
   readonly scheduler?: boolean | DeploySingletonServiceConfig

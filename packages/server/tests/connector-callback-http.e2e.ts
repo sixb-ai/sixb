@@ -102,7 +102,6 @@ for (const reused of [false, true]) {
       projectId: host.id,
       userId: "manager",
       strategyId: "test",
-      audience: "atlas",
       tokenHash: credential.tokenHash,
       createdAt: new Date(),
       expiresAt: new Date(Date.now() + 60_000),
@@ -114,7 +113,7 @@ for (const reused of [false, true]) {
       port,
       hostname: "127.0.0.1",
       quiet: true,
-      browser: createTestBrowserPolicy({ apiOrigin: base, atlasOrigin: base }),
+      browser: createTestBrowserPolicy({ apiOrigin: base, appOrigin: base }),
     })
     const agent = new Agent({ keepAlive: true, maxSockets: 1 })
     const http = (
@@ -135,7 +134,8 @@ for (const reused of [false, true]) {
             headers: {
               origin: base,
               cookie:
-                options.cookie ?? `sixb_session=${credential.cookieValue}; sixb_csrf=test-csrf`,
+                options.cookie ??
+                `sixb_session_app=${credential.cookieValue}; sixb_csrf_app=test-csrf`,
               "content-type": "application/json",
               "x-sixb-csrf": "test-csrf",
             },

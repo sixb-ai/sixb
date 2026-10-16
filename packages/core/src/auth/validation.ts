@@ -22,8 +22,6 @@ export const MAX_AUTH_INVITATION_TTL_MS = 30 * DAY
  */
 export const DEFAULT_AUTH_SESSION_CACHE_TTL_MS = 5_000
 
-export { resolveAuthSessionAudience } from "./audience"
-
 export function resolveAuthConfig(config: SixbAuthConfig | undefined): ResolvedAuthConfig {
   if (!config) {
     return {

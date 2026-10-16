@@ -1,5 +1,5 @@
 import type { AgentContextInput } from "@sixb/core"
-import { agentContext } from "../src/agents"
+import { agentContext } from "../src"
 
 const Invoice = { id: "Invoice" } as const
 const invoiceContext = agentContext.object(Invoice, "inv-123")

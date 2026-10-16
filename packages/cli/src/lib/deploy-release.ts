@@ -27,7 +27,6 @@ import { type ProductionRole, productionRoleFacts } from "./production-roles"
  */
 const ROLE_SERVICES = {
   api: "api",
-  atlas: "atlas",
   app: "app",
   orchestrator: "orchestrator",
   scheduler: "scheduler",
@@ -44,7 +43,6 @@ type RoleOf<Service extends DeployServiceName> = {
 /** The role behind each service. A service that no role deploys does not compile. */
 const SERVICE_ROLES: { readonly [Service in DeployServiceName]: RoleOf<Service> } = {
   api: "api",
-  atlas: "atlas",
   app: "app",
   orchestrator: "orchestrator",
   scheduler: "scheduler",
@@ -55,7 +53,6 @@ const SERVICE_ROLES: { readonly [Service in DeployServiceName]: RoleOf<Service> 
 /** The variable each role reads for a surface's public origin. */
 const PUBLIC_ORIGIN_ENV = {
   api: "SIXB_API_PUBLIC_ORIGIN",
-  atlas: "SIXB_ATLAS_PUBLIC_ORIGIN",
   app: "SIXB_APP_PUBLIC_ORIGIN",
 } as const satisfies Record<DeployHttpServiceName, string>
 

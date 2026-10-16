@@ -203,7 +203,7 @@ async function createSubagentApp(viewer?: { id: string; canRun: boolean }) {
           roleIds: [],
           grants: {
             ...emptyGrantIndex(),
-            "observe:aiUsage": new Set(["aiUsage"]),
+            "observe:aiUsage": true,
             "run:agent": viewer.canRun,
           },
         }
@@ -660,8 +660,8 @@ function aiUsageAuthorization(
 ): AuthorizationContext {
   const grants = {
     ...emptyGrantIndex(),
-    "observe:aiUsage": new Set(capabilities.includes("observe") ? ["aiUsage"] : []),
-    "manage:aiUsage": new Set(capabilities.includes("manage") ? ["aiUsage"] : []),
+    "observe:aiUsage": capabilities.includes("observe"),
+    "manage:aiUsage": capabilities.includes("manage"),
   }
   return {
     principal: { type: "user", id: "ai-operator" },

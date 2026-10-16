@@ -7,7 +7,7 @@ Explore working Sixb projects to see how data, domain models, apps, and AI fit t
 A service operations app that connects equipment, customers, and field work. Follow a service
 case from an equipment alarm through dispatch, repair approval, and completion.
 
-[Open app](https://northline.sixb.ai/) · [Explore in Atlas](https://atlas.northline.sixb.ai/) ·
+[Open app](https://northline.sixb.ai/) ·
 [API docs](https://northline.sixb.ai/docs) · [Source & setup](https://github.com/sixb-ai/sixb/tree/main/examples/northline#readme)
 
 Runs locally with simulated source systems. No external credentials required unless you enable

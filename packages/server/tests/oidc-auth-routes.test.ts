@@ -156,14 +156,13 @@ async function seedAdminSession(storage: InMemoryStorage) {
     projectId,
     userId: "usr_admin",
     strategyId: "okta",
-    audience: "atlas",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-05-17T10:00:00.000Z"),
     expiresAt: new Date("2099-05-17T10:00:00.000Z"),
   })
 
   return {
-    cookie: `sixb_session=${credential.cookieValue}; sixb_csrf=csrf_1`,
+    cookie: `sixb_session_app=${credential.cookieValue}; sixb_csrf_app=csrf_1`,
     csrfHeader: { "x-sixb-csrf": "csrf_1" },
   }
 }
@@ -191,10 +190,9 @@ function clearedStateCookie(cookie: string): string {
 
 async function startSignIn(app: ReturnType<typeof createRuntime>["app"]) {
   const response = await app.fetch(
-    new Request(
-      "http://api.localhost/auth/sign-in?audience=atlas&returnTo=http%3A%2F%2Fatlas.localhost%2F",
-      { redirect: "manual" }
-    )
+    new Request("http://api.localhost/auth/sign-in?returnTo=http%3A%2F%2Fapp.localhost%2F", {
+      redirect: "manual",
+    })
   )
   const state = new URL(response.headers.get("location") ?? "").searchParams.get("state") ?? ""
   return { response, state, cookie: stateCookie(response) }
@@ -224,7 +222,7 @@ describe("oidc auth routes", () => {
 
     const response = await app.fetch(
       new Request(
-        "http://api.localhost/auth/sign-in?audience=atlas&returnTo=http%3A%2F%2Fatlas.localhost%2Fobjects",
+        "http://api.localhost/auth/sign-in?returnTo=http%3A%2F%2Fapp.localhost%2Fobjects",
         { redirect: "manual" }
       )
     )
@@ -240,7 +238,7 @@ describe("oidc auth routes", () => {
     const { app } = createRuntime()
     const signIn = await app.fetch(
       new Request(
-        "http://api.localhost/auth/sign-in?audience=atlas&returnTo=http%3A%2F%2Fatlas.localhost%2Fdashboard",
+        "http://api.localhost/auth/sign-in?returnTo=http%3A%2F%2Fapp.localhost%2Fdashboard",
         { redirect: "manual" }
       )
     )
@@ -255,17 +253,17 @@ describe("oidc auth routes", () => {
     )
 
     expect(callback.status).toBe(303)
-    expect(callback.headers.get("location")).toBe("http://atlas.localhost/dashboard")
+    expect(callback.headers.get("location")).toBe("http://app.localhost/dashboard")
     const setCookie = callback.headers.get("set-cookie")
-    const sessionCookie = cookieValue(setCookie, "sixb_session")
-    const csrfCookie = cookieValue(setCookie, "sixb_csrf")
+    const sessionCookie = cookieValue(setCookie, "sixb_session_app")
+    const csrfCookie = cookieValue(setCookie, "sixb_csrf_app")
     expect(sessionCookie).toContain(".")
     expect(csrfCookie).toBeTruthy()
 
     const sessionResponse = await app.fetch(
       new Request("http://api.localhost/api/auth/session", {
         headers: {
-          cookie: `sixb_session=${sessionCookie}`,
+          cookie: `sixb_session_app=${sessionCookie}`,
         },
       })
     )
@@ -284,11 +282,11 @@ describe("oidc auth routes", () => {
     })
   })
 
-  test("API browser OIDC callbacks use the stored audience and return target", async () => {
+  test("API browser OIDC callbacks use the stored return target", async () => {
     const { app } = createRuntime()
     const signIn = await app.fetch(
       new Request(
-        "http://api.localhost/auth/sign-in?audience=app&returnTo=http%3A%2F%2Fapp.localhost%2Fdashboard",
+        "http://api.localhost/auth/sign-in?returnTo=http%3A%2F%2Fapp.localhost%2Fdashboard",
         { redirect: "manual" }
       )
     )
@@ -315,7 +313,7 @@ describe("oidc auth routes", () => {
     const { app } = createRuntime()
     const signIn = await app.fetch(
       new Request(
-        "http://api.localhost/auth/sign-in?audience=atlas&returnTo=http%3A%2F%2Fatlas.localhost%2Fdashboard",
+        "http://api.localhost/auth/sign-in?returnTo=http%3A%2F%2Fapp.localhost%2Fdashboard",
         { redirect: "manual" }
       )
     )
@@ -329,7 +327,7 @@ describe("oidc auth routes", () => {
     const replay = await app.fetch(new Request(callbackUrl, { headers, redirect: "manual" }))
 
     expect(replay.status).toBe(400)
-    expect(replay.headers.get("set-cookie")).not.toContain("sixb_session")
+    expect(replay.headers.get("set-cookie")).not.toContain("sixb_session_app")
   })
 
   test("creates OIDC invitation emails and applies invited groups on callback", async () => {
@@ -347,7 +345,7 @@ describe("oidc auth routes", () => {
         body: JSON.stringify({
           email: " Ava@Acme.COM ",
           groupIds: ["commercial"],
-          returnTo: "http://atlas.localhost/dashboard",
+          returnTo: "http://app.localhost/dashboard",
         }),
       })
     )
@@ -376,8 +374,7 @@ describe("oidc auth routes", () => {
       subject: "You are invited to Sixb",
     })
     expect(invitationUrl.pathname).toBe("/auth/sign-in")
-    expect(invitationUrl.searchParams.get("audience")).toBe("atlas")
-    expect(invitationUrl.searchParams.get("returnTo")).toBe("http://atlas.localhost/dashboard")
+    expect(invitationUrl.searchParams.get("returnTo")).toBe("http://app.localhost/dashboard")
 
     client.tokenClaims = {
       sub: "00u-ava",
@@ -401,7 +398,7 @@ describe("oidc auth routes", () => {
     )
 
     expect(callback.status).toBe(303)
-    expect(callback.headers.get("location")).toBe("http://atlas.localhost/dashboard")
+    expect(callback.headers.get("location")).toBe("http://app.localhost/dashboard")
     await expect(
       storage.auth.groupMemberships.listForGroup({
         projectId,
@@ -419,7 +416,7 @@ describe("oidc auth routes", () => {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          origin: "http://atlas.localhost",
+          origin: "http://app.localhost",
           cookie: admin.cookie,
           ...admin.csrfHeader,
         },
@@ -444,7 +441,7 @@ describe("oidc auth routes", () => {
     const callback = await completeSignIn(app)
 
     expect(callback.status).toBe(403)
-    expect(callback.headers.get("set-cookie")).not.toContain("sixb_session")
+    expect(callback.headers.get("set-cookie")).not.toContain("sixb_session_app")
     expect(await callback.text()).toContain("stranger@acme.com hasn't been invited.")
   })
 
@@ -503,10 +500,9 @@ describe("oidc sign-in browser binding", () => {
     expect(header).toMatch(/; Path=\/auth\/callback; SameSite=Lax; HttpOnly; Max-Age=(599|600)$/)
 
     const secure = await app.fetch(
-      new Request(
-        "https://api.localhost/auth/sign-in?audience=atlas&returnTo=http%3A%2F%2Fatlas.localhost%2F",
-        { redirect: "manual" }
-      )
+      new Request("https://api.localhost/auth/sign-in?returnTo=http%3A%2F%2Fapp.localhost%2F", {
+        redirect: "manual",
+      })
     )
     expect(stateCookie(secure)).toStartWith("sixb_oidc_")
     expect(secure.headers.get("set-cookie")).toEndWith("; Secure")
@@ -520,7 +516,7 @@ describe("oidc sign-in browser binding", () => {
 
     expect(refused.status).toBe(400)
     expect(await refused.text()).toContain("This sign-in attempt could not be completed.")
-    expect(refused.headers.get("set-cookie")).not.toContain("sixb_session")
+    expect(refused.headers.get("set-cookie")).not.toContain("sixb_session_app")
     expect((await callback(app, signIn.state, signIn.cookie)).status).toBe(303)
   })
 
@@ -534,9 +530,9 @@ describe("oidc sign-in browser binding", () => {
     const otherValue = await callback(app, theirs.state, `${theirName}=${mine.state}`)
 
     expect(otherAttempt.status).toBe(400)
-    expect(otherAttempt.headers.get("set-cookie")).not.toContain("sixb_session")
+    expect(otherAttempt.headers.get("set-cookie")).not.toContain("sixb_session_app")
     expect(otherValue.status).toBe(400)
-    expect(otherValue.headers.get("set-cookie")).not.toContain("sixb_session")
+    expect(otherValue.headers.get("set-cookie")).not.toContain("sixb_session_app")
   })
 
   test("callback clears the state cookie whether sign-in completes or is refused", async () => {
@@ -545,7 +541,7 @@ describe("oidc sign-in browser binding", () => {
     const success = await callback(app, completed.state, completed.cookie)
 
     expect(success.status).toBe(303)
-    expect(cookieValue(success.headers.get("set-cookie"), "sixb_session")).toContain(".")
+    expect(cookieValue(success.headers.get("set-cookie"), "sixb_session_app")).toContain(".")
     expect(success.headers.getSetCookie()).toContain(clearedStateCookie(completed.cookie))
 
     client.tokenClaims = { sub: "00u-stranger", email: "stranger@acme.com", email_verified: true }

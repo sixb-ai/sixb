@@ -22,7 +22,6 @@ import type {
 } from "@sixb/core/storage"
 import { PIPELINE_RUN_FAILURE_CODES, PipelineRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
-import { installFreshSqliteSchema } from "./migrations"
 import {
   appendRunListFilters,
   hasEmptyStatuses,
@@ -54,10 +53,6 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
     this.executions = options.executions
-
-    if (this.connection.installFreshSchema) {
-      installFreshSqliteSchema(this.db)
-    }
   }
 
   async queue(input: QueuePipelineRunInput): Promise<PipelineRunRecord> {

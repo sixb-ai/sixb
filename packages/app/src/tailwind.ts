@@ -19,7 +19,7 @@ export interface TailwindCssCompilerOptions {
    * version wins.
    */
   resolveFrom?: string
-  /** Prefix for error messages, e.g. `[SixbAtlas]`. */
+  /** Prefix for error messages, e.g. `[SixbCustomApp]`. */
   label?: string
   /** Minify the compiled CSS. Off by default; bundlers usually minify later. */
   minify?: boolean
@@ -67,9 +67,9 @@ export function resolveTailwindCliEntry(resolveFrom: string): string | null {
 }
 
 /**
- * Shared Tailwind v4 CSS build pipeline used by the built-in UI (Atlas) and
- * custom apps. Owns CLI resolution, source-detection scoping,
- * debounced/queued rebuilds, error formatting, and watch lifecycle cleanup.
+ * The Tailwind v4 CSS build pipeline for the app and its built-in pages. Owns CLI resolution,
+ * source-detection scoping, debounced/queued rebuilds, error formatting, and watch lifecycle
+ * cleanup.
  */
 export function createTailwindCssCompiler(
   options: TailwindCssCompilerOptions

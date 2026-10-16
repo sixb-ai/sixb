@@ -2,7 +2,7 @@
 
 The Sixb API exposes your project's data and operations over HTTP. Requests are authenticated and checked against the caller's permissions.
 
-During development, `bun sixb dev` serves the API at `http://localhost:3002` by default. In production, use the configured API origin.
+During development, `bun sixb dev` serves the API at `http://localhost:3001` by default. In production, use the configured API origin.
 
 ## Explore the API
 

@@ -1,7 +1,6 @@
 import { mkdir } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { createCustomApp } from "@sixb/app/server"
-import { buildAtlasAssets } from "@sixb/atlas"
 import { buildRuntime } from "../lib/build-runtime"
 import { generateProjectTypes } from "../lib/typegen"
 import { BuildView, ErrorView, renderStatic } from "../ui"
@@ -37,43 +36,27 @@ export async function runBuild(options: BuildOptions = {}) {
     generatedDir: join(".sixb", "build", "app"),
   })
 
-  if (await customApp.hasRoutes()) {
-    try {
-      const appResult = await customApp.build({
-        outdir: resolve(outdir, "app"),
-      })
+  try {
+    const appResult = await customApp.build({
+      outdir: resolve(outdir, "app"),
+    })
 
-      if (!appResult.success) {
-        await renderStatic(
-          <ErrorView
-            title="App build failed"
-            message="Failed to build the app"
-            details={appResult.logs ?? []}
-          />
-        )
-        process.exit(1)
-      }
-    } catch (error) {
-      // e.g. the app/globals.css Tailwind compile failed — surface the labeled
-      // message instead of an unhandled stack trace.
-      const message = error instanceof Error ? error.message : String(error)
+    if (!appResult.success) {
       await renderStatic(
-        <ErrorView title="App build failed" message="Failed to build the app" details={[message]} />
+        <ErrorView
+          title="App build failed"
+          message="Failed to build the app"
+          details={appResult.logs ?? []}
+        />
       )
       process.exit(1)
     }
-  }
-
-  try {
-    await buildAtlasAssets({ outdir: resolve(outdir, "atlas") })
   } catch (error) {
+    // e.g. the app/globals.css Tailwind compile failed — surface the labeled
+    // message instead of an unhandled stack trace.
     const message = error instanceof Error ? error.message : String(error)
     await renderStatic(
-      <ErrorView
-        title="Built-in UI build failed"
-        message="Failed to build production UI assets"
-        details={[message]}
-      />
+      <ErrorView title="App build failed" message="Failed to build the app" details={[message]} />
     )
     process.exit(1)
   }

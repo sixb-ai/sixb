@@ -87,7 +87,7 @@ describe("ci-guard", () => {
       "-e",
       [
         'process.stderr.write("(pass) something\\n")',
-        'process.stderr.write("::group::packages/atlas/tests/atlas-app.test.ts:\\n")',
+        'process.stderr.write("::group::packages/app/tests/manifest.test.ts:\\n")',
         // A timer creates the required silence without making a leaked Bun fixture busy-spin.
         boundedFixture(),
       ].join("; "),
@@ -95,7 +95,7 @@ describe("ci-guard", () => {
 
     expect(result.exitCode).toBe(124)
     expect(result.stderr).toContain("::error title=CI guard: stalled::")
-    expect(result.stderr).toContain("packages/atlas/tests/atlas-app.test.ts")
+    expect(result.stderr).toContain("packages/app/tests/manifest.test.ts")
     expect(result.stderr).toContain("no output for")
     // The tail is what turns "it hung" into "it hung here".
     expect(result.stderr).toContain("(pass) something")

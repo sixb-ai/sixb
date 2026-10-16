@@ -54,7 +54,6 @@ afterAll(() => {
 const signedIn: GetAuthSessionResponse = {
   authenticated: true,
   csrfToken: "csrf",
-  applicationAccess: { allowed: true, audience: "app" },
   user: {
     id: "user-1",
     email: "alex@example.com",

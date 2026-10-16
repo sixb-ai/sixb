@@ -1,9 +1,8 @@
-import type { AuthSessionAudience } from "./audience"
-import { DEFAULT_AUTH_SESSION_AUDIENCE, resolveAuthSessionAudience } from "./audience"
 import type { AuthCookieOptions } from "./types"
 
-export const DEFAULT_SESSION_COOKIE_NAME = "sixb_session"
-export const DEFAULT_CSRF_COOKIE_NAME = "sixb_csrf"
+// The names the app's cookies had beside Atlas's, so its sessions survived Atlas leaving.
+export const DEFAULT_SESSION_COOKIE_NAME = "sixb_session_app"
+export const DEFAULT_CSRF_COOKIE_NAME = "sixb_csrf_app"
 
 export interface ResolvedAuthCookieOptions {
   readonly sessionCookieName: string
@@ -39,22 +38,6 @@ export function resolveAuthCookieOptions(
 
   assertValidCookieOptions(resolved)
   return resolved
-}
-
-export function resolveAuthCookieOptionsForAudience(
-  options: ResolvedAuthCookieOptions,
-  audience: AuthSessionAudience | undefined
-): ResolvedAuthCookieOptions {
-  const resolvedAudience = resolveAuthSessionAudience(audience)
-  if (resolvedAudience === DEFAULT_AUTH_SESSION_AUDIENCE) {
-    return options
-  }
-
-  return {
-    ...options,
-    sessionCookieName: `${options.sessionCookieName}_${resolvedAudience}`,
-    csrfCookieName: `${options.csrfCookieName}_${resolvedAudience}`,
-  }
 }
 
 export function parseCookieHeader(header: string | null): ReadonlyMap<string, string> {

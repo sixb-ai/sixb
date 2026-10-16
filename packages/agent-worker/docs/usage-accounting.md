@@ -7,7 +7,7 @@ For contributors working on Sixb internals. Application setup and usage are docu
 
 The overview's `usage` sums reported counts; missing meters stay unknown and reported zeroes stay zero.
 Its `totalTokens` sums available input and output counts, including one-sided reports.
-Atlas labels partial sums using `usageCoverage`: calls reporting both input and output for totals,
+The app's AI usage page labels partial sums using `usageCoverage`: calls reporting both input and output for totals,
 and per-meter counts for individual insights. Ratios require complete reporting for both meters.
 Single-call usage and limit enforcement retain their strict completeness checks.
 

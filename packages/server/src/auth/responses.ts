@@ -1,4 +1,3 @@
-import type { AuthSessionAudience } from "@sixb/core"
 import { returnToForRequest } from "./return-to"
 
 export function jsonAuthRequiredResponse(): Response {
@@ -17,7 +16,6 @@ export function htmlAuthRedirectResponse(
   request: Request,
   options: {
     readonly absoluteReturnTo?: boolean
-    readonly audience?: AuthSessionAudience
   } = {}
 ): Response {
   const requestUrl = new URL(request.url)
@@ -25,9 +23,6 @@ export function htmlAuthRedirectResponse(
     ? new URL(returnToForRequest(request), requestUrl.origin).toString()
     : returnToForRequest(request)
   const params = new URLSearchParams({ returnTo: rawReturnTo })
-  if (options.absoluteReturnTo && options.audience) {
-    params.set("audience", options.audience)
-  }
 
   return new Response(null, {
     status: 302,

@@ -124,7 +124,7 @@ export interface AgentWorkerOptions {
   /** Queue visibility duration, renewed automatically while a turn executes. Defaults to 60s. */
   readonly leaseMs?: number
   /**
-   * Sixb server origin that hosts the agent API gateway, for example `http://localhost:3002`.
+   * Sixb server origin that hosts the agent API gateway, for example `http://localhost:3001`.
    * The sandbox receives a run-scoped gateway URL under this origin.
    */
   /** Not required when the worker only processes accounting recovery. */

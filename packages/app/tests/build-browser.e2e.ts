@@ -47,7 +47,7 @@ const app = await createCustomApp({
   rootDir: ${JSON.stringify(root)},
   apiBaseUrl: "http://127.0.0.1:3000",
   authEnabled: false,
-  agentRoutes: false,
+  builtInPages: false,
 })
 const result = await app.build()
 if (!result.success) throw new Error((result.logs ?? []).join("\\n"))

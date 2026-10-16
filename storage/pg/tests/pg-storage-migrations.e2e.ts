@@ -357,6 +357,7 @@ describe("Postgres storage migrations", () => {
             "059-file-download-grants",
             "060-drained-source-versions",
             "061-terminal-action-runs",
+            "062-drop-auth-audience",
           ],
         },
       ])
@@ -787,6 +788,13 @@ describe("Postgres storage migrations", () => {
           id: "061-terminal-action-runs",
           status: "applied",
           version: 61,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "062-drop-auth-audience",
+          status: "applied",
+          version: 62,
         },
       ])
     })
@@ -1401,6 +1409,68 @@ describe("Postgres storage migrations", () => {
             (error: unknown) => (error instanceof Error ? error.message : String(error))
           )
         expect(refusal).toContain("action_runs_status_check")
+      } finally {
+        await sql.end()
+      }
+    })
+  })
+
+  // Removal proof: drop the UPDATE from 062 and the Atlas browser session stays active, listed
+  // among the person's sessions though no cookie can reach it.
+  test("ends Atlas's browser sessions and keeps the app's and native ones", async () => {
+    await withStorage(false, async (_storage, schemaName) => {
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+      const index = postgresStorageMigrations.steps.findIndex(
+        (step) => step.id === "062-drop-auth-audience"
+      )
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
+      const migrateThrough = (count: number) =>
+        createPostgresMigrator({
+          sql,
+          schemaName,
+          migrations: defineMigrations({
+            adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+            steps: postgresStorageMigrations.steps.slice(0, count),
+          }),
+        }).migrate()
+      const schema = quoteIdent(schemaName)
+      try {
+        await migrateThrough(index)
+        await sql.unsafe(
+          `INSERT INTO ${schema}.auth_users (project_id, id, email, status, created_at, updated_at)
+          VALUES ('p', 'usr_1', 'ava@acme.com', 'active', now(), now())`
+        )
+        // A native (CLI) session has a refresh token, a client name and a short access expiry;
+        // the bearer-state constraint requires all three together.
+        for (const [id, audience, refreshTokenHash, clientName] of [
+          ["atlas", "atlas", null, null],
+          ["app", "app", null, null],
+          ["native", "atlas", "refresh-hash", "Sixb CLI"],
+        ] as const) {
+          await sql.unsafe(
+            `INSERT INTO ${schema}.auth_sessions (
+              project_id, id, user_id, strategy_id, audience, token_hash, created_at, expires_at,
+              refresh_token_hash, client_name, access_expires_at
+            ) VALUES (
+              'p', $1, 'usr_1', 'magic-link', $2, $3, now(), now() + interval '1 day', $4, $5,
+              CASE WHEN $4::text IS NULL THEN NULL ELSE now() + interval '1 hour' END
+            )`,
+            [id, audience, `hash-${id}`, refreshTokenHash, clientName]
+          )
+        }
+
+        await migrateThrough(index + 1)
+
+        const rows = await sql.unsafe<{ id: string; revoked: boolean }[]>(
+          `SELECT id, revoked_at IS NOT NULL AS revoked FROM ${schema}.auth_sessions ORDER BY id`
+        )
+        expect(rows.map((row) => [row.id, row.revoked])).toEqual([
+          ["app", false],
+          ["atlas", true],
+          ["native", false],
+        ])
+        expect(await readTableColumns(schemaName, "auth_sessions")).not.toContain("audience")
       } finally {
         await sql.end()
       }
@@ -2410,7 +2480,7 @@ describe("Postgres storage migrations", () => {
           "auth_device_authorizations",
         ])
       )
-      expect(sessionColumns).toContain("audience")
+      expect(sessionColumns).not.toContain("audience")
       expect(sessionColumns).toContain("absolute_expires_at")
       expect(sessionColumns).toContain("user_agent")
       expect(sessionColumns).toContain("ip_address")
@@ -3210,6 +3280,13 @@ describe("Postgres storage migrations", () => {
           id: "061-terminal-action-runs",
           status: "applied",
           version: 61,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "062-drop-auth-audience",
+          status: "applied",
+          version: 62,
         },
       ])
     } finally {

@@ -11,7 +11,6 @@ import type {
   StoredRuleResolvedEvent,
   StoredRuleTriggeredEvent,
 } from "@sixb/core/storage"
-import { installFreshSqliteSchema } from "./migrations"
 import {
   closeSqliteStoreConnection,
   openSqliteStoreConnection,
@@ -33,10 +32,6 @@ export class SqliteRulesStorage implements RulesStorage {
   constructor(options: SqliteRulesStorageOptions = {}) {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
-
-    if (this.connection.installFreshSchema) {
-      installFreshSqliteSchema(this.db)
-    }
   }
 
   async getActive(params: {

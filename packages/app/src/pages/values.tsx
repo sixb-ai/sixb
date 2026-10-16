@@ -9,9 +9,8 @@
  * generically and its type is never guessed.
  */
 import { client, objectFileContentUrl } from "@sixb/client"
-import { readSixbBrowserRuntimeConfig } from "@sixb/client/browser"
 import { listObjectTypesOptions } from "@sixb/client/hooks"
-import type { AuthSessionAudience, UserRef } from "@sixb/core"
+import type { UserRef } from "@sixb/core"
 import { type FileRef, fileNameFor, isFileRef } from "@sixb/core/blob-storage"
 import {
   defineMessages,
@@ -269,36 +268,21 @@ export interface FileLinks {
 /** The links to the file at a path in the value, or `null` when it cannot be opened. */
 export type FileLinksAt = (path: readonly string[], file: FileRef) => FileLinks | null
 
-/** Where file links point, and whose session opens them. */
-export interface FileApi {
-  readonly baseUrl: string
-  /**
-   * A file opens in a new tab, a navigation that sends no Origin, so the link names the session it
-   * belongs to: the app's, not Atlas's.
-   */
-  readonly audience: AuthSessionAudience
-}
-
-function appAudience(): AuthSessionAudience {
-  return readSixbBrowserRuntimeConfig({ audience: "app" }).auth.audience
-}
-
-function appFileApi(): FileApi {
-  return { baseUrl: client.getConfig().baseUrl ?? window.location.origin, audience: appAudience() }
+function apiBaseUrl(): string {
+  return client.getConfig().baseUrl ?? window.location.origin
 }
 
 /**
  * Links to a file inside a recorded value, served by a run's `files/content` route. `root` is the
  * value's place in the run, such as `params` or `input`.
  */
-export function runFileLinks(api: FileApi, routePath: string, root: string): FileLinksAt {
+export function runFileLinks(baseUrl: string, routePath: string, root: string): FileLinksAt {
   return (path) => {
-    const url = new URL(routePath, api.baseUrl)
+    const url = new URL(routePath, baseUrl)
     const pointer = [root, ...path].map((segment) =>
       segment.replace(/~/g, "~0").replace(/\//g, "~1")
     )
     url.searchParams.set("path", `/${pointer.join("/")}`)
-    url.searchParams.set("audience", api.audience)
     const inlineUrl = url.toString()
     url.searchParams.set("disposition", "attachment")
     return { inlineUrl, downloadUrl: url.toString() }
@@ -308,13 +292,13 @@ export function runFileLinks(api: FileApi, routePath: string, root: string): Fil
 /** Links to a file in an action run's parameters or writeback. */
 export function actionRunFileLinks(runId: string, root: "params" | "writeback"): FileLinksAt {
   const route = `/api/action-runs/${encodeURIComponent(runId)}/files/content`
-  return runFileLinks(appFileApi(), route, root)
+  return runFileLinks(apiBaseUrl(), route, root)
 }
 
 /** Links to a file in a workflow run's input or output. */
 export function workflowRunFileLinks(runId: string, root: "input" | "output"): FileLinksAt {
   const route = `/api/workflow-runs/${encodeURIComponent(runId)}/files/content`
-  return runFileLinks(appFileApi(), route, root)
+  return runFileLinks(apiBaseUrl(), route, root)
 }
 
 /** Links to a file in one step's input or output, within a workflow run. */
@@ -324,7 +308,7 @@ export function workflowStepFileLinks(
   root: "input" | "output"
 ): FileLinksAt {
   const route = `/api/workflow-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeKey)}/files/content`
-  return runFileLinks(appFileApi(), route, root)
+  return runFileLinks(apiBaseUrl(), route, root)
 }
 
 /** Links to a file in one of an object's properties, served by the object's `files/content` route. */
@@ -335,7 +319,6 @@ export function objectFileLinks(objectTypeId: string, primaryId: string): FileLi
       objectId: primaryId,
       pathSegments: path,
       fileRef: file,
-      audience: appAudience(),
     }
     return {
       inlineUrl: objectFileContentUrl(source),

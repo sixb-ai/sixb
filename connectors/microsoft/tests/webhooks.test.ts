@@ -54,7 +54,7 @@ function runtime(onEvent: MicrosoftEventHandler) {
       quiet: true,
       browser: {
         publicOrigin: "http://localhost",
-        allowedOrigins: [{ origin: "http://atlas.localhost", audience: "atlas" }],
+        allowedOrigins: ["http://app.localhost"],
       },
     })
   )

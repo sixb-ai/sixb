@@ -1,6 +1,6 @@
-import { Database, type SQLQueryBindings } from "bun:sqlite"
+import type { Database, SQLQueryBindings } from "bun:sqlite"
 import { expect, test } from "bun:test"
-import { installFreshSqliteSchema } from "../src/migrations"
+import { freshSqliteDatabase } from "../src/migrations"
 import { SqliteOntologyOutboxStorage } from "../src/ontology-storage/outbox"
 
 const EVENT = `json_object('type','object.created','payload',json_object(
@@ -29,8 +29,7 @@ function insertCommit(db: Database): void {
 for (const analyzed of [false, true]) {
   for (const readyFrom of [1, 9950, 10001]) {
     test(`SQLite outbox selects a bounded page (statistics: ${analyzed}, ready from: ${readyFrom})`, async () => {
-      const db = new Database(":memory:")
-      installFreshSqliteSchema(db)
+      const db = freshSqliteDatabase()
       try {
         insertCommit(db)
         db.run(`WITH RECURSIVE rows(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM rows WHERE i<10000)
@@ -77,8 +76,7 @@ for (const operation of ["markPublished", "reschedule"] as const) {
   // Regression proof: replace CROSS JOIN with the former join driven from outbox. Without
   // statistics, SQLite scans the project's history rather than looking up the requested IDs.
   test(`SQLite outbox ${operation} looks up only the requested leases without statistics`, async () => {
-    const db = new Database(":memory:")
-    installFreshSqliteSchema(db)
+    const db = freshSqliteDatabase()
     try {
       insertCommit(db)
       db.run(`WITH RECURSIVE rows(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM rows WHERE i<10000)

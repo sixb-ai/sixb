@@ -98,9 +98,6 @@
       "path": "packages/agent-worker/tsconfig.build.json"
     },
     {
-      "path": "packages/agent-ui/tsconfig.build.json"
-    },
-    {
       "path": "models/anthropic/tsconfig.build.json"
     },
     {
@@ -108,9 +105,6 @@
     },
     {
       "path": "packages/app/tsconfig.build.json"
-    },
-    {
-      "path": "packages/atlas/tsconfig.build.json"
     },
     {
       "path": "packages/cli/tsconfig.build.json"

@@ -1,4 +1,3 @@
-import { resolveAuthSessionAudience } from "../../../auth/audience"
 import { AuthStorageError } from "../errors"
 import type {
   AuthOidcAuthorizationAttemptStore,
@@ -26,7 +25,6 @@ export class InMemoryAuthOidcAuthorizationAttemptStore
     const id = assertNonEmpty(input.id, "OIDC authorization attempt id")
     const projectId = assertNonEmpty(input.projectId, "Project id")
     const strategyId = assertNonEmpty(input.strategyId, "Strategy id")
-    const audience = resolveAuthSessionAudience(input.audience)
     const stateHash = assertNonEmpty(input.stateHash, "OIDC state hash")
     const nonceHash = assertNonEmpty(input.nonceHash, "OIDC nonce hash")
     const codeVerifier = assertNonEmpty(input.codeVerifier, "OIDC code verifier")
@@ -43,7 +41,6 @@ export class InMemoryAuthOidcAuthorizationAttemptStore
       id,
       projectId,
       strategyId,
-      audience,
       stateHash,
       nonceHash,
       codeVerifier,

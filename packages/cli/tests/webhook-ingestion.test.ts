@@ -225,7 +225,7 @@ test("verified webhooks and snapshots feed merged contacts through orchestration
       host,
       browser: {
         publicOrigin: "http://localhost",
-        allowedOrigins: [{ origin: "http://localhost", audience: "atlas" }],
+        allowedOrigins: ["http://localhost"],
       },
     })
   )

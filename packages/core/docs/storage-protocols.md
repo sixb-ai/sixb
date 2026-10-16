@@ -71,6 +71,6 @@ The first run, changed definitions, unavailable snapshots, or ambiguous identiti
 replacement with the same validation rules. Comparing snapshots can still scan the dataset;
 incremental materialization does not imply incremental ingestion. Telemetry keeps its batch protocol.
 
-Atlas reports **Changes read** for incremental attempts and **Rows read** for complete reads.
+Run records count **changes read** for incremental attempts and **rows read** for complete reads.
 These counters describe input work, not the number of published objects or a recovery cursor.
 Unchanged roots are excluded from an incremental run’s commit counts.

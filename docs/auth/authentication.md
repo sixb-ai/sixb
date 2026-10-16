@@ -2,7 +2,7 @@
 
 Authentication identifies who is using your app. [Roles and permissions](authorization.md) control what they can see and do.
 
-Configure sign-in through the `auth` option in `sixb.config.ts`. Sixb handles the sign-in routes, sessions, and sign-out for Atlas and your custom app.
+Configure sign-in through the `auth` option in `sixb.config.ts`. Sixb handles the sign-in routes, sessions, and sign-out for your app.
 
 ## Configure sign-in
 

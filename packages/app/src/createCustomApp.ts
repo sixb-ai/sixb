@@ -1,9 +1,8 @@
 import { randomBytes } from "node:crypto"
-import { watch } from "node:fs"
+import { existsSync, watch } from "node:fs"
 import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
-import type { AuthSessionAudience } from "@sixb/core"
 import {
   type BuildAppResult,
   type BuildSharedAppDevResult,
@@ -33,9 +32,9 @@ export interface CreateCustomAppOptions {
   generatedDir?: string
   publicDir?: string
   apiBaseUrl?: string
-  audience?: AuthSessionAudience
   authEnabled?: boolean
-  agentRoutes?: boolean
+  /** Home, the agent, object pages and the sections. On unless a test turns them off. */
+  builtInPages?: boolean
 }
 
 export interface CustomAppDevOptions {
@@ -60,40 +59,43 @@ export interface CustomAppStartOptions {
   port?: number
   outdir?: string
   apiBaseUrl?: string
-  audience?: AuthSessionAudience
   authEnabled?: boolean
 }
 
-export interface CustomAppDevServer {
+export interface CustomAppServer {
   host: string
   port: number
   url: string
   stop(): Promise<void>
 }
 
+export interface CustomAppDevServer extends CustomAppServer {
+  /** Whether it reloads the app's sources itself: not while the project has no `app/` folder. */
+  watchesSources: boolean
+}
+
 export interface CustomAppInstance {
   scanRoutes(): Promise<PageRoute[]>
-  hasRoutes(): Promise<boolean>
   prepareAuthExperience(
     options?: CustomAuthExperienceBuildOptions
   ): Promise<CustomAuthExperienceBuildResult | null>
   dev(options?: CustomAppDevOptions): Promise<CustomAppDevServer>
   build(options?: CustomAppBuildOptions): Promise<BuildAppResult>
-  start(options?: CustomAppStartOptions): Promise<CustomAppDevServer>
+  start(options?: CustomAppStartOptions): Promise<CustomAppServer>
 }
 
 type BunServeRoutes = NonNullable<Parameters<typeof Bun.serve>[0]["routes"]>
 type BunServeRoute = BunServeRoutes[string]
 const packageRoot = resolve(import.meta.dir, "..")
-const builtInAgentRouteModule = "@sixb/app/agents"
 const builtInAgentRoutePaths = ["/agents", "/agents/new/:agentId", "/agents/:threadId"] as const
-const builtInAgentRouteSourcePath = join(packageRoot, "src", "agents.ts")
 // The shell parts a layout imports from `@sixb/app` style themselves with the same Tailwind build.
 const shellSourcePath = join(packageRoot, "src", "shell")
 const builtInPageModule = "@sixb/app/pages"
 const builtInPageSourcePath = join(packageRoot, "src", "pages")
 // Styles built-in pages need beyond utilities: the pipeline canvas.
 const builtInPageStylesheetPath = join(packageRoot, "src", "pages", "canvas.css")
+// The agent's styles beyond utilities, and the `@source` for its components.
+const agentStylesheetPath = join(packageRoot, "src", "agent", "agent.css")
 const customAppManifestRoute = "/app.webmanifest"
 const internalAppShellRoute = "/__sixb/generated/app-shell"
 // Files the built-in pages show, such as connector logos, served from the package itself so they
@@ -110,25 +112,23 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     ? resolve(rootDir, options.publicDir)
     : resolve(appDir, "public")
   const apiBaseUrl = options.apiBaseUrl
-  const audience = options.audience ?? "app"
   const authEnabled = options.authEnabled ?? true
-  const agentRoutesEnabled = options.agentRoutes ?? true
+  const builtInPagesEnabled = options.builtInPages ?? true
 
   async function scanRoutes(): Promise<PageRoute[]> {
     return [...(await scanAppRoutes(appDir)).pages]
   }
 
-  // A root layout alone is an app: the built-in pages, Home included, fill its routes.
-  async function servesApp(routes: readonly PageRoute[]): Promise<boolean> {
-    return (
-      routes.length > 0 || (agentRoutesEnabled && (await pathExists(join(appDir, "layout.tsx"))))
-    )
+  // With the built-in pages on, every project is an app, even without an `app/` folder: they fill
+  // its routes, Home included.
+  function servesApp(routes: readonly PageRoute[]): boolean {
+    return routes.length > 0 || builtInPagesEnabled
   }
 
   let tailwindCompiler: TailwindCssCompiler | null = null
   let tailwindCompilerKey: string | null = null
   let authTailwindCompiler: TailwindCssCompiler | null = null
-  let builtInAgentCssCompiler: TailwindCssCompiler | null = null
+  let frameworkCssCompiler: TailwindCssCompiler | null = null
 
   // `app/globals.css` is source. When it uses Tailwind, compile it to
   // `.sixb/generated/app.css` and bundle that; plain CSS bundles as-is. This
@@ -170,22 +170,20 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     await compiler.compile()
   }
 
-  async function prepareCombinedBuiltInAgentStylesheet(
+  async function prepareCombinedStylesheet(
     stylesheet: Extract<CustomAppStylesheet, { kind: "tailwind" }>
   ): Promise<string> {
     const inputPath = join(generatedDir, "app.input.css")
     const uiGlobalsPath = Bun.resolveSync("@sixb/ui/globals.css", packageRoot)
-    const agentUiGlobalsPath = Bun.resolveSync("@sixb/agent-ui/globals.css", packageRoot)
     await writeFileIfChanged(
       inputPath,
       [
         `@import ${JSON.stringify(uiGlobalsPath)};`,
-        `@source ${JSON.stringify(builtInAgentRouteSourcePath)};`,
         `@source ${JSON.stringify(shellSourcePath)};`,
         `@source ${JSON.stringify(builtInPageSourcePath)};`,
         `@import ${JSON.stringify(builtInPageStylesheetPath)};`,
         `@import ${JSON.stringify(stylesheet.sourcePath)};`,
-        `@import ${JSON.stringify(agentUiGlobalsPath)};`,
+        `@import ${JSON.stringify(agentStylesheetPath)};`,
         "",
       ].join("\n")
     )
@@ -202,16 +200,16 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
     if (stylesheet.kind === "tailwind" && builtInRoutes.length > 0) {
       return {
-        stylesheetPath: await prepareCombinedBuiltInAgentStylesheet(stylesheet),
+        stylesheetPath: await prepareCombinedStylesheet(stylesheet),
         frameworkStylesheetPaths: [],
       }
     }
 
     const preparedStylesheet = await prepareStylesheet(stylesheet)
-    const builtInAgentStylesheetPath = await prepareBuiltInAgentStylesheet(builtInRoutes)
+    const frameworkStylesheetPath = await prepareFrameworkStylesheet(builtInRoutes)
 
     return {
-      frameworkStylesheetPaths: builtInAgentStylesheetPath ? [builtInAgentStylesheetPath] : [],
+      frameworkStylesheetPaths: frameworkStylesheetPath ? [frameworkStylesheetPath] : [],
       stylesheetPath:
         preparedStylesheet.kind === "none"
           ? null
@@ -221,38 +219,36 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     }
   }
 
-  async function prepareBuiltInAgentStylesheet(
+  async function prepareFrameworkStylesheet(
     builtInRoutes: readonly BuiltInRouteManifestEntry[]
   ): Promise<string | null> {
     if (builtInRoutes.length === 0) {
       return null
     }
 
-    const inputPath = join(generatedDir, "agent-ui.input.css")
-    const outputPath = join(generatedDir, "agent-ui.css")
+    const inputPath = join(generatedDir, "framework.input.css")
+    const outputPath = join(generatedDir, "framework.css")
     const uiGlobalsPath = Bun.resolveSync("@sixb/ui/globals.css", packageRoot)
-    const agentUiGlobalsPath = Bun.resolveSync("@sixb/agent-ui/globals.css", packageRoot)
     await writeFileIfChanged(
       inputPath,
       [
         `@import ${JSON.stringify(uiGlobalsPath)};`,
-        `@source ${JSON.stringify(builtInAgentRouteSourcePath)};`,
         `@source ${JSON.stringify(shellSourcePath)};`,
         `@source ${JSON.stringify(builtInPageSourcePath)};`,
         `@import ${JSON.stringify(builtInPageStylesheetPath)};`,
-        `@import ${JSON.stringify(agentUiGlobalsPath)};`,
+        `@import ${JSON.stringify(agentStylesheetPath)};`,
         "",
       ].join("\n")
     )
 
-    builtInAgentCssCompiler ??= createTailwindCssCompiler({
+    frameworkCssCompiler ??= createTailwindCssCompiler({
       inputPath,
       outputPath,
       cwd: packageRoot,
       resolveFrom: packageRoot,
       label: "[SixbCustomApp]",
     })
-    await builtInAgentCssCompiler.compile()
+    await frameworkCssCompiler.compile()
     return outputPath
   }
 
@@ -265,13 +261,14 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     sharedMainPath: string
     routes: PageRoute[]
   }> {
+    assertAppPackagesInstalled(rootDir)
     const discovery = await scanAppRoutes(appDir)
     const routes = [...discovery.pages]
-    if (!(await servesApp(routes))) {
+    if (!servesApp(routes)) {
       throw new Error(`[SixbCustomApp] No app routes found in ${appDir}`)
     }
 
-    const builtInRoutes = agentRoutesEnabled ? builtInRoutesFor(routes) : []
+    const builtInRoutes = builtInPagesEnabled ? builtInRoutesFor(routes) : []
     const stylesheets = await prepareStylesheets(builtInRoutes)
     await generateRouteManifest(routes, generatedDir, {
       builtInRoutes,
@@ -279,13 +276,13 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     })
     const entry = await generateAppEntry(rootDir, generatedDir, {
       apiBaseUrl,
-      audience,
       authEnabled,
       appDir,
       publicDir,
       frameworkStylesheetPaths: stylesheets.frameworkStylesheetPaths,
       stylesheetPath: stylesheets.stylesheetPath,
-      sections: agentRoutesEnabled,
+      sections: builtInPagesEnabled,
+      projectPages: routes.length > 0,
     })
     return { ...entry, routes }
   }
@@ -347,10 +344,6 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       return await scanRoutes()
     },
 
-    async hasRoutes() {
-      return await servesApp(await scanRoutes())
-    },
-
     async prepareAuthExperience(options) {
       return await prepareAuthExperience(options)
     },
@@ -358,9 +351,9 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     async dev(devOptions: CustomAppDevOptions = {}) {
       const publicEnv = collectPublicEnv()
       const withRuntime = (html: string) =>
-        injectRuntimeConfig(html, { apiBaseUrl, audience, authEnabled, publicEnv })
+        injectRuntimeConfig(html, { apiBaseUrl, authEnabled, publicEnv })
       const host = devOptions.host ?? "0.0.0.0"
-      const port = devOptions.port ?? 3001
+      const port = devOptions.port ?? 3000
       const { htmlPath, manifestPath, sharedHtmlPath, sharedMainPath } = await prepareGeneratedApp()
       await prepareAuthExperience()
       let htmlImportVersion = 0
@@ -397,7 +390,6 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
               async () =>
                 injectRuntimeConfig((await ensureSharedBuild()).html, {
                   apiBaseUrl,
-                  audience: "app",
                   authEnabled: false,
                   publicEnv,
                 }),
@@ -486,23 +478,27 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
             console.error(`[SixbCustomApp] Rebuild failed: ${message}`)
           })
       }
-      const watcher = watch(appDir, { recursive: true }, (_eventType, filename) => {
-        if (!filename) return
-        if (!/\.(ts|tsx|css)$/.test(String(filename))) return
+      // A project without an `app/` folder serves the built-in pages alone. Nothing here can
+      // watch a folder that does not exist yet, so `sixb dev` restarts when one is created.
+      const watcher = (await pathExists(appDir))
+        ? watch(appDir, { recursive: true }, (_eventType, filename) => {
+            if (!filename) return
+            if (!/\.(ts|tsx|css)$/.test(String(filename))) return
 
-        if (rebuildTimer) {
-          clearTimeout(rebuildTimer)
-        }
-        rebuildTimer = setTimeout(() => {
-          rebuildTimer = null
-          enqueueRebuild()
-        }, 80)
-      })
+            if (rebuildTimer) {
+              clearTimeout(rebuildTimer)
+            }
+            rebuildTimer = setTimeout(() => {
+              rebuildTimer = null
+              enqueueRebuild()
+            }, 80)
+          })
+        : null
 
       // An FSWatcher emits `error` as an event, and an unhandled one takes the whole dev process
       // down — the `.catch()` above only covers a failed rebuild. Losing file watching should cost
       // hot reload, not the server: keep serving the last good build and say so.
-      watcher.on("error", (error: unknown) => {
+      watcher?.on("error", (error: unknown) => {
         const message = error instanceof Error ? error.message : String(error)
         console.error(
           `[SixbCustomApp] Stopped watching ${appDir}: ${message}. ` +
@@ -516,17 +512,18 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         host,
         port,
         url: `http://${displayHost}:${port}`,
+        watchesSources: watcher !== null,
         async stop() {
           stopping = true
           if (rebuildTimer) {
             clearTimeout(rebuildTimer)
             rebuildTimer = null
           }
-          watcher.close()
+          watcher?.close()
           await rebuildChain
           await tailwindCompiler?.stop()
           await authTailwindCompiler?.stop()
-          await builtInAgentCssCompiler?.stop()
+          await frameworkCssCompiler?.stop()
           const activeServer = server
           server = null
           activeServer?.stop(true)
@@ -574,7 +571,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     async start(startOptions: CustomAppStartOptions = {}) {
       const publicEnv = collectPublicEnv()
       const host = startOptions.host ?? "0.0.0.0"
-      const port = startOptions.port ?? 3001
+      const port = startOptions.port ?? 3000
       const outdir = resolve(rootDir, startOptions.outdir ?? join(".sixb", "dist", "app"))
       const indexPath = join(outdir, "index.html")
       const sharedIndexPath = join(outdir, SHARED_APP_SHELL_FILE_NAME)
@@ -590,13 +587,11 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
       const indexHtml = injectRuntimeConfig(await Bun.file(indexPath).text(), {
         apiBaseUrl: startOptions.apiBaseUrl ?? apiBaseUrl,
-        audience: startOptions.audience ?? audience,
         authEnabled: startOptions.authEnabled ?? authEnabled,
         publicEnv,
       })
       const sharedIndexHtml = injectRuntimeConfig(await Bun.file(sharedIndexPath).text(), {
         apiBaseUrl: startOptions.apiBaseUrl ?? apiBaseUrl,
-        audience: "app",
         authEnabled: false,
         publicEnv,
       })
@@ -695,10 +690,42 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+// The generated app imports these from the project, so the page code and the framework share one
+// copy of React. `@sixb/app` only names them as peers.
+const appPeerPackages = ["react", "react-dom", "react-router-dom", "@tanstack/react-query"] as const
+
+// Looks for `node_modules` as the bundler does. `Bun.resolveSync` would also find Bun's global
+// install cache, which the bundler never reads.
+function assertAppPackagesInstalled(rootDir: string): void {
+  const missing = appPeerPackages.filter((name) => {
+    for (let dir = rootDir; ; dir = dirname(dir)) {
+      if (existsSync(join(dir, "node_modules", name, "package.json"))) return false
+      if (dirname(dir) === dir) return true
+    }
+  })
+  if (missing.length > 0) throw new AppPackagesMissingError(missing)
+}
+
+/** The project lacks packages the app is bundled from. `sixb dev` keeps the API running. */
+export class AppPackagesMissingError extends Error {
+  readonly name = "AppPackagesMissingError"
+
+  constructor(readonly missing: readonly string[]) {
+    super(
+      `[SixbCustomApp] The app needs ${missing.join(", ")} in this project. Install them with: ` +
+        `bun add ${missing.join(" ")}`
+    )
+  }
+}
+
 function builtInRoutesFor(routes: readonly PageRoute[]): BuiltInRouteManifestEntry[] {
   const projectRoutePatterns = new Set(routes.map((route) => routePatternKey(route.path)))
   const builtInRoutes: BuiltInRouteManifestEntry[] = [
-    ...builtInAgentRoutePaths.map((path) => ({ path, moduleSpecifier: builtInAgentRouteModule })),
+    ...builtInAgentRoutePaths.map((path) => ({
+      path,
+      moduleSpecifier: builtInPageModule,
+      exportName: "AgentsPage",
+    })),
     // Home starts conversations that continue on the agent routes, so it ships with them.
     { path: "/", moduleSpecifier: builtInPageModule, exportName: "HomePage" },
     // Every object has a page, outside any section: grants decide who reads it.
@@ -974,7 +1001,6 @@ function injectRuntimeConfig(
   html: string,
   config: {
     readonly apiBaseUrl?: string
-    readonly audience: AuthSessionAudience
     readonly authEnabled: boolean
     readonly publicEnv: Record<string, string>
   }
@@ -982,12 +1008,12 @@ function injectRuntimeConfig(
   const existingRuntimeScript = /<script>window\.__SIXB_RUNTIME__ = (.*?);<\/script>/
   const existingConfig = html.match(existingRuntimeScript)?.[1]
   const script = renderCustomAppRuntimeScript({
-    auth: { audience: config.audience, enabled: config.authEnabled },
+    auth: { enabled: config.authEnabled },
     ...(existingConfig ? JSON.parse(existingConfig) : {}),
     ...(config.apiBaseUrl
       ? {
           api: { baseUrl: config.apiBaseUrl },
-          auth: { audience: config.audience, enabled: config.authEnabled },
+          auth: { enabled: config.authEnabled },
         }
       : {}),
     publicEnv: config.publicEnv,

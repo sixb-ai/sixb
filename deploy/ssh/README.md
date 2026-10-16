@@ -45,7 +45,7 @@ Each deployment lives in its deploy user's home:
   and the root Caddyfile imports `/etc/caddy/sixb.d/*.caddy`: Caddy allows one `*` per import
   pattern. A deploy runs `caddy validate` on the whole configuration before
   `sudo systemctl reload caddy`, the one command the `sixb-deploy` group may run as root, and puts
-  the previous snippet back when Caddy rejects the new one. Atlas and the app answer 502, 503, and
+  the previous snippet back when Caddy rejects the new one. The app answers 502, 503, and
   504 with the update page in `src/update-page.ts`.
 - **The deploy.** `src/scripts.ts` renders one script that holds `deploy/lock` throughout and prints
   a marker around each step, which the CLI turns into progress. `code/` is updated like

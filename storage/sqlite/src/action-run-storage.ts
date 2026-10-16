@@ -20,7 +20,6 @@ import type {
   RecordActionRunInput,
 } from "@sixb/core/storage"
 import { ActionRunError } from "@sixb/core/storage"
-import { installFreshSqliteSchema } from "./migrations"
 import {
   closeSqliteStoreConnection,
   openSqliteStoreConnection,
@@ -46,10 +45,6 @@ export class SqliteActionRunStorage implements ActionRunStorage {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
     this.executions = options.executions
-
-    if (this.connection.installFreshSchema) {
-      installFreshSqliteSchema(this.db)
-    }
   }
 
   async record(input: RecordActionRunInput): Promise<ActionRunRecord> {

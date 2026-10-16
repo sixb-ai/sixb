@@ -41,11 +41,7 @@ import { SqliteConnectorConnectionStorage } from "./connector-connection-storage
 import { SqliteExecutionStorage } from "./execution-storage"
 import { SqliteFileDownloadGrantStorage } from "./file-download-grant-storage"
 import { SqliteFileUploadSessionStorage } from "./file-upload-session-storage"
-import {
-  createSqliteStorageMigrators,
-  installFreshSqliteSchema,
-  sqliteStoragePath,
-} from "./migrations"
+import { createSqliteStorageMigrators, sqliteStoragePath } from "./migrations"
 import { SqliteObjectStorage } from "./objects"
 import { SqliteOntologyStorage, type SqliteOntologyTransactionContext } from "./ontology-storage"
 import { SqlitePipelineRunStorage } from "./pipeline-run-storage"
@@ -125,10 +121,6 @@ export class SqliteStorage implements MigrationCapableStorage {
       this.readConnection = openSqliteStoreConnection({ path, readonly: true })
     } else {
       this.readConnection = this.connection
-    }
-
-    if (this.connection.installFreshSchema) {
-      installFreshSqliteSchema(this.connection.db)
     }
 
     const stores = createSqliteStores(this.connection, {
@@ -256,7 +248,6 @@ export class SqliteStorage implements MigrationCapableStorage {
         {
           db: this.connection.db,
           ownsConnection: false,
-          installFreshSchema: false,
         },
         {
           runOntologyOperation: async (run) => run(),

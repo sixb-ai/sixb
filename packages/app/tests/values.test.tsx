@@ -104,21 +104,15 @@ describe("a recorded value", () => {
   })
 })
 
-test("links a file to its run as a JSON pointer below the value's root, in the app's session", () => {
-  const links = runFileLinks(
-    { baseUrl: "https://api.test", audience: "app" },
-    "/api/workflow-runs/wf%2F1/files/content",
-    "input"
-  )
+test("links a file to its run as a JSON pointer below the value's root", () => {
+  const links = runFileLinks("https://api.test", "/api/workflow-runs/wf%2F1/files/content", "input")
   const url = links(["input~file", "a/b"], fileRef)
   // Regression proof: drop the `~` and `/` escapes in runFileLinks and the server reads another path.
   expect(url?.inlineUrl).toBe(
-    "https://api.test/api/workflow-runs/wf%2F1/files/content?path=%2Finput%2Finput%7E0file%2Fa%7E1b&audience=app"
+    "https://api.test/api/workflow-runs/wf%2F1/files/content?path=%2Finput%2Finput%7E0file%2Fa%7E1b"
   )
-  // A new tab sends no Origin. Regression proof: drop `audience` and the API answers with Atlas's
-  // session, which a person signed in to the app alone does not have.
   expect(url?.downloadUrl).toBe(
-    "https://api.test/api/workflow-runs/wf%2F1/files/content?path=%2Finput%2Finput%7E0file%2Fa%7E1b&audience=app&disposition=attachment"
+    "https://api.test/api/workflow-runs/wf%2F1/files/content?path=%2Finput%2Finput%7E0file%2Fa%7E1b&disposition=attachment"
   )
 })
 

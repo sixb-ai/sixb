@@ -12,7 +12,7 @@ records each completed provider call, and finalizes the conversation or workflow
 import { AgentWorker } from "@sixb/agent-worker"
 
 const worker = new AgentWorker(sixb, {
-  apiBaseUrl: "http://localhost:3002",
+  apiBaseUrl: "http://localhost:3001",
 })
 
 await worker.start()

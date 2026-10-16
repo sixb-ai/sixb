@@ -16,7 +16,6 @@ import type {
   ShareGrantStorage,
 } from "@sixb/core/storage"
 import { ShareGrantStorageError } from "@sixb/core/storage"
-import { installFreshSqliteSchema } from "./migrations"
 import { isUniqueConstraintError } from "./storage-errors"
 import {
   closeSqliteStoreConnection,
@@ -37,7 +36,6 @@ export class SqliteShareGrantStorage implements ShareGrantStorage {
   constructor(options: SqliteShareGrantStorageOptions = {}) {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
-    if (this.connection.installFreshSchema) installFreshSqliteSchema(this.db)
   }
 
   async create(input: CreateShareGrantInput): Promise<ShareGrantRecord> {

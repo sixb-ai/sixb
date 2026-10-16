@@ -30,14 +30,14 @@ function freePortBlock() {
     const port = 20_000 + Math.floor(Math.random() * 30_000)
     const reservations: ReturnType<typeof Bun.serve>[] = []
     try {
-      for (let offset = 0; offset < 3; offset++) {
+      for (let offset = 0; offset < 2; offset++) {
         reservations.push(
           Bun.serve({ hostname: "127.0.0.1", port: port + offset, fetch: () => new Response() })
         )
       }
       return port
     } catch {
-      // Try another block while holding all three reservations together.
+      // Try another block while holding both reservations together.
     } finally {
       for (const server of reservations) server.stop(true)
     }
@@ -50,9 +50,8 @@ function freePortBlock() {
 test("dev reloads backend modules, rediscovers files, recovers, and keeps frontend HMR", async () => {
   const fixture = await createDevFixture()
   const port = freePortBlock()
-  const api = `http://127.0.0.1:${port + 2}`
-  const atlas = `http://127.0.0.1:${port}`
-  const app = `http://127.0.0.1:${port + 1}`
+  const app = `http://127.0.0.1:${port}`
+  const api = `http://127.0.0.1:${port + 1}`
   let output = ""
   const proc = Bun.spawn(
     [
@@ -107,9 +106,9 @@ test("dev reloads backend modules, rediscovers files, recovers, and keeps fronte
       () => readyCount() >= count,
       () => output
     )
-  const generation = async (origin = atlas) =>
+  const generation = async () =>
     (
-      await request(`${origin}/__sixb/dev-reload.js`, {
+      await request(`${app}/__sixb/dev-reload.js`, {
         method: "HEAD",
         signal: AbortSignal.timeout(2000),
       })
@@ -158,7 +157,7 @@ test("dev reloads backend modules, rediscovers files, recovers, and keeps fronte
     expect(originalGeneration).toBeTruthy()
     // Execute the actual served browser script against real HTTP. The browser can
     // outlive the dev child and must reload once, only after the replacement is ready.
-    runInNewContext(await (await request(`${atlas}/__sixb/dev-reload.js`)).text(), {
+    runInNewContext(await (await request(`${app}/__sixb/dev-reload.js`)).text(), {
       window: {},
       document: { visibilityState: "visible", addEventListener() {}, removeEventListener() {} },
       location: {
@@ -168,7 +167,7 @@ test("dev reloads backend modules, rediscovers files, recovers, and keeps fronte
       },
       AbortSignal,
       clearTimeout,
-      fetch: (path: string, options: RequestInit) => fetch(`${atlas}${path}`, options),
+      fetch: (path: string, options: RequestInit) => fetch(`${app}${path}`, options),
       setTimeout(callback: () => void, delay: number) {
         if (browserStopped) return
         const timer = setTimeout(callback, delay)
@@ -231,11 +230,10 @@ test("dev reloads backend modules, rediscovers files, recovers, and keeps fronte
     // `edit` waits for the next Ready: saving SIXB.md restarts the project too.
     await edit("SIXB.md", "Answer briefly.\n")
 
-    // First route must start the app server even though app/ did not exist at boot.
+    // The first app file restarts the project: app/ did not exist at boot, so nothing watched it.
     await edit("app/page.tsx", pageSource("Frontend first"))
     const appResponse = await request(app)
     if (appResponse.status !== 200) throw new Error(await appResponse.text())
-    expect(await generation(app)).toBe(await generation())
     expect(await (await request(app)).text()).toContain("/__sixb/dev-reload.js")
     const stableGeneration = await generation()
     count = readyCount()

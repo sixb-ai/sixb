@@ -4,7 +4,6 @@ import {
   verifyDoubleSubmitCsrf,
 } from "@sixb/core/internal/auth"
 import { credentialTransport, isAccessTokenRoute, shouldVerifyCsrf } from "./access-token-boundary"
-import { sessionCanAccessApplication } from "./application-access"
 import { BrowserOriginError, type ResolveRequestAuthContext } from "./browser-origin"
 import { classifyRoute } from "./public-routes"
 import {
@@ -64,17 +63,13 @@ export class ServerAuthGuard {
       return { kind: "deny", response: authContext }
     }
 
-    let session = await this.host.auth.getSession(request, {
-      audience: authContext.audience,
-      credentialSource: "any",
-    })
+    let session = await this.host.auth.getSession(request, { credentialSource: "any" })
     if (!session.authenticated) {
       if (route.kind === "html") {
         return {
           kind: "deny",
           response: htmlAuthRedirectResponse(request, {
             absoluteReturnTo: authContext.absoluteReturnTo ?? false,
-            audience: authContext.audience,
           }),
         }
       }
@@ -84,20 +79,6 @@ export class ServerAuthGuard {
       }
 
       return { kind: "deny", response: jsonAuthRequiredResponse() }
-    }
-
-    // Application access gates the web app a browser session belongs to. A native client's session
-    // and an access token belong to no web app: grants alone decide what they may do. Account pages
-    // serve every signed-in user.
-    const deniedApplication = (caller: AuthenticatedRequestAuthSession) =>
-      !route.account &&
-      credentialTransport(caller) === "cookie" &&
-      !sessionCanAccessApplication(this.host, caller, authContext.audience)
-    if (deniedApplication(session)) {
-      return {
-        kind: "deny",
-        response: jsonForbiddenResponse("Application access is not allowed"),
-      }
     }
 
     if (session.credentialSource === "accessToken" && !isAccessTokenRoute(request)) {
@@ -123,7 +104,6 @@ export class ServerAuthGuard {
       hasForegroundSessionActivity(request)
     ) {
       const activeSession = await this.host.auth.getSession(request, {
-        audience: authContext.audience,
         credentialSource: "session",
         sessionActivity: "foreground",
       })
@@ -133,17 +113,10 @@ export class ServerAuthGuard {
             kind: "deny",
             response: htmlAuthRedirectResponse(request, {
               absoluteReturnTo: authContext.absoluteReturnTo ?? false,
-              audience: authContext.audience,
             }),
           }
         }
         return { kind: "deny", response: jsonAuthRequiredResponse() }
-      }
-      if (deniedApplication(activeSession)) {
-        return {
-          kind: "deny",
-          response: jsonForbiddenResponse("Application access is not allowed"),
-        }
       }
       session = activeSession
     }
@@ -151,14 +124,13 @@ export class ServerAuthGuard {
     return { kind: "allow", session }
   }
 
-  getCsrfCookieName(request: Request): string {
-    const audience = this.resolveAuthContext(request).audience
-    return this.host.auth.getCookieOptions({ audience }).csrfCookieName
+  getCsrfCookieName(): string {
+    return this.host.auth.getCookieOptions().csrfCookieName
   }
 
   verifyCsrf(request: Request, _session: AuthenticatedRequestAuthSession): boolean {
     return verifyDoubleSubmitCsrf(request, {
-      cookieName: this.getCsrfCookieName(request),
+      cookieName: this.getCsrfCookieName(),
     })
   }
 

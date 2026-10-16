@@ -104,7 +104,7 @@ describe("classifyRoute", () => {
 
   test("the /__sixb prefix is public only for the agent gateway", () => {
     // A blanket GET rule for /__sixb used to sit beside the gateway rule. It was a
-    // second, narrower fail-open: Atlas serves its own /__sixb/runtime.json from its
+    // second, narrower fail-open: the app serves its own /__sixb/runtime.json from its
     // own server, so nothing on the API needed it.
     expect(classifyRoute(request("GET", "/__sixb/runtime.json")).kind).toBe("api")
     expect(classifyRoute(request("GET", "/__sixb/agent-api/objects")).kind).toBe("public")

@@ -9,12 +9,6 @@ export {
   parseAccessTokenValue,
   SERVICE_ACCOUNT_ACCESS_TOKEN_PREFIX,
 } from "./access-tokens"
-export type { AuthSessionAudience, AuthSessionAudienceOptions } from "./audience"
-export {
-  DEFAULT_AUTH_SESSION_AUDIENCE,
-  isValidAuthSessionAudience,
-  resolveAuthSessionAudience,
-} from "./audience"
 export { getRequestClientAddress, setRequestClientAddress } from "./client-address"
 export {
   clearCsrfCookieHeader,

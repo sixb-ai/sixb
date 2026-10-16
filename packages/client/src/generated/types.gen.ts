@@ -430,10 +430,6 @@ export type GetAuthSessionResponses = {
     | {
         authenticated: true
         csrfToken?: string
-        applicationAccess: {
-          allowed: boolean
-          audience: "atlas" | "app"
-        }
         user: {
           id: string
           email: string
@@ -504,7 +500,6 @@ export type ListAuthSessionsResponses = {
   200: {
     sessions: Array<{
       id: string
-      audience?: "atlas" | "app"
       current: boolean
       createdAt: string
       expiresAt: string
@@ -1294,7 +1289,6 @@ export type CreateAuthInvitationData = {
   body: {
     email: string
     groupIds?: Array<string>
-    destinationId?: "atlas" | "app"
     expiresAt?: string
     returnTo?: string
     revealLink?: boolean
@@ -1409,11 +1403,6 @@ export type GetAuthInvitationOptionsResponses = {
       label?: string
       description?: string
     }>
-    destinations: Array<{
-      id: "atlas" | "app"
-      label: string
-    }>
-    defaultDestinationId?: "atlas" | "app"
     canInviteWithoutGroups: boolean
     capabilities: {
       createInvitation:
@@ -7415,10 +7404,6 @@ export type GetWorkflowRunFileContentData = {
     runId: string
   }
   query: {
-    /**
-     * Session audience for file navigation without Origin; must match Origin when present
-     */
-    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -7471,10 +7456,6 @@ export type HeadWorkflowRunFileContentData = {
     runId: string
   }
   query: {
-    /**
-     * Session audience for file navigation without Origin; must match Origin when present
-     */
-    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -7525,10 +7506,6 @@ export type GetWorkflowNodeRunFileContentData = {
     nodeKey: string
   }
   query: {
-    /**
-     * Session audience for file navigation without Origin; must match Origin when present
-     */
-    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -7582,10 +7559,6 @@ export type HeadWorkflowNodeRunFileContentData = {
     nodeKey: string
   }
   query: {
-    /**
-     * Session audience for file navigation without Origin; must match Origin when present
-     */
-    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -8937,10 +8910,6 @@ export type GetObjectFileContentData = {
     objectId: string
   }
   query: {
-    /**
-     * Session audience for file navigation without Origin; must match Origin when present
-     */
-    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -8993,10 +8962,6 @@ export type HeadObjectFileContentData = {
     objectId: string
   }
   query: {
-    /**
-     * Session audience for file navigation without Origin; must match Origin when present
-     */
-    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -10056,10 +10021,6 @@ export type GetActionRunFileContentData = {
     runId: string
   }
   query: {
-    /**
-     * Session audience for file navigation without Origin; must match Origin when present
-     */
-    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -10112,10 +10073,6 @@ export type HeadActionRunFileContentData = {
     runId: string
   }
   query: {
-    /**
-     * Session audience for file navigation without Origin; must match Origin when present
-     */
-    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -11044,10 +11001,6 @@ export type GetAgentMessageFileContentData = {
     messageId: string
   }
   query: {
-    /**
-     * Session audience for file navigation without Origin; must match Origin when present
-     */
-    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -11101,10 +11054,6 @@ export type HeadAgentMessageFileContentData = {
     messageId: string
   }
   query: {
-    /**
-     * Session audience for file navigation without Origin; must match Origin when present
-     */
-    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**

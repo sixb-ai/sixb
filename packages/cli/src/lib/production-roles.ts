@@ -11,22 +11,20 @@ const PRODUCTION_ROLES = {
   orchestrator: { onEventPlane: true, usesStorageSchema: true },
   worker: { onEventPlane: true, usesStorageSchema: true },
   "worker-group": { onEventPlane: true, usesStorageSchema: true },
-  atlas: { onEventPlane: false, usesStorageSchema: false },
   app: { onEventPlane: false, usesStorageSchema: false },
 } as const satisfies Record<string, ProductionRoleFacts>
 
 interface ProductionRoleFacts {
   /**
-   * Whether the role publishes to or claims from the event plane. `atlas` and `app` only serve
-   * a browser bundle, so refusing to boot them on a process-local provider would block a valid
-   * UI-only container.
+   * Whether the role publishes to or claims from the event plane. `app` only serves a browser
+   * bundle, so refusing to boot it on a process-local provider would block a valid UI-only
+   * container.
    */
   readonly onEventPlane: boolean
 
   /**
-   * Whether the role should bring the storage schema up to date at startup. `atlas` and `app`
-   * are the tier facing the internet, and a container serving a bundle has no business holding
-   * a DDL grant.
+   * Whether the role should bring the storage schema up to date at startup. `app` is the tier
+   * facing the internet, and a container serving a bundle has no business holding a DDL grant.
    */
   readonly usesStorageSchema: boolean
 }

@@ -172,7 +172,7 @@ export const AGENT_RUN_DIAGNOSTIC_CODES = [
  *
  * Sixb writes these codes and the generated client is what reads them, so an open union would only
  * be honest if the HTTP schema were open too — and that costs the OpenAPI enum, the client's
- * autocompletion, and Atlas's exhaustive `switch`. Sixb owns both ends, so a new code is a minor
+ * autocompletion, and the app's exhaustive `switch`. Sixb owns both ends, so a new code is a minor
  * version bump: cheap here, and a broken `switch` is better than a 500 from `z.enum`.
  */
 export type AgentRunDiagnosticCode = (typeof AGENT_RUN_DIAGNOSTIC_CODES)[number]

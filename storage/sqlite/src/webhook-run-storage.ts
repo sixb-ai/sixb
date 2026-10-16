@@ -13,7 +13,6 @@ import type {
   WebhookRunStorage,
 } from "@sixb/core/storage"
 import { canRetryWebhookRun, WEBHOOK_RUN_FAILURE_CODES, WebhookRunError } from "@sixb/core/storage"
-import { installFreshSqliteSchema } from "./migrations"
 import {
   appendRunListFilters,
   hasEmptyStatuses,
@@ -45,8 +44,6 @@ export class SqliteWebhookRunStorage implements WebhookRunStorage {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
     this.executions = options.executions
-
-    if (this.connection.installFreshSchema) installFreshSqliteSchema(this.db)
   }
 
   async start(input: StartWebhookRunInput): Promise<WebhookRunRecord> {

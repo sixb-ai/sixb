@@ -1,4 +1,3 @@
-import { AgentExecutionTrace } from "@sixb/agent-ui"
 import type { GetWorkflowResponse, GetWorkflowRunResponse } from "@sixb/client"
 import {
   getWorkflowAgentNodeExecutionOptions,
@@ -10,6 +9,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Bot, ChevronRight, Cog, Hand, Workflow, Zap } from "lucide-react"
 import { type ComponentType, useMemo, useState } from "react"
 import { Link, useParams } from "react-router-dom"
+import { AgentExecutionTrace } from "../../agent/agent-execution-trace"
 import { useSections } from "../../sections/sections"
 import { workflowNodeIoSchemas, workflowSchemas } from "../ontology/workflows/utils"
 import { workflowCanvasHref } from "../routes"

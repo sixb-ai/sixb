@@ -299,7 +299,7 @@ export function isSharedAccessPublicPath(pathname: string, requestMethod: string
 /**
  * The header selects the grant. File GET/HEAD routes also accept the selector in the query, because
  * `<img>`, `<video>`, and download links cannot send headers. Either way it only names which
- * grant cookie to read; the HttpOnly cookie remains the credential, as with a file `audience`.
+ * grant cookie to read; the HttpOnly cookie remains the credential.
  */
 function selectSharedAccessGrant(request: Request): SharedAccessGrantSelection {
   const header = request.headers.get(SHARED_ACCESS_GRANT_HEADER_NAME)

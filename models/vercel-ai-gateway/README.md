@@ -44,7 +44,8 @@ Sixb sends strict JSON Schema requests and validates the returned output.
 - Require every object property and set `additionalProperties: false`; use nullable fields where needed.
 - Missing catalog metadata allows the request; it does not guarantee provider support.
 - Workflow agents check known model and schema incompatibilities before their first model call.
-- Failure phase and cause summaries are available in Atlas and the workflow run's `error.details`.
+- Failure phase and cause summaries are available on the app's run pages and in the workflow run's
+  `error.details`.
 
 Unsupported configurations raise `UnsupportedModelFeatureError`; endpoint failures raise
 `ModelProviderError`. There is no JSON-tool fallback.

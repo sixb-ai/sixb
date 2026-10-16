@@ -10,7 +10,8 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
   let stopping = false
   let restarting = false
   let pending = false
-  let hasCustomApp = false
+  // While the dev process runs and watches `app/`, its app server reloads app sources itself.
+  let appWatched = false
   let started = false
   let timer: ReturnType<typeof setTimeout> | undefined
   let startupTimer: ReturnType<typeof setTimeout> | undefined
@@ -58,7 +59,7 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
       while (pending && !stopping) {
         await stopChild()
         if (stopping) break
-        hasCustomApp = false
+        appWatched = false
         if (started) await watcher.refresh()
         else await watcher.ready
         if (stopping) break
@@ -87,10 +88,10 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
           if (child !== current || !message || typeof message !== "object") return
           if ("type" in message && message.type === "ready") {
             clearTimeout(startupTimer)
-            hasCustomApp = "hasCustomApp" in message && message.hasCustomApp === true
+            appWatched = "watchesApp" in message && message.watchesApp === true
             console.log(`[SixbDev] Ready (pid ${proc.pid}). Watching ${root}`)
           } else if ("type" in message && message.type === "startup-error") {
-            hasCustomApp = false
+            appWatched = false
           }
         })
         child = current
@@ -106,7 +107,7 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
             if (child !== current) return
             clearTimeout(startupTimer)
             child = null
-            hasCustomApp = false
+            appWatched = false
             if (!stopping && !restarting) {
               console.error(`[SixbDev] Dev process exited (${code}). Waiting for source changes.`)
             }
@@ -120,7 +121,7 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
 
   const watcher = watchDevSource(
     root,
-    () => hasCustomApp,
+    () => appWatched,
     (filename) => {
       if (stopping) return
       pending = true

@@ -93,7 +93,7 @@ Grant access to actions and workflows through [roles](../auth/authorization.md) 
 
 ## Use in your app
 
-Atlas and [Sixb apps](../apps/overview.md) include a chat interface. In your app, open `/agents`
+[Sixb apps](../apps/overview.md) include a chat interface. In your app, open `/agents`
 or embed `AgentPanel` in a page and give it context:
 
 File: `app/_components/invoice-assistant.tsx`

@@ -1,4 +1,4 @@
-const defaultApiUrl = "http://localhost:3002/api"
+const defaultApiUrl = "http://localhost:3001/api"
 
 export function apiBaseUrl(): string {
   const value = process.env.SIXB_API_URL ?? defaultApiUrl

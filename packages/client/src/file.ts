@@ -1,4 +1,4 @@
-import type { AuthSessionAudience, FileRef } from "@sixb/core"
+import type { FileRef } from "@sixb/core"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BYTES } from "@sixb/core/blob-storage"
 import { isSixbApiError, type SixbClient } from "./api"
 import { getClientSharedGrantId } from "./client-authority"
@@ -19,8 +19,6 @@ export interface ObjectFileContentUrlInput {
   /** Property path segments, without the leading `properties` segment. */
   readonly pathSegments: readonly string[]
   readonly fileRef: FileRef
-  /** Session audience for browser file navigation, e.g. "app" in split-domain deployments. */
-  readonly audience?: AuthSessionAudience
   readonly disposition?: "inline" | "attachment"
   readonly client?: SixbClient
 }
@@ -47,7 +45,6 @@ export function objectFileContentUrl(input: ObjectFileContentUrlInput): string {
         .map((segment) => segment.replaceAll("~", "~0").replaceAll("/", "~1"))
         .join("/")}`,
       disposition: input.disposition,
-      audience: input.audience,
       shareGrant: getClientSharedGrantId(client) ?? undefined,
       // Opaque cache key, not a historical-file selector. Include per-reference metadata.
       // Encode each field so Elysia won't interpret commas in filenames as an array.

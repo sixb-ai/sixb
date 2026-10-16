@@ -1,7 +1,7 @@
 /**
  * Grant builders for role definitions.
  *
- * Grants are plain data referencing application and runtime definitions
+ * Grants are plain data referencing runtime definitions
  * by id. They carry no enforcement logic — the authorization engine expands
  * each grant's selection into per-principal id sets at startup, so runtime
  * checks stay simple `set.has(id)` lookups.
@@ -31,10 +31,8 @@ import {
   isBreadthSelector,
 } from "./every"
 import type {
-  AccessGrant,
   AgentRunGrant,
   AppendGrant,
-  ApplicationDefinition,
   ApplyGrant,
   EditGrant,
   ManageGrant,
@@ -54,7 +52,7 @@ const VIEW_TARGETS = ["object", "dataset"] as const
 const RUN_TARGETS = ["workflow", "sync", "pipeline"] as const
 
 /**
- * Seven of the nine targets carry a `kind` discriminant naming themselves. The other two — an
+ * Six of the eight targets carry a `kind` discriminant naming themselves. The other two — an
  * `ObjectType` and an `ActionDefinition` — carry none, and each appears in exactly one builder that
  * allows no other undiscriminated target, so the allowed set names them unambiguously.
  */
@@ -63,7 +61,6 @@ const TARGET_BY_DEFINITION_KIND: Readonly<Partial<Record<string, BreadthTarget>>
   sync: "sync",
   pipeline: "pipeline",
   workflow: "workflow",
-  application: "application",
   connector: "connector",
   share: "share",
 }
@@ -82,7 +79,7 @@ function targetOfDefinition<TTarget extends BreadthTarget>(
   // `spec.universeKey` with a `TypeError` naming neither the role nor the definition.
   if (discriminated) {
     if (!isAllowedTarget(discriminated, allowedTargets)) {
-      // "one targeting x", not "a x definition": four of the eight targets start with a vowel, and
+      // "one targeting x", not "a x definition": object and action start with a vowel, and
       // this string ships in a release. Same reason the selector branch below writes no article.
       throw new SecurityValidationError(
         `[Sixb] ${label} accepts ${allowedTargets.join(" or ")} definitions, but received one targeting ${discriminated}.`
@@ -156,11 +153,6 @@ function resolveGrant<TDefinition extends { readonly id?: unknown }, TTarget ext
   // Dedupe explicit ids up front; resolution would dedupe via Set anyway.
   const ids = [...new Set(items.map((item) => definitionIdOf(item, label)))]
   return { target, selection: { all: false, ids } }
-}
-
-function access(input: GrantInput<ApplicationDefinition, "application">): AccessGrant {
-  const { selection } = resolveGrant(input, "can.access", ["application"])
-  return { kind: "grant", capability: "access", target: "application", selection }
 }
 
 function view<const TObjectTypeId extends string>(
@@ -270,13 +262,7 @@ function observe(input: "logs" | AgentUsageReference): ObserveGrant {
   if (input !== "logs" && !isAgentUsageReference(input)) {
     throw new SecurityValidationError('[Sixb] can.observe accepts "logs" or agent.usage.')
   }
-  const target = input === "logs" ? "logs" : "aiUsage"
-  return {
-    kind: "grant",
-    capability: "observe",
-    target,
-    selection: { all: false, ids: [target] },
-  }
+  return { kind: "grant", capability: "observe", target: input === "logs" ? "logs" : "aiUsage" }
 }
 
 function manage(input: GrantInput<ConnectorDefinition, "connector">): ManageGrant<"connector">
@@ -285,12 +271,7 @@ function manage(
   input: GrantInput<ConnectorDefinition, "connector"> | AgentUsageReference
 ): ManageGrant {
   if (isAgentUsageReference(input)) {
-    return {
-      kind: "grant",
-      capability: "manage",
-      target: "aiUsage",
-      selection: { all: false, ids: ["aiUsage"] },
-    }
+    return { kind: "grant", capability: "manage", target: "aiUsage" }
   }
   return {
     kind: "grant",
@@ -301,7 +282,6 @@ function manage(
 }
 
 export const can = {
-  access,
   view,
   edit,
   append,

@@ -18,12 +18,12 @@ bun run dev
 
 Everything runs locally. No database setup or API keys required.
 
-Open **[localhost:3001](http://localhost:3001)** and select **Locate** to see the starter app track
+Open **[localhost:3000](http://localhost:3000)** and select **Locate** to see the starter app track
 Sentinel-6B using public orbital data. Keep the terminal running; locating the satellite requires
 an internet connection.
 
 Open **Ontology** from the user menu to explore your model, or view the
-**[API documentation](http://localhost:3002/docs)**.
+**[API documentation](http://localhost:3001/docs)**.
 
 <div data-build-with-ai></div>
 

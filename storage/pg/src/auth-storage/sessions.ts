@@ -1,4 +1,3 @@
-import type { AuthSessionAudience } from "@sixb/core"
 import type {
   AuthSessionStore,
   CreateAuthSessionInput,
@@ -38,28 +37,6 @@ export class PgAuthSessionStore implements AuthSessionStore {
     return getSessionById(this.sql, params)
   }
 
-  async getActiveByUserId(params: {
-    readonly projectId: string
-    readonly userId: string
-    readonly audience: AuthSessionAudience
-    readonly now: Date
-  }): Promise<SessionRecord | null> {
-    const [row] = await this.sql<PgAuthSessionRow[]>`
-      SELECT *
-      FROM auth_sessions
-      WHERE project_id = ${params.projectId}
-        AND user_id = ${params.userId}
-        AND audience = ${params.audience}
-        AND revoked_at IS NULL
-        AND expires_at > ${params.now}
-        AND (absolute_expires_at IS NULL OR absolute_expires_at > ${params.now})
-      ORDER BY created_at DESC, id DESC
-      LIMIT 1
-    `
-
-    return row ? rowToSessionRecord(row) : null
-  }
-
   async listActiveByUserId(params: {
     readonly projectId: string
     readonly userId: string
@@ -82,7 +59,6 @@ export class PgAuthSessionStore implements AuthSessionStore {
   async findValidByTokenHash(params: {
     readonly projectId: string
     readonly id: string
-    readonly audience: AuthSessionAudience
     readonly tokenHash: string
     readonly now: Date
   }): Promise<SessionRecord | null> {
@@ -91,7 +67,6 @@ export class PgAuthSessionStore implements AuthSessionStore {
     if (
       !row ||
       row.refresh_token_hash !== null ||
-      row.audience !== params.audience ||
       row.token_hash !== params.tokenHash ||
       !isLiveSessionRow(row, params.now)
     ) {
@@ -169,7 +144,6 @@ export class PgAuthSessionStore implements AuthSessionStore {
   async renewIfValid(params: {
     readonly projectId: string
     readonly id: string
-    readonly audience: AuthSessionAudience
     readonly tokenHash: string
     readonly now: Date
     readonly expiresAt: Date
@@ -186,7 +160,6 @@ export class PgAuthSessionStore implements AuthSessionStore {
           last_seen_at = ${params.now}
       WHERE project_id = ${params.projectId}
         AND id = ${params.id}
-        AND audience = ${params.audience}
         AND token_hash = ${params.tokenHash}
         AND refresh_token_hash IS NULL
         AND revoked_at IS NULL
@@ -228,15 +201,10 @@ export class PgAuthSessionStore implements AuthSessionStore {
   async revokeActiveForUser(params: {
     readonly projectId: string
     readonly userId: string
-    readonly audience?: AuthSessionAudience
     readonly revokedAt: Date
   }): Promise<readonly SessionRecord[]> {
     return runPgTransaction(this.sql, async (tx) => {
-      const locks = [authLockKey("sessions", params.projectId, params.userId)]
-      if (params.audience) {
-        locks.push(authLockKey("sessions", params.projectId, params.userId, params.audience))
-      }
-      await lockAdvisoryKeys(tx, locks)
+      await lockAdvisoryKeys(tx, [authLockKey("sessions", params.projectId, params.userId)])
       return revokeActiveSessionsForUser(tx, params)
     })
   }

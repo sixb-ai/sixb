@@ -1,7 +1,7 @@
 # @sixb/server
 
-Sixb API server. Owns the REST API, auth routes, WebSocket API, and OpenAPI docs. The built-in
-Atlas UI is served by `@sixb/atlas`.
+Sixb API server. Owns the REST API, auth routes, WebSocket API, and OpenAPI docs. The project's
+app, with its built-in pages, is served by `@sixb/app`.
 
 ## Installation
 
@@ -19,33 +19,24 @@ const host = await createSixb({ /* providers, ontology, ... */ })
 
 const server = createSixbServer({
   host,
-  port: 3002,
+  port: 3001,
   browser: {
     publicOrigin: "https://api.example.com",
-    allowedOrigins: [
-      { origin: "https://atlas.example.com", audience: "atlas" },
-      { origin: "https://app.example.com", audience: "app" },
-    ],
+    allowedOrigins: ["https://app.example.com"],
   },
 })
 await server.start()
-// Server running at http://0.0.0.0:3002
-// OpenAPI docs at http://0.0.0.0:3002/docs
+// Server running at http://0.0.0.0:3001
+// OpenAPI docs at http://0.0.0.0:3001/docs
 ```
 
-Each configured audience identifies the browser application for exactly one origin. Configured
-origins are shown as invitation destinations and participate in `can.access(applications.atlas)` or
-`can.access(applications.app)` authorization.
+`allowedOrigins` lists the browser origins that may call the API with a session, normally the
+project's app. A sign-in or invitation returns only to one of them or to the API's own origin.
 
-File-content `GET`/`HEAD` routes accept `?audience=app` or `?audience=atlas` for
-browser navigations that omit `Origin`. Use `objectFileContentUrl({ ..., audience: "app" })`
-in a separate app. The audience must be configured in `allowedOrigins` or be the
-`apiOriginAudience`; an explicit `Origin` must match it. The server authenticates only
-the selected audience and still checks application and resource access. Omitting the
-selector preserves the API audience default (`atlas`). This selector applies only to
-file-content reads, including object, action/workflow run, and agent message files.
-It does not change authentication for other routes. API cookies must reach the request;
-with Sixb's `SameSite=Strict` cookies, use same-site app/API origins for embedding.
+File-content `GET`/`HEAD` routes serve browser navigations that omit `Origin`, such as an `<img>` or
+a link opened in a new tab, from the same session cookie. This covers object, action/workflow run,
+and agent message files. API cookies must reach the request; with Sixb's `SameSite=Strict` cookies,
+use same-site app/API origins for embedding.
 
 ## API Routes
 

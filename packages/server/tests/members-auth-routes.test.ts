@@ -89,14 +89,13 @@ async function seedSession(
     projectId,
     userId: params.userId,
     strategyId: "magic-link",
-    audience: "atlas",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-05-17T10:00:00.000Z"),
     expiresAt: new Date("2099-05-17T10:00:00.000Z"),
   })
 
   return {
-    cookie: `sixb_session=${credential.cookieValue}; sixb_csrf=${csrfToken}`,
+    cookie: `sixb_session_app=${credential.cookieValue}; sixb_csrf_app=${csrfToken}`,
     csrfHeader: { "x-sixb-csrf": csrfToken },
   }
 }
