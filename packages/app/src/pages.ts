@@ -6,6 +6,7 @@
 import { createElement } from "react"
 import { SectionIndex } from "./pages/section-page"
 
+export { AgentsPage } from "./agent/workspace"
 export {
   DataConnectorPage,
   DataConnectorsPage,

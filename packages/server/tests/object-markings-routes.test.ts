@@ -98,12 +98,11 @@ async function seedSession(storage: InMemoryStorage, userId: string, groupIds: r
     projectId,
     userId,
     strategyId: "test",
-    audience: "atlas",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-10-08T10:00:00.000Z"),
     expiresAt: new Date("2099-10-08T10:00:00.000Z"),
   })
-  return { cookie: `sixb_session=${credential.cookieValue}` }
+  return { cookie: `sixb_session_app=${credential.cookieValue}` }
 }
 
 describe("object routes with markings", () => {
@@ -137,7 +136,7 @@ describe("object routes with markings", () => {
       new Request("http://localhost/api/objects/query", {
         method: "POST",
         headers: {
-          cookie: `${headers.cookie}; sixb_csrf=csrf_1`,
+          cookie: `${headers.cookie}; sixb_csrf_app=csrf_1`,
           "x-sixb-csrf": "csrf_1",
           "content-type": "application/json",
         },
@@ -203,7 +202,7 @@ describe("event stream with markings", () => {
       hostname: "127.0.0.1",
       port,
       quiet: true,
-      browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),
+      browser: createTestBrowserPolicy({ apiOrigin: baseUrl, appOrigin: baseUrl }),
     })
 
     await server.start()

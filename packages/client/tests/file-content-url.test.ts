@@ -17,17 +17,6 @@ const input = {
 }
 
 describe("objectFileContentUrl", () => {
-  test("encodes an explicit navigation audience without changing the default", () => {
-    const client = createSixbClient({ baseUrl: "https://api.example.com" })
-    expect(new URL(objectFileContentUrl({ ...input, client })).searchParams.has("audience")).toBe(
-      false
-    )
-    for (const audience of ["app", "atlas"] as const) {
-      const url = new URL(objectFileContentUrl({ ...input, client, audience }))
-      expect(url.searchParams.get("audience")).toBe(audience)
-    }
-  })
-
   // Media elements cannot send the selector header. Regression proof: drop `shareGrant` from the
   // helper's query and the shared assertion fails.
   test("names the Share in the query only for a shared client", () => {

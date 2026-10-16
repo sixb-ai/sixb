@@ -1,57 +1,20 @@
-import {
-  type AuthSessionAudience,
-  applications,
-  DEFAULT_AUTH_SESSION_AUDIENCE,
-  isValidAuthSessionAudience,
-  resolveAuthSessionAudience,
-} from "@sixb/core"
-import { matchesPathPattern, normalizeRoutePath, SIXB_API_ROUTES } from "@sixb/core/internal/http"
-
-const fileNavigationRoutes = SIXB_API_ROUTES.filter(
-  (route) =>
-    (route.method === "GET" || route.method === "HEAD") && route.path.endsWith("/files/content")
-)
-
-export interface SixbBrowserOrigin {
-  readonly origin: string
-  readonly audience: AuthSessionAudience
-}
-
 export interface SixbApiBrowserPolicy {
   readonly publicOrigin?: string
-  readonly allowedOrigins: readonly SixbBrowserOrigin[]
-  readonly apiOriginAudience?: AuthSessionAudience
-}
-
-export interface ResolvedSixbBrowserOrigin {
-  readonly origin: string
-  readonly audience: AuthSessionAudience
+  /** The browser origins that may call the API with a session: the project's app. */
+  readonly allowedOrigins: readonly string[]
 }
 
 export interface ResolvedSixbApiBrowserPolicy {
   readonly publicOrigin?: string
-  readonly apiOriginAudience: AuthSessionAudience
-  readonly allowedOrigins: readonly ResolvedSixbBrowserOrigin[]
+  readonly allowedOrigins: readonly string[]
 }
 
 export interface RequestAuthContext {
-  readonly audience: AuthSessionAudience
   readonly browserOrigin?: string
   readonly absoluteReturnTo?: boolean
 }
 
-export interface AuthInvitationDestination {
-  readonly id: AuthSessionAudience
-  readonly label: string
-}
-
-export interface AuthInvitationDestinationOptions {
-  readonly destinations: readonly AuthInvitationDestination[]
-  readonly defaultDestinationId?: AuthSessionAudience
-}
-
 export interface AuthInvitationRedirectInput {
-  readonly destinationId?: AuthSessionAudience
   readonly returnTo?: string
 }
 
@@ -60,13 +23,11 @@ export type AuthInvitationRedirectContext = AuthRedirectContext
 export type ResolveRequestAuthContext = (request: Request) => RequestAuthContext
 
 export interface AuthRedirectInput {
-  readonly audience?: string | null
   readonly returnTo?: string | null
   readonly fallbackReturnToOrigin?: string
 }
 
 export interface AuthRedirectContext {
-  readonly audience: AuthSessionAudience
   readonly returnTo: string
   readonly requestOrigin: string
 }
@@ -83,46 +44,18 @@ export class BrowserOriginError extends Error {
 export function resolveApiBrowserPolicy(
   policy: SixbApiBrowserPolicy
 ): ResolvedSixbApiBrowserPolicy {
-  const apiOriginAudience = resolveAuthSessionAudience(
-    policy.apiOriginAudience ?? DEFAULT_AUTH_SESSION_AUDIENCE
-  )
-  const origins = new Map<string, ResolvedSixbBrowserOrigin>()
-  const audienceOrigins = new Map<AuthSessionAudience, string>()
+  const allowedOrigins = [
+    ...new Set(
+      policy.allowedOrigins.map((origin) => normalizeHttpOrigin(origin, "browser origin"))
+    ),
+  ]
 
-  for (const entry of policy.allowedOrigins) {
-    const origin = normalizeHttpOrigin(entry.origin, "browser origin")
-    const audience = resolveAuthSessionAudience(entry.audience)
-    const existingAudienceOrigin = audienceOrigins.get(audience)
-    if (existingAudienceOrigin && existingAudienceOrigin !== origin) {
-      throw new Error(
-        `[SixbServer] Auth audience '${audience}' is mapped to multiple browser origins.`
-      )
-    }
-    audienceOrigins.set(audience, origin)
-
-    const existing = origins.get(origin)
-    if (existing) {
-      if (existing.audience !== audience) {
-        throw new Error(
-          `[SixbServer] Browser origin '${origin}' is mapped to multiple auth audiences.`
-        )
-      }
-      continue
-    }
-
-    origins.set(origin, { origin, audience })
-  }
-
-  if (origins.size === 0) {
-    throw new Error("[SixbServer] API browser policy requires at least one allowed origin.")
-  }
-
+  // Empty is an API serving no browser app: only its own origin is admitted.
   return {
     publicOrigin: policy.publicOrigin
       ? normalizeHttpOrigin(policy.publicOrigin, "API public origin")
       : undefined,
-    apiOriginAudience,
-    allowedOrigins: [...origins.values()],
+    allowedOrigins,
   }
 }
 
@@ -143,67 +76,15 @@ export function resolveApiBrowserAuthContext(
   request: Request
 ): RequestAuthContext {
   const origin = normalizeRequestOrigin(request)
-  const fileAudience = resolveFileNavigationAudience(policy, request)
   if (!origin) {
-    return { audience: fileAudience ?? policy.apiOriginAudience, absoluteReturnTo: true }
+    return { absoluteReturnTo: true }
   }
 
-  const allowed = findAllowedBrowserOrigin(policy, origin)
-  if (allowed) {
-    assertFileAudienceMatchesOrigin(fileAudience, allowed.audience)
-    return {
-      audience: allowed.audience,
-      browserOrigin: allowed.origin,
-      absoluteReturnTo: true,
-    }
-  }
-
-  if (isSameOriginApiRequest(policy, origin, request)) {
-    assertFileAudienceMatchesOrigin(fileAudience, policy.apiOriginAudience)
-    return { audience: policy.apiOriginAudience, browserOrigin: origin, absoluteReturnTo: true }
+  if (isAllowedOrigin(policy, request, origin)) {
+    return { browserOrigin: origin, absoluteReturnTo: true }
   }
 
   throw new BrowserOriginError(`[SixbServer] Browser origin '${origin}' is not allowed.`)
-}
-
-// A URL audience selects credentials, never grants authority. Only file GET/HEAD
-// routes accept it; Origin remains authoritative whenever the browser sends one.
-function resolveFileNavigationAudience(
-  policy: ResolvedSixbApiBrowserPolicy,
-  request: Request
-): AuthSessionAudience | undefined {
-  const url = new URL(request.url)
-  if (
-    !fileNavigationRoutes.some(
-      (route) =>
-        route.method === request.method &&
-        matchesPathPattern(normalizeRoutePath(url.pathname), route.path)
-    )
-  ) {
-    return undefined
-  }
-  const values = url.searchParams.getAll("audience")
-  if (values.length === 0) return undefined
-  const audience = values[0]
-  if (
-    values.length !== 1 ||
-    !audience ||
-    !isValidAuthSessionAudience(audience) ||
-    (audience !== policy.apiOriginAudience &&
-      !policy.allowedOrigins.some((entry) => entry.audience === audience))
-  ) {
-    throw new BrowserOriginError("[SixbServer] File navigation audience is not allowed.")
-  }
-  return audience
-}
-
-function assertFileAudienceMatchesOrigin(
-  audience: AuthSessionAudience | undefined,
-  originAudience: AuthSessionAudience
-): void {
-  if (audience !== undefined && audience !== originAudience) {
-    throw new BrowserOriginError("[SixbServer] File navigation audience conflicts with Origin.")
-  }
 }
 
 export function isAllowedApiBrowserOrigin(
@@ -211,14 +92,7 @@ export function isAllowedApiBrowserOrigin(
   request: Request
 ): boolean {
   const origin = normalizeRequestOrigin(request)
-  if (!origin) {
-    return false
-  }
-
-  return (
-    findAllowedBrowserOrigin(policy, origin) !== null ||
-    isSameOriginApiRequest(policy, origin, request)
-  )
+  return origin !== null && isAllowedOrigin(policy, request, origin)
 }
 
 export function resolveApiBrowserAuthRedirectContext(
@@ -226,58 +100,21 @@ export function resolveApiBrowserAuthRedirectContext(
   request: Request,
   input: AuthRedirectInput
 ): AuthRedirectContext {
-  const audience = resolveRequiredAuthAudience(input.audience)
-  const returnTo = resolveApiBrowserReturnTo(policy, request, input, audience)
-
   return {
-    audience,
-    returnTo,
+    returnTo: resolveApiBrowserReturnTo(policy, request, input),
     requestOrigin: resolveApiBrowserPublicOrigin(policy, request),
   }
 }
 
-export function getApiBrowserInvitationDestinationOptions(
-  policy: ResolvedSixbApiBrowserPolicy
-): AuthInvitationDestinationOptions {
-  const destinations = policy.allowedOrigins.map((entry) => ({
-    id: entry.audience,
-    label: applications[entry.audience].label,
-  }))
-  const defaultDestinationId = destinations.some((destination) => destination.id === "app")
-    ? applications.app.id
-    : destinations.some((destination) => destination.id === "atlas")
-      ? applications.atlas.id
-      : undefined
-
-  return {
-    destinations,
-    ...(defaultDestinationId ? { defaultDestinationId } : {}),
-  }
-}
-
+/** An invitation lands where the inviter works, or on the app when the request has no Origin. */
 export function resolveApiBrowserInvitationRedirectContext(
   policy: ResolvedSixbApiBrowserPolicy,
   request: Request,
   input: AuthInvitationRedirectInput
 ): AuthInvitationRedirectContext {
   const authContext = resolveApiBrowserAuthContext(policy, request)
-  if (!input.destinationId) {
-    return resolveApiBrowserAuthRedirectContext(policy, request, {
-      audience: authContext.audience,
-      fallbackReturnToOrigin: authContext.browserOrigin,
-      returnTo: input.returnTo,
-    })
-  }
-
-  const destination = policy.allowedOrigins.find((entry) => entry.audience === input.destinationId)
-  if (!destination) {
-    throw new BrowserOriginError("[SixbServer] Invitation destination is not allowed.")
-  }
-  assertInvitationReturnToOrigin(input.returnTo, destination.origin)
-
   return resolveApiBrowserAuthRedirectContext(policy, request, {
-    audience: destination.audience,
-    fallbackReturnToOrigin: destination.origin,
+    fallbackReturnToOrigin: authContext.browserOrigin ?? policy.allowedOrigins[0],
     returnTo: input.returnTo,
   })
 }
@@ -289,51 +126,21 @@ export function resolveApiBrowserPublicOrigin(
   return policy.publicOrigin ?? new URL(request.url).origin
 }
 
-function findAllowedBrowserOrigin(
+function isAllowedOrigin(
   policy: ResolvedSixbApiBrowserPolicy,
+  request: Request,
   origin: string
-): ResolvedSixbBrowserOrigin | null {
-  return policy.allowedOrigins.find((entry) => entry.origin === origin) ?? null
-}
-
-function isSameOriginApiRequest(
-  policy: ResolvedSixbApiBrowserPolicy,
-  origin: string,
-  request: Request
 ): boolean {
-  const apiOrigin = resolveApiBrowserPublicOrigin(policy, request)
-  return origin === apiOrigin
-}
-
-function assertInvitationReturnToOrigin(
-  returnTo: string | undefined,
-  destinationOrigin: string
-): void {
-  if (!returnTo?.trim()) return
-
-  try {
-    if (new URL(returnTo).origin === destinationOrigin) return
-  } catch {
-    // Fall through to the same public validation error as an origin mismatch.
-  }
-
-  throw new BrowserOriginError("[SixbServer] Invitation return target is not allowed.")
-}
-
-function resolveRequiredAuthAudience(value: string | null | undefined): AuthSessionAudience {
-  const audience = value?.trim()
-  if (!audience || !isValidAuthSessionAudience(audience)) {
-    throw new BrowserOriginError("[SixbServer] Auth audience is invalid or missing.")
-  }
-
-  return audience
+  return (
+    policy.allowedOrigins.includes(origin) ||
+    origin === resolveApiBrowserPublicOrigin(policy, request)
+  )
 }
 
 function resolveApiBrowserReturnTo(
   policy: ResolvedSixbApiBrowserPolicy,
   request: Request,
-  input: AuthRedirectInput,
-  audience: AuthSessionAudience
+  input: AuthRedirectInput
 ): string {
   const rawReturnTo = input.returnTo?.trim()
   const value =
@@ -354,33 +161,16 @@ function resolveApiBrowserReturnTo(
     throw new BrowserOriginError("[SixbServer] Auth return target must be an absolute URL.")
   }
 
-  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
-    throw new BrowserOriginError("[SixbServer] Auth return target is not allowed.")
-  }
-
-  const returnAudience = resolveReturnToAudience(policy, request, url.origin)
-  if (returnAudience !== audience) {
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.username ||
+    url.password ||
+    !isAllowedOrigin(policy, request, url.origin)
+  ) {
     throw new BrowserOriginError("[SixbServer] Auth return target is not allowed.")
   }
 
   return url.toString()
-}
-
-function resolveReturnToAudience(
-  policy: ResolvedSixbApiBrowserPolicy,
-  request: Request,
-  origin: string
-): AuthSessionAudience | null {
-  const allowed = findAllowedBrowserOrigin(policy, origin)
-  if (allowed) {
-    return allowed.audience
-  }
-
-  if (origin === resolveApiBrowserPublicOrigin(policy, request)) {
-    return policy.apiOriginAudience
-  }
-
-  return null
 }
 
 function normalizeRequestOrigin(request: Request): string | null {

@@ -1,7 +1,7 @@
 import { appendFileSync } from "node:fs"
 
-// Kept apart from `runtime.ts`, which imports every worker package: `atlas` and `app` serve static
-// assets for as long as they run and must not hold that module graph to reuse these two helpers.
+// Kept apart from `runtime.ts`, which imports every worker package: `app` serves static assets for
+// as long as it runs and must not hold that module graph to reuse these two helpers.
 
 export async function stopQuietly(stopFn: (() => Promise<void>) | undefined | null): Promise<void> {
   if (!stopFn) return

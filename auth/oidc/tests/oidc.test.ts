@@ -72,7 +72,6 @@ class FakeOidcClient implements OidcClientAdapter {
 function sessionInput(id = "ses_1"): CompleteAuthSessionInput {
   return {
     id,
-    audience: "atlas",
     tokenHash: `${id}-hash`,
     createdAt: new Date("2026-05-17T10:00:00.000Z"),
     expiresAt: new Date("2026-05-24T10:00:00.000Z"),
@@ -103,7 +102,6 @@ async function startSignIn(input: {
   const start = await strategy.startOidcSignIn({
     projectId,
     authStorage: input.authStorage,
-    audience: "atlas",
     returnTo: input.returnTo ?? "/dashboard",
     requestOrigin: "http://localhost",
     now: new Date("2026-05-17T09:58:00.000Z"),
@@ -173,7 +171,6 @@ describe("oidc auth strategy", () => {
     })
     expect(attempt).toMatchObject({
       strategyId: "okta",
-      audience: "atlas",
       codeVerifier: "verifier",
       returnTo: "/dashboard",
     })
@@ -209,7 +206,6 @@ describe("oidc auth strategy", () => {
       now: new Date("2026-05-17T10:00:00.000Z"),
     })
 
-    expect(result.audience).toBe("atlas")
     expect(result.returnTo).toBe("/dashboard")
     expect(result.user).toMatchObject({
       email: "ava@acme.com",

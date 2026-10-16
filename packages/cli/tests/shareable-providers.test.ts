@@ -78,17 +78,15 @@ describe("assertShareableProviders", () => {
     ).toThrow(/requires a queues provider/)
   })
 
-  test("lets UI-only roles through", () => {
-    // `atlas` and `app` read auth.isEnabled() and the project id off the runtime and
-    // never publish or claim, so refusing to boot would block a valid UI container.
-    for (const role of ["atlas", "app"] as const) {
-      expect(() =>
-        assertShareableProviders(
-          sixbWith({ broker: new InMemoryBroker(), queues: new InMemoryQueues() }),
-          role
-        )
-      ).not.toThrow()
-    }
+  test("lets the UI-only role through", () => {
+    // `app` reads auth.isEnabled() and the project id off the runtime and never publishes or
+    // claims, so refusing to boot would block a valid UI container.
+    expect(() =>
+      assertShareableProviders(
+        sixbWith({ broker: new InMemoryBroker(), queues: new InMemoryQueues() }),
+        "app"
+      )
+    ).not.toThrow()
   })
 
   test("accepts providers that are shareable", () => {

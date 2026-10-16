@@ -196,13 +196,12 @@ async function seedSession(storage: InMemoryStorage, groupIds: readonly string[]
     projectId: "test-project",
     userId: `usr_${groupIds.join("_") || "none"}`,
     strategyId: "test",
-    audience: "atlas",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-06-30T12:00:00.000Z"),
     expiresAt: new Date("2099-06-30T12:00:00.000Z"),
   })
 
-  return { cookie: `sixb_session=${credential.cookieValue}` }
+  return { cookie: `sixb_session_app=${credential.cookieValue}` }
 }
 
 function fileRefJson(fileRef: FileRef): Record<string, string | number> {

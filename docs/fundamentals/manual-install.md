@@ -5,10 +5,11 @@ Add Sixb to an existing Bun and TypeScript project. For a new project, use the
 
 ## Install Sixb
 
-Use Bun **1.4.2 or later** and install the runtime and CLI:
+Use Bun **1.4.2 or later** and install the runtime, the CLI, and the app with the React packages
+it is built from:
 
 ```bash
-bun add @sixb/core @sixb/cli
+bun add @sixb/core @sixb/cli @sixb/app react react-dom react-router-dom @tanstack/react-query
 ```
 
 ## Define your first object
@@ -69,8 +70,8 @@ Run this from your project root:
 bun sixb dev
 ```
 
-Open your app at [localhost:3001](http://localhost:3001) and choose **Ontology** from the user
-menu to explore your model, or the [API documentation](http://localhost:3002/docs) to see its
+Open your app at [localhost:3000](http://localhost:3000) and choose **Ontology** from the user
+menu to explore your model, or the [API documentation](http://localhost:3001/docs) to see its
 endpoints.
 
 To add a React interface, see [Building apps](../apps/overview.md).

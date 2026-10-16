@@ -315,7 +315,7 @@ describe("Azure SAS uploads", () => {
       quiet: true,
       browser: {
         publicOrigin: "http://127.0.0.1:49011",
-        allowedOrigins: [{ origin: "http://app.localhost", audience: "app" }],
+        allowedOrigins: ["http://app.localhost"],
       },
     })
     await server.start()

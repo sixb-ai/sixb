@@ -18,9 +18,8 @@ The first start creates deterministic source files and populates Sixb through th
 dataset, pipeline, and projection path. The operations app and data plane do not require external
 credentials.
 
-- Northline Operations: <http://localhost:3001>
-- Atlas: <http://localhost:3000>
-- API documentation: <http://localhost:3002/docs>
+- Northline Operations: <http://localhost:3000>
+- API documentation: <http://localhost:3001/docs>
 
 The Northline home route is a branded assistant landing with a centered prompt. Once it creates a
 durable thread, navigating into the operations app hands that thread to the persistent side dock in
@@ -45,7 +44,7 @@ assistant turns are unavailable. Customize the model catalog in [`ai/models.ts`]
 and project tools in [`ai/tools.ts`](./ai/tools.ts). Agent commands run through the local sandbox
 provider by default.
 
-To exercise an agent inside a workflow, open **Workflows → Agent service assessment** in Atlas and
+To exercise an agent inside a workflow, open **Ontology → Workflows → Agent service assessment** in the app and
 request a run with these values:
 
 ```text
@@ -103,8 +102,8 @@ PriorityCare 24/7 contract requires a response within 90 minutes. From Northline
 5. Approve the repair quote for customer authorization.
 6. Complete field work, verify telemetry recovery, and close the case.
 
-The same objects, links and rule state remain inspectable in Atlas, the action and workflow runs
-under **Observability** in the app, and the datasets and projections under **Data**.
+The same objects, links and rule state remain inspectable under **Ontology** in the app, the action
+and workflow runs under **Observability**, and the datasets and projections under **Data**.
 
 ## Demo commands
 
@@ -139,8 +138,8 @@ committed.
 
 3. Put `DATABASE_URL` and `REDIS_URL` in the project's `.env` on the server;
    `bun run deploy check` prints where it goes.
-4. Deploy the committed code with `bun run deploy`. It serves `northline-app`, `northline-atlas`,
-   and `northline-api` under your domain.
+4. Deploy the committed code with `bun run deploy`. It serves `northline-app` and
+   `northline-api` under your domain.
 
 ## Source ownership
 

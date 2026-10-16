@@ -1,9 +1,5 @@
 import { randomUUID } from "node:crypto"
-import {
-  type AuthorizationContext,
-  canAccessApplication,
-  resolveAuthorizationContext,
-} from "../authorization"
+import { type AuthorizationContext, resolveAuthorizationContext } from "../authorization"
 import {
   canPerformMembershipOperation,
   type GroupReference,
@@ -33,13 +29,8 @@ import {
   hashAccessTokenSecret,
   parseAccessTokenValue,
 } from "./access-tokens"
-import { type AuthSessionAudience, DEFAULT_AUTH_SESSION_AUDIENCE } from "./audience"
 import { getRequestClientAddress } from "./client-address"
-import {
-  getCookie,
-  type ResolvedAuthCookieOptions,
-  resolveAuthCookieOptionsForAudience,
-} from "./cookies"
+import { getCookie, type ResolvedAuthCookieOptions } from "./cookies"
 import { AuthRuntimeError } from "./errors"
 import { SessionCache } from "./session-cache"
 import {
@@ -108,7 +99,6 @@ import {
   isInvitationDeliveryAuthStrategy,
   normalizePagination,
   resolveAuthConfig,
-  resolveAuthSessionAudience,
   resolveInvitationExpiresAt,
 } from "./validation"
 
@@ -184,8 +174,8 @@ export class AuthRuntime {
     }
   }
 
-  getCookieOptions(options: AuthSessionResolutionOptions = {}): ResolvedAuthCookieOptions {
-    return resolveAuthCookieOptionsForAudience(this.config.cookies, options.audience)
+  getCookieOptions(): ResolvedAuthCookieOptions {
+    return this.config.cookies
   }
 
   assertCanServeHttp(params: { readonly production: boolean }): void {
@@ -240,8 +230,6 @@ export class AuthRuntime {
       return { authenticated: false, reason: "auth_disabled" }
     }
 
-    const audience = resolveAuthSessionAudience(options.audience)
-
     if (options.credentialSource === "any") {
       const tokenValue = getBearerAccessTokenValue(request)
       if (tokenValue?.startsWith(SESSION_ACCESS_TOKEN_PREFIX)) {
@@ -257,15 +245,14 @@ export class AuthRuntime {
       }
     }
 
-    return this.resolveCookieSession(request, audience, options.sessionActivity)
+    return this.resolveCookieSession(request, options.sessionActivity)
   }
 
   private async resolveCookieSession(
     request: Request,
-    audience: ReturnType<typeof resolveAuthSessionAudience>,
     activity: AuthSessionResolutionOptions["sessionActivity"]
   ): Promise<AuthSessionResult> {
-    const cookieOptions = this.getCookieOptions({ audience })
+    const cookieOptions = this.getCookieOptions()
     const cookieValue = getCookie(request, cookieOptions.sessionCookieName)
     if (!cookieValue) {
       return { authenticated: false, reason: "missing_cookie" }
@@ -283,7 +270,6 @@ export class AuthRuntime {
       sessionId: parts.sessionId,
       tokenHash,
       transport: "cookie",
-      audience,
       nowMs,
     })
     if (cached) {
@@ -298,7 +284,6 @@ export class AuthRuntime {
     let session = await storage.sessions.findValidByTokenHash({
       projectId: this.projectId,
       id: parts.sessionId,
-      audience,
       tokenHash,
       now,
     })
@@ -312,7 +297,6 @@ export class AuthRuntime {
       const renewed = await storage.sessions.renewIfValid({
         projectId: this.projectId,
         id: parts.sessionId,
-        audience,
         tokenHash,
         now,
         expiresAt: this.getRenewedSessionExpiresAt(session, nowMs),
@@ -388,7 +372,6 @@ export class AuthRuntime {
     this.sessionCache?.set({
       sessionId: session.id,
       tokenHash,
-      audience: session.audience,
       session: result,
       nowMs: now.getTime(),
       sessionExpiresAtMs: session.expiresAt.getTime(),
@@ -418,8 +401,6 @@ export class AuthRuntime {
         projectId: this.projectId,
         userId: input.userId,
         strategyId: "device",
-        // A native session belongs to no web app. The column needs a value; nothing reads it.
-        audience: DEFAULT_AUTH_SESSION_AUDIENCE,
         tokenHash: tokens.tokenHash,
         createdAt: input.now,
         ...this.createSessionDeadlines(input.now),
@@ -1170,7 +1151,7 @@ export class AuthRuntime {
     return { user: reactivated, groupIds, managedGroupIds }
   }
 
-  /** The caller's active sessions across every audience, most recently active first. */
+  /** The caller's active sessions, most recently active first. */
   async listSessions(caller: AuthenticatedUserRequestSession): Promise<readonly SessionRecord[]> {
     return this.requireAuthStorage().sessions.listActiveByUserId({
       projectId: this.projectId,
@@ -1202,7 +1183,7 @@ export class AuthRuntime {
     return true
   }
 
-  /** End every active session of the caller, across audiences. Returns how many ended. */
+  /** End every active session of the caller. Returns how many ended. */
   async revokeAllSessions(caller: AuthenticatedUserRequestSession): Promise<number> {
     const revoked = await this.requireAuthStorage().sessions.revokeActiveForUser({
       projectId: this.projectId,
@@ -1291,7 +1272,6 @@ export class AuthRuntime {
     }
 
     await this.assertCanInviteRecipient(strategy, authStorage, input.email, now)
-    this.assertInvitationApplicationAccess(groupIds, destination.audience)
 
     const invitation = await authStorage.invitations.createOrUpdateActive({
       id: `inv_${randomUUID()}`,
@@ -1311,7 +1291,6 @@ export class AuthRuntime {
         projectId: this.projectId,
         authStorage,
         invitation,
-        audience: destination.audience,
         returnTo: destination.returnTo,
         requestOrigin: destination.requestOrigin,
         revealLink: input.revealLink,
@@ -1456,27 +1435,6 @@ export class AuthRuntime {
     }
 
     return { state: "enabled" }
-  }
-
-  private assertInvitationApplicationAccess(
-    groupIds: readonly string[],
-    audience: AuthSessionAudience
-  ): void {
-    // Check only the groups this invitation assigns. Existing memberships may
-    // be outside the caller's policy scope and must not affect this response.
-    const roles = this.security.listResolvedRoles()
-    const authorization = resolveAuthorizationContext({
-      principal: { type: "user", id: "invited-user" },
-      groupIds,
-      roles,
-    })
-
-    if (canAccessApplication(authorization, roles, audience)) return
-
-    throw new AuthRuntimeError(
-      "authorization_denied",
-      `[Sixb] Invitation groups do not grant access to application '${audience}'.`
-    )
   }
 
   private async assertCanInviteRecipient(

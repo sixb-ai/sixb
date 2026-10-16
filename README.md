@@ -30,8 +30,8 @@ bun install
 bun run dev
 ```
 
-No database setup or API keys required. Open your [app](http://localhost:3001),
-[Atlas](http://localhost:3000), or the [API docs](http://localhost:3002/docs).
+No database setup or API keys required. Open your [app](http://localhost:3000) or the
+[API docs](http://localhost:3001/docs).
 
 [Getting started →](https://docs.sixb.ai/get-started)
 
@@ -80,13 +80,14 @@ The built-in [AI agent](https://docs.sixb.ai/models) works with that same model 
 in a sandbox. Choose the models it can use. In chat, it inherits the user's permissions; in a
 workflow, you choose its access.
 
-## Meet Atlas
+## Built into every app
 
-Atlas comes with Sixb. Explore your model, inspect its data, and follow what runs through it.
+Every Sixb app comes with pages to explore your model, inspect its data, and follow what runs
+through it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/brand/atlas-ontology-dark.png">
-  <img src="docs/brand/atlas-ontology.png" alt="The current Atlas ontology graph, with Quote selected and its relationships to customers, facilities, service cases, and visits visible" width="100%">
+  <img src="docs/brand/atlas-ontology.png" alt="The ontology graph, with Quote selected and its relationships to customers, facilities, service cases, and visits visible" width="100%">
 </picture>
 
 **Explore the model.** See how your types connect, then inspect their properties, relationships, and actions.
@@ -96,7 +97,7 @@ Atlas comes with Sixb. Explore your model, inspect its data, and follow what run
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/brand/atlas-workflow-dark.png">
-  <img src="docs/brand/atlas-workflow.png" alt="An Atlas service-response workflow run paused at a human review step before dispatching a work order" width="100%">
+  <img src="docs/brand/atlas-workflow.png" alt="A service-response workflow run paused at a human review step before dispatching a work order" width="100%">
 </picture>
 
 **Follow the work.** Inspect a workflow run from its input through human review and execution.
@@ -115,8 +116,8 @@ Its interface, assistant, and automation work with the same model of customers, 
   </picture>
 </a>
 
-[Open app](https://northline.sixb.ai) · [Explore Atlas](https://atlas.northline.sixb.ai) ·
-[API docs](https://northline.sixb.ai/docs) · [Source](examples/northline)
+[Open app](https://northline.sixb.ai) · [API docs](https://northline.sixb.ai/docs) ·
+[Source](examples/northline)
 
 ## Explore further
 

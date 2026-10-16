@@ -9,13 +9,11 @@ import { Elysia, ParseError } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
 import { zodToJsonSchema } from "zod-to-json-schema"
 import {
-  type AuthInvitationDestinationOptions,
   type AuthInvitationRedirectContext,
   type AuthInvitationRedirectInput,
   BrowserOriginError,
   createApiBrowserAuthContextResolver,
   createApiBrowserAuthRedirectContextResolver,
-  getApiBrowserInvitationDestinationOptions,
   isAllowedApiBrowserOrigin,
   type RequestAuthContext,
   type ResolveAuthRedirectContext,
@@ -144,10 +142,6 @@ export class SixbServer {
 
   resolveAuthRequestOrigin(request: Request): string {
     return resolveApiBrowserPublicOrigin(this.apiBrowserPolicy, request)
-  }
-
-  getInvitationDestinationOptions(_request: Request): AuthInvitationDestinationOptions {
-    return getApiBrowserInvitationDestinationOptions(this.apiBrowserPolicy)
   }
 
   resolveInvitationRedirectContext(
@@ -439,10 +433,8 @@ export function createSixbApi(server: SixbServer) {
 
   const authExperience = server.getAuthExperience()
   registerAuthRoutes(app, host, {
-    resolveAuthContext: (request) => server.resolveAuthContext(request),
     resolveAuthRedirectContext: (request, input) =>
       server.resolveAuthRedirectContext(request, input),
-    getInvitationDestinationOptions: (request) => server.getInvitationDestinationOptions(request),
     resolveAuthRequestOrigin: (request) => server.resolveAuthRequestOrigin(request),
     authExperience: authExperience && { ...authExperience, locale: host.locale },
     resolveInvitationRedirectContext: (request, input) =>
@@ -451,13 +443,8 @@ export function createSixbApi(server: SixbServer) {
   registerHttpRoutes(app, host, {
     sharedAccess,
     connectorConnections: {
-      resolveReturnTo: (request, returnTo) => {
-        const authContext = server.resolveAuthContext(request)
-        return server.resolveAuthRedirectContext(request, {
-          audience: authContext.audience,
-          returnTo,
-        }).returnTo
-      },
+      resolveReturnTo: (request, returnTo) =>
+        server.resolveAuthRedirectContext(request, { returnTo }).returnTo,
       resolveCallbackUrl: (request) =>
         new URL("/auth/connectors/callback", server.resolveAuthRequestOrigin(request)).toString(),
     },

@@ -1,4 +1,3 @@
-export { applications } from "./applications"
 export type {
   DefineGroupOptions,
   DefineMarkingOptions,
@@ -20,10 +19,8 @@ export {
 export type { SecurityDefinitionCatalog, SecurityRegistryOptions } from "./registry"
 export { SecurityRegistry } from "./registry"
 export type {
-  AccessGrant,
   AgentRunGrant,
   AppendGrant,
-  ApplicationDefinition,
   ApplyGrant,
   EditGrant,
   GrantCapability,

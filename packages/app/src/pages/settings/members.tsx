@@ -43,11 +43,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   Input,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Sheet,
   SheetContent,
   SheetDescription,
@@ -732,7 +727,6 @@ function MemberMenu({
 interface InviteBody {
   email: string
   groupIds?: string[]
-  destinationId?: "atlas" | "app"
   revealLink?: boolean
 }
 
@@ -754,7 +748,6 @@ function InviteDialog({
   const allMessages = useSettingsMessages()
   const messages = allMessages.members.invite
   const [email, setEmail] = useState("")
-  const [destinationId, setDestinationId] = useState("")
   const [groupIds, setGroupIds] = useState<string[]>([])
   const [revealLink, setRevealLink] = useState(false)
 
@@ -762,7 +755,6 @@ function InviteDialog({
   useEffect(() => {
     if (!open) return
     setEmail("")
-    setDestinationId("")
     setGroupIds([])
     setRevealLink(false)
   }, [open])
@@ -773,13 +765,8 @@ function InviteDialog({
     setGroupIds((previous) => previous.filter((groupId) => allowed.has(groupId)))
   }, [options])
 
-  const destinations = options.destinations
-  const destination = destinations.some((candidate) => candidate.id === destinationId)
-    ? destinationId
-    : (options.defaultDestinationId ?? destinations[0]?.id ?? "")
   const canSubmit =
     email.trim().length > 0 &&
-    (destinations.length === 0 || destination.length > 0) &&
     (groupIds.length > 0 || options.canInviteWithoutGroups) &&
     !isSubmitting
 
@@ -789,7 +776,6 @@ function InviteDialog({
     onSubmit({
       email: email.trim(),
       ...(groupIds.length > 0 ? { groupIds } : {}),
-      ...(destination === "atlas" || destination === "app" ? { destinationId: destination } : {}),
       ...(revealLink ? { revealLink: true } : {}),
     })
   }
@@ -815,26 +801,6 @@ function InviteDialog({
                 placeholder={messages.emailPlaceholder}
               />
             </Field>
-            {destinations.length > 1 ? (
-              <Field label={messages.destination}>
-                <Select
-                  value={destination || undefined}
-                  onValueChange={setDestinationId}
-                  disabled={isSubmitting}
-                >
-                  <SelectTrigger aria-label={messages.destination} className="w-full">
-                    <SelectValue placeholder={messages.destinationPlaceholder} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {destinations.map((candidate) => (
-                      <SelectItem key={candidate.id} value={candidate.id}>
-                        {candidate.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            ) : null}
             <Field
               label={messages.groups}
               hint={

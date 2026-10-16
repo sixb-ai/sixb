@@ -9,13 +9,14 @@ import { createTailwindCssCompiler } from "../src/tailwind"
 // Links already-installed workspace packages into a fixture project's
 // node_modules, the way a real app would have them installed.
 async function linkDepsInto(projectRoot: string, packages: readonly string[]): Promise<void> {
-  const atlasRoot = resolve(import.meta.dir, "..", "..", "atlas")
+  // Resolved as this package resolves them.
+  const appRoot = resolve(import.meta.dir, "..")
   const rokuRoot = resolve(import.meta.dir, "..", "..", "..", "examples", "roku-tv")
 
   for (const name of packages) {
     let packageDir: string
     try {
-      packageDir = dirname(Bun.resolveSync(`${name}/package.json`, atlasRoot))
+      packageDir = dirname(Bun.resolveSync(`${name}/package.json`, appRoot))
     } catch {
       packageDir = dirname(Bun.resolveSync(`${name}/package.json`, rokuRoot))
     }
@@ -181,7 +182,6 @@ describe("custom app Tailwind build (e2e)", () => {
       "@tanstack/react-query",
       "@sixb/app",
       "@sixb/client",
-      "@sixb/agent-ui",
       "@sixb/ui",
     ])
     const appDir = join(tempRoot, "app")
@@ -242,12 +242,13 @@ describe("custom app Tailwind build (e2e)", () => {
     // The compiled stylesheet lands under .sixb/generated, not app/.
     // Canary classes, one per scanned source — proves Tailwind compiled the app's own page plus the
     // linked component libraries, not just one of them. `line-through` is the app page, `max-h-60`
-    // comes only from @sixb/agent-ui, `h-dvh` only from @sixb/app. (Repoint these if a class is
-    // removed from its source rather than asserting a class that no longer exists.)
+    // comes only from the agent's components, `scroll-mt-4` only from the built-in pages.
+    // (Repoint these if a class is removed from its source rather than asserting a class that no
+    // longer exists.)
     const generatedCss = await readFile(join(tempRoot, ".sixb", "generated", "app.css"), "utf-8")
     expect(generatedCss).toContain("line-through")
     expect(generatedCss).toContain("max-h-60")
-    expect(generatedCss).toContain("h-dvh")
+    expect(generatedCss).toContain("scroll-mt-4")
     expect(generatedCss.lastIndexOf("--background: #123456")).toBeGreaterThan(
       generatedCss.lastIndexOf("--background: #fafafa")
     )
@@ -257,7 +258,7 @@ describe("custom app Tailwind build (e2e)", () => {
       "utf-8"
     )
     expect(generatedRuntime).toContain('import "./app.css"')
-    expect(generatedRuntime).not.toContain('import "./agent-ui.css"')
+    expect(generatedRuntime).not.toContain('import "./framework.css"')
 
     // The bundled output ships the compiled utility, proving the generated
     // entry imported the compiled CSS rather than the raw Tailwind source.

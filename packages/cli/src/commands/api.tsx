@@ -3,7 +3,7 @@ import { resolve } from "node:path"
 import { createSixbServer, type SixbServer } from "@sixb/server"
 import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
 import type { LoadedSixbHost } from "../lib/loadSixb"
-import { builtAppOutdir, hasBuiltCustomApp, loadProductionSixb } from "../lib/production"
+import { builtAppOutdir, loadProductionSixb } from "../lib/production"
 import { runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
 import { stopSixbProviders } from "../lib/runtime"
 import { migrateStorageForRole } from "../lib/storage-migration"
@@ -17,7 +17,6 @@ export interface ApiOptions {
   apiPort?: string
   apiHost?: string
   apiPublicOrigin?: string
-  atlasPublicOrigin?: string
   appPublicOrigin?: string
   trustedProxies?: string
 }
@@ -51,7 +50,6 @@ export async function runApi(options: ApiOptions = {}) {
     })
 
     const appOutdir = builtAppOutdir(loaded.buildOutdir)
-    const hasCustomApp = await hasBuiltCustomApp(appOutdir)
     const authExperienceOutdir = resolve(appOutdir, "auth")
     const hasAuthExperience = await stat(resolve(authExperienceOutdir, "index.html"))
       .then(() => true)
@@ -63,9 +61,7 @@ export async function runApi(options: ApiOptions = {}) {
       port: options.port,
       apiPort: options.apiPort,
       apiPublicOrigin: options.apiPublicOrigin,
-      atlasPublicOrigin: options.atlasPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,
-      hasCustomApp,
     })
 
     const trustedProxies = (options.trustedProxies ?? process.env.SIXB_TRUSTED_PROXIES ?? "")

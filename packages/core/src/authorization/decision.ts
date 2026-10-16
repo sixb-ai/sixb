@@ -10,7 +10,6 @@
  * is unrestricted.
  */
 
-import type { AuthSessionAudience } from "../auth/audience"
 import {
   type ResolvedRuntimeAuthorization,
   resolveExecutionScopeAuthorization,
@@ -18,12 +17,11 @@ import {
 } from "../execution/authorization"
 import type { ExecutionContext, RuntimeAuthorization } from "../execution/types"
 import { AuthorizationError } from "./errors"
-import type { GrantKind } from "./grant-kinds"
+import type { SingletonGrantKind, TargetedGrantKind } from "./grant-kinds"
 import type { AuthorizationContext, GrantIndex } from "./types"
 
 /** Something a principal may attempt, paired with the resource it targets. */
 export type AuthzRequest =
-  | { readonly kind: "application.access"; readonly audience: AuthSessionAudience }
   | { readonly kind: "object.view"; readonly objectTypeId: string }
   | { readonly kind: "dataset.view"; readonly datasetId: string }
   | { readonly kind: "object.edit"; readonly objectTypeId: string }
@@ -59,13 +57,11 @@ interface AuthorizedRuntime {
 // the two can never drift. `kind` is the resolved-index key, so enforcement is
 // a direct lookup with no per-target dispatch.
 type Atom =
-  | { readonly kind: "run:agent" }
-  | { readonly kind: Exclude<GrantKind, "run:agent">; readonly id: string }
+  | { readonly kind: SingletonGrantKind }
+  | { readonly kind: TargetedGrantKind; readonly id: string }
 
 function atomsFor(request: AuthzRequest): readonly Atom[] {
   switch (request.kind) {
-    case "application.access":
-      return [{ kind: "access:application", id: request.audience }]
     case "object.view":
       return [{ kind: "view:object", id: request.objectTypeId }]
     case "dataset.view":
@@ -87,11 +83,11 @@ function atomsFor(request: AuthzRequest): readonly Atom[] {
     case "agent.run":
       return [{ kind: "run:agent" }]
     case "logs.observe":
-      return [{ kind: "observe:logs", id: "logs" }]
+      return [{ kind: "observe:logs" }]
     case "aiUsage.observe":
-      return [{ kind: "observe:aiUsage", id: "aiUsage" }]
+      return [{ kind: "observe:aiUsage" }]
     case "aiUsage.manage":
-      return [{ kind: "manage:aiUsage", id: "aiUsage" }]
+      return [{ kind: "manage:aiUsage" }]
     case "connector.manage":
       return [{ kind: "manage:connector", id: request.connectorId }]
     case "object.query":
@@ -100,20 +96,11 @@ function atomsFor(request: AuthzRequest): readonly Atom[] {
 }
 
 function atomKey(atom: Atom): string {
-  if (atom.kind === "run:agent") return atom.kind
-  if (
-    atom.kind === "observe:logs" ||
-    atom.kind === "observe:aiUsage" ||
-    atom.kind === "manage:aiUsage"
-  ) {
-    return atom.kind
-  }
-  return `${atom.kind}:${atom.id}`
+  return "id" in atom ? `${atom.kind}:${atom.id}` : atom.kind
 }
 
 function holds(grants: GrantIndex, atom: Atom): boolean {
-  if (atom.kind === "run:agent") return grants[atom.kind]
-  return grants[atom.kind].has(atom.id)
+  return "id" in atom ? grants[atom.kind].has(atom.id) : grants[atom.kind]
 }
 
 /** Resolve a request against a principal's grants. Never throws. */
@@ -267,8 +254,6 @@ function deniedMessage(
 ): string {
   const principalId = authorization?.principal.id ?? "unknown"
   switch (request.kind) {
-    case "application.access":
-      return `[Sixb] Principal '${principalId}' is not allowed to access application '${request.audience}'.`
     case "object.view":
       return `[Sixb] Principal '${principalId}' is not allowed to view object type '${request.objectTypeId}'.`
     case "dataset.view":

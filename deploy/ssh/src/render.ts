@@ -81,7 +81,7 @@ export function renderUnit(release: DeployRelease, layout: DeploymentLayout): st
 export function renderCaddySnippet(release: DeployRelease): string {
   const sites = release.services.flatMap((service) => {
     if (!service.http) return []
-    const pages = service.name === "app" || service.name === "atlas"
+    const pages = service.name === "app"
     return [
       [
         `${service.http.domain} {`,
@@ -95,7 +95,7 @@ export function renderCaddySnippet(release: DeployRelease): string {
 }
 
 /**
- * While the app or Atlas is down — during a deploy, or an outage — a browser asking for a page
+ * While the app is down — during a deploy, or an outage — a browser asking for a page
  * gets the update page instead of Caddy's bare error. Other requests keep the error.
  */
 function updatePageOnProxyErrors(): string[] {

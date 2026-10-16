@@ -31,7 +31,6 @@ describe("deploy config validation", () => {
       env: { SIXB_ERROR_EMAIL_TO: "ops@example.com" },
       services: {
         api: { domain: "api.example.com", env: { POSTGRES_POOL_MAX: "6" }, process: {} },
-        atlas: false,
         app: true,
         orchestrator: { process: { killTimeoutMs: 30_000 } },
         scheduler: false,
@@ -67,6 +66,10 @@ describe("deploy config validation", () => {
       "Ports belong to the target, such as `new SshTarget({ ports: { api: 3012 } })`."
     )
     rejects(config({ services: { sentinel: true } }), "Unknown deploy setting 'services.sentinel'")
+    rejects(
+      config({ services: { atlas: false } }),
+      "Atlas's pages are part of the app now; remove the setting and configure `app`."
+    )
   })
 
   test("runs HTTP and single-instance services as one process", () => {

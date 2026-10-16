@@ -391,8 +391,6 @@ export {
 
 export type {
   AuthCookieOptions,
-  AuthSessionAudience,
-  AuthSessionAudienceOptions,
   AuthSessionOptions,
   AuthStrategy,
   AuthStrategyKind,
@@ -401,22 +399,14 @@ export type {
   Principal,
   SixbAuthConfig,
 } from "./auth"
-export {
-  DEFAULT_AUTH_SESSION_AUDIENCE,
-  isValidAuthSessionAudience,
-  principalsEqual,
-  resolveAuthSessionAudience,
-  SYSTEM_PRINCIPAL,
-} from "./auth"
+export { principalsEqual, SYSTEM_PRINCIPAL } from "./auth"
 
 // ── Authorization ──────────────────────────────────────────
 
 export type { AuthorizationContext, GrantIndex, GrantKind } from "./authorization"
 export {
   AuthorizationError,
-  canAccessApplication,
   isAllowed,
-  isApplicationAccessControlled,
   resolveAuthorizationContext,
 } from "./authorization"
 
@@ -440,10 +430,8 @@ export type {
 // ── Security Definitions ───────────────────────────────────
 
 export type {
-  AccessGrant,
   AgentRunGrant,
   AppendGrant,
-  ApplicationDefinition,
   ApplyGrant,
   BreadthSelector,
   BreadthTarget,
@@ -476,7 +464,6 @@ export type {
   ViewGrantTarget,
 } from "./security"
 export {
-  applications,
   can,
   defineGroup,
   defineMarking,

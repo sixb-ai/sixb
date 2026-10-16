@@ -44,9 +44,9 @@ export async function renderCliError(
   )
 }
 
-// The entrypoint and the browser roles render through these rather than JSX of their own: a module
-// with JSX loads React as soon as it is evaluated, and `atlas` and `app` load neither React nor
-// Ink outside a terminal.
+// The entrypoint and the app role render through these rather than JSX of their own: a module
+// with JSX loads React as soon as it is evaluated, and `app` loads neither React nor Ink outside a
+// terminal.
 
 export async function renderVersion(version: string): Promise<void> {
   await renderStatic(<VersionView version={version} />)
@@ -481,7 +481,6 @@ export function DevView({
   apiUrl,
   apiDocsUrl,
   wsUrl,
-  uiUrl,
   appUrl,
   workers = [],
   warnings = [],
@@ -490,8 +489,8 @@ export function DevView({
   apiUrl: string
   apiDocsUrl: string
   wsUrl: string
-  uiUrl: string | null
-  appUrl?: string | null
+  /** `null` when the app could not start; a warning says why. */
+  appUrl: string | null
   workers?: readonly { readonly type: string; readonly concurrency: number }[]
   warnings?: readonly string[]
 }) {
@@ -500,22 +499,15 @@ export function DevView({
     { label: "API docs", value: apiDocsUrl },
     { label: "Events", value: wsUrl },
   ]
-  if (uiUrl) {
-    serverItems.push({ label: "Atlas UI", value: uiUrl })
-  }
 
   return (
     <Box flexDirection="column">
       <Text bold>sixb dev</Text>
       <Text dimColor>{name}</Text>
       <Spacer />
+      <ServicePanel name="App" items={[{ label: "URL", value: appUrl ?? "not running" }]} />
+      <Spacer />
       <ServicePanel name="Server" items={serverItems} />
-      {appUrl ? (
-        <>
-          <Spacer />
-          <ServicePanel name="Custom app" items={[{ label: "URL", value: appUrl }]} />
-        </>
-      ) : null}
       {workers.length > 0 ? (
         <>
           <Spacer />

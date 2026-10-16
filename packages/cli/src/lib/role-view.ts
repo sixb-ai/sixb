@@ -13,9 +13,8 @@ export interface RoleView {
 /**
  * How a long-running role reports itself: the Ink panels in a terminal, plain lines in a log.
  *
- * Ink's layout engine keeps about 45 MB for the life of the process once it is imported. `atlas`
- * and `app` run under a supervisor and serve static files, so outside a terminal they never load
- * it.
+ * Ink's layout engine keeps about 45 MB for the life of the process once it is imported. `app`
+ * runs under a supervisor and serves static files, so outside a terminal it never loads it.
  *
  * Call this before the role sets NODE_ENV. Bun compiles JSX for the mode the process started in,
  * and React loaded after the change cannot run it: the panels then render nothing, or throw. Ink

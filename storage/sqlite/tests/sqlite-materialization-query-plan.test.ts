@@ -1,7 +1,7 @@
-import { Database, type SQLQueryBindings } from "bun:sqlite"
+import type { Database, SQLQueryBindings } from "bun:sqlite"
 import { describe, expect, test } from "bun:test"
 import type { OntologyLinkRef, OntologyObjectRef } from "@sixb/core/internal/materialization"
-import { installFreshSqliteSchema } from "../src/migrations"
+import { freshSqliteDatabase } from "../src/migrations"
 import { SqliteMaterializationStateReader } from "../src/ontology-storage/materialization-state"
 import {
   EXPAND_LINK_STATEMENTS,
@@ -160,8 +160,7 @@ describe("SQLite replacement plan query plans", () => {
   // override's own column and stops correlating; drop the `+` from the root's row lookup; or read
   // the latest points as the series' rows at their property's `MAX(at)`, which walks the history.
   test("identity revisions look every input up by the identity's own key", () => {
-    const db = new Database(":memory:")
-    installFreshSqliteSchema(db)
+    const db = freshSqliteDatabase()
     try {
       for (const kind of ["object", "link"] as const) {
         const plan = db
@@ -206,8 +205,7 @@ describe("SQLite replacement plan query plans", () => {
   // from the incident statement; without statistics SQLite then searches the project's links or
   // overrides by `project_id` alone, once per incident object.
   test("link expansion seeks each incident object's links by its own key", () => {
-    const db = new Database(":memory:")
-    installFreshSqliteSchema(db)
+    const db = freshSqliteDatabase()
     try {
       for (const [name, statement] of Object.entries(EXPAND_LINK_STATEMENTS)) {
         const plan = db
@@ -235,8 +233,7 @@ describe("SQLite replacement plan query plans", () => {
   // Removal proof: drop the `touched` filter from a refresh statement, or the bound on
   // `expand_at` from link expansion; the statement then walks the plan's identities by version.
   test("refresh and link expansion seek only what changed, never the whole plan", () => {
-    const db = new Database(":memory:")
-    installFreshSqliteSchema(db)
+    const db = freshSqliteDatabase()
     try {
       const statements = {
         "refresh.object": TOUCHED_REFRESH_STATEMENTS.object,
@@ -288,8 +285,7 @@ function withRecordedReader(
     readonly recorded: readonly RecordedQuery[]
   }) => void
 ): void {
-  const db = new Database(":memory:")
-  installFreshSqliteSchema(db)
+  const db = freshSqliteDatabase()
   const recorded: RecordedQuery[] = []
   const reader = new SqliteMaterializationStateReader(recordingDatabase(db, recorded), projectId)
   try {

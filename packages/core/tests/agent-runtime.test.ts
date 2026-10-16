@@ -32,7 +32,6 @@ async function userScope(host: ReturnType<typeof setup>["host"], id: string, all
     id: sessionId,
     userId: id,
     strategyId: "test",
-    audience: "atlas",
     tokenHash: sessionId,
     createdAt: new Date(),
     expiresAt: new Date(Date.now() + 60_000),

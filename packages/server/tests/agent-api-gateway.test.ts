@@ -116,7 +116,7 @@ describe("agent API gateway", () => {
       new Request(`${gatewayBaseUrl}/api/object-types`, {
         headers: {
           authorization: "Bearer attacker",
-          cookie: "sixb_session=attacker",
+          cookie: "sixb_session_app=attacker",
         },
       })
     )
@@ -131,7 +131,7 @@ describe("agent API gateway", () => {
         method: "POST",
         headers: {
           authorization: "Bearer attacker",
-          cookie: "sixb_session=attacker",
+          cookie: "sixb_session_app=attacker",
           "content-type": "application/json",
         },
         body: JSON.stringify({ query: { kind: "start", objectTypeId: "device" } }),
@@ -907,7 +907,6 @@ async function createMainAgentExecution(storage: InMemoryStorage, runId: string)
     projectId: PROJECT_ID,
     userId,
     strategyId: "test",
-    audience: "app",
     tokenHash: "not-used-after-admission",
     createdAt: NOW,
     expiresAt: new Date("2027-06-28T12:00:00.000Z"),

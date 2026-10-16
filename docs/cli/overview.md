@@ -18,7 +18,7 @@ Run these from your project root:
 | --- | --- |
 | `bun create sixb my-app` | Create a new project. |
 | `sixb init [directory]` | Initialize a project in a directory. |
-| `sixb dev` | Start local API, Atlas, app, and workers. |
+| `sixb dev` | Start the local API, app, and workers. |
 | `sixb build` | Build the runtime and browser assets into `.sixb/dist`. |
 | `sixb typegen` | Generate ontology types for typed queries. |
 | `sixb check` | Validate the project and check provider health. |
@@ -27,14 +27,16 @@ Run these from your project root:
 | `sixb lake check` | Validate dataset definitions against the lake catalog. |
 | `sixb lake cleanup --dry-run` | Preview supported lake maintenance. |
 
-`dev` defaults to Atlas on port 3000, the custom app on 3001, and the API on 3002. Backend changes restart the local stack; app changes use hot reload. Restart manually after changing environment variables.
+`dev` serves the app on port 3000 and the API on 3001. The app runs even without an `app/`
+folder, with its built-in pages. Backend changes restart the local stack; app changes use hot
+reload. Restart manually after changing environment variables.
 
 Common project options:
 
 | Option | Purpose |
 | --- | --- |
 | `--entry <path>` | Use a different configuration file. |
-| `--port <port>` | Set a serving command's port; for `dev`, the Atlas base port. |
+| `--port <port>` | Set a serving command's port; for `dev`, the app's port, with the API on the next one. |
 | `--host <host>` | Bind host. Development defaults to loopback. |
 | `--api-port <port>` | Set the development API port. |
 | `--outdir <path>` | Change the build output directory. |
@@ -46,8 +48,7 @@ Each command runs one service. See [Deployment](../deployment/overview.md) for t
 | Command | Purpose |
 | --- | --- |
 | `sixb api` | HTTP API, WebSockets, and OpenAPI docs. |
-| `sixb atlas` | Built-in Atlas interface. |
-| `sixb app` | Custom app. |
+| `sixb app` | The app. |
 | `sixb orchestrator` | Dispatch event-triggered work. |
 | `sixb scheduler` | Trigger cron schedules. |
 | `sixb rules` | Evaluate rules. |
@@ -61,13 +62,12 @@ Public-origin flags have matching environment variables:
 | Flag | Environment variable |
 | --- | --- |
 | `--api-public-origin` | `SIXB_API_PUBLIC_ORIGIN` |
-| `--atlas-public-origin` | `SIXB_ATLAS_PUBLIC_ORIGIN` |
 | `--app-public-origin` | `SIXB_APP_PUBLIC_ORIGIN` |
 | `--trusted-proxies` | `SIXB_TRUSTED_PROXIES` |
 
 `sixb api` accepts `--trusted-proxies` to choose which proxies identify the client address; see [Run behind a proxy](../deployment/overview.md#run-behind-a-proxy).
 
-The API requires API and Atlas origins, plus the app origin when serving a built custom app. Atlas, the app server, agent workers, and workers that create [download URLs](../server/overview.md#share-a-file-with-an-external-service) need the API origin. With the app origin, Atlas links to the app's pages; without it, Atlas shows only its agent. Flags override environment variables.
+The API requires the API and app origins. The app server, agent workers, and workers that create [download URLs](../server/overview.md#share-a-file-with-an-external-service) need the API origin. Flags override environment variables.
 
 Schema-using services migrate storage and prepare declared query structures at startup. Unchanged query declarations are checked without rebuilding. Use `--no-migrate` or `SIXB_SKIP_MIGRATION=1` when `sixb db migrate` ran both steps in a separate release step. Initial PostgreSQL text backfills can block writes; allow maintenance time or prepare before starting the release.
 

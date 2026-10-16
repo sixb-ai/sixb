@@ -63,7 +63,6 @@ async function resolveCaller(
 }
 
 const invitationDestination = {
-  audience: "atlas",
   requestOrigin: "http://localhost",
   returnTo: "/",
 } as const
@@ -92,7 +91,6 @@ async function seedAuthenticatedUser(
     projectId: sixb.id,
     userId: params.userId,
     strategyId: "magic-link",
-    audience: "atlas",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-05-16T10:00:00.000Z"),
     expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -101,7 +99,7 @@ async function seedAuthenticatedUser(
   return resolveCaller(
     sixb,
     new Request("http://localhost/api/auth/invitations", {
-      headers: { cookie: `sixb_session=${credential.cookieValue}` },
+      headers: { cookie: `sixb_session_app=${credential.cookieValue}` },
     })
   )
 }
@@ -123,7 +121,6 @@ function createInviteRuntime(options: { readonly strategy?: MagicLinkAuthStrateg
           projectId: input.projectId,
           authStorage: input.authStorage,
           email: input.invitation.email,
-          audience: input.audience,
           returnTo: input.returnTo,
           requestOrigin: input.requestOrigin,
           now: input.now,
@@ -193,7 +190,6 @@ describe("SixbHost auth runtime", () => {
       projectId: sixb.id,
       userId: "usr_1",
       strategyId: "test",
-      audience: "atlas",
       tokenHash: credential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -201,7 +197,7 @@ describe("SixbHost auth runtime", () => {
 
     const session = await sixb.auth.getSession(
       new Request("http://localhost/api/project", {
-        headers: { cookie: `sixb_session=${credential.cookieValue}` },
+        headers: { cookie: `sixb_session_app=${credential.cookieValue}` },
       })
     )
 
@@ -362,13 +358,12 @@ describe("SixbHost auth runtime", () => {
       projectId: sixb.id,
       userId: "usr_1",
       strategyId: "test",
-      audience: "atlas",
       tokenHash: sessionCredential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
     })
     const request = new Request("http://localhost/api/project", {
-      headers: { cookie: `sixb_session=${sessionCredential.cookieValue}` },
+      headers: { cookie: `sixb_session_app=${sessionCredential.cookieValue}` },
     })
 
     const caller = await resolveCaller(sixb, request)
@@ -455,7 +450,6 @@ describe("SixbHost auth runtime", () => {
       projectId: sixb.id,
       userId: "usr_low",
       strategyId: "test",
-      audience: "atlas",
       tokenHash: sessionCredential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -474,7 +468,7 @@ describe("SixbHost auth runtime", () => {
       source: "manual",
     })
     const request = new Request("http://localhost/api/project", {
-      headers: { cookie: `sixb_session=${sessionCredential.cookieValue}` },
+      headers: { cookie: `sixb_session_app=${sessionCredential.cookieValue}` },
     })
 
     // Cannot escalate a personal token beyond the caller's own groups, or place a
@@ -615,76 +609,51 @@ describe("SixbHost auth runtime", () => {
     ])
   })
 
-  test("resolves sessions and cookie names by audience", async () => {
+  test("reads the session from the configured cookie names, or the defaults", async () => {
     const deps = createTestRuntimeDeps()
-    const sixb = new SixbHost({
+    const configured = new SixbHost({
       ontology: [],
       ...deps,
       auth: {
         strategy: authStrategy,
-        cookies: {
-          sessionCookieName: "acme_session",
-          csrfCookieName: "acme_csrf",
-        },
+        cookies: { sessionCookieName: "acme_session", csrfCookieName: "acme_csrf" },
       },
     })
-    const adminCredential = createSessionCredential("ses_admin")
-    const appCredential = createSessionCredential("ses_app")
-
+    const credential = createSessionCredential("ses_1")
     await deps.storage.auth.users.create({
       id: "usr_1",
-      projectId: sixb.id,
+      projectId: configured.id,
       email: "ava@acme.com",
     })
     await deps.storage.auth.sessions.create({
-      id: adminCredential.sessionId,
-      projectId: sixb.id,
+      id: credential.sessionId,
+      projectId: configured.id,
       userId: "usr_1",
       strategyId: "test",
-      audience: "atlas",
-      tokenHash: adminCredential.tokenHash,
+      tokenHash: credential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
     })
-    await deps.storage.auth.sessions.create({
-      id: appCredential.sessionId,
-      projectId: sixb.id,
-      userId: "usr_1",
-      strategyId: "test",
-      audience: "app",
-      tokenHash: appCredential.tokenHash,
-      createdAt: new Date("2026-05-16T10:01:00.000Z"),
-      expiresAt: new Date("2099-05-16T10:01:00.000Z"),
-    })
+    const withCookie = (cookie: string) =>
+      new Request("http://localhost/api/project", { headers: { cookie } })
 
-    expect(sixb.auth.getCookieOptions({ audience: "atlas" })).toMatchObject({
+    expect(configured.auth.getCookieOptions()).toMatchObject({
       sessionCookieName: "acme_session",
       csrfCookieName: "acme_csrf",
     })
-    expect(sixb.auth.getCookieOptions({ audience: "app" })).toMatchObject({
-      sessionCookieName: "acme_session_app",
-      csrfCookieName: "acme_csrf_app",
-    })
+    await expect(
+      configured.auth.getSession(withCookie(`acme_session=${credential.cookieValue}`))
+    ).resolves.toMatchObject({ authenticated: true, session: { id: "ses_1" } })
+    await expect(
+      configured.auth.getSession(withCookie(`sixb_session_app=${credential.cookieValue}`))
+    ).resolves.toEqual({ authenticated: false, reason: "missing_cookie" })
 
-    await expect(
-      sixb.auth.getSession(
-        new Request("http://localhost/api/project", {
-          headers: { cookie: `acme_session_app=${appCredential.cookieValue}` },
-        }),
-        { audience: "app" }
-      )
-    ).resolves.toMatchObject({ authenticated: true, session: { id: "ses_app" } })
-    await expect(
-      sixb.auth.getSession(
-        new Request("http://localhost/api/project", {
-          headers: { cookie: `acme_session=${appCredential.cookieValue}` },
-        }),
-        { audience: "atlas" }
-      )
-    ).resolves.toEqual({ authenticated: false, reason: "invalid_session" })
-    expect(() => sixb.auth.getCookieOptions({ audience: "app prod" as never })).toThrow(
-      "Auth session audience 'app prod' is invalid"
-    )
+    // The defaults are the names the app's cookies had beside Atlas's, so its sessions carry over.
+    const defaults = new SixbHost({ ontology: [], ...createTestRuntimeDeps(), auth: authStrategy })
+    expect(defaults.auth.getCookieOptions()).toMatchObject({
+      sessionCookieName: "sixb_session_app",
+      csrfCookieName: "sixb_csrf_app",
+    })
   })
 
   test("returns unauthenticated results for missing and suspended sessions", async () => {
@@ -707,7 +676,6 @@ describe("SixbHost auth runtime", () => {
       projectId: sixb.id,
       userId: "usr_1",
       strategyId: "test",
-      audience: "atlas",
       tokenHash: credential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -719,7 +687,7 @@ describe("SixbHost auth runtime", () => {
     await expect(
       sixb.auth.getSession(
         new Request("http://localhost/api/project", {
-          headers: { cookie: `sixb_session=${credential.cookieValue}` },
+          headers: { cookie: `sixb_session_app=${credential.cookieValue}` },
         })
       )
     ).resolves.toEqual({ authenticated: false, reason: "suspended_user" })
@@ -1014,20 +982,20 @@ describe("SixbHost auth runtime", () => {
     const request = new Request("http://localhost/api/objects", {
       method: "PUT",
       headers: {
-        cookie: "sixb_csrf=csrf_1",
+        cookie: "sixb_csrf_app=csrf_1",
         "x-sixb-csrf": "csrf_1",
       },
     })
 
-    expect(verifyDoubleSubmitCsrf(request, { cookieName: "sixb_csrf" })).toBe(true)
+    expect(verifyDoubleSubmitCsrf(request, { cookieName: "sixb_csrf_app" })).toBe(true)
     expect(
       verifyDoubleSubmitCsrf(new Request("http://localhost/api/objects", { method: "PUT" }), {
-        cookieName: "sixb_csrf",
+        cookieName: "sixb_csrf_app",
       })
     ).toBe(false)
     expect(
       verifyDoubleSubmitCsrf(new Request("http://localhost/api/objects", { method: "GET" }), {
-        cookieName: "sixb_csrf",
+        cookieName: "sixb_csrf_app",
       })
     ).toBe(true)
   })
@@ -1046,7 +1014,6 @@ describe("SixbHost auth runtime", () => {
       projectId: sixb.id,
       userId: "usr_1",
       strategyId: "test",
-      audience: "atlas",
       tokenHash: credential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -1062,7 +1029,7 @@ describe("SixbHost auth runtime", () => {
     )
     const request = () =>
       new Request("http://localhost/api/project", {
-        headers: { cookie: `sixb_session=${credential.cookieValue}` },
+        headers: { cookie: `sixb_session_app=${credential.cookieValue}` },
       })
 
     await expect(sixb.auth.getSession(request())).resolves.toMatchObject({ authenticated: true })
@@ -1095,7 +1062,6 @@ describe("SixbHost auth runtime", () => {
       projectId: sixb.id,
       userId: "usr_1",
       strategyId: "test",
-      audience: "atlas",
       tokenHash: credential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -1103,7 +1069,7 @@ describe("SixbHost auth runtime", () => {
     // Prime the cache with the valid cookie.
     await sixb.auth.getSession(
       new Request("http://localhost/api/project", {
-        headers: { cookie: `sixb_session=${credential.cookieValue}` },
+        headers: { cookie: `sixb_session_app=${credential.cookieValue}` },
       })
     )
 
@@ -1112,7 +1078,7 @@ describe("SixbHost auth runtime", () => {
     await expect(
       sixb.auth.getSession(
         new Request("http://localhost/api/project", {
-          headers: { cookie: `sixb_session=${forged}` },
+          headers: { cookie: `sixb_session_app=${forged}` },
         })
       )
     ).resolves.toEqual({ authenticated: false, reason: "invalid_session" })
@@ -1181,13 +1147,12 @@ describe("SixbHost auth runtime", () => {
         projectId: sixb.id,
         userId: "usr_existing_policy",
         strategyId: "test",
-        audience: "atlas",
         tokenHash: credential.tokenHash,
         createdAt: new Date(now.getTime() - 2 * 60 * 60_000),
         expiresAt: new Date(now.getTime() + 5 * 60_000),
       })
       const request = new Request("http://localhost/api/project", {
-        headers: { cookie: `sixb_session=${credential.cookieValue}` },
+        headers: { cookie: `sixb_session_app=${credential.cookieValue}` },
       })
 
       const session = await sixb.auth.getSession(request, { sessionActivity: "foreground" })
@@ -1260,7 +1225,6 @@ describe("SixbHost auth runtime", () => {
         projectId: sixb.id,
         userId: "usr_renew",
         strategyId: "test",
-        audience: "atlas",
         tokenHash: credential.tokenHash,
         createdAt: now,
         expiresAt: new Date(now.getTime() + 5 * 60_000),
@@ -1276,7 +1240,7 @@ describe("SixbHost auth runtime", () => {
       )
       const request = () =>
         new Request("http://localhost/api/project", {
-          headers: { cookie: `sixb_session=${credential.cookieValue}` },
+          headers: { cookie: `sixb_session_app=${credential.cookieValue}` },
         })
 
       const background = await sixb.auth.getSession(request())
@@ -1327,7 +1291,6 @@ describe("SixbHost auth runtime", () => {
         projectId: sixb.id,
         userId: "usr_cached_renew",
         strategyId: "test",
-        audience: "atlas",
         tokenHash: credential.tokenHash,
         createdAt: now,
         expiresAt: new Date(now.getTime() + 12 * 60_000),
@@ -1353,7 +1316,7 @@ describe("SixbHost auth runtime", () => {
       )
       const request = () =>
         new Request("http://localhost/api/project", {
-          headers: { cookie: `sixb_session=${credential.cookieValue}` },
+          headers: { cookie: `sixb_session_app=${credential.cookieValue}` },
         })
 
       await sixb.auth.getSession(request(), { sessionActivity: "foreground" })
@@ -1396,7 +1359,6 @@ describe("SixbHost auth runtime", () => {
       projectId: sixb.id,
       userId: "usr_1",
       strategyId: "test",
-      audience: "atlas",
       tokenHash: credential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -1412,7 +1374,7 @@ describe("SixbHost auth runtime", () => {
     )
     const request = () =>
       new Request("http://localhost/api/project", {
-        headers: { cookie: `sixb_session=${credential.cookieValue}` },
+        headers: { cookie: `sixb_session_app=${credential.cookieValue}` },
       })
 
     await sixb.auth.getSession(request())
@@ -1494,8 +1456,8 @@ describe("SixbHost auth runtime", () => {
     const request = new Request("https://api.example.com/api/auth/session")
     const expiresAt = new Date(Date.now() + 60_000)
     const options = resolveAuthCookieOptions({
-      sessionCookieName: "__Host-sixb_session",
-      csrfCookieName: "__Host-sixb_csrf",
+      sessionCookieName: "__Host-sixb_session_app",
+      csrfCookieName: "__Host-sixb_csrf_app",
       csrfHttpOnly: true,
     })
 
@@ -1517,15 +1479,15 @@ describe("SixbHost auth runtime", () => {
     ).toContain("Secure")
     expect(() =>
       resolveAuthCookieOptions({
-        sessionCookieName: "__Host-sixb_session",
-        csrfCookieName: "__Host-sixb_csrf",
+        sessionCookieName: "__Host-sixb_session_app",
+        csrfCookieName: "__Host-sixb_csrf_app",
         cookieDomain: ".example.com",
       })
     ).toThrow("__Host- auth cookies cannot be configured with cookieDomain")
     expect(() =>
       resolveAuthCookieOptions({
-        sessionCookieName: "__Host-sixb_session",
-        csrfCookieName: "__Host-sixb_csrf",
+        sessionCookieName: "__Host-sixb_session_app",
+        csrfCookieName: "__Host-sixb_csrf_app",
         secure: false,
       })
     ).toThrow("__Host- auth cookies require secure cookies")
@@ -1791,14 +1753,13 @@ describe("SixbHost auth member management", () => {
       projectId: sixb.id,
       userId: "usr_target",
       strategyId: "test",
-      audience: "atlas",
       tokenHash: targetCredential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
     })
     const targetRequest = () =>
       new Request("http://localhost/api/project", {
-        headers: { cookie: `sixb_session=${targetCredential.cookieValue}` },
+        headers: { cookie: `sixb_session_app=${targetCredential.cookieValue}` },
       })
 
     // The target's session authenticates and is cached before suspension.

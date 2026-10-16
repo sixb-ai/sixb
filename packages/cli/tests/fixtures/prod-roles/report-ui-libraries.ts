@@ -1,7 +1,7 @@
 import { appendFileSync } from "node:fs"
 
 // Preloaded into a role under test: records, as the process exits, which terminal UI libraries it
-// loaded. Outside a terminal, `atlas` and `app` print plain lines and must load none of them.
+// loaded. Outside a terminal, `app` prints plain lines and must load none of them.
 const UI_LIBRARY = /\/node_modules\/(ink|react|react-reconciler|yoga-layout)\//
 
 process.on("exit", () => {

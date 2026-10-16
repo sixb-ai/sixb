@@ -17,7 +17,6 @@ import type {
 } from "@sixb/core/storage"
 import { SYNC_RUN_FAILURE_CODES, SyncRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
-import { installFreshSqliteSchema } from "./migrations"
 import {
   appendRunListFilters,
   hasEmptyStatuses,
@@ -48,10 +47,6 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
     this.executions = options.executions
-
-    if (this.connection.installFreshSchema) {
-      installFreshSqliteSchema(this.db)
-    }
   }
 
   async queue(input: QueueSyncRunInput): Promise<SyncRunRecord> {

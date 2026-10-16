@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router-dom"
-import { getObjectViewStyle } from "../src/pages/ontology/lib/user-preferences"
 import type { WorkflowSummary } from "../src/pages/ontology/workflows/utils"
 import { WorkflowCard } from "../src/pages/ontology/workflows/workflow-card"
 
@@ -19,10 +18,6 @@ const workflow = {
   ],
   latestRun: null,
 } satisfies WorkflowSummary
-
-test("object collections default to the table workbench", () => {
-  expect(getObjectViewStyle()).toBe("table")
-})
 
 test("workflow cards keep the catalog summary compact", () => {
   const markup = renderToStaticMarkup(

@@ -38,7 +38,7 @@ export interface SshTargetOptions {
   readonly user?: string
   /**
    * Local ports for the HTTP services, which Caddy on the server forwards to. Set them when
-   * projects share a server, so that each has its own. Defaults: atlas 3000, app 3001, api 3002.
+   * projects share a server, so that each has its own. Defaults: app 3001, api 3002.
    */
   readonly ports?: Readonly<Partial<Record<DeployHttpServiceName, number>>>
 }
@@ -48,7 +48,6 @@ const OPTIONS = ["host", "user", "ports"] as const
 const DEFAULT_USER = "sixb"
 
 const DEFAULT_PORTS = {
-  atlas: 3000,
   app: 3001,
   api: 3002,
 } as const satisfies Record<DeployHttpServiceName, number>
@@ -287,9 +286,7 @@ function validatePorts(value: unknown): Partial<Record<DeployHttpServiceName, nu
   const ports: Partial<Record<DeployHttpServiceName, number>> = {}
   for (const [service, port] of Object.entries(value)) {
     if (!Object.hasOwn(DEFAULT_PORTS, service)) {
-      throw new Error(
-        `[SshTarget] ports.${service} is not an HTTP service. Available: api, atlas, app.`
-      )
+      throw new Error(`[SshTarget] ports.${service} is not an HTTP service. Available: api, app.`)
     }
     // A deploy user has no privileges, and ports below 1024 need them.
     if (!Number.isInteger(port) || port < 1024 || port > 65_535) {

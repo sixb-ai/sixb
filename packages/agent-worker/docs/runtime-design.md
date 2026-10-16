@@ -62,7 +62,7 @@ the route's internal node records, and only top-level input/output file paths ar
   streams interrupted before final usage retain unknown meters/cost and any native IDs received.
 
 Use `storage.aiCosts.listModelCalls()` to read immutable call-time costs and optional estimates.
-Provider request, response, and generation IDs appear in the model-call API and Atlas when supplied;
+Provider request, response, and generation IDs appear in the model-call API and the app when supplied;
 internal fallback response IDs are separate.
 
 This is a call-level ledger: requests that fail before returning a stream and process crashes before

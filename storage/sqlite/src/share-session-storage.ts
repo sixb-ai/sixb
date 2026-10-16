@@ -15,7 +15,6 @@ import type {
   ShareSessionStorage,
 } from "@sixb/core/storage"
 import { ShareSessionStorageError } from "@sixb/core/storage"
-import { installFreshSqliteSchema } from "./migrations"
 import { isForeignKeyConstraintError, isUniqueConstraintError } from "./storage-errors"
 import {
   closeSqliteStoreConnection,
@@ -36,7 +35,6 @@ export class SqliteShareSessionStorage implements ShareSessionStorage {
   constructor(options: SqliteShareSessionStorageOptions = {}) {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
-    if (this.connection.installFreshSchema) installFreshSqliteSchema(this.db)
   }
 
   async create(input: CreateShareSessionInput): Promise<ShareSessionRecord> {

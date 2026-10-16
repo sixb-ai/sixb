@@ -203,7 +203,7 @@ function importedDeclarationSpecifiers(contents: string): string[] {
  * bundles resolve through, so while they agree a bundle holds one copy of each module. Let an
  * entry go missing and that one specifier resolves through `exports.import` instead: a second,
  * separately-configured copy in the same bundle, or an outright failure when `dist` is not built
- * yet. A `@sixb/client` subpath already went missing once and took the Atlas bundle with it.
+ * yet. A `@sixb/client` subpath already went missing once and took a browser bundle with it.
  *
  * Subpaths whose `bun` target is not source are left out rather than special-cased: `create-sixb`
  * publishes only `dist` and points every condition there, so it has no source to mirror.

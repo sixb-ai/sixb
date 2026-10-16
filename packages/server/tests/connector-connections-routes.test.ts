@@ -169,17 +169,16 @@ async function seedSession(storage: InMemoryStorage, userId: string, canManage: 
     projectId: "test-project",
     userId,
     strategyId: "test",
-    audience: "atlas",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-08-24T10:00:00.000Z"),
     expiresAt: new Date("2099-08-24T10:00:00.000Z"),
   })
-  const cookie = `sixb_session=${credential.cookieValue}`
+  const cookie = `sixb_session_app=${credential.cookieValue}`
   return {
-    readHeaders: { cookie, origin: "http://atlas.localhost" },
+    readHeaders: { cookie, origin: "http://app.localhost" },
     mutationHeaders: {
-      cookie: `${cookie}; sixb_csrf=csrf_connector`,
-      origin: "http://atlas.localhost",
+      cookie: `${cookie}; sixb_csrf_app=csrf_connector`,
+      origin: "http://app.localhost",
       "x-sixb-csrf": "csrf_connector",
       "content-type": "application/json",
     },
@@ -193,7 +192,7 @@ async function startRun(harness: Awaited<ReturnType<typeof createHarness>>, slot
       headers: harness.session.mutationHeaders,
       body: JSON.stringify({
         slot,
-        returnTo: "http://atlas.localhost/settings/connectors?tab=crm",
+        returnTo: "http://app.localhost/settings/connectors?tab=crm",
       }),
     })
   )
@@ -485,7 +484,7 @@ describe("connector connection Headless API", () => {
     expect(callback.headers.get("referrer-policy")).toBe("no-referrer")
     expect(callback.headers.get("set-cookie")).toContain("Max-Age=0")
     const destination = new URL(callback.headers.get("location")!)
-    expect(destination.origin).toBe("http://atlas.localhost")
+    expect(destination.origin).toBe("http://app.localhost")
     expect(destination.pathname).toBe("/settings/connectors")
     expect(destination.searchParams.get("tab")).toBe("crm")
     expect(destination.searchParams.get("connectionConnectorId")).toBe("crm")
@@ -696,7 +695,7 @@ describe("connector connection Headless API", () => {
           method: "POST",
           headers: harness.session.mutationHeaders,
           body: JSON.stringify({
-            returnTo: "http://atlas.localhost/settings/connectors?tab=crm",
+            returnTo: "http://app.localhost/settings/connectors?tab=crm",
           }),
         }
       )
@@ -978,7 +977,7 @@ describe("connector connection Headless API", () => {
         },
         body: JSON.stringify({
           slot: "default",
-          returnTo: "http://atlas.localhost/settings/connectors",
+          returnTo: "http://app.localhost/settings/connectors",
         }),
       })
     )
@@ -991,7 +990,7 @@ describe("connector connection Headless API", () => {
         headers: withoutGrant.mutationHeaders,
         body: JSON.stringify({
           slot: "default",
-          returnTo: "http://atlas.localhost/settings/connectors",
+          returnTo: "http://app.localhost/settings/connectors",
         }),
       })
     )
@@ -1011,7 +1010,7 @@ describe("connector connection Headless API", () => {
     expect(response.status).toBe(403)
   })
 
-  test("rejects a return target outside the initiating browser audience", async () => {
+  test("rejects a return target outside the allowed browser origins", async () => {
     const harness = await createHarness()
     const response = await harness.app.handle(
       new Request("http://api.localhost/api/connectors/crm/connection-runs", {

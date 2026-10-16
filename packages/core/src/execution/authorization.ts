@@ -1,7 +1,12 @@
 import { isDeepStrictEqual } from "node:util"
 import { agentServiceAccountId } from "../agents/identity"
 import type { Principal } from "../auth"
-import { TARGETED_GRANT_KIND_KEYS, type TargetedGrantKind } from "../authorization/grant-kinds"
+import {
+  SINGLETON_GRANT_KIND_KEYS,
+  type SingletonGrantKind,
+  TARGETED_GRANT_KIND_KEYS,
+  type TargetedGrantKind,
+} from "../authorization/grant-kinds"
 import type { AuthorizationContext, GrantIndex } from "../authorization/types"
 import { createSixbError } from "../errors/internal"
 import type { ObjectRef } from "../ontology"
@@ -586,10 +591,11 @@ function snapshotAuthorizationContext(
   for (const kind of TARGETED_GRANT_KIND_KEYS) {
     grants[kind] = new ImmutableGrantSet(context.grants[kind])
   }
-  const frozenGrants: GrantIndex = Object.freeze({
-    ...grants,
-    "run:agent": context.grants["run:agent"],
-  })
+  const singletons = {} as Record<SingletonGrantKind, boolean>
+  for (const kind of SINGLETON_GRANT_KIND_KEYS) {
+    singletons[kind] = context.grants[kind]
+  }
+  const frozenGrants: GrantIndex = Object.freeze({ ...grants, ...singletons })
   return Object.freeze({
     principal,
     ...(context.sessionId === undefined ? {} : { sessionId: context.sessionId }),

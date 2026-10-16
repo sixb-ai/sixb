@@ -1,5 +1,4 @@
 import { type ResolvedRole, resolveRoleGrants } from "../authorization"
-import { APPLICATION_IDS } from "./applications"
 import type {
   GroupDefinition,
   MarkingDefinition,
@@ -26,7 +25,6 @@ export interface SecurityRegistryOptions {
   readonly groups?: readonly GroupDefinition[]
   readonly roles?: readonly RoleDefinition[]
   readonly membershipPolicies?: readonly MembershipPolicyDefinition[]
-  readonly applicationIds?: ReadonlySet<string>
   readonly objectTypeIds?: ReadonlySet<string>
   readonly datasetIds?: ReadonlySet<string>
   readonly actionIds?: ReadonlySet<string>
@@ -52,7 +50,6 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
       groups: input.groups ?? [],
       roles: input.roles ?? [],
       membershipPolicies: input.membershipPolicies ?? [],
-      applicationIds: input.applicationIds ?? APPLICATION_IDS,
       objectTypeIds: input.objectTypeIds,
       datasetIds: input.datasetIds,
       actionIds: input.actionIds,
@@ -61,13 +58,10 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
       pipelineIds: input.pipelineIds,
       agentAvailable: input.agentAvailable,
       connectorIds: input.connectorIds,
-      observableIds: new Set(["logs", "aiUsage"]),
-      manageableIds: new Set(["aiUsage"]),
       shareIds: input.shareIds,
     })
 
     const universe = {
-      applicationIds: input.applicationIds ?? APPLICATION_IDS,
       objectTypeIds: input.objectTypeIds ?? new Set<string>(),
       datasetIds: input.datasetIds ?? new Set<string>(),
       actionIds: input.actionIds ?? new Set<string>(),
@@ -75,8 +69,6 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
       syncIds: input.syncIds ?? new Set<string>(),
       pipelineIds: input.pipelineIds ?? new Set<string>(),
       connectorIds: input.connectorIds ?? new Set<string>(),
-      observableIds: new Set(["logs", "aiUsage"]),
-      manageableIds: new Set(["aiUsage"]),
       shareIds: input.shareIds ?? new Set<string>(),
       getSubTypes: input.getSubTypes ?? (() => []),
     }

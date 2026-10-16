@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { builtAtlasOutdir, hasBuiltCustomApp, resolveProductionPaths } from "../src/lib/production"
+import { builtAppOutdir, hasBuiltApp, resolveProductionPaths } from "../src/lib/production"
 
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
@@ -61,7 +61,7 @@ describe("sixb command dispatch", () => {
     const result = runCli(["help"])
 
     expect(result.exitCode).toBe(0)
-    for (const command of ["api", "atlas", "app", "scheduler", "orchestrator", "rules", "worker"]) {
+    for (const command of ["api", "app", "scheduler", "orchestrator", "rules", "worker"]) {
       expect(result.stdout).toContain(command)
     }
     expect(result.stdout).toContain("sixb worker pipeline")
@@ -226,11 +226,11 @@ describe("production asset paths", () => {
     const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-production-app-"))
     tempDirs.push(tempDir)
 
-    expect(await hasBuiltCustomApp(tempDir)).toBe(false)
+    expect(await hasBuiltApp(tempDir)).toBe(false)
     await writeFile(join(tempDir, "index.html"), "ordinary")
-    expect(await hasBuiltCustomApp(tempDir)).toBe(false)
+    expect(await hasBuiltApp(tempDir)).toBe(false)
     await writeFile(join(tempDir, "shared-index.html"), "shared")
-    expect(await hasBuiltCustomApp(tempDir)).toBe(true)
+    expect(await hasBuiltApp(tempDir)).toBe(true)
   })
 
   test("resolves default .sixb/dist assets from the source project root", async () => {
@@ -239,19 +239,19 @@ describe("production asset paths", () => {
 
     expect(paths.projectRoot).toBe(projectRoot)
     expect(paths.buildOutdir).toBe(join(projectRoot, ".sixb", "dist"))
-    expect(builtAtlasOutdir(paths.buildOutdir)).toBe(join(projectRoot, ".sixb", "dist", "atlas"))
+    expect(builtAppOutdir(paths.buildOutdir)).toBe(join(projectRoot, ".sixb", "dist", "app"))
   })
 
   test("resolves custom build assets next to the built entry", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-production-"))
     tempDirs.push(tempDir)
     const outdir = join(tempDir, "dist")
-    await mkdir(join(outdir, "atlas"), { recursive: true })
+    await mkdir(join(outdir, "app"), { recursive: true })
 
     const paths = await resolveProductionPaths(join(outdir, "sixb.config.js"))
 
     expect(paths.projectRoot).toBe(outdir)
     expect(paths.buildOutdir).toBe(outdir)
-    expect(builtAtlasOutdir(paths.buildOutdir)).toBe(join(outdir, "atlas"))
+    expect(builtAppOutdir(paths.buildOutdir)).toBe(join(outdir, "app"))
   })
 })

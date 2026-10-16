@@ -11,7 +11,6 @@ describe("SshTarget", () => {
 
     expect(target.kind).toBe("ssh")
     expect(target.location).toBe("sixb@203.0.113.10")
-    expect(target.listenAddress("atlas")).toEqual({ host: "127.0.0.1", port: 3000 })
     expect(target.listenAddress("app")).toEqual({ host: "127.0.0.1", port: 3001 })
     expect(target.listenAddress("api")).toEqual({ host: "127.0.0.1", port: 3002 })
   })

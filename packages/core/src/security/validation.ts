@@ -1,4 +1,9 @@
-import { GRANT_KINDS, type GrantUniverseKey, grantKindOf } from "../authorization/grant-kinds"
+import {
+  GRANT_KINDS,
+  type GrantUniverseKey,
+  grantKindOf,
+  isSingletonGrantKind,
+} from "../authorization/grant-kinds"
 import { SecurityValidationError } from "./errors"
 import { isMembershipOperation } from "./membership-policies"
 import type {
@@ -22,11 +27,10 @@ type RegisteredUniverses = Partial<Record<GrantUniverseKey, ReadonlySet<string>>
  *
  * Written as a total `Record<GrantCapability, true>` rather than a bare array so a capability added
  * to `GrantDefinition` is a compile error here — the same discipline `GRANT_KINDS` uses. The
- * hand-written `capability !== "access" && …` chain this replaces would have accepted the new
+ * hand-written `capability !== "view" && …` chain this replaces would have accepted the new
  * capability at startup and then died on `GRANT_KINDS[kind].universeKey`.
  */
 const GRANT_CAPABILITIES = Object.keys({
-  access: true,
   view: true,
   edit: true,
   append: true,
@@ -231,10 +235,6 @@ export function assertGrantDefinition(
     )
   }
 
-  if (value.capability === "access" && value.target !== "application") {
-    throw createError(`[Sixb] ${field} access grant target must be 'application'.`)
-  }
-
   if (value.capability === "view" && value.target !== "object" && value.target !== "dataset") {
     throw createError(`[Sixb] ${field} view grant target must be 'object' or 'dataset'.`)
   }
@@ -259,9 +259,13 @@ export function assertGrantDefinition(
     throw createError(`[Sixb] ${field} manage grant target must be 'connector' or 'aiUsage'.`)
   }
 
-  if (value.capability === "run" && value.target === "agent") {
+  // The agent, logs and AI usage are one surface each, so their grants select nothing. The checks
+  // above settled the capability and target, so the kind is known.
+  if (isSingletonGrantKind(grantKindOf(value as unknown as GrantDefinition))) {
     if (value.selection !== undefined) {
-      throw createError(`[Sixb] ${field} agent run grant must not declare a selection.`)
+      throw createError(
+        `[Sixb] ${field} ${value.capability} grant on '${value.target}' must not declare a selection.`
+      )
     }
     return
   }
@@ -332,8 +336,6 @@ export function validateSecurityDefinitionsAtStartup(input: {
   readonly groups: readonly GroupDefinition[]
   readonly membershipPolicies: readonly MembershipPolicyDefinition[]
   readonly roles?: readonly RoleDefinition[]
-  /** Registered browser application ids — when provided, access grants must reference them. */
-  readonly applicationIds?: ReadonlySet<string>
   /** Registered object type ids — when provided, view grants must reference them. */
   readonly objectTypeIds?: ReadonlySet<string>
   /** Registered dataset ids — when provided, dataset view grants must reference them. */
@@ -348,10 +350,6 @@ export function validateSecurityDefinitionsAtStartup(input: {
   readonly pipelineIds?: ReadonlySet<string>
   /** Whether the project's single conversational Agent is configured. */
   readonly agentAvailable?: boolean
-  /** Registered observability surfaces. */
-  readonly observableIds?: ReadonlySet<string>
-  /** Registered singleton management surfaces. */
-  readonly manageableIds?: ReadonlySet<string>
   /** Registered connector ids — when provided, manage grants must reference them. */
   readonly connectorIds?: ReadonlySet<string>
   /** Registered Share ids — when provided, share grants must reference them. */
@@ -496,7 +494,11 @@ function assertGrantReferences(
     }
     return
   }
-  const spec = GRANT_KINDS[grantKindOf(grant)]
+  // Logs and AI usage are always there; only targeted grants name ids to check.
+  if (!("selection" in grant)) return
+  const kind = grantKindOf(grant)
+  if (isSingletonGrantKind(kind)) return
+  const spec = GRANT_KINDS[kind]
   const universe = registered[spec.universeKey]
 
   if (!universe) {

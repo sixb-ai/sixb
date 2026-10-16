@@ -42,7 +42,7 @@ async function statPath(path: string) {
 /** Targeted native checks, with a bounded-concurrency async scan for missed events. */
 export function watchDevSource(
   root: string,
-  hasCustomApp: () => boolean,
+  appWatched: () => boolean,
   onChange: (path: string) => void,
   onError: (error: unknown) => void
 ) {
@@ -100,7 +100,7 @@ export function watchDevSource(
     if (closed) return
     let changed: string | undefined
     const markChanged = (path: string) => {
-      if (!(hasCustomApp() && isAppSource(path))) changed ??= path
+      if (!(appWatched() && isAppSource(path))) changed ??= path
     }
     const inScope = (path: string) =>
       (!directory || path === directory || path.startsWith(`${directory}${sep}`)) &&
@@ -119,24 +119,24 @@ export function watchDevSource(
   }
 
   async function reconcile(notify = true) {
-    const skipApp = hasCustomApp()
+    const skipApp = appWatched()
     apply(await snapshot("", skipApp), "", skipApp, notify)
   }
 
   async function checkPath(path: string) {
-    if (closed || ignored(path) || (hasCustomApp() && isAppSource(path))) return
+    if (closed || ignored(path) || (appWatched() && isAppSource(path))) return
     const stat = await statPath(resolve(root, path))
     if (stat?.isDirectory()) {
-      const skipApp = hasCustomApp()
+      const skipApp = appWatched()
       apply(await snapshot(path, skipApp), path, skipApp, true)
     } else if (stat?.isFile() && isSource(path)) {
       const value = fingerprint(stat)
       if (!closed && previous.get(path) !== value) {
         previous.set(path, value)
-        if (!(hasCustomApp() && isAppSource(path))) onChange(path)
+        if (!(appWatched() && isAppSource(path))) onChange(path)
       }
     } else if (!stat || stat.isSymbolicLink()) {
-      apply(new Map(), path, hasCustomApp(), true)
+      apply(new Map(), path, appWatched(), true)
     }
   }
 
@@ -154,7 +154,7 @@ export function watchDevSource(
     if (closed) return
     if (filename) {
       const path = String(filename)
-      if (ignored(path) || (hasCustomApp() && isAppSource(path))) return
+      if (ignored(path) || (appWatched() && isAppSource(path))) return
       dirty.add(path)
     } else fullCheck = true
     clearTimeout(debounce)

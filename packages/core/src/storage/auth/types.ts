@@ -1,4 +1,4 @@
-import type { AccessTokenKind, AuthSessionAudience, Principal } from "../../auth"
+import type { AccessTokenKind, Principal } from "../../auth"
 import type { AuthorizablePrincipal } from "../../execution/types"
 
 export type UserStatus = "active" | "suspended"
@@ -57,7 +57,6 @@ export interface SessionRecord {
   readonly userId: string
   readonly strategyId: string
   /** The web app a browser session belongs to. A bearer session belongs to none and ignores it. */
-  readonly audience: AuthSessionAudience
   readonly tokenHash: string
   readonly createdAt: Date
   readonly expiresAt: Date
@@ -142,7 +141,6 @@ export interface MagicLinkRecord {
   readonly id: string
   readonly projectId: string
   readonly strategyId: string
-  readonly audience: AuthSessionAudience
   readonly email: string
   readonly tokenHash: string
   readonly returnTo?: string
@@ -156,7 +154,6 @@ export interface OidcAuthorizationAttemptRecord {
   readonly id: string
   readonly projectId: string
   readonly strategyId: string
-  readonly audience: AuthSessionAudience
   readonly stateHash: string
   readonly nonceHash: string
   readonly codeVerifier: string
@@ -288,7 +285,6 @@ export interface CreateAuthSessionInput {
   readonly projectId: string
   readonly userId: string
   readonly strategyId: string
-  readonly audience: AuthSessionAudience
   readonly tokenHash: string
   readonly createdAt: Date
   readonly expiresAt: Date
@@ -330,7 +326,6 @@ export interface ListAuthAccessTokensResult {
 
 export interface CompleteAuthSessionInput {
   readonly id: string
-  readonly audience: AuthSessionAudience
   readonly tokenHash: string
   readonly createdAt: Date
   readonly expiresAt: Date
@@ -379,7 +374,6 @@ export interface CreateAuthMagicLinkInput {
   readonly id: string
   readonly projectId: string
   readonly strategyId: string
-  readonly audience: AuthSessionAudience
   readonly email: string
   readonly tokenHash: string
   readonly returnTo?: string
@@ -391,7 +385,6 @@ export interface CreateOidcAuthorizationAttemptInput {
   readonly id: string
   readonly projectId: string
   readonly strategyId: string
-  readonly audience: AuthSessionAudience
   readonly stateHash: string
   readonly nonceHash: string
   readonly codeVerifier: string
@@ -536,13 +529,7 @@ export interface AuthSessionStore {
     readonly projectId: string
     readonly id: string
   }): Promise<SessionRecord | null>
-  getActiveByUserId(params: {
-    readonly projectId: string
-    readonly userId: string
-    readonly audience: AuthSessionAudience
-    readonly now: Date
-  }): Promise<SessionRecord | null>
-  // All active sessions for a user across every audience, most-recently-active
+  // All active sessions for a user, most-recently-active
   // first. Backs the active-sessions view.
   listActiveByUserId(params: {
     readonly projectId: string
@@ -553,7 +540,6 @@ export interface AuthSessionStore {
   findValidByTokenHash(params: {
     readonly projectId: string
     readonly id: string
-    readonly audience: AuthSessionAudience
     readonly tokenHash: string
     readonly now: Date
   }): Promise<SessionRecord | null>
@@ -585,7 +571,6 @@ export interface AuthSessionStore {
   renewIfValid(params: {
     readonly projectId: string
     readonly id: string
-    readonly audience: AuthSessionAudience
     readonly tokenHash: string
     readonly now: Date
     readonly expiresAt: Date
@@ -598,7 +583,6 @@ export interface AuthSessionStore {
   revokeActiveForUser(params: {
     readonly projectId: string
     readonly userId: string
-    readonly audience?: AuthSessionAudience
     readonly revokedAt: Date
   }): Promise<readonly SessionRecord[]>
   touch(params: {

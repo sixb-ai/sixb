@@ -30,7 +30,7 @@ limitation blocks, and a minimal reproducible example when possible.
 
 ## Commands
 
-- `bun dev` — start the runtime, the built-in Atlas UI, and the app (ports 3000 / 3001 / 3002)
+- `bun dev` — start the runtime and the app (app on 3000, API on 3001)
 - `bun run build` — production build
 - `bun run typecheck` — generate Sixb types, then run `tsc --noEmit`
 - `bun run check` — format and lint

@@ -1,9 +1,19 @@
 import { dirname, resolve } from "node:path"
-import { type CustomAppDevServer, createCustomApp } from "@sixb/app/server"
-import { type AtlasAppServer, createAtlasApp } from "@sixb/atlas"
+import {
+  AppPackagesMissingError,
+  type CustomAppDevOptions,
+  type CustomAppDevServer,
+  createCustomApp,
+} from "@sixb/app/server"
 import { createSixbServer } from "@sixb/server"
 import { resolveAgentTurnTimeoutMs } from "../lib/agent-turn-timeout"
-import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
+import {
+  apiDocsUrl,
+  apiEventsUrl,
+  apiUrl,
+  resolveBrowserTopology,
+  servedUrl,
+} from "../lib/browser-topology"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { stopQuietly } from "../lib/role-lifecycle"
 import { startSixbRuntime, stopSixbProviders } from "../lib/runtime"
@@ -18,7 +28,6 @@ export interface DevOptions {
   apiPort?: string
   apiHost?: string
   apiPublicOrigin?: string
-  atlasPublicOrigin?: string
   appPublicOrigin?: string
   agentTurnTimeout?: string
   concurrency?: readonly string[]
@@ -37,7 +46,6 @@ export async function runDevRuntime(options: DevOptions = {}) {
     <LoadingView title="Starting sixb" subtitle={entry} status="Loading runtime" />
   )
 
-  let atlasServer: AtlasAppServer | null = null
   let customAppServer: CustomAppDevServer | null = null
   let sixb: LoadedSixbHost | null = null
   let runtime: Awaited<ReturnType<typeof startSixbRuntime>> | null = null
@@ -58,8 +66,6 @@ export async function runDevRuntime(options: DevOptions = {}) {
     abort.signal.throwIfAborted()
     const projectRoot = dirname(resolve(entry))
 
-    const customAppProbe = await createCustomApp({ rootDir: projectRoot })
-    const hasCustomApp = await customAppProbe.hasRoutes()
     const topology = resolveBrowserTopology({
       role: "dev",
       host: options.host,
@@ -67,21 +73,16 @@ export async function runDevRuntime(options: DevOptions = {}) {
       port: options.port,
       apiPort: options.apiPort,
       apiPublicOrigin: options.apiPublicOrigin,
-      atlasPublicOrigin: options.atlasPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,
-      hasCustomApp,
     })
     const customApp = await createCustomApp({
       rootDir: projectRoot,
       apiBaseUrl: topology.apiPublicOrigin,
-      audience: "app",
       authEnabled: host.auth.isEnabled(),
     })
-    const authExperience = hasCustomApp
-      ? ((await customApp.prepareAuthExperience()) ?? {
-          outdir: resolve(projectRoot, ".sixb", "generated", "auth"),
-        })
-      : null
+    const authExperience = (await customApp.prepareAuthExperience()) ?? {
+      outdir: resolve(projectRoot, ".sixb", "generated", "auth"),
+    }
 
     abort.signal.throwIfAborted()
     const server = createSixbServer({
@@ -93,7 +94,7 @@ export async function runDevRuntime(options: DevOptions = {}) {
         publicOrigin: topology.apiPublicOrigin,
         allowedOrigins: topology.allowedBrowserOrigins,
       },
-      ...(authExperience ? { authExperience } : {}),
+      authExperience,
     })
     runtimeOwnsProviders = true
     // The runtime owns the server's lifecycle so agent turns run only while it listens.
@@ -114,33 +115,10 @@ export async function runDevRuntime(options: DevOptions = {}) {
       vectorConcurrency,
     })
     abort.signal.throwIfAborted()
-    const authEnabled = host.auth.isEnabled()
 
-    const atlas = createAtlasApp({
-      apiBaseUrl: topology.apiPublicOrigin,
-      audience: "atlas",
-      authEnabled,
-      appUrl: topology.appPublicOrigin ?? undefined,
-    })
-    atlasServer = await atlas.start({
-      host: topology.host,
-      port: topology.atlasPort,
-      development: true,
-    })
-    abort.signal.throwIfAborted()
-
-    let appUrl: string | null = null
-    if (hasCustomApp) {
-      app.rerender(
-        <LoadingView title="Starting sixb" subtitle={entry} status="Starting custom app" />
-      )
-
-      customAppServer = await customApp.dev({
-        host: topology.host,
-        port: topology.appPort,
-      })
-      appUrl = topology.appPublicOrigin
-    }
+    app.rerender(<LoadingView title="Starting sixb" subtitle={entry} status="Starting app" />)
+    const devApp = await startDevApp(customApp, { host: topology.host, port: topology.appPort })
+    customAppServer = devApp.server
     abort.signal.throwIfAborted()
 
     app.rerender(
@@ -149,8 +127,7 @@ export async function runDevRuntime(options: DevOptions = {}) {
         apiUrl={apiUrl(topology)}
         apiDocsUrl={apiDocsUrl(topology)}
         wsUrl={apiEventsUrl(topology)}
-        uiUrl={topology.atlasPublicOrigin}
-        appUrl={appUrl}
+        appUrl={customAppServer ? servedUrl(topology) : null}
         workers={[
           { type: "agent", worker: runtime.agentWorker },
           { type: "projection", worker: runtime.projectionWorker },
@@ -160,12 +137,12 @@ export async function runDevRuntime(options: DevOptions = {}) {
         ].flatMap(({ type, worker }) =>
           worker ? [{ type, concurrency: worker.concurrency }] : []
         )}
-        warnings={runtime.warnings}
+        warnings={devApp.warning ? [devApp.warning, ...runtime.warnings] : runtime.warnings}
       />
     )
 
     process.env.SIXB_DEV_READY = "1"
-    process.send?.({ type: "ready", hasCustomApp })
+    process.send?.({ type: "ready", watchesApp: customAppServer?.watchesSources ?? false })
 
     await Promise.race([stopped, runtime.waitForWorkerFailure()])
   } catch (error) {
@@ -179,10 +156,25 @@ export async function runDevRuntime(options: DevOptions = {}) {
     process.env.SIXB_DEV_READY = ""
     app.unmount()
     await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
-    await stopQuietly(() => atlasServer?.stop() ?? Promise.resolve())
     await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
     if (sixb && !runtimeOwnsProviders) await stopSixbProviders(sixb)
     process.off("SIGINT", requestShutdown)
     process.off("SIGTERM", requestShutdown)
+  }
+}
+
+/**
+ * Starts the app's dev server. A project missing the packages the app is bundled from still gets
+ * its API, with the install command as a warning; `sixb build` refuses instead.
+ */
+export async function startDevApp(
+  customApp: { dev(options: CustomAppDevOptions): Promise<CustomAppDevServer> },
+  options: CustomAppDevOptions
+): Promise<{ readonly server: CustomAppDevServer | null; readonly warning?: string }> {
+  try {
+    return { server: await customApp.dev(options) }
+  } catch (error) {
+    if (!(error instanceof AppPackagesMissingError)) throw error
+    return { server: null, warning: error.message.replace("[SixbCustomApp] ", "") }
   }
 }

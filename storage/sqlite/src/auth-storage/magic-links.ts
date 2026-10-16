@@ -1,5 +1,4 @@
 import type { Database } from "bun:sqlite"
-import { resolveAuthSessionAudience } from "@sixb/core"
 import type {
   AuthMagicLinkStore,
   CreateAuthMagicLinkInput,
@@ -28,7 +27,6 @@ export class SqliteAuthMagicLinkStore implements AuthMagicLinkStore {
       const id = assertNonEmpty(input.id, "Magic link id")
       const projectId = assertNonEmpty(input.projectId, "Project id")
       const strategyId = assertNonEmpty(input.strategyId, "Strategy id")
-      const audience = resolveAuthSessionAudience(input.audience)
       const email = normalizeEmail(input.email)
       const tokenHash = assertNonEmpty(input.tokenHash, "Magic link token hash")
 
@@ -53,20 +51,18 @@ export class SqliteAuthMagicLinkStore implements AuthMagicLinkStore {
               project_id,
               id,
               strategy_id,
-              audience,
               email,
               token_hash,
               return_to,
               created_at,
               expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
           `
           )
           .run(
             projectId,
             id,
             strategyId,
-            audience,
             email,
             tokenHash,
             input.returnTo ?? null,
@@ -85,7 +81,6 @@ export class SqliteAuthMagicLinkStore implements AuthMagicLinkStore {
         id,
         projectId,
         strategyId,
-        audience,
         email,
         tokenHash,
         returnTo: input.returnTo,

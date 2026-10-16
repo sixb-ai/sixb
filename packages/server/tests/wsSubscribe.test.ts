@@ -473,7 +473,7 @@ async function withWsServer(
     hostname: "127.0.0.1",
     port,
     quiet: true,
-    browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),
+    browser: createTestBrowserPolicy({ apiOrigin: baseUrl, appOrigin: baseUrl }),
   })
 
   await server.start()

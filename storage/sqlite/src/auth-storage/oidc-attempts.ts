@@ -1,5 +1,4 @@
 import type { Database } from "bun:sqlite"
-import { resolveAuthSessionAudience } from "@sixb/core"
 import type {
   AuthOidcAuthorizationAttemptStore,
   CreateOidcAuthorizationAttemptInput,
@@ -26,7 +25,6 @@ export class SqliteAuthOidcAuthorizationAttemptStore implements AuthOidcAuthoriz
       const id = assertNonEmpty(input.id, "OIDC authorization attempt id")
       const projectId = assertNonEmpty(input.projectId, "Project id")
       const strategyId = assertNonEmpty(input.strategyId, "Strategy id")
-      const audience = resolveAuthSessionAudience(input.audience)
       const stateHash = assertNonEmpty(input.stateHash, "OIDC state hash")
       const nonceHash = assertNonEmpty(input.nonceHash, "OIDC nonce hash")
       const codeVerifier = assertNonEmpty(input.codeVerifier, "OIDC code verifier")
@@ -46,21 +44,19 @@ export class SqliteAuthOidcAuthorizationAttemptStore implements AuthOidcAuthoriz
               project_id,
               id,
               strategy_id,
-              audience,
               state_hash,
               nonce_hash,
               code_verifier,
               return_to,
               created_at,
               expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           `
           )
           .run(
             projectId,
             id,
             strategyId,
-            audience,
             stateHash,
             nonceHash,
             codeVerifier,
@@ -80,7 +76,6 @@ export class SqliteAuthOidcAuthorizationAttemptStore implements AuthOidcAuthoriz
         id,
         projectId,
         strategyId,
-        audience,
         stateHash,
         nonceHash,
         codeVerifier,

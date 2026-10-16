@@ -45,7 +45,6 @@ import type {
   UpdateAiLimitPolicyInput,
 } from "@sixb/core/storage"
 import { AiLimitStorageError, aiLimitCalendarMonth } from "@sixb/core/storage"
-import { installFreshSqliteSchema } from "./migrations"
 import {
   closeSqliteStoreConnection,
   openSqliteStoreConnection,
@@ -64,7 +63,6 @@ export class SqliteAiLimitStorage implements AiLimitStorage {
 
   constructor(options: SqliteAiLimitStorageOptions = {}) {
     this.connection = openSqliteStoreConnection(options)
-    if (this.connection.installFreshSchema) installFreshSqliteSchema(this.connection.db)
   }
 
   async createPolicy(input: CreateAiLimitPolicyInput): Promise<AiLimitPolicy> {

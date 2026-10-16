@@ -6,13 +6,6 @@ import { useState } from "react"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom"
 import { OperationsAssistant } from "../../../examples/northline/app/_components/operations-assistant"
 import NorthlineConversationPage from "../../../examples/northline/app/chat/[id]/page"
-import { AgentSurface } from "../../agent-ui/src/AgentSurface"
-import {
-  DocumentPreviewRoot,
-  useDocumentPreview,
-} from "../../agent-ui/src/document-preview/DocumentPreviewRoot"
-import type { AgentDocumentSource } from "../../agent-ui/src/document-preview/types"
-import { AgentChatPage } from "../../agent-ui/src/react-router"
 import { createSixbClient } from "../../client/src"
 import {
   getAgentQueryKey,
@@ -22,6 +15,13 @@ import {
   SixbProvider,
   searchObjectsQueryKey,
 } from "../../client/src/hooks"
+import { AgentSurface } from "../src/agent/agent-surface"
+import {
+  DocumentPreviewRoot,
+  useDocumentPreview,
+} from "../src/agent/document-preview/document-preview-root"
+import type { AgentDocumentSource } from "../src/agent/document-preview/types"
+import { AgentChatPage } from "../src/agent/react-router"
 
 const browser = new Window({ url: "https://app.sixb.test" })
 const globals = [

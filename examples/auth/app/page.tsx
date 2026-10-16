@@ -22,8 +22,7 @@ export default function AuthExampleApp() {
           <p className="auth-app-eyebrow">Sixb auth example</p>
           <h1>Custom app</h1>
           <p className="auth-app-lede">
-            This page uses the app audience, so it is a simple target for testing direct invitations
-            and application grants.
+            This page is a simple target for testing direct invitations and role grants.
           </p>
         </div>
         <span className="auth-app-status">

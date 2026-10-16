@@ -242,7 +242,7 @@ describe("custom app metadata and manifest generation", () => {
       buildScript,
       [
         `import { createCustomApp } from ${JSON.stringify(createCustomAppPath)}`,
-        `const app = await createCustomApp({ rootDir: ${JSON.stringify(fixture.root)}, authEnabled: false, agentRoutes: false })`,
+        `const app = await createCustomApp({ rootDir: ${JSON.stringify(fixture.root)}, authEnabled: false, builtInPages: false })`,
         "const result = await app.build()",
         "if (!result.success) throw new Error((result.logs ?? []).join('\\n'))",
         "",
@@ -295,5 +295,23 @@ describe("custom app metadata and manifest generation", () => {
 
     expect(after).toEqual(before)
     expect(await readFile(second.manifestPath, "utf-8")).toEndWith("\n")
+  })
+
+  // Regression proof: drop `!options.projectPages` from defaultShell in codegen and the second
+  // runtime wraps the project's own pages in AppShell.
+  test("only a project with no app/ pages or layout gets the default shell", async () => {
+    const fixture = await createFixture()
+    roots.push(fixture.root)
+    const runtime = async (projectPages: boolean) => {
+      const { runtimePath } = await generateAppEntry(fixture.root, fixture.generatedDir, {
+        sections: true,
+        projectPages,
+      })
+      return readFile(runtimePath, "utf-8")
+    }
+
+    expect(await runtime(false)).toContain("<AppShell>")
+    // Pages without a layout rendered bare before the built-in pages, and still do.
+    expect(await runtime(true)).not.toContain("<AppShell>")
   })
 })

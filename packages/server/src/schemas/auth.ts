@@ -179,15 +179,8 @@ export const AuthCreateInvitationCapabilitySchema = z.union([
   }),
 ])
 
-export const AuthInvitationDestinationSchema = z.object({
-  id: z.enum(["atlas", "app"]),
-  label: z.string(),
-})
-
 export const GetAuthInvitationOptionsResponseSchema = z.object({
   groups: z.array(AuthInvitationGroupOptionSchema),
-  destinations: z.array(AuthInvitationDestinationSchema),
-  defaultDestinationId: z.enum(["atlas", "app"]).optional(),
   canInviteWithoutGroups: z.boolean(),
   capabilities: z.object({
     createInvitation: AuthCreateInvitationCapabilitySchema,
@@ -240,7 +233,6 @@ export const ReactivateAuthMemberResponseSchema = z.object({
 export const CreateAuthInvitationBodySchema = z.object({
   email: z.string().min(1),
   groupIds: z.array(z.string().min(1)).optional(),
-  destinationId: z.enum(["atlas", "app"]).optional(),
   expiresAt: z.string().optional(),
   returnTo: z.string().optional(),
   revealLink: z.boolean().optional(),
@@ -286,11 +278,6 @@ export const AuthSessionResponseSchema = z.union([
     authenticated: z.literal(true),
     /** Browser sessions only: send it back in `x-sixb-csrf` on mutations. */
     csrfToken: z.string().optional(),
-    /** Whether the user may open a web app: the browser session's own, or Atlas for a native client. */
-    applicationAccess: z.object({
-      allowed: z.boolean(),
-      audience: z.enum(["atlas", "app"]),
-    }),
     user: z.object({
       id: z.string(),
       email: z.string(),
@@ -354,8 +341,6 @@ export const DeviceAuthorizationDecisionBodySchema = z.object({
 
 export const AuthSessionSummarySchema = z.object({
   id: z.string(),
-  /** The web app a browser session belongs to. Native clients' sessions have none. */
-  audience: z.enum(["atlas", "app"]).optional(),
   current: z.boolean(),
   createdAt: z.string(),
   expiresAt: z.string(),

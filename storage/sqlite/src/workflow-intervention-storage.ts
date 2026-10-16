@@ -12,7 +12,6 @@ import type {
   WorkflowInterventionStorage,
 } from "@sixb/core/storage"
 import { WorkflowInterventionError } from "@sixb/core/storage"
-import { installFreshSqliteSchema } from "./migrations"
 import { isUniqueConstraintError } from "./storage-errors"
 import {
   closeSqliteStoreConnection,
@@ -34,10 +33,6 @@ export class SqliteWorkflowInterventionStorage implements WorkflowInterventionSt
   constructor(options: SqliteWorkflowInterventionStorageOptions = {}) {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
-
-    if (this.connection.installFreshSchema) {
-      installFreshSqliteSchema(this.db)
-    }
   }
 
   async create(input: CreateWorkflowInterventionInput): Promise<WorkflowInterventionRecord> {

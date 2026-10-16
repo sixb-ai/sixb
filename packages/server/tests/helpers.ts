@@ -1,4 +1,4 @@
-import type { SixbApiBrowserPolicy, SixbBrowserOrigin } from "../src"
+import type { SixbApiBrowserPolicy } from "../src"
 
 interface TestApp {
   fetch(request: Request): Response | Promise<Response>
@@ -30,11 +30,6 @@ export async function confirmCallback(app: TestApp, link: URL): Promise<Response
     }
     body.set(name, value)
   }
-  const audience =
-    html.match(/name="audience" value="([^"]+)"/)?.[1] ?? link.searchParams.get("audience")
-  if (audience) {
-    body.set("audience", audience)
-  }
   return app.fetch(
     new Request(new URL("/auth/callback", link).toString(), {
       method: "POST",
@@ -51,24 +46,10 @@ export async function confirmCallback(app: TestApp, link: URL): Promise<Response
 }
 
 export function createTestBrowserPolicy(
-  options: {
-    readonly apiOrigin?: string
-    readonly atlasOrigin?: string
-    readonly appOrigin?: string
-    readonly includeApp?: boolean
-  } = {}
+  options: { readonly apiOrigin?: string; readonly appOrigin?: string } = {}
 ): SixbApiBrowserPolicy {
-  const atlasOrigin = options.atlasOrigin ?? "http://atlas.localhost"
-  const appOrigin = options.appOrigin ?? "http://app.localhost"
-  const includeApp = options.includeApp ?? true
-  const allowedOrigins: SixbBrowserOrigin[] = [{ origin: atlasOrigin, audience: "atlas" }]
-
-  if (includeApp) {
-    allowedOrigins.push({ origin: appOrigin, audience: "app" })
-  }
-
   return {
     publicOrigin: options.apiOrigin ?? "http://api.localhost",
-    allowedOrigins,
+    allowedOrigins: [options.appOrigin ?? "http://app.localhost"],
   }
 }

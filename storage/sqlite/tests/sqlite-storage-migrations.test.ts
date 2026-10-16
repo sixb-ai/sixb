@@ -548,6 +548,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 60,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "061-drop-auth-audience",
+    status: "applied",
+    version: 61,
+  },
 ]
 
 afterEach(async () => {
@@ -814,7 +821,7 @@ describe("SQLite storage migrations", () => {
       await steps[index]!.up(db)
       // Read back through the provider: its read path never consults executions.
       const actionRuns = new SqliteActionRunStorage({
-        connection: { db, ownsConnection: false, installFreshSchema: false },
+        connection: { db, ownsConnection: false },
         executions: new InMemoryStorage().executions,
       })
       const runs = new Map(
@@ -890,6 +897,45 @@ describe("SQLite storage migrations", () => {
           )
           .get()
       ).toEqual({ count: 4 })
+    } finally {
+      db.close()
+    }
+  })
+
+  // Removal proof: drop the UPDATE from 061 and the Atlas browser session stays active, listed
+  // among the person's sessions though no cookie can reach it.
+  test("ends Atlas's browser sessions and keeps the app's and native ones", async () => {
+    const db = new Database(":memory:")
+    try {
+      const steps = sqliteStorageMigrations.steps
+      const index = steps.findIndex((step) => step.id === "061-drop-auth-audience")
+      for (const step of steps.slice(0, index)) await step.up(db)
+      const insertSession = (id: string, audience: string, refreshTokenHash: string | null) =>
+        db.run(
+          `INSERT INTO auth_sessions (
+            project_id, id, user_id, strategy_id, audience, token_hash, created_at, expires_at,
+            refresh_token_hash
+          ) VALUES ('p', ?, 'usr_1', 'magic-link', ?, ?, '2026-01-01T00:00:00.000Z',
+            '2099-01-01T00:00:00.000Z', ?)`,
+          [id, audience, `hash-${id}`, refreshTokenHash]
+        )
+      insertSession("atlas", "atlas", null)
+      insertSession("app", "app", null)
+      insertSession("native", "atlas", "refresh-hash")
+
+      await steps[index]?.up(db)
+
+      const rows = db.query("SELECT id, revoked_at FROM auth_sessions ORDER BY id").all() as {
+        id: string
+        revoked_at: string | null
+      }[]
+      expect(rows.map((row) => [row.id, row.revoked_at !== null])).toEqual([
+        ["app", false],
+        ["atlas", true],
+        ["native", false],
+      ])
+      const columns = db.query("PRAGMA table_info(auth_sessions)").all() as { name: string }[]
+      expect(columns.map((column) => column.name)).not.toContain("audience")
     } finally {
       db.close()
     }
@@ -3039,7 +3085,7 @@ describe("SQLite storage migrations", () => {
     expect(tables).toContain("auth_magic_links")
     expect(tables).toContain("auth_oidc_authorization_attempts")
     expect(tables).toContain("auth_device_authorizations")
-    expect(sessionColumns).toContain("audience")
+    expect(sessionColumns).not.toContain("audience")
     expect(sessionColumns).toContain("absolute_expires_at")
     expect(sessionColumns).toContain("user_agent")
     expect(sessionColumns).toContain("ip_address")

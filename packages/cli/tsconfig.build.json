@@ -21,9 +21,6 @@
       "path": "../app/tsconfig.build.json"
     },
     {
-      "path": "../atlas/tsconfig.build.json"
-    },
-    {
       "path": "../client/tsconfig.build.json"
     },
     {

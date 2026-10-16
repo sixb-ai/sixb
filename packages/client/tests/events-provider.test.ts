@@ -91,7 +91,7 @@ describe("createEventsRegistry", () => {
     sharedController = configureSixbSharedBrowserClient(
       {
         api: { baseUrl: "https://api.example.test" },
-        auth: { audience: "app", enabled: true },
+        auth: { enabled: true },
       },
       {
         grantId: "shr_1",
@@ -121,7 +121,7 @@ describe("createEventsRegistry", () => {
     sharedController = configureSixbSharedBrowserClient(
       {
         api: { baseUrl: "https://api.example.test" },
-        auth: { audience: "app", enabled: true },
+        auth: { enabled: true },
       },
       {
         grantId: "shr_1",

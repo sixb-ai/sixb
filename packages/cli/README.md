@@ -21,10 +21,9 @@ bun add @sixb/cli
 
 | Command | Description |
 |---|---|
-| `sixb dev` | Start local API, Atlas UI, optional custom app, and workers |
+| `sixb dev` | Start the local API, app, and workers |
 | `sixb api` | Start the production API/docs/WebSocket server |
-| `sixb atlas` | Start the production Atlas UI server |
-| `sixb app` | Start the production custom app server |
+| `sixb app` | Start the production app server |
 | `sixb login <api-url>` | Validate an instance and save it as the current profile |
 | `sixb logout` | Remove the current or named profile |
 | `sixb status` | Check the selected profile and API |
@@ -55,7 +54,7 @@ bun add @sixb/cli
 | `sixb worker <type>` | Start a production queue worker (one queue type per process) |
 | `sixb worker-group [types...]` | Co-host several queue workers in one process (constrained resources) |
 | `sixb check` | Validate project configuration and provider health |
-| `sixb build` | Bundle the project runtime, custom app, and Atlas assets |
+| `sixb build` | Bundle the project runtime and the app |
 | `sixb db migrate` | Run adapter-owned database migrations ahead of, or instead of, role startup |
 | `sixb lake check` | Check lake dataset definitions for drift against the lake catalog |
 | `sixb lake cleanup` | Run provider-supported lake maintenance cleanup |
@@ -94,17 +93,16 @@ supervisor disappears, so a stuck startup cannot leave its process group running
 |---|---|---|---|
 | `--entry <path>` | project and runtime commands | `sixb.config.ts` | Path to the sixb config module |
 | `--no-migrate` | production roles | false | Start without migrating storage. Also `SIXB_SKIP_MIGRATION=1`. |
-| `--port <port>` | serving commands | role default | Role bind port. For `dev`, this is the Atlas base port. |
+| `--port <port>` | serving commands | role default | Role bind port. For `dev`, this is the app port. |
 | `--host <host>` | serving commands | dev: `127.0.0.1`, roles: `0.0.0.0` | Bind host. `sixb dev` stays on loopback unless you opt in. |
-| `--api-port <port>` | `dev`, `api` | `port + 2` | API/auth/docs/WebSocket port |
+| `--api-port <port>` | `dev`, `api` | `port + 1` | API/auth/docs/WebSocket port |
 | `--api-host <host>` | `dev`, `api` | `--host` | API bind host |
 | `--api-public-origin <origin>` | browser/API commands | dev: `http://localhost:<api-port>` | Public API origin |
 | `--agent-turn-timeout <duration>` | `dev`, agent worker/group | `SIXB_AGENT_TURN_TIMEOUT` or `10m` | Agent turn wall-clock budget, e.g. `30s`, `10m`, or `1h` |
 | `--vector-concurrency <count>` | `dev`, projection worker/group | `SIXB_VECTOR_CONCURRENCY` or `4` | Concurrent embedding calls for vector indexing |
-| `--atlas-public-origin <origin>` | `dev`, `api`, `atlas` | dev: `http://localhost:<port>` | Public Atlas UI origin |
-| `--app-public-origin <origin>` | `dev`, `api`, `app` | dev: `http://localhost:<port+1>` | Public custom app origin |
+| `--app-public-origin <origin>` | `dev`, `api`, `app` | dev: `http://localhost:<port>` | Public app origin |
 | `--profile <name>` | remote commands | current profile | Use a saved profile without changing the current one |
-| `--api-url <url>` | remote commands | resolved profile or `http://localhost:3002` | Use an API without a saved profile |
+| `--api-url <url>` | remote commands | resolved profile or `http://localhost:3001` | Use an API without a saved profile |
 | `--token <token>` | remote commands | selected source | Bearer token; direct `--api-url` never inherits another source's token |
 | `--token-stdin` | `login` | false | Read an existing token from standard input |
 | `--id <id>` | token/service-account commands | generated when supported | Token or service-account id |
@@ -167,12 +165,11 @@ written as one compact `{"error": ...}` value on stderr.
 # Start development servers (loads ./sixb.config.ts)
 sixb dev
 
-# Build production runtime and static UI/app assets
+# Build the production runtime and the app
 sixb build
 
 # Recommended production process layout
 sixb api
-sixb atlas
 sixb app
 sixb scheduler
 sixb orchestrator
@@ -182,7 +179,7 @@ sixb worker pipeline
 sixb worker projection
 sixb worker workflow
 
-# Development with custom entry and Atlas port
+# Development with custom entry and app port
 sixb dev --entry examples/mac-os/sixb.config.ts --port 8080
 
 # Validate project health
@@ -225,7 +222,7 @@ Login validates `/api/project`, saves the profile in `~/.config/sixb/config.json
 The directory is mode `0700`; the config file is atomically replaced at mode `0600`.
 
 ```bash
-sixb login http://localhost:3002 --profile local
+sixb login http://localhost:3001 --profile local
 
 # Authenticated APIs open a browser and wait for approval:
 sixb login https://api.acme.example --profile production
@@ -256,7 +253,7 @@ Remote target resolution is deterministic:
 SIXB_API_URL (+ SIXB_API_TOKEN or SIXB_TOKEN)
 SIXB_PROFILE
 current profile
-http://localhost:3002
+http://localhost:3001
 ```
 
 Use a named profile for local tools such as Codex or Claude Code:
@@ -348,7 +345,7 @@ to call.
 
 Roles that read or write through the storage schema (`api`, `scheduler`, `orchestrator`, `rules`,
 `worker`, `worker-group`) bring it up to date themselves at startup, and print the migration steps
-they applied. `atlas` and `app` do not: they serve a browser bundle and hold no DDL grant.
+they applied. `app` does not: it serves a browser bundle and holds no DDL grant.
 
 `sixb db migrate` is no longer a required release step. It stays useful when you want the schema
 change to be its own deploy stage — run it first, then start the roles with `--no-migrate` (or
@@ -402,20 +399,19 @@ wall-clock budget with `--agent-turn-timeout` or `SIXB_AGENT_TURN_TIMEOUT`; it d
 `sixb dev` uses separated local ports by default:
 
 ```txt
-http://localhost:3000 -> Atlas UI
-http://localhost:3001 -> custom app UI when routes exist
-http://localhost:3002 -> API, auth, docs, and runtime WebSockets
+http://localhost:3000 -> the app, with its built-in pages even without an app/ folder
+http://localhost:3001 -> API, auth, docs, and runtime WebSockets
 ```
 
 Production serving commands require explicit public origins through flags or environment variables.
-The split UI commands require their own public origin and `SIXB_API_PUBLIC_ORIGIN`. `sixb api`
-requires `SIXB_API_PUBLIC_ORIGIN`, `SIXB_ATLAS_PUBLIC_ORIGIN`,
-and `SIXB_APP_PUBLIC_ORIGIN` when a built custom app is served.
+Both `sixb api` and `sixb app` require `SIXB_API_PUBLIC_ORIGIN`. `SIXB_APP_PUBLIC_ORIGIN` is the
+API's browser allowlist: without it the API admits no browser, as a deploy without the app wants.
+On `sixb app` it only labels the startup output.
 
-`sixb atlas` and `sixb app` serve only prebuilt assets. Run `sixb build` before starting them.
-They fail with a clear error instead of compiling assets at startup. They never load
-`sixb.config.ts`, so they need neither the project's environment nor access to its database: the
-served page asks the API whether auth is enabled.
+`sixb app` serves only prebuilt assets. Run `sixb build` before starting it. It fails with a clear
+error instead of compiling assets at startup. It never loads `sixb.config.ts`, so it needs neither
+the project's environment nor access to its database: the served page asks the API whether auth is
+enabled.
 
 `sixb worker <type>` is intended for queue backends that can be shared across processes. Each
 worker process owns exactly one queue type. `sixb worker-group [types...]` co-hosts several queue

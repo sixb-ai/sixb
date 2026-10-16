@@ -484,7 +484,6 @@ export async function seedConnectorActors(
       projectId,
       userId,
       strategyId: "test",
-      audience: "atlas",
       tokenHash: `hash-${sessionId}`,
       createdAt: now,
       expiresAt,

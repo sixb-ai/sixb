@@ -1,7 +1,7 @@
 # Auth example
 
-A tiny Sixb project for testing authentication, invitations, and application grants. It serves
-Atlas at `http://localhost:3000` and a small custom app at `http://localhost:3001`. Auth state
+A tiny Sixb project for testing authentication, invitations, and role grants. It serves
+its app at `http://localhost:3000`. Auth state
 (users, sessions, groups) persists to a local SQLite database in `.sixb/`, so you stay signed in
 across restarts. Pick the strategy with `SIXB_AUTH_MODE` (defaults to
 `magic-link`). Delete `.sixb/` to start fresh.
@@ -39,34 +39,30 @@ whole flow, not just sign-in:
 - **Membership policy** — security admins can invite, assign groups, suspend,
   and reactivate members in `security-admins` and `team-members`
   (`security/policies/default-membership.ts`).
-- **Application access** — `team-members` can open the custom app but not Atlas.
-  `security-admins` can open both applications.
 - **Resource grants** — `team-members` can view `Note`, view the team-notes dataset,
   and apply `acknowledge-note`. `security-admins` use wildcard grants: view all
   objects, view all datasets, apply all actions, run all workflows, and view events
-  (`security/roles/atlas-access.ts`).
+  (`security/roles/access.ts`).
 - **Seed data** — startup writes one `Note`, one `AdminNote`, and one
   `AccessRequest` (`seed.ts`).
 
 Try the complete flow:
 
-1. Sign in to the custom app at `http://localhost:3001` as `admin@example.com`.
-2. Open **Settings › Members** at `http://localhost:3001/settings/members` and invite a teammate
-   into `team-members`, choosing **Custom app** as the destination.
-3. Open the sign-in link for the teammate. It should create an `app` session and land at
-   `http://localhost:3001`, where the page shows the teammate, their groups, and granted notes.
+1. Sign in to the app at `http://localhost:3000` as `admin@example.com`.
+2. Open **Settings › Members** at `http://localhost:3000/settings/members` and invite a teammate
+   into `team-members`.
+3. Open the sign-in link for the teammate. It should land at `http://localhost:3000`, where the
+   page shows the teammate, their groups, and granted notes.
 4. As the teammate, `/settings/members` sends you home: `app/layout.tsx` shows Members and Service
    accounts only to `security-admins`. Personal and Developers stay open to everyone.
-5. Try signing that teammate into Atlas. Atlas should show the application access-denied page.
-6. Return as the admin to edit the teammate's groups, suspend them, or reactivate them.
+5. Return as the admin to edit the teammate's groups, suspend them, or reactivate them.
    Suspending revokes active sessions immediately; reactivation does not restore old sessions.
 
-The custom app is intentionally small: it proves the selected invitation destination, audience
-cookie, application grant, group membership, and scoped `Note` read in one screen.
+The app's own page is intentionally small: it proves the invitation, group membership, and scoped
+`Note` read in one screen.
 
-It also exports `app/auth.tsx`, so app-audience magic-link requests use the branded Acme login,
-check-email, confirmation, and expired-link states. Atlas intentionally keeps the generic Sixb
-login to demonstrate the audience-specific fallback.
+It also exports `app/auth.tsx`, so magic-link requests use the branded Acme login, check-email,
+confirmation, and expired-link states.
 
 The magic-link email is branded too. `sixb.config.ts` sets the Acme subject and passes the
 framework-generated `message.url` to `lib/magic-link-email.ts`, which owns the organization-specific

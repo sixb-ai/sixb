@@ -432,6 +432,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("059-file-download-grants", fileDownloadGrantsSql),
     pgSql("060-drained-source-versions", drainedSourceVersionsSql),
     pgSql("061-terminal-action-runs", terminalActionRunsSql),
+    pgSql("062-drop-auth-audience", dropAuthAudienceSql),
   ],
 })
 
@@ -461,3 +462,4 @@ import drainedSourceVersionsSql from "./migrations/060-drained-source-versions.s
   type: "text",
 }
 import terminalActionRunsSql from "./migrations/061-terminal-action-runs.sql" with { type: "text" }
+import dropAuthAudienceSql from "./migrations/062-drop-auth-audience.sql" with { type: "text" }

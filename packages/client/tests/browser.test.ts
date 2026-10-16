@@ -27,7 +27,7 @@ import {
 
 const runtimeConfig: SixbBrowserRuntimeConfig = {
   api: { baseUrl: "http://localhost:3002" },
-  auth: { audience: "app", enabled: true },
+  auth: { enabled: true },
 }
 
 const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document")
@@ -370,12 +370,11 @@ describe("shared browser client", () => {
 })
 
 describe("browser client auth", () => {
-  test("creates API-origin sign-in URLs with audience and return target", () => {
+  test("creates API-origin sign-in URLs with the return target", () => {
     const url = new URL(createSixbSignInUrl(runtimeConfig, "http://localhost:3001/devices"))
 
     expect(url.origin).toBe("http://localhost:3002")
     expect(url.pathname).toBe("/auth/sign-in")
-    expect(url.searchParams.get("audience")).toBe("app")
     expect(url.searchParams.get("returnTo")).toBe("http://localhost:3001/devices")
   })
 
@@ -506,7 +505,6 @@ describe("browser client auth", () => {
     expect(redirects).toHaveLength(1)
     const redirect = new URL(redirects[0])
     expect(redirect.pathname).toBe("/auth/sign-in")
-    expect(redirect.searchParams.get("audience")).toBe("app")
     expect(redirect.searchParams.get("returnTo")).toBe(currentUrl)
   })
 

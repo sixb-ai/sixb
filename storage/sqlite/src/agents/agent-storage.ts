@@ -1,5 +1,4 @@
 import type { AgentStorage, ExecutionStorage } from "@sixb/core/storage"
-import { installFreshSqliteSchema } from "../migrations"
 import {
   closeSqliteStoreConnection,
   openSqliteStoreConnection,
@@ -34,10 +33,6 @@ export class SqliteAgentStorage implements AgentStorage {
 
   constructor(options: SqliteAgentStorageOptions) {
     this.connection = openSqliteStoreConnection(options)
-
-    if (this.connection.installFreshSchema) {
-      installFreshSqliteSchema(this.connection.db)
-    }
 
     this.threads = new SqliteAgentThreadStore(this.connection.db)
     this.runs = new SqliteAgentRunStore(this.connection.db, options.executions)

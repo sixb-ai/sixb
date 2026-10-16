@@ -16,7 +16,6 @@ import type {
   UserRecord,
 } from "@sixb/core/storage"
 import { AuthStorageError } from "@sixb/core/storage"
-import { installFreshSqliteSchema } from "../migrations"
 import {
   closeSqliteStoreConnection,
   openSqliteStoreConnection,
@@ -89,10 +88,6 @@ export class SqliteAuthStorage implements AuthStorage {
   constructor(options: SqliteAuthStorageOptions = {}) {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
-
-    if (this.connection.installFreshSchema) {
-      installFreshSqliteSchema(this.db)
-    }
 
     this.users = new SqliteAuthUserStore(this.db)
     this.identities = new SqliteAuthUserIdentityStore(this.db)
@@ -202,7 +197,6 @@ export class SqliteAuthStorage implements AuthStorage {
         }
 
         validateCompleteSessionInput(this.db, projectId, input.session)
-        assertSignInSessionAudience(projectId, input.session.audience, magicLink.audience)
 
         let newUserId: string | undefined
         if (shouldCreateUser) {
@@ -340,7 +334,6 @@ export class SqliteAuthStorage implements AuthStorage {
         }
 
         validateCompleteSessionInput(this.db, projectId, input.session)
-        assertSignInSessionAudience(projectId, input.session.audience, attempt.audience)
 
         let newUserId: string | undefined
         if (shouldCreateUser) {
@@ -700,7 +693,6 @@ export class SqliteAuthStorage implements AuthStorage {
       projectId: input.projectId,
       userId: input.userId,
       strategyId: input.strategyId,
-      audience: input.session.audience,
       tokenHash: input.session.tokenHash,
       createdAt: input.session.createdAt,
       expiresAt: input.session.expiresAt,
@@ -771,21 +763,6 @@ export class SqliteAuthStorage implements AuthStorage {
       updated_at: toIso(input.updatedAt),
     })
   }
-}
-
-function assertSignInSessionAudience(
-  projectId: string,
-  sessionAudience: string,
-  storedAudience: string
-): void {
-  if (sessionAudience === storedAudience) {
-    return
-  }
-
-  throw new AuthStorageError(
-    "invalid_input",
-    `[Sixb] Sign-in session audience '${sessionAudience}' does not match stored auth audience '${storedAudience}' for project '${projectId}'.`
-  )
 }
 
 function assertCompletableDeviceAuthorization(

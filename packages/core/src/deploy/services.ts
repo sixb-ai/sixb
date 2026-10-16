@@ -10,7 +10,6 @@ import type {
 
 const SERVICES = {
   api: "http",
-  atlas: "http",
   app: "http",
   orchestrator: "singleton",
   scheduler: "singleton",

@@ -99,7 +99,7 @@ test.skipIf(!enabled)(
       hostname: "127.0.0.1",
       port: 0,
       fetch(request) {
-        // The public tunnel never exposes normal API routes, Atlas, filesystem, or admin surfaces.
+        // The public tunnel never exposes normal API routes, the app, filesystem, or admin surfaces.
         if (!new URL(request.url).pathname.startsWith("/__sixb/agent-api/"))
           return new Response("Not found", { status: 404 })
         gatewayRequests++
@@ -124,7 +124,7 @@ test.skipIf(!enabled)(
         new SixbServer({
           host,
           quiet: true,
-          browser: { publicOrigin: origin, allowedOrigins: [{ origin, audience: "atlas" }] },
+          browser: { publicOrigin: origin, allowedOrigins: [origin] },
         })
       )
       console.log("[AzureE2E] Temporary HTTPS tunnel ready")

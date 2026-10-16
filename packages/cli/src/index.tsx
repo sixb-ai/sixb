@@ -102,7 +102,6 @@ async function main(): Promise<void> {
         apiPort: getFlag("api-port"),
         apiHost: getFlag("api-host"),
         apiPublicOrigin: getFlag("api-public-origin"),
-        atlasPublicOrigin: getFlag("atlas-public-origin"),
         appPublicOrigin: getFlag("app-public-origin"),
         agentTurnTimeout: getFlag("agent-turn-timeout"),
         concurrency: getFlags("concurrency"),
@@ -149,22 +148,8 @@ async function main(): Promise<void> {
         apiPort: getFlag("api-port"),
         apiHost: getFlag("api-host"),
         apiPublicOrigin: getFlag("api-public-origin"),
-        atlasPublicOrigin: getFlag("atlas-public-origin"),
         appPublicOrigin: getFlag("app-public-origin"),
         trustedProxies: getFlag("trusted-proxies"),
-      })
-      break
-    }
-
-    case "atlas": {
-      const { runAtlas } = await import("./commands/atlas")
-      await runAtlas({
-        entry: getFlag("entry"),
-        port: getFlag("port"),
-        host: getFlag("host"),
-        apiPublicOrigin: getFlag("api-public-origin"),
-        atlasPublicOrigin: getFlag("atlas-public-origin"),
-        appPublicOrigin: getFlag("app-public-origin"),
       })
       break
     }

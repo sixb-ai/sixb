@@ -20,7 +20,6 @@ import type { ShareDefinition } from "../shares"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows/types"
 import { SecurityValidationError } from "./errors"
-import type { ApplicationDefinition } from "./types"
 
 /** Capability targets a breadth selector can range over. */
 export const BREADTH_TARGETS = [
@@ -30,7 +29,6 @@ export const BREADTH_TARGETS = [
   "workflow",
   "sync",
   "pipeline",
-  "application",
   "connector",
   "share",
 ] as const
@@ -44,7 +42,6 @@ interface BreadthTargetInput {
   workflow: WorkflowDefinition
   sync: SyncDefinition
   pipeline: PipelineDefinition
-  application: ApplicationDefinition
   connector: ConnectorDefinition
   share: ShareDefinition
 }
@@ -106,7 +103,6 @@ export const every = {
   workflow: (): BreadthSelector<"workflow"> => all("workflow"),
   sync: (): BreadthSelector<"sync"> => all("sync"),
   pipeline: (): BreadthSelector<"pipeline"> => all("pipeline"),
-  application: (): BreadthSelector<"application"> => all("application"),
   connector: (): BreadthSelector<"connector"> => all("connector"),
   share: (): BreadthSelector<"share"> => all("share"),
 }

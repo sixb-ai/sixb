@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   agent,
-  applications,
   can,
-  canAccessApplication,
   col,
   defineAction,
   defineConnector,
@@ -15,7 +13,6 @@ import {
   defineRole,
   defineSync,
   every,
-  isApplicationAccessControlled,
   prop,
   type RoleDefinition,
   resolveAuthorizationContext,
@@ -128,7 +125,6 @@ describe("resolveAuthorizationContext", () => {
   // The registry expands grants against the registered universe at startup;
   // here we expand by hand so the resolver can be exercised in isolation.
   const universe = {
-    applicationIds: new Set(["atlas", "app"]),
     connectorIds: new Set<string>(),
     objectTypeIds: new Set(["contract", "signed-contract", "invoice"]),
     datasetIds: new Set(["raw.contracts", "raw.invoices"]),
@@ -137,8 +133,6 @@ describe("resolveAuthorizationContext", () => {
     workflowIds: new Set<string>(),
     syncIds: new Set(["sync-contracts", "sync-invoices"]),
     pipelineIds: new Set(["pipeline-contracts", "pipeline-invoices"]),
-    observableIds: new Set(["logs", "aiUsage"]),
-    manageableIds: new Set(["aiUsage"]),
     getSubTypes: (objectTypeId: string) => (objectTypeId === "contract" ? ["signed-contract"] : []),
   }
 
@@ -172,28 +166,9 @@ describe("resolveAuthorizationContext", () => {
       })
       const context = resolve([admins.id], [role])
       expect(context.grants["run:agent"]).toBe(expected.run)
-      expect(context.grants["observe:aiUsage"].has("aiUsage")).toBe(expected.observe)
-      expect(context.grants["manage:aiUsage"].has("aiUsage")).toBe(expected.manage)
+      expect(context.grants["observe:aiUsage"]).toBe(expected.observe)
+      expect(context.grants["manage:aiUsage"]).toBe(expected.manage)
     }
-  })
-
-  test("application access becomes an allowlist when a role grants it", () => {
-    const atlasAccess = defineRole("atlas.access", {
-      grantedTo: [admins],
-      grants: [can.access(applications.atlas)],
-    })
-    const roles = [atlasAccess].map((role) => ({
-      id: role.id,
-      grantedToGroupIds: role.grantedToGroupIds,
-      grants: resolveRoleGrants(role, universe),
-    }))
-    const allowed = resolveAuthorizationContext({ principal, groupIds: [admins.id], roles })
-    const denied = resolveAuthorizationContext({ principal, groupIds: [finance.id], roles })
-
-    expect(isApplicationAccessControlled(roles, "atlas")).toBe(true)
-    expect(canAccessApplication(allowed, roles, "atlas")).toBe(true)
-    expect(canAccessApplication(denied, roles, "atlas")).toBe(false)
-    expect(canAccessApplication(denied, roles, "app")).toBe(true)
   })
 
   test("matches roles by group membership and expands view grants to subtypes", () => {
@@ -209,7 +184,7 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants["run:sync"]).toEqual(new Set(["sync-contracts"]))
     expect(context.grants["run:pipeline"]).toEqual(new Set(["pipeline-contracts"]))
     expect(context.grants["run:agent"]).toBe(true)
-    expect(context.grants["observe:logs"]).toEqual(new Set())
+    expect(context.grants["observe:logs"]).toBe(false)
   })
 
   test("unions grants across all matched roles", () => {
@@ -409,7 +384,6 @@ describe("auth.createAuthorizationContext", () => {
       projectId,
       userId: params.userId,
       strategyId: "test",
-      audience: "atlas",
       tokenHash: credential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -417,7 +391,7 @@ describe("auth.createAuthorizationContext", () => {
 
     return {
       request: new Request("http://localhost/api/objects", {
-        headers: { cookie: `sixb_session=${credential.cookieValue}` },
+        headers: { cookie: `sixb_session_app=${credential.cookieValue}` },
       }),
       sessionId: credential.sessionId,
     }

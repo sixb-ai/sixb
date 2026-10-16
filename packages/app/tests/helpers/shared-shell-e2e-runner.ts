@@ -24,7 +24,7 @@ async function runDev(root: string): Promise<void> {
     rootDir: root,
     apiBaseUrl: "https://api.example.test/v1",
     authEnabled: false,
-    agentRoutes: false,
+    builtInPages: false,
   })
   const server = await app.dev({ host: "127.0.0.1", port })
 
@@ -102,7 +102,7 @@ async function runProduction(root: string): Promise<void> {
   const app = await createCustomApp({
     rootDir: root,
     authEnabled: false,
-    agentRoutes: false,
+    builtInPages: false,
   })
   const result = await app.build({ outdir })
   assert(result.success, `production build failed: ${result.logs?.join("\n") ?? "unknown"}`)

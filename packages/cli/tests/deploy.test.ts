@@ -13,7 +13,7 @@ import { runCliToCompletion } from "./shared/cli-process"
 const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
 const fixtureProject = resolve(import.meta.dir, "fixtures", "deploy-project")
 
-const ports = { atlas: 3000, app: 3001, api: 3002 } as const
+const ports = { app: 3001, api: 3002 } as const
 
 const target: DeployTarget = {
   kind: "test",
@@ -101,7 +101,6 @@ describe("deploy release", () => {
 
     expect(built.services.map((entry) => [entry.name, entry.kind])).toEqual([
       ["api", "http"],
-      ["atlas", "http"],
       ["app", "http"],
       ["orchestrator", "singleton"],
       ["scheduler", "singleton"],
@@ -111,7 +110,7 @@ describe("deploy release", () => {
     expect(built.bunVersion).toBe("1.4.2")
     expect(commandLine(built, "api")).toBe("sixb api --host 127.0.0.1 --port 3002 --no-migrate")
     expect(service(built, "api").http?.readinessPath).toBe("/ready")
-    expect(commandLine(built, "atlas")).toBe("sixb atlas --host 127.0.0.1 --port 3000")
+    expect(commandLine(built, "app")).toBe("sixb app --host 127.0.0.1 --port 3001")
     expect(commandLine(built, "rules")).toBe("sixb rules --no-migrate")
     expect(commandLine(built, "workers")).toBe("sixb worker-group --no-migrate")
     expect(built.steps).toEqual({
@@ -138,7 +137,6 @@ describe("deploy release", () => {
     })
     const roles: Readonly<Record<string, ProductionRole>> = {
       api: "api",
-      atlas: "atlas",
       app: "app",
       orchestrator: "orchestrator",
       scheduler: "scheduler",
@@ -179,7 +177,6 @@ describe("deploy release", () => {
       ])
     ).toEqual([
       ["api", true],
-      ["atlas", false],
       ["app", false],
       ["orchestrator", false],
       ["scheduler", false],
@@ -202,7 +199,7 @@ describe("deploy release", () => {
       services: {
         app: { domain: "ops.example.com" },
         api: { env: { POSTGRES_POOL_MAX: "6" } },
-        atlas: false,
+        scheduler: false,
       },
     })
 
@@ -220,7 +217,7 @@ describe("deploy release", () => {
       domain: "ops.example.com",
       publicOrigin: "https://ops.example.com",
     })
-    expect(built.services.some((entry) => entry.name === "atlas")).toBe(false)
+    expect(built.services.some((entry) => entry.name === "scheduler")).toBe(false)
   })
 
   test("supervises project processes with Bun", () => {
@@ -252,7 +249,7 @@ describe("deploy release", () => {
     )
     expect(() =>
       release({ target: { ...target, listenAddress: () => ({ host: "127.0.0.1", port: 3000 }) } })
-    ).toThrow("api and atlas both listen on port 3000")
+    ).toThrow("api and app both listen on port 3000")
     expect(() => release({ services: { workers: { agentTurnTimeout: "10 minutes" } } })).toThrow(
       "agentTurnTimeout '10 minutes' is not a duration"
     )
@@ -324,7 +321,7 @@ export default {
   target: {
     kind: "test",
     location: "sixb@test-server",
-    listenAddress: (service) => ({ host: "127.0.0.1", port: { atlas: 3000, app: 3001, api: 3002 }[service] }),
+    listenAddress: (service) => ({ host: "127.0.0.1", port: { app: 3001, api: 3002 }[service] }),
     async deploy(release, source, context) {
       context.report({ type: "steps", labels: ["Upload source", "Build"] })
       context.report({ type: "step", index: 0, status: "running" })
@@ -656,7 +653,6 @@ export default {
     expect(built.target).toEqual({ kind: "ssh", location: "sixb@203.0.113.10" })
     expect(built.services.map((entry) => entry.name)).toEqual([
       "api",
-      "atlas",
       "app",
       "orchestrator",
       "rules",

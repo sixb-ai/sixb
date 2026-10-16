@@ -1,6 +1,6 @@
 # Deployment
 
-A deployed Sixb project runs as several services, such as the API, Atlas, your app, and background workers, that share one configuration and the same persistent providers.
+A deployed Sixb project runs as several services, such as the API, your app, and background workers, that share one configuration and the same persistent providers.
 
 There are two ways to run them:
 
@@ -17,17 +17,16 @@ Configure [authentication](../auth/authentication.md), and provide the same proj
 
 ## Configure public origins
 
-Set the public addresses of the API, Atlas, and your custom app:
+Set the public addresses of the API and your app:
 
 ```bash
 export SIXB_API_PUBLIC_ORIGIN=https://api.example.com
-export SIXB_ATLAS_PUBLIC_ORIGIN=https://atlas.example.com
 export SIXB_APP_PUBLIC_ORIGIN=https://app.example.com
 ```
 
-Omit the app origin if your project has no custom app. Origins contain only the scheme, host, and optional port, with no path. They configure browser access and authentication redirects; they are separate from the host and port a process binds to.
+Origins contain only the scheme, host, and optional port, with no path. They configure browser access and authentication redirects; they are separate from the host and port a process binds to. Without `SIXB_APP_PUBLIC_ORIGIN`, the API admits no browser app, which suits a deployment that runs the API alone.
 
-Serve these public origins over HTTPS. Atlas and the custom app connect to the API; they do not serve API routes themselves.
+Serve these public origins over HTTPS. The app connects to the API; it does not serve API routes itself.
 
 ## Run behind a proxy
 
@@ -63,14 +62,13 @@ Run each needed command as a separate managed process or container:
 | Command | Purpose |
 | --- | --- |
 | `bun sixb api` | Serve the HTTP API, WebSockets, and API docs. |
-| `bun sixb atlas` | Serve Atlas. |
-| `bun sixb app` | Serve your custom app, if present. |
+| `bun sixb app` | Serve your app, with its built-in pages. |
 | `bun sixb orchestrator` | Dispatch event-triggered work. |
 | `bun sixb worker-group` | Run workers for the project's registered work. |
 | `bun sixb scheduler` | Run cron schedules, if used. |
 | `bun sixb rules` | Evaluate rules, if used. |
 
-`atlas` and `app` serve the built bundles without loading `sixb.config.ts`, so they need only their public origins, not the project's secrets or database access.
+`app` serves the built bundle without loading `sixb.config.ts`, so it needs only the API's public origin, not the project's secrets or database access.
 
 Keep at least one API process running for event recovery and maintenance. Start workers and rules before the orchestrator and scheduler. On shutdown, stop producers before workers.
 

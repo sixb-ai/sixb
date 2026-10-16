@@ -35,10 +35,7 @@ export interface MagicLinkOptions {
   readonly magicLinkTtlMs?: number
   /**
    * Request rate limit, or `false` to disable. The limiter is keyed per email and
-   * shared across every audience served by one API process. A user signing into
-   * Atlas and a custom app back-to-back draws from the same per-email bucket. Set
-   * `perMinute` to at least the number of browser roles a user signs into.
-   * Defaults to `{ perMinute: 5, perHour: 20 }`.
+   * shared by one API process. Defaults to `{ perMinute: 5, perHour: 20 }`.
    */
   readonly rateLimit?: false | Partial<MagicLinkRateLimitOptions>
   readonly sendMagicLink: (message: SendMagicLinkInput) => Promise<void>
@@ -101,7 +98,6 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       projectId: input.projectId,
       authStorage: input.authStorage,
       email: input.invitation.email,
-      audience: input.audience,
       returnTo: input.returnTo,
       requestOrigin: input.requestOrigin,
       now: input.now,
@@ -142,7 +138,6 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       id: magicLinkId,
       projectId: input.projectId,
       strategyId: this.id,
-      audience: input.audience,
       email,
       tokenHash: credential.tokenHash,
       returnTo: input.returnTo,
@@ -151,7 +146,6 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
     })
 
     const link = this.createCallbackUrl({
-      audience: input.audience,
       magicLinkId,
       requestOrigin: input.requestOrigin,
       token: credential.token,
@@ -265,15 +259,11 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       newUserId: `usr_${randomUUID()}`,
       allowUserCreationWithoutInvitation: canBootstrap,
       manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
-      session: {
-        ...input.session,
-        audience: magicLink.audience,
-      },
+      session: input.session,
     })
 
     return {
       ...signIn,
-      audience: magicLink.audience,
       returnTo: magicLink.returnTo ?? "/",
     }
   }
@@ -306,7 +296,6 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
   }
 
   private createCallbackUrl(input: {
-    readonly audience: MagicLinkRequestInput["audience"]
     readonly magicLinkId: string
     readonly requestOrigin: string
     readonly token: string
@@ -314,9 +303,6 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
   }): string {
     const origin = this.publicOrigin ?? normalizePublicOrigin(input.requestOrigin)
     const url = new URL("/auth/callback", origin)
-    // This non-secret hint only selects the pre-auth presentation. Completion
-    // still uses the audience and returnTo stored with the magic link.
-    url.searchParams.set("audience", input.audience)
     url.searchParams.set("magicLinkId", input.magicLinkId)
     url.searchParams.set("token", input.token)
     if (input.requesterHash) {

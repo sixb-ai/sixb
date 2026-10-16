@@ -30,16 +30,16 @@ function stub(name: string, dependencies: string[] = []): PublishablePackage {
 describe("topologicalPublishOrder", () => {
   test("puts every dependency before the package that needs it", () => {
     const ordered = topologicalPublishOrder([
-      stub("@sixb/cli", ["@sixb/atlas", "create-sixb"]),
-      stub("@sixb/atlas", ["@sixb/core", "@sixb/ui"]),
+      stub("@sixb/cli", ["@sixb/app", "create-sixb"]),
+      stub("@sixb/app", ["@sixb/core", "@sixb/ui"]),
       stub("@sixb/core"),
       stub("@sixb/ui"),
       stub("create-sixb"),
     ]).map(packageName)
 
-    expect(ordered.indexOf("@sixb/core")).toBeLessThan(ordered.indexOf("@sixb/atlas"))
-    expect(ordered.indexOf("@sixb/ui")).toBeLessThan(ordered.indexOf("@sixb/atlas"))
-    expect(ordered.indexOf("@sixb/atlas")).toBeLessThan(ordered.indexOf("@sixb/cli"))
+    expect(ordered.indexOf("@sixb/core")).toBeLessThan(ordered.indexOf("@sixb/app"))
+    expect(ordered.indexOf("@sixb/ui")).toBeLessThan(ordered.indexOf("@sixb/app"))
+    expect(ordered.indexOf("@sixb/app")).toBeLessThan(ordered.indexOf("@sixb/cli"))
     expect(ordered.indexOf("create-sixb")).toBeLessThan(ordered.indexOf("@sixb/cli"))
   })
 
@@ -74,8 +74,8 @@ describe("topologicalPublishOrder", () => {
 
   test("is deterministic across runs", () => {
     const input = [
-      stub("@sixb/cli", ["@sixb/atlas"]),
-      stub("@sixb/atlas", ["@sixb/core"]),
+      stub("@sixb/cli", ["@sixb/app"]),
+      stub("@sixb/app", ["@sixb/core"]),
       stub("@sixb/core"),
       stub("@sixb/pg", ["@sixb/core"]),
       stub("@sixb/sqlite", ["@sixb/core"]),

@@ -1,12 +1,10 @@
 import { resolve } from "node:path"
-import type { AuthSessionAudience } from "@sixb/core"
 
 const AUTH_BOOTSTRAP_PLACEHOLDER = "__SIXB_AUTH_BOOTSTRAP__"
 const AUTH_ASSET_PREFIX = "/auth/assets/"
 
 export interface SixbAuthExperienceOptions {
   readonly outdir: string
-  readonly audience?: AuthSessionAudience
 }
 
 /** The configured experience with the project's language, which its pages declare. */
@@ -30,7 +28,6 @@ export interface AuthExperienceSubmission {
 export async function customAuthExperienceResponse(
   options: ProjectAuthExperience | undefined,
   input: {
-    readonly audience: AuthSessionAudience
     readonly state: AuthExperiencePageState
     readonly signInUrl: string
     readonly submission?: AuthExperienceSubmission
@@ -39,7 +36,7 @@ export async function customAuthExperienceResponse(
     readonly formActionOrigins?: readonly string[]
   }
 ): Promise<Response | null> {
-  if (!options || input.audience !== (options.audience ?? "app")) {
+  if (!options) {
     return null
   }
 

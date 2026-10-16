@@ -14,7 +14,6 @@ import {
   type SummarizeAiUsageExecutionInput,
   type SummarizeAiUsageExecutionsInput,
 } from "@sixb/core/storage"
-import { installFreshSqliteSchema } from "./migrations"
 import { isUniqueConstraintError } from "./storage-errors"
 import {
   closeSqliteStoreConnection,
@@ -34,9 +33,6 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
 
   constructor(options: SqliteAiUsageStorageOptions = {}) {
     this.connection = openSqliteStoreConnection(options)
-    if (this.connection.installFreshSchema) {
-      installFreshSqliteSchema(this.connection.db)
-    }
   }
 
   async recordModelCall(input: RecordAiModelCallInput): Promise<RecordAiModelCallResult> {

@@ -66,7 +66,6 @@ afterAll(() => {
 
 const signedIn: GetAuthSessionResponse = {
   authenticated: true,
-  applicationAccess: { allowed: true, audience: "app" },
   user: { id: "user-1", email: "morgan@example.com", displayName: "Morgan Reyes", groupIds: [] },
   session: { id: "session-1", expiresAt: "2026-10-15T00:00:00.000Z" },
 }
@@ -164,26 +163,21 @@ test("AppShell offers Search in the app, not with header={null}, and not on a sh
 })
 
 // Regression proof: drop the `conversationPage` check from AgentDock and Home gets the launcher.
-test("the agent waits docked beside app pages, but not on Home or without an agent", async () => {
+test("the agent waits docked beside app pages, but not on Home or without an agent", () => {
   const shell = (
     <AppShell nav={[{ label: "Quotes", href: "/quotes" }]}>
       <p>Page</p>
     </AppShell>
   )
-
-  const quotes = renderInApp(shell, "/quotes", { sections: true, agent: true })
-  expect(await quotes.findByRole("button", { name: "Ask the agent" })).toBeDefined()
-  cleanup()
-
-  for (const [path, agent] of [
-    ["/", true],
-    ["/agents/thread-1", true],
-    ["/quotes", false],
-  ] as const) {
+  const launcher = (path: string, agent: boolean) => {
     const view = renderInApp(shell, path, { sections: true, agent })
-    // The surface loads lazily; give it the time it took above before checking it stayed away.
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(view.queryByRole("button", { name: "Ask the agent" })).toBeNull()
+    const found = view.queryByRole("button", { name: "Ask the agent" }) !== null
     cleanup()
+    return found
   }
+
+  expect(launcher("/quotes", true)).toBe(true)
+  expect(launcher("/", true)).toBe(false)
+  expect(launcher("/agents/thread-1", true)).toBe(false)
+  expect(launcher("/quotes", false)).toBe(false)
 })

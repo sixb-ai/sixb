@@ -1,6 +1,6 @@
 import type { AgentRunActivityEvent, AgentRunStreamEvent } from "@sixb/core/agents/streams"
 // Import the wire validator from the browser-safe streams subpath: the `@sixb/core` root pulls in
-// node-only runtime (e.g. `node:crypto`), which breaks the Atlas browser bundle.
+// node-only runtime (e.g. `node:crypto`), which breaks browser bundles.
 import { isAgentRunActivityEvent, isAgentRunStreamEvent } from "@sixb/core/agents/streams"
 import type { BrokerRecord } from "@sixb/core/broker"
 import type { Client } from "./generated/client"

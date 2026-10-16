@@ -64,7 +64,6 @@ export interface SqliteAuthSessionRow {
   readonly id: string
   readonly user_id: string
   readonly strategy_id: string
-  readonly audience: SessionRecord["audience"]
   readonly token_hash: string
   readonly created_at: string
   readonly expires_at: string
@@ -127,7 +126,6 @@ export interface SqliteAuthMagicLinkRow {
   readonly project_id: string
   readonly id: string
   readonly strategy_id: string
-  readonly audience: MagicLinkRecord["audience"]
   readonly email: string
   readonly token_hash: string
   readonly return_to: string | null
@@ -141,7 +139,6 @@ export interface SqliteAuthOidcAttemptRow {
   readonly project_id: string
   readonly id: string
   readonly strategy_id: string
-  readonly audience: OidcAuthorizationAttemptRecord["audience"]
   readonly state_hash: string
   readonly nonce_hash: string
   readonly code_verifier: string
@@ -230,7 +227,6 @@ export function rowToSessionRecord(row: SqliteAuthSessionRow): SessionRecord {
     projectId: row.project_id,
     userId: row.user_id,
     strategyId: row.strategy_id,
-    audience: row.audience,
     tokenHash: row.token_hash,
     createdAt: new Date(row.created_at),
     expiresAt: new Date(row.expires_at),
@@ -321,7 +317,6 @@ export function rowToMagicLinkRecord(row: SqliteAuthMagicLinkRow): MagicLinkReco
     id: row.id,
     projectId: row.project_id,
     strategyId: row.strategy_id,
-    audience: row.audience,
     email: row.email,
     tokenHash: row.token_hash,
     returnTo: row.return_to ?? undefined,
@@ -339,7 +334,6 @@ export function rowToOidcAuthorizationAttemptRecord(
     id: row.id,
     projectId: row.project_id,
     strategyId: row.strategy_id,
-    audience: row.audience,
     stateHash: row.state_hash,
     nonceHash: row.nonce_hash,
     codeVerifier: row.code_verifier,

@@ -1,4 +1,3 @@
-import { type AuthSessionAudience, resolveAuthSessionAudience } from "../../../auth/audience"
 import { AuthStorageError } from "../errors"
 import type {
   AccessTokenRecord,
@@ -213,17 +212,12 @@ export function revokeActiveSessionsForUser(
   state: AuthStorageState,
   projectId: string,
   userId: string,
-  revokedAt: Date,
-  audience?: AuthSessionAudience
+  revokedAt: Date
 ): readonly SessionRecord[] {
   const revoked: SessionRecord[] = []
 
   for (const [key, session] of state.sessions) {
     if (session.projectId !== projectId || session.userId !== userId) {
-      continue
-    }
-
-    if (audience !== undefined && session.audience !== audience) {
       continue
     }
 
@@ -290,7 +284,6 @@ export function validateCompleteSessionInput(
   session: CompleteAuthSessionInput
 ): void {
   const sessionId = assertNonEmpty(session.id, "Session id")
-  assertNonEmpty(session.audience, "Session audience")
   assertNonEmpty(session.tokenHash, "Session token hash")
   assertSessionIdAvailable(state, projectId, sessionId)
 }
@@ -303,7 +296,6 @@ export function createSessionRecord(
   const projectId = assertNonEmpty(input.projectId, "Project id")
   const userId = assertNonEmpty(input.userId, "User id")
   const strategyId = assertNonEmpty(input.strategyId, "Strategy id")
-  const audience = resolveAuthSessionAudience(input.audience)
   const tokenHash = assertNonEmpty(input.tokenHash, "Session token hash")
 
   assertSessionIdAvailable(state, projectId, id)
@@ -313,7 +305,6 @@ export function createSessionRecord(
     projectId,
     userId,
     strategyId,
-    audience,
     tokenHash,
     createdAt: cloneDate(input.createdAt),
     expiresAt: cloneDate(input.expiresAt),

@@ -34,7 +34,7 @@ export default defineDeploy({
 })
 ```
 
-This serves the API at `shop-api.example.com`, Atlas at `shop-atlas.example.com`, and your app at `shop-app.example.com`. It runs the orchestrator, scheduler, rules, and workers alongside them.
+This serves the API at `shop-api.example.com` and your app at `shop-app.example.com`. It runs the orchestrator, scheduler, rules, and workers alongside them.
 
 Preview what will run, without connecting to the server:
 
@@ -53,7 +53,7 @@ It lists every process with its command, address, and environment.
 | `services` | Turn services off or adjust them. |
 | `processes` | Long-running scripts of your own, supervised alongside the services. |
 
-Every service gets `NODE_ENV=production` and the [public origins](overview.md#configure-public-origins) of the API, Atlas, and app, so you do not set those yourself.
+Every service gets `NODE_ENV=production` and the [public origins](overview.md#configure-public-origins) of the API and the app, so you do not set those yourself.
 
 ### The SSH target
 
@@ -61,7 +61,7 @@ Every service gets `NODE_ENV=production` and the [public origins](overview.md#co
 | --- | --- | --- |
 | `host` | | The server's hostname or IP address, or a `Host` alias from your SSH config. Use an alias to reach SSH on a port other than 22. |
 | `user` | `"sixb"` | The account the services run as. Never `root`. See [Several projects on one server](server-access.md#several-projects-on-one-server). |
-| `ports` | Atlas 3000, app 3001, API 3002 | The local port each domain is forwarded to. Give each project on a server its own. |
+| `ports` | app 3001, API 3002 | The local port each domain is forwarded to. Give each project on a server its own. |
 
 ### Services
 
@@ -83,11 +83,11 @@ export default defineDeploy({
 })
 ```
 
-Turn off `app` when the project has no custom app. The scheduler and rules processes wait idly when the project has no schedules or rules; turn them off to save memory.
+The scheduler and rules processes wait idly when the project has no schedules or rules; turn them off to save memory.
 
 | Service | Settings |
 | --- | --- |
-| `api`, `atlas`, `app` | `domain`, `env`, `process` |
+| `api`, `app` | `domain`, `env`, `process` |
 | `orchestrator`, `scheduler`, `rules` | `env`, `process`. Each always runs as one process. |
 | `workers` | `types` (default: every type the project registers work for), `concurrency` per type, `agentTurnTimeout` such as `"10m"`, `env`, `process` |
 
@@ -162,7 +162,7 @@ A deploy:
 5. Stops the services, runs `sixb db migrate`, `sixb check`, and `sixb lake check`, and starts the services again.
 6. Waits for the API's `/ready`, and fails if a process exits in the seconds after.
 
-The services are down during step 5. Meanwhile, browsers opening Atlas or your app get an "Updates in progress" page.
+The services are down during step 5. Meanwhile, browsers opening your app get an "Updates in progress" page.
 
 A deploy that fails before the services stop leaves them running. One that fails later leaves them stopped until a deploy succeeds: fix the cause and deploy again, or deploy the previous commit with `--ref`. Two deploys of the same project never overlap; the second waits for the first.
 

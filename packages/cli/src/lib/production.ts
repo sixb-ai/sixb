@@ -83,7 +83,7 @@ export function builtAppOutdir(buildOutdir: string): string {
   return resolve(buildOutdir, "app")
 }
 
-export async function hasBuiltCustomApp(appOutdir: string): Promise<boolean> {
+export async function hasBuiltApp(appOutdir: string): Promise<boolean> {
   const shells = await Promise.all(
     ["index.html", "shared-index.html"].map((file) =>
       stat(resolve(appOutdir, file))
@@ -92,10 +92,6 @@ export async function hasBuiltCustomApp(appOutdir: string): Promise<boolean> {
     )
   )
   return shells.every(Boolean)
-}
-
-export function builtAtlasOutdir(buildOutdir: string): string {
-  return resolve(buildOutdir, "atlas")
 }
 
 function isDefaultBuildEntry(entry: string): boolean {
@@ -107,9 +103,8 @@ async function isCustomBuildOutdirEntry(entry: string, entryDir: string): Promis
     return false
   }
 
-  const hasBuiltAtlas = await stat(resolve(entryDir, "atlas"))
+  // `sixb build` always writes the app next to the entry.
+  return await stat(builtAppOutdir(entryDir))
     .then((info) => info.isDirectory())
     .catch(() => false)
-
-  return hasBuiltAtlas
 }

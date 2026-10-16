@@ -28,12 +28,6 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./agents": {
-      "types": "./dist/agents.d.ts",
-      "bun": "./src/agents.ts",
-      "import": "./dist/agents.js",
-      "default": "./dist/agents.js"
-    },
     "./pages": {
       "types": "./dist/pages.d.ts",
       "bun": "./src/pages.ts",
@@ -51,12 +45,6 @@
       "bun": "./src/locale.ts",
       "import": "./dist/locale.js",
       "default": "./dist/locale.js"
-    },
-    "./auth": {
-      "types": "./dist/auth.d.ts",
-      "bun": "./src/auth.ts",
-      "import": "./dist/auth.js",
-      "default": "./dist/auth.js"
     }
   },
   "scripts": {
@@ -66,13 +54,14 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@sixb/agent-ui": "workspace:^",
     "@sixb/client": "workspace:^",
     "@sixb/core": "workspace:^",
     "@sixb/ui": "workspace:^",
     "@tailwindcss/cli": "^4.2.2",
     "@xyflow/react": "^12.10.2",
     "lucide-react": "^0.562.0",
+    "papaparse": "^5.5.4",
+    "parse5": "^8.0.0",
     "recharts": "^3.8.0",
     "tailwindcss": "^4.1.18"
   },
@@ -85,6 +74,7 @@
   "devDependencies": {
     "@testing-library/react": "^16.3.2",
     "@types/bun": "latest",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "happy-dom": "^20.11.6",

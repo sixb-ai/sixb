@@ -17,15 +17,11 @@ export {
   CollectionViewToggle,
 } from "./collection-view"
 export { EmptyState } from "./empty-state"
-export {
-  SidebarCollapseToggle,
-  type SidebarUser,
-  SidebarUserMenu,
-} from "./sidebar-user-menu"
+export { SidebarCollapseToggle } from "./sidebar-collapse-toggle"
 // Sixb speech dictation
 export { DictationButton, type DictationButtonProps } from "./speech/dictation-button"
 export { DictationTextarea, type DictationTextareaProps } from "./speech/dictation-textarea"
-export { ThemePicker, ThemeSwitcher } from "./theme-switcher"
+export { nextTheme, ThemePicker, ThemeSwitcher } from "./theme-switcher"
 export { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "./ui/accordion"
 export { Alert, AlertDescription, AlertTitle } from "./ui/alert"
 export {

@@ -1,6 +1,6 @@
-import { Database, type SQLQueryBindings } from "bun:sqlite"
+import type { Database, SQLQueryBindings } from "bun:sqlite"
 import { expect, test } from "bun:test"
-import { installFreshSqliteSchema } from "../src/migrations"
+import { freshSqliteDatabase } from "../src/migrations"
 import { SqliteObjectStorage } from "../src/objects/storage"
 import { SqliteRulesStorage } from "../src/rules-storage"
 
@@ -9,8 +9,7 @@ import { SqliteRulesStorage } from "../src/rules-storage"
 // sorts every rule state of the project), so one reconciliation pass is quadratic in its rows.
 for (const analyzed of [false, true]) {
   test(`SQLite reconciliation pages seek to their cursor (statistics: ${analyzed})`, async () => {
-    const db = new Database(":memory:")
-    installFreshSqliteSchema(db)
+    const db = freshSqliteDatabase()
     try {
       db.run(`WITH RECURSIVE ids(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM ids WHERE i < 100)
         INSERT INTO objects (
@@ -26,7 +25,6 @@ for (const analyzed of [false, true]) {
       const connection = {
         db: observePlans(db, plan),
         ownsConnection: false,
-        installFreshSchema: false,
       }
       const rules = new SqliteRulesStorage({ connection })
       const objects = new SqliteObjectStorage({ connection })

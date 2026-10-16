@@ -1,5 +1,3 @@
-import type { AuthSessionAudience } from "../auth/audience"
-
 export interface GroupDefinition<TId extends string = string> {
   readonly kind: "group"
   readonly id: TId
@@ -47,19 +45,6 @@ export type GroupReference = GroupDefinition | string
 export type Selection =
   | { readonly all: true; readonly except: readonly string[] }
   | { readonly all: false; readonly ids: readonly string[] }
-
-export interface ApplicationDefinition<TId extends AuthSessionAudience = AuthSessionAudience> {
-  readonly kind: "application"
-  readonly id: TId
-  readonly label: string
-}
-
-export interface AccessGrant {
-  readonly kind: "grant"
-  readonly capability: "access"
-  readonly target: "application"
-  readonly selection: Selection
-}
 
 export type ViewGrantTarget = "object" | "dataset"
 
@@ -133,25 +118,34 @@ export interface AgentRunGrant {
 
 export type ObserveGrantTarget = "logs" | "aiUsage"
 
+/** Read the project's logs or its AI usage. Each is one surface, so there is nothing to select. */
 export interface ObserveGrant {
   readonly kind: "grant"
   readonly capability: "observe"
   readonly target: ObserveGrantTarget
-  readonly selection: Selection
 }
 
 export type ManageGrantTarget = "connector" | "aiUsage"
 
-/** Manage a selected connector or the project's AI usage-limit policies. */
-export interface ManageGrant<TTarget extends ManageGrantTarget = ManageGrantTarget> {
-  readonly kind: "grant"
-  readonly capability: "manage"
-  readonly target: TTarget
-  readonly selection: Selection
-}
+/**
+ * Manage the selected connectors, or the project's AI usage-limit policies. AI usage is one
+ * surface, so its grant selects nothing.
+ */
+export type ManageGrant<TTarget extends ManageGrantTarget = ManageGrantTarget> =
+  TTarget extends "connector"
+    ? {
+        readonly kind: "grant"
+        readonly capability: "manage"
+        readonly target: TTarget
+        readonly selection: Selection
+      }
+    : {
+        readonly kind: "grant"
+        readonly capability: "manage"
+        readonly target: TTarget
+      }
 
 export type GrantDefinition =
-  | AccessGrant
   | ViewGrant
   | EditGrant
   | AppendGrant

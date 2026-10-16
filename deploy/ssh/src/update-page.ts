@@ -1,6 +1,6 @@
 /**
- * Shown by Caddy for a page request while the app or Atlas cannot answer — during a deploy, or
- * an outage. It needs no assets or JavaScript and reloads itself every 10 seconds.
+ * Shown by Caddy for a page request while the app cannot answer — during a deploy, or an
+ * outage. It needs no assets or JavaScript and reloads itself every 10 seconds.
  */
 export function renderUpdatePage(): string {
   return `<!doctype html>

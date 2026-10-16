@@ -1,4 +1,3 @@
-export { canAccessApplication, isApplicationAccessControlled } from "./application-access"
 export type { AuthzDecision, AuthzRequest } from "./decision"
 export {
   assertAuthorized,

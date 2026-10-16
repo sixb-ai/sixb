@@ -44,7 +44,7 @@ Projects can share a server. Give each project its own `ports`; `sixb deploy che
 ```ts
 target: new SshTarget({
   host: "203.0.113.10",
-  ports: { atlas: 3010, app: 3011, api: 3012 },
+  ports: { app: 3011, api: 3012 },
 }),
 ```
 

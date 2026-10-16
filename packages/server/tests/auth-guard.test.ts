@@ -3,7 +3,6 @@ import { createServer } from "node:net"
 import {
   type AuthCookieOptions,
   type AuthSessionOptions,
-  applications,
   can,
   defineConnector,
   defineGroup,
@@ -27,7 +26,6 @@ import { DEFAULT_REQUEST_BODY_LIMIT_BYTES } from "../src/utils/request-body"
 import { createTestBrowserPolicy } from "./helpers"
 
 const securityAdmins = defineGroup("security-admins")
-const atlasUsers = defineGroup("atlas-users")
 
 const authStrategy = {
   id: "test",
@@ -108,7 +106,7 @@ function createRuntime(
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     connectors: options.connector ? [connector] : [],
-    groups: [securityAdmins, atlasUsers],
+    groups: [securityAdmins],
     roles: options.roles,
     auth: options.auth
       ? options.session || options.cookies
@@ -127,7 +125,6 @@ function createRuntime(
 async function seedSession(
   storage: InMemoryStorage,
   params: {
-    readonly audience?: "atlas" | "app"
     readonly status?: "active" | "suspended"
     readonly createdAt?: Date
     readonly expiresAt?: Date
@@ -135,8 +132,6 @@ async function seedSession(
   } = {}
 ) {
   const credential = createSessionCredential("ses_1")
-  const audience = params.audience ?? "atlas"
-  const cookieSuffix = audience === "atlas" ? "" : `_${audience}`
   await storage.auth.users.create({
     id: "usr_1",
     projectId: "test-project",
@@ -155,7 +150,6 @@ async function seedSession(
     projectId: "test-project",
     userId: "usr_1",
     strategyId: "test",
-    audience,
     tokenHash: credential.tokenHash,
     createdAt: params.createdAt ?? new Date("2026-05-16T10:00:00.000Z"),
     expiresAt: params.expiresAt ?? new Date("2099-05-16T10:00:00.000Z"),
@@ -164,8 +158,8 @@ async function seedSession(
 
   return {
     credential,
-    cookie: `sixb_session${cookieSuffix}=${credential.cookieValue}`,
-    csrfCookie: `sixb_csrf${cookieSuffix}=csrf_1`,
+    cookie: `sixb_session_app=${credential.cookieValue}`,
+    csrfCookie: `sixb_csrf_app=csrf_1`,
     csrfHeader: { "x-sixb-csrf": "csrf_1" },
   }
 }
@@ -216,7 +210,7 @@ describe("server auth guard", () => {
 
     const response = await app.fetch(new Request("http://localhost/api/auth/session"))
 
-    // Atlas and app shells do not load the project, so this is how they learn not to redirect.
+    // The app shell does not load the project, so this is how it learns not to redirect.
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ authenticated: false, authEnabled: false })
   })
@@ -239,24 +233,6 @@ describe("server auth guard", () => {
         process.env.NODE_ENV = previous
       }
     }
-  })
-
-  test("maps each auth audience to exactly one browser origin", () => {
-    const { sixb } = createRuntime({ auth: true })
-
-    expect(
-      () =>
-        new SixbServer({
-          host: sixb,
-          quiet: true,
-          browser: {
-            allowedOrigins: [
-              { origin: "http://atlas.localhost", audience: "atlas" },
-              { origin: "http://admin.localhost", audience: "atlas" },
-            ],
-          },
-        })
-    ).toThrow("Auth audience 'atlas' is mapped to multiple browser origins")
   })
 
   test("protects API routes with generic JSON 401", async () => {
@@ -358,7 +334,6 @@ describe("server auth guard", () => {
     expect(await response.json()).toEqual({
       authenticated: true,
       csrfToken: expect.any(String),
-      applicationAccess: { audience: "atlas", allowed: true },
       user: {
         id: "usr_1",
         email: "ava@acme.com",
@@ -370,7 +345,7 @@ describe("server auth guard", () => {
         expiresAt: "2099-05-16T10:00:00.000Z",
       },
     })
-    expect(response.headers.get("set-cookie")).toContain("sixb_csrf=")
+    expect(response.headers.get("set-cookie")).toContain("sixb_csrf_app=")
   })
 
   test("signs a device in as a bearer session that refreshes and signs out", async () => {
@@ -468,8 +443,6 @@ describe("server auth guard", () => {
     }
     const cliSession = listed.sessions.find((entry) => entry.clientName === "sixb CLI on alex-mbp")
     expect(cliSession).toMatchObject({ current: true })
-    // A native session belongs to no web app.
-    expect(cliSession && "audience" in cliSession).toBe(false)
     const whoami = await bearer(token.accessToken, "/api/auth/session")
     const identity = (await whoami.json()) as Record<string, unknown>
     expect(identity).toMatchObject({
@@ -517,107 +490,6 @@ describe("server auth guard", () => {
       })
     )
     expect(await replayed.json()).toEqual({ status: "expired" })
-  })
-
-  // Reproduce: skip the limiter in POST /api/auth/device-authorizations, or resolve the leftmost
-  // x-forwarded-for entry (the old behavior); either way the 11th request returns 201.
-  // Reproduce: check application access for every caller in ServerAuthGuard again; the native
-  // session and the access token are then refused an Atlas they never asked to open.
-  test("gates only browser sessions by application; native sessions and tokens use grants", async () => {
-    const atlasForAtlasUsers = defineRole("atlas.users", {
-      grantedTo: [atlasUsers],
-      grants: [can.access(applications.atlas)],
-    })
-    const { sixb, storage } = createRuntime({ auth: true, roles: [atlasForAtlasUsers] })
-    const seeded = await seedSession(storage)
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
-    const get = (path: string, headers: Record<string, string>) =>
-      app.fetch(new Request(`http://localhost${path}`, { headers }))
-
-    expect((await get("/api/project", { cookie: seeded.cookie })).status).toBe(403)
-
-    const { session, tokens } = sixb.auth.prepareBearerSession({
-      userId: "usr_1",
-      clientName: "Acme CLI",
-      now: new Date(),
-    })
-    await storage.auth.sessions.create(session)
-    const native = { authorization: `Bearer ${tokens.accessToken}` }
-    expect((await get("/api/project", native)).status).toBe(200)
-
-    const token = createAccessTokenCredential("personal")
-    await storage.auth.accessTokens.create({
-      id: token.tokenId,
-      projectId: "test-project",
-      name: "ci",
-      kind: "personal",
-      subject: { type: "user", id: "usr_1" },
-      tokenHash: token.tokenHash,
-      createdAt: new Date(),
-      expiresAt: new Date("2099-01-01T00:00:00.000Z"),
-    })
-    expect(
-      (await get("/api/project", { authorization: `Bearer ${token.tokenValue}` })).status
-    ).toBe(200)
-
-    // Who-am-I tells the native client that its user may not open Atlas.
-    expect(await (await get("/api/auth/session", native)).json()).toMatchObject({
-      authenticated: true,
-      applicationAccess: { allowed: false, audience: "atlas" },
-    })
-  })
-
-  // Reproduce: drop `account: true` from /auth/device in classifyRoute, or restore the approval
-  // handler's application check; the user is then refused on the page or when approving.
-  test("lets a user who may not open Atlas approve their own CLI login", async () => {
-    const atlasForAtlasUsers = defineRole("atlas.users", {
-      grantedTo: [atlasUsers],
-      grants: [can.access(applications.atlas)],
-    })
-    const { sixb, storage } = createRuntime({ auth: true, roles: [atlasForAtlasUsers] })
-    const seeded = await seedSession(storage)
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
-    const browser = { cookie: `${seeded.cookie}; ${seeded.csrfCookie}` }
-    expect(
-      (await app.fetch(new Request("http://localhost/api/project", { headers: browser }))).status
-    ).toBe(403)
-
-    const started = await app.fetch(
-      new Request("http://localhost/api/auth/device-authorizations", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ clientName: "Acme CLI" }),
-      })
-    )
-    const { deviceCode, userCode, verificationUriComplete } = (await started.json()) as {
-      readonly deviceCode: string
-      readonly userCode: string
-      readonly verificationUriComplete: string
-    }
-
-    const page = await app.fetch(new Request(verificationUriComplete, { headers: browser }))
-    expect(page.status).toBe(200)
-    const approved = await app.fetch(
-      new Request("http://localhost/auth/device", {
-        method: "POST",
-        headers: { ...browser, "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ userCode, decision: "approve", csrfToken: "csrf_1" }),
-      })
-    )
-    expect(approved.status).toBe(200)
-
-    const exchanged = await app.fetch(
-      new Request("http://localhost/api/auth/device-authorizations/token", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ deviceCode }),
-      })
-    )
-    expect(await exchanged.json()).toMatchObject({ status: "approved" })
   })
 
   test("limits device authorizations per client address behind a trusted proxy", async () => {
@@ -707,7 +579,7 @@ describe("server auth guard", () => {
       const response = await app.fetch(
         new Request("http://api.localhost/api/project", {
           headers: {
-            origin: "http://atlas.localhost",
+            origin: "http://app.localhost",
             cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
             "x-sixb-session-activity": "1",
           },
@@ -717,8 +589,8 @@ describe("server auth guard", () => {
       expect(response.status).toBe(200)
       const cookies = getSetCookies(response)
       expect(cookies).toHaveLength(2)
-      expect(cookies[0]).toContain(`sixb_session=${seeded.credential.cookieValue}`)
-      expect(cookies[1]).toContain("sixb_csrf=csrf_1")
+      expect(cookies[0]).toContain(`sixb_session_app=${seeded.credential.cookieValue}`)
+      expect(cookies[1]).toContain("sixb_csrf_app=csrf_1")
       expect(response.headers.get(CSRF_TOKEN_RESPONSE_HEADER_NAME)).toBe("csrf_1")
       expect(response.headers.get("access-control-expose-headers")).toContain(
         CSRF_TOKEN_RESPONSE_HEADER_NAME
@@ -765,8 +637,10 @@ describe("server auth guard", () => {
       )
 
       expect(response.status).toBe(200)
-      const csrfCookie = getSetCookies(response).find((cookie) => cookie.startsWith("sixb_csrf="))
-      const csrfToken = csrfCookie?.match(/^sixb_csrf=([^;]+)/)?.[1]
+      const csrfCookie = getSetCookies(response).find((cookie) =>
+        cookie.startsWith("sixb_csrf_app=")
+      )
+      const csrfToken = csrfCookie?.match(/^sixb_csrf_app=([^;]+)/)?.[1]
       if (!csrfToken) throw new Error("Expected the renewed CSRF cookie to contain a token")
       expect(response.headers.get(CSRF_TOKEN_RESPONSE_HEADER_NAME)).toBe(csrfToken)
     } finally {
@@ -821,7 +695,6 @@ describe("server auth guard", () => {
         },
       })
       const seeded = await seedSession(storage, {
-        audience: "app",
         createdAt: now,
         expiresAt: new Date(now.getTime() + 5 * 60_000),
       })
@@ -845,7 +718,6 @@ describe("server auth guard", () => {
       expect(body).toMatchObject({
         authenticated: true,
         csrfToken: expect.any(String),
-        applicationAccess: { audience: "app" },
         session: { expiresAt: "2026-07-01T10:30:00.000Z" },
       })
       const cookies = getSetCookies(response)
@@ -859,69 +731,11 @@ describe("server auth guard", () => {
     }
   })
 
-  test("application grants restrict Atlas at the session and API boundaries", async () => {
-    const atlasAccess = defineRole("atlas.access", {
-      grantedTo: [atlasUsers],
-      grants: [can.access(applications.atlas)],
-    })
-    const { sixb, storage } = createRuntime({ auth: true, roles: [atlasAccess] })
-    const atlasSession = await seedSession(storage)
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
-
-    const deniedSession = await app.fetch(
-      new Request("http://api.localhost/api/auth/session", {
-        headers: {
-          origin: "http://atlas.localhost",
-          cookie: atlasSession.cookie,
-        },
-      })
-    )
-    const deniedApi = await app.fetch(
-      new Request("http://api.localhost/api/project", {
-        headers: {
-          origin: "http://atlas.localhost",
-          cookie: atlasSession.cookie,
-        },
-      })
-    )
-
-    expect(deniedSession.status).toBe(200)
-    expect(await deniedSession.json()).toMatchObject({
-      authenticated: true,
-      applicationAccess: { audience: "atlas", allowed: false },
-    })
-    expect(deniedApi.status).toBe(403)
-    expect(await deniedApi.json()).toEqual({ error: "Application access is not allowed" })
-  })
-
-  test("application grants allow Atlas for a matching group", async () => {
-    const atlasAccess = defineRole("atlas.access", {
-      grantedTo: [securityAdmins],
-      grants: [can.access(applications.atlas)],
-    })
-    const { sixb, storage } = createRuntime({ auth: true, roles: [atlasAccess] })
-    const seeded = await seedSession(storage)
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
-
-    const response = await app.fetch(
-      new Request("http://api.localhost/api/project", {
-        headers: {
-          origin: "http://atlas.localhost",
-          cookie: seeded.cookie,
-        },
-      })
-    )
-
-    expect(response.status).toBe(200)
-  })
-
-  test("resolves sessions with the app audience cookie names", async () => {
+  // Atlas's cookie had the bare name. Reproduce: make the default session cookie `sixb_session` and
+  // the old cookie signs in.
+  test("resolves sessions from the app's cookie, never Atlas's old one", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
-    const seeded = await seedSession(storage, { audience: "app" })
+    const seeded = await seedSession(storage)
     const app = createSixbApi(
       new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
@@ -948,9 +762,9 @@ describe("server auth guard", () => {
     expect(adminCookie.status).toBe(401)
   })
 
-  test("resolves API browser sessions from the allowed origin audience", async () => {
+  test("resolves API browser sessions from the allowed origin", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
-    const seeded = await seedSession(storage, { audience: "app" })
+    const seeded = await seedSession(storage)
     const app = createSixbApi(
       new SixbServer({
         host: sixb,
@@ -994,7 +808,7 @@ describe("server auth guard", () => {
       new SixbServer({
         host: sixb,
         quiet: true,
-        browser: createTestBrowserPolicy({ includeApp: false }),
+        browser: createTestBrowserPolicy(),
       })
     )
 
@@ -1015,7 +829,7 @@ describe("server auth guard", () => {
       new SixbServer({
         host: sixb,
         quiet: true,
-        browser: createTestBrowserPolicy({ includeApp: false }),
+        browser: createTestBrowserPolicy(),
       })
     )
 
@@ -1023,7 +837,7 @@ describe("server auth guard", () => {
       new Request("http://api.localhost/api/objects/device/fan-1", {
         method: "OPTIONS",
         headers: {
-          origin: "http://atlas.localhost",
+          origin: "http://app.localhost",
           "access-control-request-method": "PUT",
           "access-control-request-headers":
             "content-type,x-sixb-csrf,x-sixb-session-activity,x-sixb-share-grant",
@@ -1041,7 +855,7 @@ describe("server auth guard", () => {
     )
 
     expect(allowed.status).toBe(204)
-    expect(allowed.headers.get("access-control-allow-origin")).toBe("http://atlas.localhost")
+    expect(allowed.headers.get("access-control-allow-origin")).toBe("http://app.localhost")
     expect(allowed.headers.get("access-control-allow-credentials")).toBe("true")
     expect(allowed.headers.get("access-control-allow-headers")).toBe(
       "authorization, content-type, x-sixb-csrf, x-sixb-session-activity, x-sixb-share-grant"
@@ -1049,9 +863,9 @@ describe("server auth guard", () => {
     expect(rejected.status).toBe(403)
   })
 
-  test("uses the browser origin audience for CSRF-protected API mutations", async () => {
+  test("accepts CSRF-protected API mutations from the allowed origin", async () => {
     const { sixb, storage } = createRuntime({ auth: true, roles: [deviceWriter] })
-    const seeded = await seedSession(storage, { audience: "app" })
+    const seeded = await seedSession(storage)
     const app = createSixbApi(
       new SixbServer({
         host: sixb,
@@ -1181,7 +995,7 @@ describe("server auth guard", () => {
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ success: true })
-    expect(response.headers.get("set-cookie")).toContain("sixb_session=")
+    expect(response.headers.get("set-cookie")).toContain("sixb_session_app=")
     expect(getSetCookies(response)).toHaveLength(2)
     for (const cookie of getSetCookies(response)) expect(cookie).toContain("Max-Age=0")
     await expect(
@@ -1229,9 +1043,9 @@ describe("server auth guard", () => {
     }
   })
 
-  test("accepts WebSocket connections from allowed origins with the matching audience", async () => {
+  test("accepts WebSocket connections from allowed origins with the app's cookie", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
-    const seeded = await seedSession(storage, { audience: "app" })
+    const seeded = await seedSession(storage)
     const port = await getFreePort()
     const apiOrigin = `http://127.0.0.1:${port}`
     const server = new SixbServer({
@@ -1303,7 +1117,7 @@ describe("server auth guard", () => {
 
   test("rejects WebSocket connections from unknown browser origins", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
-    const seeded = await seedSession(storage, { audience: "app" })
+    const seeded = await seedSession(storage)
     const port = await getFreePort()
     const apiOrigin = `http://127.0.0.1:${port}`
     const server = new SixbServer({
@@ -1328,7 +1142,7 @@ describe("server auth guard", () => {
     }
   })
 
-  test("does not serve Atlas shell or assets from the API server", async () => {
+  test("does not serve an app shell or assets from the API server", async () => {
     const { sixb } = createRuntime({ auth: true })
     const port = await getFreePort()
     const server = new SixbServer({
@@ -1363,7 +1177,7 @@ describe("server auth guard", () => {
       new SixbServer({
         host: sixb,
         quiet: true,
-        browser: createTestBrowserPolicy({ includeApp: false }),
+        browser: createTestBrowserPolicy(),
       })
     )
 
@@ -1377,7 +1191,6 @@ describe("server auth guard", () => {
     expect(response.status).toBe(302)
     expect(location.origin).toBe("http://api.localhost")
     expect(location.pathname).toBe("/auth/sign-in")
-    expect(location.searchParams.get("audience")).toBe("atlas")
     expect(location.searchParams.get("returnTo")).toBe("http://api.localhost/docs")
   })
 
@@ -1388,7 +1201,7 @@ describe("server auth guard", () => {
       new SixbServer({
         host: sixb,
         quiet: true,
-        browser: createTestBrowserPolicy({ includeApp: false }),
+        browser: createTestBrowserPolicy(),
       })
     )
 
@@ -1548,7 +1361,7 @@ describe("request body limits", () => {
   // with an error and keeps the socket open.
   test("closes a WebSocket that sends an oversized message", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
-    const seeded = await seedSession(storage, { audience: "app" })
+    const seeded = await seedSession(storage)
     await withServer(sixb, async ({ port }) => {
       const ws = createTestWebSocket(`ws://127.0.0.1:${port}/ws/events`, {
         origin: "http://app.localhost",

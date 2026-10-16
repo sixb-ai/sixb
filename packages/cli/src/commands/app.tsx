@@ -1,9 +1,9 @@
 import { basename } from "node:path"
-import { type CustomAppDevServer, createCustomApp } from "@sixb/app/server"
+import { type CustomAppServer, createCustomApp } from "@sixb/app/server"
 import { resolveBrowserTopology, servedUrl } from "../lib/browser-topology"
 import {
   builtAppOutdir,
-  hasBuiltCustomApp,
+  hasBuiltApp,
   resolveProductionPaths,
   resolveRuntimeEntry,
 } from "../lib/production"
@@ -31,11 +31,11 @@ export async function runApp(options: AppOptions = {}) {
     status: "Starting app",
   })
 
-  let customAppServer: CustomAppDevServer | null = null
+  let customAppServer: CustomAppServer | null = null
 
   try {
     const appOutdir = builtAppOutdir(buildOutdir)
-    if (!(await hasBuiltCustomApp(appOutdir))) {
+    if (!(await hasBuiltApp(appOutdir))) {
       throw new Error(
         `[SixbCustomApp] No built app found in ${appOutdir}. Run \`sixb build\` before \`sixb app\`.`
       )
@@ -52,7 +52,6 @@ export async function runApp(options: AppOptions = {}) {
     const customApp = await createCustomApp({
       rootDir: projectRoot,
       apiBaseUrl: topology.apiPublicOrigin,
-      audience: "app",
       // No authEnabled: the page asks the API whether the project uses auth, so serving the
       // bundle never loads the project.
     })
@@ -61,13 +60,12 @@ export async function runApp(options: AppOptions = {}) {
       port: topology.appPort,
       outdir: appOutdir,
       apiBaseUrl: topology.apiPublicOrigin,
-      audience: "app",
     })
 
     app.started({
       title: "Sixb app started",
       name: basename(projectRoot),
-      serviceName: "Custom app",
+      serviceName: "App",
       items: [{ label: "URL", value: servedUrl(topology) }],
     })
 

@@ -224,7 +224,7 @@ describe("findAliasDrift", () => {
   })
 
   test("reports a subpath the map never learned about", () => {
-    // How `@sixb/client/logs` shipped: the subpath existed, the alias did not, and the Atlas
+    // How `@sixb/client/logs` shipped: the subpath existed, the alias did not, and a browser
     // bundle resolved it through `exports.import` into a dist that had not been built.
     const packages = [
       packageAt("packages/client", "@sixb/client", {

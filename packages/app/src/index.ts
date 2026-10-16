@@ -9,37 +9,20 @@
  * for the API. This entry never re-exports them, so each name has one import path.
  */
 
-export {
-  AgentExecutionTrace,
-  type AgentExecutionTraceProps,
-  AgentLabelsProvider,
-  Composer,
-  type ComposerProps,
-  DocumentPreviewRoot,
-  type LanguageModel,
-  type ModelReasoningLevel,
-  Transcript,
-  type TranscriptProps,
-  useAgentConversation,
-  useRegisteredAgentContext,
-} from "@sixb/agent-ui"
-export { AgentChatPage, type AgentChatPageProps } from "@sixb/agent-ui/react-router"
-export {
-  AgentContextProvider,
-  type AgentDocumentPreviewRenderer,
-  type AgentDocumentPreviewRendererProps,
-  type AgentFileRef,
-  AgentPanel,
-  type AgentPanelProps,
-  AgentSurface,
-  type AgentSurfaceMode,
-  type AgentSurfaceProps,
-  AgentWorkspaceProvider,
-  type AgentWorkspaceProviderProps,
-  agentContext,
-  setAgentSurfaceMode,
-  useAgentContext,
-} from "./agents"
+export { agentContext } from "@sixb/core/agents/context"
+export type { ModelReasoningLevel } from "@sixb/core/models"
+export { AgentContextProvider, useAgentContext } from "./agent/agent-context-provider"
+export { AgentPanel, type AgentPanelProps } from "./agent/agent-panel"
+export { AgentSurface, type AgentSurfaceMode, type AgentSurfaceProps } from "./agent/agent-surface"
+export { setAgentSurfaceMode } from "./agent/agent-surface-state"
+export { Composer, type ComposerProps } from "./agent/components/composer"
+export type {
+  AgentDocumentPreviewRenderer,
+  AgentDocumentPreviewRendererProps,
+} from "./agent/document-preview/types"
+export { AgentChatPage, type AgentChatPageProps } from "./agent/react-router"
+export type { LanguageModel } from "./agent/types"
+export { AgentWorkspaceProvider, type AgentWorkspaceProviderProps } from "./agent/workspace"
 export type { AuthExperienceActions, AuthExperienceProps, AuthExperienceState } from "./auth"
 export type { AppMetadata } from "./metadata"
 export { SyncButton, type SyncButtonProps } from "./pages/data/sync-button"

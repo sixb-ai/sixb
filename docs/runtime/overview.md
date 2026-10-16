@@ -29,7 +29,7 @@ export const sixb = createSixb({
 })
 ```
 
-The CLI waits for the configuration to load before starting your project. `bun sixb dev` starts the API, Atlas, your app, and background workers together.
+The CLI waits for the configuration to load before starting your project. `bun sixb dev` starts the API, your app, and background workers together.
 
 ## Required providers
 
@@ -79,7 +79,7 @@ export const sixb = createSixb({
 
 Invalid values fail at startup. The agent knows the current date and time in this time zone. In
 chat, the user's browser time zone and language take precedence, so each user sees times in their
-own zone. Atlas stays in English.
+own zone. The app's built-in Ontology pages stay in English.
 
 ## Environment variables
 

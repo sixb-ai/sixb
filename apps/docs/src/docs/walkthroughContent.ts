@@ -270,7 +270,6 @@ export default function Quotes() {
 export const quoteReviewer = defineRole("quote-reviewer", {
   grantedTo: [reviewers],
   grants: [
-    can.access(applications.app),
     can.view([Customer, Quote]),
     can.apply(createQuoteDocument),
   ],

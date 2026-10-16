@@ -112,7 +112,7 @@ describe("deployment files", () => {
     )
   })
 
-  test("route each domain, with the update page for the app and Atlas only", () => {
+  test("route each domain, with the update page for the app only", () => {
     const snippet = renderCaddySnippet(release)
 
     expect(snippet).toContain("api.example.com {\n\treverse_proxy 127.0.0.1:3002\n}")

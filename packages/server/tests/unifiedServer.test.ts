@@ -136,7 +136,7 @@ describe("SixbServer API serving", () => {
       hostname: "127.0.0.1",
       port,
       quiet: true,
-      browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),
+      browser: createTestBrowserPolicy({ apiOrigin: baseUrl, appOrigin: baseUrl }),
     })
 
     await server.start()
@@ -155,16 +155,6 @@ describe("SixbServer API serving", () => {
 
       const body = (await response.json()) as { id: string }
       expect(body.id).toBe("test-project")
-    })
-  })
-
-  test("does not serve Atlas assets or SPA shell routes", async () => {
-    await withUnifiedServer(async ({ baseUrl }) => {
-      const staticResponse = await fetch(`${baseUrl}/favicon.svg`)
-      expect(staticResponse.status).toBe(404)
-
-      const spaResponse = await fetch(`${baseUrl}/dashboard/devices`)
-      expect(spaResponse.status).toBe(404)
     })
   })
 

@@ -27,7 +27,9 @@ bun sixb dev
 ```
 
 Sixb serves your app alongside the API and rebuilds it when you edit a page or stylesheet. It
-configures routing, authentication, and the query client for you.
+configures routing, authentication, and the query client for you. A project without an `app/`
+folder still has an app: Home, the agent, and the built-in sections, in the default
+[sidebar](#add-a-sidebar).
 
 Until you add `app/page.tsx`, Sixb serves a home page where people ask the project's agent. Without
 a configured agent, it shows the app's name. An `app/layout.tsx` with no pages is enough to serve
@@ -64,9 +66,10 @@ permissions. Open a shared URL with `<a href={url}>`, rather than programmatic r
 
 ## Add a layout
 
-An optional `app/layout.tsx` wraps every page. A layout in a subdirectory, such as
-`app/invoices/layout.tsx`, wraps only that route and its descendants. Layouts receive `children`
-and stay mounted while navigating between their pages.
+An optional `app/layout.tsx` wraps every page; without one, your pages render without a frame. A
+project with no `app/` pages and no layout gets the default [sidebar](#add-a-sidebar). A layout in a
+subdirectory, such as `app/invoices/layout.tsx`, wraps only that route and its descendants. Layouts
+receive `children` and stay mounted while navigating between their pages.
 
 File: `app/layout.tsx`
 

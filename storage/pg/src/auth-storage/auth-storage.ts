@@ -234,7 +234,6 @@ export class PgAuthStorage implements AuthStorage {
         }
 
         await validateCompleteSessionInput(tx, projectId, input.session)
-        assertSignInSessionAudience(projectId, input.session.audience, magicLink.audience)
 
         let newUserId: string | undefined
         if (shouldCreateUser) {
@@ -394,7 +393,6 @@ export class PgAuthStorage implements AuthStorage {
         }
 
         await validateCompleteSessionInput(tx, projectId, input.session)
-        assertSignInSessionAudience(projectId, input.session.audience, attempt.audience)
 
         let newUserId: string | undefined
         if (shouldCreateUser) {
@@ -719,17 +717,13 @@ export class PgAuthStorage implements AuthStorage {
       readonly userId: string
     }
   ): Promise<SessionRecord> {
-    await lockAdvisoryKeys(sql, [
-      authLockKey("sessions", input.projectId, input.userId),
-      authLockKey("sessions", input.projectId, input.userId, input.session.audience),
-    ])
+    await lockAdvisoryKeys(sql, [authLockKey("sessions", input.projectId, input.userId)])
 
     return createSession(sql, {
       id: input.session.id,
       projectId: input.projectId,
       userId: input.userId,
       strategyId: input.strategyId,
-      audience: input.session.audience,
       tokenHash: input.session.tokenHash,
       createdAt: input.session.createdAt,
       expiresAt: input.session.expiresAt,
@@ -793,21 +787,6 @@ export class PgAuthStorage implements AuthStorage {
 
     return rowToIdentityRecord(row)
   }
-}
-
-function assertSignInSessionAudience(
-  projectId: string,
-  sessionAudience: string,
-  storedAudience: string
-): void {
-  if (sessionAudience === storedAudience) {
-    return
-  }
-
-  throw new AuthStorageError(
-    "invalid_input",
-    `[Sixb] Sign-in session audience '${sessionAudience}' does not match stored auth audience '${storedAudience}' for project '${projectId}'.`
-  )
 }
 
 function assertCompletableDeviceAuthorization(

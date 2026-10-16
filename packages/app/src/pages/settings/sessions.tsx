@@ -140,12 +140,6 @@ export function SessionsSection() {
                 }
                 meta={
                   <>
-                    {session.audience ? (
-                      <>
-                        <span>{messages.audiences[session.audience]}</span>
-                        <MetaDot />
-                      </>
-                    ) : null}
                     {session.ipAddress ? (
                       <>
                         <span className="tabular-nums">{session.ipAddress}</span>

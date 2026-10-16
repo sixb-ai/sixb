@@ -1,17 +1,29 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { assertCliSucceeded, runCliToCompletion } from "./shared/cli-process"
 
-// A cold production build drives the custom-app and Atlas bundlers plus asset precompression. Keep
-// that production work out of the parallel unit suite, and bound its child so a wedged bundler
-// cannot consume the E2E job wall-clock timeout.
+// A cold production build drives the app bundler plus asset precompression. Keep that production
+// work out of the parallel unit suite, and bound its child so a wedged bundler cannot consume the
+// E2E job wall-clock timeout.
 
 const BUILD_TIMEOUT_MS = 150_000
 
 function buildTest(name: string, run: () => Promise<void>): void {
   test(name, run, BUILD_TIMEOUT_MS + 10_000)
+}
+
+// Every build bundles the app, which takes React from the project. A project inside this repo
+// finds none, since workspace installs keep packages beside their dependents, so link the copies
+// `@sixb/app` resolves.
+async function linkAppPackages(projectRoot: string): Promise<void> {
+  const appRoot = resolve(import.meta.dir, "..", "..", "app")
+  for (const name of ["react", "react-dom", "react-router-dom", "@tanstack/react-query"]) {
+    const target = join(projectRoot, "node_modules", ...name.split("/"))
+    await mkdir(dirname(target), { recursive: true })
+    await symlink(dirname(Bun.resolveSync(`${name}/package.json`, appRoot)), target)
+  }
 }
 
 async function runBuildEntry(entry: string, outdir: string) {
@@ -60,13 +72,6 @@ describe("sixb build", () => {
     await stat(join(outdir, "sixb.config.js"))
     await stat(join(outdir, "app", "index.html"))
     await stat(join(outdir, "app", "shared-index.html"))
-    const atlasAssets = await readdir(join(outdir, "atlas"))
-
-    // Exactly one entry: the Atlas build splits, and chunks are named `chunk-*` so they can never
-    // be mistaken for it.
-    expect(atlasAssets.filter((file) => /^atlas-[^.]+\.js$/.test(file))).toHaveLength(1)
-    expect(atlasAssets.filter((file) => /^atlas-[^.]+\.css$/.test(file))).toHaveLength(1)
-    expect(atlasAssets.some((file) => /^chunk-.+\.js$/.test(file))).toBe(true)
 
     const html = await readFile(join(outdir, "app", "index.html"), "utf-8")
     expect(html).toContain('class="sixb-loading-shell"')
@@ -112,6 +117,7 @@ describe("sixb build", () => {
     const repoRoot = resolve(import.meta.dir, "..", "..", "..")
     const tempDir = await mkdtemp(join(repoRoot, ".tmp-sixb-cli-build-packages-"))
     tempDirs.push(tempDir)
+    await linkAppPackages(tempDir)
     const entry = join(tempDir, "sixb.config.ts")
     const outdir = join(tempDir, "dist")
 
@@ -152,6 +158,7 @@ describe("sixb build", () => {
       const repoRoot = resolve(import.meta.dir, "..", "..", "..")
       const tempDir = await mkdtemp(join(repoRoot, ".tmp-sixb-cli-build-discovery-"))
       tempDirs.push(tempDir)
+      await linkAppPackages(tempDir)
       const projectRoot = join(tempDir, "source")
       const deploymentRoot = join(tempDir, "deployment")
       const outdir = join(deploymentRoot, ".sixb", "dist")

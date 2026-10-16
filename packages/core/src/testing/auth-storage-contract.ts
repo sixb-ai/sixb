@@ -24,12 +24,10 @@ function at(value: string): Date {
 function sessionInput(
   id: string,
   tokenHash = `${id}-hash`,
-  audience: CompleteAuthSessionInput["audience"] = "atlas",
   absoluteExpiresAt?: Date
 ): CompleteAuthSessionInput {
   return {
     id,
-    audience,
     tokenHash,
     createdAt: at("2026-05-14T10:10:00.000Z"),
     expiresAt: at("2026-05-21T10:10:00.000Z"),
@@ -43,7 +41,6 @@ function bearerSessionInput(id: string) {
     projectId,
     userId: "usr_1",
     strategyId: "magic-link",
-    audience: "atlas" as const,
     tokenHash: "access-1",
     createdAt: at("2026-05-14T10:00:00.000Z"),
     expiresAt: at("2026-06-14T10:00:00.000Z"),
@@ -89,7 +86,6 @@ async function completeOidcSignInForAva(
     id: "oidc_directory",
     projectId,
     strategyId: "entra",
-    audience: "atlas",
     stateHash: "directory-state",
     nonceHash: "nonce-hash",
     codeVerifier: "verifier",
@@ -201,7 +197,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
-          audience: "atlas",
           tokenHash: "hash-1",
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-21T10:00:00.000Z"),
@@ -211,13 +206,12 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
-          audience: "atlas",
           tokenHash: "hash-2",
           createdAt: at("2026-05-14T10:05:00.000Z"),
           expiresAt: at("2026-05-21T10:05:00.000Z"),
         })
 
-        // Creating a second session in the same audience no longer revokes the
+        // Creating a second session no longer revokes the
         // first: both stay active and authenticate independently.
         expect(first.revokedAt).toBeUndefined()
         expect(second.revokedAt).toBeUndefined()
@@ -228,7 +222,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           storage.sessions.findValidByTokenHash({
             projectId,
             id: "ses_1",
-            audience: "atlas",
             tokenHash: "hash-1",
             now: at("2026-05-14T10:06:00.000Z"),
           })
@@ -237,7 +230,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           storage.sessions.findValidByTokenHash({
             projectId,
             id: "ses_2",
-            audience: "atlas",
             tokenHash: "hash-2",
             now: at("2026-05-14T10:06:00.000Z"),
           })
@@ -246,21 +238,10 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           storage.sessions.findValidByTokenHash({
             projectId,
             id: "ses_2",
-            audience: "atlas",
             tokenHash: "wrong",
             now: at("2026-05-14T10:06:00.000Z"),
           })
         ).resolves.toBeNull()
-
-        // getActiveByUserId returns the most recently created active session.
-        await expect(
-          storage.sessions.getActiveByUserId({
-            projectId,
-            userId: "usr_1",
-            audience: "atlas",
-            now: at("2026-05-14T10:06:00.000Z"),
-          })
-        ).resolves.toMatchObject({ id: "ses_2" })
 
         const touched = await storage.sessions.touch({
           projectId,
@@ -269,28 +250,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
         })
         expect(touched.lastSeenAt?.toISOString()).toBe("2026-05-15T10:00:00.000Z")
         expect(touched.expiresAt.toISOString()).toBe("2026-05-21T10:05:00.000Z")
-
-        // A session in a different audience coexists and is cookie-scoped.
-        const appSession = await storage.sessions.create({
-          id: "ses_app",
-          projectId,
-          userId: "usr_1",
-          strategyId: "magic-link",
-          audience: "app",
-          tokenHash: "hash-app",
-          createdAt: at("2026-05-14T10:06:00.000Z"),
-          expiresAt: at("2026-05-21T10:06:00.000Z"),
-        })
-        expect(appSession.revokedAt).toBeUndefined()
-        await expect(
-          storage.sessions.findValidByTokenHash({
-            projectId,
-            id: "ses_app",
-            audience: "atlas",
-            tokenHash: "hash-app",
-            now: at("2026-05-14T10:07:00.000Z"),
-          })
-        ).resolves.toBeNull()
 
         // Revoking a single session leaves the user's other sessions active.
         await storage.sessions.revoke({
@@ -302,7 +261,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           storage.sessions.findValidByTokenHash({
             projectId,
             id: "ses_1",
-            audience: "atlas",
             tokenHash: "hash-1",
             now: at("2026-05-14T10:09:00.000Z"),
           })
@@ -311,28 +269,26 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           storage.sessions.findValidByTokenHash({
             projectId,
             id: "ses_2",
-            audience: "atlas",
             tokenHash: "hash-2",
             now: at("2026-05-14T10:09:00.000Z"),
           })
         ).resolves.toMatchObject({ id: "ses_2" })
 
         // "Sign out everywhere": revokeActiveForUser clears every remaining
-        // active session for the user, across audiences.
+        // active session for the user.
         const revoked = await storage.sessions.revokeActiveForUser({
           projectId,
           userId: "usr_1",
           revokedAt: at("2026-05-14T10:10:00.000Z"),
         })
-        expect(revoked.map((entry) => entry.id).sort()).toEqual(["ses_2", "ses_app"])
+        expect(revoked.map((entry) => entry.id).sort()).toEqual(["ses_2"])
         await expect(
-          storage.sessions.getActiveByUserId({
+          storage.sessions.listActiveByUserId({
             projectId,
             userId: "usr_1",
-            audience: "atlas",
             now: at("2026-05-14T10:11:00.000Z"),
           })
-        ).resolves.toBeNull()
+        ).resolves.toEqual([])
       })
     })
 
@@ -344,7 +300,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
-          audience: "atlas",
           tokenHash: "hash-capped",
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-21T10:00:00.000Z"),
@@ -355,7 +310,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
-          audience: "app",
           tokenHash: "hash-uncapped",
           createdAt: at("2026-05-14T10:01:00.000Z"),
           expiresAt: at("2026-05-21T10:01:00.000Z"),
@@ -367,7 +321,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           storage.sessions.findValidByTokenHash({
             projectId,
             id: capped.id,
-            audience: "atlas",
             tokenHash: "hash-capped",
             now: at("2026-05-16T09:59:59.999Z"),
           })
@@ -376,7 +329,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           storage.sessions.findValidByTokenHash({
             projectId,
             id: capped.id,
-            audience: "atlas",
             tokenHash: "hash-capped",
             now: at("2026-05-16T10:00:00.000Z"),
           })
@@ -387,22 +339,13 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           now: at("2026-05-16T10:00:00.000Z"),
         })
         expect(active.map((session) => session.id)).toEqual([uncapped.id])
-        await expect(
-          storage.sessions.getActiveByUserId({
-            projectId,
-            userId: "usr_1",
-            audience: "atlas",
-            now: at("2026-05-16T10:00:00.000Z"),
-          })
-        ).resolves.toBeNull()
-        await expect(
-          storage.sessions.revokeActiveForUser({
-            projectId,
-            userId: "usr_1",
-            audience: "atlas",
-            revokedAt: at("2026-05-16T10:00:00.000Z"),
-          })
-        ).resolves.toEqual([])
+        // A session past its absolute deadline is no longer active, so there is nothing to revoke.
+        const revoked = await storage.sessions.revokeActiveForUser({
+          projectId,
+          userId: "usr_1",
+          revokedAt: at("2026-05-16T10:00:00.000Z"),
+        })
+        expect(revoked.map((session) => session.id)).toEqual([uncapped.id])
       })
     })
 
@@ -414,7 +357,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
-          audience: "atlas",
           tokenHash: "hash-renew",
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-15T10:00:00.000Z"),
@@ -424,7 +366,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
         const renewed = await storage.sessions.renewIfValid({
           projectId,
           id: "ses_renew",
-          audience: "atlas",
           tokenHash: "hash-renew",
           now: at("2026-05-14T11:00:00.000Z"),
           expiresAt: at("2026-05-25T10:00:00.000Z"),
@@ -435,7 +376,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
         const monotonic = await storage.sessions.renewIfValid({
           projectId,
           id: "ses_renew",
-          audience: "atlas",
           tokenHash: "hash-renew",
           now: at("2026-05-14T12:00:00.000Z"),
           expiresAt: at("2026-05-18T10:00:00.000Z"),
@@ -446,7 +386,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           storage.sessions.renewIfValid({
             projectId,
             id: "ses_renew",
-            audience: "atlas",
             tokenHash: "wrong-hash",
             now: at("2026-05-14T13:00:00.000Z"),
             expiresAt: at("2026-05-19T10:00:00.000Z"),
@@ -456,7 +395,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           storage.sessions.renewIfValid({
             projectId,
             id: "ses_renew",
-            audience: "atlas",
             tokenHash: "hash-renew",
             now: at("2026-05-20T10:00:00.000Z"),
             expiresAt: at("2026-05-21T10:00:00.000Z"),
@@ -468,7 +406,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
-          audience: "atlas",
           tokenHash: "hash-concurrent",
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-15T10:00:00.000Z"),
@@ -477,7 +414,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           storage.sessions.renewIfValid({
             projectId,
             id: "ses_concurrent",
-            audience: "atlas",
             tokenHash: "hash-concurrent",
             now: at("2026-05-14T11:00:00.000Z"),
             expiresAt: at("2026-05-18T10:00:00.000Z"),
@@ -485,7 +421,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           storage.sessions.renewIfValid({
             projectId,
             id: "ses_concurrent",
-            audience: "atlas",
             tokenHash: "hash-concurrent",
             now: at("2026-05-14T11:00:00.000Z"),
             expiresAt: at("2026-05-19T10:00:00.000Z"),
@@ -505,7 +440,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
-          audience: "atlas",
           tokenHash: "hash-device",
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-21T10:00:00.000Z"),
@@ -527,7 +461,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
-          audience: "atlas",
           tokenHash: "hash-plain",
           createdAt: at("2026-05-14T10:01:00.000Z"),
           expiresAt: at("2026-05-21T10:01:00.000Z"),
@@ -537,7 +470,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
-    test("lists a user's active sessions across audiences, newest activity first", async () => {
+    test("lists a user's active sessions, newest activity first", async () => {
       await withStorage(async (storage) => {
         await createUser(storage)
 
@@ -546,7 +479,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
-          audience: "atlas",
           tokenHash: "hash-a",
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-21T10:00:00.000Z"),
@@ -556,7 +488,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
-          audience: "app",
           tokenHash: "hash-b",
           createdAt: at("2026-05-14T10:05:00.000Z"),
           expiresAt: at("2026-05-21T10:05:00.000Z"),
@@ -568,7 +499,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
-          audience: "atlas",
           tokenHash: "hash-revoked",
           createdAt: at("2026-05-14T10:01:00.000Z"),
           expiresAt: at("2026-05-21T10:01:00.000Z"),
@@ -586,7 +516,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_2",
           strategyId: "magic-link",
-          audience: "atlas",
           tokenHash: "hash-other",
           createdAt: at("2026-05-14T10:03:00.000Z"),
           expiresAt: at("2026-05-21T10:03:00.000Z"),
@@ -984,7 +913,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_creator",
           strategyId: "magic-link",
-          audience: "atlas",
           tokenHash: "hash-creator",
           createdAt: at("2026-05-14T10:00:30.000Z"),
           expiresAt: at("2026-05-21T10:00:30.000Z"),
@@ -1251,7 +1179,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "ml_1",
           projectId,
           strategyId: "magic-link",
-          audience: "atlas",
           email: "ava@acme.com",
           tokenHash: "hash-1",
           createdAt: at("2026-05-14T10:00:00.000Z"),
@@ -1261,7 +1188,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "ml_2",
           projectId,
           strategyId: "magic-link",
-          audience: "atlas",
           email: " ava@acme.com ",
           tokenHash: "hash-2",
           returnTo: "/dashboard",
@@ -1290,7 +1216,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
             consumedAt: at("2026-05-14T10:02:00.000Z"),
           })
         ).resolves.toMatchObject({
-          audience: "atlas",
           returnTo: "/dashboard",
           consumedAt: at("2026-05-14T10:02:00.000Z"),
         })
@@ -1312,7 +1237,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "oidc_1",
           projectId,
           strategyId: "okta",
-          audience: "atlas",
           stateHash: "state-hash",
           nonceHash: "nonce-hash",
           codeVerifier: "verifier",
@@ -1338,7 +1262,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
             consumedAt: at("2026-05-14T10:01:00.000Z"),
           })
         ).resolves.toMatchObject({
-          audience: "atlas",
           codeVerifier: "verifier",
           consumedAt: at("2026-05-14T10:01:00.000Z"),
         })
@@ -1362,7 +1285,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
-          audience: "atlas",
           tokenHash: "session-hash",
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-21T10:00:00.000Z"),
@@ -1433,7 +1355,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           storage.sessions.findValidByTokenHash({
             projectId,
             id: "ses_cli",
-            audience: "atlas",
             tokenHash: "access-1",
             now,
           })
@@ -1524,7 +1445,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
-          audience: "atlas",
           tokenHash: "old-hash",
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-21T10:00:00.000Z"),
@@ -1533,7 +1453,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "ml_1",
           projectId,
           strategyId: "magic-link",
-          audience: "atlas",
           email: "ava@acme.com",
           tokenHash: "link-hash",
           createdAt: at("2026-05-14T10:01:00.000Z"),
@@ -1546,7 +1465,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           tokenHash: "link-hash",
           completedAt: at("2026-05-14T10:02:00.000Z"),
           newUserId: "usr_unused",
-          session: sessionInput("ses_new", "session-hash", "atlas", at("2026-06-21T10:10:00.000Z")),
+          session: sessionInput("ses_new", "session-hash", at("2026-06-21T10:10:00.000Z")),
         })
 
         expect(result.user.id).toBe("usr_1")
@@ -1588,7 +1507,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "ml_1",
           projectId,
           strategyId: "magic-link",
-          audience: "atlas",
           email: "ava@acme.com",
           tokenHash: "link-hash",
           createdAt: at("2026-05-14T10:02:00.000Z"),
@@ -1643,7 +1561,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "ml_1",
           projectId,
           strategyId: "magic-link",
-          audience: "atlas",
           email: "ava@acme.com",
           tokenHash: "link-hash",
           createdAt: at("2026-05-14T10:02:00.000Z"),
@@ -1683,7 +1600,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "ml_1",
           projectId,
           strategyId: "magic-link",
-          audience: "atlas",
           email: "ava@acme.com",
           tokenHash: "link-hash",
           createdAt: at("2026-05-14T10:01:00.000Z"),
@@ -1721,7 +1637,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "ml_1",
           projectId,
           strategyId: "magic-link",
-          audience: "atlas",
           email: "founder@acme.com",
           tokenHash: "link-hash",
           createdAt: at("2026-05-14T10:01:00.000Z"),
@@ -1756,7 +1671,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "ml_1",
           projectId,
           strategyId: "magic-link",
-          audience: "atlas",
           email: "ava@acme.com",
           tokenHash: "link-hash",
           createdAt: at("2026-05-14T10:01:00.000Z"),
@@ -1795,7 +1709,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "oidc_1",
           projectId,
           strategyId: "okta",
-          audience: "atlas",
           stateHash: "state-hash",
           nonceHash: "nonce-hash",
           codeVerifier: "verifier",
@@ -1834,7 +1747,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "oidc_1",
           projectId,
           strategyId: "okta",
-          audience: "atlas",
           stateHash: "state-hash",
           nonceHash: "nonce-hash",
           codeVerifier: "verifier",
@@ -1873,7 +1785,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "oidc_1",
           projectId,
           strategyId: "okta",
-          audience: "atlas",
           stateHash: "state-hash",
           nonceHash: "nonce-hash",
           codeVerifier: "verifier",
@@ -1919,7 +1830,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "oidc_1",
           projectId,
           strategyId: "okta",
-          audience: "atlas",
           stateHash: "state-hash",
           nonceHash: "nonce-hash",
           codeVerifier: "verifier",
@@ -1952,7 +1862,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "oidc_bootstrap",
           projectId,
           strategyId: "okta",
-          audience: "atlas",
           stateHash: "bootstrap-state",
           nonceHash: "nonce-hash",
           codeVerifier: "verifier",
@@ -2057,7 +1966,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
-          audience: "atlas",
           tokenHash: "hash-1",
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-21T10:00:00.000Z"),
@@ -2067,7 +1975,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
-          audience: "app",
           tokenHash: "hash-app",
           createdAt: at("2026-05-14T10:01:00.000Z"),
           expiresAt: at("2026-05-21T10:01:00.000Z"),

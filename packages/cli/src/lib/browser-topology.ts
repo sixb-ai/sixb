@@ -1,17 +1,14 @@
-import type { SixbBrowserOrigin } from "@sixb/server"
 import { configuredOrigin } from "./public-origin"
 
 /**
  * The process resolving the topology. One answer settles what used to be four options: whether
- * local defaults apply, which browser surfaces the process has to account for, and which one it
- * serves itself.
+ * local defaults apply, whether the app's origin is required, and whether the process serves the
+ * app itself.
  */
-export type BrowserRole = "dev" | "api" | "atlas" | "app"
+export type BrowserRole = "dev" | "api" | "app"
 
-/** The two surfaces a browser loads, and the audience each maps to. */
-export type BrowserSurface = "atlas" | "app"
-
-interface BrowserBindOptions {
+export interface BrowserTopologyOptions {
+  readonly role: BrowserRole
   readonly host?: string
   /** `--port`: the port this role binds. See {@link resolveBrowserPorts}. */
   readonly port?: string
@@ -19,40 +16,18 @@ interface BrowserBindOptions {
   readonly apiHost?: string
   readonly apiPort?: string
   readonly apiPublicOrigin?: string
-  readonly atlasPublicOrigin?: string
   readonly appPublicOrigin?: string
 }
-
-export type BrowserTopologyOptions = BrowserBindOptions &
-  (
-    | {
-        /**
-         * Hosts the API, so its allowlist has to name every surface the project actually
-         * serves — including the custom app, which exists only when the project has one.
-         */
-        readonly role: "dev" | "api"
-        readonly hasCustomApp: boolean
-      }
-    | { readonly role: BrowserSurface }
-  )
 
 export interface BrowserTopology {
   readonly host: string
   readonly apiHost: string
-  readonly atlasPort: number
   readonly appPort: number
   readonly apiPort: number
   readonly apiPublicOrigin: string
-  readonly atlasPublicOrigin: string | null
+  /** `null` outside `sixb dev` when nobody said where the app is published. */
   readonly appPublicOrigin: string | null
-  readonly allowedBrowserOrigins: readonly SixbBrowserOrigin[]
-  /** The surface this process serves itself, or `null` when it serves none. */
-  readonly serves: BrowserSurface | null
-}
-
-/** A topology resolved by a role that serves a surface, so {@link servedUrl} always has one. */
-export interface ServingBrowserTopology extends BrowserTopology {
-  readonly serves: BrowserSurface
+  readonly allowedBrowserOrigins: readonly string[]
 }
 
 interface BrowserHosts {
@@ -61,14 +36,12 @@ interface BrowserHosts {
 }
 
 interface BrowserPorts {
-  readonly atlasPort: number
   readonly appPort: number
   readonly apiPort: number
 }
 
 interface BrowserPublicOrigins {
   readonly apiPublicOrigin: string
-  readonly atlasPublicOrigin: string | null
   readonly appPublicOrigin: string | null
 }
 
@@ -80,14 +53,9 @@ interface BrowserPublicOrigins {
  */
 const DEFAULT_PRODUCTION_HOST = "0.0.0.0"
 const DEFAULT_DEVELOPMENT_HOST = "127.0.0.1"
-const DEFAULT_ATLAS_PORT = 3000
-const DEFAULT_APP_PORT_OFFSET = 1
-const DEFAULT_API_PORT_OFFSET = 2
+const DEFAULT_APP_PORT = 3000
+const DEFAULT_API_PORT_OFFSET = 1
 
-export function resolveBrowserTopology(
-  options: BrowserBindOptions & { readonly role: BrowserSurface }
-): ServingBrowserTopology
-export function resolveBrowserTopology(options: BrowserTopologyOptions): BrowserTopology
 export function resolveBrowserTopology(options: BrowserTopologyOptions): BrowserTopology {
   const hosts = resolveBrowserHosts(options)
   const ports = resolveBrowserPorts(options)
@@ -98,25 +66,6 @@ export function resolveBrowserTopology(options: BrowserTopologyOptions): Browser
     ...ports,
     ...origins,
     allowedBrowserOrigins: createAllowedBrowserOrigins(origins),
-    serves: servedSurface(options.role),
-  }
-}
-
-/** The surface a role serves itself. For the two roles that serve one, it is the role. */
-function servedSurface(role: BrowserRole): BrowserSurface | null {
-  return role === "atlas" || role === "app" ? role : null
-}
-
-/** The surfaces a role's topology has to resolve an origin for. */
-function surfacesOf(options: BrowserTopologyOptions): Record<BrowserSurface, boolean> {
-  switch (options.role) {
-    case "dev":
-    case "api":
-      return { atlas: true, app: options.hasCustomApp }
-    case "atlas":
-      return { atlas: true, app: false }
-    case "app":
-      return { atlas: false, app: true }
   }
 }
 
@@ -130,19 +79,18 @@ function resolveBrowserHosts(options: BrowserTopologyOptions): BrowserHosts {
 }
 
 /**
- * `--port` is the port the role binds. `sixb dev` binds all three surfaces, so there it moves the
- * whole block and the others keep their offsets from it. Every other role binds exactly one, and
- * `--port` moves only that one — which is why `sixb app --port 4000` listens on 4000 and not one
- * past it. The ports a role does not bind keep their defaults and are read by nobody.
+ * `--port` is the port the role binds. `sixb dev` binds the app and the API, so there it moves
+ * both and the API keeps its offset from the app. Every other role binds exactly one, and `--port`
+ * moves only that one — which is why `sixb api --port 4000` listens on 4000 and not one past it.
+ * The port a role does not bind keeps its default and is read by nobody.
  */
 function resolveBrowserPorts(options: BrowserTopologyOptions): BrowserPorts {
   const requested = parsePort(options.port, "port")
-  const base = options.role === "dev" ? (requested ?? DEFAULT_ATLAS_PORT) : DEFAULT_ATLAS_PORT
+  const base = options.role === "dev" ? (requested ?? DEFAULT_APP_PORT) : DEFAULT_APP_PORT
   const bound = options.role === "dev" ? undefined : requested
 
   return {
-    atlasPort: (options.role === "atlas" ? bound : undefined) ?? base,
-    appPort: (options.role === "app" ? bound : undefined) ?? base + DEFAULT_APP_PORT_OFFSET,
+    appPort: (options.role === "app" ? bound : undefined) ?? base,
     apiPort:
       parsePort(options.apiPort, "api-port") ??
       (options.role === "api" ? bound : undefined) ??
@@ -154,74 +102,24 @@ function resolveBrowserPublicOrigins(
   options: BrowserTopologyOptions,
   ports: BrowserPorts
 ): BrowserPublicOrigins {
-  const surfaces = surfacesOf(options)
-
-  // Every browser surface sends its requests here, so this one is never inferred in production.
+  // The app sends its requests here, so this one is never inferred in production.
   const apiPublicOrigin =
     configuredOrigin(options.apiPublicOrigin, "SIXB_API_PUBLIC_ORIGIN", "API public origin") ??
     localOrigin(options.role, ports.apiPort) ??
     refusePublicOrigin("SIXB_API_PUBLIC_ORIGIN")
 
-  const atlasPublicOrigin = surfaces.atlas
-    ? resolveSurfaceOrigin(options, "atlas", {
-        value: options.atlasPublicOrigin,
-        envName: "SIXB_ATLAS_PUBLIC_ORIGIN",
-        label: "Atlas public origin",
-        port: ports.atlasPort,
-      })
-    : null
-  const appPublicOrigin = surfaces.app
-    ? resolveSurfaceOrigin(options, "app", {
-        value: options.appPublicOrigin,
-        envName: "SIXB_APP_PUBLIC_ORIGIN",
-        label: "custom app public origin",
-        port: ports.appPort,
-      })
-    : null
+  // Never guessed either: on the API it is the whole CORS allowlist. Without one the API admits
+  // no browser origin, which is right for a deploy with no app (`services: { app: false }`), and
+  // the app role only prints its own origin.
+  const appPublicOrigin =
+    configuredOrigin(options.appPublicOrigin, "SIXB_APP_PUBLIC_ORIGIN", "app public origin") ??
+    localOrigin(options.role, ports.appPort)
 
-  return {
-    apiPublicOrigin,
-    atlasPublicOrigin,
-    appPublicOrigin,
-  }
+  return { apiPublicOrigin, appPublicOrigin }
 }
 
-/**
- * A browser surface's own public origin. Required wherever it feeds the API's CORS allowlist, and
- * optional on the role that serves the surface, which only prints it — refusing to start over a
- * label is a startup an operator has to debug for nothing.
- */
-function resolveSurfaceOrigin(
-  options: BrowserTopologyOptions,
-  surface: BrowserSurface,
-  input: {
-    readonly value: string | undefined
-    readonly envName: string
-    readonly label: string
-    readonly port: number
-  }
-): string | null {
-  const configured = configuredOrigin(input.value, input.envName, input.label)
-  if (configured) return configured
-
-  const local = localOrigin(options.role, input.port)
-  if (local) return local
-
-  return options.role === surface ? null : refusePublicOrigin(input.envName)
-}
-
-function createAllowedBrowserOrigins(origins: BrowserPublicOrigins): readonly SixbBrowserOrigin[] {
-  const allowedOrigins: SixbBrowserOrigin[] = []
-
-  if (origins.atlasPublicOrigin) {
-    allowedOrigins.push({ origin: origins.atlasPublicOrigin, audience: "atlas" })
-  }
-
-  if (origins.appPublicOrigin) {
-    allowedOrigins.push({ origin: origins.appPublicOrigin, audience: "app" })
-  }
-
-  return allowedOrigins
+function createAllowedBrowserOrigins(origins: BrowserPublicOrigins): readonly string[] {
+  return origins.appPublicOrigin ? [origins.appPublicOrigin] : []
 }
 
 /**
@@ -231,17 +129,12 @@ function createAllowedBrowserOrigins(origins: BrowserPublicOrigins): readonly Si
 const WILDCARD_BINDS = new Set(["0.0.0.0", "::", "[::]"])
 
 /**
- * What a browser-serving role shows as its own address. The public origin when one is configured,
+ * What the app role shows as its own address. The public origin when one is configured,
  * and otherwise the address it actually bound — which is all the process knows, and better than a
  * startup panel with no URL on it.
  */
-export function servedUrl(topology: ServingBrowserTopology): string {
-  const [origin, port] =
-    topology.serves === "atlas"
-      ? ([topology.atlasPublicOrigin, topology.atlasPort] as const)
-      : ([topology.appPublicOrigin, topology.appPort] as const)
-
-  return origin ?? `http://${displayHost(topology.host)}:${port}`
+export function servedUrl(topology: BrowserTopology): string {
+  return topology.appPublicOrigin ?? `http://${displayHost(topology.host)}:${topology.appPort}`
 }
 
 function displayHost(host: string): string {

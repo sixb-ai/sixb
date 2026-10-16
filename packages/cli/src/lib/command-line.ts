@@ -13,7 +13,7 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Start a role without migrating storage (or SIXB_SKIP_MIGRATION=1)",
     kind: "boolean",
   },
-  port: { syntax: "--port <port>", summary: "Role port; dev uses Atlas base port", kind: "string" },
+  port: { syntax: "--port <port>", summary: "Role port; dev: the app port", kind: "string" },
   host: {
     syntax: "--host <host>",
     summary: "Bind host (dev: 127.0.0.1, production roles: 0.0.0.0)",
@@ -21,7 +21,7 @@ export const CLI_OPTION_DEFINITIONS = {
   },
   "api-port": {
     syntax: "--api-port <port>",
-    summary: "API port (default: Atlas port + 2)",
+    summary: "API port (default: app port + 1)",
     kind: "string",
   },
   "api-host": {
@@ -49,14 +49,9 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Concurrent embedding calls for vector indexing (default: 4)",
     kind: "string",
   },
-  "atlas-public-origin": {
-    syntax: "--atlas-public-origin <origin>",
-    summary: "Public Atlas origin",
-    kind: "string",
-  },
   "app-public-origin": {
     syntax: "--app-public-origin <origin>",
-    summary: "Public custom app origin",
+    summary: "Public app origin",
     kind: "string",
   },
   "trusted-proxies": {
@@ -147,7 +142,6 @@ export type CliOptionName = keyof typeof CLI_OPTION_DEFINITIONS
 export type LocalCommandId =
   | "dev"
   | "api"
-  | "atlas"
   | "app"
   | "login"
   | "logout"
@@ -250,7 +244,7 @@ const instanceNodes: readonly CommandNode[] = INSTANCE_COMMANDS.map((name) => ({
 }))
 
 const commandTree: readonly CommandNode[] = [
-  command("dev", "Start local development (server + built-in UI + app)", {
+  command("dev", "Start local development (server + app)", {
     options: [
       "entry",
       "port",
@@ -261,7 +255,6 @@ const commandTree: readonly CommandNode[] = [
       "agent-turn-timeout",
       "concurrency",
       "vector-concurrency",
-      "atlas-public-origin",
       "app-public-origin",
     ],
     repeatable: ["concurrency"],
@@ -275,22 +268,11 @@ const commandTree: readonly CommandNode[] = [
       "api-port",
       "api-host",
       "api-public-origin",
-      "atlas-public-origin",
       "app-public-origin",
       "trusted-proxies",
     ],
   }),
-  command("atlas", "Start production Atlas UI server", {
-    options: [
-      "entry",
-      "port",
-      "host",
-      "api-public-origin",
-      "atlas-public-origin",
-      "app-public-origin",
-    ],
-  }),
-  command("app", "Start production custom app server", {
+  command("app", "Start production app server", {
     options: ["entry", "port", "host", "api-public-origin", "app-public-origin"],
   }),
   command("login", "Save and select a local API profile", {
@@ -623,14 +605,13 @@ export const CLI_EXAMPLES = [
   "sixb dev",
   "sixb build",
   "sixb api",
-  "sixb login http://localhost:3002 --profile local",
+  "sixb login http://localhost:3001 --profile local",
   "sixb ontology list",
   "sixb objects inspect Customer customer-123",
   "sixb token create --name 'Local CLI' --expires-in 90d",
   "sixb service-account create --id svc_sandbox --name 'Sandbox agent' --group agents",
   "sixb service-account token create svc_sandbox --name 'Sandbox token' --expires-in 30d",
   "sixb status",
-  "sixb atlas",
   "sixb app",
   "sixb scheduler",
   "sixb orchestrator",

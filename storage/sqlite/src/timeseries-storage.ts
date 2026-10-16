@@ -5,7 +5,6 @@ import type {
   TimeseriesPoint,
   TimeseriesStorage,
 } from "@sixb/core/storage"
-import { installFreshSqliteSchema } from "./migrations"
 import {
   closeSqliteStoreConnection,
   openSqliteStoreConnection,
@@ -31,10 +30,6 @@ export class SqliteTimeseriesStorage implements TimeseriesStorage {
   constructor(options: SqliteTimeseriesStorageOptions = {}) {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
-
-    if (this.connection.installFreshSchema) {
-      installFreshSqliteSchema(this.db)
-    }
   }
 
   async getHistory(params: {

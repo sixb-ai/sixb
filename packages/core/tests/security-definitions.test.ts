@@ -6,7 +6,6 @@ import { pathToFileURL } from "node:url"
 import {
   type ActionDefinition,
   agent,
-  applications,
   type ConnectorDefinition,
   can,
   col,
@@ -363,15 +362,6 @@ describe("role definitions", () => {
     })
   })
 
-  test("can.access grants browser applications", () => {
-    expect(can.access([applications.atlas, applications.app])).toEqual({
-      kind: "grant",
-      capability: "access",
-      target: "application",
-      selection: { all: false, ids: ["atlas", "app"] },
-    })
-  })
-
   test("can.view dedupes ids within an explicit selection", () => {
     expect(can.view([Account, Account])).toEqual({
       kind: "grant",
@@ -402,13 +392,11 @@ describe("role definitions", () => {
       kind: "grant",
       capability: "observe",
       target: "logs",
-      selection: { all: false, ids: ["logs"] },
     })
     expect(can.observe(agent.usage)).toEqual({
       kind: "grant",
       capability: "observe",
       target: "aiUsage",
-      selection: { all: false, ids: ["aiUsage"] },
     })
   })
 
@@ -473,7 +461,6 @@ describe("role definitions", () => {
       kind: "grant",
       capability: "manage",
       target: "aiUsage",
-      selection: { all: false, ids: ["aiUsage"] },
     })
   })
 
@@ -528,9 +515,6 @@ describe("role definitions", () => {
     expect(() => can.apply(every.object() as never)).toThrow(
       "[Sixb] can.apply accepts action selectors, but received every.object()."
     )
-    expect(() => can.access(every.action() as never)).toThrow(
-      "[Sixb] can.access accepts application selectors, but received every.action()."
-    )
     expect(() => can.view(every.sync() as never)).toThrow(
       "[Sixb] can.view accepts object or dataset selectors, but received every.sync()."
     )
@@ -540,22 +524,19 @@ describe("role definitions", () => {
   })
 
   test("a definition from the wrong family is rejected, not filed under its own target", () => {
-    // Recognising a `kind` is not accepting it. These used to return `run:dataset` / `view:application`,
+    // Recognising a `kind` is not accepting it. These used to return `run:dataset` / `view:sync`,
     // and since neither is in `GRANT_KINDS`, startup died on `spec.universeKey` with a `TypeError`
     // naming neither the role nor the definition.
     expect(() => can.run(AccountSnapshot as never)).toThrow(
       "[Sixb] can.run accepts workflow or sync or pipeline definitions, but received one targeting dataset."
     )
-    expect(() => can.view(applications.atlas as never)).toThrow(
-      "[Sixb] can.view accepts object or dataset definitions, but received one targeting application."
+    expect(() => can.view(syncAccounts as never)).toThrow(
+      "[Sixb] can.view accepts object or dataset definitions, but received one targeting sync."
     )
     // The guard sits in `targetOfDefinition`, so it covers the two builders that never read `target`
-    // back either. These used to reach startup and be reported as an unknown *action* / *application*.
+    // back either. This used to reach startup and be reported as an unknown *action*.
     expect(() => can.apply(AccountSnapshot as never)).toThrow(
       "[Sixb] can.apply accepts action definitions, but received one targeting dataset."
-    )
-    expect(() => can.access(syncAccounts as never)).toThrow(
-      "[Sixb] can.access accepts application definitions, but received one targeting sync."
     )
   })
 
@@ -570,19 +551,6 @@ describe("role definitions", () => {
     )
     // A homogeneous list still resolves to the one target it describes.
     expect(can.run([syncAccounts]).target).toBe("sync")
-  })
-
-  test("every.application() selects the whole application universe", () => {
-    expect(can.access(every.application())).toEqual({
-      kind: "grant",
-      capability: "access",
-      target: "application",
-      selection: { all: true, except: [] },
-    })
-    expect(can.access(every.application().except([applications.atlas])).selection).toEqual({
-      all: true,
-      except: ["atlas"],
-    })
   })
 
   test("defineRole rejects roles granted to no groups", () => {
@@ -624,29 +592,6 @@ describe("role definitions", () => {
     })
 
     expect(() => createRuntime({ roles: [role] })).toThrow("unknown group 'commercial'")
-  })
-
-  test("runtime registration rejects access grants on unknown applications", () => {
-    expect(() =>
-      createRuntime({
-        groups: [commercial],
-        roles: [
-          {
-            kind: "role",
-            id: "unknown.application",
-            grantedToGroupIds: [commercial.id],
-            grants: [
-              {
-                kind: "grant",
-                capability: "access",
-                target: "application",
-                selection: { all: false, ids: ["unknown"] },
-              },
-            ],
-          },
-        ],
-      })
-    ).toThrow("access on unknown application 'unknown'")
   })
 
   test("runtime registration rejects view grants on unknown object types", () => {
@@ -727,7 +672,7 @@ describe("role definitions", () => {
     }
 
     expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
-      "grant capability must be 'access', 'view', 'edit', 'append', 'apply', 'share', 'run', 'observe', or 'manage'."
+      "grant capability must be 'view', 'edit', 'append', 'apply', 'share', 'run', 'observe', or 'manage'."
     )
   })
 
@@ -804,6 +749,35 @@ describe("role definitions", () => {
     )
   })
 
+  // Logs and AI usage are one surface each. Reproduce: drop `observe` and the AI-usage `manage`
+  // from the singleton check in assertGrantDefinition and these grants are accepted.
+  test("runtime registration rejects selections on logs and AI usage grants", () => {
+    for (const grant of [
+      {
+        kind: "grant",
+        capability: "observe",
+        target: "logs",
+        selection: { all: true, except: [] },
+      },
+      {
+        kind: "grant",
+        capability: "manage",
+        target: "aiUsage",
+        selection: { all: true, except: [] },
+      },
+    ]) {
+      const role = {
+        kind: "role",
+        id: "surface.reader",
+        grantedToGroupIds: [commercial.id],
+        grants: [grant],
+      } as unknown as RoleDefinition
+      expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
+        `${grant.capability} grant on '${grant.target}' must not declare a selection`
+      )
+    }
+  })
+
   test("runtime registration rejects legacy Agent grant selections", () => {
     const role = {
       kind: "role",
@@ -820,7 +794,7 @@ describe("role definitions", () => {
     } as unknown as RoleDefinition
 
     expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
-      "agent run grant must not declare a selection"
+      "run grant on 'agent' must not declare a selection"
     )
   })
 

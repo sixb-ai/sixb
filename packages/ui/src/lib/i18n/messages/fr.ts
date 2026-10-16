@@ -38,9 +38,6 @@ export const fr: Translation<UiMessages> = {
     toggle: "Afficher ou masquer la barre latérale",
     expand: "Déplier la barre latérale",
     collapse: "Replier la barre latérale",
-    preferences: "Préférences",
-    apiReference: "Référence de l’API",
-    logOut: "Se déconnecter",
   },
   theme: {
     label: "Thème",

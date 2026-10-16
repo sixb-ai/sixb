@@ -96,8 +96,8 @@ export const auth = oidc({
   is not a reliable address to match invitations against.
 - Use your tenant ID in the issuer. The shared `common` and `organizations` issuers let any
   organization's users sign in and are not supported.
-- A user without a mailbox cannot receive an invitation email. Copy the invitation link from Atlas
-  instead.
+- A user without a mailbox cannot receive an invitation email. Copy the invitation link from the
+  app's Settings › Members instead.
 
 ## Groups from your identity provider
 

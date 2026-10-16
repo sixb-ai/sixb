@@ -16,7 +16,6 @@ const base = {
   sessionId: "ses_1",
   tokenHash: "hash_1",
   transport: "cookie",
-  audience: "atlas",
 } as const
 
 describe("SessionCache", () => {
@@ -67,13 +66,11 @@ describe("SessionCache", () => {
     expect(cache.get({ ...base, nowMs: 10_000 })).toBeUndefined()
   })
 
-  test("is bound to the exact token hash and audience", () => {
+  test("is bound to the exact token hash", () => {
     const cache = new SessionCache(5_000)
     cache.set({ ...base, session: fakeSession("usr_1"), nowMs: 0, sessionExpiresAtMs: 1_000_000 })
 
     expect(cache.get({ ...base, tokenHash: "other", nowMs: 1 })).toBeUndefined()
-    cache.set({ ...base, session: fakeSession("usr_1"), nowMs: 0, sessionExpiresAtMs: 1_000_000 })
-    expect(cache.get({ ...base, audience: "app", nowMs: 1 })).toBeUndefined()
   })
 
   test("answers a bearer token only from a bearer entry, and not past its access expiry", () => {
@@ -108,7 +105,6 @@ describe("SessionCache", () => {
     const mk = (id: string) => ({
       sessionId: id,
       tokenHash: `h_${id}`,
-      audience: "atlas" as const,
       session: fakeSession(id),
       nowMs: 0,
       sessionExpiresAtMs: 1_000_000,
@@ -122,7 +118,6 @@ describe("SessionCache", () => {
         sessionId: "a",
         tokenHash: "h_a",
         transport: "cookie",
-        audience: "atlas",
         nowMs: 1,
       })
     ).toBeUndefined()
@@ -131,7 +126,6 @@ describe("SessionCache", () => {
         sessionId: "b",
         tokenHash: "h_b",
         transport: "cookie",
-        audience: "atlas",
         nowMs: 1,
       })
     ).toBeDefined()
@@ -140,7 +134,6 @@ describe("SessionCache", () => {
         sessionId: "c",
         tokenHash: "h_c",
         transport: "cookie",
-        audience: "atlas",
         nowMs: 1,
       })
     ).toBeDefined()

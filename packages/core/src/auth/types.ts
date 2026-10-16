@@ -11,7 +11,6 @@ import type {
   SessionRecord,
   UserRecord,
 } from "../storage/auth"
-import type { AuthSessionAudience, AuthSessionAudienceOptions } from "./audience"
 
 export type Principal =
   | { readonly type: "user"; readonly id: string }
@@ -63,7 +62,6 @@ export interface InvitationDeliveryInput {
   readonly projectId: string
   readonly authStorage: AuthStorage
   readonly invitation: InvitationRecord
-  readonly audience: AuthSessionAudience
   readonly returnTo: string
   readonly requestOrigin: string
   /** Return the delivered link once so the inviter can copy it through an approved channel. */
@@ -98,7 +96,6 @@ export interface MagicLinkRequestInput {
   readonly projectId: string
   readonly authStorage: AuthStorage
   readonly email: string
-  readonly audience: AuthSessionAudience
   readonly returnTo: string
   readonly requestOrigin: string
   /**
@@ -140,7 +137,6 @@ export interface MagicLinkCallbackInput {
 }
 
 export interface MagicLinkCallbackResult extends CompleteSignInResult {
-  readonly audience: AuthSessionAudience
   readonly returnTo: string
 }
 
@@ -182,7 +178,6 @@ export interface MagicLinkAuthStrategy extends InvitationDeliveryAuthStrategy {
 export interface OidcStartSignInInput {
   readonly projectId: string
   readonly authStorage: AuthStorage
-  readonly audience: AuthSessionAudience
   readonly returnTo: string
   readonly requestOrigin: string
   readonly now?: Date
@@ -208,7 +203,6 @@ export interface OidcCallbackInput {
 }
 
 export interface OidcCallbackResult extends CompleteSignInResult {
-  readonly audience: AuthSessionAudience
   readonly returnTo: string
 }
 
@@ -380,7 +374,7 @@ export interface ReactivateMemberResult {
 /** `"session"` reads only the cookie; `"any"` reads a bearer access token, else the cookie. */
 export type AuthCredentialSource = "session" | "any"
 
-export interface AuthSessionResolutionOptions extends AuthSessionAudienceOptions {
+export interface AuthSessionResolutionOptions {
   readonly credentialSource?: AuthCredentialSource
   /** Marks this request as eligible to renew a near-expiry browser session. */
   readonly sessionActivity?: "foreground"
@@ -388,7 +382,6 @@ export interface AuthSessionResolutionOptions extends AuthSessionAudienceOptions
 
 /** Where an invitation link sends its recipient. */
 export interface InvitationDestination {
-  readonly audience: AuthSessionAudience
   readonly requestOrigin: string
   readonly returnTo: string
 }
