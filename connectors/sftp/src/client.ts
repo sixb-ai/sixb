@@ -96,16 +96,22 @@ async function openSftpStream(
 
   if (options.signal) {
     const signal = options.signal
-    const onAbort = () => nodeStream.destroy(abortError(signal))
-    const cleanup = () => signal.removeEventListener("abort", onAbort)
+    // ssh2 can replace destroy(reason) with a CLOSE failure. Error the consumer's stream first;
+    // pipeThrough then cancels the source and closes the remote handle without losing the reason.
+    return stream.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        start(controller) {
+          const onAbort = () => controller.error(abortError(signal))
+          const cleanup = () => signal.removeEventListener("abort", onAbort)
 
-    signal.addEventListener("abort", onAbort, { once: true })
-    nodeStream.once("close", cleanup)
-    nodeStream.once("end", cleanup)
-    nodeStream.once("error", cleanup)
-    if (signal.aborted) {
-      onAbort()
-    }
+          signal.addEventListener("abort", onAbort, { once: true })
+          nodeStream.once("close", cleanup)
+          nodeStream.once("end", cleanup)
+          nodeStream.once("error", cleanup)
+          if (signal.aborted) onAbort()
+        },
+      })
+    )
   }
 
   return stream
