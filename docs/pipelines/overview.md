@@ -97,8 +97,9 @@ const titles = definePipelineStep("campaign-titles")
   .sql(({ campaigns }) => `select id, upper(name) as name from ${campaigns}`)
 ```
 
-A step cannot read [marked](../auth/markings.md) columns yet, so pick the others. The output of a
-step is always the whole dataset.
+A step's output inherits the [markings](../auth/markings.md#markings-through-pipelines) of the
+columns it reads. A `.run()` step inherits every one of them, so picking only what it needs keeps
+sensitive columns out of its output. The output of a step is always the whole dataset.
 
 ## Next steps
 

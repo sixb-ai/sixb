@@ -58,6 +58,10 @@ const invoiceProjection = defineProjection("invoices", Invoice)
 
 const normalizeQuery: SqlTransformBody = ({ invoices }) =>
   `SELECT id, title, amount * 1.2 AS amount FROM ${invoices}`
+const normalize = definePipelineStep("normalize-invoices")
+  .inputs({ invoices: rawInvoices })
+  .output(normalizedInvoices)
+  .sql(normalizeQuery)
 
 type HostOptions = Partial<ConstructorParameters<typeof SixbHost>[0]>
 
@@ -67,10 +71,31 @@ function startHost(options: HostOptions = {}): SixbHost {
     ontology: [Invoice],
     markings: [financial, pii],
     datasets: [rawInvoices, normalizedInvoices],
+    pipelines: [definePipeline("invoices").then(normalize)],
     projections: [invoiceProjection],
     ...createTestRuntimeDeps(),
     ...options,
   })
+}
+
+/** `"invoices.amount"` → a column of the step input named `invoices`. */
+function analysis(lineage: {
+  readonly rows?: readonly string[]
+  readonly columns: Readonly<Record<string, readonly string[]>>
+}): SqlTransformAnalysis {
+  const ref = (path: string) => {
+    const [source = "", column = ""] = path.split(".")
+    return { source, column }
+  }
+  return {
+    supported: true,
+    lineage: {
+      rows: (lineage.rows ?? []).map(ref),
+      columns: Object.fromEntries(
+        Object.entries(lineage.columns).map(([column, refs]) => [column, refs.map(ref)])
+      ),
+    },
+  }
 }
 
 /** A lake whose SQL provider analyzes each query with the lineage the test gives it. */
@@ -102,6 +127,14 @@ function analyzingLake(analyses: ReadonlyMap<SqlTransformBody, SqlTransformAnaly
   })
   return { lakeStorage, calls, mostAtOnce: () => concurrency.most }
 }
+
+const exactNormalize = analysis({
+  columns: {
+    id: ["invoices.id"],
+    title: ["invoices.title"],
+    amount: ["invoices.amount"],
+  },
+})
 
 describe("pick", () => {
   test("returns the same dataset with only the picked columns, in order", () => {
@@ -191,6 +224,46 @@ describe("pipeline steps at startup", () => {
     )
   })
 
+  test("every output column of a run step inherits every column it reads", () => {
+    expect(() =>
+      startHost({
+        pipelines: [definePipeline("invoices").then(runStep({ invoices: rawInvoices }))],
+      })
+    ).toThrow(
+      "[Sixb] Projection 'invoices': column 'normalized_invoices.id' becomes the id of 'Invoice' and cannot carry markings, but carries [financial] from 'raw_invoices.amount' through step 'invoices/score-invoices' and [pii] from 'raw_invoices.customer_tax_id' through step 'invoices/score-invoices'."
+    )
+
+    // A step that reads only unmarked columns derives no marking.
+    const picked = runStep({ invoices: rawInvoices.pick("id", "title") })
+    expect(() => startHost({ pipelines: [definePipeline("invoices").then(picked)] })).not.toThrow()
+  })
+
+  test("markings go around a cycle of steps", () => {
+    const drafts = defineDataset("invoice_drafts", { schema: [col("id", "string")] })
+    // Runs first, but only marks its output once the step after it has.
+    const review = definePipelineStep("review-invoices")
+      .inputs({ invoices: rawInvoices.pick("id", "amount"), reviewed: normalizedInvoices })
+      .output(drafts)
+      .run(() => {})
+    const publish = definePipelineStep("publish-invoices")
+      .inputs({ drafts })
+      .output(normalizedInvoices)
+      .run(() => {})
+
+    expect(() =>
+      startHost({
+        datasets: [rawInvoices, normalizedInvoices, drafts],
+        pipelines: [definePipeline("invoices").then(review).then(publish)],
+      })
+    ).toThrow(
+      "[Sixb] Projection 'invoices': column 'normalized_invoices.id' becomes the id of 'Invoice' and cannot carry markings, but carries [financial] from 'raw_invoices.amount' through steps 'invoices/review-invoices', 'invoices/publish-invoices'."
+    )
+  })
+
+  test("SQL steps derive nothing until the preflight analyzes them", () => {
+    expect(() => startHost()).not.toThrow()
+  })
+
   // Reproduce: do not report a change when only the output's row markings grow in
   // MarkingPropagation.apply; the count is not revisited and stays unmarked.
   test("a step whose rows gain a marking its columns already carry revisits its readers", () => {
@@ -258,6 +331,61 @@ describe("run step lineage", () => {
 })
 
 describe("pipeline markings preflight", () => {
+  test("derives each output column's markings from the analyzed SQL", async () => {
+    const { lakeStorage, calls } = analyzingLake(new Map([[normalizeQuery, exactNormalize]]))
+    const host = startHost({ lakeStorage })
+
+    await checkPipelineMarkings({ definitions: host.definitions, lakeStorage })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.sources.invoices).toEqual({
+      dataset: rawInvoices,
+      columns: ["id", "title", "amount", "customer_tax_id"],
+    })
+  })
+
+  test("names the path a marking took to a property that does not declare it", async () => {
+    // The step copies the amount into the title.
+    const copiesAmount = analysis({
+      columns: { id: ["invoices.id"], title: ["invoices.amount"], amount: ["invoices.amount"] },
+    })
+    const { lakeStorage } = analyzingLake(new Map([[normalizeQuery, copiesAmount]]))
+    const host = startHost({ lakeStorage })
+
+    await expect(
+      checkPipelineMarkings({ definitions: host.definitions, lakeStorage })
+    ).rejects.toThrow(
+      "[Sixb] Projection 'invoices': property 'Invoice.title' is projected from column 'normalized_invoices.title', which carries [financial] from 'raw_invoices.amount' through step 'invoices/normalize-invoices'. Add markings: [financial] to the property."
+    )
+  })
+
+  test("row selection marks every output column", async () => {
+    // SELECT id, title, amount FROM invoices WHERE amount > 100
+    const filtersOnAmount = analysis({
+      rows: ["invoices.amount"],
+      columns: { id: ["invoices.id"], title: ["invoices.title"], amount: ["invoices.amount"] },
+    })
+    const { lakeStorage } = analyzingLake(new Map([[normalizeQuery, filtersOnAmount]]))
+    const host = startHost({ lakeStorage })
+
+    await expect(
+      checkPipelineMarkings({ definitions: host.definitions, lakeStorage })
+    ).rejects.toThrow(
+      "[Sixb] Projection 'invoices': column 'normalized_invoices.id' becomes the id of 'Invoice' and cannot carry markings, but carries [financial] from 'raw_invoices.amount' through step 'invoices/normalize-invoices'."
+    )
+  })
+
+  test("a column the lineage does not list depends on every column the step reads", async () => {
+    const partial = analysis({ columns: { id: ["invoices.id"], amount: ["invoices.amount"] } })
+    const { lakeStorage } = analyzingLake(new Map([[normalizeQuery, partial]]))
+    const host = startHost({ lakeStorage })
+
+    await expect(
+      checkPipelineMarkings({ definitions: host.definitions, lakeStorage })
+    ).rejects.toThrow(
+      "property 'Invoice.title' is projected from column 'normalized_invoices.title', which carries [financial] from 'raw_invoices.amount' through step 'invoices/normalize-invoices' and [pii] from 'raw_invoices.customer_tax_id' through step 'invoices/normalize-invoices'."
+    )
+  })
+
   test("a step that reads no marked column is not analyzed", async () => {
     const step = definePipelineStep("normalize-invoices")
       .inputs({ invoices: rawInvoices.pick("id", "title") })
@@ -268,5 +396,203 @@ describe("pipeline markings preflight", () => {
 
     await checkPipelineMarkings({ definitions: host.definitions, lakeStorage })
     expect(calls).toEqual([])
+  })
+
+  test("SQL the provider cannot analyze is reported with its step and reason", async () => {
+    const pivot: SqlTransformAnalysis = { supported: false, reason: "PIVOT is not supported" }
+    const { lakeStorage } = analyzingLake(new Map([[normalizeQuery, pivot]]))
+    const host = startHost({ lakeStorage })
+
+    await expect(
+      checkPipelineMarkings({ definitions: host.definitions, lakeStorage })
+    ).rejects.toThrow(
+      "[Sixb] Pipeline 'invoices' step 'normalize-invoices' reads column 'raw_invoices.amount', which carries [financial], but its SQL cannot be analyzed: PIVOT is not supported. Rewrite that part of the query, or pick only unmarked columns."
+    )
+  })
+
+  test("a provider failure names the step it was analyzing", async () => {
+    // The stub throws for any query it was not given.
+    const { lakeStorage } = analyzingLake(new Map())
+    const host = startHost({ lakeStorage })
+
+    await expect(
+      checkPipelineMarkings({ definitions: host.definitions, lakeStorage })
+    ).rejects.toThrow(
+      "[Sixb] Pipeline 'invoices' step 'normalize-invoices' could not be analyzed: unexpected query"
+    )
+  })
+
+  test("analyzes a few steps at a time", async () => {
+    // Twenty steps reading a marked column, all in the first wave.
+    const steps = Array.from({ length: 20 }, (_, index) => {
+      const output = defineDataset(`normalized_${index}`, {
+        schema: [col("id", "string"), col("title", "string"), col("amount", "decimal")],
+      })
+      const step = definePipelineStep(`normalize-${index}`)
+        .inputs({ invoices: rawInvoices })
+        .output(output)
+        .sql(normalizeQuery)
+      return { output, step }
+    })
+    const { lakeStorage, calls, mostAtOnce } = analyzingLake(
+      new Map([[normalizeQuery, exactNormalize]])
+    )
+    const host = startHost({
+      lakeStorage,
+      datasets: [rawInvoices, normalizedInvoices, ...steps.map(({ output }) => output)],
+      pipelines: [
+        steps.reduce((pipeline, { step }) => pipeline.then(step), definePipeline("many")),
+      ],
+    })
+
+    await checkPipelineMarkings({ definitions: host.definitions, lakeStorage })
+    // Reproduce: analyze a whole wave with an unbounded Promise.all.
+    expect(calls).toHaveLength(20)
+    expect(mostAtOnce()).toBe(8)
+  })
+
+  test("a step reused by two pipelines is analyzed once", async () => {
+    const { lakeStorage, calls } = analyzingLake(new Map([[normalizeQuery, exactNormalize]]))
+    const host = startHost({
+      lakeStorage,
+      pipelines: [
+        definePipeline("invoices").then(normalize),
+        definePipeline("backfill").then(normalize),
+      ],
+    })
+
+    await checkPipelineMarkings({ definitions: host.definitions, lakeStorage })
+    expect(calls).toHaveLength(1)
+  })
+
+  // Reproduce: drop the loop over the step's inputs in MarkingPropagation.apply; the count reads
+  // no column of `rich`, so it carries nothing and the projection passes.
+  test("a count over a filtered input carries what decided its rows", async () => {
+    const richInvoices = defineDataset("rich_invoices", { schema: [col("id", "string")] })
+    const richStats = defineDataset("rich_stats", {
+      schema: [col("label", "string"), col("invoice_count", "int64")],
+    })
+    const RichStats = defineObjectType({
+      id: "RichStats",
+      name: "RichStats",
+      properties: [
+        prop("label", "string", { required: true, primary: true }),
+        prop("invoiceCount", "integer"),
+      ],
+    })
+    const filterQuery: SqlTransformBody = ({ invoices }) =>
+      `SELECT id FROM ${invoices} WHERE amount > 100`
+    const filter = definePipelineStep("filter-rich")
+      .inputs({ invoices: rawInvoices })
+      .output(richInvoices)
+      .sql(filterQuery)
+    const countQuery: SqlTransformBody = ({ rich }) =>
+      `SELECT 'all' AS label, count(*) AS invoice_count FROM ${rich}`
+    const count = definePipelineStep("count-rich")
+      .inputs({ rich: richInvoices })
+      .output(richStats)
+      .sql(countQuery)
+    const { lakeStorage } = analyzingLake(
+      new Map([
+        [filterQuery, analysis({ rows: ["invoices.amount"], columns: { id: ["invoices.id"] } })],
+        // Neither column names a column of `rich`.
+        [countQuery, analysis({ columns: { label: [], invoice_count: [] } })],
+      ])
+    )
+    const host = startHost({
+      lakeStorage,
+      ontology: [RichStats],
+      datasets: [rawInvoices, richInvoices, richStats],
+      pipelines: [definePipeline("invoices").then(filter).then(count)],
+      projections: [
+        defineProjection("rich-stats", RichStats)
+          .fromDataset(richStats)
+          .properties({ label: "label", invoiceCount: "invoice_count" }),
+      ],
+    })
+
+    await expect(
+      checkPipelineMarkings({ definitions: host.definitions, lakeStorage })
+    ).rejects.toThrow(
+      // Even the constant label: zero rows would say that no invoice exceeds 100.
+      "[Sixb] Projection 'rich-stats': column 'rich_stats.label' becomes the id of 'RichStats' and cannot carry markings, but carries [financial] from 'raw_invoices.amount' through steps 'invoices/filter-rich', 'invoices/count-rich'."
+    )
+  })
+
+  test("a lake provider that cannot analyze SQL cannot run SQL over marked columns", async () => {
+    const host = startHost()
+
+    await expect(
+      checkPipelineMarkings({ definitions: host.definitions, lakeStorage: host.lakeStorage })
+    ).rejects.toThrow(
+      "[Sixb] Pipeline 'invoices' step 'normalize-invoices' reads column 'raw_invoices.amount', which carries [financial], but the lake provider cannot analyze SQL to derive the markings of its output. Use a lake provider that analyzes SQL, or pick only unmarked columns."
+    )
+  })
+
+  test("markings flow through chained, self-reading, and concurrent producers", async () => {
+    const enrichedInvoices = defineDataset("enriched_invoices", {
+      schema: [col("id", "string"), col("title", "string"), col("note", "string")],
+    })
+    const Enriched = defineObjectType({
+      id: "Enriched",
+      name: "Enriched",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("title", "string"),
+        prop("note", "string"),
+      ],
+    })
+    const enrichedProjection = defineProjection("enriched", Enriched)
+      .fromDataset(enrichedInvoices)
+      .properties({ id: "id", title: "title", note: "note" })
+
+    // Reads normalized_invoices, which only carries markings once 'normalize-invoices' is analyzed,
+    // and its own previous output.
+    const enrichQuery: SqlTransformBody = ({ invoices, previous }) =>
+      `SELECT i.id, i.title, p.note FROM ${invoices} i LEFT JOIN ${previous} p USING (id)`
+    const enrich = definePipelineStep("enrich-invoices")
+      .inputs({ invoices: normalizedInvoices, previous: enrichedInvoices })
+      .output(enrichedInvoices, { mode: "append" })
+      .sql(enrichQuery)
+    // A second producer of the same dataset copies the amount into the note.
+    const annotateQuery: SqlTransformBody = ({ invoices }) =>
+      `SELECT id, title, CAST(amount AS VARCHAR) AS note FROM ${invoices}`
+    const annotate = definePipelineStep("annotate-invoices")
+      .inputs({ invoices: normalizedInvoices })
+      .output(enrichedInvoices, { mode: "append" })
+      .sql(annotateQuery)
+
+    const { lakeStorage, calls } = analyzingLake(
+      new Map([
+        [normalizeQuery, exactNormalize],
+        [
+          enrichQuery,
+          analysis({
+            rows: ["invoices.id", "previous.id"],
+            columns: { id: ["invoices.id"], title: ["invoices.title"], note: ["previous.note"] },
+          }),
+        ],
+        [
+          annotateQuery,
+          analysis({
+            columns: { id: ["invoices.id"], title: ["invoices.title"], note: ["invoices.amount"] },
+          }),
+        ],
+      ])
+    )
+    const host = startHost({
+      lakeStorage,
+      ontology: [Invoice, Enriched],
+      datasets: [rawInvoices, normalizedInvoices, enrichedInvoices],
+      pipelines: [definePipeline("invoices").then(enrich).then(normalize).then(annotate)],
+      projections: [invoiceProjection, enrichedProjection],
+    })
+
+    await expect(
+      checkPipelineMarkings({ definitions: host.definitions, lakeStorage })
+    ).rejects.toThrow(
+      "[Sixb] Projection 'enriched': property 'Enriched.note' is projected from column 'enriched_invoices.note', which carries [financial] from 'raw_invoices.amount' through steps 'invoices/normalize-invoices', 'invoices/annotate-invoices'. Add markings: [financial] to the property."
+    )
+    expect(calls).toHaveLength(3)
   })
 })
