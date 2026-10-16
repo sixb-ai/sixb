@@ -27,7 +27,8 @@ The connected `SftpClient` exposes directory and file operations such as `list`,
 `read`, `write`, `rename`, and `delete`.
 
 Use `open(...)` for large files. It preserves backpressure and closes the remote handle when the
-stream is canceled or its signal aborts:
+stream is canceled or its signal aborts. An abort preserves its original reason even if closing
+the remote handle fails:
 
 ```ts
 const body = await client.open("/exports/video.mov", { signal })
