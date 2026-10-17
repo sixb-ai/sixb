@@ -41,10 +41,31 @@ membership visibility depends on the authenticated user's organization access.
 the sandbox factory's `auth` option. It is separate from the token-based REST connector; no connector
 registration is required. See [sandbox configuration](../../docs/agents/defining-agents.md#sandbox-configuration).
 
-The App must be installed on the selected GitHub.com repository with Contents read/write
-permission. Each run receives a repository-scoped installation token, injected outside the VM
-only for Git fetch/push endpoints. SSH, Git LFS and cross-repository submodule credentials are not
-provided. Private keys remain host-side; the App does not replace your application's access checks.
+Set up the GitHub App once:
+
+1. Create a GitHub App (Settings → Developer settings → GitHub Apps). It needs no webhook. Grant
+   the repository permissions Contents: Read and write, Pull requests: Read and write, and
+   Metadata: Read. Read-only access (the default `source.access`) needs only Contents: Read.
+2. Install the App on the repository the sandbox clones.
+3. Note the App ID shown on the App's settings page.
+4. Generate a private key and put the PEM file's contents in an environment variable, such as
+   `GITHUB_APP_PRIVATE_KEY`.
+
+With `source.access: "write"`, the agent can use `git` and GitHub API clients such as `gh` for
+that repository, for example to push and open pull requests. Each run receives a repository-scoped installation token,
+injected outside the VM only into Git fetch/push requests and, with write access, GitHub API
+requests. The sandbox gets a placeholder in `GH_TOKEN` and `GITHUB_TOKEN` and the Git identity of
+the App's bot, so commits are attributed to it. SSH, Git LFS and cross-repository submodule
+credentials are not provided. Private keys remain host-side; the App does not replace your
+application's access checks.
+
+If the installation lacks a permission the workspace needs, the run fails: the cause of the error
+reported to `onError` names the permissions to grant.
+
+Write access lets the agent push to any branch of that repository and, through the API, merge pull
+requests or delete branches. Protect the default branch with branch protection or rulesets, for
+example by requiring a reviewed pull request, so that the agent's work reaches it only through
+review.
 
 ## Client API
 
