@@ -5,4 +5,4 @@ export {
   resolveFileRefAtPath,
   statFileRef,
 } from "./file-content"
-export { canonicalMediaType } from "./media-type"
+export { canonicalMediaType, inferFileMediaType, sniffFileMediaType } from "./media-type"

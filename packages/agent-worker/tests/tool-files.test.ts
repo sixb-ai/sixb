@@ -7,15 +7,15 @@ import type {
   SandboxFileRecord,
 } from "@sixb/core"
 import { InMemoryBlobStorage } from "@sixb/core"
-import { AgentToolArtifactBudget, createAgentToolArtifacts } from "../src/tools/artifacts"
+import { AgentFileBudget, createAgentToolFiles } from "../src/tools/tool-files"
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
-describe("agent tool artifacts", () => {
+describe("agent tool files", () => {
   test("stores detected image bytes and materializes them under a safe sandbox path", async () => {
     const blobStorage = new InMemoryBlobStorage()
-    const sandbox = new ArtifactSandbox()
-    const artifacts = createAgentToolArtifacts({
+    const sandbox = new ToolFileSandbox()
+    const files = createAgentToolFiles({
       toolName: "create_image",
       toolCallId: "../../unsafe provider call id",
       signal: new AbortController().signal,
@@ -23,35 +23,33 @@ describe("agent tool artifacts", () => {
       resolveSandbox: async () => ({ sandbox }),
     })
 
-    const artifact = await artifacts.put({
+    const file = await files.put({
       body: PNG_BYTES,
       fileName: "generated image.png",
     })
 
-    expect(artifact.fileRef).toMatchObject({
+    expect(file.fileRef).toMatchObject({
       sizeBytes: PNG_BYTES.byteLength,
       fileName: "generated image.png",
       mediaType: "image/png",
     })
-    expect(artifact.sandboxPath).toStartWith(`${sandbox.workingDirectory}/.sixb/agent/artifacts/`)
-    expect(artifact.sandboxPath).toEndWith("-generated image.png")
-    expect(artifact.sandboxPath).not.toContain("../")
+    expect(file.sandboxPath).toStartWith(`${sandbox.workingDirectory}/.sixb/agent/tool-files/`)
+    expect(file.sandboxPath).toEndWith("-generated image.png")
+    expect(file.sandboxPath).not.toContain("../")
 
     const written = sandbox.writtenFiles[0]
-    expect(written?.path).toStartWith(".sixb/agent/artifacts/")
+    expect(written?.path).toStartWith(".sixb/agent/tool-files/")
     expect(written?.path).not.toContain("..")
     expect(written?.contents).toEqual(PNG_BYTES)
     expect(
-      new Uint8Array(
-        await new Response(await blobStorage.open(artifact.fileRef.blobId)).arrayBuffer()
-      )
+      new Uint8Array(await new Response(await blobStorage.open(file.fileRef.blobId)).arrayBuffer())
     ).toEqual(PNG_BYTES)
   })
 
   test("rejects unsafe file names before storing or provisioning a sandbox", async () => {
     let sandboxResolutions = 0
-    const sandbox = new ArtifactSandbox()
-    const artifacts = createAgentToolArtifacts({
+    const sandbox = new ToolFileSandbox()
+    const files = createAgentToolFiles({
       toolName: "create_image",
       toolCallId: "call-1",
       signal: new AbortController().signal,
@@ -69,8 +67,8 @@ describe("agent tool artifacts", () => {
       "bad\nname",
     ]) {
       await expect(
-        artifacts.put({ body: PNG_BYTES, fileName, mediaType: "image/png" })
-      ).rejects.toThrow("artifact fileName must be a single safe file name")
+        files.put({ body: PNG_BYTES, fileName, mediaType: "image/png" })
+      ).rejects.toThrow("fileName must be a single safe file name")
     }
     expect(sandboxResolutions).toBe(0)
     expect(sandbox.writtenFiles).toEqual([])
@@ -78,14 +76,14 @@ describe("agent tool artifacts", () => {
 
   test("rejects bodies over the file limit while reading a stream", async () => {
     let sandboxResolutions = 0
-    const artifacts = createAgentToolArtifacts({
+    const files = createAgentToolFiles({
       toolName: "create_file",
       toolCallId: "call-2",
       signal: new AbortController().signal,
       blobStorage: new InMemoryBlobStorage(),
       resolveSandbox: async () => {
         sandboxResolutions += 1
-        return { sandbox: new ArtifactSandbox() }
+        return { sandbox: new ToolFileSandbox() }
       },
       fileMaxBytes: 4,
     })
@@ -95,28 +93,28 @@ describe("agent tool artifacts", () => {
       },
     })
 
-    await expect(artifacts.put({ body, fileName: "large.bin" })).rejects.toThrow(
-      "artifact is 5 bytes and exceeds the 4-byte file limit"
+    await expect(files.put({ body, fileName: "large.bin" })).rejects.toThrow(
+      "file is 5 bytes and exceeds the 4-byte file limit"
     )
     expect(sandboxResolutions).toBe(0)
   })
 
   test("rejects a declared image type that does not match the bytes", async () => {
     let sandboxResolutions = 0
-    const artifacts = createAgentToolArtifacts({
+    const files = createAgentToolFiles({
       toolName: "create_image",
       toolCallId: "call-3",
       signal: new AbortController().signal,
       blobStorage: new InMemoryBlobStorage(),
       resolveSandbox: async () => {
         sandboxResolutions += 1
-        return { sandbox: new ArtifactSandbox() }
+        return { sandbox: new ToolFileSandbox() }
       },
     })
 
     await expect(
-      artifacts.put({ body: PNG_BYTES, fileName: "generated.jpg", mediaType: "image/jpeg" })
-    ).rejects.toThrow("artifact bytes are image/png, not the declared media type image/jpeg")
+      files.put({ body: PNG_BYTES, fileName: "generated.jpg", mediaType: "image/jpeg" })
+    ).rejects.toThrow("file bytes are image/png, not the declared media type image/jpeg")
     expect(sandboxResolutions).toBe(0)
   })
 
@@ -133,10 +131,10 @@ describe("agent tool artifacts", () => {
       open: (blobId) => stored.open(blobId),
       stat: (blobId) => stored.stat(blobId),
     }
-    const budget = new AgentToolArtifactBudget(6)
-    const sandbox = new ArtifactSandbox()
+    const budget = new AgentFileBudget(6)
+    const sandbox = new ToolFileSandbox()
     const createPublisher = (toolCallId: string) =>
-      createAgentToolArtifacts({
+      createAgentToolFiles({
         toolName: "create_file",
         toolCallId,
         signal: new AbortController().signal,
@@ -156,7 +154,7 @@ describe("agent tool artifacts", () => {
         body: new Uint8Array(4),
         fileName: "second.bin",
       })
-    ).rejects.toThrow("artifacts exceed the 6-byte run limit")
+    ).rejects.toThrow("files exceed the 6-byte run limit")
 
     releaseUpload.resolve()
     await expect(first).resolves.toMatchObject({ fileRef: { sizeBytes: 4 } })
@@ -184,9 +182,9 @@ describe("agent tool artifacts", () => {
       },
     }
     const abort = new AbortController()
-    const budget = new AgentToolArtifactBudget(10)
-    const sandbox = new ArtifactSandbox()
-    const artifacts = createAgentToolArtifacts({
+    const budget = new AgentFileBudget(10)
+    const sandbox = new ToolFileSandbox()
+    const files = createAgentToolFiles({
       toolName: "create_file",
       toolCallId: "cancelled-upload",
       signal: abort.signal,
@@ -195,7 +193,7 @@ describe("agent tool artifacts", () => {
       resolveSandbox: async () => ({ sandbox }),
     })
 
-    const upload = artifacts.put({ body: new Uint8Array(4), fileName: "cancelled.bin" })
+    const upload = files.put({ body: new Uint8Array(4), fileName: "cancelled.bin" })
     await uploadStarted.promise
     const reason = new Error("stop upload")
     abort.abort(reason)
@@ -207,8 +205,8 @@ describe("agent tool artifacts", () => {
   })
 })
 
-class ArtifactSandbox implements Sandbox {
-  readonly id = "artifact-sandbox"
+class ToolFileSandbox implements Sandbox {
+  readonly id = "tool-file-sandbox"
   readonly provider = "test"
   readonly workingDirectory = "/workspace"
   readonly status = "running"
@@ -223,7 +221,7 @@ class ArtifactSandbox implements Sandbox {
     _args?: readonly string[],
     _options?: RunCommandOptions
   ): Promise<CommandResult> {
-    throw new Error("runCommand is not used by artifact publishing tests")
+    throw new Error("runCommand is not used by tool file tests")
   }
 
   async stop(): Promise<void> {}

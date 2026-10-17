@@ -27,3 +27,72 @@ export function canonicalMediaType(value: unknown): string | null {
   }
   return canonical
 }
+
+/**
+ * The media type a file's bytes declare by their leading signature, or `undefined` when they carry
+ * none this function knows. Only formats with an unambiguous signature are recognized; text formats
+ * have none and are left to the file name.
+ */
+export function sniffFileMediaType(bytes: Uint8Array): string | undefined {
+  if (startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "image/png"
+  if (startsWith(bytes, [0xff, 0xd8, 0xff])) return "image/jpeg"
+  if (asciiAt(bytes, 0, "GIF87a") || asciiAt(bytes, 0, "GIF89a")) return "image/gif"
+  if (asciiAt(bytes, 0, "RIFF") && asciiAt(bytes, 8, "WEBP")) return "image/webp"
+  if (asciiAt(bytes, 0, "%PDF-")) return "application/pdf"
+  return undefined
+}
+
+/**
+ * The media type of a file handed over without one: its bytes' signature when they have one, else
+ * its extension, else `application/octet-stream`. Every place that classifies a sandbox or tool file
+ * goes through this one table, so the same file gets the same type wherever it comes from.
+ */
+export function inferFileMediaType(fileName: string, bytes?: Uint8Array): string {
+  const sniffed = bytes === undefined ? undefined : sniffFileMediaType(bytes)
+  if (sniffed) return sniffed
+  const dot = fileName.lastIndexOf(".")
+  const extension = dot < 0 ? "" : fileName.slice(dot).toLowerCase()
+  return EXTENSION_MEDIA_TYPES[extension] ?? "application/octet-stream"
+}
+
+const EXTENSION_MEDIA_TYPES: Readonly<Record<string, string>> = {
+  ".bmp": "image/bmp",
+  ".css": "text/css",
+  ".csv": "text/csv",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".gif": "image/gif",
+  ".htm": "text/html",
+  ".html": "text/html",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".js": "application/javascript",
+  ".json": "application/json",
+  ".jsonl": "application/x-ndjson",
+  ".markdown": "text/markdown",
+  ".md": "text/markdown",
+  ".mjs": "application/javascript",
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".svg": "image/svg+xml",
+  ".tsv": "text/tab-separated-values",
+  ".txt": "text/plain",
+  ".webp": "image/webp",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".xml": "application/xml",
+  ".yaml": "application/yaml",
+  ".yml": "application/yaml",
+  ".zip": "application/zip",
+}
+
+function startsWith(bytes: Uint8Array, signature: readonly number[]): boolean {
+  return signature.every((byte, index) => bytes[index] === byte)
+}
+
+function asciiAt(bytes: Uint8Array, offset: number, value: string): boolean {
+  if (bytes.byteLength < offset + value.length) return false
+  for (let index = 0; index < value.length; index += 1) {
+    if (bytes[offset + index] !== value.charCodeAt(index)) return false
+  }
+  return true
+}

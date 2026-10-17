@@ -132,10 +132,10 @@ defineAgentTool("readonly_output")
   .run(() => ({ results: readonlyResults }))
 
 defineAgentTool("create_image")
-  .description("Create an image artifact.")
+  .description("Create an image.")
   .input({ prompt: "string" })
-  .run(async ({ artifacts, toolCallId }) => {
-    const { fileRef } = await artifacts.put({
+  .run(async ({ files, toolCallId }) => {
+    const { fileRef } = await files.put({
       body: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
       fileName: "image.png",
       mediaType: "image/png",
@@ -200,7 +200,7 @@ tool.objects(Project).byId("project-1").delete()
 tool.datasets
 // @ts-expect-error nor telemetry series directly
 tool.telemetry
-// @ts-expect-error files a tool produces go through its artifacts
+// @ts-expect-error files a tool produces go through `files`
 tool.blobs
 // @ts-expect-error tools do not start workflows
 tool.workflows

@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test"
 import type { FileRef } from "../src"
 import { fileNameFor, InMemoryBlobStorage, isFileRef } from "../src"
 import { BlobStorageError } from "../src/blob-storage"
-import { canonicalMediaType } from "../src/blob-storage/media-type"
+import {
+  canonicalMediaType,
+  inferFileMediaType,
+  sniffFileMediaType,
+} from "../src/blob-storage/media-type"
 import { isValidFileRef } from "../src/blob-storage/validation"
 
 const encoder = new TextEncoder()
@@ -184,6 +188,41 @@ describe("canonicalMediaType", () => {
     }
     expect(canonicalMediaType(undefined)).toBeNull()
     expect(canonicalMediaType(42)).toBeNull()
+  })
+})
+
+describe("inferFileMediaType", () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00])
+  const pdf = new TextEncoder().encode("%PDF-1.7\n")
+
+  test("reads the type from the extension, ignoring its case", () => {
+    expect(inferFileMediaType("report.MD")).toBe("text/markdown")
+    expect(inferFileMediaType("data.tsv")).toBe("text/tab-separated-values")
+    expect(inferFileMediaType("deck.pptx")).toBe(
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    )
+    expect(inferFileMediaType("archive.tar.zip")).toBe("application/zip")
+  })
+
+  test("trusts a known signature over the extension", () => {
+    expect(inferFileMediaType("chart.txt", png)).toBe("image/png")
+    expect(inferFileMediaType("scan.bin", pdf)).toBe("application/pdf")
+  })
+
+  test("falls back to octet-stream for an unknown or missing extension", () => {
+    expect(inferFileMediaType("README")).toBe("application/octet-stream")
+    expect(inferFileMediaType("notes.unknown", new TextEncoder().encode("plain"))).toBe(
+      "application/octet-stream"
+    )
+  })
+
+  test("recognizes only unambiguous signatures", () => {
+    expect(sniffFileMediaType(png)).toBe("image/png")
+    expect(sniffFileMediaType(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe("image/jpeg")
+    expect(sniffFileMediaType(new TextEncoder().encode("GIF89a"))).toBe("image/gif")
+    expect(sniffFileMediaType(new TextEncoder().encode("RIFF\0\0\0\0WEBP"))).toBe("image/webp")
+    expect(sniffFileMediaType(new TextEncoder().encode("<svg></svg>"))).toBeUndefined()
+    expect(sniffFileMediaType(new Uint8Array())).toBeUndefined()
   })
 })
 

@@ -1,12 +1,13 @@
 import { posix } from "node:path"
-import type { AgentToolArtifacts, FileRef, JsonValue } from "@sixb/core"
+import type { AgentToolFiles, FileRef, JsonValue } from "@sixb/core"
 import { AgentToolPublicError } from "@sixb/core"
+import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import type { JsonObject, ModelTool } from "@sixb/core/models"
 import type { PreparedAgentAttachmentContext } from "../attachments"
 import { agentToolErrorText } from "../model-adapters"
 import type { AgentSandboxFileRegistry } from "../sandbox-file-registry"
+import { readSandboxFile, resolveSandboxPath, SandboxFileError } from "../sandbox-files"
 import type { AgentSandboxHandle } from "../sandbox-handle"
-import { inferAgentFileMediaType } from "./artifacts"
 import type { AgentToolModelOutput } from "./result-output"
 
 const VIEW_FILE_MAX_BYTES = 25 * 1024 * 1024
@@ -32,10 +33,10 @@ export function createViewFileTool(input: {
   readonly resolveSandbox: () => Promise<AgentSandboxHandle>
   readonly attachments: PreparedAgentAttachmentContext
   readonly registry: AgentSandboxFileRegistry
-  readonly artifactsForToolCall: (options: {
+  readonly filesForToolCall: (options: {
     readonly toolCallId: string
     readonly signal: AbortSignal
-  }) => AgentToolArtifacts
+  }) => AgentToolFiles
   readonly toolResultToModelOutput: (input: {
     readonly output: JsonValue
     readonly signal: AbortSignal
@@ -48,7 +49,12 @@ export function createViewFileTool(input: {
     async execute({ path }, { signal, toolCallId }): Promise<JsonValue> {
       signal.throwIfAborted()
       const handle = await input.resolveSandbox()
-      const absolutePath = resolveSafeSandboxPath(handle.sandbox.workingDirectory, path)
+      let absolutePath: string
+      try {
+        absolutePath = resolveSandboxPath(handle.sandbox.workingDirectory, path)
+      } catch (error) {
+        throw toViewFileError(error)
+      }
       const knownFileRef =
         input.registry.get(absolutePath) ??
         preparedFileRefAtPath(input.attachments, handle.sandbox.workingDirectory, absolutePath)
@@ -57,17 +63,24 @@ export function createViewFileTool(input: {
       if (knownFileRef) {
         fileRef = knownFileRef
       } else {
-        const bytes = await readSandboxFile({ handle, absolutePath, signal })
+        const bytes = await readSandboxFile(handle, {
+          path: absolutePath,
+          maxBytes: VIEW_FILE_MAX_BYTES,
+          signal,
+          timeoutMs: VIEW_FILE_TIMEOUT_MS,
+        }).catch((error: unknown) => {
+          throw toViewFileError(error)
+        })
         const fileName = safePublishedFileName(posix.basename(absolutePath))
-        const artifact = await input.artifactsForToolCall({ toolCallId, signal }).put({
+        const file = await input.filesForToolCall({ toolCallId, signal }).put({
           body: bytes,
           fileName,
-          mediaType: inferAgentFileMediaType(bytes, fileName),
+          mediaType: inferFileMediaType(fileName, bytes),
         })
-        fileRef = artifact.fileRef
+        fileRef = file.fileRef
       }
 
-      // Prepared attachments and framework artifacts are immutable snapshots and can be reused.
+      // Prepared attachments and files tools stored are immutable snapshots and can be reused.
       // Arbitrary bash paths stay mutable, so do not cache their published snapshot at the source
       // path; a later view_file call must read the path again.
       if (knownFileRef) input.registry.register(absolutePath, fileRef)
@@ -105,64 +118,6 @@ function preparedFileRefAtPath(
   return undefined
 }
 
-function resolveSafeSandboxPath(workingDirectory: string, requestedPath: string): string {
-  if (
-    typeof requestedPath !== "string" ||
-    requestedPath.length === 0 ||
-    requestedPath.includes("\0")
-  ) {
-    throw viewFileError("path must be a non-empty sandbox file path")
-  }
-  const root = posix.normalize(workingDirectory)
-  const absolutePath = posix.resolve(root, requestedPath)
-  if (absolutePath === root || !absolutePath.startsWith(`${root}/`)) {
-    throw viewFileError("path must stay inside the sandbox working directory")
-  }
-  return absolutePath
-}
-
-async function readSandboxFile(input: {
-  readonly handle: AgentSandboxHandle
-  readonly absolutePath: string
-  readonly signal: AbortSignal
-}): Promise<Uint8Array> {
-  const result = await input.handle.sandbox.runCommand("bash", ["-lc", READ_VIEW_FILE_SCRIPT], {
-    env: {
-      ...(input.handle.env ?? {}),
-      SIXB_VIEW_FILE_PATH_B64: Buffer.from(input.absolutePath, "utf-8").toString("base64"),
-      SIXB_VIEW_FILE_ROOT: input.handle.sandbox.workingDirectory,
-      SIXB_VIEW_FILE_MAX_BYTES: String(VIEW_FILE_MAX_BYTES),
-    },
-    timeout: VIEW_FILE_TIMEOUT_MS,
-    signal: input.signal,
-  })
-  input.signal.throwIfAborted()
-
-  if (result.exitCode === 2) {
-    throw viewFileError("file does not exist, is not a regular file, or is a symbolic link")
-  }
-  if (result.exitCode === 3) {
-    throw viewFileError(`file exceeds the ${VIEW_FILE_MAX_BYTES}-byte inspection limit`)
-  }
-  if (result.exitCode === 4) {
-    throw viewFileError("resolved path escapes the sandbox working directory")
-  }
-  if (result.exitCode !== 0) {
-    throw viewFileError("file could not be read")
-  }
-
-  const separator = result.stdout.indexOf("\n")
-  const sizeBytes = Number(result.stdout.slice(0, separator))
-  const bytes = Buffer.from(
-    separator < 0 ? "" : result.stdout.slice(separator + 1).trim(),
-    "base64"
-  )
-  if (!Number.isInteger(sizeBytes) || sizeBytes < 0 || bytes.byteLength !== sizeBytes) {
-    throw viewFileError("file changed while it was being read")
-  }
-  return new Uint8Array(bytes)
-}
-
 function richViewFileResult(fileRef: FileRef): JsonValue {
   const mediaType = fileRef.mediaType ?? "application/octet-stream"
   const fileName = fileRef.fileName ?? "file"
@@ -190,27 +145,11 @@ function safePublishedFileName(value: string): string {
   return safe && safe !== "." && safe !== ".." ? safe : "viewed-file.bin"
 }
 
+/** A sandbox file refusal becomes the message the Agent sees; anything else passes through. */
+function toViewFileError(error: unknown): unknown {
+  return error instanceof SandboxFileError ? viewFileError(error.message) : error
+}
+
 function viewFileError(message: string): AgentToolPublicError {
   return new AgentToolPublicError(`[SixbAgentWorker] view_file ${message}.`)
 }
-
-const READ_VIEW_FILE_SCRIPT = `# sixb-read-view-file
-set -euo pipefail
-requested="$(printf '%s' "\${SIXB_VIEW_FILE_PATH_B64:?}" | base64 -d)"
-root="\${SIXB_VIEW_FILE_ROOT:?}"
-max_bytes="\${SIXB_VIEW_FILE_MAX_BYTES:?}"
-if [ ! -f "$requested" ] || [ -L "$requested" ]; then
-  exit 2
-fi
-parent="$(cd -P -- "$(dirname -- "$requested")" && pwd)"
-resolved="$parent/$(basename -- "$requested")"
-case "$resolved" in
-  "$root"/*) ;;
-  *) exit 4 ;;
-esac
-size="$(wc -c < "$resolved" | tr -d ' ')"
-if [ "$size" -gt "$max_bytes" ]; then
-  exit 3
-fi
-printf '%s\n' "$size"
-head -c "$max_bytes" "$resolved" | base64 | tr -d '\n'`

@@ -10,7 +10,7 @@ import { InMemoryBlobStorage } from "@sixb/core"
 import type { ModelTool } from "@sixb/core/models"
 import type { PreparedAgentAttachmentContext } from "../src/attachments"
 import { AgentSandboxFileRegistry } from "../src/sandbox-file-registry"
-import { createAgentToolArtifacts } from "../src/tools/artifacts"
+import { createAgentToolFiles } from "../src/tools/tool-files"
 import { createViewFileTool } from "../src/tools/view-file"
 
 const PNG_BYTES = Uint8Array.from(
@@ -30,15 +30,15 @@ describe("view_file tool", () => {
     })
     const sandbox = new ViewFileSandbox()
     const registry = new AgentSandboxFileRegistry()
-    const artifactPath = `${sandbox.workingDirectory}/.sixb/agent/artifacts/generated.png`
-    registry.register(artifactPath, fileRef)
+    const toolFilePath = `${sandbox.workingDirectory}/.sixb/agent/tool-files/generated.png`
+    registry.register(toolFilePath, fileRef)
     let publications = 0
     const viewFile = executableViewFileTool(
       createViewFileTool({
         resolveSandbox: async () => ({ sandbox }),
         attachments: emptyAttachments(),
         registry,
-        artifactsForToolCall: () => {
+        filesForToolCall: () => {
           publications += 1
           throw new Error("Known files must not be republished.")
         },
@@ -46,7 +46,7 @@ describe("view_file tool", () => {
       })
     )
 
-    const output = await viewFile.execute({ path: artifactPath })
+    const output = await viewFile.execute({ path: toolFilePath })
 
     expect(output).toMatchObject({
       kind: "agentToolResult",
@@ -55,7 +55,7 @@ describe("view_file tool", () => {
         { type: "file", fileRef },
       ],
     })
-    expect(JSON.stringify(output)).not.toContain(artifactPath)
+    expect(JSON.stringify(output)).not.toContain(toolFilePath)
     expect(publications).toBe(0)
     expect(sandbox.commands).toHaveLength(0)
   })
@@ -71,9 +71,9 @@ describe("view_file tool", () => {
         resolveSandbox: async () => ({ sandbox }),
         attachments: emptyAttachments(),
         registry,
-        artifactsForToolCall: ({ toolCallId, signal }) => {
+        filesForToolCall: ({ toolCallId, signal }) => {
           publications += 1
-          return createAgentToolArtifacts({
+          return createAgentToolFiles({
             toolName: "view_file",
             toolCallId,
             signal,
@@ -114,7 +114,7 @@ describe("view_file tool", () => {
     expect(second).not.toEqual(first)
     expect(publications).toBe(2)
     expect(sandbox.commands).toHaveLength(2)
-    expect(sandbox.writtenFiles.some((file) => file.path.includes(".sixb/agent/artifacts/"))).toBe(
+    expect(sandbox.writtenFiles.some((file) => file.path.includes(".sixb/agent/tool-files/"))).toBe(
       true
     )
   })
@@ -135,7 +135,7 @@ describe("view_file tool", () => {
         resolveSandbox: async () => ({ sandbox }),
         attachments: emptyAttachments(),
         registry,
-        artifactsForToolCall: () => {
+        filesForToolCall: () => {
           throw new Error("unused")
         },
         toolResultToModelOutput: unusedToolResultProjection,
@@ -169,7 +169,7 @@ describe("view_file tool", () => {
         resolveSandbox: async () => ({ sandbox }),
         attachments,
         registry,
-        artifactsForToolCall: () => {
+        filesForToolCall: () => {
           throw new Error("Prepared files must not be republished.")
         },
         toolResultToModelOutput: unusedToolResultProjection,
@@ -203,7 +203,7 @@ describe("view_file tool", () => {
         resolveSandbox: async () => ({ sandbox }),
         attachments: emptyAttachments(),
         registry: new AgentSandboxFileRegistry(),
-        artifactsForToolCall: () => {
+        filesForToolCall: () => {
           throw new Error("unused")
         },
         toolResultToModelOutput: unusedToolResultProjection,
@@ -272,7 +272,7 @@ class ViewFileSandbox implements Sandbox {
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
     this.commands.push({ command, args })
-    const encodedPath = options.env?.SIXB_VIEW_FILE_PATH_B64
+    const encodedPath = options.env?.SIXB_READ_PATH_B64
     const path = encodedPath ? Buffer.from(encodedPath, "base64").toString("utf-8") : ""
     const bytes = this.files.get(path)
     if (!bytes) {
