@@ -1323,6 +1323,30 @@ describe("server auth guard", () => {
     expect(location.searchParams.get("returnTo")).toBe("http://api.localhost/docs")
   })
 
+  // Reproduce: build the return target from the request's own origin in htmlAuthRedirectResponse.
+  // Behind a proxy that ends TLS that origin is http://, and sign-in refuses it with a 400.
+  test("returns a signed-out visitor to the API's public origin, not the proxied one", async () => {
+    const { sixb } = createRuntime({ auth: true })
+    const app = createSixbApi(
+      new SixbServer({
+        host: sixb,
+        quiet: true,
+        browser: createTestBrowserPolicy({ apiOrigin: "https://api.example.com" }),
+      })
+    )
+
+    // The proxy ended TLS, so the request reaches the API as plain HTTP.
+    const response = await app.fetch(new Request("http://api.example.com/auth/device?user_code=X"))
+    const location = new URL(response.headers.get("location") ?? "", "https://api.example.com")
+
+    expect(response.status).toBe(302)
+    expect(location.searchParams.get("returnTo")).toBe(
+      "https://api.example.com/auth/device?user_code=X"
+    )
+    // Sign-in accepts it; this test's strategy has no page to show, rather than refusing it (400).
+    expect((await app.fetch(new Request(location))).status).toBe(501)
+  })
+
   test("allows API-owned docs mutations with the API-origin session and CSRF token", async () => {
     const { sixb, storage } = createRuntime({ auth: true, roles: [deviceWriter] })
     const seeded = await seedSession(storage)

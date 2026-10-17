@@ -11,7 +11,11 @@ export interface ResolvedSixbApiBrowserPolicy {
 
 export interface RequestAuthContext {
   readonly browserOrigin?: string
-  readonly absoluteReturnTo?: boolean
+  /**
+   * Where a signed-out visitor to one of the API's own pages comes back to: its public origin.
+   * Behind a proxy that ends TLS, the request's own URL is `http://` and sign-in refuses it.
+   */
+  readonly returnToOrigin?: string
 }
 
 export interface AuthInvitationRedirectInput {
@@ -76,12 +80,13 @@ export function resolveApiBrowserAuthContext(
   request: Request
 ): RequestAuthContext {
   const origin = normalizeRequestOrigin(request)
+  const returnToOrigin = resolveApiBrowserPublicOrigin(policy, request)
   if (!origin) {
-    return { absoluteReturnTo: true }
+    return { returnToOrigin }
   }
 
   if (isAllowedOrigin(policy, request, origin)) {
-    return { browserOrigin: origin, absoluteReturnTo: true }
+    return { browserOrigin: origin, returnToOrigin }
   }
 
   throw new BrowserOriginError(`[SixbServer] Browser origin '${origin}' is not allowed.`)
