@@ -264,8 +264,14 @@ async function assertScaffold(projectDir: string, name: string): Promise<void> {
     dependencies?: Record<string, string>
   }
   expect(packageJson.name).toBe(name)
-  expect(packageJson.dependencies?.["@sixb/cli"]).toBe("^0.1.9")
-  expect(packageJson.dependencies?.["@sixb/ducklake"]).toBe("^0.1.5")
+  // Each release bumps the template's Sixb versions, so they are compared, not pinned.
+  const template = JSON.parse(
+    await readFile(join(createPackageDir, "template", "package.json"), "utf8")
+  ) as { dependencies: Record<string, string> }
+
+  expect(packageJson.dependencies?.["@sixb/cli"]).toStartWith("^")
+  expect(packageJson.dependencies?.["@sixb/cli"]).toBe(template.dependencies["@sixb/cli"])
+  expect(packageJson.dependencies?.["@sixb/ducklake"]).toBe(template.dependencies["@sixb/ducklake"])
   expect(packageJson.dependencies?.cobe).toBe("^2.0.1")
   expect(packageJson.dependencies?.["satellite.js"]).toBe("^7.1.0")
   expect(packageJson.dependencies?.["@sixb/lake-local"]).toBeUndefined()

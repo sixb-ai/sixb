@@ -78,8 +78,17 @@ describe("sixb init", () => {
 
     expect(packageJson.name).toBe("starter")
     expect(packageJson.scripts.typecheck).toBe("sixb typegen && tsc --noEmit")
-    expect(packageJson.dependencies["@sixb/client"]).toBe("^0.1.9")
-    expect(packageJson.dependencies["@sixb/ducklake"]).toBe("^0.1.5")
+    // Each release bumps the template's Sixb versions, so they are compared, not pinned.
+    const template = JSON.parse(
+      await readFile(
+        resolve(import.meta.dir, "..", "..", "create-sixb", "template", "package.json"),
+        "utf-8"
+      )
+    ) as { dependencies: Record<string, string> }
+
+    expect(packageJson.dependencies["@sixb/client"]).toStartWith("^")
+    expect(packageJson.dependencies["@sixb/client"]).toBe(template.dependencies["@sixb/client"])
+    expect(packageJson.dependencies["@sixb/ducklake"]).toBe(template.dependencies["@sixb/ducklake"])
     expect(packageJson.dependencies["@sixb/lake-local"]).toBeUndefined()
     expect(packageJson.dependencies["@sixb/pg"]).toBeUndefined()
     expect(packageJson.dependencies["@sixb/blob-s3"]).toBeUndefined()
