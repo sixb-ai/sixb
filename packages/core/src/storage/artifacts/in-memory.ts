@@ -2,6 +2,7 @@ import { principalsEqual } from "../../auth"
 import { paginate } from "../pagination"
 import { artifactStorageErrors, cloneArtifactRecord, cloneArtifactVersionRecord } from "./record"
 import type {
+  ArtifactFrameGrantRecord,
   ArtifactRecord,
   ArtifactStorage,
   ArtifactVersionInput,
@@ -9,6 +10,8 @@ import type {
   CreateArtifactInput,
   DeleteArtifactInput,
   DeleteArtifactVersionsByOriginInput,
+  DeleteExpiredArtifactFrameGrantsInput,
+  FindArtifactFrameGrantInput,
   GetArtifactInput,
   GetArtifactVersionInput,
   ListArtifactsInput,
@@ -30,6 +33,7 @@ interface StoredArtifact {
 
 export class InMemoryArtifactStorage implements ArtifactStorage {
   private artifacts = new Map<string, StoredArtifact>()
+  private frameGrants = new Map<string, ArtifactFrameGrantRecord>()
 
   async create(input: CreateArtifactInput): Promise<PublishedArtifactVersion> {
     const key = artifactKey(input.projectId, input.id)
@@ -129,8 +133,37 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     return referencing
   }
 
+  async createFrameGrant(record: ArtifactFrameGrantRecord): Promise<void> {
+    if (!this.artifacts.has(artifactKey(record.projectId, record.artifactId))) {
+      throw artifactStorageErrors.notFound(record.artifactId)
+    }
+    this.frameGrants.set(artifactKey(record.projectId, record.tokenHash), { ...record })
+  }
+
+  async findFrameGrant(
+    input: FindArtifactFrameGrantInput
+  ): Promise<ArtifactFrameGrantRecord | null> {
+    const grant = this.frameGrants.get(artifactKey(input.projectId, input.tokenHash))
+    return grant ? { ...grant } : null
+  }
+
+  async deleteExpiredFrameGrants(input: DeleteExpiredArtifactFrameGrantsInput): Promise<number> {
+    let deleted = 0
+    for (const [key, grant] of this.frameGrants) {
+      if (deleted >= input.limit) break
+      if (grant.projectId !== input.projectId || grant.expiresAt >= input.expiredBefore) continue
+      this.frameGrants.delete(key)
+      deleted += 1
+    }
+    return deleted
+  }
+
   async delete(input: DeleteArtifactInput): Promise<boolean> {
-    return this.artifacts.delete(artifactKey(input.projectId, input.id))
+    const key = artifactKey(input.projectId, input.id)
+    for (const [grantKey, grant] of this.frameGrants) {
+      if (artifactKey(grant.projectId, grant.artifactId) === key) this.frameGrants.delete(grantKey)
+    }
+    return this.artifacts.delete(key)
   }
 
   async deleteVersionsByOrigin(input: DeleteArtifactVersionsByOriginInput): Promise<number> {

@@ -69,6 +69,7 @@
       ],
       "@sixb/core/internal/actions": ["./packages/core/src/actions/index.ts"],
       "@sixb/core/internal/agents/streams": ["./packages/core/src/agents/streams/internal.ts"],
+      "@sixb/core/internal/artifacts/frames": ["./packages/core/src/artifacts/frames/index.ts"],
       "@sixb/core/internal/artifacts/publish": ["./packages/core/src/artifacts/publish/index.ts"],
       "@sixb/core/internal/agents": ["./packages/core/src/agents/index.ts"],
       "@sixb/core/internal/agent-run-storage-provider": [

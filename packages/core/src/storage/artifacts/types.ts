@@ -129,6 +129,31 @@ export interface ListReferencingVersionsInput {
   readonly artifactId: string
 }
 
+/**
+ * A short-lived link to one version, which a sandboxed frame loads a deck's files through. Only
+ * the SHA-256 of the link's token is stored; the token is the credential.
+ */
+export interface ArtifactFrameGrantRecord {
+  readonly projectId: string
+  /** SHA-256 hex of the token. */
+  readonly tokenHash: string
+  readonly artifactId: string
+  readonly version: number
+  readonly createdAt: Date
+  readonly expiresAt: Date
+}
+
+export interface FindArtifactFrameGrantInput {
+  readonly projectId: string
+  readonly tokenHash: string
+}
+
+export interface DeleteExpiredArtifactFrameGrantsInput {
+  readonly projectId: string
+  readonly expiredBefore: Date
+  readonly limit: number
+}
+
 export interface DeleteArtifactVersionsByOriginInput {
   readonly projectId: string
   readonly runId: string
@@ -157,7 +182,13 @@ export interface ArtifactStorage {
    * a new version can tell which artifacts it breaks.
    */
   listReferencingVersions(input: ListReferencingVersionsInput): Promise<ArtifactVersionRecord[]>
-  /** Deletes the artifact and every version. Returns `false` when it does not exist. */
+  /** Stores a frame grant. Throws `artifact_not_found` when its artifact does not exist. */
+  createFrameGrant(record: ArtifactFrameGrantRecord): Promise<void>
+  /** Returns expired grants too; the caller decides whether one still serves. */
+  findFrameGrant(input: FindArtifactFrameGrantInput): Promise<ArtifactFrameGrantRecord | null>
+  /** Deletes up to `limit` grants that expired before `expiredBefore`, and returns the count. */
+  deleteExpiredFrameGrants(input: DeleteExpiredArtifactFrameGrantsInput): Promise<number>
+  /** Deletes the artifact, every version, and its frame grants. `false` when it does not exist. */
   delete(input: DeleteArtifactInput): Promise<boolean>
   /**
    * Deletes the versions a run published and returns how many. An artifact left without versions

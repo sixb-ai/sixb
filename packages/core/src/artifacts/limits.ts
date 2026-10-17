@@ -17,6 +17,9 @@ export const ARTIFACT_LIMITS = {
   maxChartSeries: 5,
   /** One slice per theme chart color, so no two slices share one. */
   maxPieSlices: 5,
+  /** A deck's `index.html` is parsed whole when it is published. */
+  maxDeckBytes: 2 * 1024 * 1024,
+  maxSlides: 100,
   /** `artifact:` addresses one version may use. */
   maxReferences: 200,
 } as const

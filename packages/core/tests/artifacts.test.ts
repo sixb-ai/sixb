@@ -225,7 +225,7 @@ describe("publishing any version", () => {
 
   test("refuses kinds whose format has not shipped", async () => {
     const { as, put } = setup()
-    for (const kind of ["slides", "page"] as const) {
+    for (const kind of ["page"] as const) {
       await expectRequestError(
         as("alice").artifacts.create({
           kind,

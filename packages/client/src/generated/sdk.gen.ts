@@ -40,6 +40,9 @@ import type {
   CreateAiLimitPolicyResponses,
   CreateArtifactData,
   CreateArtifactErrors,
+  CreateArtifactFrameData,
+  CreateArtifactFrameErrors,
+  CreateArtifactFrameResponses,
   CreateArtifactResponses,
   CreateAuthInvitationData,
   CreateAuthInvitationErrors,
@@ -2778,6 +2781,28 @@ export const publishArtifactVersion = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
+  })
+
+/**
+ * Open an artifact version in a frame
+ *
+ * A short-lived path that serves the version's files to a sandboxed frame, such as a deck. It expires within an hour.
+ */
+export const createArtifactFrame = <ThrowOnError extends boolean = false>(
+  options: Options<CreateArtifactFrameData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    CreateArtifactFrameResponses,
+    CreateArtifactFrameErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}/frame",
+    ...options,
   })
 
 /**

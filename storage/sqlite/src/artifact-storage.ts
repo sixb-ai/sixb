@@ -5,6 +5,7 @@ import {
   parseArtifactVersionRow,
 } from "@sixb/core/internal/storage"
 import type {
+  ArtifactFrameGrantRecord,
   ArtifactRecord,
   ArtifactStorage,
   ArtifactVersionInput,
@@ -12,6 +13,8 @@ import type {
   CreateArtifactInput,
   DeleteArtifactInput,
   DeleteArtifactVersionsByOriginInput,
+  DeleteExpiredArtifactFrameGrantsInput,
+  FindArtifactFrameGrantInput,
   GetArtifactInput,
   GetArtifactVersionInput,
   ListArtifactsInput,
@@ -195,8 +198,56 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     return rows.map(parseArtifactVersionRow)
   }
 
+  async createFrameGrant(record: ArtifactFrameGrantRecord): Promise<void> {
+    runImmediateTransaction(this.db, () => {
+      const exists = this.db
+        .query("SELECT 1 FROM artifacts WHERE project_id = ? AND id = ?")
+        .get(record.projectId, record.artifactId)
+      if (!exists) throw artifactStorageErrors.notFound(record.artifactId)
+      this.db
+        .query(
+          `INSERT INTO artifact_frame_grants
+             (project_id, token_hash, artifact_id, version, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          record.projectId,
+          record.tokenHash,
+          record.artifactId,
+          record.version,
+          record.createdAt.toISOString(),
+          record.expiresAt.toISOString()
+        )
+    })
+  }
+
+  async findFrameGrant(
+    input: FindArtifactFrameGrantInput
+  ): Promise<ArtifactFrameGrantRecord | null> {
+    const row = this.db
+      .query(
+        `SELECT project_id AS projectId, token_hash AS tokenHash, artifact_id AS artifactId,
+                version, created_at AS createdAt, expires_at AS expiresAt
+         FROM artifact_frame_grants WHERE project_id = ? AND token_hash = ?`
+      )
+      .get(input.projectId, input.tokenHash) as Record<string, unknown> | null
+    return row ? frameGrantFromRow(row) : null
+  }
+
+  async deleteExpiredFrameGrants(input: DeleteExpiredArtifactFrameGrantsInput): Promise<number> {
+    return this.db
+      .query(
+        `DELETE FROM artifact_frame_grants WHERE rowid IN (
+           SELECT rowid FROM artifact_frame_grants
+           WHERE project_id = ? AND expires_at < ?
+           ORDER BY expires_at LIMIT ?
+         )`
+      )
+      .run(input.projectId, input.expiredBefore.toISOString(), input.limit).changes
+  }
+
   async delete(input: DeleteArtifactInput): Promise<boolean> {
-    // Versions go with the artifact through the foreign key's ON DELETE CASCADE.
+    // Versions and frame grants go with the artifact through ON DELETE CASCADE.
     return (
       this.db
         .query("DELETE FROM artifacts WHERE project_id = ? AND id = ?")
@@ -306,5 +357,16 @@ export class SqliteArtifactStorage implements ArtifactStorage {
          WHERE project_id = ? AND artifact_id = ? AND version = ?`
       )
       .get(projectId, artifactId, version) as Record<string, unknown> | null
+  }
+}
+
+function frameGrantFromRow(row: Record<string, unknown>): ArtifactFrameGrantRecord {
+  return {
+    projectId: String(row.projectId),
+    tokenHash: String(row.tokenHash),
+    artifactId: String(row.artifactId),
+    version: Number(row.version),
+    createdAt: new Date(String(row.createdAt)),
+    expiresAt: new Date(String(row.expiresAt)),
   }
 }

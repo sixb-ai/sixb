@@ -1,11 +1,13 @@
 import type { SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
+import type { FrameOrigins } from "./artifacts/frame"
 import type { SharedAccessBoundary } from "./auth/shared-access"
 import { registerActionRunRoutes } from "./routes/action-runs"
 import { registerActionRoutes } from "./routes/actions"
 import { registerAgentApiGatewayRoutes } from "./routes/agent-api-gateway"
 import { registerAgentRoutes } from "./routes/agents"
 import { registerAiAccountingRoutes } from "./routes/ai-accounting"
+import { registerArtifactFrameRoutes } from "./routes/artifact-frames"
 import { registerArtifactRoutes } from "./routes/artifacts"
 import {
   type ConnectorConnectionRouteOptions,
@@ -37,6 +39,8 @@ import { registerWorkflowRoutes } from "./routes/workflows"
 export interface HttpRouteOptions {
   readonly connectorConnections: ConnectorConnectionRouteOptions
   readonly sharedAccess: SharedAccessBoundary
+  /** Where frames are served from and which app origins may show them. */
+  readonly frameOrigins: FrameOrigins
 }
 
 export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: HttpRouteOptions) {
@@ -62,6 +66,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerActionRunRoutes(app, host)
   registerAgentRoutes(app, host)
   registerArtifactRoutes(app, host)
+  registerArtifactFrameRoutes(app, host, options.frameOrigins)
   registerModelRoutes(app, host)
   registerLinkRoutes(app, host)
   registerTelemetryRoutes(app, host)

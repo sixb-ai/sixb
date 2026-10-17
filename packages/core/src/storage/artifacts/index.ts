@@ -3,6 +3,7 @@ export { ArtifactStorageError } from "./errors"
 export { InMemoryArtifactStorage } from "./in-memory"
 export type {
   ArtifactFile,
+  ArtifactFrameGrantRecord,
   ArtifactKind,
   ArtifactOrigin,
   ArtifactOutline,
@@ -14,6 +15,8 @@ export type {
   CreateArtifactInput,
   DeleteArtifactInput,
   DeleteArtifactVersionsByOriginInput,
+  DeleteExpiredArtifactFrameGrantsInput,
+  FindArtifactFrameGrantInput,
   GetArtifactInput,
   GetArtifactVersionInput,
   ListArtifactsInput,

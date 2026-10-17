@@ -360,6 +360,7 @@ describe("Postgres storage migrations", () => {
             "062-drop-auth-audience",
             "063-artifacts",
             "064-drop-output-diagnostics",
+            "065-artifact-frame-grants",
           ],
         },
       ])
@@ -811,6 +812,13 @@ describe("Postgres storage migrations", () => {
           id: "064-drop-output-diagnostics",
           status: "applied",
           version: 64,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "065-artifact-frame-grants",
+          status: "applied",
+          version: 65,
         },
       ])
     })
@@ -3317,6 +3325,13 @@ describe("Postgres storage migrations", () => {
           id: "064-drop-output-diagnostics",
           status: "applied",
           version: 64,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "065-artifact-frame-grants",
+          status: "applied",
+          version: 65,
         },
       ])
     } finally {

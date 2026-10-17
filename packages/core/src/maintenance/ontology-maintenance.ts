@@ -231,6 +231,21 @@ export class OntologyMaintenance {
       )
     }
 
+    // A frame grant lasts an hour; nothing reads one after it expires.
+    const artifacts = this.storage.artifacts
+    if (artifacts) {
+      await captureFailure(
+        () =>
+          artifacts.deleteExpiredFrameGrants({
+            projectId: this.projectId,
+            expiredBefore: started,
+            limit: this.cleanupLimit,
+          }),
+        failures,
+        0
+      )
+    }
+
     return {
       publishedOutboxRowsDeleted,
       terminalSourceRowsDeleted:

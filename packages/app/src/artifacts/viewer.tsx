@@ -36,6 +36,7 @@ import { DocumentRenderer } from "./renderers/document"
 import { FileRenderer } from "./renderers/file"
 import { ViewerLoading, ViewerNotice } from "./renderers/notice"
 import { SheetRenderer } from "./renderers/sheet/sheet"
+import { SlidesRenderer } from "./renderers/slides/slides"
 import { type ArtifactTarget, artifactLink, type ViewerTarget } from "./target"
 
 export interface ViewerChrome {
@@ -176,6 +177,7 @@ function ArtifactBody({
     return <DocumentRenderer version={version} latestVersion={latestVersion} part={part} />
   }
   if (kind === "sheet") return <SheetRenderer version={version} part={part} />
+  if (kind === "slides") return <SlidesRenderer version={version} part={part} />
   if (kind === "file") {
     const source = versionFileSource(version, version.entry)
     return source ? (
@@ -207,8 +209,12 @@ function ArtifactHeader({
   const messages = useArtifactMessages()
   const locale = useLocale()
   const { artifact } = detail
-  // A sheet downloads each sheet as CSV from its tabs; its entry is only the workbook.
-  const download = artifact.kind === "sheet" ? null : versionFileSource(version, version.entry)
+  // A sheet downloads each sheet as CSV from its tabs, and a deck's entry is only its slides'
+  // markup: neither is a file the reader wants on its own.
+  const download =
+    artifact.kind === "sheet" || artifact.kind === "slides"
+      ? null
+      : versionFileSource(version, version.entry)
   const date = (iso: string) =>
     new Date(iso).toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric" })
 

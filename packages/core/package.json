@@ -125,6 +125,12 @@
       "import": "./dist/agents/streams/internal.js",
       "default": "./dist/agents/streams/internal.js"
     },
+    "./internal/artifacts/frames": {
+      "types": "./dist/artifacts/frames/index.d.ts",
+      "bun": "./src/artifacts/frames/index.ts",
+      "import": "./dist/artifacts/frames/index.js",
+      "default": "./dist/artifacts/frames/index.js"
+    },
     "./internal/artifacts/publish": {
       "types": "./dist/artifacts/publish/index.d.ts",
       "bun": "./src/artifacts/publish/index.ts",

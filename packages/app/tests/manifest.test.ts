@@ -264,6 +264,17 @@ describe("custom app metadata and manifest generation", () => {
     expect(builtHtml).toContain('href="/app.webmanifest"')
     expect(builtHtml).toContain('href="/favicon.svg"')
     expect(builtHtml).toContain('class="sixb-loading-shell"')
+    // The shell paints in the theme chosen in the app, not the system's: dark chosen on a light
+    // system must not flash white. Reproduce by dropping the theme script from withLoadingShell.
+    const bootstrap = builtHtml.match(/<script[^>]*data-sixb-theme[^>]*>([^<]*)<\/script>/)?.[1]
+    expect(bootstrap).toBeDefined()
+    const classes = new Set<string>()
+    new Function("localStorage", "matchMedia", "document", bootstrap ?? "")(
+      { getItem: (key: string) => (key === "sixb-theme" ? "dark" : null) },
+      () => ({ matches: false }),
+      { documentElement: { classList: { add: (name: string) => classes.add(name) } } }
+    )
+    expect([...classes]).toEqual(["dark"])
     expect(builtHtml).not.toContain("main.tsx")
     const scriptFile = builtHtml.match(/src="\/(app-[a-z0-9]+\.js)"/)?.[1]
     expect(scriptFile).toBeDefined()

@@ -475,6 +475,13 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: false,
   },
   {
+    operationId: "createArtifactFrame",
+    method: "POST",
+    path: "/api/artifacts/:artifactId/versions/:version/frame",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
     operationId: "getArtifactFileContent",
     method: "GET",
     path: "/api/artifacts/:artifactId/versions/:version/content",

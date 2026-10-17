@@ -10,6 +10,7 @@ owner reads it.
 | ---------- | ---------------------------------------------------------------------- |
 | `document` | A Markdown report in `document.md`, with its images beside it          |
 | `sheet`    | Tables of data, one CSV per sheet, with typed columns and their charts |
+| `slides`   | A deck: `index.html` with one `<section class="slide">` per slide      |
 | `file`     | One file, shown as its type allows or offered for download             |
 
 ## Publish an artifact
@@ -116,6 +117,38 @@ workbook 20 sheets and 10 charts.
 
 Readers sort columns, select a range to see its sum, average, and count, copy cells, and download
 each sheet as CSV. A CSV or TSV `file` artifact opens in the same grid.
+
+## Write slides
+
+A deck is `index.html` with one `<section class="slide">` per 1280×720 slide, and the CSS and
+images it loads beside it by relative path. Sixb adds a kit and a small runtime to the page: they
+scale the slides to fit, number them, apply your app's theme and dark mode, and give the reader
+previous and next, an overview of every slide, and present, where the slide fills the page.
+
+```html
+<section class="slide title">
+  <p class="eyebrow">Q3 2026</p>
+  <h1>Restorations within SLA reached 94%</h1>
+  <p>Up from 88% in Q2</p>
+</section>
+<section class="slide stat">
+  <h2>Revenue grew 9.6%</h2>
+  <div class="value">$2.14M</div>
+  <div class="label">Service revenue, Q3</div>
+  <p class="source">Field service records</p>
+</section>
+```
+
+- A slide picks a layout by class: `title`, `section`, `stat`, `split`, `chart`, `table`, `quote`,
+  or `image`. `.eyebrow` sits above a heading and `.source` at a slide's foot.
+- The kit reads your theme's tokens as CSS variables (`--foreground`, `--primary`, `--chart-1` to
+  `--chart-5`, `--font-sans`, …). A deck's own CSS overrides the kit and the theme.
+- Slides open in a sandboxed frame from a short-lived link. A deck runs its own scripts, but it
+  can't read the app's cookies or call the API as the reader, and it loads only its own files and a
+  few public CDNs (jsDelivr, cdnjs, unpkg, and Google Fonts).
+- A link to another artifact (`<a href="artifact:…">`) opens it where the reader is. A deck can't
+  show another artifact in place yet.
+- `?part=4` opens a deck at slide 4, and `![…](artifact:…#4)` shows that slide in a document.
 
 ## Reference another artifact
 
