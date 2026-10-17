@@ -11736,6 +11736,780 @@ export type GetAgentRunResponses = {
 
 export type GetAgentRunResponse = GetAgentRunResponses[keyof GetAgentRunResponses]
 
+export type ListArtifactsData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Only artifacts with a version the Agent published in this thread
+     */
+    thread?: string
+    limit?: string
+    offset?: string
+  }
+  url: "/api/artifacts"
+}
+
+export type ListArtifactsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+}
+
+export type ListArtifactsError = ListArtifactsErrors[keyof ListArtifactsErrors]
+
+export type ListArtifactsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    artifacts: Array<{
+      id: string
+      projectId: string
+      kind: "document" | "sheet" | "slides" | "page" | "file"
+      title: string
+      owner: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      latestVersion: number
+      createdAt: string
+      updatedAt: string
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListArtifactsResponse = ListArtifactsResponses[keyof ListArtifactsResponses]
+
+export type CreateArtifactData = {
+  body: {
+    kind: "document" | "sheet" | "slides" | "page" | "file"
+    title: string
+    /**
+     * Files stored with POST /api/files, at their paths in the artifact
+     */
+    files: Array<{
+      /**
+       * The file's path inside the artifact, such as figures/revenue.svg
+       */
+      path: string
+      file: {
+        blobId: string
+        digest: string
+        sizeBytes: number
+        fileName?: string
+        mediaType?: string
+        logicalPath?: string
+      }
+    }>
+  }
+  path?: never
+  query?: never
+  url: "/api/artifacts"
+}
+
+export type CreateArtifactErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+}
+
+export type CreateArtifactError = CreateArtifactErrors[keyof CreateArtifactErrors]
+
+export type CreateArtifactResponses = {
+  /**
+   * Response for status 201
+   */
+  201: {
+    artifact: {
+      id: string
+      projectId: string
+      kind: "document" | "sheet" | "slides" | "page" | "file"
+      title: string
+      owner: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      latestVersion: number
+      createdAt: string
+      updatedAt: string
+    }
+    version: {
+      artifactId: string
+      version: number
+      title: string
+      entry: string
+      files: Array<{
+        /**
+         * The file's path inside the artifact, such as figures/revenue.svg
+         */
+        path: string
+        file: {
+          blobId: string
+          digest: string
+          sizeBytes: number
+          fileName?: string
+          mediaType?: string
+          logicalPath?: string
+        }
+      }>
+      outline:
+        | {
+            kind: "document"
+            headings: Array<{
+              depth: number
+              text: string
+              slug: string
+            }>
+          }
+        | {
+            kind: "sheet"
+            sheets: Array<{
+              name: string
+              rows: number
+              columns: Array<string>
+            }>
+            charts: Array<string>
+          }
+        | {
+            kind: "slides"
+            slides: Array<{
+              title?: string
+            }>
+          }
+        | {
+            kind: "page"
+          }
+        | {
+            kind: "file"
+            mediaType: string
+          }
+      references: Array<{
+        address: string
+        as: "embed" | "link"
+        at: string
+        resolvedVersion: number
+      }>
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      origin?: {
+        threadId: string
+        runId: string
+      }
+      createdAt: string
+    }
+    warnings: Array<{
+      code: string
+      message: string
+      part?: string
+      rect?: {
+        x: number
+        y: number
+        width: number
+        height: number
+      }
+      preview?: string
+    }>
+  }
+}
+
+export type CreateArtifactResponse = CreateArtifactResponses[keyof CreateArtifactResponses]
+
+export type DeleteArtifactData = {
+  body?: never
+  path: {
+    artifactId: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}"
+}
+
+export type DeleteArtifactErrors = {
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+}
+
+export type DeleteArtifactError = DeleteArtifactErrors[keyof DeleteArtifactErrors]
+
+export type DeleteArtifactResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    deleted: true
+  }
+}
+
+export type DeleteArtifactResponse = DeleteArtifactResponses[keyof DeleteArtifactResponses]
+
+export type GetArtifactData = {
+  body?: never
+  path: {
+    artifactId: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}"
+}
+
+export type GetArtifactErrors = {
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+}
+
+export type GetArtifactError = GetArtifactErrors[keyof GetArtifactErrors]
+
+export type GetArtifactResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    artifact: {
+      id: string
+      projectId: string
+      kind: "document" | "sheet" | "slides" | "page" | "file"
+      title: string
+      owner: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      latestVersion: number
+      createdAt: string
+      updatedAt: string
+    }
+    /**
+     * Newest first
+     */
+    versions: Array<{
+      version: number
+      title: string
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      origin?: {
+        threadId: string
+        runId: string
+      }
+      createdAt: string
+    }>
+  }
+}
+
+export type GetArtifactResponse = GetArtifactResponses[keyof GetArtifactResponses]
+
+export type PublishArtifactVersionData = {
+  body: {
+    kind: "document" | "sheet" | "slides" | "page" | "file"
+    title: string
+    /**
+     * Files stored with POST /api/files, at their paths in the artifact
+     */
+    files: Array<{
+      /**
+       * The file's path inside the artifact, such as figures/revenue.svg
+       */
+      path: string
+      file: {
+        blobId: string
+        digest: string
+        sizeBytes: number
+        fileName?: string
+        mediaType?: string
+        logicalPath?: string
+      }
+    }>
+  }
+  path: {
+    artifactId: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/versions"
+}
+
+export type PublishArtifactVersionErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+}
+
+export type PublishArtifactVersionError =
+  PublishArtifactVersionErrors[keyof PublishArtifactVersionErrors]
+
+export type PublishArtifactVersionResponses = {
+  /**
+   * Response for status 201
+   */
+  201: {
+    artifact: {
+      id: string
+      projectId: string
+      kind: "document" | "sheet" | "slides" | "page" | "file"
+      title: string
+      owner: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      latestVersion: number
+      createdAt: string
+      updatedAt: string
+    }
+    version: {
+      artifactId: string
+      version: number
+      title: string
+      entry: string
+      files: Array<{
+        /**
+         * The file's path inside the artifact, such as figures/revenue.svg
+         */
+        path: string
+        file: {
+          blobId: string
+          digest: string
+          sizeBytes: number
+          fileName?: string
+          mediaType?: string
+          logicalPath?: string
+        }
+      }>
+      outline:
+        | {
+            kind: "document"
+            headings: Array<{
+              depth: number
+              text: string
+              slug: string
+            }>
+          }
+        | {
+            kind: "sheet"
+            sheets: Array<{
+              name: string
+              rows: number
+              columns: Array<string>
+            }>
+            charts: Array<string>
+          }
+        | {
+            kind: "slides"
+            slides: Array<{
+              title?: string
+            }>
+          }
+        | {
+            kind: "page"
+          }
+        | {
+            kind: "file"
+            mediaType: string
+          }
+      references: Array<{
+        address: string
+        as: "embed" | "link"
+        at: string
+        resolvedVersion: number
+      }>
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      origin?: {
+        threadId: string
+        runId: string
+      }
+      createdAt: string
+    }
+    warnings: Array<{
+      code: string
+      message: string
+      part?: string
+      rect?: {
+        x: number
+        y: number
+        width: number
+        height: number
+      }
+      preview?: string
+    }>
+  }
+}
+
+export type PublishArtifactVersionResponse =
+  PublishArtifactVersionResponses[keyof PublishArtifactVersionResponses]
+
+export type GetArtifactVersionData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * A version number, or "latest"
+     */
+    version: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/versions/{version}"
+}
+
+export type GetArtifactVersionErrors = {
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+}
+
+export type GetArtifactVersionError = GetArtifactVersionErrors[keyof GetArtifactVersionErrors]
+
+export type GetArtifactVersionResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    artifactId: string
+    version: number
+    title: string
+    entry: string
+    files: Array<{
+      /**
+       * The file's path inside the artifact, such as figures/revenue.svg
+       */
+      path: string
+      file: {
+        blobId: string
+        digest: string
+        sizeBytes: number
+        fileName?: string
+        mediaType?: string
+        logicalPath?: string
+      }
+    }>
+    outline:
+      | {
+          kind: "document"
+          headings: Array<{
+            depth: number
+            text: string
+            slug: string
+          }>
+        }
+      | {
+          kind: "sheet"
+          sheets: Array<{
+            name: string
+            rows: number
+            columns: Array<string>
+          }>
+          charts: Array<string>
+        }
+      | {
+          kind: "slides"
+          slides: Array<{
+            title?: string
+          }>
+        }
+      | {
+          kind: "page"
+        }
+      | {
+          kind: "file"
+          mediaType: string
+        }
+    references: Array<{
+      address: string
+      as: "embed" | "link"
+      at: string
+      resolvedVersion: number
+    }>
+    author: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    origin?: {
+      threadId: string
+      runId: string
+    }
+    createdAt: string
+  }
+}
+
+export type GetArtifactVersionResponse =
+  GetArtifactVersionResponses[keyof GetArtifactVersionResponses]
+
+export type GetArtifactFileContentData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * A version number, or "latest"
+     */
+    version: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
+  }
+  url: "/api/artifacts/{artifactId}/versions/{version}/content"
+}
+
+export type GetArtifactFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
+}
+
+export type GetArtifactFileContentError =
+  GetArtifactFileContentErrors[keyof GetArtifactFileContentErrors]
+
+export type GetArtifactFileContentResponses = {
+  /**
+   * File content
+   */
+  200: Blob | File
+  /**
+   * Partial file content
+   */
+  206: Blob | File
+}
+
+export type GetArtifactFileContentResponse =
+  GetArtifactFileContentResponses[keyof GetArtifactFileContentResponses]
+
+export type HeadArtifactFileContentData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * A version number, or "latest"
+     */
+    version: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
+  }
+  url: "/api/artifacts/{artifactId}/versions/{version}/content"
+}
+
+export type HeadArtifactFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
+}
+
+export type HeadArtifactFileContentError =
+  HeadArtifactFileContentErrors[keyof HeadArtifactFileContentErrors]
+
+export type HeadArtifactFileContentResponses = {
+  /**
+   * File content headers
+   */
+  200: unknown
+  /**
+   * Partial file content headers
+   */
+  206: unknown
+}
+
 export type ListModelsData = {
   body?: never
   path?: never

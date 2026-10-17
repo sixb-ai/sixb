@@ -119,6 +119,12 @@
       "import": "./dist/agents/streams/internal.js",
       "default": "./dist/agents/streams/internal.js"
     },
+    "./internal/artifacts": {
+      "types": "./dist/artifacts/index.d.ts",
+      "bun": "./src/artifacts/index.ts",
+      "import": "./dist/artifacts/index.js",
+      "default": "./dist/artifacts/index.js"
+    },
     "./internal/agents": {
       "types": "./dist/agents/index.d.ts",
       "bun": "./src/agents/index.ts",

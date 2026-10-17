@@ -1,6 +1,7 @@
 import { type ActionsRuntime, createActionsRuntime } from "../actions/execution"
 import { type AgentRuntime, createAgentRuntime } from "../agents/execution"
 import { type AiUsageRuntime, createAiUsageRuntime } from "../ai-usage"
+import { type ArtifactsRuntime, createArtifactsRuntime } from "../artifacts/execution"
 import { type BlobsRuntime, createBlobsRuntime } from "../blob-storage/execution"
 import type { BlobStorage } from "../blob-storage/types"
 import { registerConnectorConnectionsRuntime } from "../connectors/connections/capability"
@@ -44,6 +45,7 @@ export interface Sixb<TParams extends Record<string, unknown> = Record<string, u
   readonly projections: ProjectionsRuntime
   readonly rules: RulesRuntime
   readonly agent: AgentRuntime<TParams>
+  readonly artifacts: ArtifactsRuntime
   readonly models: ModelsRuntime
   readonly aiUsage: AiUsageRuntime
   readonly events: EventsRuntime
@@ -133,6 +135,7 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
       dependencies.definitions.models,
       dependencies.sandbox
     ),
+    artifacts: createArtifactsRuntime(runtime, dependencies.blobStorage),
     models: createModelsRuntime(
       runtime,
       execution,

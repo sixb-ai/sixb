@@ -1,0 +1,157 @@
+import { ARTIFACT_KINDS } from "@sixb/core/internal/artifacts"
+import { z } from "zod"
+import { ErrorResponseSchema, PrincipalSchema } from "./common"
+import { FileContentQuerySchema, FileRefSchema } from "./files"
+
+export const ArtifactKindSchema = z.enum(ARTIFACT_KINDS)
+
+export const ArtifactFileSchema = z.object({
+  path: z
+    .string()
+    .min(1)
+    .describe("The file's path inside the artifact, such as figures/revenue.svg"),
+  file: FileRefSchema,
+})
+
+const DocumentOutlineSchema = z.object({
+  kind: z.literal("document"),
+  headings: z.array(z.object({ depth: z.number().int(), text: z.string(), slug: z.string() })),
+})
+
+const SheetOutlineSchema = z.object({
+  kind: z.literal("sheet"),
+  sheets: z.array(
+    z.object({ name: z.string(), rows: z.number().int(), columns: z.array(z.string()) })
+  ),
+  charts: z.array(z.string()),
+})
+
+const SlidesOutlineSchema = z.object({
+  kind: z.literal("slides"),
+  slides: z.array(z.object({ title: z.string().optional() })),
+})
+
+const PageOutlineSchema = z.object({ kind: z.literal("page") })
+
+const FileOutlineSchema = z.object({ kind: z.literal("file"), mediaType: z.string() })
+
+export const ArtifactOutlineSchema = z.discriminatedUnion("kind", [
+  DocumentOutlineSchema,
+  SheetOutlineSchema,
+  SlidesOutlineSchema,
+  PageOutlineSchema,
+  FileOutlineSchema,
+])
+
+export const ArtifactReferenceSchema = z.object({
+  address: z.string(),
+  as: z.enum(["embed", "link"]),
+  at: z.string(),
+  resolvedVersion: z.number().int().positive(),
+})
+
+export const ArtifactWarningSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  part: z.string().optional(),
+  rect: z
+    .object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+    .optional(),
+  preview: z.string().optional(),
+})
+
+export const ArtifactSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  kind: ArtifactKindSchema,
+  title: z.string(),
+  owner: PrincipalSchema,
+  latestVersion: z.number().int().positive(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+})
+
+export const ArtifactOriginSchema = z.object({ threadId: z.string(), runId: z.string() })
+
+export const ArtifactVersionSchema = z.object({
+  artifactId: z.string(),
+  version: z.number().int().positive(),
+  title: z.string(),
+  entry: z.string(),
+  files: z.array(ArtifactFileSchema),
+  outline: ArtifactOutlineSchema,
+  references: z.array(ArtifactReferenceSchema),
+  author: PrincipalSchema,
+  origin: ArtifactOriginSchema.optional(),
+  createdAt: z.string(),
+})
+
+export const ArtifactVersionSummarySchema = ArtifactVersionSchema.pick({
+  version: true,
+  title: true,
+  author: true,
+  origin: true,
+  createdAt: true,
+})
+
+export const ArtifactParamsSchema = z.object({ artifactId: z.string().min(1) })
+
+export const ArtifactVersionParamsSchema = ArtifactParamsSchema.extend({
+  version: z
+    .string()
+    .regex(/^(?:latest|[1-9]\d*)$/)
+    .describe('A version number, or "latest"'),
+})
+
+export const ArtifactListQuerySchema = z
+  .object({
+    thread: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Only artifacts with a version the Agent published in this thread"),
+    limit: z.string().optional(),
+    offset: z.string().optional(),
+  })
+  .strict()
+
+export const ArtifactListResponseSchema = z.object({
+  artifacts: z.array(ArtifactSchema),
+  hasMore: z.boolean(),
+  total: z.number().int(),
+})
+
+export const ArtifactResponseSchema = z.object({
+  artifact: ArtifactSchema,
+  versions: z.array(ArtifactVersionSummarySchema).describe("Newest first"),
+})
+
+export const PublishArtifactBodySchema = z
+  .object({
+    kind: ArtifactKindSchema,
+    title: z.string(),
+    files: z
+      .array(ArtifactFileSchema)
+      .min(1)
+      .describe("Files stored with POST /api/files, at their paths in the artifact"),
+  })
+  .strict()
+
+export const PublishedArtifactResponseSchema = z.object({
+  artifact: ArtifactSchema,
+  version: ArtifactVersionSchema,
+  warnings: z.array(ArtifactWarningSchema),
+})
+
+export const DeleteArtifactResponseSchema = z.object({ deleted: z.literal(true) })
+
+export const ArtifactFileContentQuerySchema = FileContentQuerySchema
+
+export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
+  code: z
+    .string()
+    .optional()
+    .describe(
+      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+    ),
+})

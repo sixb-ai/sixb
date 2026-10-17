@@ -48,3 +48,24 @@ export interface FileOutline {
   readonly kind: "file"
   readonly mediaType: string
 }
+
+/**
+ * Turns a document's heading texts, in order, into their section slugs: lowercase, punctuation
+ * dropped, spaces as hyphens, and `-1`, `-2` after a repeat. Publishing and the renderer both name
+ * sections with it, so an address to a section finds the heading the reader sees.
+ */
+export function createHeadingSlugger(): (text: string) => string {
+  const used = new Set<string>()
+  return (text) => {
+    const base =
+      text
+        .trim()
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s_-]/gu, "")
+        .replace(/\s+/g, "-") || "section"
+    let slug = base
+    for (let repeat = 1; used.has(slug); repeat += 1) slug = `${base}-${repeat}`
+    used.add(slug)
+    return slug
+  }
+}
