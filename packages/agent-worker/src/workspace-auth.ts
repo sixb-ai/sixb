@@ -64,6 +64,11 @@ export class WorkspaceAuthSession {
     this.inject = sandbox.setRequestCredentials.bind(sandbox)
   }
 
+  /** Whether every grant issued so far has been revoked. */
+  get revoked(): boolean {
+    return this.grants.size === 0
+  }
+
   /** The first grant: its request origins join the session network. */
   async prepare(): Promise<WorkspaceGrant> {
     this.input.signal.throwIfAborted()

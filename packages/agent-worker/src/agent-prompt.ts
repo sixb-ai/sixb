@@ -84,6 +84,11 @@ export interface AgentRuntimeFacts {
 /** Only non-secret facts about the environment actually prepared for this run. */
 export interface AgentWorkspacePromptContext {
   readonly workingDirectory: string
+  /**
+   * How long files outlive the run: a persistent workspace (a thread's) is kept for its next
+   * runs, an ephemeral one is discarded when the run ends.
+   */
+  readonly retention: "persistent" | "ephemeral"
   readonly source?: {
     readonly type: "git"
     readonly url: string
@@ -352,13 +357,16 @@ function promptSection(tag: string, body: string | undefined): string {
 function renderWorkspaceContext(workspace: AgentWorkspacePromptContext): string {
   return [
     `Working directory: ${quoteWorkspaceValue(workspace.workingDirectory)}`,
-    "Files persist between runs in this conversation, subject to workspace retention.",
-    ...(workspace.source ? renderWorkspaceSource(workspace.source) : []),
+    workspace.retention === "persistent"
+      ? "Files persist between runs in this conversation, subject to workspace retention."
+      : "This workspace is discarded when the task ends.",
+    ...(workspace.source ? renderWorkspaceSource(workspace.source, workspace.retention) : []),
   ].join("\n")
 }
 
 function renderWorkspaceSource(
-  source: NonNullable<AgentWorkspacePromptContext["source"]>
+  source: NonNullable<AgentWorkspacePromptContext["source"]>,
+  retention: AgentWorkspacePromptContext["retention"]
 ): string[] {
   switch (source.type) {
     case "git":
@@ -366,13 +374,25 @@ function renderWorkspaceSource(
         `Source (git): ${quoteWorkspaceValue(source.url)}`,
         ...(source.authenticatedAccess
           ? [
-              "Git authentication is managed automatically for this repository; use Git normally without retrieving credentials.",
+              "Repository access is authenticated outside the sandbox: use Git and the provider's tools normally, do not configure credentials, and leave credential environment variables as they are; they may hold placeholders.",
               `Authenticated access: ${source.authenticatedAccess === "write" ? "read and write" : "read"}.`,
             ]
           : []),
-        "Do not commit or push unless the user requests it.",
+        renderWorkspaceChangeRule(retention, source.authenticatedAccess),
       ]
   }
+}
+
+/** A thread's checkout follows the user; a run's is discarded, so only a push keeps its work. */
+function renderWorkspaceChangeRule(
+  retention: AgentWorkspacePromptContext["retention"],
+  access: NonNullable<AgentWorkspacePromptContext["source"]>["authenticatedAccess"]
+): string {
+  if (retention === "persistent") return "Do not commit or push unless the user requests it."
+
+  return access === "write"
+    ? "Commit and push only when the task requires it."
+    : "Do not push: this task cannot publish changes to this repository."
 }
 
 // Quote dynamic values as data and prevent them from introducing prompt section tags.

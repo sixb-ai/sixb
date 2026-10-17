@@ -13,7 +13,7 @@ import type { AcquiredRunSandbox, RunSandbox } from "./run-sandbox"
 import { bounded, sandboxError } from "./sandbox-operation"
 import type { AgentExecutionContext } from "./types"
 import { WorkspaceAccess } from "./workspace-access"
-import { prepareWorkspaceRunFiles } from "./workspace-files"
+import { prepareWorkspaceRunFiles, WorkspaceRunFilesConflictError } from "./workspace-files"
 
 interface PersistentRunSandboxInput {
   readonly context: AgentExecutionContext
@@ -207,7 +207,7 @@ class PersistentSandboxSession {
     const acquired: AcquiredRunSandbox = {
       sandbox: this.guard(session),
       env: this.access.sessionOptions.env ?? {},
-      promptContext: this.access.promptContext(session),
+      promptContext: this.access.promptContext(session, "persistent"),
       resetAt: this.resetAt,
     }
     // No release: the thread keeps its sandbox. beforeFinalize saves or quarantines it; a lost
@@ -337,6 +337,8 @@ class PersistentSandboxSession {
 
 function acquisitionError(error: unknown): Error {
   if (error instanceof AgentExecutionLostError) return error
+  // The repository itself must change: say how instead of asking for recovery.
+  if (error instanceof WorkspaceRunFilesConflictError) return error
   return sandboxError(
     error instanceof SandboxStateUnavailableError
       ? "saved files are unavailable. Recreate explicitly to start fresh."

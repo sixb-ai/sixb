@@ -84,14 +84,21 @@ export async function runWorkflowAgentNode(
   })
 
   const sandboxReadiness = monitorSandboxReadiness(input.context.sandboxReady)
-  const abortSignal = AbortSignal.any([input.signal, sandboxReadiness.signal])
-  // A provisioning failure is the concrete cause of the abort it triggers in any phase. Once the
-  // node itself is aborted (cancellation, deadline or shutdown), provisioning fails because of
-  // it, and the abort's reason is the one to report.
+  const { environmentFailureSignal } = input.context
+  const abortSignal = AbortSignal.any([
+    input.signal,
+    sandboxReadiness.signal,
+    ...(environmentFailureSignal ? [environmentFailureSignal] : []),
+  ])
+  // A provisioning or environment failure (for example lost source credentials) is the concrete
+  // cause of the abort it triggers in any phase. Once the node itself is aborted (cancellation,
+  // deadline or shutdown), provisioning fails because of it, and the abort's reason is the one
+  // to report.
   const throwIfEnvironmentFailed = () => {
     if (input.signal.aborted) return
 
     sandboxReadiness.throwIfFailed()
+    environmentFailureSignal?.throwIfAborted()
   }
   const completedSteps: ModelStep[] = []
   const traceDetails = {

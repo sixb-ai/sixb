@@ -4,7 +4,9 @@ import type {
   OntologyDocsCatalog,
   Principal,
   SandboxDefinition,
+  SandboxFactory,
 } from "@sixb/core"
+import { staticSandboxRecipe } from "@sixb/core/internal/agents"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type RenderedOntologyDocs, renderOntologyDocs } from "@sixb/core/internal/ontology"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
@@ -34,7 +36,7 @@ import {
 import type { AgentContextBudget } from "./context-budget"
 import { prepareAgentConversationContext } from "./context-compaction"
 import { ephemeralRunSandbox } from "./ephemeral-run-sandbox"
-import { isLostExecution } from "./errors"
+import { assertExecutionOwned, isLostExecution } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type AgentErrorDetails, modelToolsFromAgentDefinitions } from "./model-adapters"
 import { persistentRunSandbox } from "./persistent-run-sandbox"
@@ -106,6 +108,8 @@ export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvi
   readonly stepId: string
   readonly nodeInput: WorkflowIOSnapshot
   readonly errorDetails: AgentErrorDetails
+  /** The step's own sandbox factory. Without one, the node gets the project's blank sandbox. */
+  readonly stepSandbox?: SandboxFactory
 }
 
 /** Prepare conversation history and attachments, then start the shared agent environment. */
@@ -264,35 +268,83 @@ export async function createWorkflowAgentNodeEnvironment(
     signal: input.signal,
   })
 
-  return startAgentEnvironment({
-    mode: "workflow-task",
-    // Cancellation, lost ownership, worker shutdown or the node deadline stop provisioning.
-    sandbox: ephemeralRunSandbox({ context, signal: input.signal }),
-    context,
-    actorId: run.actorId,
-    plan,
-    runId: run.nodeRunId,
-    toolRun: {
-      kind: "workflow",
-      id: run.nodeRunId,
-      workflowId: input.workflowId,
-      stepId: input.stepId,
-    },
-    toolAttachments: workflowInputToolAttachments({
-      input: input.nodeInput,
-      blobStorage: context.blobStorage,
-    }),
-    apiBaseUrl: createAgentApiGatewayBaseUrl({
-      apiBaseUrl: context.apiBaseUrl,
-      projectId: context.id,
+  // Cancellation, lost ownership, worker shutdown or the node deadline stop provisioning. A
+  // step's lost source credentials end the node through `failure`.
+  const failure = new AbortController()
+  const sandboxSignal = input.signal
+    ? AbortSignal.any([input.signal, failure.signal])
+    : failure.signal
+
+  // A step with its own factory works in a workspace from that factory's static recipe; any
+  // other node in a blank sandbox from the project factory.
+  const { stepSandbox } = input
+  const sandbox = stepSandbox
+    ? ephemeralRunSandbox({
+        context,
+        signal: sandboxSignal,
+        workspace: {
+          runId: run.nodeRunId,
+          factory: stepSandbox,
+          recipe: staticSandboxRecipe(stepSandbox.configuration ?? {}),
+          auth: stepSandbox.configuration?.auth,
+          assertOwner: () => assertNodeRunOwned(context, run.nodeRunId, execution.token),
+          onAuthFailure: (error) => failure.abort(error),
+        },
+      })
+    : ephemeralRunSandbox({ context, signal: input.signal })
+
+  try {
+    return await startAgentEnvironment({
+      mode: "workflow-task",
+      sandbox,
+      sandboxSignal,
+      failureSignal: failure.signal,
+      context,
+      actorId: run.actorId,
+      plan,
       runId: run.nodeRunId,
-      executionToken: execution.token,
-    }),
-    attachmentContext,
-    ontologyDocs: renderRunOntologyDocs(context),
-    errorDetails: input.errorDetails,
-    onDetachedTeardown: input.onDetachedTeardown,
+      toolRun: {
+        kind: "workflow",
+        id: run.nodeRunId,
+        workflowId: input.workflowId,
+        stepId: input.stepId,
+      },
+      toolAttachments: workflowInputToolAttachments({
+        input: input.nodeInput,
+        blobStorage: context.blobStorage,
+      }),
+      apiBaseUrl: createAgentApiGatewayBaseUrl({
+        apiBaseUrl: context.apiBaseUrl,
+        projectId: context.id,
+        runId: run.nodeRunId,
+        executionToken: execution.token,
+      }),
+      attachmentContext,
+      ontologyDocs: renderRunOntologyDocs(context),
+      errorDetails: input.errorDetails,
+      onDetachedTeardown: input.onDetachedTeardown,
+    })
+  } catch (error) {
+    // Provisioning can fail, or be abandoned, before the node receives this environment. Confirm
+    // the step's credentials are closed before the node records its fate; a lost execution must
+    // touch nothing.
+    if (!isLostExecution(error, input.signal)) await sandbox.beforeFinalize?.()
+    throw error
+  }
+}
+
+/** Throw unless this execution still owns the node run; read before each provider action. */
+async function assertNodeRunOwned(
+  context: AgentExecutionContext,
+  nodeRunId: string,
+  executionToken: string
+): Promise<void> {
+  const current = await context.storage.workflowRuns?.agentNodes.getByNodeRunId({
+    projectId: context.id,
+    nodeRunId,
   })
+
+  assertExecutionOwned({ current, executionToken, runId: nodeRunId })
 }
 
 interface AgentEnvironmentSetup extends Omit<CreateAgentEnvironmentInput, "signal"> {
@@ -327,7 +379,8 @@ interface AgentEnvironmentSetup extends Omit<CreateAgentEnvironmentInput, "signa
 /**
  * Start the shared tools, sandbox, and teardown lifecycle after source-specific preparation.
  * A blank sandbox boots concurrently with the model call and tools await it only when used; a
- * thread's workspace is ready first, so the system prompt describes the one the run got.
+ * workspace (a thread's or a step's) is ready first, so the system prompt describes the one the
+ * run got.
  */
 async function startAgentEnvironment(
   input: AgentEnvironmentSetup

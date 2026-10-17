@@ -13,7 +13,8 @@ export interface AcquiredRunSandbox extends AgentSandboxHandle {
  * How one run obtains its sandbox and gives it back. Every run kind goes through this lifecycle,
  * with one of two behaviors:
  *
- * - ephemeral (`ephemeralRunSandbox`): created for this run and destroyed when the run releases it;
+ * - ephemeral (`ephemeralRunSandbox`): created for this run, blank or prepared from a recipe, and
+ *   destroyed when the run releases it;
  * - persistent (`persistentRunSandbox`): a thread's workspace, resumed for this run and saved by
  *   `beforeFinalize`. It has no `release`: nothing destroys it.
  *
