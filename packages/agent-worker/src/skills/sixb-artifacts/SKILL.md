@@ -37,7 +37,8 @@ with a table of a dozen rows is a document; data the reader works with is a shee
 
 3. If it refuses, nothing was published. Fix what the message names and publish again. If you
    cannot, tell the user the deliverable could not be published; never describe it as ready.
-4. Fix what each warning names and publish its next version when it matters to the reader.
+4. Fix what each warning names and publish its next version when it matters to the reader. A
+   deck also comes back with a screenshot of each slide: look at them (`slides.md`, Check).
 5. In the reply, say in a sentence or two what you published and what stands out. Do not paste
    its content, its id, or a path: the user sees the artifact.
 

@@ -83,8 +83,22 @@ opens it beside the conversation. A deck cannot show another artifact in place y
 
 ## Check
 
-Publishing refuses a deck without `index.html` or without a `section.slide`. Open `index.html`
-and read each slide before you publish.
+Publishing refuses a deck without `index.html` or without a `section.slide`.
+
+Once a deck publishes, Sixb lays it out in the sandbox's browser as the reader will see it, in
+light and in dark mode, and warns about each slide that has something past its edge, running
+into the footer, drawn over other text, or cut off; text under 18px; text under WCAG AA contrast;
+an image that did not load; or an error while the deck loaded. Each warning names the slide, the
+element as CSS names it (`p.kicker`), and where it is on the 1280×720 slide. The result names
+the screenshots, one per slide, under `.sixb/agent/checks/`.
+
+1. Open the screenshots with `view_file`, at least the slides a warning names, and look at each
+   as the reader will: is anything crowded, misaligned, or unreadable?
+2. Fix what the warnings name and what you see, in the deck's files.
+3. Publish the next version with `publish_artifact_version`, and check again.
+
+Contrast that fails only in dark mode means a fixed color: use the theme's variables. When the
+result says the check did not run, read `index.html` slide by slide instead.
 
 ## Examples
 

@@ -9,6 +9,7 @@ import {
   principalsEqual,
   type Storage,
 } from "@sixb/core"
+import { SLIDES_ENTRY } from "@sixb/core/internal/artifacts/frames"
 import {
   ARTIFACT_LIMITS,
   isArtifactId,
@@ -27,6 +28,7 @@ import {
 } from "../sandbox-files"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 import type { AgentFileBudget } from "../tools/tool-files"
+import { checkDeckLayout, type LayoutCheck } from "./layout-check/layout-check"
 
 const CREATE_TOOL = "publish_artifact"
 const VERSION_TOOL = "publish_artifact_version"
@@ -172,6 +174,8 @@ async function publish(
     )
   }
   const reservation = input.budget.reserve(totalBytes, tool)
+  let entry: { readonly directory: string; readonly bytes: Uint8Array } | undefined
+  let published: Awaited<ReturnType<typeof publishArtifact>>
   try {
     const files: ArtifactFile[] = []
     for (const source of sources) {
@@ -188,6 +192,9 @@ async function publish(
       if (bytes.byteLength !== source.sizeBytes) {
         throw publishError(tool, `'${source.path}' changed while it was being read; publish again`)
       }
+      if (kind === "slides" && source.path === SLIDES_ENTRY) {
+        entry = { directory: posix.dirname(source.absolutePath), bytes }
+      }
       const fileName = posix.basename(source.path)
       const fileRef = await input.blobStorage.put({
         body: bytes,
@@ -200,7 +207,7 @@ async function publish(
     }
     signal.throwIfAborted()
 
-    const published = await input.storage.transaction(async (tx) => {
+    published = await input.storage.transaction(async (tx) => {
       await assertRunIsCurrent(tx, input.projectId, input.run)
       const artifacts = tx.artifacts
       if (!artifacts) throw publishError(tool, "artifacts need storage that supports them")
@@ -220,21 +227,39 @@ async function publish(
         }
       )
     })
-    return {
-      artifactId: published.artifact.id,
-      version: published.version.version,
-      kind: published.artifact.kind,
-      title: published.version.title,
-      warnings: published.warnings.map(({ code, message, part }) => ({
-        code,
-        message,
-        ...(part === undefined ? {} : { part }),
-      })),
-    }
   } catch (error) {
     // Nothing was published, so the bytes do not count against the run.
     reservation.release()
     throw toPublishError(error, tool)
+  }
+
+  // A published deck is laid out in the sandbox's browser, so the Agent sees what the reader
+  // will, and fixes it in its next version.
+  const check: LayoutCheck | undefined = entry
+    ? await checkDeckLayout({
+        handle,
+        directory: entry.directory,
+        entry: entry.bytes,
+        name: `${published.artifact.id}-v${published.version.version}`,
+        signal,
+      })
+    : undefined
+  return {
+    artifactId: published.artifact.id,
+    version: published.version.version,
+    kind: published.artifact.kind,
+    title: published.version.title,
+    warnings: [...published.warnings, ...(check?.status === "checked" ? check.warnings : [])].map(
+      ({ code, message, part }) => ({ code, message, ...(part === undefined ? {} : { part }) })
+    ),
+    ...(check === undefined
+      ? {}
+      : {
+          layoutCheck:
+            check.status === "checked"
+              ? { screenshots: [...check.screenshots] }
+              : { skipped: check.reason },
+        }),
   }
 }
 
@@ -369,6 +394,18 @@ function publishSummary(output: JsonValue, tool: PublishToolName): string {
     if (typeof warning === "object" && warning !== null && !Array.isArray(warning)) {
       lines.push(
         `Warning${warning.part ? ` (${String(warning.part)})` : ""}: ${String(warning.message)}`
+      )
+    }
+  }
+  const check = output.layoutCheck
+  if (typeof check === "object" && check !== null && !Array.isArray(check)) {
+    const screenshots = Array.isArray(check.screenshots) ? check.screenshots.map(String) : []
+    if (typeof check.skipped === "string") {
+      lines.push(`The layout check did not run: ${check.skipped}. Read index.html slide by slide.`)
+    } else if (screenshots.length > 0) {
+      const directory = posix.dirname(screenshots[0] ?? "")
+      lines.push(
+        `Layout check: each slide as the reader sees it in light mode is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with view_file, fix what the warnings name, and publish the next version.`
       )
     }
   }

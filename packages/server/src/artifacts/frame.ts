@@ -1,9 +1,4 @@
-import {
-  ARTIFACT_FRAME_ROUTE_PREFIX,
-  FRAME_ASSET_PREFIX,
-  FRAME_KIT_CSS,
-  frameRuntime,
-} from "@sixb/core/internal/artifacts/frames"
+import { ARTIFACT_FRAME_ROUTE_PREFIX } from "@sixb/core/internal/artifacts/frames"
 
 /**
  * Hosts a frame may load from besides its own files: CSS and script libraries and web fonts. Each
@@ -54,39 +49,3 @@ export function frameContentSecurityPolicy(input: {
 }
 
 /** The kit and the runtime, served beside a version's files under `__sixb/`. */
-export const FRAME_ASSETS: Readonly<
-  Record<string, { readonly body: string; readonly type: string }>
-> = {
-  [`${FRAME_ASSET_PREFIX}kit.css`]: { body: FRAME_KIT_CSS, type: "text/css; charset=utf-8" },
-  [`${FRAME_ASSET_PREFIX}runtime.js`]: {
-    body: `(${frameRuntime.toString()})()\n`,
-    type: "text/javascript; charset=utf-8",
-  },
-}
-
-const INJECTED = `<link rel="stylesheet" href="${FRAME_ASSET_PREFIX}kit.css"><script src="${FRAME_ASSET_PREFIX}runtime.js"></script>`
-
-/**
- * A deck's entry with the kit and the runtime first in its `<head>`, before anything of its own,
- * so the deck's styles and scripts build on them. Exactly once, whatever the markup: in `<head>`
- * when the page has one, else first in `<html>`, else right after the doctype, so a page without
- * either still renders in standards mode.
- */
-export async function injectFrameAssets(html: string): Promise<string> {
-  const target = /<head[\s>]/i.test(html) ? "head" : /<html[\s>]/i.test(html) ? "html" : null
-  if (!target) {
-    const doctype = /^\s*<!doctype[^>]*>/i.exec(html)?.[0] ?? ""
-    return `${doctype}${INJECTED}${html.slice(doctype.length)}`
-  }
-  let injected = false
-  return new HTMLRewriter()
-    .on(target, {
-      element(element) {
-        if (injected) return
-        injected = true
-        element.prepend(INJECTED, { html: true })
-      },
-    })
-    .transform(new Response(html))
-    .text()
-}
