@@ -53,6 +53,14 @@ export interface PublishedArtifact {
 
 const CREATE_ATTEMPTS = 3
 
+/** A version checked against its kind and with its addresses resolved, ready to store. */
+export interface PreparedArtifactVersion {
+  readonly artifactId?: string
+  readonly kind: ArtifactKind
+  readonly author: Principal
+  readonly version: ArtifactVersionInput
+}
+
 /**
  * Validates a version against its kind and stores it. Who may publish is the caller's decision:
  * this checks only what the version holds.
@@ -61,46 +69,91 @@ export async function publishArtifact(
   context: PublishArtifactContext,
   input: PublishArtifactInput
 ): Promise<PublishedArtifact> {
+  const prepared = await prepareArtifactVersion(context, input)
+  const stored = await storeArtifactVersion(context, prepared)
+  return { ...stored, warnings: await artifactVersionWarnings(context, prepared, stored) }
+}
+
+/**
+ * Everything publishing checks before it stores: the title, the files, the theme, the kind's own
+ * format, and every address, resolved against what the author can read. It reads the files back
+ * and parses them, so a caller that stores inside a transaction prepares outside it.
+ */
+export async function prepareArtifactVersion(
+  context: PublishArtifactContext,
+  input: PublishArtifactInput
+): Promise<PreparedArtifactVersion> {
   const title = checkTitle(input.title)
   await checkArtifactFiles(context.blobStorage, input.files)
   if (input.kind !== "file") await checkTheme(context.blobStorage, input.files)
   const validated = await validateKind(context.blobStorage, input.kind, input.files)
-  const { entry, outline } = validated
-  const referenceContext = {
+  const references = await resolveReferences(
+    referenceContext(context, input),
+    validated.references ?? []
+  )
+  return {
+    ...(input.artifactId ? { artifactId: input.artifactId } : {}),
+    kind: input.kind,
+    author: input.author,
+    version: {
+      title,
+      entry: validated.entry,
+      files: input.files.map(({ path, file }) => ({ path, file: { ...file } })),
+      outline: validated.outline,
+      references,
+      author: input.author,
+      ...(input.origin ? { origin: input.origin } : {}),
+      createdAt: new Date(),
+    },
+  }
+}
+
+/** Stores a prepared version: the next one of its artifact, or the first of a new one. */
+export async function storeArtifactVersion(
+  context: PublishArtifactContext,
+  prepared: PreparedArtifactVersion
+): Promise<PublishedArtifactVersion> {
+  return prepared.artifactId
+    ? publishVersion(context, prepared.artifactId, prepared.kind, prepared.version)
+    : createArtifact(context, prepared.kind, prepared.author, prepared.version)
+}
+
+/**
+ * What a stored version breaks in other artifacts that show it. A first version breaks nothing:
+ * no other artifact could name it yet. The version is stored by now, so a failed check only loses
+ * the warnings.
+ */
+export async function artifactVersionWarnings(
+  context: PublishArtifactContext,
+  prepared: PreparedArtifactVersion,
+  stored: PublishedArtifactVersion
+): Promise<readonly ArtifactWarning[]> {
+  if (!prepared.artifactId) return []
+  try {
+    return await brokenDependents(
+      referenceContext(context, prepared),
+      stored.artifact,
+      stored.version
+    )
+  } catch (error) {
+    console.warn(
+      `[Sixb] Could not check which artifacts version ${stored.version.version} of '${stored.artifact.id}' breaks:`,
+      error
+    )
+    return []
+  }
+}
+
+function referenceContext(
+  context: PublishArtifactContext,
+  input: { readonly author: Principal; readonly artifactId?: string }
+) {
+  return {
     projectId: context.projectId,
     storage: context.storage,
     author: input.author,
     ...(input.artifactId ? { artifactId: input.artifactId } : {}),
   }
-  const references = await resolveReferences(referenceContext, validated.references ?? [])
-
-  const version: ArtifactVersionInput = {
-    title,
-    entry,
-    files: input.files.map(({ path, file }) => ({ path, file: { ...file } })),
-    outline,
-    references,
-    author: input.author,
-    ...(input.origin ? { origin: input.origin } : {}),
-    createdAt: new Date(),
-  }
-  const stored = input.artifactId
-    ? await publishVersion(context, input.artifactId, input.kind, version)
-    : await createArtifact(context, input.kind, input.author, version)
-  // A first version breaks nothing: no other artifact could name it yet. The version is stored by
-  // now, and for the Agent inside its run's transaction, so a failed check only loses warnings.
-  let warnings: readonly ArtifactWarning[] = []
-  if (input.artifactId) {
-    try {
-      warnings = await brokenDependents(referenceContext, stored.artifact, stored.version)
-    } catch (error) {
-      console.warn(
-        `[Sixb] Could not check which artifacts version ${stored.version.version} of '${stored.artifact.id}' breaks:`,
-        error
-      )
-    }
-  }
-  return { ...stored, warnings }
 }
 
 async function validateKind(
@@ -121,8 +174,9 @@ async function validateKind(
       return validateSheet(blobStorage, files)
     case "slides":
       return validateSlides(blobStorage, files)
-    case "page":
-      throw invalidArtifact(`Publishing a ${kind} is not supported yet.`)
+    default:
+      // A caller past the API's schema, such as a script on the SDK, can name any kind.
+      throw invalidArtifact(`'${kind satisfies never}' is not a kind of artifact.`)
   }
 }
 

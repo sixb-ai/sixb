@@ -31,15 +31,12 @@ const SlidesOutlineSchema = z.object({
   slides: z.array(z.object({ title: z.string().optional() })),
 })
 
-const PageOutlineSchema = z.object({ kind: z.literal("page") })
-
 const FileOutlineSchema = z.object({ kind: z.literal("file"), mediaType: z.string() })
 
 export const ArtifactOutlineSchema = z.discriminatedUnion("kind", [
   DocumentOutlineSchema,
   SheetOutlineSchema,
   SlidesOutlineSchema,
-  PageOutlineSchema,
   FileOutlineSchema,
 ])
 
@@ -54,10 +51,6 @@ export const ArtifactWarningSchema = z.object({
   code: z.string(),
   message: z.string(),
   part: z.string().optional(),
-  rect: z
-    .object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
-    .optional(),
-  preview: z.string().optional(),
 })
 
 export const ArtifactSchema = z.object({

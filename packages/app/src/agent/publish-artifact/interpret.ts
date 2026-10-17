@@ -1,3 +1,4 @@
+import { ARTIFACT_KINDS } from "@sixb/core/artifacts"
 import type { ArtifactKindName } from "../../artifacts/kind-icon"
 import type { NormalizedPart, NormalizedTool } from "../parts"
 
@@ -17,8 +18,6 @@ export interface PublishedArtifact {
   readonly warnings: readonly { readonly message: string; readonly part?: string }[]
 }
 
-const KINDS: readonly ArtifactKindName[] = ["document", "sheet", "slides", "page", "file"]
-
 export function publishedArtifact(tool: NormalizedTool): PublishedArtifact | null {
   if (!isPublishTool(tool.toolName) || tool.state !== "output-available") return null
   const output = tool.output
@@ -27,7 +26,7 @@ export function publishedArtifact(tool: NormalizedTool): PublishedArtifact | nul
     typeof output.artifactId !== "string" ||
     typeof output.version !== "number" ||
     typeof output.title !== "string" ||
-    !KINDS.includes(output.kind as ArtifactKindName)
+    !(ARTIFACT_KINDS as readonly string[]).includes(String(output.kind))
   ) {
     return null
   }

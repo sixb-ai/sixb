@@ -223,19 +223,17 @@ describe("publishing any version", () => {
     )
   })
 
-  test("refuses kinds whose format has not shipped", async () => {
+  test("refuses a kind it does not know", async () => {
     const { as, put } = setup()
-    for (const kind of ["page"] as const) {
-      await expectRequestError(
-        as("alice").artifacts.create({
-          kind,
-          title: "Q3",
-          files: [await put("index.html", "<p/>")],
-        }),
-        "invalid_artifact",
-        "not supported yet"
-      )
-    }
+    await expectRequestError(
+      as("alice").artifacts.create({
+        kind: "page" as never,
+        title: "Q3",
+        files: [await put("index.html", "<p/>")],
+      }),
+      "invalid_artifact",
+      "'page' is not a kind of artifact"
+    )
   })
 })
 

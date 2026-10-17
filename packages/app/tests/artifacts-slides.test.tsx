@@ -1,6 +1,10 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 import type { GetArtifactVersionResponse } from "@sixb/client"
-import { type DeckMode, FRAME_PROTOCOL, type FrameEvent } from "@sixb/core/artifacts"
+import {
+  type DeckMode,
+  FRAME_PROTOCOL,
+  type FrameEvent,
+} from "@sixb/core/internal/artifacts/frame-protocol"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, render } from "@testing-library/react"
 import { Window } from "happy-dom"

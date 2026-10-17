@@ -173,22 +173,22 @@ function ArtifactBody({
   readonly part?: string
 }) {
   const messages = useArtifactMessages()
-  if (kind === "document") {
-    return <DocumentRenderer version={version} latestVersion={latestVersion} part={part} />
+  switch (kind) {
+    case "document":
+      return <DocumentRenderer version={version} latestVersion={latestVersion} part={part} />
+    case "sheet":
+      return <SheetRenderer version={version} part={part} />
+    case "slides":
+      return <SlidesRenderer version={version} part={part} />
+    case "file": {
+      const source = versionFileSource(version, version.entry)
+      return source ? (
+        <FileRenderer source={source} />
+      ) : (
+        <ViewerNotice title={messages.viewer.loadFailed} />
+      )
+    }
   }
-  if (kind === "sheet") return <SheetRenderer version={version} part={part} />
-  if (kind === "slides") return <SlidesRenderer version={version} part={part} />
-  if (kind === "file") {
-    const source = versionFileSource(version, version.entry)
-    return source ? (
-      <FileRenderer source={source} />
-    ) : (
-      <ViewerNotice title={messages.viewer.loadFailed} />
-    )
-  }
-  return (
-    <ViewerNotice title={messages.viewer.unsupportedKind(messages.kinds[kind].toLowerCase())} />
-  )
 }
 
 type ArtifactDetail = GetArtifactResponse

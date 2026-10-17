@@ -87,9 +87,14 @@ async function readSheet(
   const file = byPath.get(path)
   if (!file) throw invalidArtifact(`Sheet '${sheet.name}' needs its values in '${path}'.`)
 
+  if (file.file.sizeBytes > ARTIFACT_LIMITS.maxSheetFileBytes) {
+    throw invalidArtifact(
+      `'${path}' is ${megabytes(file.file.sizeBytes)} MB; a sheet's values may be at most ${megabytes(ARTIFACT_LIMITS.maxSheetFileBytes)} MB, which is what the viewer reads. Split it into several sheets, or publish the CSV as a file.`
+    )
+  }
   let table: CsvTable
   try {
-    table = parseCsv(await readArtifactText(blobStorage, file, ARTIFACT_LIMITS.maxFileBytes))
+    table = parseCsv(await readArtifactText(blobStorage, file, ARTIFACT_LIMITS.maxSheetFileBytes))
   } catch (error) {
     if (error instanceof CsvParseError) throw invalidArtifact(`'${path}': ${error.message}`)
     throw error
@@ -239,4 +244,8 @@ function columnLetter(index: number): string {
     letters = String.fromCharCode(65 + ((rest - 1) % 26)) + letters
   }
   return letters
+}
+
+function megabytes(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")
 }

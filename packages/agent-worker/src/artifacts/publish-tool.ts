@@ -9,11 +9,14 @@ import {
   principalsEqual,
   type Storage,
 } from "@sixb/core"
+import { ARTIFACT_KINDS } from "@sixb/core/artifacts"
 import { SLIDES_ENTRY } from "@sixb/core/internal/artifacts/frames"
 import {
   ARTIFACT_LIMITS,
+  artifactVersionWarnings,
   isArtifactId,
-  publishArtifact,
+  prepareArtifactVersion,
+  storeArtifactVersion,
 } from "@sixb/core/internal/artifacts/publish"
 import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import type { JsonObject, ModelTool } from "@sixb/core/models"
@@ -35,8 +38,8 @@ const VERSION_TOOL = "publish_artifact_version"
 type PublishToolName = typeof CREATE_TOOL | typeof VERSION_TOOL
 const SANDBOX_TIMEOUT_MS = 30_000
 /** The kinds the Agent can create today; each lands with its validator, renderer, and skill. */
-const PUBLISHABLE_KINDS = ["document", "sheet", "slides", "file"] as const
-type PublishableKind = (typeof PUBLISHABLE_KINDS)[number]
+const PUBLISHABLE_KINDS = ARTIFACT_KINDS
+type PublishableKind = ArtifactKind
 
 // Creating and revising are two tools, and every argument of each is required and meaningful. A
 // mode carried by an optional or null argument is where models differ: some fill every field, some
@@ -173,9 +176,12 @@ async function publish(
       `the files hold ${totalBytes} bytes; a version may hold at most ${ARTIFACT_LIMITS.maxVersionBytes}`
     )
   }
+  const artifacts = input.storage.artifacts
+  if (!artifacts) throw publishError(tool, "artifacts need storage that supports them")
   const reservation = input.budget.reserve(totalBytes, tool)
   let entry: { readonly directory: string; readonly bytes: Uint8Array } | undefined
-  let published: Awaited<ReturnType<typeof publishArtifact>>
+  let published: Awaited<ReturnType<typeof storeArtifactVersion>>
+  let prepared: Awaited<ReturnType<typeof prepareArtifactVersion>>
   try {
     const files: ArtifactFile[] = []
     for (const source of sources) {
@@ -207,24 +213,30 @@ async function publish(
     }
     signal.throwIfAborted()
 
+    // Validation reads the files back and parses them, so it runs before the transaction, which
+    // only checks the run still owns its conversation and stores.
+    prepared = await prepareArtifactVersion(
+      { projectId: input.projectId, storage: artifacts, blobStorage: input.blobStorage },
+      {
+        ...("artifactId" in request.target ? { artifactId: request.target.artifactId } : {}),
+        kind,
+        title: request.title,
+        files,
+        author: input.owner,
+        origin: { threadId: input.run.threadId, runId: input.run.id },
+      }
+    )
     published = await input.storage.transaction(async (tx) => {
       await assertRunIsCurrent(tx, input.projectId, input.run)
-      const artifacts = tx.artifacts
-      if (!artifacts) throw publishError(tool, "artifacts need storage that supports them")
+      const stored = tx.artifacts
+      if (!stored) throw publishError(tool, "artifacts need storage that supports them")
       // The owner may have deleted it since the check above.
       if ("artifactId" in request.target) {
-        await ownedArtifact(input, artifacts, request.target.artifactId, tool)
+        await ownedArtifact(input, stored, request.target.artifactId, tool)
       }
-      return publishArtifact(
-        { projectId: input.projectId, storage: artifacts, blobStorage: input.blobStorage },
-        {
-          ...("artifactId" in request.target ? { artifactId: request.target.artifactId } : {}),
-          kind,
-          title: request.title,
-          files,
-          author: input.owner,
-          origin: { threadId: input.run.threadId, runId: input.run.id },
-        }
+      return storeArtifactVersion(
+        { projectId: input.projectId, storage: stored, blobStorage: input.blobStorage },
+        prepared
       )
     })
   } catch (error) {
@@ -233,23 +245,36 @@ async function publish(
     throw toPublishError(error, tool)
   }
 
+  const warnings = await artifactVersionWarnings(
+    { projectId: input.projectId, storage: artifacts, blobStorage: input.blobStorage },
+    prepared,
+    published
+  )
   // A published deck is laid out in the sandbox's browser, so the Agent sees what the reader
-  // will, and fixes it in its next version.
-  const check: LayoutCheck | undefined = entry
-    ? await checkDeckLayout({
+  // will, and fixes it in its next version. The version exists by now: a check that fails says
+  // so, and never reads as a failed publish, which the Agent would publish again.
+  let check: LayoutCheck | undefined
+  if (entry) {
+    try {
+      check = await checkDeckLayout({
         handle,
         directory: entry.directory,
         entry: entry.bytes,
         name: `${published.artifact.id}-v${published.version.version}`,
         signal,
       })
-    : undefined
+    } catch (error) {
+      if (signal.aborted) throw error
+      console.warn("[SixbAgentWorker] The layout check failed:", error)
+      check = { status: "skipped", reason: "the check failed in the sandbox" }
+    }
+  }
   return {
     artifactId: published.artifact.id,
     version: published.version.version,
     kind: published.artifact.kind,
     title: published.version.title,
-    warnings: [...published.warnings, ...(check?.status === "checked" ? check.warnings : [])].map(
+    warnings: [...warnings, ...(check?.status === "checked" ? check.warnings : [])].map(
       ({ code, message, part }) => ({ code, message, ...(part === undefined ? {} : { part }) })
     ),
     ...(check === undefined

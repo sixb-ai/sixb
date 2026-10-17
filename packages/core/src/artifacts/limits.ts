@@ -12,6 +12,8 @@ export const ARTIFACT_LIMITS = {
   /** A sheet's limits keep the grid quick and its charts readable. */
   maxSheets: 20,
   maxSheetRows: 100_000,
+  /** The viewer reads a sheet whole, and reads at most this much. */
+  maxSheetFileBytes: 5 * 1024 * 1024,
   maxSheetColumns: 200,
   maxCharts: 10,
   maxChartSeries: 5,

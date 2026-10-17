@@ -435,8 +435,6 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("062-drop-auth-audience", dropAuthAudienceSql),
     pgSql("063-artifacts", artifactsSql),
     pgSql("064-drop-output-diagnostics", dropOutputDiagnosticsSql),
-    pgSql("065-artifact-frame-grants", artifactFrameGrantsSql),
-    pgSql("066-artifact-frame-targets", artifactFrameTargetsSql),
   ],
 })
 
@@ -469,11 +467,5 @@ import terminalActionRunsSql from "./migrations/061-terminal-action-runs.sql" wi
 import dropAuthAudienceSql from "./migrations/062-drop-auth-audience.sql" with { type: "text" }
 import artifactsSql from "./migrations/063-artifacts.sql" with { type: "text" }
 import dropOutputDiagnosticsSql from "./migrations/064-drop-output-diagnostics.sql" with {
-  type: "text",
-}
-import artifactFrameGrantsSql from "./migrations/065-artifact-frame-grants.sql" with {
-  type: "text",
-}
-import artifactFrameTargetsSql from "./migrations/066-artifact-frame-targets.sql" with {
   type: "text",
 }
