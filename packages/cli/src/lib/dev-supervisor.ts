@@ -1,11 +1,17 @@
 import { spawn } from "node:child_process"
 import { dirname, resolve } from "node:path"
 import type { DevOptions } from "../commands/dev-runner"
+import { loadDesktop } from "./desktop"
 import { watchDevSource } from "./dev-watch"
+import { errorMessage } from "./errors"
 
 /** The parent never imports project modules: every generation gets a fresh module graph. */
 export async function runDevSupervisor(options: DevOptions): Promise<void> {
   const root = dirname(resolve(options.entry ?? "sixb.config.ts"))
+  // Loaded first, so a project without the package hears so before the dev server starts.
+  const desktop = options.desktop ? await loadDesktop(root) : null
+  // Opened once the app is first served, and kept open across restarts: the app reloads itself.
+  let desktopWindow: Promise<{ close(): void } | null> | null = null
   let child: { process: ReturnType<typeof spawn>; exited: Promise<number | null> } | null = null
   let stopping = false
   let restarting = false
@@ -90,6 +96,19 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
             clearTimeout(startupTimer)
             appWatched = "watchesApp" in message && message.watchesApp === true
             console.log(`[SixbDev] Ready (pid ${proc.pid}). Watching ${root}`)
+            const app = servedApp(message)
+            if (desktop && app && !desktopWindow) {
+              desktopWindow = desktop
+                .openDesktopApp({ projectRoot: root, appUrl: app.url, apiOrigin: app.apiOrigin })
+                .catch((error: unknown) => {
+                  console.error(
+                    `[SixbDev] Could not open the desktop window: ${errorMessage(error)}`
+                  )
+                  // The next generation to come up tries again.
+                  desktopWindow = null
+                  return null
+                })
+            }
           } else if ("type" in message && message.type === "startup-error") {
             appWatched = false
           }
@@ -139,6 +158,9 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
     stopping = true
     clearTimeout(timer)
     try {
+      // First, or the window says the app is unreachable as the server stops. Not awaited: a window
+      // still being set up closes once it opens, and does not hold up the rest of the shutdown.
+      void desktopWindow?.then((opened) => opened?.close())
       await watcher.close()
       await stopChild()
     } finally {
@@ -168,4 +190,11 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
     process.off("SIGTERM", requestShutdown)
     await shutdown()
   }
+}
+
+/** Where the dev process serves the app, from its ready message; `null` when it serves none. */
+function servedApp(message: object): { readonly url: string; readonly apiOrigin: string } | null {
+  if (!("app" in message) || typeof message.app !== "object" || message.app === null) return null
+  const { url, apiOrigin } = message.app as { readonly url?: unknown; readonly apiOrigin?: unknown }
+  return typeof url === "string" && typeof apiOrigin === "string" ? { url, apiOrigin } : null
 }

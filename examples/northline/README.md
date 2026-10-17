@@ -120,6 +120,16 @@ bun run demo:artifacts      # publish sample artifacts and print their links
 Mutable source state lives under `.sixb/demo-sources/` and survives ordinary restarts. Only
 `demo:reset` replaces it.
 
+## Desktop app
+
+```bash
+bun run desktop             # bun run dev, with the app in a desktop window
+bun run desktop:build       # package the deployed app for this machine
+```
+
+`desktop:build` opens the deployment `sixb.deploy.ts` describes, so it needs the deploy variables
+below. See [Desktop App](../../docs/apps/desktop.md).
+
 ## Deploy
 
 Northline deploys to a Linux server with [`sixb deploy`](../../docs/deployment/servers.md). Deployed,

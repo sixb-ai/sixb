@@ -20,6 +20,7 @@ Run these from your project root:
 | `sixb init [directory]` | Initialize a project in a directory. |
 | `sixb dev` | Start the local API, app, and workers. |
 | `sixb build` | Build the runtime and browser assets into `.sixb/dist`. |
+| `sixb desktop build` | Package the deployed app as a [desktop app](../apps/desktop.md) for this machine. |
 | `sixb typegen` | Generate ontology types for typed queries. |
 | `sixb check` | Validate the project and check provider health. |
 | `sixb db migrate` | Apply storage migrations and prepare declared query indexes on supported providers. |
@@ -29,7 +30,8 @@ Run these from your project root:
 
 `dev` serves the app on port 3000 and the API on 3001. The app runs even without an `app/`
 folder, with its built-in pages. Backend changes restart the local stack; app changes use hot
-reload. Restart manually after changing environment variables.
+reload. Restart manually after changing environment variables. With `--desktop`, `dev` also opens
+the app in a [desktop window](../apps/desktop.md).
 
 Common project options:
 

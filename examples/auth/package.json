@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun ../../packages/cli/src/index.tsx dev",
+    "desktop": "bun ../../packages/cli/src/index.tsx dev --desktop",
     "build": "bun ../../packages/cli/src/index.tsx build",
     "check": "bun ../../packages/cli/src/index.tsx check",
     "typecheck": "bun ../../packages/cli/src/index.tsx typegen && tsc --noEmit --paths null"
@@ -21,6 +22,7 @@
     "react-router-dom": "^7.13.0"
   },
   "devDependencies": {
+    "@sixb/desktop": "workspace:*",
     "@types/bun": "latest",
     "@types/node": "^22.15.30",
     "@types/react": "^19.0.0",

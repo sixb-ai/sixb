@@ -32,6 +32,8 @@ export interface DevOptions {
   agentTurnTimeout?: string
   concurrency?: readonly string[]
   vectorConcurrency?: string
+  /** Also open the app in a desktop window. The supervisor does, so the window outlives restarts. */
+  desktop?: boolean
 }
 
 export async function runDevRuntime(options: DevOptions = {}) {
@@ -142,7 +144,13 @@ export async function runDevRuntime(options: DevOptions = {}) {
     )
 
     process.env.SIXB_DEV_READY = "1"
-    process.send?.({ type: "ready", watchesApp: customAppServer?.watchesSources ?? false })
+    process.send?.({
+      type: "ready",
+      watchesApp: customAppServer?.watchesSources ?? false,
+      app: customAppServer
+        ? { url: servedUrl(topology), apiOrigin: topology.apiPublicOrigin }
+        : null,
+    })
 
     await Promise.race([stopped, runtime.waitForWorkerFailure()])
   } catch (error) {
