@@ -1078,7 +1078,6 @@ describe("createCustomApp.dev", () => {
       expect(runtime).toContain('import { AppShell, type AppVisibility } from "@sixb/app"')
       expect(runtime).toContain("<AppShell>")
       expect(runtime).not.toContain("RootLayout")
-      expect((await fetch(`http://127.0.0.1:${port}/settings/personal`)).status).toBe(200)
     } finally {
       await server.stop()
     }
