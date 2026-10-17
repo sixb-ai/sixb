@@ -29,7 +29,8 @@ export interface LakeSqlExecutor<TSqlDialect extends SqlDialect = SqlDialect> {
    * run step passes `BeginDatasetWriteInput.lineage`: the provider analyzes the SQL it executes
    * (as `analyze`), maps that lineage through the source versions it read with
    * `resolveStepLineage`, and stores what `lineageAtCommit` returns for it, which merges in what an
-   * append keeps of its parent. When it cannot analyze the SQL, it passes no lineage, and the
+   * append keeps of its parent. SQL it cannot analyze exactly but that reads only its sources
+   * depends on every column it reads, as a run step does. Otherwise it passes no lineage, and the
    * version is classified with every marking.
    */
   execute(input: ExecuteSqlTransformInput<TSqlDialect>): Promise<DatasetWriteCommitResult>

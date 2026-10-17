@@ -44,7 +44,6 @@ import {
 } from "../objects/telemetry/workload"
 import type { OntologyRegistry } from "../ontology"
 import type { AppliedMarkings } from "../security/applied-markings"
-import type { EventOriginRef } from "../security/applied-markings-contribution"
 import type {
   LinkBatchKey,
   ObjectFacetRequest,
@@ -55,7 +54,7 @@ import type {
 } from "../storage"
 import { assertObjectReadOutputWithinLimit, MAX_OBJECT_READ_FACETS } from "../storage"
 import { captureExecutionScope, resolveExecutionScopeAuthorization } from "./authorization"
-import type { Clearance } from "./object-reader-clearance"
+import type { Clearance, EventSources } from "./object-reader-clearance"
 import { ObjectReaderOntology } from "./object-reader-ontology"
 import { ObjectReaderSecurity, type ResolvedExecutionAuthority } from "./object-reader-security"
 import type { ExecutionScope } from "./types"
@@ -127,12 +126,12 @@ class AuthorizedObjectReaderImpl {
     return reader.#security.clearance.current()
   }
 
-  /** What the reader cannot read in an object event a projection emitted. */
-  static eventOriginClearance(
+  /** What the reader cannot read in an object event. */
+  static eventClearance(
     reader: AuthorizedObjectReaderImpl,
-    origin: EventOriginRef
+    sources: EventSources
   ): Clearance | Promise<Clearance> {
-    return reader.#security.clearance.forEventOrigin(origin)
+    return reader.#security.clearance.forEvent(sources)
   }
 
   static ontologyView(reader: AuthorizedObjectReaderImpl): AuthorizedOntologyView {
@@ -669,15 +668,15 @@ export function readerClearance(reader: AuthorizedObjectReader): Promise<Clearan
 }
 
 /**
- * What a reader cannot read in an object event a projection emitted: it holds the values of its
- * origin version, so that version's markings apply on top of the current ones. A plain value for
- * a reader those markings cannot affect, which reads no version.
+ * What a reader cannot read in an object event: the current markings, with those of the versions
+ * its values came from. A plain value for a reader those markings cannot affect, which reads no
+ * version.
  */
-export function readerEventOriginClearance(
+export function readerEventClearance(
   reader: AuthorizedObjectReader,
-  origin: EventOriginRef
+  sources: EventSources
 ): Clearance | Promise<Clearance> {
-  return AuthorizedObjectReaderImpl.eventOriginClearance(reader, origin)
+  return AuthorizedObjectReaderImpl.eventClearance(reader, sources)
 }
 
 /** What a write or a request names: object types, and links by their source type. */

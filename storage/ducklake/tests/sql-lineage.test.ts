@@ -10,6 +10,7 @@ import type {
   AnalyzeSqlTransformSource,
   SqlTransformBody,
   SqlTransformLineage,
+  SqlTransformRelation,
 } from "@sixb/core/lake-storage"
 import {
   analyzeSqlTransformLineage,
@@ -35,6 +36,8 @@ interface RejectionCase {
   readonly name: string
   readonly sql: SqlTransformBody<"duckdb">
   readonly reason: string
+  /** Whether the transform still reads nothing but its sources. */
+  readonly readsOnlySources?: boolean
 }
 
 function dataset(id: string, ...columns: DatasetColumnDefinition[]): AnalyzeSqlTransformSource {
@@ -1009,6 +1012,7 @@ describe("SQL lineage: rejections", () => {
           PIVOT ${inv} ON currency IN ('EUR') USING sum(amount) GROUP BY customer_id
         )`,
       reason: "PIVOT is not supported",
+      readsOnlySources: true,
     },
     {
       name: "UNPIVOT",
@@ -1017,6 +1021,7 @@ describe("SQL lineage: rejections", () => {
           UNPIVOT (SELECT id, title, currency FROM ${inv}) ON title, currency INTO NAME k VALUE v
         )`,
       reason: "UNPIVOT is not supported",
+      readsOnlySources: true,
     },
     {
       name: "read_csv",
@@ -1075,9 +1080,9 @@ describe("SQL lineage: rejections", () => {
     },
   ]
 
-  for (const { name, sql, reason } of cases) {
+  for (const { name, sql, reason, readsOnlySources = false } of cases) {
     test(name, async () => {
-      expect(await analyze(sql)).toEqual({ supported: false, reason })
+      expect(await analyze(sql)).toEqual({ supported: false, reason, readsOnlySources })
     })
   }
 
@@ -1091,6 +1096,7 @@ describe("SQL lineage: rejections", () => {
       expect(await analyze(() => sql)).toEqual({
         supported: false,
         reason: expect.stringMatching(/^DuckDB could not parse the transform: /),
+        readsOnlySources: false,
       })
     }
   })
@@ -1101,11 +1107,117 @@ describe("SQL lineage: rejections", () => {
       reason: expect.stringMatching(
         /^DuckDB could not bind the transform: Referenced column "rowid" not found/
       ),
+      readsOnlySources: true,
     })
     expect(await analyze(() => "SELECT * FROM '/etc/hosts'")).toEqual({
       supported: false,
       reason: expect.stringMatching(/^DuckDB could not bind the transform: /),
+      readsOnlySources: false,
     })
+  })
+})
+
+// A rejected transform that reads only its sources depends on at most every column they expose.
+// Reproduce: in `visit` in statement-gate.ts, visit each common table expression's query with every
+// name its query defines, or a recursive one's whole query with its own name; the self, forward and
+// recursive references then read as sources, though DuckDB resolves each to a table of the lake.
+describe("SQL lineage: what a rejected transform reads", () => {
+  const pivot = (relation: SqlTransformRelation | string) =>
+    `SELECT * FROM (PIVOT ${relation} ON currency IN ('EUR') USING sum(amount) GROUP BY customer_id)`
+
+  const readsOnlySources = async (sql: SqlTransformBody<"duckdb">) => {
+    const analysis = await analyze(sql)
+    if (analysis.supported) throw new Error("[Test] The transform was analyzed exactly.")
+    return analysis.readsOnlySources
+  }
+
+  test("its sources, through subqueries and common table expressions", async () => {
+    expect(await readsOnlySources(({ inv }) => pivot(inv))).toBe(true)
+    expect(
+      await readsOnlySources(({ inv }) => pivot(`(SELECT * FROM ${inv} WHERE amount > 0)`))
+    ).toBe(true)
+    expect(
+      await readsOnlySources(({ inv }) => `WITH T AS (SELECT * FROM ${inv}) ${pivot("t")}`)
+    ).toBe(true)
+    expect(
+      await readsOnlySources(
+        ({ inv }) => `WITH a AS (SELECT * FROM ${inv}), b AS (SELECT * FROM a) ${pivot("b")}`
+      )
+    ).toBe(true)
+    expect(
+      await readsOnlySources(
+        ({ inv }) => `
+          WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 3)
+          ${pivot(`(SELECT i.* FROM ${inv} i JOIN r ON r.n = 1)`)}`
+      )
+    ).toBe(true)
+  })
+
+  test("a table of the lake, however it is named", async () => {
+    expect(await readsOnlySources(() => pivot("lake.main.raw_invoices"))).toBe(false)
+    expect(await readsOnlySources(() => pivot("main.raw_invoices"))).toBe(false)
+    expect(await readsOnlySources(() => pivot("raw_invoices"))).toBe(false)
+    expect(
+      await readsOnlySources(({ inv }) =>
+        pivot(`(SELECT * FROM ${inv} WHERE id IN (SELECT id FROM other))`)
+      )
+    ).toBe(false)
+  })
+
+  test("a name a common table expression does not define where it is read", async () => {
+    // A non-recursive expression reads the lake's table of its own name.
+    expect(await readsOnlySources(() => `WITH raw AS (SELECT * FROM raw) ${pivot("raw")}`)).toBe(
+      false
+    )
+    // An expression sees only those defined before it.
+    expect(
+      await readsOnlySources(
+        ({ inv }) => `WITH a AS (SELECT * FROM b), b AS (SELECT * FROM ${inv}) ${pivot("a")}`
+      )
+    ).toBe(false)
+    // A subquery's expressions are not in scope beside it.
+    expect(
+      await readsOnlySources(
+        ({ inv }) => `
+          SELECT * FROM (WITH t AS (SELECT * FROM ${inv}) SELECT id FROM t) x,
+          (${pivot("t")}) y`
+      )
+    ).toBe(false)
+    // A recursive expression sees itself only in its recursive part: its first reads the lake.
+    expect(
+      await readsOnlySources(
+        ({ inv }) => `
+          WITH RECURSIVE raw AS (SELECT * FROM raw UNION ALL SELECT * FROM raw WHERE false)
+          ${pivot(`(SELECT i.* FROM ${inv} i, raw)`)}`
+      )
+    ).toBe(false)
+  })
+
+  // Reproduce: drop the function check from `readsOnlySources` in statement-gate.ts; the macro
+  // call then reads as reading only the sources.
+  test("functions DuckDB defines, but no other", async () => {
+    const computed =
+      (expression: string) =>
+      ({ inv }: Record<string, SqlTransformRelation>) =>
+        pivot(`(SELECT customer_id, currency, ${expression} AS amount FROM ${inv})`)
+
+    expect(
+      await readsOnlySources(computed("CAST(round(amount * 2) AS DECIMAL) + row_number() OVER ()"))
+    ).toBe(true)
+    // DuckDB writes this syntax as calls to functions of schema `main`.
+    expect(
+      await readsOnlySources(
+        computed("amount * EXTRACT(month FROM issued_at) + [1, 2][1] + {a: 1}.a")
+      )
+    ).toBe(true)
+
+    // A macro the lake's setup defines can read any table, and its call shows none.
+    expect(await readsOnlySources(computed("amount_due(amount)"))).toBe(false)
+    expect(await readsOnlySources(computed("lake.main.amount_due(amount)"))).toBe(false)
+  })
+
+  test("SQL that does not parse", async () => {
+    expect(await readsOnlySources(() => "SELEC 1")).toBe(false)
   })
 })
 

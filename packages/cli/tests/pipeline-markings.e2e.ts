@@ -410,6 +410,36 @@ describe("security markings through pipelines (e2e)", () => {
     DEPLOY_TIMEOUT_MS
   )
 
+  // Reproduce: return undefined from `analyzeExecutedLineage` in the DuckLake executor for every
+  // transform the analysis rejects. The PIVOT's version then carries every marking: staff read
+  // none of its columns, and the projection is refused.
+  test(
+    "a PIVOT over unmarked columns stays readable and projects",
+    async () => {
+      const byHand = await deploy({ invoiceDueDate: true })
+      const expected = (await byHand.run("field-service")).version("equipment-status")
+      const { rows } = await readRows(byHand.host, "staff", "equipment_status", {
+        versionId: expected.versionId,
+      })
+      await byHand.stop()
+
+      const app = await deploy({ invoiceDueDate: true, readingsPivot: true })
+      const pivoted = (await app.run("field-service")).version("equipment-status")
+      expect(pivoted.versionId).not.toBe(expected.versionId)
+
+      const read = await readRows(app.host, "staff", "equipment_status", {
+        versionId: pivoted.versionId,
+      })
+      expect(read.redactions).toEqual({})
+      expect(read.rows).toEqual(rows)
+
+      expect((await app.projection("equipment", pivoted)).status).toBe("succeeded")
+      expect((await listObjects(app.host, "staff", "Equipment")).length).toBe(rows.length)
+      await app.stop()
+    },
+    DEPLOY_TIMEOUT_MS
+  )
+
   test(
     "a restarted host classifies every version as before",
     async () => {

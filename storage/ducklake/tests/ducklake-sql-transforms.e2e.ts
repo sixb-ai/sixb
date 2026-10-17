@@ -755,16 +755,16 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
       expect((await executeInsights(insightsSql)).outcome).toBe("unchanged")
     })
 
-    // Regression proof: record no lineage for unanalyzed SQL whatever its producer. A transform
-    // outside pipelines then reads as depending on its own columns only.
-    test("executes SQL it cannot analyze and records no lineage", async () => {
-      const totals = (id: string) =>
-        defineDataset(id, {
-          schema: [col("customerId", "string"), col("total", "int64", { nullable: true })],
-        })
+    const totals = (id: string) =>
+      defineDataset(id, {
+        schema: [col("customerId", "string"), col("total", "int64", { nullable: true })],
+      })
+
+    // Reproduce: return undefined from `analyzeExecutedLineage` for every transform the analysis
+    // rejects. The PIVOT then records no lineage, and its version reads as holding any marking.
+    test("records every column a PIVOT reads as deciding each of its values", async () => {
       const totalsDataset = totals("analytics.customer_totals")
       const unattributedDataset = totals("analytics.unattributed_totals")
-
       await storage.createDataset(totalsDataset)
       await storage.createDataset(unattributedDataset)
       await seedSources()
@@ -782,16 +782,48 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
           `,
         })
 
+      const everyOrderColumn = {
+        rows: [orderRef("amount"), orderRef("customerId"), orderRef("orderId")],
+        columns: { customerId: [], total: [] },
+      }
+
       const version = await executePivot(totalsDataset, { ...pipeline, runId: "run_1" })
-      expect(version.producer).toEqual({ ...pipeline, runId: "run_1" })
-      expect(version.lineage).toBeUndefined()
+      expect(version.lineage).toEqual(everyOrderColumn)
       expect(await collectRows(storage.readRows({ datasetId: totalsDataset.id }))).toEqual([
         { customerId: "cust_1", total: "10" },
         { customerId: "cust_2", total: null },
       ])
 
+      expect((await executePivot(unattributedDataset)).lineage).toEqual(everyOrderColumn)
+    })
+
+    // Regression proof: record the lineage of every column the sources expose for SQL that also
+    // reads elsewhere. What it read elsewhere then follows no lineage.
+    test("records no lineage for SQL that may read beyond its sources", async () => {
+      const totalsDataset = totals("analytics.customer_totals")
+      const unattributedDataset = totals("analytics.unattributed_totals")
+      await storage.createDataset(totalsDataset)
+      await storage.createDataset(unattributedDataset)
+      await seedSources()
+
+      const executeCatalogRead = (target: DatasetDefinition, producer?: DatasetProducer) =>
+        storage.sql.execute({
+          sources: { orders: { dataset: ordersDataset } },
+          target,
+          mode: "snapshot",
+          producer,
+          sql: ({ orders }) => `
+            SELECT customerId, (SELECT count(*) FROM duckdb_tables())::BIGINT AS total
+            FROM ${orders}
+          `,
+        })
+
+      const version = await executeCatalogRead(totalsDataset, { ...pipeline, runId: "run_1" })
+      expect(version.producer).toEqual({ ...pipeline, runId: "run_1" })
+      expect(version.lineage).toBeUndefined()
+
       // Outside pipelines, a write without lineage would depend on its own columns only.
-      expect((await executePivot(unattributedDataset)).lineage).toEqual({
+      expect((await executeCatalogRead(unattributedDataset)).lineage).toEqual({
         unknown: `a SQL transform into '${unattributedDataset.id}' could not be analyzed`,
       })
     })

@@ -60,6 +60,15 @@ export interface AppliedMarkings {
     snapshot: AppliedMarkingsSnapshot,
     origin: EventOriginRef
   ): Promise<AppliedMarkingsSnapshot>
+  /**
+   * The snapshot with every marking a column declares on each property a projection maps to this
+   * type: what an object event's earlier values read under. They are the values an update or a
+   * deletion replaced, and the projected values an action or a direct write recorded. They came
+   * from versions projections applied before, which no event records, so they read like a version
+   * that cannot be read. Like the objects they wrote, a projection the code no longer declares
+   * marks nothing.
+   */
+  forEarlierValues(snapshot: AppliedMarkingsSnapshot, objectTypeId: string): AppliedMarkingsSnapshot
 }
 
 export interface AppliedMarkingsOptions {
@@ -341,8 +350,37 @@ export function createAppliedMarkings(options: AppliedMarkingsOptions): AppliedM
     return result
   }
 
+  const earlier = new WeakMap<AppliedMarkingsSnapshot, Map<string, AppliedMarkingsSnapshot>>()
+  const forEarlierValues = (snapshot: AppliedMarkingsSnapshot, objectTypeId: string) => {
+    let byType = earlier.get(snapshot)
+    const cached = byType?.get(objectTypeId)
+    if (cached) return cached
+
+    const primary = options.ontology
+      .getObjectTypeById(objectTypeId)
+      ?.properties.find((property) => property.primary)?.id
+    const projected = options.projections
+      .listObjects()
+      .filter((projection) => projection.objectTypeId === objectTypeId)
+      .flatMap((projection) => Object.keys(projection.properties))
+
+    const markings = [...versionMarkings.everyMarking()].sort()
+    const result = withPropertyMarkings(
+      snapshot,
+      [...new Set(projected)]
+        .filter((propertyId) => propertyId !== primary)
+        .map((propertyId) => ({ objectTypeId, propertyId, markings }))
+    )
+
+    byType ??= new Map()
+    earlier.set(snapshot, byType)
+    keep(byType, objectTypeId, result)
+    return result
+  }
+
   return {
     forEventOrigin,
+    forEarlierValues,
     affects: (clearances) => {
       for (const markingId of versionMarkings.everyMarking()) {
         if (!clearances.has(markingId)) return true
