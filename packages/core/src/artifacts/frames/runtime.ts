@@ -121,7 +121,10 @@ export function frameRuntime(): void {
   window.addEventListener("message", (event) => {
     if (event.source !== window.parent) return
     const data = event.data as Record<string, unknown> | null
+    // Requests only: at the top level, as in the layout check, the frame's own answers come back
+    // to it, and answering an answer would trade error messages with itself for good.
     if (!data || data.protocol !== PROTOCOL || typeof data.id !== "number") return
+    if (typeof data.method !== "string") return
     try {
       handle(String(data.method), (data.params ?? {}) as Record<string, unknown>)
       post({ id: data.id })

@@ -149,6 +149,12 @@ previous and next, an overview of every slide, and present, where the slide fill
 - A link to another artifact (`<a href="artifact:…">`) opens it where the reader is. A deck can't
   show another artifact in place yet.
 - `?part=4` opens a deck at slide 4, and `![…](artifact:…#4)` shows that slide in a document.
+- When the Agent publishes a deck, it lays the deck out in its sandbox's headless browser and
+  gets a warning for each slide with content past its edge or over the footer, overlapping or cut
+  off text, text under 18px or under WCAG AA contrast in light or dark mode, or a broken image,
+  with a screenshot of every slide to look at before it revises. This needs the agent image (or a
+  sandbox with Playwright for Node at `/opt/sixb/js/node_modules/playwright`); without a browser
+  the deck still publishes, unchecked, and the Agent is told.
 
 ## Reference another artifact
 

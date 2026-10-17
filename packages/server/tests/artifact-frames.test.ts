@@ -7,9 +7,8 @@ import {
   InMemoryStorage,
   SixbHost,
 } from "@sixb/core"
-import { createArtifactFrame } from "@sixb/core/internal/artifacts/frames"
+import { createArtifactFrame, injectFrameAssets } from "@sixb/core/internal/artifacts/frames"
 import { createSessionCredential } from "@sixb/core/internal/auth"
-import { injectFrameAssets } from "../src/artifacts/frame"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 

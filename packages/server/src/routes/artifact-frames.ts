@@ -1,15 +1,12 @@
 import type { SixbHostView } from "@sixb/core"
 import {
   ARTIFACT_FRAME_ROUTE_PREFIX,
+  FRAME_ASSETS,
+  injectFrameAssets,
   resolveArtifactFrame,
 } from "@sixb/core/internal/artifacts/frames"
 import type { Elysia } from "elysia"
-import {
-  FRAME_ASSETS,
-  type FrameOrigins,
-  frameContentSecurityPolicy,
-  injectFrameAssets,
-} from "../artifacts/frame"
+import { type FrameOrigins, frameContentSecurityPolicy } from "../artifacts/frame"
 import { createFileContentResponse } from "../files/content"
 
 interface FrameContext {
