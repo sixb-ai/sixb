@@ -227,7 +227,7 @@ export {
 } from "./ui/item"
 export { Kbd, KbdGroup } from "./ui/kbd"
 export { Label } from "./ui/label"
-export { Markdown, type MarkdownProps } from "./ui/markdown"
+export { defaultUrlTransform, Markdown, type MarkdownProps } from "./ui/markdown"
 export { Marker, MarkerContent, MarkerIcon, markerVariants } from "./ui/marker"
 export {
   Menubar,

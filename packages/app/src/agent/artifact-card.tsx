@@ -1,11 +1,10 @@
 import { getArtifactOptions, getArtifactVersionOptions } from "@sixb/client/hooks"
-import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import { ChevronRight } from "lucide-react"
 import type { ReactNode } from "react"
-import { versionChanges, versionSummary } from "../artifacts/card-details"
-import { ArtifactPreview } from "../artifacts/card-preview"
+import { versionChanges } from "../artifacts/card-details"
+import { ArtifactCardFace } from "../artifacts/card-preview"
 import { ArtifactKindIcon } from "../artifacts/kind-icon"
 import { useArtifactMessages } from "../artifacts/messages"
 import { artifactHref } from "../pages/routes"
@@ -48,8 +47,6 @@ export function ArtifactCards({ artifacts }: { readonly artifacts: readonly Turn
 
 /** A new artifact: a preview of it above its title, its kind, and what it holds. */
 function ArtifactCard({ artifact }: { readonly artifact: PublishedArtifact }) {
-  const locale = useLocale()
-  const artifactMessages = useArtifactMessages()
   const selected = useIsOpen(artifact)
   const version = useVersion(artifact.artifactId, artifact.version)
   return (
@@ -61,28 +58,12 @@ function ArtifactCard({ artifact }: { readonly artifact: PublishedArtifact }) {
         !selected && "hover:shadow-[0_4px_14px_rgb(0_0_0/0.07)]"
       )}
     >
-      <span
-        aria-hidden="true"
-        className="relative block h-[7.75rem] overflow-hidden border-b border-border/70"
-      >
-        <ArtifactPreview kind={artifact.kind} version={version.data} loading={version.isLoading} />
-      </span>
-      <span className="flex min-w-0 items-center gap-2.5 px-3.5 py-3">
-        <ArtifactKindIcon kind={artifact.kind} className="size-4 shrink-0 text-muted-foreground" />
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span
-            className="truncate text-[13.5px] leading-snug font-medium text-foreground"
-            title={artifact.title}
-          >
-            {artifact.title}
-          </span>
-          <span className="truncate text-[12px] leading-snug text-muted-foreground tabular-nums">
-            {version.data
-              ? versionSummary(version.data, artifactMessages, locale)
-              : artifactMessages.kinds[artifact.kind]}
-          </span>
-        </span>
-      </span>
+      <ArtifactCardFace
+        kind={artifact.kind}
+        title={artifact.title}
+        version={version.data}
+        loading={version.isLoading}
+      />
     </OpenArtifact>
   )
 }

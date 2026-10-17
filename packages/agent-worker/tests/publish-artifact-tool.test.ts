@@ -332,6 +332,16 @@ describe("materializeThreadArtifacts", () => {
           kind: "document",
           title: "Second",
           version: 1,
+          // Ready to copy: the Agent never works out a heading's slug.
+          address: `artifact:${second.artifactId}`,
+          pinned: `artifact:${second.artifactId}@1`,
+          parts: [
+            {
+              address: `artifact:${second.artifactId}#second`,
+              pinned: `artifact:${second.artifactId}@1#second`,
+              name: "Second",
+            },
+          ],
           directory: `.sixb/agent/artifacts/${second.artifactId}`,
           files: ["document.md"],
         },
@@ -340,6 +350,15 @@ describe("materializeThreadArtifacts", () => {
           kind: "document",
           title: "First",
           version: 2,
+          address: `artifact:${first.artifactId}`,
+          pinned: `artifact:${first.artifactId}@2`,
+          parts: [
+            {
+              address: `artifact:${first.artifactId}#first`,
+              pinned: `artifact:${first.artifactId}@2#first`,
+              name: "First",
+            },
+          ],
           directory: `.sixb/agent/artifacts/${first.artifactId}`,
           files: ["document.md"],
         },
@@ -370,6 +389,15 @@ describe("materializeThreadArtifacts", () => {
       kind: "document",
       title: "First",
       version: 2,
+      address: `artifact:${first.artifactId}`,
+      pinned: `artifact:${first.artifactId}@2`,
+      parts: [
+        {
+          address: `artifact:${first.artifactId}#first`,
+          pinned: `artifact:${first.artifactId}@2#first`,
+          name: "First",
+        },
+      ],
       files: ["document.md"],
     })
     expect(bounded.files).toHaveLength(1)

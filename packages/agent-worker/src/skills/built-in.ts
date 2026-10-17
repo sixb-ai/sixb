@@ -29,6 +29,7 @@ import serviceWorkbook from "./sixb-artifacts/examples/sheet/service-metrics/wor
   type: "text",
 }
 import fileGuide from "./sixb-artifacts/file.md" with { type: "text" }
+import referencesGuide from "./sixb-artifacts/references.md" with { type: "text" }
 import skillMarkdown from "./sixb-artifacts/SKILL.md" with { type: "text" }
 import sheetGuide from "./sixb-artifacts/sheet.md" with { type: "text" }
 
@@ -45,6 +46,7 @@ export const BUILT_IN_SKILLS: readonly AgentSkillDefinition[] = Object.freeze([
     "examples/document/operations-review/figures/restorations.svg": restorationsFigure,
     "examples/document/incident-report/document.md": incidentReport,
     "sheet.md": sheetGuide,
+    "references.md": referencesGuide,
     "examples/sheet/service-metrics/workbook.json": text(serviceWorkbook),
     "examples/sheet/service-metrics/sheets/Quarters.csv": serviceQuarters,
     "examples/sheet/service-metrics/sheets/Regions.csv": serviceRegions,

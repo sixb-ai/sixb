@@ -123,6 +123,12 @@ export interface DeleteArtifactInput {
   readonly id: string
 }
 
+export interface ListReferencingVersionsInput {
+  readonly projectId: string
+  /** The artifact the versions refer to. */
+  readonly artifactId: string
+}
+
 export interface DeleteArtifactVersionsByOriginInput {
   readonly projectId: string
   readonly runId: string
@@ -146,6 +152,11 @@ export interface ArtifactStorage {
   getVersion(input: GetArtifactVersionInput): Promise<ArtifactVersionRecord | null>
   /** Newest first. */
   listVersions(input: ListArtifactVersionsInput): Promise<ListArtifactVersionsResult>
+  /**
+   * The latest version of each artifact whose latest version has an address to this artifact, so
+   * a new version can tell which artifacts it breaks.
+   */
+  listReferencingVersions(input: ListReferencingVersionsInput): Promise<ArtifactVersionRecord[]>
   /** Deletes the artifact and every version. Returns `false` when it does not exist. */
   delete(input: DeleteArtifactInput): Promise<boolean>
   /**

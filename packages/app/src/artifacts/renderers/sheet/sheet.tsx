@@ -1,5 +1,7 @@
 import {
+  type CellRange,
   parseCsv,
+  parseSheetPart,
   parseWorkbook,
   sheetFilePath,
   WORKBOOK_FILE,
@@ -63,7 +65,21 @@ export function SheetRenderer({
   if (!workbook) return <ViewerNotice title={messages.sheet.loadFailed} />
   const tab = validTab(workbook, chosen)
   if (!tab) return <ViewerNotice title={messages.sheet.empty} />
-  return <WorkbookView version={version} workbook={workbook} tab={tab} onTab={setChosen} />
+  // A range the address named opens selected, on its own sheet only.
+  const named = part ? parseSheetPart(part) : null
+  const selected =
+    named?.type === "sheet" && named.range && tab.kind === "sheet" && tab.name === named.sheet
+      ? named.range
+      : undefined
+  return (
+    <WorkbookView
+      version={version}
+      workbook={workbook}
+      tab={tab}
+      onTab={setChosen}
+      {...(selected ? { selected } : {})}
+    />
+  )
 }
 
 function WorkbookView({
@@ -71,11 +87,13 @@ function WorkbookView({
   workbook,
   tab,
   onTab,
+  selected,
 }: {
   readonly version: ArtifactVersion
   readonly workbook: Workbook
   readonly tab: Tab
   readonly onTab: (tab: Tab) => void
+  readonly selected?: CellRange
 }) {
   const messages = useArtifactMessages()
   const locale = useLocale()
@@ -161,6 +179,7 @@ function WorkbookView({
           <>
             <SheetGrid
               key={`${version.version}:${sheetName}`}
+              {...(selected ? { selected } : {})}
               model={model}
               locale={locale}
               onStatusChange={setStatus}

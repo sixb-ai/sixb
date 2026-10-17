@@ -1,4 +1,4 @@
-import { parseSheetDate, parseSheetNumber } from "@sixb/core/artifacts"
+import { isArtifactAddress, parseSheetDate, parseSheetNumber } from "@sixb/core/artifacts"
 import type { SheetColumn } from "./model"
 
 /** A cell as the grid shows it. */
@@ -7,6 +7,8 @@ export interface FormattedCell {
   readonly negative?: boolean
   /** A link cell's address. */
   readonly href?: string
+  /** An `artifact:` address in a link or image cell, which opens where the reader is. */
+  readonly reference?: string
   /** An image cell's path in the artifact. */
   readonly image?: string
 }
@@ -52,12 +54,14 @@ export function cellFormatter(
     case "link":
       return (value) => {
         const href = value.trim()
+        if (isArtifactAddress(href)) return { text: href, reference: href }
         if (!/^https?:\/\//i.test(href)) return { text: value }
         return { text: href.replace(/^https?:\/\//i, "").replace(/\/$/, ""), href }
       }
     case "image":
       return (value) => {
         const path = value.trim()
+        if (isArtifactAddress(path)) return { text: path, reference: path }
         return path ? { text: path.split("/").at(-1) ?? path, image: path } : { text: "" }
       }
     case "text":

@@ -1,7 +1,8 @@
-import { Collapsible, CollapsibleContent, CollapsibleTrigger, Markdown } from "@sixb/ui/components"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { ChevronRight, FileX, Wrench } from "lucide-react"
 import { memo, useState } from "react"
+import { ReferencingMarkdown } from "../../artifacts/references/references"
 import { latestWorkLabel } from "../activity-label"
 import { ArtifactCards } from "../artifact-card"
 import { BashToolView } from "../bash/bash-tool-view"
@@ -100,8 +101,9 @@ function NotPublished({ title }: { title: string }) {
   )
 }
 
+// A reply can show or link to an artifact; the panel around the conversation says where it opens.
 const TextBlock = memo(function TextBlock({ text }: { text: string }) {
-  return <Markdown className="prose-chat">{text}</Markdown>
+  return <ReferencingMarkdown className="prose-chat">{text}</ReferencingMarkdown>
 })
 
 const FileBlock = memo(function FileBlock({

@@ -10,6 +10,8 @@ import { createSixbClient } from "../../client/src"
 import {
   getAgentQueryKey,
   getAgentThreadQueryKey,
+  getArtifactQueryKey,
+  getArtifactVersionQueryKey,
   listAgentThreadMessagesQueryKey,
   listAgentThreadRunsQueryKey,
   SixbProvider,
@@ -18,7 +20,12 @@ import {
 import { AgentSurface } from "../src/agent/agent-surface"
 import { ArtifactPanelRoot, useArtifactPanel } from "../src/agent/artifact-panel"
 import { AgentChatPage } from "../src/agent/react-router"
-import { type FileSource, messageFileSource } from "../src/artifacts/file-source"
+import { ArtifactPage } from "../src/artifacts/artifact-page"
+import {
+  artifactFileSource,
+  type FileSource,
+  messageFileSource,
+} from "../src/artifacts/file-source"
 
 const browser = new Window({ url: "https://app.sixb.test" })
 const globals = [
@@ -283,4 +290,144 @@ test.each(["/agents", "/agents/a"])("standalone %s has an exit even on a direct 
   expect(ui.getByText("Application home")).toBeTruthy()
   ui.unmount()
   cache.clear()
+})
+
+const REPORT = "art_q3rep9rt00"
+const SHEET = "art_q3n4mbers0"
+
+/** A report that links to a sheet, both already read. */
+function referencingCache(): QueryClient {
+  const report = REPORT
+  const sheet = SHEET
+  const cache = new QueryClient({
+    defaultOptions: { queries: { enabled: false, retry: false, staleTime: Infinity } },
+  })
+  const files: Record<string, Record<string, string>> = {
+    [report]: {
+      "document.md": `# Q3 report\n\nSee [the regional sheet](artifact:${sheet}#Regions).\n`,
+    },
+    [sheet]: {
+      "workbook.json": JSON.stringify({ sheets: [{ name: "Regions" }] }),
+      "sheets/Regions.csv": "Region,Visits\nNorth,1284\n",
+    },
+  }
+  for (const [artifactId, texts] of Object.entries(files)) {
+    const title = artifactId === report ? "Q3 report" : "Q3 numbers"
+    const kind = artifactId === report ? "document" : "sheet"
+    const versionFiles = Object.entries(texts).map(([path, text], index) => ({
+      path,
+      file: {
+        blobId: `${artifactId}-${index}`,
+        digest: `sha256:${String(index).repeat(64)}`,
+        sizeBytes: text.length,
+        mediaType: path.endsWith(".csv") ? "text/csv" : "text/plain",
+      },
+    }))
+    cache.setQueryData(getArtifactQueryKey({ path: { artifactId } }), {
+      artifact: {
+        id: artifactId,
+        projectId: "project",
+        kind,
+        title,
+        owner: { type: "user", id: "user-1" },
+        latestVersion: 1,
+        createdAt: "2026-10-01T12:00:00.000Z",
+        updatedAt: "2026-10-01T12:00:00.000Z",
+      },
+      versions: [
+        {
+          version: 1,
+          title,
+          author: { type: "user", id: "user-1" },
+          createdAt: "2026-10-01T12:00:00.000Z",
+        },
+      ],
+    })
+    cache.setQueryData(getArtifactVersionQueryKey({ path: { artifactId, version: "1" } }), {
+      artifactId,
+      version: 1,
+      title,
+      entry: kind === "sheet" ? "workbook.json" : "document.md",
+      files: versionFiles,
+      outline:
+        kind === "sheet"
+          ? {
+              kind,
+              sheets: [{ name: "Regions", rows: 1, columns: ["Region", "Visits"] }],
+              charts: [],
+            }
+          : { kind, headings: [{ depth: 1, text: "Q3 report", slug: "q3-report" }] },
+      references: [],
+      author: { type: "user", id: "user-1" },
+      createdAt: "2026-10-01T12:00:00.000Z",
+    })
+    for (const { path, file } of versionFiles) {
+      const source = artifactFileSource({ artifactId, version: 1, path, fileRef: file })
+      cache.setQueryData([...source.queryKey, "text"], texts[path])
+    }
+  }
+  return cache
+}
+
+test("following a reference in the panel keeps a way back to where the reader was", async () => {
+  // Reproduce by dropping onOpenReference from the panel's Viewer: the link opens the sheet in
+  // place, and there is no Back button.
+  const report = REPORT
+  const cache = referencingCache()
+  function Opener() {
+    const panel = useArtifactPanel()
+    return (
+      <button type="button" onClick={() => panel?.open({ type: "artifact", artifactId: report })}>
+        Open report
+      </button>
+    )
+  }
+  const ui = render(
+    <QueryClientProvider client={cache}>
+      <MemoryRouter>
+        <ArtifactPanelRoot compact={false} scopeKey="thread">
+          <Opener />
+        </ArtifactPanelRoot>
+      </MemoryRouter>
+    </QueryClientProvider>
+  )
+  fireEvent.click(ui.getByText("Open report"))
+  await waitFor(() => expect(ui.getByText("the regional sheet")).toBeTruthy())
+  expect(ui.queryByRole("button", { name: "Back" })).toBeNull()
+
+  fireEvent.click(ui.getByText("the regional sheet"))
+  await waitFor(() => expect(ui.getByRole("heading", { name: "Q3 numbers" })).toBeTruthy())
+  fireEvent.click(ui.getByRole("button", { name: "Back" }))
+  await waitFor(() => expect(ui.getByText("the regional sheet")).toBeTruthy())
+  expect(ui.queryByRole("button", { name: "Back" })).toBeNull()
+})
+
+test("following a reference on an artifact's page opens the other artifact's page", async () => {
+  // Reproduce by dropping onOpenReference from ArtifactPage: the address keeps the report's id,
+  // gains only ?part=, and the page does not change.
+  function Location() {
+    const location = useLocation()
+    return <output data-testid="location">{location.pathname + location.search}</output>
+  }
+  const ui = render(
+    <QueryClientProvider client={referencingCache()}>
+      <MemoryRouter initialEntries={[`/artifacts/${REPORT}`]}>
+        <Routes>
+          <Route
+            path="/artifacts/:artifactId"
+            element={
+              <>
+                <ArtifactPage />
+                <Location />
+              </>
+            }
+          />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
+  )
+  await waitFor(() => expect(ui.getByText("the regional sheet")).toBeTruthy())
+  fireEvent.click(ui.getByText("the regional sheet"))
+  await waitFor(() => expect(ui.getByRole("heading", { name: "Q3 numbers" })).toBeTruthy())
+  expect(ui.getByTestId("location").textContent).toBe(`/artifacts/${SHEET}?part=Regions`)
 })

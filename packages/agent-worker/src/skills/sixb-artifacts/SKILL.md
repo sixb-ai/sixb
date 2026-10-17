@@ -18,6 +18,8 @@ the question, answer in the chat.
 | `sheet` | Tabular data the reader sorts, sums, charts, or downloads: metrics, lists, trackers, exports | `sheet.md` |
 | `file` | One file in a format the user asked for (PDF, DOCX, XLSX, PPTX, CSV), or a binary | `file.md` |
 
+To show or link to another artifact, such as a sheet's chart in a report, read `references.md`.
+
 Prefer a `document` to a DOCX or PDF, and a `sheet` to an XLSX or CSV file, unless the user asked
 for that format: they render in the app, and their versions stay readable side by side. A report
 with a table of a dozen rows is a document; data the reader works with is a sheet.

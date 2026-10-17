@@ -148,6 +148,48 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    test("lists the latest versions that refer to an artifact, at any version, file, or part", async () => {
+      await withStorage(async (artifacts) => {
+        const refer = (address: string) => ({
+          address,
+          as: "embed" as const,
+          at: "",
+          resolvedVersion: 1,
+        })
+        const create = (id: string, addresses: string[], project = projectId) =>
+          artifacts.create(
+            createInput({
+              projectId: project,
+              id,
+              version: versionInput({ references: addresses.map(refer) }),
+            })
+          )
+        await create("art_numbers", [])
+        await create("art_chart", ["artifact:art_numbers#chart=revenue"])
+        await create("art_pinned", ["artifact:art_numbers@1/figures/a.svg"])
+        await create("art_whole", ["artifact:art_numbers"])
+        // A longer id that starts with the same letters is another artifact.
+        await create("art_longer", ["artifact:art_numbersx#chart=revenue"])
+        await create("art_elsewhere", ["artifact:art_numbers"], otherProjectId)
+        // Only the latest version counts: this one dropped its reference.
+        await create("art_dropped", ["artifact:art_numbers#Summary"])
+        await artifacts.publish(publishInput({ createdAt: at(1) }, "art_dropped"))
+
+        const referencing = await artifacts.listReferencingVersions({
+          projectId,
+          artifactId: "art_numbers",
+        })
+        expect(referencing.map((version) => version.artifactId).sort()).toEqual([
+          "art_chart",
+          "art_pinned",
+          "art_whole",
+        ])
+        expect(
+          referencing.find((version) => version.artifactId === "art_chart")?.references
+        ).toEqual([refer("artifact:art_numbers#chart=revenue")])
+      })
+    })
+
     test("lists the latest of each artifact, most recently updated first", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput({ id: "art_a" }))

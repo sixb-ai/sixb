@@ -37,8 +37,8 @@ const { artifact } = await sixb.artifacts.create({
 ```
 
 `sixb.artifacts.publish(artifact.id, input)` adds the next version. Publishing checks the whole
-version first: a document's images must be files in that version, so it reads the same wherever
-it opens.
+version first: a document's images must be files in that version or another artifact's address, so
+it reads the same wherever it opens.
 
 From outside the server, use `POST /api/artifacts` and
 `POST /api/artifacts/{artifactId}/versions` with files uploaded through `POST /api/files`.
@@ -108,7 +108,7 @@ Central,962,0.934,141950
 - `frozenRows` (default 1, the header) and `frozenColumns` (default 0) stay in view while the
   sheet scrolls; `widths` sets columns' widths in pixels.
 - A chart is a `bar`, `line`, `area`, or `pie` chart of up to five `y` columns against an `x`
-  column. Bar and area charts can be `stacked`; a pie has one `y` column and at most five rows.
+  column. Its `name` is its address, so keep it across versions and rename it by its `title`. Bar and area charts can be `stacked`; a pie has one `y` column and at most five rows.
 
 Publishing reads every typed cell and every chart against its sheet and refuses the version with
 the file, row, and column to fix. A sheet holds at most 200 columns and 100,000 rows, and a
@@ -116,6 +116,45 @@ workbook 20 sheets and 10 charts.
 
 Readers sort columns, select a range to see its sum, average, and count, copy cells, and download
 each sheet as CSV. A CSV or TSV `file` artifact opens in the same grid.
+
+## Reference another artifact
+
+A document, a sheet, or an agent's reply can show another artifact, or a part of it, by its
+address. A report that shows a sheet's chart stays current when the sheet changes. The Agent's
+replies pin the version they describe (`@2`), so what a reply shows never changes under its words.
+
+```text
+artifact:<id>[@<version>][/<file>][#<part>]
+```
+
+| Address | Points at |
+| --- | --- |
+| `artifact:art_k3m9q2x7tp` | The artifact, at its latest version |
+| `artifact:art_k3m9q2x7tp@2` | Version 2, which never changes |
+| `artifact:art_k3m9q2x7tp/figures/revenue.svg` | A file inside it |
+| `artifact:art_k3m9q2x7tp#Regions` | A sheet |
+| `artifact:art_k3m9q2x7tp#Regions!A1:D5` | A range of a sheet; row 1 is its header row |
+| `artifact:art_k3m9q2x7tp#chart=revenue` | A chart in a workbook |
+| `artifact:art_k3m9q2x7tp#methodology` | A document's section, by its heading's slug |
+
+In Markdown, an image alone in its paragraph shows the target in place, with the image's alt text
+as its caption; a link opens it:
+
+```md
+![Revenue by quarter](artifact:art_k3m9q2x7tp#chart=revenue)
+
+The [regional numbers](artifact:art_k3m9q2x7tp#Regions) explain the gap.
+```
+
+A range shows as a table formatted the way its sheet formats it, a chart as the chart, a section as
+its text, an image file as the image, and a whole artifact as a card. Under each, a line names the
+source and whether it follows the latest version or a fixed one. Something shown inside a shown
+artifact appears as a link. In a sheet, a `link` or `image` column cell can hold an address.
+
+Publishing resolves every address in a version against what its author can read, and refuses one
+that names nothing, saying what the target has instead. When a new version renames or removes
+something another artifact shows, it publishes with a warning naming that artifact. A reader who
+can't open a target sees it as unavailable.
 
 ## Open an artifact
 

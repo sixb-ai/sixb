@@ -1,5 +1,6 @@
 import { posix } from "node:path"
 import type { ArtifactFile } from "../../../storage/artifacts/types"
+import { isArtifactAddress } from "../../address"
 import { CsvParseError, type CsvTable, parseCsv } from "../../csv"
 import { ARTIFACT_LIMITS } from "../../limits"
 import type { SheetOutline } from "../../outline"
@@ -15,6 +16,7 @@ import {
   type WorkbookSheet,
 } from "../../workbook"
 import { type ArtifactBlobStorage, invalidArtifact, readArtifactText } from "../files"
+import type { FoundReference } from "../references"
 
 /**
  * Reads a sheet: `workbook.json`, then each sheet's CSV against it. Every cell of a typed column
@@ -24,7 +26,11 @@ import { type ArtifactBlobStorage, invalidArtifact, readArtifactText } from "../
 export async function validateSheet(
   blobStorage: ArtifactBlobStorage,
   files: readonly ArtifactFile[]
-): Promise<{ readonly entry: string; readonly outline: SheetOutline }> {
+): Promise<{
+  readonly entry: string
+  readonly outline: SheetOutline
+  readonly references: readonly FoundReference[]
+}> {
   const byPath = new Map(files.map((file) => [file.path, file]))
   const workbookFile = byPath.get(WORKBOOK_FILE)
   if (!workbookFile) {
@@ -47,8 +53,9 @@ export async function validateSheet(
   }
 
   const tables = new Map<string, CsvTable>()
+  const references: FoundReference[] = []
   for (const sheet of workbook.sheets) {
-    tables.set(sheet.name, await readSheet(blobStorage, byPath, sheet))
+    tables.set(sheet.name, await readSheet(blobStorage, byPath, sheet, references))
   }
   checkCharts(workbook, tables)
 
@@ -66,13 +73,15 @@ export async function validateSheet(
       }),
       charts: workbook.charts.map((chart) => chart.name),
     },
+    references,
   }
 }
 
 async function readSheet(
   blobStorage: ArtifactBlobStorage,
   byPath: ReadonlyMap<string, ArtifactFile>,
-  sheet: WorkbookSheet
+  sheet: WorkbookSheet,
+  references: FoundReference[]
 ): Promise<CsvTable> {
   const path = sheetFilePath(sheet.name)
   const file = byPath.get(path)
@@ -123,7 +132,20 @@ async function readSheet(
     }
   }
   for (const [column, format] of Object.entries(sheet.columns)) {
-    checkColumn(path, table, header.indexOf(column), column, format, byPath)
+    const index = header.indexOf(column)
+    if (format.type === "link" || format.type === "image") {
+      // A link or image may be another artifact's address, resolved with the rest.
+      for (const [rowIndex, row] of table.rows.entries()) {
+        const value = row[index]?.trim() ?? ""
+        if (!isArtifactAddress(value)) continue
+        references.push({
+          address: value,
+          as: format.type === "image" ? "embed" : "link",
+          at: `${sheet.name}!${columnLetter(index)}${rowIndex + 2}`,
+        })
+      }
+    }
+    checkColumn(path, table, index, column, format, byPath)
   }
   return table
 }
@@ -138,7 +160,7 @@ function checkColumn(
 ): void {
   for (const [rowIndex, row] of table.rows.entries()) {
     const value = row[index] ?? ""
-    if (!value.trim()) continue
+    if (!value.trim() || isArtifactAddress(value)) continue
     const problem = cellProblem(value, format, byPath)
     if (problem) {
       throw invalidArtifact(
@@ -170,12 +192,12 @@ function cellProblem(
     case "link":
       return /^https?:\/\/[^\s]+$/i.test(value.trim())
         ? undefined
-        : "is not a link: write a full https:// address."
+        : "is not a link: write a full https:// address, or another artifact's address."
     case "image": {
       const imagePath = posix.normalize(value.trim())
       return byPath.has(imagePath)
         ? undefined
-        : "is not one of the artifact's files: add the image to the artifact and give its relative path."
+        : "is not one of the artifact's files: add the image to the artifact and give its relative path, or give another artifact's address."
     }
     case "text":
       return undefined
@@ -208,4 +230,13 @@ function checkCharts(workbook: Workbook, tables: ReadonlyMap<string, CsvTable>):
       )
     }
   }
+}
+
+/** A column's letter as a spreadsheet shows it: A, Z, AA. */
+function columnLetter(index: number): string {
+  let letters = ""
+  for (let rest = index + 1; rest > 0; rest = Math.floor((rest - 1) / 26)) {
+    letters = String.fromCharCode(65 + ((rest - 1) % 26)) + letters
+  }
+  return letters
 }

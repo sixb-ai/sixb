@@ -31,6 +31,7 @@ import { formatFileSize } from "./file-size"
 import type { ArtifactKindName } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
 import { type ArtifactVersion, versionFileSource } from "./queries"
+import { ArtifactReferencesProvider } from "./references/references"
 import { DocumentRenderer } from "./renderers/document"
 import { FileRenderer } from "./renderers/file"
 import { ViewerLoading, ViewerNotice } from "./renderers/notice"
@@ -50,18 +51,24 @@ export interface ViewerChrome {
 export function Viewer({
   target,
   onTargetChange,
+  onOpenReference = onTargetChange,
   chrome = {},
   className,
 }: {
   readonly target: ViewerTarget
   readonly onTargetChange: (target: ViewerTarget) => void
+  /** Opens an artifact this one shows or links to; a host can remember the way back. */
+  readonly onOpenReference?: (target: ArtifactTarget) => void
   readonly chrome?: ViewerChrome
   readonly className?: string
 }) {
   return (
     <div className={cn("flex h-full min-h-0 min-w-0 flex-col bg-background", className)}>
       {target.type === "artifact" ? (
-        <ArtifactView target={target} onTargetChange={onTargetChange} chrome={chrome} />
+        // A link to another artifact opens it here, in place of this one.
+        <ArtifactReferencesProvider open={onOpenReference}>
+          <ArtifactView target={target} onTargetChange={onTargetChange} chrome={chrome} />
+        </ArtifactReferencesProvider>
       ) : (
         <>
           <FileHeader target={target} chrome={chrome} />

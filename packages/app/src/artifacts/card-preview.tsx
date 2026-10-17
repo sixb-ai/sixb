@@ -10,10 +10,11 @@ import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { AreaChart as AreaIcon, ChartColumn, ChartLine, ChartPie } from "lucide-react"
 import { type ReactNode, useMemo } from "react"
+import { versionSummary } from "./card-details"
 import { formatFileSize } from "./file-size"
 import type { FileSource } from "./file-source"
 import { fileView } from "./file-view"
-import type { ArtifactKindName } from "./kind-icon"
+import { ArtifactKindIcon, type ArtifactKindName } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
 import { type ArtifactVersion, useArtifactTheme, useFileText, versionFileSource } from "./queries"
 import { chartData } from "./renderers/sheet/chart-data"
@@ -43,6 +44,49 @@ export function ArtifactPreview({
 }) {
   if (!version) return <Skeleton pulse={loading} />
   return <VersionPreview version={version} kind={kind} />
+}
+
+/**
+ * A card's face, wherever an artifact shows as a card: its preview above its kind, its title, and
+ * what it holds. The control around it decides what a click does.
+ */
+export function ArtifactCardFace({
+  kind,
+  title,
+  version,
+  loading,
+}: {
+  readonly kind: ArtifactKindName
+  readonly title: string
+  readonly version: ArtifactVersion | undefined
+  readonly loading: boolean
+}) {
+  const locale = useLocale()
+  const messages = useArtifactMessages()
+  return (
+    <>
+      <span
+        aria-hidden="true"
+        className="relative block h-[7.75rem] overflow-hidden border-b border-border/70"
+      >
+        <ArtifactPreview kind={kind} version={version} loading={loading} />
+      </span>
+      <span className="flex min-w-0 items-center gap-2.5 px-3.5 py-3">
+        <ArtifactKindIcon kind={kind} className="size-4 shrink-0 text-muted-foreground" />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span
+            className="truncate text-[13.5px] leading-snug font-medium text-foreground"
+            title={title}
+          >
+            {title}
+          </span>
+          <span className="truncate text-[12px] leading-snug text-muted-foreground tabular-nums">
+            {version ? versionSummary(version, messages, locale) : messages.kinds[kind]}
+          </span>
+        </span>
+      </span>
+    </>
+  )
 }
 
 function VersionPreview({

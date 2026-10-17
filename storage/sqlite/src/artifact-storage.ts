@@ -18,6 +18,7 @@ import type {
   ListArtifactsResult,
   ListArtifactVersionsInput,
   ListArtifactVersionsResult,
+  ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
 } from "@sixb/core/storage"
@@ -170,6 +171,28 @@ export class SqliteArtifactStorage implements ArtifactStorage {
       hasMore: offset + rows.length < total,
       total,
     }
+  }
+
+  async listReferencingVersions(
+    input: ListReferencingVersionsInput
+  ): Promise<ArtifactVersionRecord[]> {
+    // An address names the artifact when the id is followed by nothing, a version, a file, or a
+    // part.
+    const prefix = `artifact:${input.artifactId}`
+    const rows = this.db
+      .query(
+        `SELECT ${VERSION_COLUMNS} FROM artifact_versions v
+         WHERE (project_id, artifact_id, version) IN (
+           SELECT project_id, id, latest_version FROM artifacts WHERE project_id = ?
+         ) AND EXISTS (
+           SELECT 1 FROM json_each(v.refs) r
+           WHERE substr(json_extract(r.value, '$.address'), 1, ?) = ?
+             AND substr(json_extract(r.value, '$.address'), ? + 1, 1) IN ('', '@', '/', '#')
+         )
+         ORDER BY artifact_id`
+      )
+      .all(input.projectId, prefix.length, prefix, prefix.length) as Record<string, unknown>[]
+    return rows.map(parseArtifactVersionRow)
   }
 
   async delete(input: DeleteArtifactInput): Promise<boolean> {

@@ -1,6 +1,7 @@
 import { posix } from "node:path"
 import type { BlobStorage, Principal, SandboxFileRecord } from "@sixb/core"
-import type { ArtifactStorage } from "@sixb/core/storage"
+import { formatArtifactAddress } from "@sixb/core/artifacts"
+import type { ArtifactOutline, ArtifactStorage } from "@sixb/core/storage"
 
 /** How many of the thread's artifacts are installed, newest first, and how many bytes in all. */
 const MATERIALIZE_MAX_ARTIFACTS = 50
@@ -17,6 +18,16 @@ interface ManifestEntry {
   readonly kind: string
   readonly title: string
   readonly version: number
+  /** The artifact's address: an artifact that shows it follows its latest version. */
+  readonly address: string
+  /** The same at this version, which never changes: a reply shows what its words describe. */
+  readonly pinned: string
+  /** Addresses of its parts: a document's sections, a sheet's sheets and charts. */
+  readonly parts?: readonly {
+    readonly address: string
+    readonly pinned: string
+    readonly name: string
+  }[]
   /** Where the version's files are, relative to the working directory; absent when not installed. */
   readonly directory?: string
   readonly files: readonly string[]
@@ -77,10 +88,46 @@ export async function materializeThreadArtifacts(input: {
         kind: artifact.kind,
         title: version.title,
         version: version.version,
+        address: formatArtifactAddress({ artifactId: artifact.id }),
+        pinned: formatArtifactAddress({ artifactId: artifact.id, version: version.version }),
+        ...partsOf(artifact.id, version.version, version.outline),
         ...(install ? { directory } : {}),
         files: version.files.map((file) => file.path),
       })
     }
   }
   return { files, manifestJson: JSON.stringify({ artifacts: entries }, null, 2) }
+}
+
+/**
+ * The parts an address can name, each with its address written out, so the Agent copies an
+ * address instead of working out a heading's slug.
+ */
+function partsOf(
+  artifactId: string,
+  version: number,
+  outline: ArtifactOutline
+): { readonly parts?: ManifestEntry["parts"] } {
+  const part = (name: string, label: string) => ({
+    address: formatArtifactAddress({ artifactId, part: name }),
+    pinned: formatArtifactAddress({ artifactId, version, part: name }),
+    name: label,
+  })
+  const parts =
+    outline.kind === "document"
+      ? outline.headings
+          .filter((heading) => heading.depth <= 3)
+          .map((heading) => part(heading.slug, heading.text))
+      : outline.kind === "sheet"
+        ? [
+            ...outline.sheets.map((sheet) =>
+              part(
+                sheet.name,
+                `Sheet ${sheet.name}: ${sheet.rows} rows; columns ${sheet.columns.join(", ")}`
+              )
+            ),
+            ...outline.charts.map((chart) => part(`chart=${chart}`, `Chart ${chart}`)),
+          ]
+        : []
+  return parts.length > 0 ? { parts } : {}
 }

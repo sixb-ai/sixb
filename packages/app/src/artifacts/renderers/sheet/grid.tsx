@@ -13,6 +13,7 @@ import {
   useState,
 } from "react"
 import { useArtifactMessages } from "../../messages"
+import { ArtifactAddressLabel, ArtifactLink } from "../../references/references"
 import { cellFormatter, type FormattedCell } from "./format"
 import type { SheetColumn, SheetModel } from "./model"
 import {
@@ -56,6 +57,7 @@ export function SheetGrid({
   locale,
   onStatusChange,
   imageUrl,
+  selected,
   className,
 }: {
   readonly model: SheetModel
@@ -63,6 +65,8 @@ export function SheetGrid({
   readonly onStatusChange?: (status: SheetGridStatus) => void
   /** An image cell's URL by its path in the artifact; images show only where they resolve. */
   readonly imageUrl?: (path: string) => string | undefined
+  /** A range to open on, selected and in view, such as the one an address named. */
+  readonly selected?: CellRange
   readonly className?: string
 }) {
   const messages = useArtifactMessages().sheet
@@ -70,8 +74,18 @@ export function SheetGrid({
   const [viewport, setViewport] = useState({ top: 0, left: 0, width: 960, height: 640 })
   const [widths, setWidths] = useState(() => model.columns.map((column) => column.width))
   const [sort, setSort] = useState<{ column: number; direction: SortDirection } | null>(null)
-  const [anchor, setAnchor] = useState<CellPoint>({ row: 1, column: 0 })
-  const [focus, setFocus] = useState<CellPoint>({ row: 1, column: 0 })
+  // Row 0 is the header row, as in an address; the range is kept to the cells the sheet has.
+  const opening = useMemo(() => {
+    if (!selected) return null
+    const bottom = model.rows.length
+    const right = model.columns.length - 1
+    return {
+      anchor: { row: Math.min(selected.top, bottom), column: Math.min(selected.left, right) },
+      focus: { row: Math.min(selected.bottom, bottom), column: Math.min(selected.right, right) },
+    }
+  }, [selected, model])
+  const [anchor, setAnchor] = useState<CellPoint>(() => opening?.anchor ?? { row: 1, column: 0 })
+  const [focus, setFocus] = useState<CellPoint>(() => opening?.focus ?? { row: 1, column: 0 })
   const dragging = useRef(false)
 
   const order = useMemo(() => sortedOrder(model, sort, locale), [model, sort, locale])
@@ -182,6 +196,14 @@ export function SheetGrid({
     },
     [frozenRows, frozenColumns, headerHeight, rowNumberWidth, offsets, frozenWidth]
   )
+
+  const revealedOpening = useRef(false)
+  useLayoutEffect(() => {
+    if (!opening || revealedOpening.current) return
+    revealedOpening.current = true
+    reveal(opening.focus)
+    reveal(opening.anchor)
+  }, [opening, reveal])
 
   const select = (point: CellPoint, extend: boolean) => {
     if (!extend) setAnchor(point)
@@ -596,6 +618,16 @@ function CellContent({
   readonly numeric: boolean
   readonly imageUrl?: (path: string) => string | undefined
 }) {
+  if (cell.reference) {
+    return (
+      <ArtifactLink
+        address={cell.reference}
+        className="truncate text-primary underline-offset-2 hover:underline"
+      >
+        <ArtifactAddressLabel address={cell.reference} />
+      </ArtifactLink>
+    )
+  }
   if (cell.href) {
     return (
       <a

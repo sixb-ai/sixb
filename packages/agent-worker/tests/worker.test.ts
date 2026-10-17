@@ -8154,6 +8154,20 @@ describe("AgentWorker", () => {
             kind: "document",
             title: "Q3 review",
             version: 1,
+            address: `artifact:${artifact.id}`,
+            pinned: `artifact:${artifact.id}@1`,
+            parts: [
+              {
+                address: `artifact:${artifact.id}#q3-review`,
+                pinned: `artifact:${artifact.id}@1#q3-review`,
+                name: "Q3 review",
+              },
+              {
+                address: `artifact:${artifact.id}#regions`,
+                pinned: `artifact:${artifact.id}@1#regions`,
+                name: "Regions",
+              },
+            ],
             directory: `.sixb/agent/artifacts/${artifact.id}`,
             files: ["document.md"],
           },

@@ -575,6 +575,41 @@ const visits = await publish({
   },
 })
 
+// A report that shows other artifacts by their addresses: a chart and a range from the metrics
+// sheet, a section of the operations review, the workbook as a card, and a chart that isn't there.
+const summary = await publish({
+  kind: "document",
+  title: "Q3 board summary",
+  files: {
+    "document.md": await upload(
+      "document.md",
+      `# Q3 board summary
+
+Service revenue grew to $2.14M, and priority restorations within SLA reached 94%.
+
+## Revenue
+
+![Service revenue and parts cost by quarter](artifact:${metrics.id}#chart=revenue)
+
+## Regions
+
+Every region but South improved; the [regional sheet](artifact:${metrics.id}#Regions) has the detail.
+
+![Regional results, Q3](artifact:${metrics.id}#Regions!A1:E4)
+
+## Risks
+
+![](artifact:${review.id}#risks)
+
+## The numbers
+
+![](artifact:${metrics.id})
+`,
+      "text/markdown"
+    ),
+  },
+})
+
 const files = [
   [
     "Sensor readings (CSV, 1,200 rows)",
@@ -645,6 +680,7 @@ const threadId =
 
 const rows: (readonly [string, string])[] = [
   ["Q3 operations review (2 versions)", page(review.id)],
+  ["Q3 board summary (shows other artifacts)", page(summary.id)],
   ["  at a section", page(review.id, "?part=response-times")],
   ["  version 1", page(review.id, "?v=1")],
   ["Harbor Point brief (own dark theme)", page(themed.id)],
@@ -662,5 +698,5 @@ const rows: (readonly [string, string])[] = [
   ],
 ]
 const width = Math.max(...rows.map(([label]) => label.length))
-console.log(`[Northline] Published ${6 + files.length} artifacts:\n`)
+console.log(`[Northline] Published ${7 + files.length} artifacts:\n`)
 for (const [label, url] of rows) console.log(`  ${label.padEnd(width)}  ${url}`)
