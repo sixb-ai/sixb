@@ -8,6 +8,7 @@ import { SectionIndex } from "./pages/section-page"
 
 export { AgentsPage } from "./agent/agents-page"
 export { ArtifactPage } from "./artifacts/artifact-page"
+export { ArtifactsPage } from "./artifacts/gallery"
 export {
   DataConnectorPage,
   DataConnectorsPage,

@@ -506,6 +506,7 @@ export const fr: Translation<AgentMessages> = {
       total === 1
         ? "1 artefact dans cette conversation"
         : `${number(total)} artefacts dans cette conversation`,
+    all: "Tous les artefacts",
     publishing: (title) => (title ? `Publication de ${title}` : "Publication d’un artefact"),
     published: (title) => (title ? `${title} publié` : "Artefact publié"),
     publishFailed: (title) =>

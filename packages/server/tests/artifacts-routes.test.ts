@@ -128,6 +128,11 @@ describe("artifact routes", () => {
       hasMore: false,
       artifacts: [{ id, latestVersion: 2 }],
     })
+    const ofKind = async (kind: string) =>
+      app.fetch(new Request(url(`/api/artifacts?kind=${kind}`), alice))
+    expect((await (await ofKind("document")).json()).total).toBe(1)
+    expect((await (await ofKind("slides")).json()).total).toBe(0)
+    expect((await ofKind("spreadsheet")).status).toBe(422)
 
     const detail = await (await app.fetch(new Request(url(`/api/artifacts/${id}`), alice))).json()
     expect(detail.artifact.title).toBe("Q3 report, revised")

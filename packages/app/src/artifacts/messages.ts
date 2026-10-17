@@ -54,6 +54,31 @@ export const en = {
     missingPart: (title: string) => `This part is no longer in “${title}”.`,
     moreRows: (count: number) => (count === 1 ? "1 more row" : `${number(count)} more rows`),
   },
+  gallery: {
+    title: "Artifacts",
+    description: "Documents, sheets, slides, and files published in this project.",
+    filter: "Filter by kind",
+    all: "All",
+    kinds: { document: "Documents", sheet: "Sheets", slides: "Slides", file: "Files" },
+    count: (count: number, kind?: "document" | "sheet" | "slides" | "file") => {
+      const [one, many] = {
+        all: ["artifact", "artifacts"],
+        document: ["document", "documents"],
+        sheet: ["sheet", "sheets"],
+        slides: ["deck", "decks"],
+        file: ["file", "files"],
+      }[kind ?? "all"]
+      return `${number(count)} ${count === 1 ? one : many}`
+    },
+    empty: "No artifacts yet",
+    emptyDescription:
+      "Ask the agent for a report, a spreadsheet, or a deck. What it publishes appears here.",
+    emptyKind: (kind: "document" | "sheet" | "slides" | "file") =>
+      `No ${{ document: "documents", sheet: "sheets", slides: "decks", file: "files" }[kind]} yet`,
+    showAll: "Show all",
+    loadFailed: "Artifacts could not be loaded.",
+    retry: "Try again",
+  },
   slides: {
     deck: (title: string) => `Slides: ${title}`,
     previous: "Previous slide",
@@ -186,6 +211,31 @@ export const fr: Translation<ArtifactMessages> = {
     unavailableDescription: "Il a été supprimé, ou il n’est pas partagé avec vous.",
     missingPart: (title) => `Cette partie ne figure plus dans « ${title} ».`,
     moreRows: (count) => (count === 1 ? "1 ligne de plus" : `${numberFr(count)} lignes de plus`),
+  },
+  gallery: {
+    title: "Artefacts",
+    description: "Documents, feuilles, diapositives et fichiers publiés dans ce projet.",
+    filter: "Filtrer par type",
+    all: "Tous",
+    kinds: { document: "Documents", sheet: "Feuilles", slides: "Diapositives", file: "Fichiers" },
+    count: (count, kind) => {
+      const [one, many] = {
+        all: ["artefact", "artefacts"],
+        document: ["document", "documents"],
+        sheet: ["feuille", "feuilles"],
+        slides: ["présentation", "présentations"],
+        file: ["fichier", "fichiers"],
+      }[kind ?? "all"]
+      return `${numberFr(count)} ${count <= 1 ? one : many}`
+    },
+    empty: "Aucun artefact pour l’instant",
+    emptyDescription:
+      "Demandez à l’agent un rapport, un tableur ou une présentation : ce qu’il publie apparaît ici.",
+    emptyKind: (kind) =>
+      `Aucun${kind === "sheet" || kind === "slides" ? "e" : ""} ${{ document: "document", sheet: "feuille", slides: "présentation", file: "fichier" }[kind]} pour l’instant`,
+    showAll: "Tout afficher",
+    loadFailed: "Impossible de charger les artefacts.",
+    retry: "Réessayer",
   },
   slides: {
     deck: (title) => `Diapositives : ${title}`,

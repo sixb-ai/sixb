@@ -185,6 +185,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           const offset = parseOptionalInt(query.offset)
           const result = await requireRequestSixb(context).artifacts.list({
             ...(query.thread === undefined ? {} : { threadId: query.thread }),
+            ...(query.kind === undefined ? {} : { kind: query.kind }),
             ...(limit === undefined ? {} : { limit }),
             ...(offset === undefined ? {} : { offset }),
           })

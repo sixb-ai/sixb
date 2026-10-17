@@ -110,6 +110,7 @@ export const ArtifactListQuerySchema = z
       .min(1)
       .optional()
       .describe("Only artifacts with a version the Agent published in this thread"),
+    kind: ArtifactKindSchema.optional().describe("Only artifacts of this kind"),
     limit: z.string().optional(),
     offset: z.string().optional(),
   })

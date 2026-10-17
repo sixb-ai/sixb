@@ -11696,6 +11696,10 @@ export type ListArtifactsData = {
      * Only artifacts with a version the Agent published in this thread
      */
     thread?: string
+    /**
+     * Only artifacts of this kind
+     */
+    kind?: "document" | "sheet" | "slides" | "page" | "file"
     limit?: string
     offset?: string
   }

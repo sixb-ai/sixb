@@ -263,6 +263,24 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    test("lists one kind, counting only that kind", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput({ id: "art_doc" }))
+        await artifacts.create(createInput({ id: "art_deck_a", kind: "slides" }))
+        await artifacts.create(
+          createInput({
+            id: "art_deck_b",
+            kind: "slides",
+            version: versionInput({ createdAt: at(1) }),
+          })
+        )
+        const decks = await artifacts.list({ projectId, kind: "slides", limit: 1 })
+        expect(decks.artifacts.map((artifact) => artifact.id)).toEqual(["art_deck_b"])
+        expect(decks).toMatchObject({ total: 2, hasMore: true })
+        expect((await artifacts.list({ projectId, kind: "sheet" })).total).toBe(0)
+      })
+    })
+
     test("lists by owner, by the thread a version came from, and only within the project", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput({ id: "art_mine" }))

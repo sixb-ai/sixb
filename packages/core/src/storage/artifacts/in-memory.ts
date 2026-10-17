@@ -91,6 +91,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
         ({ record, versions }) =>
           record.projectId === input.projectId &&
           (!input.owner || principalsEqual(record.owner, input.owner)) &&
+          (input.kind === undefined || record.kind === input.kind) &&
           (input.originThreadId === undefined ||
             versions.some((version) => version.origin?.threadId === input.originThreadId))
       )

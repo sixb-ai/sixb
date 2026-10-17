@@ -473,6 +473,7 @@ export const en = {
       total === 1
         ? "1 artifact in this conversation"
         : `${number(total)} artifacts in this conversation`,
+    all: "All artifacts",
     /** A `publish_artifact` call, by the title it names (`title` may be empty). */
     publishing: (title: string) => `Publishing ${title || "an artifact"}`,
     published: (title: string) => `Published ${title || "an artifact"}`,

@@ -5,6 +5,9 @@ export function objectHref(objectTypeId: string, primaryId: string): string {
   return `/objects/${encodeURIComponent(objectTypeId)}/${encodeURIComponent(primaryId)}`
 }
 
+/** The gallery of every artifact the reader can open. */
+export const ARTIFACTS_HREF = "/artifacts"
+
 /** An artifact's own page, at a version and part when given. */
 export function artifactHref(
   artifactId: string,
