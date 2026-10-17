@@ -38,6 +38,9 @@ import type {
   CreateAiLimitPolicyData,
   CreateAiLimitPolicyErrors,
   CreateAiLimitPolicyResponses,
+  CreateArtifactData,
+  CreateArtifactErrors,
+  CreateArtifactResponses,
   CreateAuthInvitationData,
   CreateAuthInvitationErrors,
   CreateAuthInvitationResponses,
@@ -59,6 +62,9 @@ import type {
   DeleteAiLimitPolicyData,
   DeleteAiLimitPolicyErrors,
   DeleteAiLimitPolicyResponses,
+  DeleteArtifactData,
+  DeleteArtifactErrors,
+  DeleteArtifactResponses,
   DisableAuthServiceAccountData,
   DisableAuthServiceAccountErrors,
   DisableAuthServiceAccountResponses,
@@ -106,6 +112,15 @@ import type {
   GetAiLimitSubjectOptionsData,
   GetAiLimitSubjectOptionsErrors,
   GetAiLimitSubjectOptionsResponses,
+  GetArtifactData,
+  GetArtifactErrors,
+  GetArtifactFileContentData,
+  GetArtifactFileContentErrors,
+  GetArtifactFileContentResponses,
+  GetArtifactResponses,
+  GetArtifactVersionData,
+  GetArtifactVersionErrors,
+  GetArtifactVersionResponses,
   GetAuthAccessManagementOptionsData,
   GetAuthAccessManagementOptionsErrors,
   GetAuthAccessManagementOptionsResponses,
@@ -196,6 +211,9 @@ import type {
   HeadAgentMessageFileContentData,
   HeadAgentMessageFileContentErrors,
   HeadAgentMessageFileContentResponses,
+  HeadArtifactFileContentData,
+  HeadArtifactFileContentErrors,
+  HeadArtifactFileContentResponses,
   HeadObjectFileContentData,
   HeadObjectFileContentErrors,
   HeadObjectFileContentResponses,
@@ -231,6 +249,9 @@ import type {
   ListAiModelCallsData,
   ListAiModelCallsErrors,
   ListAiModelCallsResponses,
+  ListArtifactsData,
+  ListArtifactsErrors,
+  ListArtifactsResponses,
   ListAuthAccessTokensData,
   ListAuthAccessTokensErrors,
   ListAuthAccessTokensResponses,
@@ -316,6 +337,9 @@ import type {
   PostAgentThreadMessageData,
   PostAgentThreadMessageErrors,
   PostAgentThreadMessageResponses,
+  PublishArtifactVersionData,
+  PublishArtifactVersionErrors,
+  PublishArtifactVersionResponses,
   QueryObjectLinksData,
   QueryObjectLinksErrors,
   QueryObjectLinksResponses,
@@ -2655,6 +2679,163 @@ export const getAgentRun = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<GetAgentRunResponses, GetAgentRunErrors, ThrowOnError>({
     security: [{ scheme: "bearer", type: "http" }],
     url: "/api/agent-runs/{runId}",
+    ...options,
+  })
+
+/**
+ * List artifacts
+ *
+ * The caller's artifacts, most recently updated first.
+ */
+export const listArtifacts = <ThrowOnError extends boolean = false>(
+  options?: Options<ListArtifactsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListArtifactsResponses, ListArtifactsErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts",
+    ...options,
+  })
+
+/**
+ * Create an artifact
+ *
+ * Creates an artifact owned by the caller, with its first version. Store each file with POST /api/files first.
+ */
+export const createArtifact = <ThrowOnError extends boolean = false>(
+  options: Options<CreateArtifactData, ThrowOnError>
+) =>
+  (options.client ?? client).post<CreateArtifactResponses, CreateArtifactErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Delete an artifact
+ *
+ * Deletes the artifact with every version.
+ */
+export const deleteArtifact = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteArtifactData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<DeleteArtifactResponses, DeleteArtifactErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}",
+    ...options,
+  })
+
+/**
+ * Get an artifact and its versions
+ */
+export const getArtifact = <ThrowOnError extends boolean = false>(
+  options: Options<GetArtifactData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetArtifactResponses, GetArtifactErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}",
+    ...options,
+  })
+
+/**
+ * Publish an artifact's next version
+ *
+ * The kind must be the artifact's. The new version becomes the latest.
+ */
+export const publishArtifactVersion = <ThrowOnError extends boolean = false>(
+  options: Options<PublishArtifactVersionData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    PublishArtifactVersionResponses,
+    PublishArtifactVersionErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Get an artifact version
+ *
+ * Its files, outline, and references. Use "latest" for the newest version.
+ */
+export const getArtifactVersion = <ThrowOnError extends boolean = false>(
+  options: Options<GetArtifactVersionData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetArtifactVersionResponses,
+    GetArtifactVersionErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}",
+    ...options,
+  })
+
+/**
+ * Get a file of an artifact version
+ */
+export const getArtifactFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<GetArtifactFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetArtifactFileContentResponses,
+    GetArtifactFileContentErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}/content",
+    ...options,
+  })
+
+/**
+ * Head a file of an artifact version
+ */
+export const headArtifactFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<HeadArtifactFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).head<
+    HeadArtifactFileContentResponses,
+    HeadArtifactFileContentErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/versions/{version}/content",
     ...options,
   })
 

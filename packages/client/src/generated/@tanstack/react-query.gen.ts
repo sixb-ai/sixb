@@ -20,6 +20,7 @@ import {
   countObjects,
   createAgentThread,
   createAiLimitPolicy,
+  createArtifact,
   createAuthInvitation,
   createAuthPersonalAccessToken,
   createAuthServiceAccount,
@@ -27,6 +28,7 @@ import {
   createDeviceAuthorization,
   createFileUpload,
   deleteAiLimitPolicy,
+  deleteArtifact,
   disableAuthServiceAccount,
   disconnectConnectorConnection,
   exchangeDeviceAuthorization,
@@ -43,6 +45,9 @@ import {
   getAiAccountingOverview,
   getAiLimitStatus,
   getAiLimitSubjectOptions,
+  getArtifact,
+  getArtifactFileContent,
+  getArtifactVersion,
   getAuthAccessManagementOptions,
   getAuthInvitationOptions,
   getAuthMembershipOptions,
@@ -81,6 +86,7 @@ import {
   listAiLimitPolicies,
   listAiModelCallGroups,
   listAiModelCalls,
+  listArtifacts,
   listAuthAccessTokens,
   listAuthInvitations,
   listAuthMembers,
@@ -113,6 +119,7 @@ import {
   listWorkflows,
   type Options,
   postAgentThreadMessage,
+  publishArtifactVersion,
   queryObjectLinks,
   queryObjects,
   reactivateAuthMember,
@@ -178,6 +185,9 @@ import type {
   CreateAiLimitPolicyData,
   CreateAiLimitPolicyError,
   CreateAiLimitPolicyResponse,
+  CreateArtifactData,
+  CreateArtifactError,
+  CreateArtifactResponse,
   CreateAuthInvitationData,
   CreateAuthInvitationError,
   CreateAuthInvitationResponse,
@@ -199,6 +209,9 @@ import type {
   DeleteAiLimitPolicyData,
   DeleteAiLimitPolicyError,
   DeleteAiLimitPolicyResponse,
+  DeleteArtifactData,
+  DeleteArtifactError,
+  DeleteArtifactResponse,
   DisableAuthServiceAccountData,
   DisableAuthServiceAccountError,
   DisableAuthServiceAccountResponse,
@@ -246,6 +259,15 @@ import type {
   GetAiLimitSubjectOptionsData,
   GetAiLimitSubjectOptionsError,
   GetAiLimitSubjectOptionsResponse,
+  GetArtifactData,
+  GetArtifactError,
+  GetArtifactFileContentData,
+  GetArtifactFileContentError,
+  GetArtifactFileContentResponse,
+  GetArtifactResponse,
+  GetArtifactVersionData,
+  GetArtifactVersionError,
+  GetArtifactVersionResponse,
   GetAuthAccessManagementOptionsData,
   GetAuthAccessManagementOptionsError,
   GetAuthAccessManagementOptionsResponse,
@@ -356,6 +378,9 @@ import type {
   ListAiModelCallsData,
   ListAiModelCallsError,
   ListAiModelCallsResponse,
+  ListArtifactsData,
+  ListArtifactsError,
+  ListArtifactsResponse,
   ListAuthAccessTokensData,
   ListAuthAccessTokensError,
   ListAuthAccessTokensResponse,
@@ -441,6 +466,9 @@ import type {
   PostAgentThreadMessageData,
   PostAgentThreadMessageError,
   PostAgentThreadMessageResponse,
+  PublishArtifactVersionData,
+  PublishArtifactVersionError,
+  PublishArtifactVersionResponse,
   QueryObjectLinksData,
   QueryObjectLinksError,
   QueryObjectLinksResponse,
@@ -4418,6 +4446,234 @@ export const getAgentRunOptions = (options: Options<GetAgentRunData>) =>
       return data
     },
     queryKey: getAgentRunQueryKey(options),
+  })
+
+export const listArtifactsQueryKey = (options?: Options<ListArtifactsData>) =>
+  createQueryKey("listArtifacts", options)
+
+/**
+ * List artifacts
+ *
+ * The caller's artifacts, most recently updated first.
+ */
+export const listArtifactsOptions = (options?: Options<ListArtifactsData>) =>
+  queryOptions<
+    ListArtifactsResponse,
+    ListArtifactsError,
+    ListArtifactsResponse,
+    ReturnType<typeof listArtifactsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listArtifacts({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listArtifactsQueryKey(options),
+  })
+
+export const listArtifactsInfiniteQueryKey = (
+  options?: Options<ListArtifactsData>
+): QueryKey<Options<ListArtifactsData>> => createQueryKey("listArtifacts", options, true)
+
+/**
+ * List artifacts
+ *
+ * The caller's artifacts, most recently updated first.
+ */
+export const listArtifactsInfiniteOptions = (options?: Options<ListArtifactsData>) =>
+  infiniteQueryOptions<
+    ListArtifactsResponse,
+    ListArtifactsError,
+    InfiniteData<ListArtifactsResponse>,
+    QueryKey<Options<ListArtifactsData>>,
+    string | Pick<QueryKey<Options<ListArtifactsData>>[0], "body" | "headers" | "path" | "query">
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListArtifactsData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listArtifacts({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listArtifactsInfiniteQueryKey(options),
+    }
+  )
+
+/**
+ * Create an artifact
+ *
+ * Creates an artifact owned by the caller, with its first version. Store each file with POST /api/files first.
+ */
+export const createArtifactMutation = (
+  options?: Partial<Options<CreateArtifactData>>
+): UseMutationOptions<CreateArtifactResponse, CreateArtifactError, Options<CreateArtifactData>> => {
+  const mutationOptions: UseMutationOptions<
+    CreateArtifactResponse,
+    CreateArtifactError,
+    Options<CreateArtifactData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await createArtifact({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Delete an artifact
+ *
+ * Deletes the artifact with every version.
+ */
+export const deleteArtifactMutation = (
+  options?: Partial<Options<DeleteArtifactData>>
+): UseMutationOptions<DeleteArtifactResponse, DeleteArtifactError, Options<DeleteArtifactData>> => {
+  const mutationOptions: UseMutationOptions<
+    DeleteArtifactResponse,
+    DeleteArtifactError,
+    Options<DeleteArtifactData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await deleteArtifact({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getArtifactQueryKey = (options: Options<GetArtifactData>) =>
+  createQueryKey("getArtifact", options)
+
+/**
+ * Get an artifact and its versions
+ */
+export const getArtifactOptions = (options: Options<GetArtifactData>) =>
+  queryOptions<
+    GetArtifactResponse,
+    GetArtifactError,
+    GetArtifactResponse,
+    ReturnType<typeof getArtifactQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getArtifact({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getArtifactQueryKey(options),
+  })
+
+/**
+ * Publish an artifact's next version
+ *
+ * The kind must be the artifact's. The new version becomes the latest.
+ */
+export const publishArtifactVersionMutation = (
+  options?: Partial<Options<PublishArtifactVersionData>>
+): UseMutationOptions<
+  PublishArtifactVersionResponse,
+  PublishArtifactVersionError,
+  Options<PublishArtifactVersionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    PublishArtifactVersionResponse,
+    PublishArtifactVersionError,
+    Options<PublishArtifactVersionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await publishArtifactVersion({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getArtifactVersionQueryKey = (options: Options<GetArtifactVersionData>) =>
+  createQueryKey("getArtifactVersion", options)
+
+/**
+ * Get an artifact version
+ *
+ * Its files, outline, and references. Use "latest" for the newest version.
+ */
+export const getArtifactVersionOptions = (options: Options<GetArtifactVersionData>) =>
+  queryOptions<
+    GetArtifactVersionResponse,
+    GetArtifactVersionError,
+    GetArtifactVersionResponse,
+    ReturnType<typeof getArtifactVersionQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getArtifactVersion({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getArtifactVersionQueryKey(options),
+  })
+
+export const getArtifactFileContentQueryKey = (options: Options<GetArtifactFileContentData>) =>
+  createQueryKey("getArtifactFileContent", options)
+
+/**
+ * Get a file of an artifact version
+ */
+export const getArtifactFileContentOptions = (options: Options<GetArtifactFileContentData>) =>
+  queryOptions<
+    GetArtifactFileContentResponse,
+    GetArtifactFileContentError,
+    GetArtifactFileContentResponse,
+    ReturnType<typeof getArtifactFileContentQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getArtifactFileContent({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getArtifactFileContentQueryKey(options),
   })
 
 export const listModelsQueryKey = (options?: Options<ListModelsData>) =>

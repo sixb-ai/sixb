@@ -6,6 +6,7 @@ import { registerActionRoutes } from "./routes/actions"
 import { registerAgentApiGatewayRoutes } from "./routes/agent-api-gateway"
 import { registerAgentRoutes } from "./routes/agents"
 import { registerAiAccountingRoutes } from "./routes/ai-accounting"
+import { registerArtifactRoutes } from "./routes/artifacts"
 import {
   type ConnectorConnectionRouteOptions,
   registerConnectorConnectionRunRoutes,
@@ -60,6 +61,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerFileDownloadRoutes(app, host)
   registerActionRunRoutes(app, host)
   registerAgentRoutes(app, host)
+  registerArtifactRoutes(app, host)
   registerModelRoutes(app, host)
   registerLinkRoutes(app, host)
   registerTelemetryRoutes(app, host)

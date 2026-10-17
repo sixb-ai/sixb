@@ -123,6 +123,10 @@ export const OPENAPI_TAGS = {
     name: "Files",
     description: "File uploads and file references",
   },
+  artifacts: {
+    name: "Artifacts",
+    description: "Versioned documents, sheets, slides, pages, and files",
+  },
   links: {
     name: "Links",
     description: "Object relationship links",

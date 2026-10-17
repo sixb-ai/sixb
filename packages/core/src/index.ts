@@ -867,6 +867,18 @@ export type {
   AgentThreadsRuntime,
   ExecutionAgentRunResult,
 } from "./agents/execution"
+export type { ArtifactRequestErrorCode } from "./artifacts/errors"
+export { ArtifactRequestError } from "./artifacts/errors"
+export type {
+  ArtifactContentInput,
+  ArtifactsRuntime,
+  ListArtifactsRuntimeInput,
+} from "./artifacts/execution"
+export type { ArtifactKind } from "./artifacts/kinds"
+export type { ArtifactOutline } from "./artifacts/outline"
+export type { PublishedArtifact } from "./artifacts/publish/publish"
+export type { ArtifactReference } from "./artifacts/references"
+export type { ArtifactWarning } from "./artifacts/warnings"
 export type { CreateFileDownloadUrlOptions, FileDownloadUrl } from "./blob-storage/download-urls"
 export type { BlobsRuntime } from "./blob-storage/execution"
 export type { ConnectorRuntime } from "./connectors/execution"
@@ -1090,6 +1102,14 @@ export type {
   AgentThreadSandboxState,
   ListAgentThreadsResult,
 } from "./storage/agents"
+export type {
+  ArtifactFile,
+  ArtifactOrigin,
+  ArtifactRecord,
+  ArtifactVersionRecord,
+  ListArtifactsResult,
+  ListArtifactVersionsResult,
+} from "./storage/artifacts"
 
 // ── Models ──────────────────────────────────────────────────
 
