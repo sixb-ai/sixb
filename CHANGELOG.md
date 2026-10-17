@@ -2,6 +2,59 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-10-17 — Framework 0.1.20
+
+### Highlights
+
+- Ship Atlas's pages in every project's app. `@sixb/app` now brings built-in sections: Settings
+  (Personal, Developers, Members, Service accounts), Data (connectors, syncs, datasets, pipelines,
+  projections), Observability (runs, logs, AI usage) and Ontology (object types, objects, graph,
+  actions, workflows, rules), opened from the user menu. A `visibility` export in
+  `app/layout.tsx` chooses who sees each section.
+- Make `@sixb/app` the one import for app code. Apps get `AppShell` and its parts
+  (`AppShellProvider`, `Brand`, `NavItems`, `UserMenu`), `useCurrentUser`, `useSignOut`,
+  `useCurrentSection()` and `SyncButton`. A project without `app/page.tsx` gets a built-in Home, and
+  a project without an `app/` folder still gets the app in the default shell.
+- Give every object a page at `/objects/:type/:id`, add Search on ⌘K across pages and objects, and
+  dock the project's agent beside each page.
+- Add `ThemePicker` to `@sixb/ui`, shown in the user menu and in Settings › Personal.
+- Run four embedding calls at once in the projection worker; set it with `--vector-concurrency` or
+  `SIXB_VECTOR_CONCURRENCY` on `sixb worker projection`, `sixb worker-group` and `sixb dev`.
+- Let automatic and explicit vector indexing wait five minutes for an embedding. Search keeps its
+  30-second deadline.
+- Verify direct S3 uploads without relying on backend checksums, and keep SFTP abort reasons when
+  remote cleanup fails.
+
+### Upgrade notes
+
+- `@sixb/atlas` and `@sixb/agent-ui` are gone, with `sixb atlas`, Atlas's place in `sixb dev` and
+  `sixb build`, and the `atlas` deploy service. The app now takes port 3000 and the API 3001;
+  `sixb api` starts without an app origin. Remove both packages from your project and update any
+  proxy or deployment that pointed at Atlas.
+- The app is bundled from the project, so React must be installed there; `sixb build` names what
+  is missing.
+- `@sixb/app/agents` and `@sixb/app/auth` are no longer import paths, and `SidebarUserMenu` becomes
+  the app's `UserMenu`. CLI tooling moves to `@sixb/app/server`.
+- Sessions, magic links and sign-in attempts no longer carry an audience, and
+  `can.access(applications.*)` with the session's `applicationAccess` is removed. PostgreSQL
+  migration `062-drop-auth-audience` and SQLite migration `061-drop-auth-audience` drop those columns and end Atlas's
+  browser sessions; the app keeps its cookie names, so its sessions survive. Upgrade core, pg/sqlite
+  and both auth strategies together.
+- Managing service accounts now requires a membership policy with the `serviceAccounts` operation.
+  Group files import `defineGroup` from the browser-safe `@sixb/core/security`.
+
+### Package versions
+
+- `0.1.20`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`,
+  `@sixb/pg`, `@sixb/sqlite`, `@sixb/agent-worker`, `@sixb/pipeline-worker`,
+  `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`.
+- `0.1.12`: `@sixb/app`.
+- `0.1.6`: `@sixb/auth-magic-link`, `@sixb/auth-oidc`.
+- `0.1.5`: `create-sixb`.
+- `0.1.4`: `@sixb/ui`, `@sixb/blob-s3`.
+- `0.1.3`: `@sixb/connector-sftp`.
+- `0.1.2`: `@sixb/deploy-ssh`.
+
 ## 2026-10-14 — Framework 0.1.19
 
 ### Highlights
