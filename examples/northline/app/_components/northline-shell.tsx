@@ -61,8 +61,8 @@ export function NorthlineShell({ children }: PropsWithChildren) {
   const agentsActive = location.pathname.startsWith("/agents")
   const homeActive = location.pathname === "/"
   const conversationActive = homeActive || location.pathname.startsWith("/chat/")
-  // Data and Settings pages bring their own margins, and some fill the height.
-  const sectionActive = useCurrentSection() !== null
+  // Data and Settings pages bring their own margins, and some fill the height; so does an artifact.
+  const fullBleed = useCurrentSection() !== null || location.pathname.startsWith("/artifacts/")
   useInvalidateOnEvent(events.objects(), () => [objectQueryKeys.all()], {
     debounceMs: 75,
     enabled: !agentsActive,
@@ -99,7 +99,7 @@ export function NorthlineShell({ children }: PropsWithChildren) {
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div
               className={
-                conversationActive || sectionActive
+                conversationActive || fullBleed
                   ? "h-full w-full"
                   : "mx-auto w-full max-w-[1320px] px-6 py-8 max-sm:px-4 max-sm:py-5"
               }

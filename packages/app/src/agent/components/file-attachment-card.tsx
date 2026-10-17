@@ -9,28 +9,29 @@ import {
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { File as FileIcon, FileImage, FileText, Table2, X } from "lucide-react"
-import { useDocumentPreview } from "../document-preview/document-preview-root"
-import { formatFileSize } from "../document-preview/file-size"
-import type { AgentDocumentSource } from "../document-preview/types"
+import { formatFileSize } from "../../artifacts/file-size"
+import type { FileSource } from "../../artifacts/file-source"
+import { viewerTargetKey } from "../../artifacts/target"
+import { useArtifactPanel } from "../artifact-panel"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
 import type { AgentFileRef } from "../types"
 
 export function FileAttachmentCard({
   fileRef,
-  document,
+  source,
   className,
 }: {
   readonly fileRef: AgentFileRef
-  readonly document?: AgentDocumentSource
+  readonly source?: FileSource
   readonly className?: string
 }) {
-  const preview = useDocumentPreview()
+  const panel = useArtifactPanel()
   const messages = useAgentMessages().files
   const locale = useLocale()
   const fileName = fileRef.fileName?.trim() || messages.file
-  const previewable = document !== undefined && preview?.canPreview(document) === true
-  const selected = Boolean(document && previewable && preview?.activeDocumentId === document.id)
+  const target = source ? ({ type: "file", source } as const) : null
+  const selected = Boolean(target && panel?.openKey === viewerTargetKey(target))
   const mediaLabel = fileMediaLabel(fileRef.mediaType, fileName, messages)
   const { Icon, className: iconClassName } = fileIconPresentation(fileRef.mediaType, fileName)
 
@@ -46,21 +47,19 @@ export function FileAttachmentCard({
         className
       )}
     >
-      {document && previewable && preview ? (
+      {target && panel ? (
         <AttachmentTrigger asChild>
           <button
             type="button"
-            onClick={() =>
-              selected ? preview.closeDocument(document.id) : preview.openDocument(document)
-            }
+            onClick={() => (selected ? panel.close() : panel.open(target))}
             aria-label={selected ? messages.closePreview(fileName) : messages.preview(fileName)}
             aria-pressed={selected}
           />
         </AttachmentTrigger>
-      ) : document ? (
+      ) : source ? (
         <AttachmentTrigger asChild>
           <a
-            href={document.inlineUrl}
+            href={source.inlineUrl}
             target="_blank"
             rel="noreferrer"
             aria-label={messages.open(fileName)}

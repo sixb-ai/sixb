@@ -21,6 +21,7 @@ export const sections: readonly SectionDef[] = [
   { folder: "actions", title: "Actions" },
   { folder: "workflows", title: "Workflows" },
   { folder: "models", title: "Models" },
+  { folder: "artifacts", title: "Artifacts" },
   { folder: "schedules", title: "Schedules" },
   { folder: "rules", title: "Rules" },
   { folder: "auth", title: "Security" },

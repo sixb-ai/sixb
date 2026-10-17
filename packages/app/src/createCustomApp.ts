@@ -96,6 +96,8 @@ const builtInPageSourcePath = join(packageRoot, "src", "pages")
 const builtInPageStylesheetPath = join(packageRoot, "src", "pages", "canvas.css")
 // The agent's styles beyond utilities, and the `@source` for its components.
 const agentStylesheetPath = join(packageRoot, "src", "agent", "agent.css")
+// The artifact viewer's: the document page and the `@source` for its components.
+const artifactsStylesheetPath = join(packageRoot, "src", "artifacts", "artifacts.css")
 const customAppManifestRoute = "/app.webmanifest"
 const internalAppShellRoute = "/__sixb/generated/app-shell"
 // Files the built-in pages show, such as connector logos, served from the package itself so they
@@ -184,6 +186,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         `@import ${JSON.stringify(builtInPageStylesheetPath)};`,
         `@import ${JSON.stringify(stylesheet.sourcePath)};`,
         `@import ${JSON.stringify(agentStylesheetPath)};`,
+        `@import ${JSON.stringify(artifactsStylesheetPath)};`,
         "",
       ].join("\n")
     )
@@ -237,6 +240,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         `@source ${JSON.stringify(builtInPageSourcePath)};`,
         `@import ${JSON.stringify(builtInPageStylesheetPath)};`,
         `@import ${JSON.stringify(agentStylesheetPath)};`,
+        `@import ${JSON.stringify(artifactsStylesheetPath)};`,
         "",
       ].join("\n")
     )
@@ -733,6 +737,12 @@ function builtInRoutesFor(routes: readonly PageRoute[]): BuiltInRouteManifestEnt
       path: "/objects/:objectTypeId/:primaryId",
       moduleSpecifier: builtInPageModule,
       exportName: "ObjectPage",
+    },
+    // So does every artifact: its owner reads it wherever a link to it leads.
+    {
+      path: "/artifacts/:artifactId",
+      moduleSpecifier: builtInPageModule,
+      exportName: "ArtifactPage",
     },
     ...sectionCatalog.flatMap((section) => [
       {

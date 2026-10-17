@@ -145,7 +145,7 @@ function DebugStepCard({
         {files.map((part, fileIndex) => (
           <div key={`${part.fileRef.blobId}-${fileIndex}`} className="space-y-1.5">
             <DebugLabel icon={<FileText />} label="File" />
-            <FileAttachmentCard fileRef={part.fileRef} document={part.document} />
+            <FileAttachmentCard fileRef={part.fileRef} source={part.source} />
           </div>
         ))}
       </div>

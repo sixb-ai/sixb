@@ -108,14 +108,9 @@ embedded agent panel. Applications that want a conversation to move between a fu
 in-app dock should mount one `AgentSurface` in their shell and derive its `fullPage` presentation
 from the route instead of mounting a second chat.
 
-Add `AgentWorkspaceProvider` to `app/agents/layout.tsx` to register `documentPreviewRenderers`
-for the generated routes without coupling `@sixb/app` to their implementation.
-
-```tsx
-<AgentWorkspaceProvider documentPreviewRenderers={[workbookPreviewRenderer]}>
-  {children}
-</AgentWorkspaceProvider>
-```
+Files and artifacts open beside the conversation in one viewer (`src/artifacts/`), which also
+serves each artifact's own page at `/artifacts/:artifactId`. On the routed page the open artifact
+lives in `?artifact=&v=&part=`, so reloads and shared links land on it.
 
 ### Embedded Agent Panel
 

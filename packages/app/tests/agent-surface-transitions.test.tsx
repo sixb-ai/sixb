@@ -16,12 +16,9 @@ import {
   searchObjectsQueryKey,
 } from "../../client/src/hooks"
 import { AgentSurface } from "../src/agent/agent-surface"
-import {
-  DocumentPreviewRoot,
-  useDocumentPreview,
-} from "../src/agent/document-preview/document-preview-root"
-import type { AgentDocumentSource } from "../src/agent/document-preview/types"
+import { ArtifactPanelRoot, useArtifactPanel } from "../src/agent/artifact-panel"
 import { AgentChatPage } from "../src/agent/react-router"
+import { type FileSource, messageFileSource } from "../src/artifacts/file-source"
 
 const browser = new Window({ url: "https://app.sixb.test" })
 const globals = [
@@ -77,9 +74,7 @@ afterAll(() => {
   }
   browser.close()
 })
-const document: AgentDocumentSource = {
-  id: "file",
-  kind: "image",
+const file: FileSource = messageFileSource({
   threadId: "thread",
   messageId: "message",
   path: "/parts/0/fileRef",
@@ -90,12 +85,11 @@ const document: AgentDocumentSource = {
     fileName: "example.png",
     mediaType: "image/png",
   },
-  inlineUrl: "https://app.sixb.test/file",
-  downloadUrl: "https://app.sixb.test/file",
-}
+  baseUrl: "https://app.sixb.test",
+})
 function Conversation() {
   const [draft, setDraft] = useState("")
-  const preview = useDocumentPreview()
+  const panel = useArtifactPanel()
   return (
     <>
       <input
@@ -103,40 +97,36 @@ function Conversation() {
         value={draft}
         onInput={(event) => setDraft(event.currentTarget.value)}
       />
-      <button type="button" onClick={() => preview?.openDocument(document)}>
+      <button type="button" onClick={() => panel?.open({ type: "file", source: file })}>
         Open file
       </button>
-      <output data-testid="active-file">{preview?.activeDocumentId ?? "none"}</output>
+      <output data-testid="active-file">{panel?.openKey ?? "none"}</output>
     </>
   )
 }
 
-test("dock/full-page transitions retain the conversation instance and open documents", () => {
-  // Reproduce against the pre-review implementation: toggling compact swaps the conversation's
-  // parent and restores stale preview state. Both draft and selected file assertions fail.
+test("dock/full-page transitions retain the conversation instance and the open file", () => {
+  // Reproduce by rendering ArtifactWorkspace only for the panel presentation: toggling compact
+  // swaps the conversation's parent, and the draft assertion fails.
   const host = globalThis.document.createElement("div")
   globalThis.document.body.append(host)
   const view = (compact: boolean) => (
-    <DocumentPreviewRoot
-      compact={compact}
-      overlayHost={compact ? host : null}
-      persistenceKey="thread"
-    >
+    <ArtifactPanelRoot compact={compact} overlayHost={compact ? host : null} scopeKey="thread">
       <Conversation />
-    </DocumentPreviewRoot>
+    </ArtifactPanelRoot>
   )
   const ui = render(view(true))
   const input = ui.getByLabelText("Draft")
   fireEvent.input(input, { target: { value: "Keep this unsent draft" } })
   fireEvent.click(ui.getByText("Open file"))
-  expect(ui.getByTestId("active-file").textContent).toBe("file")
+  expect(ui.getByTestId("active-file").textContent).toBe(`file:${file.id}`)
   ui.rerender(view(false))
   expect(ui.getByLabelText("Draft")).toBe(input)
   expect((ui.getByLabelText("Draft") as HTMLInputElement).value).toBe("Keep this unsent draft")
-  expect(ui.getByTestId("active-file").textContent).toBe("file")
+  expect(ui.getByTestId("active-file").textContent).toBe(`file:${file.id}`)
   ui.rerender(view(true))
   expect(ui.getByLabelText("Draft")).toBe(input)
-  expect(ui.getByTestId("active-file").textContent).toBe("file")
+  expect(ui.getByTestId("active-file").textContent).toBe(`file:${file.id}`)
   host.remove()
 })
 

@@ -12,6 +12,7 @@
     "demo:sync": "bun scripts/sync-demo.ts",
     "demo:alarm": "bun scripts/send-alarm.ts",
     "demo:approve-quote": "bun scripts/approve-quote.ts",
+    "demo:artifacts": "bun scripts/demo-artifacts.ts",
     "typecheck": "bun ../../packages/cli/src/index.tsx typegen && tsc --noEmit --paths null"
   },
   "dependencies": {

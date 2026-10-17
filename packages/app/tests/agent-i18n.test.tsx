@@ -16,6 +16,7 @@ import { AgentLabelsProvider } from "../src/agent/i18n"
 import { en } from "../src/agent/i18n/en"
 import { fr } from "../src/agent/i18n/fr"
 import { ViewFileToolView } from "../src/agent/view-file/view-file-tool-view"
+import { en as artifactsEn, fr as artifactsFr } from "../src/artifacts/messages"
 
 function render(node: ReactNode, locale?: string): string {
   const queryClient = new QueryClient()
@@ -33,12 +34,12 @@ function render(node: ReactNode, locale?: string): string {
 describe("agent chat localization", () => {
   test("translates every message into French", () => {
     expect(untranslatedMessages(en, fr)).toEqual([])
+    expect(untranslatedMessages(artifactsEn, artifactsFr)).toEqual([])
   })
 
   test("composes grammatical French sentences", () => {
-    const limits = [fr.documents.firstRows(500, 1_200), fr.documents.firstColumns(50, 80)]
-    expect(fr.documents.showing(limits.join(` ${fr.documents.and} `))).toBe(
-      "Seules les 500 premières lignes sur 1\u202f200 et les 50 premières colonnes sur 80 sont affichées."
+    expect(artifactsFr.files.showing(500, 1_200)).toBe(
+      "Seules les 500 premières lignes sur 1\u202f200 sont affichées."
     )
     expect(fr.web.read(fr.web.webPage)).toBe("Page consultée : page web")
   })

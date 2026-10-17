@@ -87,7 +87,7 @@ const FileBlock = memo(function FileBlock({
 }: {
   part: Extract<NormalizedPart, { kind: "file" }>
 }) {
-  return <FileAttachmentCard fileRef={part.fileRef} document={part.document} />
+  return <FileAttachmentCard fileRef={part.fileRef} source={part.source} />
 })
 
 /**

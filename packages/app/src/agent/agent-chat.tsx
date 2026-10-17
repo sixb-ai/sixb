@@ -2,10 +2,11 @@ import { Button, EmptyState } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { MessagesSquare } from "lucide-react"
 import type { ReactNode } from "react"
+import type { ArtifactTarget } from "../artifacts/target"
+import { ArtifactPanelRoot } from "./artifact-panel"
 import { ConversationPanel } from "./components/conversation-panel"
 import { SandboxRecovery } from "./components/sandbox-recovery"
-import { DocumentPreviewRoot } from "./document-preview/document-preview-root"
-import type { AgentDocumentPreviewRenderer } from "./document-preview/types"
+import { ThreadArtifactsMenu } from "./components/thread-artifacts-menu"
 import { useAgentConversation } from "./hooks/use-agent-conversation"
 import { useAgentMessages } from "./i18n"
 import type { AgentContextInput } from "./types"
@@ -19,12 +20,13 @@ export interface AgentChatProps {
   readonly compact?: boolean
   /** Centered content for an empty conversation. Omit for the agent identity; null hides it. */
   readonly welcomeContent?: ReactNode
-  /** Additional file viewers supplied by the host application. */
-  readonly documentPreviewRenderers?: readonly AgentDocumentPreviewRenderer[]
-  /** Portal host for a modeless compact document canvas. */
-  readonly documentPreviewHost?: HTMLElement | null
-  /** Keep documents beside compact chat on desktop instead of opening a modal. */
-  readonly splitDocumentPreview?: boolean
+  /** Portal host for a modeless compact artifact canvas. */
+  readonly artifactHost?: HTMLElement | null
+  /** Keep artifacts beside compact chat on desktop instead of opening a modal. */
+  readonly splitArtifacts?: boolean
+  /** The open artifact when the host keeps it in its route; files stay local. */
+  readonly artifactTarget?: ArtifactTarget | null
+  readonly onArtifactTargetChange?: (target: ArtifactTarget | null) => void
   readonly conversationHeaderActions?: ReactNode
   readonly composerPlaceholder?: string
 }
@@ -38,10 +40,11 @@ export function AgentChat({
   ambientContext = [],
   compact = false,
   welcomeContent,
-  documentPreviewRenderers,
-  documentPreviewHost,
-  splitDocumentPreview = false,
-  conversationHeaderActions,
+  artifactHost,
+  splitArtifacts = false,
+  artifactTarget,
+  onArtifactTargetChange,
+  conversationHeaderActions: hostHeaderActions,
   composerPlaceholder,
 }: AgentChatProps) {
   const messages = useAgentMessages()
@@ -59,6 +62,14 @@ export function AgentChat({
     !conversation.threads.some((entry) => entry.id === threadId && entry.activeRunId !== null)
       ? 1
       : 0)
+
+  const conversationHeaderActions =
+    threadId || hostHeaderActions ? (
+      <>
+        {threadId ? <ThreadArtifactsMenu threadId={threadId} /> : null}
+        {hostHeaderActions}
+      </>
+    ) : null
 
   let content: ReactNode
   let controlsInConversationHeader = false
@@ -193,13 +204,13 @@ export function AgentChat({
   }
 
   return (
-    <DocumentPreviewRoot
+    <ArtifactPanelRoot
       compact={compact}
-      split={splitDocumentPreview}
-      overlayHost={documentPreviewHost}
+      split={splitArtifacts}
+      overlayHost={artifactHost}
       scopeKey={threadId ?? "draft"}
-      persistenceKey={threadId}
-      documentPreviewRenderers={documentPreviewRenderers}
+      routeTarget={artifactTarget}
+      onRouteTargetChange={onArtifactTargetChange}
     >
       <div
         data-agent-panel={compact ? "" : undefined}
@@ -212,7 +223,7 @@ export function AgentChat({
         ) : null}
         <main className="min-h-0 min-w-0 flex-1">{content}</main>
       </div>
-    </DocumentPreviewRoot>
+    </ArtifactPanelRoot>
   )
 }
 

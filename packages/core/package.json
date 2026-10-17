@@ -41,6 +41,12 @@
       "import": "./dist/agents/streams/index.js",
       "default": "./dist/agents/streams/index.js"
     },
+    "./artifacts": {
+      "types": "./dist/artifacts/index.d.ts",
+      "bun": "./src/artifacts/index.ts",
+      "import": "./dist/artifacts/index.js",
+      "default": "./dist/artifacts/index.js"
+    },
     "./auth/strategy": {
       "types": "./dist/auth/strategy.d.ts",
       "bun": "./src/auth/strategy.ts",
@@ -118,12 +124,6 @@
       "bun": "./src/agents/streams/internal.ts",
       "import": "./dist/agents/streams/internal.js",
       "default": "./dist/agents/streams/internal.js"
-    },
-    "./internal/artifacts": {
-      "types": "./dist/artifacts/index.d.ts",
-      "bun": "./src/artifacts/index.ts",
-      "import": "./dist/artifacts/index.js",
-      "default": "./dist/artifacts/index.js"
     },
     "./internal/agents": {
       "types": "./dist/agents/index.d.ts",
