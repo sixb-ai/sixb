@@ -106,11 +106,7 @@ export async function bindPersistentSandbox(
     networkPolicy: withRequestCredentials(options.network, options.requestCredentials ?? []),
   })
   const pinned: VercelSandboxClient = {
-    setRequestCredentials: async (credentials) => {
-      await session.update({
-        networkPolicy: withRequestCredentials(options.network, credentials),
-      })
-    },
+    updateNetworkPolicy: (policy) => session.update({ networkPolicy: policy }),
     name: client.name,
     cwd: session.cwd,
     get status() {
