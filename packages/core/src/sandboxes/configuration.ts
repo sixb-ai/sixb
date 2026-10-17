@@ -202,7 +202,13 @@ function validateSetup(setup: unknown): void {
   }
 }
 
-function validateEnv(env: unknown): void {
+/** Snapshot guest-readable variables under the recipe `env` rules; never include values in errors. */
+export function captureSandboxEnv(value: unknown): Readonly<Record<string, string>> {
+  validateEnv(value)
+  return structuredClone(value)
+}
+
+function validateEnv(env: unknown): asserts env is Record<string, string> {
   if (
     !isPlainRecord(env) ||
     Object.entries(env).some(

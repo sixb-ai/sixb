@@ -42,6 +42,7 @@ import {
   type SandboxConfig,
   type SandboxFactory,
   type SandboxFileRecord,
+  type SandboxRequestCredential,
   type SandboxSourceAuth,
   type SixbErrorContext,
   SixbHost,
@@ -2231,8 +2232,9 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("rejects an incompatible explicit network policy before acquiring state or compute", async () => {
-    // Regression proof: widen an explicit none policy in workspaceNetwork; provider calls start.
+  test("rejects a none network policy before acquiring state or compute", async () => {
+    // Regression proof: treat none like an empty restricted policy in workspaceNetwork; provider
+    // calls start.
     let providerCalls = 0
     let modelCalls = 0
     const provision = async () => {
@@ -2682,12 +2684,10 @@ describe("AgentWorker", () => {
   test.each([
     "transport",
     "replacement-failed",
-    "network-denied",
   ] as const)("does not silently bypass %s during recovery", async (failure) => {
-    // Regression proof: recreate on every resume error or bypass network validation; counts fail.
+    // Regression proof: recreate on every resume error; counts fail.
     let creates = 0
     let calls = 0
-    let resolutions = 0
     const names: string[] = []
     const sandbox = new RecordingSandbox("recovery-failure")
     const host = buildSixb(
@@ -2710,20 +2710,7 @@ describe("AgentWorker", () => {
       {
         sandboxConfig: {
           params: {},
-          resolve: () => {
-            resolutions++
-            return {
-              source: { type: "git" as const, url: "https://example.com/repo.git" },
-              ...(failure === "network-denied" && resolutions > 1
-                ? {
-                    network: {
-                      mode: "restricted" as const,
-                      allow: [{ name: "api", origin: new URL(TEST_AGENT_API_BASE_URL).origin }],
-                    },
-                  }
-                : {}),
-            }
-          },
+          resolve: () => ({ source: { type: "git", url: "https://example.com/repo.git" } }),
         },
       }
     )
@@ -2899,6 +2886,284 @@ describe("AgentWorker", () => {
       await worker.stop()
       completion.restore()
     }
+  })
+
+  test("applies the authentication guest environment on creation and resume", async () => {
+    // Regression proof: build ThreadSandboxSession's options without grant.env; the session and
+    // command assertions fail. Spread grant.env after recipe.env; the GUEST_SHARED value fails.
+    const expected = { GIT_AUTHOR_NAME: "Integration", GUEST_SHARED: "recipe" }
+    const sessions: (Readonly<Record<string, string>> | undefined)[] = []
+    const sandbox = Object.assign(new RecordingSandbox("guest-env"), {
+      setRequestCredentials: async () => {},
+    })
+
+    // Each run calls bash once, then answers from its result.
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (options) =>
+        options.messages.at(-1)?.role === "tool"
+          ? stream([
+              { type: "stream-start", warnings: [] },
+              { type: "text-start", id: "answer" },
+              { type: "text-delta", id: "answer", delta: "Done" },
+              { type: "text-end", id: "answer" },
+              finish("stop"),
+            ])
+          : stream([
+              { type: "stream-start", warnings: [] },
+              {
+                type: "tool-call",
+                toolCallId: "print-guest-env",
+                toolName: "bash",
+                input: JSON.stringify({ command: "print-guest-env" }),
+              },
+              finish("tool-calls"),
+            ]),
+    })
+    const host = buildSixb(
+      model,
+      new InMemoryBroker(),
+      {
+        supportsRequestCredentials: true,
+        create: async (options) => {
+          sessions.push(options?.env)
+          return sandbox
+        },
+        resume: async (_name, options) => {
+          sessions.push(options?.env)
+          sandbox.status = "running"
+          return sandbox
+        },
+      },
+      {
+        sandboxConfig: {
+          source: { type: "git", url: "https://example.com/repository.git" },
+          env: { GUEST_SHARED: "recipe" },
+          auth: {
+            authorize: async () => ({
+              requests: [
+                {
+                  origin: "https://example.com",
+                  path: "/repository.git/info/refs",
+                  method: "GET",
+                  headers: { Authorization: "workspace-secret" },
+                },
+              ],
+              env: { GIT_AUTHOR_NAME: "Integration", GUEST_SHARED: "auth" },
+              expiresAt: new Date(Date.now() + 3_600_000),
+              revoke: async () => {},
+            }),
+          },
+        },
+      }
+    )
+    const sdk = createTestSixb(host)
+    const thread = await sdk.agent.threads.create({ sandbox: {} })
+
+    for (let i = 0; i < 2; i++) {
+      const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })
+      const completion = observeQueueSettlement(host.queues.agents)
+      const worker = new AgentWorker(host, workerOptions())
+      await worker.start()
+      try {
+        await completion.wait()
+        expect(
+          await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
+        ).toMatchObject({ status: "succeeded" })
+      } finally {
+        await worker.stop()
+        completion.restore()
+      }
+    }
+
+    const commands = sandbox.commands.filter((call) => call.args.at(-1) === "print-guest-env")
+    expect(sessions).toEqual([expected, expected])
+    expect(commands).toHaveLength(2)
+    for (const call of commands) expect(call.options.env).toMatchObject(expected)
+  })
+
+  test("rejects an invalid authentication guest environment before provisioning", async () => {
+    // Regression proof: replace captureSandboxEnv(grant.env) with grant.env in
+    // WorkspaceAuthSession; the provider is called with the invalid environment.
+    let provisions = 0
+    let revocations = 0
+    let modelCalls = 0
+    const provision = async () => {
+      provisions++
+      return new RecordingSandbox("invalid-guest-env")
+    }
+    const host = buildSixb(
+      answerModel(() => {
+        modelCalls++
+      }),
+      new InMemoryBroker(),
+      {
+        supportsRequestCredentials: true,
+        create: provision,
+        resume: provision,
+      },
+      {
+        sandboxConfig: {
+          source: { type: "git", url: "https://example.com/repository.git" },
+          auth: {
+            authorize: async () => ({
+              requests: [
+                {
+                  origin: "https://example.com",
+                  path: "/repository.git/info/refs",
+                  method: "GET",
+                  headers: { Authorization: "workspace-secret" },
+                },
+              ],
+              env: { "GIT=AUTHOR": "Integration" },
+              expiresAt: new Date(Date.now() + 3_600_000),
+              revoke: async () => {
+                revocations++
+              },
+            }),
+          },
+        },
+      }
+    )
+    attachSixbErrorReporter(host, () => {})
+    const thread = await createTestSixb(host).agent.threads.create({ sandbox: {} })
+    const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })
+    const completion = observeQueueSettlement(host.queues.agents)
+    const worker = new AgentWorker(host, workerOptions())
+    await worker.start()
+    try {
+      await completion.wait()
+      expect(
+        await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
+      ).toMatchObject({ status: "failed" })
+      expect(
+        (await agentStorageOf(host).threads.getById({ projectId: PROJECT_ID, id: thread.id }))
+          ?.sandboxState
+      ).toBeUndefined()
+      expect(provisions).toBe(0)
+      expect(modelCalls).toBe(0)
+      expect(revocations).toBe(1)
+    } finally {
+      await worker.stop()
+      completion.restore()
+    }
+  })
+
+  test.each([
+    "omitted",
+    "restricted",
+    "all",
+  ] as const)("opens every authentication origin when the network policy is %s", async (mode) => {
+    // Regression proof: drop credentialOrigins from workspaceNetwork's required targets; the
+    // omitted and restricted policies fail. Return a restricted policy unchanged; it fails too.
+    const api = new URL(TEST_AGENT_API_BASE_URL).origin
+    const repository = "https://example.com"
+    const graphql = "https://api.example.com"
+    const registry = { name: "npm", origin: "https://registry.npmjs.org" }
+    const network =
+      mode === "omitted"
+        ? undefined
+        : mode === "all"
+          ? { mode: "all" as const }
+          : { mode: "restricted" as const, allow: [registry] }
+    const injections: (readonly SandboxRequestCredential[])[] = []
+    let issued = 0
+    let created: CreateSandboxOptions | undefined
+    let renewed!: () => void
+    const renewal = new Promise<void>((resolve) => {
+      renewed = resolve
+    })
+    const sandbox = Object.assign(new RecordingSandbox("credential-network"), {
+      setRequestCredentials: async (credentials: readonly SandboxRequestCredential[]) => {
+        injections.push(credentials)
+        if (credentials.length) renewed()
+      },
+    })
+
+    // Hold the run open until the first grant has been renewed.
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async () => {
+        await renewal
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "Done" },
+          { type: "text-end", id: "answer" },
+          finish("stop"),
+        ])
+      },
+    })
+    const host = buildSixb(
+      model,
+      new InMemoryBroker(),
+      {
+        supportsRequestCredentials: true,
+        create: async (options) => {
+          created = options
+          return sandbox
+        },
+        resume: async () => sandbox,
+      },
+      {
+        sandboxConfig: {
+          source: { type: "git", url: `${repository}/repository.git` },
+          ...(network ? { network } : {}),
+          auth: {
+            authorize: async () => {
+              const token = `token-${++issued}`
+              return {
+                requests: [
+                  { origin: repository, path: "/repository.git/info/refs", method: "GET" as const },
+                  { origin: graphql, path: "/graphql", method: "POST" as const },
+                ].map((target) => ({ ...target, headers: { Authorization: token } })),
+                // The first grant is renewed about one second after issuance.
+                expiresAt: new Date(Date.now() + (issued === 1 ? 61_000 : 3_600_000)),
+                revoke: async () => {},
+              }
+            },
+          },
+        },
+      }
+    )
+    const sdk = createTestSixb(host)
+    const thread = await sdk.agent.threads.create({ sandbox: {} })
+    const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
+    const completion = observeQueueSettlement(host.queues.agents)
+    const worker = new AgentWorker(host, workerOptions())
+    await worker.start()
+    try {
+      await completion.wait()
+      expect(
+        await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
+      ).toMatchObject({ status: "succeeded" })
+    } finally {
+      await worker.stop()
+      completion.restore()
+    }
+
+    const required = [
+      { name: "sixb-api", origin: api },
+      { name: "workspace-repository", origin: repository },
+      { name: "workspace-auth", origin: graphql },
+    ]
+    expect(created?.network).toEqual(
+      mode === "all"
+        ? { mode: "all" }
+        : { mode: "restricted", allow: mode === "restricted" ? [registry, ...required] : required }
+    )
+
+    // Every request reaches the provider, at creation and on renewal.
+    const targets = (credentials: readonly SandboxRequestCredential[] | undefined) =>
+      credentials?.map((credential) => [credential.origin, credential.headers.Authorization])
+    expect(targets(created?.requestCredentials)).toEqual([
+      [repository, "token-1"],
+      [graphql, "token-1"],
+    ])
+    expect(targets(injections[0])).toEqual([
+      [repository, "token-2"],
+      [graphql, "token-2"],
+    ])
   })
 
   test("refuses a stored workspace without a recipe before model or sandbox work", async () => {
