@@ -52,6 +52,7 @@ import { PgActionRunStorage } from "./pg-action-run-storage"
 import { PgAiCostStorage } from "./pg-ai-cost-storage"
 import { PgAiLimitStorage } from "./pg-ai-limit-storage"
 import { PgAiUsageStorage } from "./pg-ai-usage-storage"
+import { PgArtifactStorage } from "./pg-artifact-storage"
 import { createPgClient, type SQL, type SQLClient } from "./pg-client"
 import { PgExecutionStorage } from "./pg-execution-storage"
 import { PgFileDownloadGrantStorage } from "./pg-file-download-grant-storage"
@@ -166,6 +167,7 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
   readonly auth: PgAuthStorage
   readonly executions: PgExecutionStorage
   readonly agents: PgAgentStorage
+  readonly artifacts: PgArtifactStorage
   readonly aiUsage: AiUsageStorage
   readonly aiCosts: AiCostStorage
   readonly aiLimits: AiLimitStorage
@@ -252,6 +254,7 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
     this.auth = createAuthOperationScope(stores.auth, scope)
     this.executions = createOperationScopedFacade(stores.executions, scope)
     this.agents = createAgentOperationScope(stores.agents, scope)
+    this.artifacts = createOperationScopedFacade(stores.artifacts, scope)
     this.aiUsage = createOperationScopedFacade(stores.aiUsage, scope)
     this.aiCosts = createOperationScopedFacade(stores.aiCosts, scope)
     this.aiLimits = createOperationScopedFacade(stores.aiLimits, scope)
@@ -414,6 +417,7 @@ function createPostgresStores(
     auth,
     executions,
     agents: new PgAgentStorage({ sql, executions }),
+    artifacts: new PgArtifactStorage(sql),
     aiUsage: new PgAiUsageStorage(sql),
     aiCosts: new PgAiCostStorage(sql),
     aiLimits: new PgAiLimitStorage(sql),
@@ -440,6 +444,7 @@ interface PostgresStoreSet {
   readonly auth: PgAuthStorage
   readonly executions: PgExecutionStorage
   readonly agents: PgAgentStorage
+  readonly artifacts: PgArtifactStorage
   readonly aiUsage: PgAiUsageStorage
   readonly aiCosts: PgAiCostStorage
   readonly aiLimits: PgAiLimitStorage

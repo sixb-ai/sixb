@@ -35,6 +35,11 @@ export {
   seedAiUsageStorageContractExecutions,
 } from "./ai-usage-storage-contract"
 export {
+  type ArtifactStorageContractStorage,
+  type ArtifactStorageContractSuiteOptions,
+  runArtifactStorageContractSuite,
+} from "./artifact-storage-contract"
+export {
   type AuthStorageContractSuiteOptions,
   runAuthStorageContractSuite,
 } from "./auth-storage-contract"

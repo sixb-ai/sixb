@@ -194,6 +194,30 @@ export type {
 } from "./ai-usage"
 export { AiUsageStorageError, aggregateAiModelCallUsage, InMemoryAiUsageStorage } from "./ai-usage"
 export type {
+  ArtifactFile,
+  ArtifactKind,
+  ArtifactOrigin,
+  ArtifactOutline,
+  ArtifactRecord,
+  ArtifactReference,
+  ArtifactStorage,
+  ArtifactStorageErrorCode,
+  ArtifactVersionInput,
+  ArtifactVersionRecord,
+  CreateArtifactInput,
+  DeleteArtifactInput,
+  DeleteArtifactVersionsByOriginInput,
+  GetArtifactInput,
+  GetArtifactVersionInput,
+  ListArtifactsInput,
+  ListArtifactsResult,
+  ListArtifactVersionsInput,
+  ListArtifactVersionsResult,
+  PublishArtifactVersionInput,
+  PublishedArtifactVersion,
+} from "./artifacts"
+export { ArtifactStorageError } from "./artifacts"
+export type {
   AccessTokenRecord,
   AuthAccessTokenStore,
   AuthDeviceAuthorizationStore,
