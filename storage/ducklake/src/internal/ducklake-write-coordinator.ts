@@ -53,7 +53,7 @@ import {
   quoteIdentifier,
   quoteSqlString,
 } from "./sql"
-import { parseCommitMetadata, type SixbCommitMetadata } from "./versions"
+import { parseCommitMetadata, parseVersionId, type SixbCommitMetadata } from "./versions"
 
 export interface DuckLakeCommitDatasetVersionInput {
   readonly dataset: DatasetDefinition
@@ -321,12 +321,11 @@ export class DuckLakeWriteCoordinator {
       })
       input.signal?.throwIfAborted()
 
-      // A commit that changes no rows is decided against the latest version, read in this
-      // transaction if beginning it did not.
+      // A commit that changes no rows is decided against the latest version it compared with.
       const noOpBase = changeResult.dataChangeExpected
         ? undefined
         : latestVersion === undefined
-          ? await this.snapshots.getLatestVersionSummaryForDefinition(input.runtime, input.dataset)
+          ? await this.latestVersionAtReadSnapshot(input)
           : latestVersion
 
       const createsVersion =
@@ -550,6 +549,27 @@ export class DuckLakeWriteCoordinator {
         lineage,
       })
     )
+  }
+
+  /**
+   * The latest version a write that began without reading it compared its rows with: the one at
+   * the lake snapshot its first read fixed. The version metadata also shows versions committed
+   * since. One of this dataset means the rows were compared with an older version, so the write
+   * reruns.
+   */
+  private async latestVersionAtReadSnapshot(
+    input: DuckLakeCommitVersionOutcomeRuntimeInput
+  ): Promise<DuckLakeVersionSummary | null> {
+    const { snapshotId, latestVersion } =
+      await this.snapshots.getLatestVersionSummaryAtCurrentSnapshot(input.runtime, input.dataset)
+
+    if (latestVersion && BigInt(parseVersionId(latestVersion.versionId)) > BigInt(snapshotId)) {
+      throw new CatalogMovedError(
+        `[SixbDuckLake] Dataset '${input.dataset.id}' changed while an unchanged write was compared with it.`
+      )
+    }
+
+    return latestVersion
   }
 
   private async versionForNoOpCommit(
