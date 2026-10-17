@@ -217,7 +217,9 @@ describe("the viewer", () => {
                 { depth: 2, text: "Costs", slug: "costs" },
               ],
             }
-          : { kind: "file", mediaType: input.files[0]?.file.mediaType ?? "" },
+          : input.kind === "sheet"
+            ? { kind: "sheet", sheets: [], charts: [] }
+            : { kind: "file", mediaType: input.files[0]?.file.mediaType ?? "" },
       references: [],
       author: { type: "user", id: "user-1" },
       createdAt: "2026-10-02T12:00:00.000Z",
@@ -292,18 +294,46 @@ describe("the viewer", () => {
     expect(html).toContain("<span>File</span>")
   })
 
-  test("says a kind is not viewable yet rather than guessing", () => {
+  test("shows a sheet as a spreadsheet: its tabs, its typed columns, and its rows", () => {
     const html = render({
       kind: "sheet",
-      entry: "workbook.xlsx",
+      entry: "workbook.json",
       files: [
-        {
-          path: "workbook.xlsx",
-          file: fileRef("xlsx", 4_096, "application/vnd.ms-excel"),
-        },
+        { path: "workbook.json", file: fileRef("workbook", 200, "application/json") },
+        { path: "sheets/Summary.csv", file: fileRef("summary", 120, "text/csv") },
+        { path: "sheets/Regions.csv", file: fileRef("regions", 80, "text/csv") },
       ],
+      texts: {
+        "workbook.json": JSON.stringify({
+          sheets: [
+            { name: "Summary", columns: { Revenue: "currency", Margin: "percent" } },
+            { name: "Regions" },
+          ],
+          charts: [{ name: "revenue", type: "bar", sheet: "Summary", x: "Quarter", y: "Revenue" }],
+        }),
+        "sheets/Summary.csv":
+          "Quarter,Revenue,Margin\nQ2 2026,4380000,0.281\nQ3 2026,5560000,0.351\n",
+      },
     })
-    expect(html).toContain("sheet")
+
+    expect(html).toContain('role="tablist"')
+    expect(html).toMatch(/role="tab" aria-selected="true"[^>]*>Summary</)
+    expect(html).toMatch(/role="tab" aria-selected="false"[^>]*>Regions</)
+    expect(html).toContain('aria-label="Download Summary as CSV"')
+    expect(html).toContain("$5,560,000")
+    expect(html).toContain("35.1%")
+    expect(html).toContain("Summary · 2 rows · Row 1 frozen")
+    // The workbook's entry is not a file a reader wants; each sheet downloads as CSV instead.
+    expect(html).not.toContain("workbook.json")
+  })
+
+  test("says a kind is not viewable yet rather than guessing", () => {
+    const html = render({
+      kind: "slides",
+      entry: "slides.md",
+      files: [{ path: "slides.md", file: fileRef("slides", 4_096, "text/markdown") }],
+    })
+    expect(html).toContain("slides")
     expect(html).not.toContain("data-sixb-artifact=")
   })
 

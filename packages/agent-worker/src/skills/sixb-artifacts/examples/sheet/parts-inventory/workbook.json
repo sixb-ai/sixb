@@ -1,0 +1,33 @@
+{
+  "sheets": [
+    {
+      "name": "Inventory",
+      "frozenColumns": 1,
+      "columns": {
+        "On hand": "number",
+        "Reorder point": "number",
+        "Lead time (weeks)": "number",
+        "Unit cost": { "type": "currency", "currency": "USD" },
+        "Last received": "date",
+        "Supplier": "link"
+      },
+      "widths": { "Part": 200 }
+    },
+    {
+      "name": "Spend",
+      "columns": {
+        "Q3 spend": { "type": "currency", "currency": "USD", "decimals": 0 }
+      }
+    }
+  ],
+  "charts": [
+    {
+      "name": "spend-by-category",
+      "type": "pie",
+      "sheet": "Spend",
+      "x": "Category",
+      "y": "Q3 spend",
+      "title": "Parts spend by category, Q3"
+    }
+  ]
+}

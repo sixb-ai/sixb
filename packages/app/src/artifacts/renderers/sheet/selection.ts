@@ -1,0 +1,152 @@
+import { parseSheetNumber } from "@sixb/core/artifacts"
+import type { SheetModel } from "./model"
+
+// Grid coordinates: row 0 is the header row, row 1 the first data row as currently ordered;
+// column 0 is the sheet's first column. A1 names count rows from 1, so grid row 0 is row 1.
+
+export interface CellPoint {
+  readonly row: number
+  readonly column: number
+}
+
+export interface CellRange {
+  readonly top: number
+  readonly left: number
+  readonly bottom: number
+  readonly right: number
+}
+
+export function cellRange(anchor: CellPoint, focus: CellPoint): CellRange {
+  return {
+    top: Math.min(anchor.row, focus.row),
+    left: Math.min(anchor.column, focus.column),
+    bottom: Math.max(anchor.row, focus.row),
+    right: Math.max(anchor.column, focus.column),
+  }
+}
+
+export function inRange(range: CellRange, row: number, column: number): boolean {
+  return row >= range.top && row <= range.bottom && column >= range.left && column <= range.right
+}
+
+/** `A`, `Z`, `AA`, `AB`… */
+export function columnLetter(index: number): string {
+  let letters = ""
+  for (let rest = index + 1; rest > 0; rest = Math.floor((rest - 1) / 26)) {
+    letters = String.fromCharCode(65 + ((rest - 1) % 26)) + letters
+  }
+  return letters
+}
+
+/** `B2`, or `B2:D5` for more than one cell. */
+export function rangeLabel(range: CellRange): string {
+  const start = `${columnLetter(range.left)}${range.top + 1}`
+  const end = `${columnLetter(range.right)}${range.bottom + 1}`
+  return start === end ? start : `${start}:${end}`
+}
+
+export interface RangeStats {
+  /** Cells with a value. */
+  readonly count: number
+  /** Cells of numeric columns that hold a number; the sum and average are theirs. */
+  readonly numericCount: number
+  readonly sum: number
+  readonly average?: number
+}
+
+/** What a spreadsheet's status bar says about a selection. Header cells are labels, not values. */
+export function rangeStats(
+  range: CellRange,
+  model: SheetModel,
+  order: readonly number[]
+): RangeStats {
+  let count = 0
+  let numericCount = 0
+  let sum = 0
+  for (let row = Math.max(range.top, 1); row <= range.bottom; row += 1) {
+    const values = model.rows[order[row - 1] ?? -1]
+    if (!values) continue
+    for (let column = range.left; column <= range.right; column += 1) {
+      const value = values[column] ?? ""
+      if (!value.trim()) continue
+      count += 1
+      if (!model.columns[column]?.numeric) continue
+      const number = parseSheetNumber(value)
+      if (number === undefined) continue
+      numericCount += 1
+      sum += number
+    }
+  }
+  return { count, numericCount, sum, ...(numericCount > 0 ? { average: sum / numericCount } : {}) }
+}
+
+/** The selection as tab-separated values, the shape every spreadsheet pastes. */
+export function rangeTsv(range: CellRange, model: SheetModel, order: readonly number[]): string {
+  const lines: string[] = []
+  for (let row = range.top; row <= range.bottom; row += 1) {
+    const values =
+      row === 0 ? model.columns.map((column) => column.name) : model.rows[order[row - 1] ?? -1]
+    if (!values) continue
+    lines.push(
+      values
+        .slice(range.left, range.right + 1)
+        .map((value) => value.replace(/[\t\r\n]+/g, " "))
+        .join("\t")
+    )
+  }
+  return lines.join("\n")
+}
+
+export type MoveKey = "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Home" | "End"
+
+/** Where a key moves the focus cell; `jump` goes to the edge, as with Cmd or Ctrl held. */
+export function moveFocus(
+  point: CellPoint,
+  key: MoveKey,
+  bounds: { readonly rows: number; readonly columns: number },
+  jump = false
+): CellPoint {
+  const lastRow = bounds.rows - 1
+  const lastColumn = bounds.columns - 1
+  switch (key) {
+    case "ArrowUp":
+      return { ...point, row: jump ? 0 : Math.max(0, point.row - 1) }
+    case "ArrowDown":
+      return { ...point, row: jump ? lastRow : Math.min(lastRow, point.row + 1) }
+    case "ArrowLeft":
+      return { ...point, column: jump ? 0 : Math.max(0, point.column - 1) }
+    case "ArrowRight":
+      return { ...point, column: jump ? lastColumn : Math.min(lastColumn, point.column + 1) }
+    case "Home":
+      return jump ? { row: 0, column: 0 } : { ...point, column: 0 }
+    case "End":
+      return jump ? { row: lastRow, column: lastColumn } : { ...point, column: lastColumn }
+  }
+}
+
+export type SortDirection = "ascending" | "descending"
+
+/** The order of the data rows sorted by one column: numbers as numbers, the rest as text. */
+export function sortedOrder(
+  model: SheetModel,
+  sort: { readonly column: number; readonly direction: SortDirection } | null,
+  locale: string
+): number[] {
+  const order = model.rows.map((_, index) => index)
+  if (!sort) return order
+  const column = model.columns[sort.column]
+  const collator = new Intl.Collator(locale, { numeric: true, sensitivity: "base" })
+  const key = (index: number) => model.rows[index]?.[sort.column] ?? ""
+  const sign = sort.direction === "ascending" ? 1 : -1
+  return order.sort((a, b) => {
+    const left = key(a)
+    const right = key(b)
+    // Empty cells go last whichever way the column sorts.
+    if (!left.trim() || !right.trim()) return (left.trim() ? 0 : 1) - (right.trim() ? 0 : 1)
+    if (column?.numeric) {
+      const difference = (parseSheetNumber(left) ?? 0) - (parseSheetNumber(right) ?? 0)
+      if (difference !== 0) return sign * difference
+    }
+    return sign * collator.compare(left, right) || a - b
+  })
+}

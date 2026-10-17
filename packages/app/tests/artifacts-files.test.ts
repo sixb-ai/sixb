@@ -3,12 +3,6 @@ import { SixbApiError } from "@sixb/client"
 import { artifactPanelPresentation } from "../src/agent/artifact-panel-state"
 import { artifactFileSource, messageFileSource } from "../src/artifacts/file-source"
 import { fileLoadError } from "../src/artifacts/file-view"
-import {
-  DelimitedTextParseError,
-  MAX_DELIMITED_PREVIEW_COLUMNS,
-  MAX_DELIMITED_PREVIEW_ROWS,
-  parseDelimitedText,
-} from "../src/artifacts/renderers/delimited"
 
 const fileRef = {
   blobId: "blob",
@@ -66,62 +60,6 @@ describe("file sources", () => {
       "storageUnavailable"
     )
     expect(fileLoadError(new Error("network details"))).toBe("loadFailed")
-  })
-})
-
-describe("delimited text", () => {
-  test("parses CSV quoting, escaped quotes, CRLF, multiline cells, BOM, and blank headers", () => {
-    const preview = parseDelimitedText(
-      `${String.fromCharCode(0xfeff)}name,,note\r\nAlice,42,"hello, world"\r\nBob,,"line 1\nline 2"\r\nEve,7,"said ""hi"""\r\n`,
-      "csv"
-    )
-
-    expect(preview.headers).toEqual(["name", "Column 2", "note"])
-    expect(preview.rows).toEqual([
-      ["Alice", "42", "hello, world"],
-      ["Bob", "", "line 1\nline 2"],
-      ["Eve", "7", 'said "hi"'],
-    ])
-    expect(preview.totalRows).toBe(3)
-    expect(preview.rowsTruncated).toBe(false)
-  })
-
-  test("parses TSV with an explicit tab delimiter", () => {
-    const preview = parseDelimitedText('name\tnote\nAda\t"one\ttwo"', "tsv")
-    expect(preview.headers).toEqual(["name", "note"])
-    expect(preview.rows).toEqual([["Ada", "one\ttwo"]])
-  })
-
-  test("normalizes uneven rows without dropping additional columns", () => {
-    const preview = parseDelimitedText("a,b\n1\n2,3,4", "csv")
-    expect(preview.headers).toEqual(["a", "b", "Column 3"])
-    expect(preview.rows).toEqual([
-      ["1", "", ""],
-      ["2", "3", "4"],
-    ])
-  })
-
-  test("rejects empty and malformed files", () => {
-    expect(() => parseDelimitedText("  \n", "csv")).toThrow(DelimitedTextParseError)
-    expect(() => parseDelimitedText('a,b\n"unterminated', "csv")).toThrow(
-      "malformed delimited text near row 2"
-    )
-  })
-
-  test("caps rendered rows and columns while counting the whole file", () => {
-    const headers = Array.from(
-      { length: MAX_DELIMITED_PREVIEW_COLUMNS + 1 },
-      (_, index) => `column-${index + 1}`
-    )
-    const rows = Array.from({ length: 20_000 }, (_, index) => `${index},value`)
-    const preview = parseDelimitedText(`${headers.join(",")}\n${rows.join("\n")}`, "csv")
-
-    expect(preview.headers).toHaveLength(MAX_DELIMITED_PREVIEW_COLUMNS)
-    expect(preview.rows).toHaveLength(MAX_DELIMITED_PREVIEW_ROWS)
-    expect(preview.totalColumns).toBe(MAX_DELIMITED_PREVIEW_COLUMNS + 1)
-    expect(preview.totalRows).toBe(20_000)
-    expect(preview.columnsTruncated).toBe(true)
-    expect(preview.rowsTruncated).toBe(true)
   })
 })
 

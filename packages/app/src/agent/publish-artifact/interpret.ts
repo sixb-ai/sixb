@@ -57,18 +57,28 @@ export function publishTitle(tool: NormalizedTool): string {
   return isRecord(tool.input) && typeof tool.input.title === "string" ? tool.input.title : ""
 }
 
+/** An artifact as a turn left it, and whether the turn created it or revised an earlier one. */
+export interface TurnArtifact extends PublishedArtifact {
+  readonly created: boolean
+}
+
 /**
  * Each artifact a turn published, once, at the last version the turn published, in the order the
  * turn first published them.
  */
-export function turnArtifacts(parts: readonly NormalizedPart[]): PublishedArtifact[] {
-  const byId = new Map<string, PublishedArtifact>()
+export function turnArtifacts(parts: readonly NormalizedPart[]): TurnArtifact[] {
+  const byId = new Map<string, TurnArtifact>()
   for (const part of parts) {
     if (part.kind !== "tool") continue
     const published = publishedArtifact(part.tool)
     if (!published) continue
     const earlier = byId.get(published.artifactId)
-    if (!earlier || published.version > earlier.version) byId.set(published.artifactId, published)
+    const created = earlier?.created === true || part.tool.toolName === "publish_artifact"
+    if (!earlier || published.version > earlier.version) {
+      byId.set(published.artifactId, { ...published, created })
+    } else if (created !== earlier.created) {
+      byId.set(published.artifactId, { ...earlier, created })
+    }
   }
   return [...byId.values()]
 }

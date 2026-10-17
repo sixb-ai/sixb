@@ -1,0 +1,5 @@
+Region,Visits,Within SLA,Change,Parts cost,Lead
+North,1284,0.961,0.042,182400,https://ops.northline.example/regions/north
+Central,962,0.934,0.068,141950,https://ops.northline.example/regions/central
+South,1107,0.918,-0.013,166020,https://ops.northline.example/regions/south
+Coastal,448,0.95,0.021,58310,https://ops.northline.example/regions/coastal

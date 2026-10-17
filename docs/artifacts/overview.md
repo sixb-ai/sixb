@@ -6,10 +6,11 @@ owner reads it.
 
 ## Kinds
 
-| Kind       | What it holds                                                 |
-| ---------- | ------------------------------------------------------------- |
-| `document` | A Markdown report in `document.md`, with its images beside it |
-| `file`     | One file, shown as its type allows or offered for download    |
+| Kind       | What it holds                                                          |
+| ---------- | ---------------------------------------------------------------------- |
+| `document` | A Markdown report in `document.md`, with its images beside it          |
+| `sheet`    | Tables of data, one CSV per sheet, with typed columns and their charts |
+| `file`     | One file, shown as its type allows or offered for download             |
 
 ## Publish an artifact
 
@@ -44,8 +45,8 @@ From outside the server, use `POST /api/artifacts` and
 
 ## The Agent publishes
 
-In a conversation, the Agent publishes what you ask it to make, such as a report, a brief, or a file
-in a format you name, as an artifact. Each artifact gets a card under the reply and opens beside the
+In a conversation, the Agent publishes what you ask it to make, such as a report, a brief, a table
+of data, or a file in a format you name, as an artifact. Each artifact gets a card under the reply and opens beside the
 conversation as soon as it is published, while the Agent is still working. Ask for a change and the
 Agent publishes the next version of the same artifact; the version menu keeps the earlier ones. The
 conversation's header lists every artifact it published.
@@ -71,10 +72,56 @@ A document is Markdown with tables, footnotes, and task lists. A few conventions
   caption: `![Revenue by region](figures/revenue.png "Revenue by region, Q3")`.
 - Table columns of figures align right.
 
+## Write a sheet
+
+A sheet is `workbook.json` and one CSV per sheet under `sheets/`. The CSV holds raw values; the
+workbook says how to read them:
+
+```json
+{
+  "sheets": [
+    {
+      "name": "Regions",
+      "frozenColumns": 1,
+      "columns": {
+        "Visits": "number",
+        "Within SLA": { "type": "percent", "decimals": 1 },
+        "Parts cost": { "type": "currency", "currency": "USD" }
+      }
+    }
+  ],
+  "charts": [{ "name": "sla", "type": "bar", "sheet": "Regions", "x": "Region", "y": "Within SLA" }]
+}
+```
+
+```text
+sheets/Regions.csv
+Region,Visits,Within SLA,Parts cost
+North,1284,0.961,182400
+Central,962,0.934,141950
+```
+
+- A column is `text` unless the workbook gives it a type: `number`, `currency`, `percent` (written
+  as a fraction, `0.961`), `date` (`2026-09-30`), `link` (a full `https://` address), or `image`
+  (the path of an image file in the artifact).
+- Values are formatted in the reader's locale, so write them without symbols or separators.
+- `frozenRows` (default 1, the header) and `frozenColumns` (default 0) stay in view while the
+  sheet scrolls; `widths` sets columns' widths in pixels.
+- A chart is a `bar`, `line`, `area`, or `pie` chart of up to five `y` columns against an `x`
+  column. Bar and area charts can be `stacked`; a pie has one `y` column and at most five rows.
+
+Publishing reads every typed cell and every chart against its sheet and refuses the version with
+the file, row, and column to fix. A sheet holds at most 200 columns and 100,000 rows, and a
+workbook 20 sheets and 10 charts.
+
+Readers sort columns, select a range to see its sum, average, and count, copy cells, and download
+each sheet as CSV. A CSV or TSV `file` artifact opens in the same grid.
+
 ## Open an artifact
 
 Every artifact has a page at `/artifacts/{artifactId}` that fills the window, over your app's
-navigation. Add `?v=2` for a version and `?part=revenue` to open at a section. In an agent
+navigation. Add `?v=2` for a version and `?part=revenue` to open at a document's section, a
+sheet (`?part=Regions`), or a chart (`?part=chart=sla`). In an agent
 conversation, artifacts open beside the chat.
 
 The link button in an artifact's header copies a link to its page, and the one beside a heading a

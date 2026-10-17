@@ -38,9 +38,7 @@ describe("agent chat localization", () => {
   })
 
   test("composes grammatical French sentences", () => {
-    expect(artifactsFr.files.showing(500, 1_200)).toBe(
-      "Seules les 500 premières lignes sur 1\u202f200 sont affichées."
-    )
+    expect(artifactsFr.sheet.frozenRows(3)).toBe("Lignes 1 à 3 figées")
     expect(fr.web.read(fr.web.webPage)).toBe("Page consultée : page web")
   })
 
