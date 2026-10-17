@@ -677,8 +677,11 @@ export function CheckView({
   broker: { ok: boolean; message?: string }
   queues: { ok: boolean; message?: string }
   projectValidation?: { ok: boolean; message?: string }
-  /** The pipeline markings preflight: what SQL steps derive, checked against projections. */
-  markings?: { ok: boolean; message?: string }
+  /**
+   * The pipeline markings preflight: what SQL steps derive, checked against projections. A warning
+   * reports projections whose applied version adds markings the code no longer declares.
+   */
+  markings?: { ok: boolean; warning?: boolean; message?: string }
   ontology?: { enabled: boolean; source: string; errors: number; warnings: number }
   warnings: readonly string[]
 }) {
@@ -696,8 +699,9 @@ export function CheckView({
     return row.message ?? (row.ok ? "ok" : "failed")
   }
 
-  function statusColor(ok: boolean): string {
-    return ok ? "green" : "red"
+  function statusColor(ok: boolean, warning = false): string {
+    if (!ok) return "red"
+    return warning ? "yellow" : "green"
   }
 
   return (
@@ -731,7 +735,9 @@ export function CheckView({
         </Text>
         <Text>
           <Text dimColor>{padLabel("Markings", 14)}</Text>
-          <Text color={statusColor(markingsCheck.ok)}>{statusText(markingsCheck)}</Text>
+          <Text color={statusColor(markingsCheck.ok, markingsCheck.warning)}>
+            {statusText(markingsCheck)}
+          </Text>
         </Text>
       </Box>
       {ontology ? (
@@ -831,7 +837,15 @@ export function DbMigrateView({
   )
 }
 
-export function LakeCheckView({ projectId, status }: { projectId: string; status: "ok" }) {
+export function LakeCheckView({
+  projectId,
+  status,
+  warnings = [],
+}: {
+  projectId: string
+  status: "ok"
+  warnings?: readonly string[]
+}) {
   return (
     <Box flexDirection="column">
       <Text color="green" bold>
@@ -840,6 +854,13 @@ export function LakeCheckView({ projectId, status }: { projectId: string; status
       <Text dimColor>{projectId}</Text>
       <Spacer />
       <KeyValueList items={[{ label: "Lake", value: status }]} />
+      {warnings.length > 0 ? (
+        <>
+          <Spacer />
+          <SectionTitle>Warnings</SectionTitle>
+          <BulletList items={warnings} />
+        </>
+      ) : null}
     </Box>
   )
 }

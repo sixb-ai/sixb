@@ -2,7 +2,11 @@ import { resolve } from "node:path"
 import { errorMessage } from "../lib/errors"
 import { checkRuntimeHealth } from "../lib/health"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
-import { checkRuntimePipelineMarkings, stopSixbProviders } from "../lib/runtime"
+import {
+  checkRuntimePipelineMarkings,
+  readAppliedMarkingNotices,
+  stopSixbProviders,
+} from "../lib/runtime"
 import { generateProjectTypes } from "../lib/typegen"
 import { CheckView, renderStatic } from "../ui"
 
@@ -18,7 +22,7 @@ export async function runCheck(options: CheckOptions = {}) {
   try {
     const objectTypes = sixb.definitions.ontology.listObjectTypes()
     const health = await checkRuntimeHealth(sixb)
-    const markings = await checkMarkings(sixb)
+    const markings = await checkMarkings(sixb, health.storage.ok)
 
     const projectValidation =
       objectTypes.length > 0
@@ -42,7 +46,7 @@ export async function runCheck(options: CheckOptions = {}) {
           // are a different thing and counting them here read as ontology drift.
           warnings: 0,
         }}
-        warnings={health.warnings}
+        warnings={[...health.warnings, ...markings.warnings]}
       />
     )
 
@@ -70,12 +74,42 @@ export async function runCheck(options: CheckOptions = {}) {
 
 const CLOSE_TIMEOUT_MS = 10_000
 
-async function checkMarkings(sixb: LoadedSixbHost): Promise<{ ok: boolean; message?: string }> {
+interface MarkingsCheck {
+  readonly ok: boolean
+  readonly warning?: boolean
+  readonly message?: string
+  readonly warnings: readonly string[]
+}
+
+/**
+ * The SQL preflight, then what the versions projections applied still add to the code's markings.
+ * The second is a warning, not a failure: the code is right, and only rerunning the pipeline with
+ * it deployed applies a version it allows.
+ */
+async function checkMarkings(sixb: LoadedSixbHost, storageOk: boolean): Promise<MarkingsCheck> {
   try {
     await checkRuntimePipelineMarkings(sixb)
-    return { ok: true }
   } catch (error) {
-    return { ok: false, message: errorMessage(error) }
+    return { ok: false, message: errorMessage(error), warnings: [] }
+  }
+
+  // The storage row already reports an unreachable storage.
+  if (!storageOk) return { ok: true, warnings: [] }
+
+  try {
+    const notices = await readAppliedMarkingNotices(sixb)
+    if (notices.length === 0) return { ok: true, warnings: [] }
+
+    const count =
+      notices.length === 1 ? "1 projection applied" : `${notices.length} projections applied`
+    return {
+      ok: true,
+      warning: true,
+      message: `${count} a version the code does not allow`,
+      warnings: notices,
+    }
+  } catch (error) {
+    return { ok: false, message: errorMessage(error), warnings: [] }
   }
 }
 

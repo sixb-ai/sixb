@@ -34,6 +34,25 @@ describe("ontology mutation runtime", () => {
     expect(wakes).toBe(3)
   })
 
+  // Reproduce: drop `applied(...)` around replaceProjection in createOntologyMutationRuntime; the
+  // host's next read keeps the markings of the version the projection replaced.
+  test("reports each projection that may have applied a version, even an empty one", async () => {
+    const applied: string[] = []
+    const runtime = createOntologyMutationRuntime({
+      materializer: materializerWithEventCount(0),
+      notifyCommittedFacts: () => {},
+      onProjectionApplied: () => applied.push("applied"),
+    })
+
+    await runtime.commitEdits({} as never)
+    await runtime.appendTelemetry({} as never)
+    expect(applied).toEqual([])
+
+    await runtime.replaceProjection({} as never)
+    await runtime.finishProjection({} as never)
+    expect(applied).toEqual(["applied", "applied"])
+  })
+
   test("does not wake for an empty commit or let wake-up failure reject a durable commit", async () => {
     let wakes = 0
     const emptyBound = materializerWithEventCount(0)
