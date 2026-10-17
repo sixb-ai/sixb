@@ -2,4 +2,11 @@
 
 export { isArtifactId } from "../ids"
 export { ARTIFACT_LIMITS } from "../limits"
-export { type PublishArtifactInput, publishArtifact } from "./publish"
+export {
+  artifactVersionWarnings,
+  type PreparedArtifactVersion,
+  type PublishArtifactInput,
+  prepareArtifactVersion,
+  publishArtifact,
+  storeArtifactVersion,
+} from "./publish"

@@ -1,5 +1,6 @@
 import type { ArtifactFile } from "../../../storage/artifacts/types"
 import { isArtifactAddress, parseArtifactAddress } from "../../address"
+import { decodeHtmlEntities } from "../../html"
 import { ARTIFACT_LIMITS } from "../../limits"
 import type { SlidesOutline } from "../../outline"
 import { type ArtifactBlobStorage, invalidArtifact, readArtifactText } from "../files"
@@ -69,7 +70,7 @@ export async function validateSlides(
     })
     .on("a[href]", {
       element(element) {
-        const href = element.getAttribute("href") ?? ""
+        const href = decodeHtmlEntities(element.getAttribute("href") ?? "")
         if (isArtifactAddress(href)) {
           references.push({ address: href.trim(), as: "link", at: at() })
         }
@@ -77,7 +78,7 @@ export async function validateSlides(
     })
     .on("img[src]", {
       element(element) {
-        const source = (element.getAttribute("src") ?? "").trim()
+        const source = decodeHtmlEntities(element.getAttribute("src") ?? "").trim()
         if (!isArtifactAddress(source)) return
         if (!parseArtifactAddress(source)?.path) {
           refused ??= `An <img> shows a file from another artifact, and '${source}' names none: show a chart, a range, a section, or a slide with <sixb-embed src="${source}"></sixb-embed>.`
@@ -88,7 +89,7 @@ export async function validateSlides(
     })
     .on("sixb-embed", {
       element(element) {
-        const source = (element.getAttribute("src") ?? "").trim()
+        const source = decodeHtmlEntities(element.getAttribute("src") ?? "").trim()
         if (!isArtifactAddress(source)) {
           refused ??= `<sixb-embed> shows another artifact: give it src="artifact:…", such as artifact:art_k3m9q2x7tp#chart=revenue.`
           return
@@ -98,7 +99,9 @@ export async function validateSlides(
     })
     .on("iframe[src], object[data], embed[src]", {
       element(element) {
-        const source = (element.getAttribute("src") ?? element.getAttribute("data") ?? "").trim()
+        const source = decodeHtmlEntities(
+          element.getAttribute("src") ?? element.getAttribute("data") ?? ""
+        ).trim()
         if (isArtifactAddress(source)) {
           refused ??= `${SLIDES_ENTRY} frames '${source}': show another artifact with <sixb-embed src="${source}"></sixb-embed>, or a file of one with <img>.`
         }
@@ -122,33 +125,10 @@ export async function validateSlides(
     outline: {
       kind: "slides",
       slides: slides.map(({ title }) => {
-        const plain = decodeEntities(title).replace(/\s+/g, " ").trim()
+        const plain = decodeHtmlEntities(title).replace(/\s+/g, " ").trim()
         return plain ? { title: plain } : {}
       }),
     },
     references,
   }
-}
-
-const ENTITIES: Readonly<Record<string, string>> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  apos: "'",
-  nbsp: " ",
-}
-
-/** HTMLRewriter hands over text as written in the HTML, entities included. */
-function decodeEntities(text: string): string {
-  return text.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
-    if (entity[0] !== "#") return ENTITIES[entity.toLowerCase()] ?? match
-    const code =
-      entity[1]?.toLowerCase() === "x"
-        ? Number.parseInt(entity.slice(2), 16)
-        : Number(entity.slice(1))
-    return Number.isInteger(code) && code >= 0 && code <= 0x10ffff
-      ? String.fromCodePoint(code)
-      : match
-  })
 }

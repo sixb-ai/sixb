@@ -6,7 +6,7 @@ import {
   type FrameRequest,
   type FrameStart,
   frameStartHash,
-} from "@sixb/core/artifacts"
+} from "@sixb/core/internal/artifacts/frame-protocol"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import {

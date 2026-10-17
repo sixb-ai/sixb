@@ -1,4 +1,4 @@
-import type { DeckMode, FrameEmbed, FrameEvent } from "@sixb/core/artifacts"
+import type { DeckMode, FrameEmbed, FrameEvent } from "@sixb/core/internal/artifacts/frame-protocol"
 import { cn } from "@sixb/ui/lib/utils"
 import { ChevronLeft, ChevronRight, Fullscreen, LayoutGrid, type LucideIcon, X } from "lucide-react"
 import {

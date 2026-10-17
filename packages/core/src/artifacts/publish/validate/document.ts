@@ -1,6 +1,7 @@
 import { posix } from "node:path"
 import type { ArtifactFile } from "../../../storage/artifacts/types"
 import { isArtifactAddress } from "../../address"
+import { decodeHtmlEntities } from "../../html"
 import { ARTIFACT_LIMITS } from "../../limits"
 import { createHeadingSlugger, type DocumentHeading, type DocumentOutline } from "../../outline"
 import { type ArtifactBlobStorage, invalidArtifact, readArtifactText } from "../files"
@@ -53,7 +54,7 @@ export async function validateDocument(
     })
     .on("img", {
       element(element) {
-        const source = decodeHtml(element.getAttribute("src") ?? "")
+        const source = decodeHtmlEntities(element.getAttribute("src") ?? "")
         if (isArtifactAddress(source)) {
           addresses.push({ address: source.trim(), as: "embed", heading: headings.length - 1 })
         } else {
@@ -63,7 +64,7 @@ export async function validateDocument(
     })
     .on("a", {
       element(element) {
-        const href = decodeHtml(element.getAttribute("href") ?? "")
+        const href = decodeHtmlEntities(element.getAttribute("href") ?? "")
         if (isArtifactAddress(href)) {
           addresses.push({ address: href.trim(), as: "link", heading: headings.length - 1 })
         }
@@ -76,7 +77,7 @@ export async function validateDocument(
 
   const slug = createHeadingSlugger()
   const outlined = headings.map(({ depth, text }): DocumentHeading => {
-    const plain = decodeHtml(text).replace(/\s+/g, " ").trim()
+    const plain = decodeHtmlEntities(text).replace(/\s+/g, " ").trim()
     return { depth, text: plain, slug: slug(plain) }
   })
   return {
@@ -110,27 +111,4 @@ function safeDecodeUri(value: string): string {
   } catch {
     return value
   }
-}
-
-const NAMED_ENTITIES: Readonly<Record<string, string>> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  apos: "'",
-  nbsp: String.fromCharCode(0xa0),
-}
-
-/** HTMLRewriter hands over text and attributes as written in the HTML, entities included. */
-function decodeHtml(value: string): string {
-  return value.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
-    if (entity[0] !== "#") return NAMED_ENTITIES[entity.toLowerCase()] ?? match
-    const codePoint =
-      entity[1]?.toLowerCase() === "x"
-        ? Number.parseInt(entity.slice(2), 16)
-        : Number(entity.slice(1))
-    return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
-      ? String.fromCodePoint(codePoint)
-      : match
-  })
 }

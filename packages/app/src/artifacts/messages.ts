@@ -9,7 +9,6 @@ export const en = {
     document: "Document",
     sheet: "Sheet",
     slides: "Slides",
-    page: "Page",
     file: "File",
   },
   viewer: {
@@ -31,7 +30,6 @@ export const en = {
     notFoundDescription: "It was deleted, or it belongs to someone else.",
     storageUnavailable: "Artifact storage is not available.",
     loadFailed: "This artifact could not be loaded.",
-    unsupportedKind: (kind: string) => `Sixb can't show ${kind} artifacts yet.`,
   },
   document: {
     meta: (version: number, date: string) => `Version ${number(version)} · ${date}`,
@@ -167,7 +165,6 @@ export const fr: Translation<ArtifactMessages> = {
     document: "Document",
     sheet: "Feuille",
     slides: "Diapositives",
-    page: "Page",
     file: "Fichier",
   },
   viewer: {
@@ -189,7 +186,6 @@ export const fr: Translation<ArtifactMessages> = {
     notFoundDescription: "Il a été supprimé, ou il appartient à quelqu’un d’autre.",
     storageUnavailable: "Le stockage des artefacts n’est pas disponible.",
     loadFailed: "Impossible de charger cet artefact.",
-    unsupportedKind: (kind) => `Sixb ne sait pas encore afficher les artefacts de type ${kind}.`,
   },
   document: {
     meta: (version, date) => `Version ${numberFr(version)} · ${date}`,

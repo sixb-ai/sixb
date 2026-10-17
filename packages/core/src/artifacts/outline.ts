@@ -2,12 +2,7 @@
  * What a version contains, read from its files when it is published. Addresses resolve against
  * it, and previews and hover cards show it without opening the files.
  */
-export type ArtifactOutline =
-  | DocumentOutline
-  | SheetOutline
-  | SlidesOutline
-  | PageOutline
-  | FileOutline
+export type ArtifactOutline = DocumentOutline | SheetOutline | SlidesOutline | FileOutline
 
 export interface DocumentOutline {
   readonly kind: "document"
@@ -38,10 +33,6 @@ export interface SlidesOutline {
   readonly kind: "slides"
   /** One entry per slide, in order; the title is the slide's first heading. */
   readonly slides: readonly { readonly title?: string }[]
-}
-
-export interface PageOutline {
-  readonly kind: "page"
 }
 
 export interface FileOutline {

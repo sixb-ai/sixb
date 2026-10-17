@@ -125,6 +125,12 @@
       "import": "./dist/agents/streams/internal.js",
       "default": "./dist/agents/streams/internal.js"
     },
+    "./internal/artifacts/frame-protocol": {
+      "types": "./dist/artifacts/frames/protocol.d.ts",
+      "bun": "./src/artifacts/frames/protocol.ts",
+      "import": "./dist/artifacts/frames/protocol.js",
+      "default": "./dist/artifacts/frames/protocol.js"
+    },
     "./internal/artifacts/frames": {
       "types": "./dist/artifacts/frames/index.d.ts",
       "bun": "./src/artifacts/frames/index.ts",

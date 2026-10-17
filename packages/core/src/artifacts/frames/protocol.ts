@@ -1,3 +1,5 @@
+import { ARTIFACT_THEME_TOKENS } from "../theme"
+
 /**
  * Messages between the app and a deck in its sandboxed frame. The app asks; the frame answers
  * each request by its id, and tells the app what happened inside it as events. Later abilities
@@ -101,26 +103,8 @@ export const DECK_KEYS = [
   "Escape",
 ] as const
 
-/** The theme tokens the app sends into a frame, read from the viewer as it is themed. */
-export const FRAME_THEME_TOKENS = [
-  "--background",
-  "--foreground",
-  "--card",
-  "--card-foreground",
-  "--muted",
-  "--muted-foreground",
-  "--primary",
-  "--primary-foreground",
-  "--accent",
-  "--accent-foreground",
-  "--border",
-  "--chart-1",
-  "--chart-2",
-  "--chart-3",
-  "--chart-4",
-  "--chart-5",
-  "--font-sans",
-  "--font-serif",
-  "--font-mono",
-  "--radius",
-] as const
+/**
+ * The theme tokens the app sends into a frame, read from the viewer as it is themed: the ones an
+ * artifact's theme may set.
+ */
+export const FRAME_THEME_TOKENS = ARTIFACT_THEME_TOKENS

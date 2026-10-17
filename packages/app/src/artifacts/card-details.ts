@@ -41,8 +41,6 @@ export function versionSummary(
         ...(file ? [formatFileSize(file.file.sizeBytes, locale, messages.files)] : []),
       ].join(" · ")
     }
-    case "page":
-      break
   }
   return [messages.kinds[outline.kind], ...details].join(" · ")
 }

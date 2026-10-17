@@ -11699,7 +11699,7 @@ export type ListArtifactsData = {
     /**
      * Only artifacts of this kind
      */
-    kind?: "document" | "sheet" | "slides" | "page" | "file"
+    kind?: "document" | "sheet" | "slides" | "file"
     limit?: string
     offset?: string
   }
@@ -11739,7 +11739,7 @@ export type ListArtifactsResponses = {
     artifacts: Array<{
       id: string
       projectId: string
-      kind: "document" | "sheet" | "slides" | "page" | "file"
+      kind: "document" | "sheet" | "slides" | "file"
       title: string
       owner: {
         type: "user" | "serviceAccount" | "system"
@@ -11758,7 +11758,7 @@ export type ListArtifactsResponse = ListArtifactsResponses[keyof ListArtifactsRe
 
 export type CreateArtifactData = {
   body: {
-    kind: "document" | "sheet" | "slides" | "page" | "file"
+    kind: "document" | "sheet" | "slides" | "file"
     title: string
     /**
      * Files stored with POST /api/files, at their paths in the artifact
@@ -11846,7 +11846,7 @@ export type CreateArtifactResponses = {
     artifact: {
       id: string
       projectId: string
-      kind: "document" | "sheet" | "slides" | "page" | "file"
+      kind: "document" | "sheet" | "slides" | "file"
       title: string
       owner: {
         type: "user" | "serviceAccount" | "system"
@@ -11900,9 +11900,6 @@ export type CreateArtifactResponses = {
             }>
           }
         | {
-            kind: "page"
-          }
-        | {
             kind: "file"
             mediaType: string
           }
@@ -11926,13 +11923,6 @@ export type CreateArtifactResponses = {
       code: string
       message: string
       part?: string
-      rect?: {
-        x: number
-        y: number
-        width: number
-        height: number
-      }
-      preview?: string
     }>
   }
 }
@@ -12026,7 +12016,7 @@ export type GetArtifactResponses = {
     artifact: {
       id: string
       projectId: string
-      kind: "document" | "sheet" | "slides" | "page" | "file"
+      kind: "document" | "sheet" | "slides" | "file"
       title: string
       owner: {
         type: "user" | "serviceAccount" | "system"
@@ -12059,7 +12049,7 @@ export type GetArtifactResponse = GetArtifactResponses[keyof GetArtifactResponse
 
 export type PublishArtifactVersionData = {
   body: {
-    kind: "document" | "sheet" | "slides" | "page" | "file"
+    kind: "document" | "sheet" | "slides" | "file"
     title: string
     /**
      * Files stored with POST /api/files, at their paths in the artifact
@@ -12150,7 +12140,7 @@ export type PublishArtifactVersionResponses = {
     artifact: {
       id: string
       projectId: string
-      kind: "document" | "sheet" | "slides" | "page" | "file"
+      kind: "document" | "sheet" | "slides" | "file"
       title: string
       owner: {
         type: "user" | "serviceAccount" | "system"
@@ -12204,9 +12194,6 @@ export type PublishArtifactVersionResponses = {
             }>
           }
         | {
-            kind: "page"
-          }
-        | {
             kind: "file"
             mediaType: string
           }
@@ -12230,13 +12217,6 @@ export type PublishArtifactVersionResponses = {
       code: string
       message: string
       part?: string
-      rect?: {
-        x: number
-        y: number
-        width: number
-        height: number
-      }
-      preview?: string
     }>
   }
 }
@@ -12379,9 +12359,6 @@ export type GetArtifactVersionResponses = {
           slides: Array<{
             title?: string
           }>
-        }
-      | {
-          kind: "page"
         }
       | {
           kind: "file"

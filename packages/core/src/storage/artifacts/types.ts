@@ -6,7 +6,7 @@ import type { FileRef } from "../../blob-storage"
 
 export type { ArtifactKind, ArtifactOutline, ArtifactReference }
 
-/** A versioned document, sheet, deck, page, or file. Its kind never changes. */
+/** A versioned document, sheet, deck, or file. Its kind never changes. */
 export interface ArtifactRecord {
   readonly projectId: string
   readonly id: string

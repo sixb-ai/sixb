@@ -1,4 +1,4 @@
-import type { DeckMode } from "@sixb/core/artifacts"
+import type { DeckMode } from "@sixb/core/internal/artifacts/frame-protocol"
 
 /** What a key does to a deck, wherever focus is: in the frame or on the viewer around it. */
 export type DeckAction =

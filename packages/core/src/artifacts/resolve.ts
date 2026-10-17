@@ -85,7 +85,6 @@ export function resolveArtifactAddress(
         ? { part: { type: "slide", slide } }
         : { problem: `has no slide '${address.part}': it has ${outline.slides.length} slides` }
     }
-    case "page":
     case "file":
       return { problem: `is a ${target.kind}, which has no parts to name` }
   }

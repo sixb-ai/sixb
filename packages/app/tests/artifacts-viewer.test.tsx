@@ -327,16 +327,6 @@ describe("the viewer", () => {
     expect(html).not.toContain("workbook.json")
   })
 
-  test("says a kind is not viewable yet rather than guessing", () => {
-    const html = render({
-      kind: "page",
-      entry: "index.html",
-      files: [{ path: "index.html", file: fileRef("page", 4_096, "text/html") }],
-    })
-    expect(html).toContain("page")
-    expect(html).not.toContain("data-sixb-artifact=")
-  })
-
   test("pins the version a link asked for", () => {
     const html = render({
       kind: "file",
