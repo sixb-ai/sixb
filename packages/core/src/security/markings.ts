@@ -1,17 +1,22 @@
 import type { DatasetDefinition } from "../datasets/types"
 import type { OntologyDefinitionCatalog } from "../ontology/registry"
 import type { ObjectType, Property } from "../ontology/types"
+import { stepReadColumns } from "../pipelines/lineage"
 import type { PipelineDefinition } from "../pipelines/types"
 import type { ProjectionDefinitionCatalog } from "../projections/registry"
-import type { ObjectProjectionDefinition } from "../projections/types"
 import { SecurityValidationError } from "./errors"
+import { MarkingPropagation, registeredSteps, runStepLineages } from "./marking-propagation"
+import { validateProjectionMarkings } from "./projection-markings"
 
 /**
  * Check every marking once at startup.
  *
- * A marking is enforced at read time from the property or column definition alone, so each rule
- * here closes a path that would otherwise return the value unredacted or make enforcement
- * ambiguous.
+ * A marking is enforced at read time from the property or column definition and the lineage of
+ * the version read, so each rule here closes a path that would otherwise return the value
+ * unredacted or make enforcement ambiguous.
+ *
+ * Projections are checked against the markings columns declare or inherit through `run` steps.
+ * What SQL steps derive needs the lake provider's analysis, which `checkPipelineMarkings` adds.
  */
 export function validateMarkingsAtStartup(input: {
   readonly markingIds: ReadonlySet<string>
@@ -23,7 +28,14 @@ export function validateMarkingsAtStartup(input: {
   validatePropertyMarkings(input.ontology, input.markingIds)
   validateColumnMarkings(input.datasetsById, input.markingIds)
   rejectPipelineStepsOverMarkedColumns(input.pipelines, input.datasetsById)
-  validateProjectionMarkings(input.projections, input.ontology, input.datasetsById)
+
+  const runLineageOf = runStepLineages(input.datasetsById)
+  const markings = new MarkingPropagation(
+    input.datasetsById,
+    registeredSteps(input.pipelines)
+  ).derive((entry) => runLineageOf(entry) ?? null)
+
+  validateProjectionMarkings(input.projections, input.ontology, markings)
 }
 
 // ── Declarations ────────────────────────────────────────────
@@ -145,171 +157,28 @@ function assertMarkingList(
   }
 }
 
-// ── Propagation ─────────────────────────────────────────────
+// ── Pipelines ───────────────────────────────────────────────
 
 /**
- * A step's output inherits nothing from its inputs until Sixb can derive each output column's
- * markings from the transform. Until then, reading a marked column would declassify it.
+ * Pipeline steps cannot read marked columns yet. A step that reads only the unmarked columns of a
+ * dataset through `pick()` reads no marking.
  */
 function rejectPipelineStepsOverMarkedColumns(
   pipelines: readonly PipelineDefinition[],
   datasetsById: ReadonlyMap<string, DatasetDefinition>
 ): void {
-  for (const pipeline of pipelines) {
-    for (const { step } of pipeline.graph.nodes) {
-      for (const input of Object.values(step.inputs)) {
-        const dataset = datasetsById.get(input.id)
-        const column = dataset?.schema.columns.find((candidate) => candidate.markings)
-        if (!dataset || !column) continue
-        throw new SecurityValidationError(
-          `[Sixb] Pipeline '${pipeline.id}' step '${step.id}' reads column '${dataset.id}.${column.name}', which carries ${markingList(column.markings)}. Pipeline steps cannot read marked columns yet.`
-        )
-      }
-    }
-  }
-}
-
-/**
- * Objects are read through the ontology, so each projected property declares the markings of its
- * column: the ontology stays the reviewed contract of what each reader receives. Values that
- * identify objects or key links are returned wherever the object or link is, and telemetry does
- * not enforce markings yet, so those columns cannot carry markings.
- */
-function validateProjectionMarkings(
-  projections: ProjectionDefinitionCatalog,
-  ontology: OntologyDefinitionCatalog,
-  datasetsById: ReadonlyMap<string, DatasetDefinition>
-): void {
-  for (const projection of projections.listObjects()) {
-    const objectType = ontology.getObjectTypeById(projection.objectTypeId)
-    if (objectType) validateObjectProjection(projection, objectType, datasetsById)
-  }
-
-  for (const projection of projections.listLinks()) {
-    const role = `keys link '${projection.sourceObjectTypeId}.${projection.linkId}'`
-    for (const columnName of [projection.sourceField, projection.targetField]) {
-      assertUnmarkedColumn(projection, sourceColumn(projection, columnName, datasetsById), role)
-    }
-  }
-
-  for (const projection of projections.listTelemetry()) {
-    const columnNames = [
-      projection.objectIdField,
-      projection.atField,
-      ...Object.values(projection.properties).flatMap((mapping) =>
-        mapping.unitField === undefined
-          ? [mapping.valueField]
-          : [mapping.valueField, mapping.unitField]
-      ),
-    ]
-    for (const columnName of columnNames) {
-      const column = sourceColumn(projection, columnName, datasetsById)
-      if (!column.markings) continue
+  for (const { pipelineId, step } of registeredSteps(pipelines)) {
+    for (const { datasetId, column } of stepReadColumns(step)) {
+      const markings = datasetsById
+        .get(datasetId)
+        ?.schema.columns.find((candidate) => candidate.name === column)?.markings
+      if (!markings?.length) continue
       throw new SecurityValidationError(
-        `[Sixb] Projection '${projection.id}' reads column '${column.path}', which carries ${markingList(column.markings)}. Telemetry projections cannot read marked columns yet.`
+        `[Sixb] Pipeline '${pipelineId}' step '${step.id}' reads column '${datasetId}.${column}', which carries [${markings.join(", ")}]. Pipeline steps cannot read marked columns yet.`
       )
     }
   }
 }
-
-function validateObjectProjection(
-  projection: ObjectProjectionDefinition,
-  objectType: ObjectType,
-  datasetsById: ReadonlyMap<string, DatasetDefinition>
-): void {
-  const keyRoles = objectProjectionKeyRoles(projection, objectType)
-
-  for (const [propertyId, columnName] of Object.entries(projection.properties)) {
-    const column = sourceColumn(projection, columnName, datasetsById)
-    const property = objectType.properties.find((candidate) => candidate.id === propertyId)
-    const path = `${objectType.id}.${propertyId}`
-    const keyRole = keyRoles.get(propertyId)
-    if (keyRole) {
-      assertUnmarkedColumn(projection, column, keyRole)
-      if (property?.markings) {
-        throw new SecurityValidationError(
-          `[Sixb] Projection '${projection.id}': property '${path}' ${keyRole} and cannot carry markings.`
-        )
-      }
-      continue
-    }
-    const missing = missingMarkings(column.markings, property?.markings)
-    if (missing.length > 0) {
-      throw new SecurityValidationError(
-        `[Sixb] Projection '${projection.id}': property '${path}' is projected from column '${column.path}', which carries ${markingList(column.markings)}. Add markings: ${markingList(missing)} to the property.`
-      )
-    }
-  }
-
-  for (const [linkId, link] of Object.entries(projection.links)) {
-    if (link.sourceField === undefined) continue
-    assertUnmarkedColumn(
-      projection,
-      sourceColumn(projection, link.sourceField, datasetsById),
-      `keys link '${objectType.id}.${linkId}'`
-    )
-  }
-
-  // The timestamp decides whether the source value or an app edit wins, which reveals how they
-  // compare.
-  const conflictResolution = projection.conflictResolution
-  if (conflictResolution?.strategy === "mostRecent") {
-    assertUnmarkedColumn(
-      projection,
-      sourceColumn(projection, conflictResolution.sourceTimestamp, datasetsById),
-      "decides which value wins under 'mostRecent'"
-    )
-  }
-}
-
-/** Properties whose value becomes an object id or a link key, with the role they play. */
-function objectProjectionKeyRoles(
-  projection: ObjectProjectionDefinition,
-  objectType: ObjectType
-): ReadonlyMap<string, string> {
-  const roles = new Map<string, string>()
-  for (const property of objectType.properties) {
-    if (property.primary) roles.set(property.id, `becomes the id of '${objectType.id}'`)
-  }
-  for (const [linkId, link] of Object.entries(projection.links)) {
-    if (link.sourcePropertyId === undefined) continue
-    roles.set(link.sourcePropertyId, `keys link '${objectType.id}.${linkId}'`)
-  }
-  return roles
-}
-
-interface SourceColumn {
-  readonly path: string
-  readonly markings?: readonly string[]
-}
-
-function sourceColumn(
-  projection: { readonly id: string; readonly datasetId: string },
-  columnName: string,
-  datasetsById: ReadonlyMap<string, DatasetDefinition>
-): SourceColumn {
-  const column = datasetsById
-    .get(projection.datasetId)
-    ?.schema.columns.find((candidate) => candidate.name === columnName)
-  // Projection validation runs first and resolves every mapped column.
-  if (!column) {
-    throw new Error(`[Sixb] Projection '${projection.id}' maps unknown column '${columnName}'.`)
-  }
-  return { path: `${projection.datasetId}.${columnName}`, markings: column.markings }
-}
-
-function assertUnmarkedColumn(
-  projection: { readonly id: string },
-  column: SourceColumn,
-  role: string
-): void {
-  if (!column.markings) return
-  throw new SecurityValidationError(
-    `[Sixb] Projection '${projection.id}': column '${column.path}' ${role} and cannot carry markings.`
-  )
-}
-
-// ── Helpers ─────────────────────────────────────────────────
 
 function missingMarkings(
   required: readonly string[] | undefined,
@@ -317,8 +186,4 @@ function missingMarkings(
 ): readonly string[] {
   const present = new Set(declared ?? [])
   return (required ?? []).filter((markingId) => !present.has(markingId))
-}
-
-function markingList(markings: readonly string[] | undefined): string {
-  return `[${(markings ?? []).join(", ")}]`
 }

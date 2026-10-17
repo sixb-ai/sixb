@@ -1,7 +1,8 @@
 import { resolve } from "node:path"
+import { errorMessage } from "../lib/errors"
 import { checkRuntimeHealth } from "../lib/health"
-import { loadSixbFromEntry } from "../lib/loadSixb"
-import { stopSixbProviders } from "../lib/runtime"
+import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
+import { checkRuntimePipelineMarkings, stopSixbProviders } from "../lib/runtime"
 import { generateProjectTypes } from "../lib/typegen"
 import { CheckView, renderStatic } from "../ui"
 
@@ -17,6 +18,7 @@ export async function runCheck(options: CheckOptions = {}) {
   try {
     const objectTypes = sixb.definitions.ontology.listObjectTypes()
     const health = await checkRuntimeHealth(sixb)
+    const markings = await checkMarkings(sixb)
 
     const projectValidation =
       objectTypes.length > 0
@@ -31,6 +33,7 @@ export async function runCheck(options: CheckOptions = {}) {
         broker={health.broker}
         queues={health.queues}
         projectValidation={projectValidation}
+        markings={markings}
         ontology={{
           enabled: true,
           source: entry,
@@ -46,7 +49,7 @@ export async function runCheck(options: CheckOptions = {}) {
     // A failing probe exits non-zero so `sixb check` can gate a deploy. `exitCode`, not
     // `exit()`: `process.exit()` terminates immediately and the `finally` below never runs, so
     // the providers this command opened were left unclosed on the one path where that matters.
-    const failed = [health.storage, health.timeseries, health.broker, health.queues].some(
+    const failed = [health.storage, health.timeseries, health.broker, health.queues, markings].some(
       (check) => !check.ok
     )
     if (objectTypes.length === 0 || failed) process.exitCode = 1
@@ -66,6 +69,15 @@ export async function runCheck(options: CheckOptions = {}) {
 }
 
 const CLOSE_TIMEOUT_MS = 10_000
+
+async function checkMarkings(sixb: LoadedSixbHost): Promise<{ ok: boolean; message?: string }> {
+  try {
+    await checkRuntimePipelineMarkings(sixb)
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, message: errorMessage(error) }
+  }
+}
 
 async function settlesWithin(work: Promise<void>, timeoutMs: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined

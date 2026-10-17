@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   change,
   col,
+  type DatasetDefinition,
   DatasetValidationError,
   defineConnector,
   defineDataset,
@@ -189,7 +190,7 @@ describe("defineDataset", () => {
   })
 
   test("builds a dataset definition with a wrapped schema", () => {
-    expect(rawOrdersDataset).toEqual({
+    expect<DatasetDefinition>(rawOrdersDataset).toEqual({
       kind: "dataset",
       id: "raw.erp.orders",
       schema: {
@@ -206,7 +207,7 @@ describe("defineDataset", () => {
   test("derives a dataset with the parent schema", () => {
     const activeOrdersDataset = defineDataset("raw.erp.active-orders").derive(rawOrdersDataset)
 
-    expect(activeOrdersDataset).toEqual({
+    expect<DatasetDefinition>(activeOrdersDataset).toEqual({
       kind: "dataset",
       id: "raw.erp.active-orders",
       schema: {
@@ -232,7 +233,7 @@ describe("defineDataset", () => {
       }
     )
 
-    expect(orderSummariesDataset).toEqual({
+    expect<DatasetDefinition>(orderSummariesDataset).toEqual({
       kind: "dataset",
       id: "raw.erp.order-summaries",
       schema: {

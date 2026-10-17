@@ -1,5 +1,7 @@
+export { isDatasetPick } from "../datasets/builders"
 export { definePipeline, definePipelineStep } from "./builders"
 export { PipelineError } from "./errors"
+export { runStepLineage, stepInputColumns } from "./lineage"
 export type {
   PipelineRunRequestOptions,
   PipelineRunRequestResult,

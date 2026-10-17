@@ -24,6 +24,7 @@ import {
   shareProjectionRegistry,
 } from "@sixb/core/internal/projections"
 import { registerOntologyMutationRuntime } from "@sixb/core/internal/runtime"
+import { shareDatasetVersionMarkings } from "@sixb/core/internal/security"
 import type {
   DatasetChanges,
   ReadDatasetChangesInput,
@@ -153,6 +154,7 @@ function fixture(
       projections: host.definitions.projections,
     }
     shareProjectionRegistry(host, runtime)
+    shareDatasetVersionMarkings(host, runtime)
     registerOntologyMutationRuntime(runtime, {
       ...bound.ontologyMutations,
       ...(forceFull ? { getProjectionSource: undefined } : {}),

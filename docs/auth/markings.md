@@ -123,7 +123,7 @@ In TypeScript, a marked property is optional when read, even if it is required. 
 - A subtype that redefines a marked property must keep its parent's markings.
 - A projected property declares the markings of its column.
 - A column cannot be marked when it becomes an object id or a link key, decides a `mostRecent` conflict, or feeds a telemetry projection.
-- Pipeline steps cannot read marked columns yet. A step may mark the columns it produces.
+- Pipeline steps cannot read marked columns yet: [pick](../pipelines/overview.md#read-only-some-columns) the others. A step may mark the columns it produces.
 - Every marking used by a property, a column, or a clearance must be registered.
 
 Sixb checks these rules at startup.

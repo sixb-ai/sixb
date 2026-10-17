@@ -6,7 +6,8 @@ import type {
   PipelineStepRunContext,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
-import type { DatasetVersion } from "@sixb/core/lake-storage"
+import { runStepLineage } from "@sixb/core/internal/pipelines"
+import { type DatasetVersion, resolveStepLineage } from "@sixb/core/lake-storage"
 import { throwIfAborted } from "./errors"
 import { createStepInputs, type ResolvedStepInput } from "./step-inputs"
 import type { PipelineJob, PipelineLogSession, PipelineWorkerContext } from "./types"
@@ -49,12 +50,13 @@ export async function executeRunStep(input: {
     dataset: outputDataset,
     mode: step.mode,
     inputs: resolvedInputs.map((resolved) => resolved.ref),
-    producer: {
-      kind: "pipeline",
-      id: pipeline.id,
-      runId: job.id,
-      stepId: step.id,
-    },
+    producer: { kind: "pipeline", id: pipeline.id, runId: job.id, stepId: step.id },
+    // Through every upstream hop: each column the step reads stands for what its input version
+    // records. The output is the only registered dataset the step's own lineage reads.
+    lineage: resolveStepLineage(
+      runStepLineage(step, new Map([[outputDataset.id, outputDataset]])),
+      resolvedInputs.map((resolved) => resolved.version)
+    ),
   })
 
   try {
@@ -65,7 +67,13 @@ export async function executeRunStep(input: {
       runId: job.id,
       signal,
       logger,
-      inputs: createStepInputs(runtime.lakeStorage, resolvedInputs, signal),
+      inputs: createStepInputs({
+        lakeStorage: runtime.lakeStorage,
+        pipeline,
+        step,
+        resolvedInputs,
+        signal,
+      }),
       output: {
         async writeRows(rows) {
           await write.writeRows(

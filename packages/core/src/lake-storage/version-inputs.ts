@@ -1,4 +1,4 @@
-import { sameLineage, versionLineage } from "./lineage"
+import { COMMITTING_PROVIDER, sameLineage, versionLineage } from "./lineage"
 import type { DatasetVersion } from "./types"
 
 /** What a commit would store: `lineage` is the one `lineageAtCommit` returned for it. */
@@ -23,7 +23,10 @@ export function hasDatasetProvenanceChanges(
 ): boolean {
   return (
     hasDatasetInputChanges(latest.inputs, next.inputs) ||
-    !sameLineage(versionLineage(latest), versionLineage(next))
+    !sameLineage(
+      versionLineage(latest, COMMITTING_PROVIDER),
+      versionLineage(next, COMMITTING_PROVIDER)
+    )
   )
 }
 
