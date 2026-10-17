@@ -14,7 +14,7 @@ import {
   type AccessTokenRecord,
   type AuthStorage,
   AuthStorageError,
-  type CompleteDeviceAuthorizationInput,
+  type CreateAuthSessionInput,
   type GroupMembershipRecord,
   type InvitationRecord,
   type ServiceAccountGroupMembershipRecord,
@@ -389,7 +389,9 @@ export class AuthRuntime {
     readonly clientName: string
     readonly now: Date
   }): {
-    readonly session: CompleteDeviceAuthorizationInput["session"]
+    readonly session: CreateAuthSessionInput & {
+      readonly bearer: NonNullable<CreateAuthSessionInput["bearer"]>
+    }
     readonly tokens: BearerSessionTokens
   } {
     const sessionId = `ses_${randomUUID()}`

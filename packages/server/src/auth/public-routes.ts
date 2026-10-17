@@ -124,6 +124,12 @@ export function isPublicRoute(pathname: string, method: string): boolean {
     return true
   }
 
+  // Where a signed-out browser waits to be approved from another one. The HttpOnly cookie it was
+  // given when it started is the credential, and the page only ever reads.
+  if (pathname === "/auth/sign-in/device" && normalizedMethod === "GET") {
+    return true
+  }
+
   // GET renders the magic-link confirmation page; POST consumes the emailed
   // token. The token itself is the credential, and no CSRF cookie exists yet.
   if (

@@ -19,6 +19,7 @@ import {
   SixbHost,
 } from "@sixb/core"
 import { createAccessTokenCredential, createSessionCredential } from "@sixb/core/internal/auth"
+import { AuthStorageError } from "@sixb/core/storage"
 import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../src/auth/csrf"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "../src/routes/files"
 import { createSixbApi, MAX_WEBSOCKET_MESSAGE_BYTES, SixbServer } from "../src/server"
@@ -490,6 +491,134 @@ describe("server auth guard", () => {
       })
     )
     expect(await replayed.json()).toEqual({ status: "expired" })
+  })
+
+  test("signs in a browser that another browser approves, and only that browser", async () => {
+    const { sixb, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage)
+    const app = createSixbApi(
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const start =
+      "http://localhost/auth/sign-in/device?returnTo=http%3A%2F%2Fapp.localhost%2Forders&client=Acme+viewer"
+
+    const started = await app.fetch(new Request(start))
+    expect(started.status).toBe(303)
+    const pendingUrl = new URL(started.headers.get("location") ?? "", start)
+    const userCode = pendingUrl.searchParams.get("user_code") ?? ""
+    expect(userCode).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/)
+    const deviceCookie = getSetCookies(started)
+      .find((cookie) => cookie.startsWith("sixb_device="))
+      ?.split(";")[0]
+    expect(deviceCookie).toStartWith("sixb_device=dva_")
+    const waiting = (cookie?: string) =>
+      app.fetch(new Request(pendingUrl, { headers: cookie ? { cookie } : {} }))
+
+    const pending = await waiting(deviceCookie)
+    expect(pending.status).toBe(200)
+    const pendingPage = await pending.text()
+    expect(pendingPage).toContain(`/auth/device?user_code=${userCode}" target="_blank"`)
+    expect(pendingPage).toContain('<meta http-equiv="refresh" content="2">')
+
+    const approvalPage = await app.fetch(
+      new Request(`http://localhost/auth/device?user_code=${userCode}`, {
+        headers: { cookie: `${seeded.cookie}; ${seeded.csrfCookie}` },
+      })
+    )
+    const approvalHtml = await approvalPage.text()
+    expect(approvalHtml).toContain("Acme viewer")
+    // Anyone can start a request under any name; the code is what the user checks.
+    expect(approvalHtml).toContain("shows this same code")
+    const approved = await app.fetch(
+      new Request("http://localhost/auth/device", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
+        },
+        body: new URLSearchParams({ userCode, decision: "approve", csrfToken: "csrf_1" }),
+      })
+    )
+    expect(approved.status).toBe(200)
+
+    // The approved address alone is worth nothing: a browser without the cookie collects no session.
+    const stranger = await waiting()
+    expect(stranger.status).toBe(400)
+    expect(getSetCookies(stranger).some((cookie) => cookie.startsWith("sixb_session"))).toBe(false)
+
+    const completed = await waiting(deviceCookie)
+    expect(completed.status).toBe(303)
+    expect(completed.headers.get("location")).toBe("http://app.localhost/orders")
+    const sessionCookie = getSetCookies(completed)
+      .find((cookie) => cookie.startsWith("sixb_session_app="))
+      ?.split(";")[0]
+    expect(sessionCookie).toBeDefined()
+    expect(getSetCookies(completed)).toContainEqual(
+      expect.stringMatching(/^sixb_device=; .*Max-Age=0/)
+    )
+
+    const session = await app.fetch(
+      new Request("http://localhost/api/auth/session", {
+        headers: { cookie: sessionCookie ?? "", origin: "http://app.localhost" },
+      })
+    )
+    expect(await session.json()).toMatchObject({
+      authenticated: true,
+      user: { id: "usr_1" },
+    })
+
+    // Signed in, the same address is just a way back to the app.
+    const again = await app.fetch(new Request(start, { headers: { cookie: sessionCookie ?? "" } }))
+    expect(again.status).toBe(303)
+    expect(again.headers.get("location")).toBe("http://app.localhost/orders")
+
+    // The authorization was spent on that one session.
+    const replayed = await waiting(deviceCookie)
+    expect(replayed.status).toBe(400)
+    expect(await replayed.text()).toContain("expired")
+  })
+
+  // Reproduce: catch only invalid_device_authorization in GET /auth/sign-in/device. The waiting
+  // browser then gets a 500 and keeps its cookie, so every reload fails the same way.
+  test("tells a waiting browser whose approved request is gone that it expired", async () => {
+    const { sixb, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage)
+    const app = createSixbApi(
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const start = "http://localhost/auth/sign-in/device?returnTo=http%3A%2F%2Fapp.localhost%2F"
+    const started = await app.fetch(new Request(start))
+    const pendingUrl = new URL(started.headers.get("location") ?? "", start)
+    const deviceCookie =
+      getSetCookies(started)
+        .find((cookie) => cookie.startsWith("sixb_device="))
+        ?.split(";")[0] ?? ""
+    await app.fetch(
+      new Request("http://localhost/auth/device", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
+        },
+        body: new URLSearchParams({
+          userCode: pendingUrl.searchParams.get("user_code") ?? "",
+          decision: "approve",
+          csrfToken: "csrf_1",
+        }),
+      })
+    )
+    // Removed after the approval, before the waiting page's next reload.
+    storage.auth.completeDeviceAuthorization = async () => {
+      throw new AuthStorageError("missing_device_authorization", "[Sixb] Gone.")
+    }
+
+    const waited = await app.fetch(new Request(pendingUrl, { headers: { cookie: deviceCookie } }))
+
+    expect(waited.status).toBe(400)
+    expect(await waited.text()).toContain("expired")
+    expect(getSetCookies(waited)).toContainEqual(
+      expect.stringMatching(/^sixb_device=; .*Max-Age=0/)
+    )
   })
 
   test("limits device authorizations per client address behind a trusted proxy", async () => {

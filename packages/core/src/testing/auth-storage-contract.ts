@@ -1378,6 +1378,57 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
+    test("starts a cookie session for a browser that another one approves", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await storage.sessions.create({
+          ...bearerSessionInput("ses_browser"),
+          tokenHash: "session-hash",
+          bearer: undefined,
+        })
+        await storage.deviceAuthorizations.create({
+          id: "dva_1",
+          projectId,
+          deviceCodeHash: "device-code-hash",
+          userCode: "BCDF-HJKM",
+          clientName: "Acme viewer",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+          expiresAt: at("2026-05-14T10:10:00.000Z"),
+        })
+        await storage.deviceAuthorizations.approve({
+          projectId,
+          id: "dva_1",
+          userId: "usr_1",
+          sessionId: "ses_browser",
+          approvedAt: at("2026-05-14T10:01:00.000Z"),
+        })
+
+        const completed = await storage.completeDeviceAuthorization({
+          projectId,
+          id: "dva_1",
+          deviceCodeHash: "device-code-hash",
+          completedAt: at("2026-05-14T10:02:00.000Z"),
+          session: {
+            ...bearerSessionInput("ses_viewer"),
+            tokenHash: "viewer-hash",
+            bearer: undefined,
+          },
+        })
+
+        expect(completed.authorization).toMatchObject({ status: "consumed" })
+        expect(completed.session).toMatchObject({ id: "ses_viewer", userId: "usr_1" })
+        expect(completed.session.bearer).toBeUndefined()
+        await expect(
+          storage.sessions.findValidByTokenHash({
+            projectId,
+            id: "ses_viewer",
+            tokenHash: "viewer-hash",
+            now: at("2026-05-14T10:05:00.000Z"),
+          })
+        ).resolves.toMatchObject({ id: "ses_viewer" })
+      })
+    })
+
     test("keeps bearer and cookie session credentials apart", async () => {
       await withStorage(async (storage) => {
         await createUser(storage)

@@ -423,8 +423,11 @@ export interface CompleteDeviceAuthorizationInput {
   readonly projectId: string
   readonly id: string
   readonly deviceCodeHash: string
-  /** The bearer session to start for the approving user. */
-  readonly session: CreateAuthSessionInput & { readonly bearer: BearerSessionState }
+  /**
+   * The session to start for the approving user: a bearer session for a native client, or a
+   * cookie session for a browser that asked to be approved from another one.
+   */
+  readonly session: CreateAuthSessionInput
   readonly completedAt: Date
 }
 
