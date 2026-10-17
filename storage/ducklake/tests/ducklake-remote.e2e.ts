@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { change, col, type DatasetDefinition, defineDataset } from "@sixb/core"
-import type { DatasetVersion } from "@sixb/core/lake-storage"
+import type { DatasetVersion, DatasetWriteCommitResult } from "@sixb/core/lake-storage"
 import { SQL } from "bun"
 import { type DuckDbSecretOptions, DuckLakeStorage, type DuckLakeStorageOptions } from "../src"
 import type { DuckDbRuntime } from "../src/internal/duckdb-runtime"
@@ -554,6 +554,42 @@ describe("DuckLakeStorage remote catalogs", () => {
       })
     }
 
+    /**
+     * Runs `concurrently` once, right before `storage` reads the latest version a write that
+     * changes no rows compares with, whichever read that is: after the rows were compared.
+     */
+    function beforeUnchangedBaseline(storage: DuckLakeStorage, concurrently: () => Promise<void>) {
+      const reader = (storage as unknown as { snapshotReader: DuckLakeSnapshotReader })
+        .snapshotReader
+      let ran = false
+      const once = async () => {
+        if (ran) return
+        ran = true
+        await concurrently()
+      }
+
+      const forDefinition = reader.getLatestVersionSummaryForDefinition.bind(reader)
+      const atCurrentSnapshot = reader.getLatestVersionSummaryAtCurrentSnapshot.bind(reader)
+      const spies = [
+        spyOn(reader, "getLatestVersionSummaryForDefinition").mockImplementation(
+          async (...args) => {
+            await once()
+            return forDefinition(...args)
+          }
+        ),
+        spyOn(reader, "getLatestVersionSummaryAtCurrentSnapshot").mockImplementation(
+          async (...args) => {
+            await once()
+            return atCurrentSnapshot(...args)
+          }
+        ),
+      ]
+
+      return () => {
+        for (const spy of spies) spy.mockRestore()
+      }
+    }
+
     const write = async (
       storage: DuckLakeStorage,
       dataset: DatasetDefinition,
@@ -1060,6 +1096,40 @@ describe("DuckLakeStorage remote catalogs", () => {
         expect(result.version).toMatchObject({ outcome: "created", lineage })
       }, 60_000)
     }
+
+    // Regression proof: in the write coordinator, read the latest version an unchanged snapshot
+    // compares with through `getLatestVersionSummaryForDefinition`, without checking it against the
+    // snapshot its rows were compared at. The append committed in between is then the version the
+    // sync reports itself as, unchanged, and the dataset keeps a row the sync's source no longer has.
+    test("a snapshot that rewrites no rows over an append committed after its comparison reruns", async () => {
+      await twoWriters(async ({ storage, other, dataset }) => {
+        const sync = { producer: { kind: "sync", id: "erp" } } as const
+        await write(storage, dataset, sync, [{ id: "1", v: "seed" }])
+
+        const session = await storage.beginWrite({ dataset, ...sync })
+        await session.writeRows([{ id: "1", v: "seed" }])
+
+        const restore = beforeUnchangedBaseline(storage, async () => {
+          await write(other, dataset, { ...sync, mode: "append" }, [{ id: "2", v: "concurrent" }])
+        })
+        let version: DatasetWriteCommitResult
+        try {
+          version = await session.commit()
+        } finally {
+          restore()
+        }
+
+        expect(version.outcome).toBe("created")
+        expect(
+          await collectRows(
+            storage.readRows({ datasetId: dataset.id, versionId: version.versionId })
+          )
+        ).toEqual([{ id: "1", v: "seed" }])
+        expect(await collectRows(storage.readRows({ datasetId: dataset.id }))).toEqual([
+          { id: "1", v: "seed" },
+        ])
+      })
+    }, 60_000)
   })
 
   test("operates within a constrained PostgreSQL catalog connection budget", async () => {
