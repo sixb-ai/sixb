@@ -25,17 +25,22 @@ const forbidden = async (): Promise<never> => {
   throw new Error("Must not create a sandbox")
 }
 const sandboxes: SandboxFactory = {
+  supportsRequestCredentials: true,
   create: forbidden,
   resume: forbidden,
 }
 
-function setup(configuration?: SandboxConfig, ontology: readonly OntologySource[] = []) {
+function setup(
+  configuration?: SandboxConfig,
+  ontology: readonly OntologySource[] = [],
+  factory: SandboxFactory = sandboxes
+) {
   const deps = createTestRuntimeDeps()
   const host = new SixbHost({
     id: "workspaces",
     ontology,
     ...deps,
-    sandboxes: { ...sandboxes, configuration },
+    sandboxes: { ...factory, configuration },
     models: { language: [testLanguageModel()] },
   })
   return { host, sixb: createTestSixb(host), ...deps }
@@ -127,6 +132,51 @@ describe("Agent sandbox binding", () => {
         setup(config as SandboxConfig)
       }).toThrow(SandboxError)
     }
+  })
+
+  test("rejects auth on a provider without credential injection at startup", () => {
+    // Regression proof: remove the sandboxCredentialIssue check from SixbHost; the host is
+    // created and only a bound conversation's first run fails.
+    const unsupported: SandboxFactory = { create: forbidden, resume: forbidden }
+    const authenticated: SandboxConfig = {
+      source: { type: "git", url: "https://github.com/acme/app", access: "write" },
+      auth: { authorize: forbidden },
+    }
+
+    expect(() => setup(authenticated, [], unsupported)).toThrow(
+      "[Sixb] Sandbox source auth needs a provider that injects request credentials outside the sandbox: use @sixb/sandboxes-vercel, or remove auth."
+    )
+    expect(() => setup(authenticated)).not.toThrow()
+  })
+
+  test("rejects auth on a provider without credential injection when only resolve has a source", () => {
+    // Regression proof: return early from sandboxCredentialIssue when the recipe has no source;
+    // the host is created and the provider is rejected only when a run resolves a source.
+    const unsupported: SandboxFactory = { create: forbidden, resume: forbidden }
+    const resolved: SandboxConfig = {
+      auth: { authorize: forbidden },
+      resolve: () => ({ source: { type: "git", url: "https://github.com/acme/app" } }),
+    }
+
+    expect(() => setup(resolved, [], unsupported)).toThrow(
+      "[Sixb] Sandbox source auth needs a provider that injects request credentials outside the sandbox"
+    )
+    expect(() => setup(resolved)).not.toThrow()
+  })
+
+  test("rejects static write access without source auth at startup", () => {
+    // Regression proof: drop the write-access rule from sandboxCredentialIssue; the host is
+    // created and the first bound run fails with a message that does not say what to add.
+    const write: SandboxConfig = {
+      source: { type: "git", url: "https://github.com/acme/app", access: "write" },
+    }
+
+    expect(() => setup(write)).toThrow(
+      '[Sixb] Sandbox write access needs source auth: add auth to the sandbox factory or use access "read".'
+    )
+    expect(() =>
+      setup({ source: { type: "git", url: "https://github.com/acme/app", access: "read" } })
+    ).not.toThrow()
   })
 
   test("resolves with current authority on every invocation and validates returned data", async () => {

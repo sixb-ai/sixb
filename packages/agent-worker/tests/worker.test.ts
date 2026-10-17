@@ -2937,13 +2937,13 @@ describe("AgentWorker", () => {
     let provisions = 0
     let authorizations = 0
     let modelCalls = 0
-    const host = buildSixb(
+    const built = buildSixb(
       answerModel(() => {
         modelCalls++
       }),
       new InMemoryBroker(),
       {
-        supportsRequestCredentials: failure !== "unsupported",
+        supportsRequestCredentials: true,
         create: async () => {
           provisions++
           throw new Error("should not provision")
@@ -2965,6 +2965,19 @@ describe("AgentWorker", () => {
         },
       }
     )
+    // SixbHost rejects this pairing at construction. A worker host is structural, so the worker
+    // keeps its own guard: give it a provider without credential injection.
+    const host =
+      failure === "unsupported"
+        ? new Proxy(built, {
+            get(target, property, receiver) {
+              const value = Reflect.get(target, property, receiver)
+              return property === "sandboxes"
+                ? { ...value, supportsRequestCredentials: false }
+                : value
+            },
+          })
+        : built
     attachSixbErrorReporter(host, () => {})
     const thread = await createTestSixb(host).agent.threads.create({ sandbox: {} })
     const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })

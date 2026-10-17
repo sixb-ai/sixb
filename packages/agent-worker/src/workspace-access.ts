@@ -6,9 +6,10 @@ import type {
   SandboxSessionOptions,
   SandboxSourceAuth,
 } from "@sixb/core"
+import { sandboxCredentialIssue } from "@sixb/core/internal/agents"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
 import type { AgentWorkspacePromptContext } from "./agent-prompt"
-import { sandboxError } from "./sandbox-operation"
 import { WorkspaceAuthSession, type WorkspaceGrant } from "./workspace-auth"
 import { workspaceNetwork } from "./workspace-network"
 
@@ -55,20 +56,19 @@ export class WorkspaceAccess {
   }
 
   /**
-   * Issue the first grant when the source is authenticated. Write access requires
-   * authentication, and authentication a provider injecting credentials outside the guest.
+   * Issue the first grant when the source is authenticated, after checking the recipe by the
+   * rule `SixbHost` applies to a static one at startup. A worker host is structural and need not
+   * come from `SixbHost`, and `resolve` returns recipes startup never saw.
    */
   async authorize(): Promise<void> {
     const { recipe, auth, factory, signal, assertOwner, onAuthFailure } = this.input
-    if (!recipe.source || !auth) {
-      if (recipe.source?.access === "write") {
-        throw sandboxError("write access requires source authentication.")
-      }
-      return
-    }
-    if (!factory.supportsRequestCredentials) {
-      throw sandboxError("authentication requires a provider with secure credential injection.")
-    }
+    const issue = sandboxCredentialIssue({
+      supportsRequestCredentials: factory.supportsRequestCredentials,
+      auth,
+      source: recipe.source,
+    })
+    if (issue) throw createSixbError("agent.execution_failed", `[SixbAgentWorker] ${issue}`)
+    if (!recipe.source || !auth) return
 
     this.auth = new WorkspaceAuthSession({
       auth,
