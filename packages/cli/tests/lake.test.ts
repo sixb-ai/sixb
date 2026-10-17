@@ -20,6 +20,7 @@ async function runLakeCommand(
     fixture?: string
     drift?: boolean
     noMaintenance?: boolean
+    appliedVersion?: string
     args?: readonly string[]
   } = {}
 ): Promise<{
@@ -48,6 +49,7 @@ async function runLakeCommand(
       SIXB_CLI_TEST_LOG: logPath,
       ...(options.drift ? { SIXB_CLI_TEST_LAKE_DRIFT: "1" } : {}),
       ...(options.noMaintenance ? { SIXB_CLI_TEST_LAKE_NO_MAINTENANCE: "1" } : {}),
+      ...(options.appliedVersion ? { SIXB_CLI_TEST_APPLIED_VERSION: options.appliedVersion } : {}),
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -129,6 +131,32 @@ describe("sixb lake cleanup", () => {
       expireOlderThan: "7 days",
       deleteOlderThan: "7 days",
     })
+  })
+
+  // Reproduce: drop `protect` from the runMaintenance call in commands/lake-cleanup.tsx.
+  test("keeps the dataset versions projections applied", async () => {
+    const result = await runLakeCommand("cleanup", {
+      appliedVersion: "ducklake:42",
+      args: ["--dry-run"],
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Kept snapshots")
+    expect(result.stdout).toContain("5")
+    expect(result.logEntries).toContainEqual({
+      type: "lake:maintenance:protect",
+      protect: [{ datasetId: "raw.things", versionId: "ducklake:42" }],
+    })
+  })
+
+  // Reproduce: fall back to no protected versions when listActive fails in commands/lake-cleanup.tsx.
+  test("does not clean the lake when the applied versions cannot be read", async () => {
+    const result = await runLakeCommand("cleanup", { appliedVersion: "unreadable" })
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("ontology storage is unreachable")
+    expect(result.logEntries.some((entry) => entry.type === "lake:maintenance")).toBe(false)
+    expect(result.logEntries).toContainEqual({ type: "lake-storage:close" })
   })
 
   test("passes cleanup retention flags through", async () => {
