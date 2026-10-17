@@ -5,7 +5,7 @@ import { join, resolve } from "node:path"
 import type { DeployConfig, DeployRelease, DeployTarget } from "@sixb/core/deploy"
 import { ACTION_RUN_DRAIN_TIMEOUT_MS } from "@sixb/core/internal/actions"
 import { parseCliArgs } from "../src/lib/command-line"
-import { buildDeployRelease } from "../src/lib/deploy-release"
+import { buildDeployRelease, deployPublicOrigins } from "../src/lib/deploy-release"
 import { packSource, resolveBunVersion } from "../src/lib/deploy-source"
 import { type ProductionRole, productionRoleFacts } from "../src/lib/production-roles"
 import { runCliToCompletion } from "./shared/cli-process"
@@ -218,6 +218,17 @@ describe("deploy release", () => {
       publicOrigin: "https://ops.example.com",
     })
     expect(built.services.some((entry) => entry.name === "scheduler")).toBe(false)
+  })
+
+  test("tells a desktop build where browsers reach the app and the API", () => {
+    expect(
+      deployPublicOrigins({
+        name: "northline",
+        domain: "example.com",
+        target,
+        services: { app: { domain: "ops.example.com" } },
+      })
+    ).toEqual({ api: "https://northline-api.example.com", app: "https://ops.example.com" })
   })
 
   test("supervises project processes with Bun", () => {

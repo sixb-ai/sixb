@@ -174,6 +174,7 @@
       "@sixb/deploy-ssh": ["./deploy/ssh/src/index.ts"],
       "@sixb/ducklake": ["./storage/ducklake/src/index.ts"],
       "@sixb/cli-core": ["./packages/cli-core/src/index.ts"],
+      "@sixb/desktop": ["./packages/desktop/src/index.ts"],
       "@sixb/lake-local": ["./storage/lake-local/src/index.ts"],
       "@sixb/logger-pino": ["./loggers/pino/src/index.ts"],
       "@sixb/model-protocols/responses": ["./models/protocols/src/responses.ts"],

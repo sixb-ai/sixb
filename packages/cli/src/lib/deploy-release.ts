@@ -81,7 +81,7 @@ export function buildDeployRelease(
   config: DeployConfig,
   options: DeployReleaseOptions
 ): DeployRelease {
-  const enabled = DEPLOY_SERVICES.filter((service) => config.services?.[service] !== false)
+  const enabled = enabledServices(config)
   const http = resolveHttpServices(config, enabled)
 
   // Every service gets every origin: the API checks browser origins, and agent workers call it.
@@ -112,6 +112,22 @@ export function buildDeployRelease(
       ),
     ],
   }
+}
+
+/** Where browsers reach each HTTP service the deployment runs. */
+export function deployPublicOrigins(
+  config: DeployConfig
+): Partial<Record<DeployHttpServiceName, string>> {
+  return Object.fromEntries(
+    [...resolveHttpServices(config, enabledServices(config))].map(([service, address]) => [
+      service,
+      address.publicOrigin,
+    ])
+  )
+}
+
+function enabledServices(config: DeployConfig): DeployServiceName[] {
+  return DEPLOY_SERVICES.filter((service) => config.services?.[service] !== false)
 }
 
 function sixbService(

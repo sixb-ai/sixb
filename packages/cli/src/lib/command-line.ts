@@ -54,6 +54,11 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Public app origin",
     kind: "string",
   },
+  desktop: {
+    syntax: "--desktop",
+    summary: "Also open the app in a desktop window",
+    kind: "boolean",
+  },
   "trusted-proxies": {
     syntax: "--trusted-proxies <ranges>",
     summary: "Proxies trusted for client addresses (default: private)",
@@ -166,6 +171,7 @@ export type LocalCommandId =
   | "check"
   | "typegen"
   | "build"
+  | "desktop:build"
   | "db:migrate"
   | "db:prepare"
   | "lake:check"
@@ -256,6 +262,7 @@ const commandTree: readonly CommandNode[] = [
       "concurrency",
       "vector-concurrency",
       "app-public-origin",
+      "desktop",
     ],
     repeatable: ["concurrency"],
   }),
@@ -440,6 +447,18 @@ const commandTree: readonly CommandNode[] = [
   command("check", "Validate project configuration and health", { options: ["entry"] }),
   command("typegen", "Generate ontology types for typed queries", { options: ["entry"] }),
   command("build", "Build runtime and production UI/app assets", { options: ["entry", "outdir"] }),
+  {
+    name: "desktop",
+    summary: "Ship the app as a desktop app",
+    usage: "sixb desktop build",
+    children: [
+      command("desktop:build", "Package the deployed app as a desktop app for this machine", {
+        path: ["desktop", "build"],
+        options: ["app-public-origin", "api-public-origin"],
+        rootHelpLabel: "desktop build",
+      }),
+    ],
+  },
   {
     name: "db",
     summary: "Manage runtime storage",

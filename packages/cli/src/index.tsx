@@ -106,6 +106,7 @@ async function main(): Promise<void> {
         agentTurnTimeout: getFlag("agent-turn-timeout"),
         concurrency: getFlags("concurrency"),
         vectorConcurrency: getFlag("vector-concurrency"),
+        desktop: hasFlag("desktop"),
       })
       break
     }
@@ -284,6 +285,15 @@ async function main(): Promise<void> {
     case "build": {
       const { runBuild } = await import("./commands/build")
       await runBuild({ entry: getFlag("entry"), outdir: getFlag("outdir") })
+      break
+    }
+
+    case "desktop:build": {
+      const { runDesktopBuild } = await import("./commands/desktop")
+      await runDesktopBuild({
+        apiPublicOrigin: getFlag("api-public-origin"),
+        appPublicOrigin: getFlag("app-public-origin"),
+      })
       break
     }
 

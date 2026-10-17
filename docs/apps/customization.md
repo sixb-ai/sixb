@@ -82,6 +82,8 @@ provide browser and home-screen icons:
 | `icon-maskable-512.png` | 512 × 512 adaptive icon, with artwork inside the central 80% |
 | `apple-touch-icon.png` | 180 × 180 opaque iOS home-screen icon |
 
+The [desktop app](desktop.md) uses `icon-maskable-512.png`, or `icon-512.png` without one.
+
 Installed apps open in standalone mode. Protect important content from device notches and home
 indicators with safe-area padding on your app shell:
 

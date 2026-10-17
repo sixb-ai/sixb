@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "bun scripts/dev.ts",
     "dev:runtime": "bun ../../packages/cli/src/index.tsx dev",
+    "desktop": "bun scripts/dev.ts --desktop",
+    "desktop:build": "bun ../../packages/cli/src/index.tsx desktop build",
     "build": "bun ../../packages/cli/src/index.tsx build",
     "check": "bun ../../packages/cli/src/index.tsx check",
     "deploy": "bun ../../packages/cli/src/index.tsx deploy",
@@ -42,6 +44,7 @@
   "devDependencies": {
     "@sixb/cli": "workspace:*",
     "@sixb/deploy-ssh": "workspace:*",
+    "@sixb/desktop": "workspace:*",
     "@sixb/server": "workspace:*",
     "@types/bun": "latest",
     "@types/node": "^22.15.30",

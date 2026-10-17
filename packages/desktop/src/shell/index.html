@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{name}}</title>
+    <style>
+      /* The colors mirror packages/ui/src/styles/globals.css, so the app replaces this page
+         without a change of tone. `WINDOW_BACKGROUND` in window.ts repeats --background. */
+      :root {
+        color-scheme: light dark;
+        --background: #fafafa;
+        --foreground: #101010;
+        --primary: #0a0a0a;
+        --primary-foreground: #ffffff;
+        --muted-foreground: #5f5f5f;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: #0a0a0a;
+          --foreground: #f4f4f4;
+          --primary: #f4f4f4;
+          --primary-foreground: #0a0a0a;
+          --muted-foreground: #8a8a8a;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        /* Sits a little above dead-center. */
+        padding-bottom: 8vh;
+        display: grid;
+        place-items: center;
+        font-family: "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+        background: var(--background);
+        color: var(--foreground);
+        -webkit-font-smoothing: antialiased;
+        /* Nothing here is a document: the whole page moves the window, and no text selects. */
+        -webkit-app-region: drag;
+        user-select: none;
+        cursor: default;
+      }
+      main {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        animation: enter 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+      }
+      .mark {
+        display: grid;
+        place-items: center;
+        width: 3.5rem;
+        height: 3.5rem;
+        border-radius: 0.875rem;
+        background: var(--primary);
+        color: var(--primary-foreground);
+        font-size: 1.5rem;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        box-shadow:
+          0 1px 1px rgb(0 0 0 / 0.06),
+          0 12px 28px -12px rgb(0 0 0 / 0.35);
+      }
+      @media (prefers-color-scheme: dark) {
+        /* A shadow on black is only a smudge around the mark. */
+        .mark {
+          box-shadow: none;
+        }
+      }
+      /* The app's own icon brings its own shape. */
+      img.mark {
+        width: 4rem;
+        height: 4rem;
+        border-radius: 0;
+        background: none;
+        box-shadow: none;
+      }
+      h1 {
+        margin: 1.125rem 0 0;
+        font-size: 1.0625rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      /* One fixed height for both states, so the name does not move when one replaces the other. */
+      .status {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        height: 4.5rem;
+        margin-top: 1.25rem;
+      }
+      p {
+        margin: 0;
+        font-size: 0.8125rem;
+        color: var(--muted-foreground);
+      }
+      .progress {
+        position: relative;
+        width: 5rem;
+        height: 3px;
+        border-radius: 3px;
+        overflow: hidden;
+        background: color-mix(in srgb, var(--foreground) 10%, transparent);
+      }
+      .progress::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        width: 40%;
+        border-radius: inherit;
+        background: var(--foreground);
+        animation: slide 1.3s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+      }
+      /* A quick load never gets as far as words; a slow one says what it is waiting for. */
+      #connecting p {
+        margin-top: 1rem;
+        opacity: 0;
+        animation: appear 0.4s ease 2.5s forwards;
+      }
+      #unreachable a {
+        display: inline-flex;
+        align-items: center;
+        height: 2rem;
+        margin-top: 0.875rem;
+        padding: 0 0.875rem;
+        border-radius: 0.375rem;
+        background: var(--primary);
+        color: var(--primary-foreground);
+        font-size: 0.8125rem;
+        font-weight: 500;
+        text-decoration: none;
+        cursor: pointer;
+        -webkit-app-region: no-drag;
+      }
+      #unreachable a:hover {
+        opacity: 0.9;
+      }
+      #unreachable a:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+      }
+      /* The shell reopens this page at #unreachable when the app's server does not answer. It is
+         the same page a moment later, so it does not make its entrance twice. */
+      #unreachable:not(:target),
+      :root:has(#unreachable:target) #connecting {
+        display: none;
+      }
+      :root:has(#unreachable:target) main {
+        animation: none;
+      }
+      @keyframes enter {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+      }
+      @keyframes appear {
+        to {
+          opacity: 1;
+        }
+      }
+      @keyframes slide {
+        from {
+          transform: translateX(-100%);
+        }
+        to {
+          transform: translateX(250%);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        main,
+        #connecting p {
+          animation: none;
+          opacity: 1;
+        }
+        .progress::after {
+          animation: none;
+          width: 100%;
+          opacity: 0.35;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      {{mark}}
+      <h1>{{name}}</h1>
+      <div class="status" id="connecting">
+        <div class="progress"></div>
+        <p role="status">Connecting to {{host}}&hellip;</p>
+      </div>
+      <div class="status" id="unreachable">
+        <p>Can&rsquo;t reach {{host}}</p>
+        <a href="{{appUrl}}">Try again</a>
+      </div>
+    </main>
+  </body>
+</html>
