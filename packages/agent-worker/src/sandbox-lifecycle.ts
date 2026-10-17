@@ -18,7 +18,7 @@ import {
   assertRunExecutionOwned,
 } from "./errors"
 import type { AgentExecutionContext } from "./types"
-import { WorkspaceAuthSession } from "./workspace-auth"
+import { WorkspaceAuthSession, type WorkspaceGrant } from "./workspace-auth"
 import { workspaceRunFilesScript } from "./workspace-files"
 import { workspaceNetwork } from "./workspace-network"
 
@@ -66,6 +66,7 @@ class ThreadSandboxSession {
   private readonly sourceFingerprint: string
   private readonly executionToken: string
   private options: SandboxSessionOptions
+  private credentialOrigins: readonly string[] = []
   private name: string
   private initialized = false
   private resetAt: string | undefined
@@ -83,10 +84,9 @@ class ThreadSandboxSession {
   ) {
     const { context, thread, run } = input
     this.sourceUrl = recipe.source ? new URL(recipe.source.url) : undefined
-    this.options = {
-      env: recipe.env,
-      network: this.network(!thread.sandboxState?.initialized),
-    }
+    // Reject an unusable policy before any token is issued. Authorization only adds credential
+    // origins to the network, so it cannot make this check pass or fail.
+    this.options = { env: recipe.env, network: this.network() }
     // Compare recipe identity, not the mutable branch/remote in the guest.
     this.sourceFingerprint = createHash("sha256")
       .update(
@@ -148,12 +148,19 @@ class ThreadSandboxSession {
       assertOwner: () => this.assertOwner(),
       onFailure: onAuthFailure,
     })
+    let grant: WorkspaceGrant
     try {
-      this.requestCredentials = await this.auth.prepare()
+      grant = await this.auth.prepare()
     } catch (error) {
       await this.closeAuthenticationAfterFailure("before acquisition")
       throw error
     }
+
+    // Credential origins are known only now; the network opens every one of them, so the
+    // provider receives the grant's requests as issued.
+    this.credentialOrigins = grant.requests.map((request) => request.origin)
+    this.options = { env: { ...grant.env, ...this.recipe.env }, network: this.network() }
+    this.requestCredentials = grant.requests
   }
 
   private async acquireOwnership(): Promise<void> {
@@ -211,8 +218,6 @@ class ThreadSandboxSession {
 
   private async replaceLostState(): Promise<void> {
     await this.assertCanContinue()
-    // A fresh clone needs source access even if the resume policy no longer allowed it.
-    this.options = { ...this.options, network: this.network(true) }
     const { context, thread, run } = this.input
     const state = await context.storage.agents.threads.transitionSandbox({
       projectId: context.id,
@@ -259,7 +264,7 @@ class ThreadSandboxSession {
             }
           : {}),
       },
-      env: this.recipe.env ?? {},
+      env: this.options.env ?? {},
       resetAt: this.resetAt,
       save: () => {
         if (!this.saving) {
@@ -376,12 +381,12 @@ class ThreadSandboxSession {
     this.input.signal.throwIfAborted()
   }
 
-  private network(initializing: boolean) {
+  private network() {
     return workspaceNetwork(
       this.recipe.network,
       new URL(this.input.context.apiBaseUrl).origin,
       this.sourceUrl?.origin,
-      initializing
+      this.credentialOrigins
     )
   }
 

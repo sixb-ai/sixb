@@ -41,7 +41,7 @@ function fixture(authorize: () => Promise<SandboxSourceCredentials>) {
   return {
     auth,
     start: async () => {
-      updates.push(await auth.prepare())
+      updates.push((await auth.prepare()).requests)
       auth.attach({
         setRequestCredentials: async (value) => {
           updates.push(value)
@@ -168,5 +168,78 @@ describe("workspace auth lifecycle", () => {
     await expect(f.auth.close()).rejects.toThrow("authentication could not be confirmed")
     expect(f.updates).toEqual([])
     expect(token.revocations()).toBe(1)
+  })
+
+  test("returns a snapshot of the first grant's guest environment", async () => {
+    const env: Record<string, string> = { GIT_AUTHOR_NAME: "Integration" }
+    const token = grant("identity")
+    const f = fixture(async () => ({ ...token.value, env }))
+
+    const prepared = await f.auth.prepare()
+    env.GIT_AUTHOR_NAME = "Mutated"
+
+    expect(prepared.env).toEqual({ GIT_AUTHOR_NAME: "Integration" })
+    await f.auth.close()
+  })
+
+  test("defaults to an empty guest environment", async () => {
+    const f = fixture(async () => grant("no-env").value)
+
+    expect((await f.auth.prepare()).env).toEqual({})
+    await f.auth.close()
+  })
+
+  test.each([
+    { "": "empty key" },
+    { "GIT=NAME": "separator in key" },
+    { "GIT\0NAME": "NUL in key" },
+    { GIT_AUTHOR_NAME: "NUL\0in value" },
+    { GIT_AUTHOR_NAME: 1 },
+  ])("rejects an invalid guest environment and revokes its grant: %j", async (env) => {
+    // Regression proof: replace captureSandboxEnv(grant.env) with grant.env; prepare resolves.
+    const token = grant("invalid-env")
+    const f = fixture(async () => ({
+      ...token.value,
+      env: env as unknown as Record<string, string>,
+    }))
+
+    await expect(f.auth.prepare()).rejects.toThrow("authentication could not be confirmed")
+    await expect(f.auth.close()).rejects.toThrow("authentication could not be confirmed")
+
+    expect(f.updates).toEqual([])
+    expect(token.revocations()).toBe(1)
+  })
+
+  test("ignores the guest environment of a renewal", async () => {
+    // Regression proof: validate every grant's env; the invalid renewal env interrupts the session.
+    const old = grant("old", 61_000)
+    const fresh = grant("new")
+    let calls = 0
+    let renewed!: () => void
+    const renewal = new Promise<void>((resolve) => {
+      renewed = resolve
+    })
+    const originalRevoke = old.value.revoke
+    old.value.revoke = async () => {
+      await originalRevoke()
+      renewed()
+    }
+    const f = fixture(
+      async (): Promise<SandboxSourceCredentials> =>
+        ++calls === 1
+          ? { ...old.value, env: { GIT_AUTHOR_NAME: "Integration" } }
+          : { ...fresh.value, env: { "INVALID=KEY": "ignored" } }
+    )
+
+    try {
+      await f.start()
+      await renewal
+
+      expect(f.updates).toEqual([old.value.requests, fresh.value.requests])
+      expect(f.failures).toEqual([])
+    } finally {
+      await f.auth.close()
+    }
+    expect(fresh.revocations()).toBe(1)
   })
 })

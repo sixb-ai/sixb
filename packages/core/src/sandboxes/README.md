@@ -24,8 +24,11 @@ Factories define environments; threads retain immutable parameters; runs provide
   This prevents accidental staging, not deliberate publication with `git add -f`.
 - Confirmed missing/expired state allows one replacement attempt under the current execution fence.
   A durable reset timestamp informs subsequent model calls; conversation history is preserved.
-- Omitted network policy permits API/source access. Explicit policies are never widened; incompatible
-  policies fail before provisioning. Guest-readable `env` is not a Git credential channel.
+- Sixb always adds the API, source and auth request origins to a run's network: an omitted policy
+  allows only those, a restricted one lists what the project adds. `none` fails before
+  provisioning. Guest-readable `env` is not a Git credential channel.
+- Request origins are read from the first grant, so renewals must keep to the same origins: a
+  provider rejects a credential for an origin the network does not allow.
 
 ## V1 limits
 
@@ -40,3 +43,8 @@ sandboxes alike. Unsupported providers reject credentials before provisioning. D
 provisioning/setup, the worker aborts before token expiry if no session handle is available yet;
 renewal begins after acquisition. Normal teardown removes injection and revokes grants. A crash
 cannot guarantee immediate revocation.
+
+A grant may also carry a guest-readable `env` (identities, placeholders), validated like recipe
+`env` before provisioning; an invalid one fails authentication. It applies on creation and resume
+under the recipe's own `env`. Only the first grant of a run is read: the session environment
+cannot change once acquired, so renewals rotate requests and their `env` is ignored.

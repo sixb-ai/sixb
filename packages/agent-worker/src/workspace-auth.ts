@@ -4,6 +4,7 @@ import type {
   SandboxSourceAuth,
   SandboxSourceCredentials,
 } from "@sixb/core"
+import { captureSandboxEnv } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 
 const TIMEOUT_MS = 30_000
@@ -14,6 +15,12 @@ const authError = () =>
     "agent.execution_failed",
     "[SixbAgentWorker] Workspace authentication could not be confirmed."
   )
+
+/** The first grant as the caller sees it. Requests stay host-side; only `env` reaches the guest. */
+export interface WorkspaceGrant {
+  readonly requests: SandboxSourceCredentials["requests"]
+  readonly env: Readonly<Record<string, string>>
+}
 
 /** Owns host-side access only. Never stores credentials in workspace state or guest files. */
 export class WorkspaceAuthSession {
@@ -26,6 +33,7 @@ export class WorkspaceAuthSession {
   private failed = false
   private inject?: NonNullable<Sandbox["setRequestCredentials"]>
   private current?: SandboxSourceCredentials
+  private env?: Readonly<Record<string, string>>
 
   constructor(
     private readonly input: {
@@ -52,11 +60,12 @@ export class WorkspaceAuthSession {
     this.inject = sandbox.setRequestCredentials.bind(sandbox)
   }
 
-  async prepare(): Promise<SandboxSourceCredentials["requests"]> {
+  /** The first grant: its request origins join the session network. */
+  async prepare(): Promise<WorkspaceGrant> {
     this.input.signal.throwIfAborted()
     await this.rotate()
-    if (this.halted || !this.current) throw authError()
-    return this.current.requests
+    if (this.halted || !this.current || !this.env) throw authError()
+    return { requests: this.current.requests, env: this.env }
   }
 
   private readonly onAbort = () => {
@@ -104,6 +113,11 @@ export class WorkspaceAuthSession {
         typeof grant.revoke !== "function"
       )
         throw authError()
+
+      // The guest environment is fixed when the session is acquired; renewals only rotate
+      // requests, so a later grant's env is ignored rather than failing a running session.
+      const env = this.env ?? (grant.env === undefined ? {} : captureSandboxEnv(grant.env))
+
       await this.input.assertOwner()
       if (this.halted) return
       if (this.inject) await bounded(this.inject(grant.requests))
@@ -113,6 +127,7 @@ export class WorkspaceAuthSession {
       }
       if (this.halted) return
       this.current = grant
+      this.env = env
       this.timer = setTimeout(
         () => {
           if (!this.inject) {

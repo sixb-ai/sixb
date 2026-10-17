@@ -70,9 +70,11 @@ const sandboxes = new VercelSandboxFactory({
 credential-free HTTPS Git URLs; omit it for a source-free environment. `setup` commands run only
 when creating a fresh sandbox. The repository and initial revision cannot change on resume.
 
-For bound conversations, omitting `network` allows the Sixb API and source origin. Explicit policies
-are never widened: also allow package registries if setup needs them. Guest-readable `env` is not
-a safe place for credentials.
+For bound conversations, Sixb always allows what the agent needs: the Sixb API, the source origin
+and the origins `auth` issues credentials for. Omitting `network` allows only those. A
+`restricted` policy lists what the project adds, such as the package registry `setup` installs
+from; `all` allows everything. `none` is rejected: the agent cannot reach the Sixb API.
+Guest-readable `env` is not a safe place for credentials.
 
 For direct factory use, `create()` applies static source/setup. An explicit `environment` replaces
 both, including `{}` to skip them. Dynamic recipes require execution-resolved configuration.
