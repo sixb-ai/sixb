@@ -1,11 +1,14 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, Markdown } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { ChevronRight, Wrench } from "lucide-react"
+import { ChevronRight, FileX, Wrench } from "lucide-react"
 import { memo, useState } from "react"
 import { latestWorkLabel } from "../activity-label"
+import { ArtifactCards } from "../artifact-card"
 import { BashToolView } from "../bash/bash-tool-view"
 import { useAgentMessages } from "../i18n"
 import type { NormalizedPart, NormalizedTool } from "../parts"
+import { isPublishTool, turnArtifacts, unpublishedTitles } from "../publish-artifact/interpret"
+import { PublishArtifactToolView } from "../publish-artifact/publish-artifact-tool-view"
 import { ReadToolView } from "../read/read-tool-view"
 import { coerceWebFetchOutput } from "../utils/web-fetch"
 import { coerceWebSearchOutput, collectWebSources } from "../utils/web-search"
@@ -20,7 +23,8 @@ import { WebSources } from "./web-sources"
  * Render an assistant body from normalized parts. Narration text stays on the main reading path;
  * every run of consecutive reasoning + tool parts collapses into a single "work" disclosure, so a
  * long chain of thinking and tool calls reads as one quiet line above the answer instead of a stack
- * of separate dropdowns. `step-start` markers are intentionally skipped.
+ * of separate dropdowns. What the turn published closes the body as one row of cards, while each
+ * publish keeps its row in the work. `step-start` markers are intentionally skipped.
  */
 export function AssistantBody({
   parts,
@@ -74,8 +78,26 @@ export function AssistantBody({
   flushText()
   // The final work run is the only one that can still be receiving steps.
   flushWork(live)
+  const artifacts = turnArtifacts(parts)
+  if (artifacts.length > 0) blocks.push(<ArtifactCards key="artifacts" artifacts={artifacts} />)
+  // Said where the card would be, whatever the answer claims. A live turn may still retry.
+  if (!live) {
+    for (const title of unpublishedTitles(parts)) {
+      blocks.push(<NotPublished key={`unpublished:${title}`} title={title} />)
+    }
+  }
 
   return <div className="flex flex-col gap-3">{blocks}</div>
+}
+
+function NotPublished({ title }: { title: string }) {
+  const messages = useAgentMessages().artifacts
+  return (
+    <p className="flex items-center gap-1.5 text-[13px] text-muted-foreground" role="status">
+      <FileX className="size-3.5 shrink-0" aria-hidden="true" />
+      {messages.publishFailed(title)}
+    </p>
+  )
 }
 
 const TextBlock = memo(function TextBlock({ text }: { text: string }) {
@@ -196,6 +218,7 @@ function ToolCallRow({ tool }: { tool: NormalizedTool }) {
   }
   if (tool.toolName === "read") return <ReadToolView tool={tool} />
   if (tool.toolName === "view_file") return <ViewFileToolView tool={tool} />
+  if (isPublishTool(tool.toolName)) return <PublishArtifactToolView tool={tool} />
   if (
     tool.toolName === "web_fetch" &&
     (tool.state !== "output-available" || coerceWebFetchOutput(tool.output) !== null)

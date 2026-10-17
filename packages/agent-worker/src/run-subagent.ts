@@ -4,11 +4,9 @@ import { createSixbError } from "@sixb/core/internal/errors"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import { coerceAgentRunFinishReason, type SubagentRunRecord } from "@sixb/core/storage"
 import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION, withCurrentTime } from "./agent-prompt"
-import { assistantPartsWithAttachments } from "./assistant-attachments"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { finishRunOrThrow } from "./finalize"
 import { agentTraceFromModelSteps } from "./model-adapters"
-import { collectAgentOutputAttachments } from "./output-attachments"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentTurnContext } from "./types"
@@ -59,20 +57,7 @@ export async function runSubagent(input: {
     parentRunId: run.parentRunId,
     runId: run.id,
   })
-  const outputAttachments = await collectAgentOutputAttachments({
-    sandboxReady: context.sandboxReady,
-    sandboxWasUsed: context.sandboxWasUsed,
-    blobStorage: context.blobStorage,
-    signal: abortSignal,
-  })
-  assertSubagentCanFinalize({ runtime, sandboxReadiness })
-  const childResult = subagentResult(
-    assistantPartsWithAttachments(parts, {
-      projectTools: plan.tools,
-      outputAttachments: outputAttachments.attachments,
-    }),
-    run
-  )
+  const childResult = subagentResult(parts, run)
 
   const finalized = await finishRunOrThrow(context.storage.agents, {
     projectId: context.id,
@@ -81,9 +66,6 @@ export async function runSubagent(input: {
     status: "succeeded",
     modelId: plan.model.modelId,
     finishReason: coerceAgentRunFinishReason(generation.finishReason) ?? "unknown",
-    ...(outputAttachments.diagnostics.length === 0
-      ? {}
-      : { diagnostics: outputAttachments.diagnostics }),
     result: childResult,
   })
   if (finalized.kind !== "subagent") {
@@ -113,16 +95,12 @@ function subagentResult(
     .flatMap((part) => (part.type === "text" ? [part.text] : []))
     .join("\n")
     .trim()
-  const files = parts.flatMap((part) => (part.type === "file" ? [part.fileRef] : []))
-  if (!text && files.length === 0) {
+  if (!text) {
     throw createSixbError(
       "agent.execution_failed",
-      `[SixbAgentWorker] Subagent run '${run.id}' produced no final text or file result.`,
+      `[SixbAgentWorker] Subagent run '${run.id}' produced no final text.`,
       { details: { parentRunId: run.parentRunId, runId: run.id } }
     )
   }
-  return {
-    ...(text ? { text } : {}),
-    ...(files.length === 0 ? {} : { files }),
-  }
+  return { text }
 }

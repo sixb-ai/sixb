@@ -14,6 +14,7 @@ import {
   resolveAgentExecutionPlan,
   resolveWorkflowAgentStepExecutionPlan,
 } from "../src/execution-plan"
+import { BUILT_IN_SKILLS } from "../src/skills/built-in"
 import { WorkerTestModel } from "./worker-model-fixture"
 
 function workflowStep(config: Parameters<typeof defineAgentStep>[1]): AgentStepDefinition {
@@ -68,11 +69,23 @@ describe("resolveAgentExecutionPlan", () => {
     expect(plan).toEqual({
       model: defaultModel,
       tools: [lookup],
-      skills: [skill("invoice-review")],
+      skills: [skill("invoice-review"), ...BUILT_IN_SKILLS],
       maxSteps: 25,
     })
     expect(Object.isFrozen(plan)).toBe(true)
     expect("agentId" in plan).toBe(false)
+  })
+
+  test("adds the built-in skills unless the project replaces one by name", () => {
+    expect(BUILT_IN_SKILLS.map((builtIn) => builtIn.name)).toEqual(["sixb-artifacts"])
+    const own = skill("sixb-artifacts")
+    const plan = resolveAgentExecutionPlan({
+      models,
+      tools,
+      skills: skillCatalog([own]),
+      defaultMaxSteps: 25,
+    })
+    expect(plan.skills).toEqual([own])
   })
 
   test("carries the project instructions from SIXB.md", () => {

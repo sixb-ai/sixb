@@ -1,8 +1,8 @@
 # Artifacts
 
 An artifact is a piece of finished work your project keeps: a report, a chart, a file someone
-needs. Each one has an address, versions that never change once published, and a page in your
-app where its owner reads it.
+needs. Each one has versions that never change once published, and a page in your app where its
+owner reads it.
 
 ## Kinds
 
@@ -42,6 +42,23 @@ it opens.
 From outside the server, use `POST /api/artifacts` and
 `POST /api/artifacts/{artifactId}/versions` with files uploaded through `POST /api/files`.
 
+## The Agent publishes
+
+In a conversation, the Agent publishes what you ask it to make, such as a report, a brief, or a file
+in a format you name, as an artifact. Each artifact gets a card under the reply and opens beside the
+conversation as soon as it is published, while the Agent is still working. Ask for a change and the
+Agent publishes the next version of the same artifact; the version menu keeps the earlier ones. The
+conversation's header lists every artifact it published.
+
+A cancelled reply keeps what it already published. Retrying a reply that failed removes what it
+published along with what it said.
+
+The Agent learns the formats from a built-in skill, `sixb-artifacts`. To change how it writes, add a
+skill with the same name under `skills/`: yours replaces the built-in one.
+
+A file one of your tools returns stays with that tool's step in the conversation. The Agent publishes
+it when it is what you asked for.
+
 ## Write a document
 
 A document is Markdown with tables, footnotes, and task lists. A few conventions shape its page:
@@ -56,11 +73,13 @@ A document is Markdown with tables, footnotes, and task lists. A few conventions
 
 ## Open an artifact
 
-Every artifact has a page at `/artifacts/{artifactId}`. Add `?v=2` for a version and
-`?part=revenue` to open at a section. In an agent conversation, artifacts open beside the chat.
+Every artifact has a page at `/artifacts/{artifactId}` that fills the window, over your app's
+navigation. Add `?v=2` for a version and `?part=revenue` to open at a section. In an agent
+conversation, artifacts open beside the chat.
 
-An artifact's address names it anywhere: `artifact:art_0123456789`, pinned to a version with
-`@2` and to a section with `#revenue`. Copy it from the artifact's header.
+The link button in an artifact's header copies a link to its page, and the one beside a heading a
+link to that section. A link to the latest version keeps following the artifact as new versions
+are published; a link copied from an earlier version stays on it.
 
 Only the artifact's owner can open it. Server code that runs as the system, outside any user's
 request, reaches every artifact in the project.

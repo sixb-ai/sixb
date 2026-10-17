@@ -101,16 +101,30 @@ Missing rate cards or incomplete cache/token meters remain explicitly unpriceabl
 and model identities are stored separately from the gateway identity. Catalog discovery is never on
 the inference or accounting path.
 
-## Attachments
+## Attachments and artifacts
 
-An answer's attachments are the files its project tools returned and the files published to
-`$SIXB_OUTPUT_DIR`, each once. Files a built-in tool only read, such as the image `view_file`
-prepared for the model, stay in that tool's result and are shown in the work trace.
+A file a tool returns, from a project tool or `view_file`, stays in that tool's result and shows in
+the work trace. What the user receives is what the Agent publishes.
 
-Assistant file attachments remain structured message parts for display and download; they are not
-replayed as assistant text. Earlier files in the retained conversation are discoverable through the
-sandbox's `$SIXB_ATTACHMENTS` manifest and inspectable using `view_file` when materialized. Current
-user attachments and file-producing tool results retain their model-input projections.
+Earlier files in the retained conversation are discoverable through the sandbox's
+`$SIXB_ATTACHMENTS` manifest and inspectable using `view_file` when materialized. Current user
+attachments and file-producing tool results retain their model-input projections.
+
+`publish_artifact` creates an artifact and `publish_artifact_version` publishes the next version of
+one (`src/artifacts/publish-tool.ts`). They are two tools so that every argument of each is required:
+a mode carried by an optional or null argument is where models differ, and with every property
+required each model adapter sends both schemas strict. Offered only to conversations, each reads a
+file or directory from the sandbox, stores its bytes against the run's file budget, and publishes it
+through `publishArtifact` as the thread's owner, with the thread and run as its origin. The version commits
+in a transaction that first checks the run still holds its execution token, so a run reclaimed by
+another delivery publishes nothing. The version exists when the tool returns: the conversation shows
+it mid-turn, a cancelled run keeps it, and retrying the run deletes it with the run's messages.
+
+Before each conversation run, `src/artifacts/materialize.ts` installs the latest version of each
+artifact the thread published under `$SIXB_ARTIFACTS_DIR/<id>/` and lists them in `$SIXB_ARTIFACTS`,
+newest first within a byte budget; a sandbox that outlives the run is cleared there first. The
+built-in `sixb-artifacts` skill (`src/skills/`) describes the formats the publisher accepts; its
+examples are published in the tests.
 
 ## Live Stream
 

@@ -9,3 +9,10 @@ export function createArtifactId(): string {
   for (const byte of bytes) id += ALPHABET[byte % ALPHABET.length]
   return id
 }
+
+const ARTIFACT_ID = new RegExp(`^art_[${ALPHABET}]{10}$`)
+
+/** Whether `value` has the shape of an artifact id; whether that artifact exists is another matter. */
+export function isArtifactId(value: string): boolean {
+  return ARTIFACT_ID.test(value)
+}

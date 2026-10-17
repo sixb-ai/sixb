@@ -2,7 +2,11 @@ import { join } from "node:path"
 import type { AgentProjectFile, AgentSkillDefinition, Sandbox, SandboxFileRecord } from "@sixb/core"
 import { loadAgentCliAssets } from "./agent-cli-assets"
 import { AGENT_RUNTIME_PROFILE } from "./agent-runtime/profile"
+import type { MaterializedArtifacts } from "./artifacts/materialize"
 import type { PreparedAgentAttachmentContext } from "./attachments"
+
+/** Where a conversation's artifacts are installed, relative to the sandbox working directory. */
+export const AGENT_ARTIFACTS_DIRECTORY = ".sixb/agent/artifacts"
 
 export interface AgentSandboxApiContext {
   readonly env: Readonly<Record<string, string>>
@@ -19,6 +23,10 @@ export interface PrepareAgentSandboxApiContextInput {
   readonly skills: readonly AgentSkillDefinition[]
   /** The run's ontology reference docs and scripts, by path relative to the ontology directory. */
   readonly ontologyFiles: readonly AgentProjectFile[]
+  /** A conversation's published artifacts, under {@link AGENT_ARTIFACTS_DIRECTORY}. */
+  readonly artifacts?: MaterializedArtifacts
+  /** The sandbox outlives the run, so an earlier install is removed before this one. */
+  readonly replaceArtifacts?: boolean
 }
 
 export async function prepareAgentSandboxApiContext(
@@ -34,9 +42,8 @@ export async function prepareAgentSandboxApiContext(
   const runtimeProbePath = join(contextDir, "runtime", "read-probe.txt")
   const attachmentsManifestPath = join(contextDir, "context", "attachments.json")
   const attachmentsDir = join(contextDir, "attachments")
-  const outputRoot = join(contextDir, "outputs")
-  const outputStagingDir = join(outputRoot, "staging")
-  const outputDir = join(outputRoot, "published")
+  const artifactsDir = join(input.sandbox.workingDirectory, AGENT_ARTIFACTS_DIRECTORY)
+  const artifactsManifestPath = join(contextDir, "context", "artifacts.json")
   const cli = await loadAgentCliAssets()
 
   // apiBaseUrl arrives already normalized + wrapped as the run's gateway URL (see worker.ts /
@@ -51,12 +58,16 @@ export async function prepareAgentSandboxApiContext(
       apiBaseUrl: input.apiBaseUrl,
       attachmentsManifestPath,
       attachmentsDir,
-      outputDir,
-      outputStagingDir,
+      ...(input.artifacts ? { artifactsManifestPath, artifactsDir } : {}),
     },
     null,
     2
   )
+
+  if (input.artifacts && input.replaceArtifacts) {
+    // A version's directory holds exactly that version: files an older one had must not linger.
+    await input.sandbox.runCommand("rm", ["-rf", artifactsDir])
+  }
 
   // Materialize skills, ontology docs + run context through the sandbox capability rather than the host
   // filesystem, so any provider (including non-host-path ones like smolvm) places the bytes in the
@@ -83,12 +94,19 @@ export async function prepareAgentSandboxApiContext(
       path: attachmentsManifestPath,
       contents: input.attachments?.manifestJson ?? emptyManifestJson(),
     },
-    { path: join(outputStagingDir, ".keep"), contents: "" },
-    { path: join(outputDir, ".keep"), contents: "" },
     ...(input.attachments?.sandboxFiles.map((file) => ({
       path: join(input.sandbox.workingDirectory, file.path),
       contents: file.bytes,
     })) ?? []),
+    ...(input.artifacts
+      ? [
+          { path: artifactsManifestPath, contents: input.artifacts.manifestJson },
+          ...input.artifacts.files.map((file) => ({
+            ...file,
+            path: join(input.sandbox.workingDirectory, file.path),
+          })),
+        ]
+      : []),
   ])
 
   return {
@@ -104,8 +122,9 @@ export async function prepareAgentSandboxApiContext(
       SIXB_RUN_CONTEXT: runContextPath,
       SIXB_ATTACHMENTS: attachmentsManifestPath,
       SIXB_ATTACHMENT_DIR: attachmentsDir,
-      SIXB_OUTPUT_DIR: outputDir,
-      SIXB_OUTPUT_STAGING_DIR: outputStagingDir,
+      ...(input.artifacts
+        ? { SIXB_ARTIFACTS: artifactsManifestPath, SIXB_ARTIFACTS_DIR: artifactsDir }
+        : {}),
       SIXB_PROJECT_ID: input.projectId,
       ...(input.actorId === undefined ? {} : { SIXB_ACTOR_ID: input.actorId }),
       ...(input.threadId ? { SIXB_THREAD_ID: input.threadId } : {}),

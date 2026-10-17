@@ -10703,17 +10703,9 @@ export type ListAgentThreadMessagesResponses = {
           }
       >
       annotations: Array<{
-        code:
-          | "output_file_limit_exceeded"
-          | "output_file_too_large"
-          | "output_budget_exhausted"
-          | "output_collection_failed"
-          | "output_file_changed"
-          | "output_storage_failed"
-          | "step_limit_reached"
+        code: "step_limit_reached"
         severity: "warning" | "error"
-        scope: "output" | "run"
-        path?: string
+        scope: "run"
         message: string
       }>
       compaction?: {
@@ -10943,17 +10935,9 @@ export type PostAgentThreadMessageResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code:
-          | "output_file_limit_exceeded"
-          | "output_file_too_large"
-          | "output_budget_exhausted"
-          | "output_collection_failed"
-          | "output_file_changed"
-          | "output_storage_failed"
-          | "step_limit_reached"
+        code: "step_limit_reached"
         severity: "warning" | "error"
-        scope: "output" | "run"
-        path?: string
+        scope: "run"
         message: string
       }>
       error?: {
@@ -11204,17 +11188,9 @@ export type CancelAgentRunResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code:
-          | "output_file_limit_exceeded"
-          | "output_file_too_large"
-          | "output_budget_exhausted"
-          | "output_collection_failed"
-          | "output_file_changed"
-          | "output_storage_failed"
-          | "step_limit_reached"
+        code: "step_limit_reached"
         severity: "warning" | "error"
-        scope: "output" | "run"
-        path?: string
+        scope: "run"
         message: string
       }>
       error?: {
@@ -11382,17 +11358,9 @@ export type RetryAgentRunResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code:
-          | "output_file_limit_exceeded"
-          | "output_file_too_large"
-          | "output_budget_exhausted"
-          | "output_collection_failed"
-          | "output_file_changed"
-          | "output_storage_failed"
-          | "step_limit_reached"
+        code: "step_limit_reached"
         severity: "warning" | "error"
-        scope: "output" | "run"
-        path?: string
+        scope: "run"
         message: string
       }>
       error?: {
@@ -11536,17 +11504,9 @@ export type ListAgentThreadRunsResponses = {
         unvaluedCallCount: number
       }
       diagnostics?: Array<{
-        code:
-          | "output_file_limit_exceeded"
-          | "output_file_too_large"
-          | "output_budget_exhausted"
-          | "output_collection_failed"
-          | "output_file_changed"
-          | "output_storage_failed"
-          | "step_limit_reached"
+        code: "step_limit_reached"
         severity: "warning" | "error"
-        scope: "output" | "run"
-        path?: string
+        scope: "run"
         message: string
       }>
       error?: {
@@ -11687,17 +11647,9 @@ export type GetAgentRunResponses = {
       unvaluedCallCount: number
     }
     diagnostics?: Array<{
-      code:
-        | "output_file_limit_exceeded"
-        | "output_file_too_large"
-        | "output_budget_exhausted"
-        | "output_collection_failed"
-        | "output_file_changed"
-        | "output_storage_failed"
-        | "step_limit_reached"
+      code: "step_limit_reached"
       severity: "warning" | "error"
-      scope: "output" | "run"
-      path?: string
+      scope: "run"
       message: string
     }>
     error?: {

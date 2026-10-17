@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { CommandResult, RunCommandOptions, Sandbox, SandboxFileRecord } from "@sixb/core"
 import {
   listSandboxFiles,
   readSandboxFile,
   resolveSandboxPath,
   SandboxFileError,
 } from "../src/sandbox-files"
+import { LocalBashSandbox } from "./helpers"
 
 // The scripts run in a real local bash against a temporary directory, so the symlink, escape, and
 // size checks are exercised as a sandbox would run them.
@@ -143,41 +143,3 @@ describe("readSandboxFile", () => {
 })
 
 /** Runs each command in a local bash, without a login shell, in the given working directory. */
-class LocalBashSandbox implements Sandbox {
-  readonly id = "local-bash"
-  readonly provider = "test"
-  readonly status = "running"
-
-  constructor(readonly workingDirectory: string) {}
-
-  async writeFiles(_files: readonly SandboxFileRecord[]): Promise<void> {
-    throw new Error("writeFiles is not used by sandbox file tests")
-  }
-
-  async runCommand(
-    command: string,
-    args: readonly string[] = [],
-    options: RunCommandOptions = {}
-  ): Promise<CommandResult> {
-    const script = args.at(-1)
-    if (command !== "bash" || typeof script !== "string") {
-      throw new Error(`Unexpected command ${command}`)
-    }
-    const child = Bun.spawn(["bash", "-c", script], {
-      cwd: this.workingDirectory,
-      env: { PATH: process.env.PATH ?? "/usr/bin:/bin", ...options.env },
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ])
-    return { exitCode, stdout, stderr, durationMs: 0 }
-  }
-
-  async stop(): Promise<void> {}
-
-  async destroy(): Promise<void> {}
-}

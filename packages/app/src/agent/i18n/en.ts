@@ -203,14 +203,6 @@ export const en = {
   },
   /** Platform diagnostics, by their stable `code`; `unknown` covers codes added later. */
   diagnostics: {
-    output_file_limit_exceeded:
-      "Some generated files were not attached because the file limit was reached.",
-    output_file_too_large: "A generated file exceeds the attachment size limit and was skipped.",
-    output_budget_exhausted:
-      "A generated file exceeds the remaining attachment budget and was skipped.",
-    output_collection_failed: "Generated files could not be collected.",
-    output_file_changed: "A generated file changed while it was being attached and was skipped.",
-    output_storage_failed: "A generated file could not be stored as an attachment.",
     step_limit_reached:
       "I reached the step limit before producing a final answer. Ask me to continue and I can use the work above as context.",
     unknown: "Something went wrong during this response.",
@@ -481,6 +473,13 @@ export const en = {
       total === 1
         ? "1 artifact in this conversation"
         : `${number(total)} artifacts in this conversation`,
+    /** A `publish_artifact` call, by the title it names (`title` may be empty). */
+    publishing: (title: string) => `Publishing ${title || "an artifact"}`,
+    published: (title: string) => `Published ${title || "an artifact"}`,
+    publishFailed: (title: string) => `Couldn't publish ${title || "an artifact"}`,
+    open: (title: string) => `Open ${title}`,
+    /** Labels the cards of what one response published. */
+    cards: "Published in this response",
   },
   sandbox: {
     title: "Sandbox recovery required",

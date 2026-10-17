@@ -359,6 +359,7 @@ describe("Postgres storage migrations", () => {
             "061-terminal-action-runs",
             "062-drop-auth-audience",
             "063-artifacts",
+            "064-drop-output-diagnostics",
           ],
         },
       ])
@@ -803,6 +804,13 @@ describe("Postgres storage migrations", () => {
           id: "063-artifacts",
           status: "applied",
           version: 63,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "064-drop-output-diagnostics",
+          status: "applied",
+          version: 64,
         },
       ])
     })
@@ -3302,6 +3310,13 @@ describe("Postgres storage migrations", () => {
           id: "063-artifacts",
           status: "applied",
           version: 63,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "064-drop-output-diagnostics",
+          status: "applied",
+          version: 64,
         },
       ])
     } finally {

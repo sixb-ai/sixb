@@ -193,16 +193,6 @@ export const fr: Translation<AgentMessages> = {
     reconnectingLabel: "Reconnexion au flux de l’agent",
   },
   diagnostics: {
-    output_file_limit_exceeded:
-      "Certains fichiers générés n’ont pas été joints : le nombre maximal de fichiers a été atteint.",
-    output_file_too_large:
-      "Un fichier généré dépasse la taille maximale d’une pièce jointe et a été ignoré.",
-    output_budget_exhausted:
-      "Un fichier généré dépasse l’espace restant pour les pièces jointes et a été ignoré.",
-    output_collection_failed: "Les fichiers générés n’ont pas pu être récupérés.",
-    output_file_changed:
-      "Un fichier généré a été modifié pendant son ajout en pièce jointe et a été ignoré.",
-    output_storage_failed: "Un fichier généré n’a pas pu être enregistré en pièce jointe.",
     step_limit_reached:
       "J’ai atteint la limite d’étapes avant de produire une réponse finale. Il suffit de me demander de continuer pour reprendre ce travail.",
     unknown: "Un problème est survenu pendant cette réponse.",
@@ -516,6 +506,12 @@ export const fr: Translation<AgentMessages> = {
       total === 1
         ? "1 artefact dans cette conversation"
         : `${number(total)} artefacts dans cette conversation`,
+    publishing: (title) => (title ? `Publication de ${title}` : "Publication d’un artefact"),
+    published: (title) => (title ? `${title} publié` : "Artefact publié"),
+    publishFailed: (title) =>
+      title ? `Impossible de publier ${title}` : "Impossible de publier l’artefact",
+    open: (title) => `Ouvrir ${title}`,
+    cards: "Publié dans cette réponse",
   },
   sandbox: {
     title: "Récupération de l’environnement requise",

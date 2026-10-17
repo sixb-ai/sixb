@@ -16,7 +16,6 @@ import {
   agent,
   type BlobStorage,
   type Broker,
-  type CommandResult,
   type ConnectorDefinition,
   type CreateSandboxOptions,
   can,
@@ -86,6 +85,8 @@ import {
   AgentStorageError,
   type AiUsageStorage,
   type AppendAgentMessageInput,
+  type ArtifactRecord,
+  type ArtifactStorage,
   type ConversationAgentRunRecord,
   type RecordAiModelCallInput,
   type SubagentRunRecord,
@@ -199,6 +200,52 @@ function observeQueueSettlement<TFailure>(queue: {
       retried.mockRestore()
     },
   }
+}
+
+const Q3_REVIEW_MARKDOWN =
+  "# Q3 review\n\nRestorations within SLA rose to 94%.\n\n## Regions\n\nNorth led.\n"
+
+function toolCallStream(toolCallId: string, toolName: string, input: Record<string, unknown>) {
+  return stream([
+    { type: "stream-start", warnings: [] },
+    { type: "tool-call", toolCallId, toolName, input: JSON.stringify(input) },
+    finish("tool-calls"),
+  ])
+}
+
+function answerStream(text: string) {
+  return stream([
+    { type: "stream-start", warnings: [] },
+    { type: "text-start", id: "t" },
+    { type: "text-delta", id: "t", delta: text },
+    { type: "text-end", id: "t" },
+    finish("stop"),
+  ])
+}
+
+function artifactStorageOf(sixb: TestSixb | undefined): ArtifactStorage {
+  const artifacts = sixb?.storage.artifacts
+  if (!artifacts) throw new Error("Expected artifact storage.")
+  return artifacts
+}
+
+async function onlyArtifact(sixb: TestSixb | undefined): Promise<ArtifactRecord> {
+  const { artifacts } = await artifactStorageOf(sixb).list({ projectId: PROJECT_ID })
+  const [artifact] = artifacts
+  if (!artifact || artifacts.length !== 1) {
+    throw new Error(`Expected one artifact, found ${artifacts.length}.`)
+  }
+  return artifact
+}
+
+async function waitForTerminalRun(storage: AgentStorage, runId: string) {
+  return waitFor(
+    async () => {
+      const run = await storage.runs.getById({ projectId: PROJECT_ID, id: runId })
+      return run && run.status !== "queued" && run.status !== "running" ? run : null
+    },
+    { label: `run ${runId} terminal` }
+  )
 }
 
 function stream(chunks: WorkerTestStreamEvent[]) {
@@ -711,35 +758,6 @@ function bashThenAnswerModel(): WorkerTestModel {
   })
 }
 
-function outputBashThenAnswerModel(): WorkerTestModel {
-  let call = 0
-  return new WorkerTestModel({
-    modelId: "mock-model",
-    stream: async () => {
-      call += 1
-      if (call === 1) {
-        return stream([
-          { type: "stream-start", warnings: [] },
-          {
-            type: "tool-call",
-            toolCallId: "bash-output-call-1",
-            toolName: "bash",
-            input: JSON.stringify({ command: "create-agent-output" }),
-          },
-          finish("tool-calls"),
-        ])
-      }
-      return stream([
-        { type: "stream-start", warnings: [] },
-        { type: "text-start", id: "t" },
-        { type: "text-delta", id: "t", delta: "I created the report." },
-        { type: "text-end", id: "t" },
-        finish("stop"),
-      ])
-    },
-  })
-}
-
 function apiBashThenAnswerModel(
   captureSystem?: (system: string | undefined) => void
 ): WorkerTestModel {
@@ -1094,8 +1112,6 @@ class RecordingSandbox implements Sandbox {
   readonly commands: RecordedCommand[] = []
   readonly writtenFiles: SandboxFileRecord[] = []
   readonly files = new Map<string, Uint8Array>()
-  readonly outputFiles = new Map<string, Uint8Array>()
-  readonly outputListedSizeOverrides = new Map<string, number>()
   destroyed = false
 
   constructor(id: string, provider = "recording") {
@@ -1128,11 +1144,8 @@ class RecordingSandbox implements Sandbox {
     }
   }
 
-  writeOutputFile(relativePath: string, contents: string | Uint8Array): void {
-    this.outputFiles.set(
-      relativePath,
-      typeof contents === "string" ? new TextEncoder().encode(contents) : contents
-    )
+  writeWorkingFile(relativePath: string, contents: string): void {
+    this.files.set(join(this.workingDirectory, relativePath), new TextEncoder().encode(contents))
   }
 
   async runCommand(command: string, args: readonly string[] = [], options: RunCommandOptions = {}) {
@@ -1168,14 +1181,10 @@ class RecordingSandbox implements Sandbox {
       this.files.set(join(this.workingDirectory, "scratch", "bash-image.png"), TEST_PNG_BYTES)
       return { exitCode: 0, stdout: "created image", stderr: "", durationMs: 1 }
     }
-    if (command === "bash" && script === "create-agent-output") {
-      this.writeOutputFile("report.txt", "generated report")
-      return {
-        exitCode: 0,
-        stdout: "created report.txt",
-        stderr: "",
-        durationMs: 1,
-      }
+    if (command === "bash" && script === "write-q3-review") {
+      this.writeWorkingFile("work/q3-review/document.md", Q3_REVIEW_MARKDOWN)
+      this.writeWorkingFile("work/q3-review/.draft-notes", "not for the reader")
+      return { exitCode: 0, stdout: "wrote work/q3-review", stderr: "", durationMs: 1 }
     }
     if (command === "bash" && script === 'cat "$SIXB_ATTACHMENTS"') {
       return {
@@ -1190,17 +1199,14 @@ class RecordingSandbox implements Sandbox {
       typeof script === "string" &&
       script.includes("sixb-list-sandbox-files")
     ) {
+      const prefix = `${options.env?.SIXB_LIST_DIR}/`
       return {
         exitCode: 0,
-        stdout: [...this.outputFiles.entries()]
-          .filter(([relativePath]) => relativePath !== ".keep")
-          .sort(([left], [right]) => left.localeCompare(right))
+        stdout: [...this.files.entries()]
+          .filter(([path]) => path.startsWith(prefix))
           .map(
-            ([relativePath, bytes]) =>
-              `${this.outputListedSizeOverrides.get(relativePath) ?? bytes.byteLength}\t${Buffer.from(
-                relativePath,
-                "utf-8"
-              ).toString("base64")}`
+            ([path, bytes]) =>
+              `${bytes.byteLength}\t${Buffer.from(path.slice(prefix.length), "utf-8").toString("base64")}`
           )
           .join("\n"),
         stderr: "",
@@ -1214,10 +1220,7 @@ class RecordingSandbox implements Sandbox {
     ) {
       const encoded = options.env?.SIXB_READ_PATH_B64
       const path = encoded ? Buffer.from(encoded, "base64").toString("utf-8") : ""
-      const outputPrefix = `${options.env?.SIXB_OUTPUT_DIR}/`
-      const bytes = path.startsWith(outputPrefix)
-        ? this.outputFiles.get(path.slice(outputPrefix.length))
-        : this.files.get(path)
+      const bytes = this.files.get(path)
       return bytes
         ? {
             exitCode: 0,
@@ -1243,8 +1246,8 @@ class RecordingSandbox implements Sandbox {
           `context=${env.SIXB_RUN_CONTEXT ?? ""}`,
           `attachments=${env.SIXB_ATTACHMENTS ?? ""}`,
           `attachmentDir=${env.SIXB_ATTACHMENT_DIR ?? ""}`,
-          `outputStagingDir=${env.SIXB_OUTPUT_STAGING_DIR ?? ""}`,
-          `outputDir=${env.SIXB_OUTPUT_DIR ?? ""}`,
+          `artifacts=${env.SIXB_ARTIFACTS ?? ""}`,
+          `artifactsDir=${env.SIXB_ARTIFACTS_DIR ?? ""}`,
           `token=${env.SIXB_ACCESS_TOKEN ?? ""}`,
         ].join("\n"),
         stderr: "",
@@ -1277,60 +1280,6 @@ class RecordingSandboxFactory implements SandboxFactory {
     this.createOptions.push(options)
     const sandbox = new RecordingSandbox(`sandbox-${this.sandboxes.length + 1}`)
     this.sandboxes.push(sandbox)
-    return sandbox
-  }
-}
-
-class BlockingOutputCollectionSandbox extends RecordingSandbox {
-  readonly listStarted: Promise<void>
-  private markListStarted!: () => void
-
-  constructor(id: string) {
-    super(id)
-    this.listStarted = new Promise((resolve) => {
-      this.markListStarted = resolve
-    })
-  }
-
-  override async runCommand(
-    command: string,
-    args: readonly string[] = [],
-    options: RunCommandOptions = {}
-  ): Promise<CommandResult> {
-    const script = args.at(-1)
-    if (
-      command === "bash" &&
-      typeof script === "string" &&
-      script.includes("sixb-list-sandbox-files")
-    ) {
-      this.commands.push({ command, args, options })
-      this.markListStarted()
-      return new Promise((resolve) => {
-        const finish = (): void =>
-          resolve({ exitCode: 137, stdout: "", stderr: "cancelled", durationMs: 1 })
-        if (options.signal?.aborted) {
-          finish()
-        } else {
-          options.signal?.addEventListener("abort", finish, { once: true })
-        }
-      })
-    }
-    return super.runCommand(command, args, options)
-  }
-}
-
-class BlockingOutputCollectionSandboxFactory implements SandboxFactory {
-  readonly sandbox = new BlockingOutputCollectionSandbox("blocking-output-collection")
-
-  async create(): Promise<Sandbox> {
-    return this.sandbox
-  }
-}
-
-class OversizedOutputSandboxFactory extends RecordingSandboxFactory {
-  override async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
-    const sandbox = (await super.create(options)) as RecordingSandbox
-    sandbox.outputListedSizeOverrides.set("report.txt", 25 * 1024 * 1024 + 1)
     return sandbox
   }
 }
@@ -5357,7 +5306,8 @@ describe("AgentWorker", () => {
       )
       expect(systemPrompt).toContain("Do not run `sixb --help`")
       expect(systemPrompt).toContain("sixb objects inspect <type> <id>")
-      expect(systemPrompt).not.toContain("Available Agent Skills")
+      // The project has no skills; the catalog holds only the built-in one.
+      expect(systemPrompt).toContain("Available Agent Skills:\n- sixb-artifacts: ")
       expect(systemPrompt).not.toContain("<agent_instructions>")
       expect(systemPrompt).not.toContain("/tmp/sixb-recording-sandbox")
 
@@ -6023,9 +5973,8 @@ describe("AgentWorker", () => {
           content: [{ type: "text" }, { type: "file", fileRef: published.fileRef }],
         },
       })
-      expect(firstAssistant?.parts.filter((part) => part.type === "file")).toEqual([
-        { type: "file", fileRef: published.fileRef },
-      ])
+      // A tool's file stays in its result: the Agent publishes what the user should receive.
+      expect(firstAssistant?.parts.filter((part) => part.type === "file")).toEqual([])
       const richToolPartIndex = firstAssistant?.parts.findIndex(
         (part) => part.type === "tool-call" && part.toolName === createImage.name
       )
@@ -8097,220 +8046,218 @@ describe("AgentWorker", () => {
 
   // Regression check: restore assistant fileText projection in core/src/agents/adapters.ts.
   // The second turn's assistant-history assertion must fail even though retrieval still works.
-  test("publishes outputs and retrieves them next turn without fabricating assistant text", async () => {
+  test("publishes an artifact mid-turn and edits it from storage the next turn", async () => {
     const sandboxes = new RecordingSandboxFactory()
+    const host: { sixb?: TestSixb } = {}
     let call = 0
-    let replayedAssistantText = ""
-    let inspectedFile = false
+    let duringTurn: { readonly runStatus?: string; readonly originRunId?: string } = {}
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async () => {
+        call += 1
+        if (call === 1) return toolCallStream("publish-1", "bash", { command: "write-q3-review" })
+        if (call === 2) {
+          return toolCallStream("publish-2", "publish_artifact", {
+            path: "work/q3-review",
+            kind: "document",
+            title: "Q3 review",
+          })
+        }
+        if (call === 3) {
+          // The version exists while the turn is still running.
+          const artifact = await onlyArtifact(host.sixb)
+          const version = await artifactStorageOf(host.sixb).getVersion({
+            projectId: PROJECT_ID,
+            artifactId: artifact.id,
+            version: 1,
+          })
+          if (!host.sixb) throw new Error("Expected the host.")
+          const runs = await agentStorageOf(host.sixb).runs.list({ projectId: PROJECT_ID })
+          duringTurn = {
+            runStatus: runs.runs.find((run) => run.id === version?.origin?.runId)?.status,
+            originRunId: version?.origin?.runId,
+          }
+          return answerStream("I published the Q3 review.")
+        }
+        if (call === 4) {
+          // The next turn starts from what was published, installed in its sandbox.
+          const artifact = await onlyArtifact(host.sixb)
+          return toolCallStream("publish-4", "publish_artifact_version", {
+            id: artifact.id,
+            path: `.sixb/agent/artifacts/${artifact.id}`,
+            title: "Q3 review, final",
+          })
+        }
+        return answerStream("I published the final review.")
+      },
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), sandboxes)
+    host.sixb = sixb
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const first = await requestAgent(sixb, { text: "Write the Q3 review" })
+      const firstRun = await waitForTerminalRun(storage, first.run.id)
+      expect(firstRun.status).toBe("succeeded")
+      expect(duringTurn).toEqual({ runStatus: "running", originRunId: first.run.id })
+
+      const artifact = await onlyArtifact(sixb)
+      const thread = await storage.threads.getById({
+        projectId: PROJECT_ID,
+        id: first.run.threadId,
+      })
+      const v1 = await artifactStorageOf(sixb).getVersion({
+        projectId: PROJECT_ID,
+        artifactId: artifact.id,
+        version: 1,
+      })
+      if (!thread) throw new Error("Expected the thread.")
+      expect(artifact.owner).toEqual(thread.ownerPrincipal)
+      // The draft's notes start with a dot and stay in the sandbox.
+      expect(v1?.files.map((file) => file.path)).toEqual(["document.md"])
+      expect(v1?.origin).toEqual({ threadId: first.run.threadId, runId: first.run.id })
+
+      const messages = await listMessages(storage, first.run.threadId)
+      const assistant = messages.find((message) => message.role === "assistant")
+      expect(assistant?.parts.some((part) => part.type === "file")).toBe(false)
+      expect(
+        assistant?.parts.find(
+          (part) => part.type === "tool-call" && part.toolName === "publish_artifact"
+        )
+      ).toMatchObject({
+        state: "output-available",
+        output: { artifactId: artifact.id, version: 1, kind: "document", title: "Q3 review" },
+      })
+
+      const second = await requestAgent(sixb, {
+        threadId: first.run.threadId,
+        text: "Call it final",
+      })
+      expect((await waitForTerminalRun(storage, second.run.id)).status).toBe("succeeded")
+      const secondSandbox = sandboxes.sandboxes.at(-1)
+      if (!secondSandbox) throw new Error("Expected the second turn's sandbox.")
+      const installed = join(
+        secondSandbox.workingDirectory,
+        ".sixb/agent/artifacts",
+        artifact.id,
+        "document.md"
+      )
+      expect(secondSandbox.readFileContents(installed)).toBe(Q3_REVIEW_MARKDOWN)
+      const manifest = secondSandbox.writtenFiles.find((file) =>
+        file.path.endsWith("/.sixb/agent/context/artifacts.json")
+      )
+      expect(JSON.parse(String(manifest?.contents))).toEqual({
+        artifacts: [
+          {
+            id: artifact.id,
+            kind: "document",
+            title: "Q3 review",
+            version: 1,
+            directory: `.sixb/agent/artifacts/${artifact.id}`,
+            files: ["document.md"],
+          },
+        ],
+      })
+      expect(await onlyArtifact(sixb)).toMatchObject({
+        latestVersion: 2,
+        title: "Q3 review, final",
+      })
+      expect(
+        (
+          await artifactStorageOf(sixb).getVersion({
+            projectId: PROJECT_ID,
+            artifactId: artifact.id,
+            version: 2,
+          })
+        )?.origin
+      ).toEqual({ threadId: first.run.threadId, runId: second.run.id })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("a cancelled run keeps what it published", async () => {
+    let call = 0
+    let blocked: (() => void) | undefined
+    const blockedStarted = new Promise<void>((resolve) => {
+      blocked = resolve
+    })
     const model = new WorkerTestModel({
       modelId: "mock-model",
       stream: async (options) => {
         call += 1
-        if (call === 3) {
-          replayedAssistantText = options.messages
-            .filter((message) => message.role === "assistant")
-            .flatMap((message) =>
-              message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
-            )
-            .join("")
+        if (call === 1) return toolCallStream("cancel-1", "bash", { command: "write-q3-review" })
+        if (call === 2) {
+          return toolCallStream("cancel-2", "publish_artifact", {
+            path: "work/q3-review",
+            kind: "document",
+            title: "Q3 review",
+          })
         }
-        let tool: { toolName: string; input: string } | undefined
-        if (call === 1) {
-          tool = { toolName: "bash", input: JSON.stringify({ command: "create-agent-output" }) }
-        } else if (call === 3) {
-          tool = { toolName: "bash", input: JSON.stringify({ command: 'cat "$SIXB_ATTACHMENTS"' }) }
-        } else if (call === 4) {
-          const result = options.messages
-            .flatMap((message) => (message.role === "tool" ? message.content : []))
-            .find((part) => part.toolCallId === "file-call-3")?.output
-          if (
-            result?.type !== "json" ||
-            typeof result.value !== "object" ||
-            result.value === null ||
-            Array.isArray(result.value) ||
-            typeof result.value.stdout !== "string"
-          ) {
-            throw new Error("Expected manifest from bash tool result")
-          }
-          const manifest: { attachments: { fileName: string; sandboxPath: string }[] } = JSON.parse(
-            result.value.stdout
-          )
-          const attachment = manifest.attachments[0]
-          if (!attachment) throw new Error("Expected historical attachment")
-          const sandbox = sandboxes.sandboxes.at(-1)
-          if (!sandbox) throw new Error("Expected second-turn sandbox")
-          expect(attachment.fileName).toBe("report.txt")
-          expect(sandbox.files.get(join(sandbox.workingDirectory, attachment.sandboxPath))).toEqual(
-            new TextEncoder().encode("generated report")
-          )
-          tool = { toolName: "view_file", input: JSON.stringify({ path: attachment.sandboxPath }) }
-        } else if (call === 5) {
-          inspectedFile = JSON.stringify(options.messages).includes("generated report")
+        // Hang until the user cancels.
+        return {
+          stream: new ReadableStream<WorkerTestStreamEvent>({
+            start(controller) {
+              blocked?.()
+              const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
+              if (options.signal.aborted) abort()
+              else options.signal.addEventListener("abort", abort, { once: true })
+            },
+          }),
         }
-        if (tool) {
-          return stream([
-            { type: "stream-start", warnings: [] },
-            { type: "tool-call", toolCallId: `file-call-${call}`, ...tool },
-            finish("tool-calls"),
-          ])
-        }
-        return stream([
-          { type: "stream-start", warnings: [] },
-          { type: "text-start", id: "t" },
-          { type: "text-delta", id: "t", delta: "I created the report." },
-          { type: "text-end", id: "t" },
-          finish("stop"),
-        ])
       },
     })
-    const sixb = buildSixb(model, new InMemoryBroker(), sandboxes)
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory())
     const storage = agentStorageOf(sixb)
-
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
-      const {
-        run: { threadId },
-      } = await requestAgent(sixb, {
-        text: "create a report",
-      })
-
-      const run = await waitFor(
-        async () => {
-          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-          const found = list.runs[0]
-          return found && found.status !== "queued" && found.status !== "running" ? found : null
-        },
-        { label: "output attachment run terminal" }
-      )
-
-      expect(run.status).toBe("succeeded")
-      const messages = await listMessages(storage, threadId)
-      const assistant = messages.find((message) => message.role === "assistant")
-      const filePart = assistant?.parts.find((part) => part.type === "file")
-      expect(filePart).toMatchObject({
-        type: "file",
-        fileRef: {
-          fileName: "report.txt",
-          mediaType: "text/plain",
-          logicalPath: "report.txt",
-        },
-      })
-      if (!filePart || filePart.type !== "file") {
-        throw new Error("Expected assistant output file part.")
-      }
-      const stored = await sixb.blobStorage.open(filePart.fileRef.blobId)
-      expect(await new Response(stored).text()).toBe("generated report")
-      const listCommand = sandboxes.sandboxes[0]?.commands.find((command) =>
-        String(command.args.at(-1)).includes("sixb-list-sandbox-files")
-      )
-      expect(listCommand).toBeDefined()
-      // Vercel's stock sandbox image has no /dev/fd, so Bash process substitution is unavailable.
-      const listScript = String(listCommand?.args.at(-1))
-      expect(listScript).toContain('find "$dir" -type f -print0 | while')
-      expect(listScript).not.toContain("< <(")
-
-      const second = await requestAgent(sixb, { threadId, text: "Read the report you created." })
-      const secondRun = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: second.run.id })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "historical output retrieval terminal" }
-      )
-      expect(secondRun.status).toBe("succeeded")
-      expect(replayedAssistantText).toBe("I created the report.")
-      expect(inspectedFile).toBe(true)
-      expect(call).toBe(5)
+      const request = await requestAgent(sixb, { text: "Write the Q3 review" })
+      await blockedStarted
+      await publishAgentRunCancel(sixb.broker, { projectId: PROJECT_ID, runId: request.run.id })
+      expect((await waitForTerminalRun(storage, request.run.id)).status).toBe("cancelled")
+      expect(await onlyArtifact(sixb)).toMatchObject({ latestVersion: 1, title: "Q3 review" })
     } finally {
       await worker.stop()
     }
   })
 
-  test("finalizes as cancelled when cancellation arrives during output collection", async () => {
-    const sandboxes = new BlockingOutputCollectionSandboxFactory()
-    const sixb = buildSixb(outputBashThenAnswerModel(), new InMemoryBroker(), sandboxes)
+  test("retrying a failed run removes what it published", async () => {
+    let call = 0
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async () => {
+        call += 1
+        if (call === 1) return toolCallStream("retry-1", "bash", { command: "write-q3-review" })
+        if (call === 2) {
+          return toolCallStream("retry-2", "publish_artifact", {
+            path: "work/q3-review",
+            kind: "document",
+            title: "Q3 review",
+          })
+        }
+        if (call === 3) {
+          throw createSixbError("agent.execution_failed", "[test] The provider failed mid-turn.")
+        }
+        return answerStream("Retried.")
+      },
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory())
     const storage = agentStorageOf(sixb)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
-      const request = await requestAgent(sixb, {
-        text: "create a report",
-      })
-      await sandboxes.sandbox.listStarted
+      const request = await requestAgent(sixb, { text: "Write the Q3 review" })
+      expect((await waitForTerminalRun(storage, request.run.id)).status).toBe("failed")
+      const artifact = await onlyArtifact(sixb)
 
-      await publishAgentRunCancel(sixb.broker, {
-        projectId: PROJECT_ID,
-        runId: request.run.id,
-      })
-
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: request.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "cancel during output collection" }
-      )
-      expect(run.status).toBe("cancelled")
-      await expect(
-        aiUsageStorageOf(sixb).summarizeExecution({
-          projectId: PROJECT_ID,
-          executionId: run.executionId,
-        })
-      ).resolves.toMatchObject({
-        modelCallCount: 2,
-        usage: { inputTokens: 20, outputTokens: 14, totalTokens: 34 },
-      })
-      const messages = await listMessages(storage, request.run.threadId)
-      const persistedAssistant = messages.find((message) => message.role === "assistant")
-      expect(persistedAssistant?.parts.some((part) => part.type === "file")).toBe(false)
-    } finally {
-      await worker.stop()
-    }
-  })
-
-  test("stores output collection warnings as run diagnostics, not assistant text", async () => {
-    const sandboxes = new OversizedOutputSandboxFactory()
-    const sixb = buildSixb(outputBashThenAnswerModel(), new InMemoryBroker(), sandboxes)
-    const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions())
-    await worker.start()
-    try {
-      const request = await requestAgent(sixb, {
-        text: "create a report",
-      })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: request.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "diagnostic output run terminal" }
-      )
-      expect(run.status).toBe("succeeded")
-      expect(run.diagnostics).toEqual([
-        {
-          code: "output_file_too_large",
-          severity: "warning",
-          scope: "output",
-          path: "report.txt",
-          message: "This generated file exceeds the per-file attachment limit and was skipped.",
-        },
-      ])
-
-      const messages = await listMessages(storage, request.run.threadId)
-      const assistant = messages.find((message) => message.role === "assistant")
-      expect(assistant?.parts.some((part) => part.type === "file")).toBe(false)
+      // What the failed turn published goes with what it said.
+      // Reproduce by dropping `deleteVersionsByOrigin` from `retryAgentRun`.
+      await createTestSixb(sixb).agent.runs.retry(request.run.id)
       expect(
-        assistant?.parts.some(
-          (part) => part.type === "text" && part.text.includes("per-file attachment limit")
-        )
-      ).toBe(false)
+        await artifactStorageOf(sixb).get({ projectId: PROJECT_ID, id: artifact.id })
+      ).toBeNull()
     } finally {
       await worker.stop()
     }
@@ -8523,12 +8470,16 @@ describe("AgentWorker", () => {
       expect(capturedSystem).toContain("Do not run `sixb --help`")
       expect(capturedSystem).toContain("Sixb agent CLI")
       expect(capturedSystem).not.toContain("<agent_instructions>")
-      expect(capturedSystem).not.toContain("Available Agent Skills")
+      expect(capturedSystem).toContain("Available Agent Skills:\n- sixb-artifacts: ")
 
       const sandbox = sandboxes.sandboxes[0]
       if (!sandbox) throw new Error("Expected a provisioned sandbox.")
       expect(sandbox.writtenFiles.some((file) => file.path.endsWith("/bin/sixb"))).toBe(true)
-      expect(sandbox.writtenFiles.some((file) => file.path.endsWith("/SKILL.md"))).toBe(false)
+      expect(
+        sandbox.writtenFiles
+          .filter((file) => file.path.endsWith("/SKILL.md"))
+          .map((file) => file.path.slice(file.path.indexOf("/.sixb/")))
+      ).toEqual(["/.sixb/agent/skills/sixb-artifacts/SKILL.md"])
     } finally {
       await worker.stop()
     }
@@ -8665,8 +8616,9 @@ describe("AgentWorker", () => {
       expect(env?.SIXB_RUN_CONTEXT).toContain("/.sixb/agent/context/run.json")
       expect(env?.SIXB_ATTACHMENTS).toContain("/.sixb/agent/context/attachments.json")
       expect(env?.SIXB_ATTACHMENT_DIR).toContain("/.sixb/agent/attachments")
-      expect(env?.SIXB_OUTPUT_STAGING_DIR).toContain("/.sixb/agent/outputs/staging")
-      expect(env?.SIXB_OUTPUT_DIR).toContain("/.sixb/agent/outputs/published")
+      expect(env?.SIXB_ARTIFACTS).toContain("/.sixb/agent/context/artifacts.json")
+      expect(env?.SIXB_ARTIFACTS_DIR).toContain("/.sixb/agent/artifacts")
+      expect(env?.SIXB_OUTPUT_DIR).toBeUndefined()
       expect(env?.SIXB_API_GUIDE).toBeUndefined()
       expect(env?.SIXB_ACCESS_TOKEN).toBeUndefined()
 
@@ -8681,7 +8633,11 @@ describe("AgentWorker", () => {
         throw new Error("Expected a provisioned sandbox.")
       }
 
-      expect(sandbox.writtenFiles.some((file) => file.path.endsWith("/SKILL.md"))).toBe(false)
+      expect(
+        sandbox.writtenFiles.some(
+          (file) => file.path.endsWith("/SKILL.md") && !file.path.includes("/sixb-artifacts/")
+        )
+      ).toBe(false)
 
       const sixbCli = sandbox.readFileContents(join(env.SIXB_BIN_DIR, "sixb"))
       expect(sixbCli).toContain("../lib/sixb.mjs")
@@ -8695,14 +8651,11 @@ describe("AgentWorker", () => {
         threadId,
         runId,
         apiBaseUrl: env.SIXB_API_BASE_URL,
-        outputDir: env.SIXB_OUTPUT_DIR,
-        outputStagingDir: env.SIXB_OUTPUT_STAGING_DIR,
+        artifactsManifestPath: env.SIXB_ARTIFACTS,
+        artifactsDir: env.SIXB_ARTIFACTS_DIR,
       })
-      if (!env.SIXB_OUTPUT_STAGING_DIR || !env.SIXB_OUTPUT_DIR) {
-        throw new Error("Expected sandbox output publication env.")
-      }
-      expect(sandbox.readFileContents(join(env.SIXB_OUTPUT_STAGING_DIR, ".keep"))).toBe("")
-      expect(sandbox.readFileContents(join(env.SIXB_OUTPUT_DIR, ".keep"))).toBe("")
+      if (!env.SIXB_ARTIFACTS) throw new Error("Expected the artifacts manifest env.")
+      expect(JSON.parse(sandbox.readFileContents(env.SIXB_ARTIFACTS))).toEqual({ artifacts: [] })
 
       const messages = await listMessages(storage, threadId)
       const assistant = messages.find((message) => message.role === "assistant")
@@ -8722,8 +8675,8 @@ describe("AgentWorker", () => {
       expect(stdout).toContain(`base=${env.SIXB_API_BASE_URL}`)
       expect(stdout).toContain(`skills=${env.SIXB_SKILLS_DIR}`)
       expect(stdout).toContain(`context=${env.SIXB_RUN_CONTEXT}`)
-      expect(stdout).toContain(`outputDir=${env.SIXB_OUTPUT_DIR}`)
-      expect(stdout).toContain(`outputStagingDir=${env.SIXB_OUTPUT_STAGING_DIR}`)
+      expect(stdout).toContain(`artifacts=${env.SIXB_ARTIFACTS}`)
+      expect(stdout).toContain(`artifactsDir=${env.SIXB_ARTIFACTS_DIR}`)
       expect(stdout).toContain("token=")
       expect(stdout).not.toContain("sixb_sat_")
       expect(

@@ -31679,15 +31679,7 @@
                               "properties": {
                                 "code": {
                                   "type": "string",
-                                  "enum": [
-                                    "output_file_limit_exceeded",
-                                    "output_file_too_large",
-                                    "output_budget_exhausted",
-                                    "output_collection_failed",
-                                    "output_file_changed",
-                                    "output_storage_failed",
-                                    "step_limit_reached"
-                                  ]
+                                  "enum": ["step_limit_reached"]
                                 },
                                 "severity": {
                                   "type": "string",
@@ -31695,10 +31687,7 @@
                                 },
                                 "scope": {
                                   "type": "string",
-                                  "enum": ["output", "run"]
-                                },
-                                "path": {
-                                  "type": "string"
+                                  "enum": ["run"]
                                 },
                                 "message": {
                                   "type": "string"
@@ -32665,15 +32654,7 @@
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": [
-                                  "output_file_limit_exceeded",
-                                  "output_file_too_large",
-                                  "output_budget_exhausted",
-                                  "output_collection_failed",
-                                  "output_file_changed",
-                                  "output_storage_failed",
-                                  "step_limit_reached"
-                                ]
+                                "enum": ["step_limit_reached"]
                               },
                               "severity": {
                                 "type": "string",
@@ -32681,10 +32662,7 @@
                               },
                               "scope": {
                                 "type": "string",
-                                "enum": ["output", "run"]
-                              },
-                              "path": {
-                                "type": "string"
+                                "enum": ["run"]
                               },
                               "message": {
                                 "type": "string"
@@ -33422,15 +33400,7 @@
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": [
-                                  "output_file_limit_exceeded",
-                                  "output_file_too_large",
-                                  "output_budget_exhausted",
-                                  "output_collection_failed",
-                                  "output_file_changed",
-                                  "output_storage_failed",
-                                  "step_limit_reached"
-                                ]
+                                "enum": ["step_limit_reached"]
                               },
                               "severity": {
                                 "type": "string",
@@ -33438,10 +33408,7 @@
                               },
                               "scope": {
                                 "type": "string",
-                                "enum": ["output", "run"]
-                              },
-                              "path": {
-                                "type": "string"
+                                "enum": ["run"]
                               },
                               "message": {
                                 "type": "string"
@@ -33853,15 +33820,7 @@
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": [
-                                  "output_file_limit_exceeded",
-                                  "output_file_too_large",
-                                  "output_budget_exhausted",
-                                  "output_collection_failed",
-                                  "output_file_changed",
-                                  "output_storage_failed",
-                                  "step_limit_reached"
-                                ]
+                                "enum": ["step_limit_reached"]
                               },
                               "severity": {
                                 "type": "string",
@@ -33869,10 +33828,7 @@
                               },
                               "scope": {
                                 "type": "string",
-                                "enum": ["output", "run"]
-                              },
-                              "path": {
-                                "type": "string"
+                                "enum": ["run"]
                               },
                               "message": {
                                 "type": "string"
@@ -34348,15 +34304,7 @@
                               "properties": {
                                 "code": {
                                   "type": "string",
-                                  "enum": [
-                                    "output_file_limit_exceeded",
-                                    "output_file_too_large",
-                                    "output_budget_exhausted",
-                                    "output_collection_failed",
-                                    "output_file_changed",
-                                    "output_storage_failed",
-                                    "step_limit_reached"
-                                  ]
+                                  "enum": ["step_limit_reached"]
                                 },
                                 "severity": {
                                   "type": "string",
@@ -34364,10 +34312,7 @@
                                 },
                                 "scope": {
                                   "type": "string",
-                                  "enum": ["output", "run"]
-                                },
-                                "path": {
-                                  "type": "string"
+                                  "enum": ["run"]
                                 },
                                 "message": {
                                   "type": "string"
@@ -34749,15 +34694,7 @@
                         "properties": {
                           "code": {
                             "type": "string",
-                            "enum": [
-                              "output_file_limit_exceeded",
-                              "output_file_too_large",
-                              "output_budget_exhausted",
-                              "output_collection_failed",
-                              "output_file_changed",
-                              "output_storage_failed",
-                              "step_limit_reached"
-                            ]
+                            "enum": ["step_limit_reached"]
                           },
                           "severity": {
                             "type": "string",
@@ -34765,10 +34702,7 @@
                           },
                           "scope": {
                             "type": "string",
-                            "enum": ["output", "run"]
-                          },
-                          "path": {
-                            "type": "string"
+                            "enum": ["run"]
                           },
                           "message": {
                             "type": "string"

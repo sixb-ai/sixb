@@ -10,6 +10,7 @@ import type {
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { LanguageModel } from "@sixb/core/models"
 import type { ConversationAgentRunSpec, SubagentRunRecord } from "@sixb/core/storage"
+import { withBuiltInSkills } from "./skills/built-in"
 
 const SUBAGENT_INSTRUCTIONS =
   "Complete the delegated task autonomously and return a concise result to the parent Agent."
@@ -35,7 +36,7 @@ export interface ResolvedAgentExecutionPlan {
 
 /**
  * Resolve the project's conversational Agent without a static definition. It receives every
- * project tool and skill, and the project's `SIXB.md` instructions.
+ * project tool and skill, the worker's built-in skills, and the project's `SIXB.md` instructions.
  */
 export function resolveAgentExecutionPlan(input: {
   readonly spec?: ConversationAgentRunSpec
@@ -60,7 +61,7 @@ export function resolveAgentExecutionPlan(input: {
     model: entry.model,
     ...(input.projectInstructions === undefined ? {} : { instructions: input.projectInstructions }),
     tools: input.tools.list(),
-    skills: input.skills.list(),
+    skills: withBuiltInSkills(input.skills.list()),
     maxSteps: input.defaultMaxSteps,
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(input.spec?.timeZone === undefined ? {} : { timeZone: input.spec.timeZone }),

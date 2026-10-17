@@ -53,3 +53,21 @@ export function useArtifactTheme(version: ArtifactVersion): ArtifactTheme | null
   const parsed = parseArtifactTheme(text)
   return "theme" in parsed ? parsed.theme : null
 }
+
+/** An image a document shows, by the relative path its Markdown names, resolved as publishing did. */
+export function versionImageSource(version: ArtifactVersion, src: string): FileSource | null {
+  const raw = src.split(/[?#]/)[0] ?? ""
+  let decoded = raw
+  try {
+    decoded = decodeURI(raw)
+  } catch {
+    // Keep the path as written; it simply will not match a file.
+  }
+  const segments: string[] = []
+  for (const segment of decoded.split("/")) {
+    if (segment === "" || segment === ".") continue
+    if (segment === "..") segments.pop()
+    else segments.push(segment)
+  }
+  return versionFileSource(version, segments.join("/"))
+}

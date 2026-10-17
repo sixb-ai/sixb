@@ -751,11 +751,10 @@ describe("agent routes", () => {
     })
     const diagnostics = [
       {
-        code: "output_file_too_large" as const,
+        code: "step_limit_reached" as const,
         severity: "warning" as const,
-        scope: "output" as const,
-        path: "reports/full.csv",
-        message: "This generated file was skipped.",
+        scope: "run" as const,
+        message: "The Agent reached its 100-step limit before producing a final answer.",
       },
     ]
     await storage.agents.runs.finish({

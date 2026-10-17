@@ -5,13 +5,15 @@ import { Markdown } from "@sixb/ui/components"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
+import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { validateDocument } from "../../core/src/artifacts/publish/validate/document"
 import type { ArtifactFile } from "../../core/src/storage/artifacts/types"
+import { ArtifactPage } from "../src/artifacts/artifact-page"
 import { artifactFileSource } from "../src/artifacts/file-source"
 import { fileView } from "../src/artifacts/file-view"
 import { rehypeArtifactDocument } from "../src/artifacts/renderers/document-tree"
 import {
-  artifactAddress,
+  artifactLink,
   artifactTargetFromSearch,
   type ViewerTarget,
   withArtifactTarget,
@@ -50,16 +52,18 @@ describe("artifact targets", () => {
     expect(artifactTargetFromSearch(new URLSearchParams("v=2"))).toBeNull()
   })
 
-  test("address the latest version without pinning it", () => {
+  test("link to their page, pinned to a version only when it is not the latest", () => {
     const target = { type: "artifact", artifactId: ARTIFACT_ID } as const
-    expect(artifactAddress({ ...target, version: 3 }, 3)).toBe(`artifact:${ARTIFACT_ID}`)
-    expect(artifactAddress({ ...target, version: 2, part: "q3" }, 3)).toBe(
-      `artifact:${ARTIFACT_ID}@2#q3`
+    const origin = "https://ops.example.com"
+    expect(artifactLink({ ...target, version: 3 }, 3, origin)).toBe(
+      `https://ops.example.com/artifacts/${ARTIFACT_ID}`
+    )
+    expect(artifactLink({ ...target, version: 2, part: "q3" }, 3, origin)).toBe(
+      `https://ops.example.com/artifacts/${ARTIFACT_ID}?v=2&part=q3`
     )
     expect(artifactHref(ARTIFACT_ID, { version: 2, part: "q3" })).toBe(
       `/artifacts/${ARTIFACT_ID}?v=2&part=q3`
     )
-    expect(artifactHref(ARTIFACT_ID)).toBe(`/artifacts/${ARTIFACT_ID}`)
   })
 })
 
@@ -262,10 +266,10 @@ describe("the viewer", () => {
     })
 
     expect(html).toContain(">Q3 operating review</h2>")
-    expect(html).toContain(">Document</span>")
-    expect(html).toContain("v2")
+    expect(html).toContain("<span>Document</span>")
+    expect(html).toContain("Version 2")
     expect(html).toContain(`href="/artifacts/${ARTIFACT_ID}"`)
-    expect(html).toContain('aria-label="Copy address"')
+    expect(html).toContain('aria-label="Copy link"')
     // The image resolves to the version's file, through the route that authorizes it.
     expect(html).toContain(
       `/api/artifacts/${ARTIFACT_ID}/versions/2/content?path=figures%2Frevenue.png&amp;disposition=inline`
@@ -273,7 +277,7 @@ describe("the viewer", () => {
     expect(html).toMatch(/data-sixb-artifact="" data-sixb-artifact-print="" class="[^"]* dark"/)
     expect(html).toContain('style="--primary:#0f766e"')
     expect(html).toContain('<nav aria-label="On this page"')
-    expect(html).toContain('aria-label="Copy the address of “Revenue”"')
+    expect(html).toContain('aria-label="Copy a link to “Revenue”"')
   })
 
   test("shows a file artifact as its type allows", () => {
@@ -285,7 +289,7 @@ describe("the viewer", () => {
     })
     expect(html).toContain("Region")
     expect(html).toContain("North")
-    expect(html).toContain(">File</span>")
+    expect(html).toContain("<span>File</span>")
   })
 
   test("says a kind is not viewable yet rather than guessing", () => {
@@ -315,6 +319,23 @@ describe("the viewer", () => {
   })
 })
 
+test("an artifact's page is the whole window, with a way back and no panel controls", () => {
+  const cache = new QueryClient({ defaultOptions: { queries: { enabled: false } } })
+  const html = renderToStaticMarkup(
+    <QueryClientProvider client={cache}>
+      <MemoryRouter initialEntries={[`/artifacts/${ARTIFACT_ID}`]}>
+        <Routes>
+          <Route path="/artifacts/:artifactId" element={<ArtifactPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
+  )
+  expect(html).toContain('class="fixed inset-0 z-50 flex flex-col bg-background text-foreground"')
+  expect(html).toContain('aria-label="Back"')
+  expect(html).not.toContain('aria-label="Close"')
+  expect(html).not.toContain('aria-label="Open full page"')
+})
+
 test("a theme pins its mode and scopes its tokens to the artifact", () => {
   expect(artifactThemeAttributes(null)).toEqual({})
   expect(artifactThemeAttributes({ mode: "light" })).toEqual({ className: "light" })
@@ -324,5 +345,9 @@ test("a theme pins its mode and scopes its tokens to the artifact", () => {
 })
 
 function Wrap({ cache, children }: { readonly cache: QueryClient; readonly children: ReactNode }) {
-  return <QueryClientProvider client={cache}>{children}</QueryClientProvider>
+  return (
+    <QueryClientProvider client={cache}>
+      <MemoryRouter>{children}</MemoryRouter>
+    </QueryClientProvider>
+  )
 }

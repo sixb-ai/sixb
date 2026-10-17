@@ -24,7 +24,9 @@ describe("agent system prompt", () => {
     expect(prompt).toContain(
       "Local files and uncommitted edits from before that time were not recovered"
     )
-    expect(prompt).toContain("Conversation history and published attachments remain available")
+    expect(prompt).toContain(
+      "Conversation history, attachments, and published artifacts remain available"
+    )
     expect(prompt).toContain("within the user's authorization")
     expect(renderAgentSystemPrompt({ mode: "conversation", skills: [] })).not.toContain(
       "<sandbox_state>"
@@ -169,6 +171,13 @@ describe("agent system prompt", () => {
     expect(prompt).toContain("take precedence over conflicting agent instructions")
     expect(prompt.indexOf("<agent_instructions>")).toBeLessThan(prompt.indexOf("<sixb_mode_rules>"))
     expect(prompt.endsWith("</sixb_mode_rules>")).toBe(true)
+    // A conversation delivers files by publishing them, and revises from what it published.
+    expect(prompt).toContain("publishing it with publish_artifact")
+    expect(prompt).toContain("read the sixb-artifacts skill before the first publish")
+    expect(prompt).toContain("$SIXB_ARTIFACTS lists the artifacts this conversation published")
+    expect(prompt).toContain("publish it with publish_artifact_version")
+    expect(prompt).toContain("If a deliverable could not be published, say so")
+    expect(prompt).not.toContain("$SIXB_OUTPUT_DIR")
   })
 
   test("renders the canonical workflow-task mode", () => {
@@ -186,8 +195,7 @@ describe("agent system prompt", () => {
     expect(prompt).not.toContain("Speak like a helpful teammate")
     expect(prompt).toContain("Workflow input files, when present")
     expect(prompt).toContain("upload the complete file with the `sixb` CLI")
-    expect(prompt).not.toContain("final chat message")
-    expect(prompt).not.toContain("$SIXB_OUTPUT_STAGING_DIR")
+    expect(prompt).not.toContain("publish_artifact")
   })
 
   test("renders the canonical subagent mode", () => {
@@ -202,6 +210,8 @@ describe("agent system prompt", () => {
     expect(prompt).toContain("Do not ask a follow-up question")
     expect(prompt).not.toContain("ask for approval")
     expect(prompt).toContain("everything the parent Agent needs")
+    expect(prompt).toContain("Return your result as text")
+    expect(prompt).not.toContain("publish_artifact")
   })
 
   test("does not advertise a skill catalog when no skills are installed", () => {

@@ -1,6 +1,5 @@
 import { isDeepStrictEqual } from "node:util"
 import { AGENT_REASONING_LEVELS } from "../../agents/types"
-import { isFileRef } from "../../blob-storage"
 import { isJsonObject, isPlainRecord } from "../../json"
 import { isModelReasoning } from "../../models/language-model"
 import type { ExecutionRecord, ExecutionStorage } from "../executions"
@@ -275,20 +274,10 @@ export function assertSubagentRunResult(
   runId: string,
   prefix = "Sixb"
 ): asserts result is SubagentRunResult {
-  const text = result?.text
-  const files = result?.files
-  const hasText = typeof text === "string" && text.trim().length > 0
-  const hasFiles = Array.isArray(files) && files.length > 0 && files.every(isFileRef)
-  if (!result || (!hasText && !hasFiles)) {
+  if (typeof result?.text !== "string" || result.text.trim().length === 0) {
     throw new AgentStorageError(
       "invalid_input",
-      `[${prefix}] Succeeded subagent run '${runId}' requires text or files.`
-    )
-  }
-  if ((text !== undefined && !hasText) || (files !== undefined && !hasFiles)) {
-    throw new AgentStorageError(
-      "invalid_input",
-      `[${prefix}] Subagent run '${runId}' has an invalid result.`
+      `[${prefix}] Succeeded subagent run '${runId}' requires text.`
     )
   }
 }

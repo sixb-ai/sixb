@@ -2,6 +2,7 @@ import type {
   AgentToolAttachments,
   AgentToolRunInfo,
   OntologyDocsCatalog,
+  Principal,
   Sandbox,
   SandboxDefinition,
 } from "@sixb/core"
@@ -21,6 +22,8 @@ import { waitForAbort } from "./abort"
 import { type AgentExecutionMode, agentRuntimeFacts, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
+import { type MaterializedArtifacts, materializeThreadArtifacts } from "./artifacts/materialize"
+import { createPublishArtifactTools } from "./artifacts/publish-tool"
 import {
   modelSupportsInlineImages,
   type PreparedAgentAttachmentContext,
@@ -31,7 +34,7 @@ import { prepareAgentConversationContext } from "./context-compaction"
 import { AgentExecutionLostError } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type AgentErrorDetails, modelToolsFromAgentDefinitions } from "./model-adapters"
-import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
+import { AGENT_ARTIFACTS_DIRECTORY, prepareAgentSandboxApiContext } from "./sandbox-api-context"
 import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import { type AgentSandboxLifecycle, openThreadSandbox } from "./sandbox-lifecycle"
@@ -171,6 +174,14 @@ export async function createConversationAgentEnvironment(
       runId: run.id,
       threadId: run.threadId,
       toolRun: { kind: "conversation", id: run.id, threadId: run.threadId },
+      ...(input.thread && run.execution
+        ? {
+            publishing: {
+              owner: input.thread.ownerPrincipal,
+              executionToken: run.execution.token,
+            },
+          }
+        : {}),
       toolAttachments: threadToolAttachments({
         storage: context.storage.agents,
         projectId: context.id,
@@ -297,6 +308,11 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
   readonly ontologyDocs?: RenderedOntologyDocs
   readonly errorDetails?: AgentErrorDetails
   readonly frameworkTools?: readonly ModelTool[]
+  /**
+   * A conversation publishes artifacts as the thread's owner and edits them from storage; other
+   * runs return text.
+   */
+  readonly publishing?: { readonly owner: Principal; readonly executionToken: string }
 }
 
 /**
@@ -348,7 +364,6 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     }),
   ]
 
-  let sandboxWasUsed = false
   appendBuiltInTool(
     tools,
     createViewFileTool({
@@ -360,12 +375,21 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
     })
   )
-  const resolveSandbox = () => {
-    sandboxWasUsed = true
-    return ready
-  }
+  const resolveSandbox = () => ready
   appendBuiltInTool(tools, createReadTool(resolveSandbox))
   appendBuiltInTool(tools, createBashTool(resolveSandbox))
+  if (input.publishing && threadId) {
+    const publishTools = createPublishArtifactTools({
+      projectId: context.id,
+      storage: context.storage,
+      blobStorage: context.blobStorage,
+      run: { id: runId, threadId, executionToken: input.publishing.executionToken },
+      owner: input.publishing.owner,
+      budget: fileBudget,
+      resolveSandbox,
+    })
+    for (const tool of publishTools) appendBuiltInTool(tools, tool)
+  }
   for (const frameworkTool of input.frameworkTools ?? []) appendBuiltInTool(tools, frameworkTool)
 
   ready = provisionSandbox({
@@ -378,6 +402,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     attachmentContext,
     skills: plan.skills,
     ontologyFiles: input.ontologyDocs?.files ?? [],
+    ...(input.publishing && threadId ? { artifactsOwner: input.publishing.owner } : {}),
   })
   // Creation failure is surfaced where it is awaited (turn / sandbox tool / dispose); attach a no-op
   // catch so a rejection observed by none of them is not reported as unhandled.
@@ -421,7 +446,6 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       }),
       projectTimeZone: context.timeZone,
       sandboxReady: ready,
-      sandboxWasUsed: () => sandboxWasUsed,
       streamSink: context.streamSink,
       recoverAiModelCall: context.recoverAiModelCall,
       turnTimeoutMs: context.turnTimeoutMs,
@@ -500,10 +524,25 @@ interface ProvisionSandboxInput {
   readonly attachmentContext: PreparedAgentAttachmentContext
   readonly skills: ResolvedAgentExecutionPlan["skills"]
   readonly ontologyFiles: RenderedOntologyDocs["files"]
+  /** Install the thread's artifacts this principal owns. */
+  readonly artifactsOwner?: Principal
 }
 
 async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSandboxHandle> {
   const { context, actorId, run, apiBaseUrl, apiOrigin, skills, ontologyFiles } = input
+  // Read concurrently with sandbox creation; both run while the model starts.
+  const artifacts: Promise<MaterializedArtifacts> | undefined =
+    input.artifactsOwner && run.threadId
+      ? materializeThreadArtifacts({
+          projectId: context.id,
+          threadId: run.threadId,
+          owner: input.artifactsOwner,
+          storage: context.storage.artifacts,
+          blobStorage: context.blobStorage,
+          directory: AGENT_ARTIFACTS_DIRECTORY,
+        })
+      : undefined
+  artifacts?.catch(() => {})
   let sandbox: Sandbox | null = null
   try {
     sandbox =
@@ -522,6 +561,9 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSand
       attachments: input.attachmentContext,
       skills,
       ontologyFiles,
+      ...(artifacts
+        ? { artifacts: await artifacts, replaceArtifacts: Boolean(input.persistentSandbox) }
+        : {}),
     })
     await assertAgentRuntimeProfile({
       sandbox,

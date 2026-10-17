@@ -1,14 +1,16 @@
-import { useParams, useSearchParams } from "react-router-dom"
+import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { type ArtifactTarget, artifactTargetFromSearch, withArtifactTarget } from "./target"
 import { Viewer } from "./viewer"
 
 /**
- * An artifact on its own page, at `/artifacts/:artifactId` with `?v=` and `?part=`. It belongs to
- * no section: whoever may read the artifact can open it, and a link to it works anywhere.
+ * An artifact on its own page, at `/artifacts/:artifactId` with `?v=` and `?part=`: the whole
+ * window, over whatever shell the app draws, so a shared link opens just the artifact. It belongs
+ * to no section: whoever may read the artifact can open it, and a link to it works anywhere.
  */
 export function ArtifactPage() {
   const { artifactId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   if (!artifactId) return null
 
   // The artifact is the path; the version and part are parameters.
@@ -20,9 +22,13 @@ export function ArtifactPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
+    <div className="fixed inset-0 z-50 flex flex-col bg-background text-foreground">
       <Viewer
         target={target}
+        chrome={{
+          // Back to where the link was followed from, or into the app for a link opened cold.
+          onBack: () => (canGoBack() ? navigate(-1) : navigate("/")),
+        }}
         onTargetChange={(next) => {
           if (next.type !== "artifact") return
           const nextParams = withArtifactTarget(searchParams, next)
@@ -31,5 +37,17 @@ export function ArtifactPage() {
         }}
       />
     </div>
+  )
+}
+
+/** React Router numbers the entries it pushed; the first one has nowhere in the app to go back to. */
+function canGoBack(): boolean {
+  const state: unknown = window.history.state
+  return (
+    typeof state === "object" &&
+    state !== null &&
+    "idx" in state &&
+    typeof state.idx === "number" &&
+    state.idx > 0
   )
 }

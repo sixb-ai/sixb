@@ -1,3 +1,7 @@
+import { mkdirSync, writeFileSync } from "node:fs"
+import { dirname, isAbsolute, join } from "node:path"
+import type { CommandResult, RunCommandOptions, Sandbox, SandboxFileRecord } from "@sixb/core"
+
 /** Poll `fn` until it returns a truthy value or the timeout elapses. */
 export async function waitFor<T>(
   fn: () => Promise<T | null | undefined | false> | T | null | undefined | false,
@@ -16,4 +20,51 @@ export async function waitFor<T>(
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs))
   }
+}
+
+/**
+ * Runs the worker's sandbox scripts in a real local bash against a directory, so symlink, escape,
+ * and size checks run as a sandbox would run them. Written files land in the directory.
+ */
+export class LocalBashSandbox implements Sandbox {
+  readonly id = "local-bash"
+  readonly provider = "test"
+  readonly status = "running"
+
+  constructor(readonly workingDirectory: string) {}
+
+  async writeFiles(files: readonly SandboxFileRecord[]): Promise<void> {
+    for (const file of files) {
+      const path = isAbsolute(file.path) ? file.path : join(this.workingDirectory, file.path)
+      mkdirSync(dirname(path), { recursive: true })
+      writeFileSync(path, file.contents)
+    }
+  }
+
+  async runCommand(
+    command: string,
+    args: readonly string[] = [],
+    options: RunCommandOptions = {}
+  ): Promise<CommandResult> {
+    const script = args.at(-1)
+    if (command !== "bash" || typeof script !== "string") {
+      throw new Error(`Unexpected command ${command}`)
+    }
+    const child = Bun.spawn(["bash", "-c", script], {
+      cwd: this.workingDirectory,
+      env: { PATH: process.env.PATH ?? "/usr/bin:/bin", ...options.env },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    return { exitCode, stdout, stderr, durationMs: 0 }
+  }
+
+  async stop(): Promise<void> {}
+
+  async destroy(): Promise<void> {}
 }

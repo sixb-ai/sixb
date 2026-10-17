@@ -1,6 +1,10 @@
 import type { AgentToolDefinition, ValueType } from "@sixb/core"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import type { JsonObject } from "@sixb/core/models"
+import {
+  PUBLISH_ARTIFACT_TOOL_SPEC,
+  PUBLISH_ARTIFACT_VERSION_TOOL_SPEC,
+} from "../artifacts/publish-tool"
 import { BASH_TOOL_SPEC } from "./bash"
 import { READ_TOOL_SPEC } from "./read"
 import { VIEW_FILE_TOOL_SPEC } from "./view-file"
@@ -39,5 +43,7 @@ export function agentModelToolSpecs(input: {
     VIEW_FILE_TOOL_SPEC,
     READ_TOOL_SPEC,
     BASH_TOOL_SPEC,
+    PUBLISH_ARTIFACT_TOOL_SPEC,
+    PUBLISH_ARTIFACT_VERSION_TOOL_SPEC,
   ]
 }

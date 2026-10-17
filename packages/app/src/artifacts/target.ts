@@ -1,3 +1,4 @@
+import { artifactHref } from "../pages/routes"
 import type { FileSource } from "./file-source"
 
 /** One artifact at a version and part, or a single file such as a message attachment. */
@@ -52,9 +53,19 @@ export function withArtifactTarget(
   return next
 }
 
-/** The address another artifact or a chat reply uses for this target. */
-export function artifactAddress(target: ArtifactTarget, latestVersion?: number): string {
-  const pinned =
-    target.version !== undefined && target.version !== latestVersion ? `@${target.version}` : ""
-  return `artifact:${target.artifactId}${pinned}${target.part ? `#${target.part}` : ""}`
+/**
+ * A link to the target's own page, for people to share: pinned to its version only when that is
+ * not the latest, so a link to the current artifact keeps following its new versions.
+ */
+export function artifactLink(
+  target: ArtifactTarget,
+  latestVersion: number | undefined,
+  origin: string
+): string {
+  const pinned = target.version !== undefined && target.version !== latestVersion
+  const href = artifactHref(target.artifactId, {
+    ...(pinned && target.version !== undefined ? { version: target.version } : {}),
+    ...(target.part ? { part: target.part } : {}),
+  })
+  return new URL(href, origin).toString()
 }

@@ -2,7 +2,6 @@ import {
   AGENT_REASONING_LEVELS,
   type AgentReasoning,
   AgentToolPublicError,
-  type FileRef,
   type LanguageModelCatalog,
   type LanguageModelRef,
 } from "@sixb/core"
@@ -58,7 +57,6 @@ export interface WaitedSubagentResult {
   readonly runId: string
   readonly status: "succeeded" | "failed" | "cancelled"
   readonly text?: string
-  readonly files?: readonly FileRef[]
   readonly error?: { readonly code: string; readonly message: string }
 }
 
@@ -102,7 +100,7 @@ export class SubagentCoordinator {
     const wait: ModelTool<WaitForSubagentsInput> = {
       name: "wait_agent",
       description:
-        "Wait for previously spawned child agents and return their final text, files, or failure. Pass every run id whose result is needed.",
+        "Wait for previously spawned child agents and return their final text or failure. Pass every run id whose result is needed.",
       inputSchema: WAIT_INPUT_SCHEMA,
       parseInput: parseWaitInput,
       execute: async (value, { signal }) => {
@@ -414,7 +412,6 @@ function waitedResult(
     runId: run.id,
     status: run.status,
     ...(run.result?.text ? { text: run.result.text } : {}),
-    ...(run.result?.files && run.result.files.length > 0 ? { files: run.result.files } : {}),
     ...(run.error === undefined
       ? {}
       : { error: { code: run.error.code, message: run.error.message } }),
