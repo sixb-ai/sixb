@@ -2,7 +2,11 @@ import { afterEach, expect, test } from "bun:test"
 import type { Sandbox } from "@sixb/core"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { prepareAgentSandboxApiContext } from "../src/sandbox-api-context"
-import { workspaceRunFilesScript } from "../src/workspace-files"
+import {
+  prepareWorkspaceRunFiles,
+  WorkspaceRunFilesConflictError,
+  workspaceRunFilesScript,
+} from "../src/workspace-files"
 
 const sandboxes: Sandbox[] = []
 afterEach(async () => {
@@ -67,10 +71,14 @@ test("git add . stages only project files across creation and resume", async () 
 })
 
 test("refuses already staged runtime files without removing them", async () => {
+  // Regression proof: drop the reserved exit status from the tracked-file check in
+  // workspaceRunFilesScript; the generic command failure replaces the actionable error.
   const sandbox = await repository()
   await sandbox.writeFiles([{ path: ".sixb/agent/context/run.json", contents: "preserve" }])
   expect((await sandbox.runCommand("git", ["add", "."])).exitCode).toBe(0)
-  expect((await clean(sandbox)).exitCode).not.toBe(0)
+  await expect(prepareWorkspaceRunFiles(sandbox, true)).rejects.toThrow(
+    new WorkspaceRunFilesConflictError()
+  )
   expect((await sandbox.runCommand("cat", [".sixb/agent/context/run.json"])).stdout).toBe(
     "preserve"
   )
@@ -80,9 +88,13 @@ test.each([
   "!/.sixb/agent/\n",
   "!/.sixb/agent/\n/.sixb/agent/context/\n",
 ])("refuses repository rules that override the directory exclusion: %s", async (rules) => {
+  // Regression proof: drop the reserved exit status from the check-ignore result in
+  // workspaceRunFilesScript; the generic command failure replaces the actionable error.
   const sandbox = await repository()
   await sandbox.writeFiles([{ path: ".gitignore", contents: rules }])
-  expect((await clean(sandbox)).exitCode).not.toBe(0)
+  await expect(prepareWorkspaceRunFiles(sandbox, true)).rejects.toThrow(
+    new WorkspaceRunFilesConflictError()
+  )
 })
 
 test.each([
@@ -101,7 +113,10 @@ test.each([
   }
   const target = `${sandbox.workingDirectory}/preserved${path.endsWith("exclude") ? "/marker" : ""}`
   expect((await sandbox.runCommand("ln", ["-s", target, path])).exitCode).toBe(0)
-  expect((await clean(sandbox)).exitCode).not.toBe(0)
+  // Redirected metadata is not a repository claiming the directory: it keeps the generic error.
+  await expect(prepareWorkspaceRunFiles(sandbox, true)).rejects.toThrow(
+    "[SixbAgentWorker] Sandbox command failed."
+  )
   expect((await sandbox.runCommand("cat", ["preserved/marker"])).stdout).toBe("untouched")
 })
 

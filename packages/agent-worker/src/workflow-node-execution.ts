@@ -18,7 +18,6 @@ import {
   ModelUsageRecordingError,
 } from "@sixb/core/internal/model-execution"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
-import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
 import { createWorkflowNodeFailure, workflowAgentStepActorId } from "@sixb/core/internal/workflows"
 import type {
@@ -40,7 +39,7 @@ import type {
 import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { prepareAgentModel } from "./context-budget"
 import { shouldRetryAgentPreparation } from "./delivery-policy"
-import { AgentTurnTimeoutError, WorkflowResumeDispatchError } from "./errors"
+import { AgentTurnTimeoutError, isLostExecution, WorkflowResumeDispatchError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { resolveWorkflowAgentStepExecutionPlan } from "./execution-plan"
 import { toAgentExecutionFailure } from "./failure"
@@ -203,6 +202,7 @@ export async function executeWorkflowAgentNode(
       stepId: node.agentStep.id,
       nodeInput: nodeRun.input,
       errorDetails: workflowAgentErrorDetails(nodeRun),
+      ...(node.agentStep.sandbox === undefined ? {} : { stepSandbox: node.agentStep.sandbox }),
       signal: provisioningSignal,
       onDetachedTeardown: input.onDetachedTeardown,
     })
@@ -224,6 +224,8 @@ export async function executeWorkflowAgentNode(
       usageRecorder,
       signal: nodeSignal,
     })
+
+    await environment.beforeFinalize()
     const completedNode = await finishWorkflowAgentNodeSucceeded({
       context,
       nodeRun,
@@ -234,7 +236,8 @@ export async function executeWorkflowAgentNode(
     await enqueueWorkflowAgentNodeResume(input.host, nodeRun)
   } catch (error) {
     if (error instanceof WorkflowResumeDispatchError) throw error
-    if (lostQueueDelivery(error, signal)) return
+    // Queue ownership or the node's execution token was lost: the current owner records the fate.
+    if (isLostExecution(error, signal)) return
 
     const debug =
       error instanceof WorkflowAgentNodeExecutionError
@@ -278,6 +281,7 @@ export async function executeWorkflowAgentNode(
       cancel.signal.aborted && !(executionError instanceof ModelUsageRecordingError)
         ? "cancelled"
         : "failed"
+    await environment?.beforeFinalize()
     const failed = await finishWorkflowAgentNodeFailed({
       context,
       nodeRun,
@@ -767,13 +771,6 @@ function freshWorkflowExecution(queueLeaseExpiresAt: string): WorkflowAgentNodeR
     token: createAgentRunExecutionToken(),
     queueLeaseExpiresAt: new Date(queueLeaseExpiresAt),
   }
-}
-
-function lostQueueDelivery(error: unknown, signal: AbortSignal): boolean {
-  return (
-    error instanceof QueueDeliveryLeaseLostError ||
-    signal.reason instanceof QueueDeliveryLeaseLostError
-  )
 }
 
 async function isAlreadyCancelled(

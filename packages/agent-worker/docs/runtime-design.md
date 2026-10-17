@@ -73,9 +73,10 @@ recording are outside its guarantee.
 You rarely call `runCommand` yourself. The agent worker does it, and every run kind goes through
 one lifecycle, `RunSandbox` in [run-sandbox.ts](../src/run-sandbox.ts), with one of two behaviors:
 
-- **Ephemeral** ([ephemeral-run-sandbox.ts](../src/ephemeral-run-sandbox.ts)): a blank sandbox
-  created for one run (an unbound conversation, a subagent or a workflow node) and destroyed when
-  the run releases it.
+- **Ephemeral** ([ephemeral-run-sandbox.ts](../src/ephemeral-run-sandbox.ts)): created for one
+  run and destroyed when the run releases it. It is blank for an unbound conversation, a subagent
+  or a workflow node; a workflow step's own `sandbox` factory makes it a workspace from its static
+  recipe, destroyed after its credentials are revoked.
 - **Persistent** ([persistent-run-sandbox.ts](../src/persistent-run-sandbox.ts)): a bound
   conversation's thread workspace, resumed by each run and saved by `beforeFinalize` before the
   run's terminal write. Run teardown never destroys it.
@@ -95,8 +96,14 @@ A workflow node's deadline also covers provisioning: it starts before the enviro
 and it, a cancellation or a worker shutdown cancels `create()`. Finishing the node never does: a
 sandbox still booting then is destroyed once it is ready.
 
-A thread's workspace is ready before the first model call instead, so the system prompt can
-describe it, and its network follows its recipe, which always includes the gateway.
+A workspace, a thread's or a step's, is ready before the first model call instead, so the system
+prompt can describe the checkout, and its network follows its recipe, which always includes the
+gateway. For a step's workspace:
+
+- A step whose sandbox fails to provision after model preparation fails the node; it is not
+  retried, because the clone and setup may have run.
+- A worker crash leaves a step's ephemeral sandbox running until the provider's own timeout, as it
+  does for a blank sandbox.
 
 Because a blank sandbox's egress is locked to the gateway, its agent's only way to read or write
 app data is through that gateway — there is no open internet. See

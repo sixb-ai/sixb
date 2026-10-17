@@ -92,8 +92,9 @@ resume. Retention alone does not enable persistence.
 
 ## Gateway and network policy
 
-Ephemeral runs restrict egress to the Sixb API gateway. Workspaces also allow the repository and
-explicitly configured access. This provider maps Sixb policies to Vercel's firewall:
+Ephemeral runs restrict egress to the Sixb API gateway. Workspaces also allow the repository, the
+origins its source auth issues credentials for (such as `api.github.com` for `gh`) and explicitly
+configured access. This provider maps Sixb policies to Vercel's firewall:
 
 | Sixb policy | Vercel policy |
 | --- | --- |
@@ -110,13 +111,18 @@ Important caveats:
   allow rules; use HTTPS or an IP/CIDR target.
 - IP/CIDR rules are address-wide; the URL port is not enforced by the firewall rule.
 
-For production, expose the Sixb API gateway at a public HTTPS origin reachable from Vercel.
+Expose the Sixb API gateway at a public HTTPS origin reachable from Vercel and set
+`SIXB_API_PUBLIC_ORIGIN` to it, in production and in local development (through a tunnel).
 
 ## Runtime and dependencies
 
 Sixb explicitly selects Vercel's stock `node24` runtime by default. Custom images and snapshots used
 by agents need Bash, standard file utilities, CA certificates, and Bun 1.3+ or Node 22+. `curl` and
 `jq` are not required.
+
+The stock runtime has neither `gh` nor `bun`, which agents working in a repository usually need.
+Boot the [Sixb agent image](../agent-image/README.md#use-with-a-sandbox-provider) for those
+workspaces.
 
 For additional tools, prefer one of these setup strategies:
 

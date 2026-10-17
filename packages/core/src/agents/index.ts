@@ -1,5 +1,9 @@
 export type { PropertyClearance } from "../objects/property-clearance"
-export { captureSandboxEnv, sandboxCredentialIssue } from "../sandboxes/configuration"
+export {
+  captureSandboxEnv,
+  sandboxCredentialIssue,
+  staticSandboxRecipe,
+} from "../sandboxes/configuration"
 export type {
   AgentFileDataProjection,
   AgentFileDataResolverInput,

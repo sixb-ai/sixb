@@ -16,6 +16,7 @@ import {
   agent,
   type BlobStorage,
   type Broker,
+  type CommandResult,
   type ConnectorDefinition,
   type CreateSandboxOptions,
   can,
@@ -79,7 +80,11 @@ import type {
 } from "@sixb/core/models"
 import { ModelProviderError, UnsupportedModelFeatureError } from "@sixb/core/models"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
-import { initializeSandboxEnvironment, SandboxStateUnavailableError } from "@sixb/core/sandboxes"
+import {
+  initializeSandboxEnvironment,
+  SandboxStateUnavailableError,
+  sandboxConfig,
+} from "@sixb/core/sandboxes"
 import {
   type AgentRunRecord,
   type AgentStorage,
@@ -130,6 +135,8 @@ import type {
   AgentWorkerHost,
   AgentWorkerStorage,
 } from "../src/types"
+import * as workspaceFiles from "../src/workspace-files"
+import { WorkspaceRunFilesConflictError } from "../src/workspace-files"
 import { waitFor } from "./helpers"
 import { testStream, WorkerTestModel, type WorkerTestStreamEvent } from "./worker-model-fixture"
 
@@ -1286,6 +1293,185 @@ class RecordingSandboxFactory implements SandboxFactory {
   }
 }
 
+/** Records the lifecycle of a step's workspace: clone, setup, run files and credentials. */
+class LoggedSandbox extends RecordingSandbox {
+  constructor(
+    id: string,
+    private readonly events: string[],
+    private readonly failingCommand?: string
+  ) {
+    super(id)
+  }
+
+  async setRequestCredentials(credentials: readonly SandboxRequestCredential[]): Promise<void> {
+    this.events.push(credentials.length ? "renew" : "clear")
+  }
+
+  override async runCommand(
+    command: string,
+    args: readonly string[] = [],
+    options: RunCommandOptions = {}
+  ): Promise<CommandResult> {
+    const script = args.at(-1) ?? ""
+    if (command === "git" && args[0] === "clone") this.events.push("clone")
+    if (script.includes("/.sixb/agent/")) this.events.push("exclude-run-files")
+    if (script === this.failingCommand) {
+      this.commands.push({ command, args, options })
+      return { exitCode: 1, stdout: "", stderr: "setup failed", durationMs: 1 }
+    }
+    return super.runCommand(command, args, options)
+  }
+
+  override async writeFiles(files: readonly SandboxFileRecord[]): Promise<void> {
+    if (files.some((file) => file.path.includes("/.sixb/agent/")))
+      this.events.push("write-run-files")
+    await super.writeFiles(files)
+  }
+
+  override async destroy(): Promise<void> {
+    this.events.push("destroy")
+    await super.destroy()
+  }
+}
+
+/** A step's own factory: it applies its recipe the way a provider does and logs each event. */
+class StepSandboxFactory implements SandboxFactory {
+  readonly configuration: SandboxConfig
+  readonly supportsRequestCredentials = true
+  readonly createOptions: CreateSandboxOptions[] = []
+  readonly sandboxes: LoggedSandbox[] = []
+
+  constructor(
+    recipe: SandboxConfig,
+    /** Shared with the step's source auth, so one log orders the whole lifecycle. */
+    readonly events: string[] = [],
+    private readonly behavior: {
+      /** A setup command that exits non-zero. */
+      readonly failingCommand?: string
+      /** Runs after the session exists and before the clone, like a slow provider boot. */
+      readonly beforeClone?: () => Promise<void>
+    } = {}
+  ) {
+    this.configuration = sandboxConfig(recipe)
+  }
+
+  async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    this.createOptions.push(options)
+    this.events.push(options.requestCredentials?.length ? "inject" : "create")
+    const sandbox = new LoggedSandbox(
+      `step-sandbox-${this.sandboxes.length + 1}`,
+      this.events,
+      this.behavior.failingCommand
+    )
+    this.sandboxes.push(sandbox)
+    try {
+      await this.behavior.beforeClone?.()
+      return await initializeSandboxEnvironment(sandbox, options.environment ?? {}, options.signal)
+    } catch (error) {
+      // Providers reclaim a sandbox whose initialization failed.
+      await sandbox.destroy()
+      throw error
+    }
+  }
+}
+
+/** Source auth that logs issuance and revocation; renewals can be made to fail. */
+function stepSourceAuth(
+  events: string[],
+  options: {
+    readonly firstLifetimeMs?: number
+    readonly failRenewal?: boolean
+    /** A slow integration: "revoked" is logged only once revocation completes. */
+    readonly revokeDelayMs?: number
+    /** Every revocation is refused. */
+    readonly failRevocation?: boolean
+  } = {}
+) {
+  const accesses: (string | undefined)[] = []
+  let issued = 0
+  const auth: SandboxSourceAuth = {
+    authorize: async ({ source }) => {
+      accesses.push(source.access)
+      issued++
+      if (issued > 1 && options.failRenewal) throw new Error("renewal refused")
+      events.push("issue")
+      return {
+        requests: [
+          {
+            origin: "https://example.com",
+            path: "/repository.git/info/refs",
+            method: "GET",
+            headers: { Authorization: "step-secret" },
+          },
+        ],
+        env: { GIT_AUTHOR_NAME: "Step agent" },
+        expiresAt: new Date(
+          Date.now() + (issued === 1 ? (options.firstLifetimeMs ?? 3_600_000) : 3_600_000)
+        ),
+        revoke: async () => {
+          events.push("revoke")
+          if (options.failRevocation) throw new Error("revocation refused")
+          if (options.revokeDelayMs === undefined) return
+
+          await new Promise((resolve) => setTimeout(resolve, options.revokeDelayMs))
+          events.push("revoked")
+        },
+      }
+    },
+  }
+  return { auth, accesses }
+}
+
+/** The worker's log lines about closing source credentials, from a `console.error` spy. */
+function credentialCleanupLogs(errors: ReturnType<typeof spyOn<Console, "error">>): string[] {
+  return errors.mock.calls
+    .map(([message]) => String(message))
+    .filter((message) => message.includes("revoked") || message.includes("cleanup failed"))
+}
+
+/** Answers the workflow request at once, keeping the first system prompt it receives. */
+function promptCapturingAnswerModel(capture: (system: string) => void): WorkerTestModel {
+  let captured = false
+  return new WorkerTestModel({
+    modelId: "mock-model",
+    generate: async (request) => {
+      const system = request.messages.find((message) => message.role === "system")?.content
+      if (!captured && typeof system === "string") {
+        captured = true
+        capture(system)
+      }
+      return {
+        content: [
+          { type: "text", text: JSON.stringify({ answer: "Project Alpha", confidence: 0.96 }) },
+        ],
+        finishReason: { unified: "stop", raw: "stop" },
+        usage: USAGE,
+        warnings: [],
+      }
+    },
+  })
+}
+
+/** Holds a step's provisioning until the test lets it continue. */
+function provisioningGate() {
+  let enter!: () => void
+  let release!: () => void
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve
+  })
+  const released = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return {
+    entered,
+    release,
+    wait: async () => {
+      enter()
+      await released
+    },
+  }
+}
+
 /** A factory whose provisioning always fails (e.g. missing isolation backend). */
 class FailingSandboxFactory implements SandboxFactory {
   async create(): Promise<Sandbox> {
@@ -1463,6 +1649,8 @@ async function queueWorkflowAgentNode(input: {
   readonly tools?: readonly AgentToolDefinition[]
   readonly storage?: Storage
   readonly sandboxes?: SandboxFactory
+  /** The step's own sandbox factory. */
+  readonly stepSandbox?: SandboxFactory
   readonly runId: string
   readonly requestedByPrincipal?: typeof REQUESTER
   readonly requesterGroupIds?: readonly string[]
@@ -1474,6 +1662,7 @@ async function queueWorkflowAgentNode(input: {
     instructions: "Resolve the best project.",
     groups: input.security?.groups ?? [AGENT_RUNTIME_GROUP],
     ...(input.tools === undefined ? {} : { tools: input.tools }),
+    ...(input.stepSandbox === undefined ? {} : { sandbox: input.stepSandbox }),
   })
     .input({ query: "string" })
     .output({ answer: "string", confidence: "double" })
@@ -3283,6 +3472,48 @@ describe("AgentWorker", () => {
     ])
   })
 
+  test("reports a repository that claims the run-file directory when a thread acquires it", async () => {
+    // Regression proof: drop the WorkspaceRunFilesConflictError pass-through from
+    // acquisitionError in persistent-run-sandbox.ts; the generic recovery error is reported.
+    const reported: Error[] = []
+    const sandbox = new RecordingSandbox("claimed-run-files")
+    const host = buildSixb(
+      answerModel(() => {}),
+      new InMemoryBroker(),
+      { create: async () => sandbox, resume: async () => sandbox },
+      { sandboxConfig: { source: { type: "git", url: "https://example.com/repository.git" } } }
+    )
+    attachSixbErrorReporter(host, (error) => {
+      reported.push(error)
+    })
+
+    // workspace-files.test.ts runs the script against real repositories; here it only refuses.
+    const runFiles = spyOn(workspaceFiles, "prepareWorkspaceRunFiles").mockRejectedValue(
+      new WorkspaceRunFilesConflictError()
+    )
+    const thread = await createTestSixb(host).agent.threads.create({ sandbox: {} })
+    const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })
+    const completion = observeQueueSettlement(host.queues.agents)
+    const worker = new AgentWorker(host, workerOptions())
+    await worker.start()
+    try {
+      await completion.wait()
+
+      const run = await agentStorageOf(host).runs.getById({
+        projectId: PROJECT_ID,
+        id: requested.run.id,
+      })
+      expect(run?.status).toBe("failed")
+      expect(reported.map((error) => error.message)).toEqual([
+        new WorkspaceRunFilesConflictError().message,
+      ])
+    } finally {
+      await worker.stop()
+      completion.restore()
+      runFiles.mockRestore()
+    }
+  })
+
   test("refuses a stored workspace without a recipe before model or sandbox work", async () => {
     // Regression proof: remove the configuration guard in persistentRunSandbox.
     let modelCalls = 0
@@ -4598,6 +4829,476 @@ describe("AgentWorker", () => {
       releaseBoot()
       await worker.stop()
       completion.restore()
+    }
+  })
+
+  const STEP_REPOSITORY = "https://example.com/repository.git"
+
+  test("gives a workflow step without its own sandbox the project's blank sandbox", async () => {
+    // Regression proof: give every workflow node's ephemeralRunSandbox the project factory's
+    // static recipe; creation then receives a recipe and the prompt describes a workspace.
+    let system: string | undefined
+    const sandboxes = new RecordingSandboxFactory()
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: promptCapturingAnswerModel((prompt) => {
+        system = prompt
+      }),
+      sandboxes,
+      runId: "workflow-project-sandbox",
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      expect((await terminalWorkflowAgentNode(runs, nodeRunId)).status).toBe("succeeded")
+      await waitFor(() => sandboxes.sandboxes[0]?.destroyed || null, {
+        label: "project sandbox destroyed",
+      })
+
+      expect(sandboxes.createOptions).toEqual([
+        {
+          environment: {},
+          network: {
+            mode: "restricted",
+            allow: [{ name: "sixb-api", origin: new URL(TEST_AGENT_API_BASE_URL).origin }],
+          },
+          signal: expect.any(AbortSignal),
+        },
+      ])
+      expect(system).not.toContain("<workspace>")
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("runs a workflow step in a fresh checkout of its own sandbox recipe", async () => {
+    // Regression proof: ignore node.agentStep.sandbox in workflow-node-execution.ts; the project
+    // factory provisions a blank sandbox instead. Move prepareWorkspaceRunFiles after
+    // provisioning in EphemeralWorkspace; run files are then written before they are excluded.
+    let system: string | undefined
+    const projectSandboxes = new RecordingSandboxFactory()
+    const step = new StepSandboxFactory({
+      source: { type: "git", url: STEP_REPOSITORY },
+      setup: ["bun install"],
+      env: { NODE_ENV: "test" },
+    })
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: promptCapturingAnswerModel((prompt) => {
+        system = prompt
+      }),
+      sandboxes: projectSandboxes,
+      stepSandbox: step,
+      runId: "workflow-step-sandbox",
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      expect((await terminalWorkflowAgentNode(runs, nodeRunId)).status).toBe("succeeded")
+      await waitFor(() => step.sandboxes[0]?.destroyed || null, { label: "step sandbox destroyed" })
+
+      expect(projectSandboxes.createOptions).toEqual([])
+      expect(step.createOptions).toHaveLength(1)
+      expect(step.createOptions[0]).toMatchObject({
+        env: { NODE_ENV: "test" },
+        network: {
+          mode: "restricted",
+          allow: [
+            { name: "sixb-api", origin: new URL(TEST_AGENT_API_BASE_URL).origin },
+            { name: "workspace-repository", origin: "https://example.com" },
+          ],
+        },
+        environment: { source: { type: "git", url: STEP_REPOSITORY }, setup: ["bun install"] },
+      })
+      expect(step.createOptions[0]?.persistence).toBeUndefined()
+
+      const { events } = step
+      expect(events.slice(0, 2)).toEqual(["create", "clone"])
+      expect(events.indexOf("exclude-run-files")).toBeGreaterThan(-1)
+      expect(events.indexOf("exclude-run-files")).toBeLessThan(events.indexOf("write-run-files"))
+      expect(events.at(-1)).toBe("destroy")
+
+      expect(system).toContain(
+        'Working directory: "/tmp/sixb-recording-sandbox/step-sandbox-1/repository"'
+      )
+      expect(system).toContain(`Source (git): "${STEP_REPOSITORY}"`)
+      expect(system).toContain("This workspace is discarded when the task ends.")
+      expect(system).toContain("Do not push: this task cannot publish changes to this repository.")
+      expect(system).not.toContain("Files persist")
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("authenticates a step's checkout host-side and revokes before destroying it", async () => {
+    // Regression proof: close credentials only when EphemeralWorkspace is released; the node is
+    // then recorded before the grant is revoked.
+    let system: string | undefined
+    const events: string[] = []
+    const atTerminalWrite: string[][] = []
+    const { auth, accesses } = stepSourceAuth(events)
+    const step = new StepSandboxFactory(
+      { source: { type: "git", url: STEP_REPOSITORY, access: "write" }, auth },
+      events
+    )
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: promptCapturingAnswerModel((prompt) => {
+        system = prompt
+      }),
+      storage: observeWorkflowAgentNodeFinish(new InMemoryStorage(), () => {
+        atTerminalWrite.push([...events])
+      }),
+      stepSandbox: step,
+      runId: "workflow-step-authenticated-sandbox",
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      expect((await terminalWorkflowAgentNode(runs, nodeRunId)).status).toBe("succeeded")
+      await waitFor(() => step.sandboxes[0]?.destroyed || null, { label: "step sandbox destroyed" })
+
+      expect(accesses).toEqual(["write"])
+      expect(atTerminalWrite).toEqual([expect.arrayContaining(["clear", "revoke"])])
+      expect(
+        events.filter((event) => ["issue", "inject", "clear", "revoke", "destroy"].includes(event))
+      ).toEqual(["issue", "inject", "clear", "revoke", "destroy"])
+
+      expect(step.createOptions[0]?.env).toEqual({ GIT_AUTHOR_NAME: "Step agent" })
+      expect(step.createOptions[0]?.requestCredentials).toEqual([
+        expect.objectContaining({ headers: { Authorization: "step-secret" } }),
+      ])
+      expect(system).toContain("Repository access is authenticated outside the sandbox")
+      expect(system).toContain("Authenticated access: read and write.")
+      expect(system).toContain("Commit and push only when the task requires it.")
+      expect(system).not.toContain("step-secret")
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test(
+    "fails a workflow step whose credentials cannot be renewed and revokes them",
+    async () => {
+      // Regression proof: drop failureSignal from the step environment in
+      // createWorkflowAgentNodeEnvironment, or environmentFailureSignal from
+      // runWorkflowAgentNode's abort signal; the node deadline aborts the model instead.
+      let modelAbortReason: unknown
+      const events: string[] = []
+      const { auth } = stepSourceAuth(events, { firstLifetimeMs: 61_000, failRenewal: true })
+      const step = new StepSandboxFactory(
+        { source: { type: "git", url: STEP_REPOSITORY }, auth },
+        events
+      )
+
+      // The model works until it is stopped; the first grant is renewed about a second in.
+      const model = new WorkerTestModel({
+        modelId: "mock-model",
+        stream: async ({ signal }) => {
+          if (!signal.aborted) {
+            await new Promise((resolve) =>
+              signal.addEventListener("abort", resolve, { once: true })
+            )
+          }
+          modelAbortReason = signal.reason
+          throw signal.reason
+        },
+      })
+      const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+        model,
+        stepSandbox: step,
+        runId: "workflow-step-renewal-failure",
+      })
+      attachSixbErrorReporter(sixb, () => {})
+      const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 4_000 }))
+      await worker.start()
+      try {
+        expect((await terminalWorkflowAgentNode(runs, nodeRunId)).status).toBe("failed")
+        await waitFor(() => step.sandboxes[0]?.destroyed || null, {
+          label: "step sandbox destroyed",
+        })
+
+        expect(modelAbortReason).toMatchObject({
+          message: "[SixbAgentWorker] Workspace authentication could not be confirmed.",
+        })
+        expect(events.filter((event) => event === "revoke")).toHaveLength(1)
+        expect(events.indexOf("revoke")).toBeLessThan(events.indexOf("destroy"))
+      } finally {
+        await worker.stop()
+      }
+    },
+    { timeout: 10_000 }
+  )
+
+  test("records a successful step whose credentials cannot be revoked and destroys its sandbox", async () => {
+    // Regression proof: remove the catch from closeCredentials in EphemeralWorkspace; the refused
+    // revocation fails the node's terminal write path and the node never succeeds.
+    const events: string[] = []
+    const { auth } = stepSourceAuth(events, { failRevocation: true })
+    const step = new StepSandboxFactory(
+      { source: { type: "git", url: STEP_REPOSITORY }, auth },
+      events
+    )
+    const errors = spyOn(console, "error").mockImplementation(() => {})
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: structuredAnswerModel(),
+      stepSandbox: step,
+      runId: "workflow-step-revocation-failure",
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      expect((await terminalWorkflowAgentNode(runs, nodeRunId)).status).toBe("succeeded")
+      await waitFor(() => step.sandboxes[0]?.destroyed || null, { label: "step sandbox destroyed" })
+
+      expect(events.indexOf("revoke")).toBeLessThan(events.indexOf("destroy"))
+      expect(credentialCleanupLogs(errors)).toEqual([
+        `[SixbAgentWorker] The workspace credentials of run '${nodeRunId}' could not be revoked; they stay valid until they expire.`,
+      ])
+    } finally {
+      await worker.stop()
+      errors.mockRestore()
+    }
+  })
+
+  test("logs once when a step's refused first grant cannot be revoked either", async () => {
+    // Regression proof: drop `this.closing = Promise.resolve()` from EphemeralWorkspace.authorize;
+    // the node's beforeFinalize closes again and logs the same failure a second time.
+    const events: string[] = []
+    // A grant expiring within the renewal margin is refused after it was issued.
+    const { auth } = stepSourceAuth(events, { firstLifetimeMs: 1_000, failRevocation: true })
+    const step = new StepSandboxFactory(
+      { source: { type: "git", url: STEP_REPOSITORY }, auth },
+      events
+    )
+    const errors = spyOn(console, "error").mockImplementation(() => {})
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: structuredAnswerModel(),
+      stepSandbox: step,
+      runId: "workflow-step-refused-grant",
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      expect((await terminalWorkflowAgentNode(runs, nodeRunId)).status).toBe("failed")
+
+      expect(step.createOptions).toEqual([])
+      expect(events).toEqual(["issue", "revoke"])
+      expect(credentialCleanupLogs(errors)).toEqual([
+        "[SixbAgentWorker] Sandbox authentication cleanup failed before acquisition.",
+      ])
+    } finally {
+      await worker.stop()
+      errors.mockRestore()
+    }
+  })
+
+  test("revokes and destroys a step's sandbox whose setup fails", async () => {
+    // Two guards close the credentials here, and they overlap: EphemeralWorkspace.acquire closes
+    // them before it rejects, so the beforeFinalize in createWorkflowAgentNodeEnvironment's catch
+    // only awaits that close. Regression proof: remove both (acquire's catch destroys without
+    // discard()); the grant is not revoked before the node's terminal write. Each one alone is
+    // proven where the other cannot help: removing acquire's close fails the takeover test, whose
+    // lost execution skips beforeFinalize; removing beforeFinalize fails the cancellation and
+    // clone deadline tests, which record the node while provisioning is still in flight.
+    let modelCalls = 0
+    const events: string[] = []
+    const atTerminalWrite: string[][] = []
+    const { auth } = stepSourceAuth(events)
+    const step = new StepSandboxFactory(
+      { source: { type: "git", url: STEP_REPOSITORY }, setup: ["bun install"], auth },
+      events,
+      { failingCommand: "bun install" }
+    )
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: answerModel(() => {
+        modelCalls++
+      }),
+      storage: observeWorkflowAgentNodeFinish(new InMemoryStorage(), () => {
+        atTerminalWrite.push([...events])
+      }),
+      stepSandbox: step,
+      runId: "workflow-step-setup-failure",
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      expect((await terminalWorkflowAgentNode(runs, nodeRunId)).status).toBe("failed")
+
+      expect(modelCalls).toBe(0)
+      expect(step.sandboxes[0]?.destroyed).toBe(true)
+      expect(atTerminalWrite).toEqual([expect.arrayContaining(["revoke"])])
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("revokes and destroys a step's sandbox when the node is cancelled during provisioning", async () => {
+    // Regression proof: drop the signal from EphemeralWorkspace's create(); provisioning ignores
+    // the cancellation. Drop beforeFinalize from createWorkflowAgentNodeEnvironment's catch; the
+    // node is recorded before its slow revocation completes.
+    let modelCalls = 0
+    const gate = provisioningGate()
+    const events: string[] = []
+    const atTerminalWrite: string[][] = []
+    const { auth } = stepSourceAuth(events, { revokeDelayMs: 200 })
+    const step = new StepSandboxFactory(
+      { source: { type: "git", url: STEP_REPOSITORY }, auth },
+      events,
+      { beforeClone: gate.wait }
+    )
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: answerModel(() => {
+        modelCalls++
+      }),
+      storage: observeWorkflowAgentNodeFinish(new InMemoryStorage(), () => {
+        atTerminalWrite.push([...events])
+      }),
+      stepSandbox: step,
+      runId: "workflow-step-cancelled",
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      await gate.entered
+      await publishAgentRunCancel(sixb.broker, { projectId: PROJECT_ID, runId: nodeRunId })
+      expect((await terminalWorkflowAgentNode(runs, nodeRunId)).status).toBe("cancelled")
+
+      gate.release()
+      await waitFor(() => step.sandboxes[0]?.destroyed || null, { label: "step sandbox destroyed" })
+
+      expect(modelCalls).toBe(0)
+      expect(step.createOptions[0]?.signal?.aborted).toBe(true)
+      expect(atTerminalWrite).toEqual([expect.arrayContaining(["revoked"])])
+      expect(events.indexOf("revoked")).toBeLessThan(events.indexOf("destroy"))
+    } finally {
+      // stop() drains the detached teardown, which waits for provisioning.
+      gate.release()
+      await worker.stop()
+    }
+  })
+
+  test("revokes a step's credentials before recording a deadline reached during the clone", async () => {
+    // Regression proof: drop beforeFinalize from createWorkflowAgentNodeEnvironment's catch; the
+    // node is recorded before its slow revocation completes.
+    let modelCalls = 0
+    const gate = provisioningGate()
+    const events: string[] = []
+    const atTerminalWrite: string[][] = []
+    const { auth } = stepSourceAuth(events, { revokeDelayMs: 100 })
+    const step = new StepSandboxFactory(
+      { source: { type: "git", url: STEP_REPOSITORY }, auth },
+      events,
+      { beforeClone: gate.wait }
+    )
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: answerModel(() => {
+        modelCalls++
+      }),
+      storage: observeWorkflowAgentNodeFinish(new InMemoryStorage(), () => {
+        atTerminalWrite.push([...events])
+      }),
+      stepSandbox: step,
+      runId: "workflow-step-clone-deadline",
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 300 }))
+    await worker.start()
+    try {
+      expect((await terminalWorkflowAgentNode(runs, nodeRunId)).status).toBe("failed")
+
+      gate.release()
+      await waitFor(() => step.sandboxes[0]?.destroyed || null, { label: "step sandbox destroyed" })
+
+      expect(modelCalls).toBe(0)
+      expect(atTerminalWrite).toEqual([expect.arrayContaining(["revoked"])])
+    } finally {
+      gate.release()
+      await worker.stop()
+    }
+  })
+
+  test("revokes a step's credentials before recording a model failure", async () => {
+    // Regression proof: drop beforeFinalize from executeWorkflowAgentNode's failure path; the
+    // credentials are then closed only by the release that follows the terminal write.
+    const events: string[] = []
+    const atTerminalWrite: string[][] = []
+    const { auth } = stepSourceAuth(events)
+    const step = new StepSandboxFactory(
+      { source: { type: "git", url: STEP_REPOSITORY, access: "write" }, auth },
+      events
+    )
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: new WorkerTestModel({
+        modelId: "mock-model",
+        generate: async () => {
+          throw new Error("model unavailable")
+        },
+      }),
+      storage: observeWorkflowAgentNodeFinish(new InMemoryStorage(), () => {
+        atTerminalWrite.push([...events])
+      }),
+      stepSandbox: step,
+      runId: "workflow-step-model-failure",
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      expect((await terminalWorkflowAgentNode(runs, nodeRunId)).status).toBe("failed")
+      await waitFor(() => step.sandboxes[0]?.destroyed || null, { label: "step sandbox destroyed" })
+
+      expect(atTerminalWrite).toEqual([expect.arrayContaining(["clear", "revoke"])])
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("revokes and destroys a step's sandbox when the node is taken over during provisioning", async () => {
+    // Regression proof: make the assertOwner createWorkflowAgentNodeEnvironment passes to
+    // ephemeralRunSandbox a no-op; the stale run uses the checkout and records a terminal state
+    // over the new owner's run. Destroy before closing credentials in EphemeralWorkspace.discard;
+    // the sandbox is then destroyed before its grant is revoked. Destroy without discard() in
+    // acquire's catch; nothing revokes the grant, since a lost execution skips beforeFinalize.
+    let modelCalls = 0
+    const gate = provisioningGate()
+    const events: string[] = []
+    const { auth } = stepSourceAuth(events)
+    const step = new StepSandboxFactory(
+      { source: { type: "git", url: STEP_REPOSITORY }, auth },
+      events,
+      { beforeClone: gate.wait }
+    )
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: answerModel(() => {
+        modelCalls++
+      }),
+      stepSandbox: step,
+      runId: "workflow-step-taken-over",
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      await gate.entered
+      await runs.agentNodes.reclaim({
+        projectId: PROJECT_ID,
+        nodeRunId,
+        execution: {
+          token: "another-delivery",
+          queueLeaseExpiresAt: new Date(Date.now() + 60_000),
+        },
+      })
+
+      gate.release()
+      await waitFor(() => step.sandboxes[0]?.destroyed || null, { label: "step sandbox destroyed" })
+
+      expect(modelCalls).toBe(0)
+      expect(events.indexOf("revoke")).toBeGreaterThan(-1)
+      expect(events.indexOf("revoke")).toBeLessThan(events.indexOf("destroy"))
+      expect(
+        await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+      ).toMatchObject({ status: "running", execution: { token: "another-delivery" } })
+    } finally {
+      await worker.stop()
     }
   })
 

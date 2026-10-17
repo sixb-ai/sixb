@@ -13,6 +13,14 @@ Factories define environments; threads retain immutable parameters; runs provide
   resolves: `resolve` results are unknown at startup, and a worker host is structural.
 - Runs without a thread binding explicitly select `{}`; shared env/network defaults remain session
   settings, not an implicit project binding. Unsupported provider capabilities fail explicitly.
+- The exception is a workflow step's own `sandbox`: its factory's static recipe (source, setup,
+  env, network, auth) applies to a fresh ephemeral sandbox per node run. `params`/`resolve`, a
+  `none` network and source access that fails `sandboxCredentialIssue` are rejected when the step
+  is defined and again at startup. Before the node's terminal write, also when provisioning
+  fails, is cancelled or times out, the worker waits for one attempt to remove injection and
+  revoke every grant, and destroys the sandbox only after it. A refused revocation is logged and
+  does not fail the node: that grant stays valid until it expires. A lost execution records
+  nothing, and its failed acquisition or its release still revokes.
 
 - [Configuration](./configuration.ts) validates and snapshots recipes, sharing Action parameter
   schemas. Resolvers receive the execution-scoped SDK. Only parameters are stored in `sandbox_params`.

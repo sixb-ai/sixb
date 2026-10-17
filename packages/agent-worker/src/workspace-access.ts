@@ -103,6 +103,11 @@ export class WorkspaceAccess {
     await this.auth?.close()
   }
 
+  /** Whether no grant issued for this access is still valid. */
+  get revoked(): boolean {
+    return this.auth?.revoked ?? true
+  }
+
   /** Close on a path that already fails; the original error is the one to report. */
   async closeAfterFailure(phase: string): Promise<void> {
     try {
@@ -113,10 +118,14 @@ export class WorkspaceAccess {
   }
 
   /** Only non-secret facts about the prepared session, for the system prompt. */
-  promptContext(session: Sandbox): AgentWorkspacePromptContext {
+  promptContext(
+    session: Sandbox,
+    retention: AgentWorkspacePromptContext["retention"]
+  ): AgentWorkspacePromptContext {
     const { source } = this.input.recipe
     return {
       workingDirectory: session.workingDirectory,
+      retention,
       ...(source && this.sourceUrl
         ? {
             source: {

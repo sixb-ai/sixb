@@ -104,6 +104,84 @@ to read invoices. Without groups, it has no project grants. To add custom tools,
 For a single model call that does not need tools, use an ordinary step with
 [`sixb.models.language.generate()`](../models/configuration.md#generate-a-response).
 
+## Work in a repository
+
+Give an AI task its own `sandbox` to work in a checkout of a repository, for example to fix a bug
+and open a pull request. Pass a [sandbox factory](../sandboxes/overview.md) with a static recipe:
+
+File: `lib/app-repo.ts`
+
+```ts
+import { githubApp } from "@sixb/connector-github/sandbox"
+import { VercelSandboxFactory } from "@sixb/sandboxes-vercel"
+
+export const appRepo = new VercelSandboxFactory({
+  image: "sixb-agent:<version>",
+  sessionTimeoutMs: 15 * 60_000,
+  source: { type: "git", url: "https://github.com/acme/app.git", access: "write" },
+  setup: ["bun install"],
+  network: { mode: "restricted", allow: [{ name: "npm", origin: "https://registry.npmjs.org" }] },
+  auth: githubApp({
+    appId: process.env.GITHUB_APP_ID!,
+    privateKey: process.env.GITHUB_APP_PRIVATE_KEY!,
+  }),
+})
+```
+
+Vercel's default runtime has neither `gh` nor `bun`, so the factory boots the Sixb agent image,
+which has both: push it to your Vercel project as shown in
+[Use with a sandbox provider](https://github.com/sixb-ai/sixb/tree/main/sandboxes/agent-image#use-with-a-sandbox-provider)
+(Vercel). `sessionTimeoutMs` must cover the task's time limit, the agent worker's turn budget:
+10 minutes unless you [change it](../cli/overview.md#worker-options). Vercel's default session
+lasts 5 minutes.
+
+File: `workflows/incident-to-pr.ts`
+
+```ts
+import { defineAgentStep, ref } from "@sixb/core"
+import { appRepo } from "../lib/app-repo"
+import { Incident } from "../ontology/incident"
+import { engineering } from "../security/groups/engineering"
+
+export const fixIncident = defineAgentStep("fix-incident", {
+  instructions:
+    "Fix the bug and add a test. Push to the branch named in the request, then open a pull request from it unless one is already open.",
+  groups: [engineering],
+  sandbox: appRepo,
+})
+  .input({ incident: ref(Incident) })
+  .output({ pullRequestUrl: "string", summary: "string" })
+  .prompt(
+    ({ input }) =>
+      `Fix incident ${input.incident.primaryId} on branch fix/incident-${input.incident.primaryId}.`
+  )
+```
+
+Each run gets a fresh sandbox: Sixb clones the repository, runs `setup`, and destroys the sandbox
+when the run ends, including after a failure or a cancellation. Nothing carries over between runs,
+so setup runs every time. Cloning and setup count toward the task's time limit.
+
+If a worker stops mid-task, the task runs again in a fresh checkout. Write instructions that are
+safe to repeat, as above: a branch name derived from the input, and a check for an existing pull
+request. Protect the default branch, since write access covers every branch.
+
+The sandbox always reaches the Sixb API, the repository and the origins `auth` issues
+credentials for; without `network`, nothing else. A `restricted` network lists what the project
+adds, here the registry `bun install` downloads from.
+
+With `access: "write"`, the task can push branches and open pull requests with `git` and `gh`.
+`githubApp` keeps the credentials outside the sandbox and revokes them when the run ends; after a
+worker crash, they stay valid until they expire, within an hour. An authenticated repository
+needs a provider that injects credentials outside the sandbox, such as Vercel. The recipe must be
+static: factories with `params` or `resolve` are not supported here.
+
+Vercel sandboxes run remotely and call your Sixb API at its
+[public origin](../deployment/overview.md#configure-public-origins), so it must be an HTTPS
+address reachable from the internet. In local development, expose the API through a tunnel and
+set `SIXB_API_PUBLIC_ORIGIN` to the tunnel's URL.
+
+`createSixb({ sandboxes })` is still required for tasks without `sandbox` and for conversations.
+
 ## Start a workflow
 
 Run a workflow from its page in your app's [Ontology](../apps/overview.md#ontology) section, such as
