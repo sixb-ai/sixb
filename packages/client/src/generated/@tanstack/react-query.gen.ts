@@ -21,6 +21,7 @@ import {
   createAgentThread,
   createAiLimitPolicy,
   createArtifact,
+  createArtifactFrame,
   createAuthInvitation,
   createAuthPersonalAccessToken,
   createAuthServiceAccount,
@@ -187,6 +188,9 @@ import type {
   CreateAiLimitPolicyResponse,
   CreateArtifactData,
   CreateArtifactError,
+  CreateArtifactFrameData,
+  CreateArtifactFrameError,
+  CreateArtifactFrameResponse,
   CreateArtifactResponse,
   CreateAuthInvitationData,
   CreateAuthInvitationError,
@@ -4614,6 +4618,35 @@ export const publishArtifactVersionMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await publishArtifactVersion({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Open an artifact version in a frame
+ *
+ * A short-lived path that serves the version's files to a sandboxed frame, such as a deck. It expires within an hour.
+ */
+export const createArtifactFrameMutation = (
+  options?: Partial<Options<CreateArtifactFrameData>>
+): UseMutationOptions<
+  CreateArtifactFrameResponse,
+  CreateArtifactFrameError,
+  Options<CreateArtifactFrameData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    CreateArtifactFrameResponse,
+    CreateArtifactFrameError,
+    Options<CreateArtifactFrameData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await createArtifactFrame({
         ...options,
         ...fnOptions,
         throwOnError: true,

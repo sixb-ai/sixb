@@ -341,14 +341,23 @@ export function restoreAppStaticUrls(html: string): string {
   return html.replaceAll(STATIC_ASSET_ORIGIN, "")
 }
 
+/**
+ * Applies the theme chosen in the app (`ThemeProvider` stores it under `sixb-theme`) before the
+ * first paint, so a page loaded in dark mode never paints its light shell first.
+ */
+const THEME_BOOTSTRAP =
+  'try{var t=localStorage.getItem("sixb-theme"),d=t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.add(d?"dark":"light")}catch(e){}'
+
 function withLoadingShell(html: string): string {
   const styles = `<style data-sixb-loading-shell>
       .sixb-loading-shell{position:fixed;inset:0;display:grid;place-items:center;background:#fff;color:#71717a}
       .sixb-loading-spinner{width:1.25rem;height:1.25rem;border:2px solid currentColor;border-right-color:transparent;border-radius:9999px;animation:sixb-loading-spin .7s linear infinite}
-      @media(prefers-color-scheme:dark){.sixb-loading-shell{background:#09090b;color:#a1a1aa}}
+      html.dark .sixb-loading-shell{background:#09090b;color:#a1a1aa}
+      @media(prefers-color-scheme:dark){html:not(.light) .sixb-loading-shell{background:#09090b;color:#a1a1aa}}
       @media(prefers-reduced-motion:reduce){.sixb-loading-spinner{animation-duration:1.5s}}
       @keyframes sixb-loading-spin{to{transform:rotate(360deg)}}
-    </style>`
+    </style>
+    <script data-sixb-theme>${THEME_BOOTSTRAP}</script>`
   const root =
     '<div id="root"><div class="sixb-loading-shell" role="status" aria-label="Loading application"><span class="sixb-loading-spinner" aria-hidden="true"></span></div></div>'
 

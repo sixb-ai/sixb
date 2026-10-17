@@ -329,11 +329,11 @@ describe("the viewer", () => {
 
   test("says a kind is not viewable yet rather than guessing", () => {
     const html = render({
-      kind: "slides",
-      entry: "slides.md",
-      files: [{ path: "slides.md", file: fileRef("slides", 4_096, "text/markdown") }],
+      kind: "page",
+      entry: "index.html",
+      files: [{ path: "index.html", file: fileRef("page", 4_096, "text/html") }],
     })
-    expect(html).toContain("slides")
+    expect(html).toContain("page")
     expect(html).not.toContain("data-sixb-artifact=")
   })
 

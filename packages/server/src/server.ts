@@ -1,6 +1,7 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
 import type { OntologyMaintenanceHandle, SixbHostView } from "@sixb/core"
+import { ARTIFACT_FRAME_ROUTE_PREFIX } from "@sixb/core/internal/artifacts/frames"
 import { CSRF_HEADER_NAME, setRequestClientAddress } from "@sixb/core/internal/auth"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { setApiPublicOrigin } from "@sixb/core/internal/runtime"
@@ -453,6 +454,10 @@ export function createSixbApi(server: SixbServer) {
   })
   registerHttpRoutes(app, host, {
     sharedAccess,
+    frameOrigins: {
+      ...(apiBrowserPolicy.publicOrigin ? { publicOrigin: apiBrowserPolicy.publicOrigin } : {}),
+      appOrigins: apiBrowserPolicy.allowedOrigins,
+    },
     connectorConnections: {
       resolveReturnTo: (request, returnTo) =>
         server.resolveAuthRedirectContext(request, { returnTo }).returnTo,
@@ -507,6 +512,12 @@ function rejectDisallowedBrowserOrigin(
   policy: ResolvedSixbApiBrowserPolicy
 ): Response | undefined {
   if (!request.headers.has("origin")) {
+    return undefined
+  }
+
+  // A frame's page has an opaque origin, so what it loads arrives with `Origin: null`. Its token
+  // is the credential and no cookie counts there, so frames are the one place that is allowed.
+  if (new URL(request.url).pathname.startsWith(ARTIFACT_FRAME_ROUTE_PREFIX)) {
     return undefined
   }
 

@@ -4,6 +4,7 @@ import {
   parseArtifactVersionRow,
 } from "@sixb/core/internal/storage"
 import type {
+  ArtifactFrameGrantRecord,
   ArtifactRecord,
   ArtifactStorage,
   ArtifactVersionInput,
@@ -11,6 +12,8 @@ import type {
   CreateArtifactInput,
   DeleteArtifactInput,
   DeleteArtifactVersionsByOriginInput,
+  DeleteExpiredArtifactFrameGrantsInput,
+  FindArtifactFrameGrantInput,
   GetArtifactInput,
   GetArtifactVersionInput,
   ListArtifactsInput,
@@ -163,8 +166,54 @@ export class PgArtifactStorage implements ArtifactStorage {
     return rows.map(versionFromRow)
   }
 
+  async createFrameGrant(record: ArtifactFrameGrantRecord): Promise<void> {
+    const rows = await this.sql`
+      INSERT INTO artifact_frame_grants
+        (project_id, token_hash, artifact_id, version, created_at, expires_at)
+      SELECT ${record.projectId}, ${record.tokenHash}, ${record.artifactId}, ${record.version},
+             ${record.createdAt}, ${record.expiresAt}
+      WHERE EXISTS (
+        SELECT 1 FROM artifacts WHERE project_id = ${record.projectId} AND id = ${record.artifactId}
+      )
+      RETURNING token_hash
+    `
+    if (rows.length === 0) throw artifactStorageErrors.notFound(record.artifactId)
+  }
+
+  async findFrameGrant(
+    input: FindArtifactFrameGrantInput
+  ): Promise<ArtifactFrameGrantRecord | null> {
+    const [row] = await this.sql<PgRow[]>`
+      SELECT * FROM artifact_frame_grants
+      WHERE project_id = ${input.projectId} AND token_hash = ${input.tokenHash}
+    `
+    return row
+      ? {
+          projectId: String(row.project_id),
+          tokenHash: String(row.token_hash),
+          artifactId: String(row.artifact_id),
+          version: Number(row.version),
+          createdAt: new Date(row.created_at as string | Date),
+          expiresAt: new Date(row.expires_at as string | Date),
+        }
+      : null
+  }
+
+  async deleteExpiredFrameGrants(input: DeleteExpiredArtifactFrameGrantsInput): Promise<number> {
+    const rows = await this.sql`
+      DELETE FROM artifact_frame_grants
+      WHERE (project_id, token_hash) IN (
+        SELECT project_id, token_hash FROM artifact_frame_grants
+        WHERE project_id = ${input.projectId} AND expires_at < ${input.expiredBefore}
+        ORDER BY expires_at LIMIT ${input.limit}
+      )
+      RETURNING token_hash
+    `
+    return rows.length
+  }
+
   async delete(input: DeleteArtifactInput): Promise<boolean> {
-    // Versions go with the artifact through the foreign key's ON DELETE CASCADE.
+    // Versions and frame grants go with the artifact through ON DELETE CASCADE.
     const rows = await this.sql`
       DELETE FROM artifacts WHERE project_id = ${input.projectId} AND id = ${input.id}
       RETURNING id

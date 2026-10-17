@@ -275,6 +275,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("061-drop-auth-audience", dropAuthAudienceSql),
     sqliteSql("062-artifacts", artifactsSql),
     sqliteSql("063-drop-output-diagnostics", dropOutputDiagnosticsSql),
+    sqliteSql("064-artifact-frame-grants", artifactFrameGrantsSql),
   ],
 })
 
@@ -625,5 +626,8 @@ import terminalActionRunsSql from "./migrations/060-terminal-action-runs.sql" wi
 import dropAuthAudienceSql from "./migrations/061-drop-auth-audience.sql" with { type: "text" }
 import artifactsSql from "./migrations/062-artifacts.sql" with { type: "text" }
 import dropOutputDiagnosticsSql from "./migrations/063-drop-output-diagnostics.sql" with {
+  type: "text",
+}
+import artifactFrameGrantsSql from "./migrations/064-artifact-frame-grants.sql" with {
   type: "text",
 }

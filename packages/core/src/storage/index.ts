@@ -195,6 +195,7 @@ export type {
 export { AiUsageStorageError, aggregateAiModelCallUsage, InMemoryAiUsageStorage } from "./ai-usage"
 export type {
   ArtifactFile,
+  ArtifactFrameGrantRecord,
   ArtifactKind,
   ArtifactOrigin,
   ArtifactOutline,
@@ -207,6 +208,8 @@ export type {
   CreateArtifactInput,
   DeleteArtifactInput,
   DeleteArtifactVersionsByOriginInput,
+  DeleteExpiredArtifactFrameGrantsInput,
+  FindArtifactFrameGrantInput,
   GetArtifactInput,
   GetArtifactVersionInput,
   ListArtifactsInput,

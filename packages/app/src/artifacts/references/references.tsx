@@ -24,11 +24,13 @@ import {
   type MouseEvent,
   type ReactNode,
   Suspense,
+  useCallback,
   useContext,
   useMemo,
 } from "react"
 import { artifactHref } from "../../pages/routes"
 import { ArtifactCardFace } from "../card-preview"
+import { ArtifactFrame } from "../frame"
 import { ArtifactKindIcon } from "../kind-icon"
 import { useArtifactMessages } from "../messages"
 import { type ArtifactVersion, useFileText, versionFileSource } from "../queries"
@@ -124,6 +126,33 @@ function hostComponent<Tag extends "a" | "img" | "div">(
   value: unknown
 ): ComponentType<HostProps<Tag>> | undefined {
   return typeof value === "function" ? (value as ComponentType<HostProps<Tag>>) : undefined
+}
+
+/**
+ * Opens an address where links open: beside the conversation, in place in the viewer, or on the
+ * artifact's own page when nothing here hosts it. For a reference that is not a link, such as one
+ * a deck's frame reports.
+ */
+export function useOpenArtifactAddress(): (address: string) => void {
+  const { open } = useContext(References)
+  return useCallback(
+    (address: string) => {
+      const parsed = parseArtifactAddress(address)
+      if (!parsed) return
+      const target = targetOf(parsed)
+      if (open) {
+        open(target)
+        return
+      }
+      window.location.assign(
+        artifactHref(parsed.artifactId, {
+          ...(target.version === undefined ? {} : { version: target.version }),
+          ...(target.part === undefined ? {} : { part: target.part }),
+        })
+      )
+    },
+    [open]
+  )
 }
 
 /** Markdown with `artifact:` addresses resolved, as a chat reply renders it. */
@@ -302,9 +331,14 @@ function EmbedBody({
       return <SectionEmbed version={version} slug={part.slug} />
     case "file":
       return <FileEmbed version={version} path={part.path} address={address} caption={caption} />
-    case "artifact":
     case "slide":
-      return <CardEmbed version={version} address={address} />
+      return <SlideEmbed version={version} slide={part.slide} />
+    case "artifact":
+      return version.outline.kind === "slides" ? (
+        <SlideEmbed version={version} slide={1} />
+      ) : (
+        <CardEmbed version={version} address={address} />
+      )
   }
 }
 
@@ -432,6 +466,24 @@ function SectionEmbed({
         {text}
       </Markdown>
     </div>
+  )
+}
+
+/** One slide of a deck, live in its frame. */
+function SlideEmbed({
+  version,
+  slide,
+}: {
+  readonly version: ArtifactVersion
+  readonly slide: number
+}) {
+  return (
+    <ArtifactFrame
+      version={version}
+      title={version.title}
+      start={{ slide, fill: true }}
+      className="aspect-video w-full overflow-hidden rounded-xl border border-border bg-background"
+    />
   )
 }
 

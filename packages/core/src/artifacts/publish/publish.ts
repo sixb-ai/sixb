@@ -26,6 +26,7 @@ import { brokenDependents, type FoundReference, resolveReferences } from "./refe
 import { validateDocument } from "./validate/document"
 import { validateFileArtifact } from "./validate/file"
 import { validateSheet } from "./validate/sheet"
+import { validateSlides } from "./validate/slides"
 
 export interface PublishArtifactContext {
   readonly projectId: string
@@ -119,6 +120,7 @@ async function validateKind(
     case "sheet":
       return validateSheet(blobStorage, files)
     case "slides":
+      return validateSlides(blobStorage, files)
     case "page":
       throw invalidArtifact(`Publishing a ${kind} is not supported yet.`)
   }

@@ -190,6 +190,50 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    test("stores frame grants by token hash, expires them in batches, and drops them with the artifact", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput())
+        const grant = (seed: string, expiresInMinutes: number) => ({
+          projectId,
+          tokenHash: seed.repeat(64).slice(0, 64),
+          artifactId: "art_report",
+          version: 1,
+          createdAt: t0,
+          expiresAt: at(expiresInMinutes),
+        })
+        await artifacts.createFrameGrant(grant("a", 60))
+        await artifacts.createFrameGrant(grant("b", 5))
+        await artifacts.createFrameGrant(grant("c", 10))
+
+        expect(await artifacts.findFrameGrant({ projectId, tokenHash: "a".repeat(64) })).toEqual(
+          grant("a", 60)
+        )
+        expect(
+          await artifacts.findFrameGrant({ projectId: otherProjectId, tokenHash: "a".repeat(64) })
+        ).toBeNull()
+        await expectArtifactError(
+          artifacts.createFrameGrant({ ...grant("d", 60), artifactId: "art_missing" }),
+          "artifact_not_found"
+        )
+
+        // Expired before minute 30: b and c, one at a time.
+        const expiredBefore = at(30)
+        expect(
+          await artifacts.deleteExpiredFrameGrants({ projectId, expiredBefore, limit: 1 })
+        ).toBe(1)
+        expect(
+          await artifacts.deleteExpiredFrameGrants({ projectId, expiredBefore, limit: 10 })
+        ).toBe(1)
+        expect(await artifacts.findFrameGrant({ projectId, tokenHash: "b".repeat(64) })).toBeNull()
+        expect(
+          await artifacts.findFrameGrant({ projectId, tokenHash: "a".repeat(64) })
+        ).not.toBeNull()
+
+        await artifacts.delete({ projectId, id: "art_report" })
+        expect(await artifacts.findFrameGrant({ projectId, tokenHash: "a".repeat(64) })).toBeNull()
+      })
+    })
+
     test("lists the latest of each artifact, most recently updated first", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput({ id: "art_a" }))

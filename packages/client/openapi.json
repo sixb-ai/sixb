@@ -36657,6 +36657,110 @@
         }
       }
     },
+    "/api/artifacts/{artifactId}/versions/{version}/frame": {
+      "post": {
+        "summary": "Open an artifact version in a frame",
+        "description": "A short-lived path that serves the version's files to a sandboxed frame, such as a deck. It expires within an hour.",
+        "tags": ["Artifacts"],
+        "operationId": "createArtifactFrame",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:latest|[1-9]\\d*)$",
+              "description": "A version number, or \"latest\""
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["path", "expiresAt"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/artifacts/{artifactId}/versions/{version}": {
       "get": {
         "summary": "Get an artifact version",

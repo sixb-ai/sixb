@@ -12240,6 +12240,57 @@ export type PublishArtifactVersionResponses = {
 export type PublishArtifactVersionResponse =
   PublishArtifactVersionResponses[keyof PublishArtifactVersionResponses]
 
+export type CreateArtifactFrameData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * A version number, or "latest"
+     */
+    version: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/versions/{version}/frame"
+}
+
+export type CreateArtifactFrameErrors = {
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+}
+
+export type CreateArtifactFrameError = CreateArtifactFrameErrors[keyof CreateArtifactFrameErrors]
+
+export type CreateArtifactFrameResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    path: string
+    expiresAt: string
+  }
+}
+
+export type CreateArtifactFrameResponse =
+  CreateArtifactFrameResponses[keyof CreateArtifactFrameResponses]
+
 export type GetArtifactVersionData = {
   body?: never
   path: {

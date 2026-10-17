@@ -1,4 +1,5 @@
 import { AGENT_API_GATEWAY_PREFIX } from "@sixb/core/internal/agents"
+import { ARTIFACT_FRAME_ROUTE_PREFIX } from "@sixb/core/internal/artifacts/frames"
 import { isCsrfExemptMethod } from "@sixb/core/internal/auth"
 import { FILE_DOWNLOAD_ROUTE_PREFIX } from "@sixb/core/internal/blob-storage"
 import { isSharedAccessPublicPath } from "./shared-access"
@@ -66,6 +67,15 @@ export function isPublicRoute(pathname: string, method: string): boolean {
   // fetching media to publish. The signed token in the path is the credential.
   if (
     pathname.startsWith(FILE_DOWNLOAD_ROUTE_PREFIX) &&
+    (normalizedMethod === "GET" || normalizedMethod === "HEAD")
+  ) {
+    return true
+  }
+
+  // A frame's page is sandboxed with an opaque origin, so it cannot hold a session either. The
+  // token in a frame link's path is the credential.
+  if (
+    pathname.startsWith(ARTIFACT_FRAME_ROUTE_PREFIX) &&
     (normalizedMethod === "GET" || normalizedMethod === "HEAD")
   ) {
     return true

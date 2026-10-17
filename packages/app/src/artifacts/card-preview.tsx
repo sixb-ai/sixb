@@ -108,6 +108,8 @@ function VersionPreview({
         <DocumentPreview version={version} />
       ) : kind === "sheet" ? (
         <WorkbookPreview version={version} />
+      ) : kind === "slides" ? (
+        <DeckPreview version={version} />
       ) : source ? (
         <FilePreview source={source} />
       ) : (
@@ -162,6 +164,25 @@ function Opening({
         </span>
       ) : null}
     </Faded>
+  )
+}
+
+/** A deck's first slide in miniature: its title, set as a title slide, and how many follow. */
+function DeckPreview({ version }: { readonly version: ArtifactVersion }) {
+  const slides = version.outline.kind === "slides" ? version.outline.slides : []
+  const title = slides.find((slide) => slide.title)?.title ?? version.title
+  return (
+    <span className="flex h-full items-center justify-center bg-muted/70 p-3">
+      <span className="relative flex aspect-video h-full max-w-full flex-col justify-center overflow-hidden rounded-[4px] bg-background px-[9%] shadow-[0_1px_2px_rgb(0_0_0/0.08),0_4px_14px_rgb(0_0_0/0.07)] ring-1 ring-black/[0.05] dark:ring-white/10">
+        <span className="line-clamp-3 text-[13px] leading-[1.15] font-semibold tracking-[-0.015em] text-foreground">
+          {title}
+        </span>
+        <span className="mt-1.5 h-[3px] w-1/3 rounded-full bg-foreground/15" />
+        <span className="absolute right-[6%] bottom-[7%] text-[8px] text-muted-foreground tabular-nums">
+          1 / {slides.length}
+        </span>
+      </span>
+    </span>
   )
 }
 

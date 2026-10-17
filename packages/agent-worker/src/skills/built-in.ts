@@ -28,10 +28,17 @@ import serviceRegions from "./sixb-artifacts/examples/sheet/service-metrics/shee
 import serviceWorkbook from "./sixb-artifacts/examples/sheet/service-metrics/workbook.json" with {
   type: "text",
 }
+import launchPlanDeck from "./sixb-artifacts/examples/slides/launch-plan/index.html" with {
+  type: "text",
+}
+import q3ReviewDeck from "./sixb-artifacts/examples/slides/q3-review/index.html" with {
+  type: "text",
+}
 import fileGuide from "./sixb-artifacts/file.md" with { type: "text" }
 import referencesGuide from "./sixb-artifacts/references.md" with { type: "text" }
 import skillMarkdown from "./sixb-artifacts/SKILL.md" with { type: "text" }
 import sheetGuide from "./sixb-artifacts/sheet.md" with { type: "text" }
+import slidesGuide from "./sixb-artifacts/slides.md" with { type: "text" }
 
 /**
  * Skills the worker ships, in every conversation's catalog. They describe formats the publisher
@@ -47,6 +54,9 @@ export const BUILT_IN_SKILLS: readonly AgentSkillDefinition[] = Object.freeze([
     "examples/document/incident-report/document.md": incidentReport,
     "sheet.md": sheetGuide,
     "references.md": referencesGuide,
+    "slides.md": slidesGuide,
+    "examples/slides/q3-review/index.html": text(q3ReviewDeck),
+    "examples/slides/launch-plan/index.html": text(launchPlanDeck),
     "examples/sheet/service-metrics/workbook.json": text(serviceWorkbook),
     "examples/sheet/service-metrics/sheets/Quarters.csv": serviceQuarters,
     "examples/sheet/service-metrics/sheets/Regions.csv": serviceRegions,
@@ -67,10 +77,13 @@ export function withBuiltInSkills(
   ])
 }
 
-/** A JSON file imported as text: TypeScript types the import as the parsed value, which it is not. */
+/**
+ * A JSON or HTML file imported as text: TypeScript types the import as the parsed value or Bun's
+ * HTML bundle, which it is not.
+ */
 function text(value: unknown): string {
   if (typeof value !== "string") {
-    throw new Error("[SixbAgentWorker] A built-in skill's JSON file must be imported as text.")
+    throw new Error("[SixbAgentWorker] A built-in skill's file must be imported as text.")
   }
   return value
 }

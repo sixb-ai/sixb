@@ -147,6 +147,13 @@ export const DeleteArtifactResponseSchema = z.object({ deleted: z.literal(true) 
 
 export const ArtifactFileContentQuerySchema = FileContentQuerySchema
 
+export const ArtifactFrameResponseSchema = z.object({
+  /** The frame's base path on this API, ending in `/`; the version's entry is served under it. */
+  path: z.string(),
+  /** When the frame stops serving; ask for a new one before then. */
+  expiresAt: z.string(),
+})
+
 export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
   code: z
     .string()

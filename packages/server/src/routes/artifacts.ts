@@ -6,6 +6,7 @@ import {
   isFileRef,
   type SixbHostView,
 } from "@sixb/core"
+import { createArtifactFrame } from "@sixb/core/internal/artifacts/frames"
 import type { Elysia } from "elysia"
 import { ZodError } from "zod"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
@@ -19,6 +20,7 @@ import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   ArtifactErrorResponseSchema,
   ArtifactFileContentQuerySchema,
+  ArtifactFrameResponseSchema,
   ArtifactListQuerySchema,
   ArtifactListResponseSchema,
   ArtifactParamsSchema,
@@ -331,6 +333,48 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "publishArtifactVersion",
           security: accessTokenSecurityRequirement("publishArtifactVersion"),
+        },
+      }
+    )
+    .post(
+      "/api/artifacts/:artifactId/versions/:version/frame",
+      async (context) => {
+        try {
+          const storage = host.storage.artifacts
+          // Reading the version as the caller is the check: whoever may read it may frame it.
+          const version = await requireRequestSixb(context).artifacts.getVersion(
+            context.params.artifactId,
+            versionParam(context.params.version)
+          )
+          if (!version || !storage) return notFound(context.set)
+          const frame = await createArtifactFrame({
+            projectId: host.id,
+            storage,
+            artifactId: version.artifactId,
+            version: version.version,
+          })
+          return ArtifactFrameResponseSchema.parse({
+            path: frame.path,
+            expiresAt: frame.expiresAt.toISOString(),
+          })
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactVersionParamsSchema,
+        response: {
+          200: ArtifactFrameResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Open an artifact version in a frame",
+          description:
+            "A short-lived path that serves the version's files to a sandboxed frame, such as a deck. It expires within an hour.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "createArtifactFrame",
+          security: accessTokenSecurityRequirement("createArtifactFrame"),
         },
       }
     )

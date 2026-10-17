@@ -33,7 +33,7 @@ const VERSION_TOOL = "publish_artifact_version"
 type PublishToolName = typeof CREATE_TOOL | typeof VERSION_TOOL
 const SANDBOX_TIMEOUT_MS = 30_000
 /** The kinds the Agent can create today; each lands with its validator, renderer, and skill. */
-const PUBLISHABLE_KINDS = ["document", "sheet", "file"] as const
+const PUBLISHABLE_KINDS = ["document", "sheet", "slides", "file"] as const
 type PublishableKind = (typeof PUBLISHABLE_KINDS)[number]
 
 // Creating and revising are two tools, and every argument of each is required and meaningful. A
