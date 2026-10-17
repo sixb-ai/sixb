@@ -85,6 +85,14 @@ export async function runWorkflowAgentNode(
 
   const sandboxReadiness = monitorSandboxReadiness(input.context.sandboxReady)
   const abortSignal = AbortSignal.any([input.signal, sandboxReadiness.signal])
+  // A provisioning failure is the concrete cause of the abort it triggers in any phase. Once the
+  // node itself is aborted (cancellation, deadline or shutdown), provisioning fails because of
+  // it, and the abort's reason is the one to report.
+  const throwIfEnvironmentFailed = () => {
+    if (input.signal.aborted) return
+
+    sandboxReadiness.throwIfFailed()
+  }
   const completedSteps: ModelStep[] = []
   const traceDetails = {
     agentStepId: input.agentStepId,
@@ -138,7 +146,7 @@ export async function runWorkflowAgentNode(
       },
     })
     input.usageRecorder.assertHealthy()
-    sandboxReadiness.throwIfFailed()
+    throwIfEnvironmentFailed()
     if (research.status === "aborted") {
       throw abortSignal.reason ?? new DOMException("The workflow agent was aborted.", "AbortError")
     }
@@ -199,7 +207,7 @@ export async function runWorkflowAgentNode(
         break
       } catch (error) {
         input.usageRecorder.assertHealthy()
-        sandboxReadiness.throwIfFailed()
+        throwIfEnvironmentFailed()
         if (
           attempt >= WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS ||
           !(error instanceof StructuredOutputError)
@@ -232,7 +240,7 @@ export async function runWorkflowAgentNode(
       )
     }
 
-    sandboxReadiness.throwIfFailed()
+    throwIfEnvironmentFailed()
     return {
       output: snapshotWorkflowAgentStepOutput({
         workflowId: input.workflowId,
@@ -245,8 +253,7 @@ export async function runWorkflowAgentNode(
       trace: agentTraceFromModelSteps(completedSteps, traceDetails),
     }
   } catch (cause) {
-    // Prefer the concrete provisioning failure over the abort it causes in either model phase.
-    sandboxReadiness.throwIfFailed()
+    throwIfEnvironmentFailed()
     throw new WorkflowAgentNodeExecutionError({
       phase,
       finishReason,

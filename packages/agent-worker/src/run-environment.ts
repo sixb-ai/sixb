@@ -266,7 +266,8 @@ export async function createWorkflowAgentNodeEnvironment(
 
   return startAgentEnvironment({
     mode: "workflow-task",
-    sandbox: ephemeralRunSandbox({ context }),
+    // Cancellation, lost ownership, worker shutdown or the node deadline stop provisioning.
+    sandbox: ephemeralRunSandbox({ context, signal: input.signal }),
     context,
     actorId: run.actorId,
     plan,

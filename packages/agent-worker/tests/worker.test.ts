@@ -110,6 +110,7 @@ import {
   AgentExecutionLostError,
   AgentFinalizationError,
   AgentRunOwnedElsewhereError,
+  AgentTurnTimeoutError,
 } from "../src/errors"
 import { resolveAgentExecutionPlan } from "../src/execution-plan"
 import { finishRunOrThrow } from "../src/finalize"
@@ -1397,6 +1398,50 @@ function withOneFailingWorkflowAgentFinalization(storage: Storage): Storage {
         })
       }, options),
   }
+}
+
+/** Calls `onFinish` as a workflow agent node's terminal state is written. */
+function observeWorkflowAgentNodeFinish(storage: Storage, onFinish: () => void): Storage {
+  const wrapRuns = (runs: WorkflowRunStorage): WorkflowRunStorage => {
+    const agentNodes = new Proxy(runs.agentNodes, {
+      get(target, property, receiver) {
+        if (property === "finish") {
+          return (input: Parameters<typeof target.finish>[0]) => {
+            onFinish()
+            return target.finish(input)
+          }
+        }
+        const value = Reflect.get(target, property, receiver)
+        return typeof value === "function" ? value.bind(target) : value
+      },
+    })
+    return new Proxy(runs, {
+      get(target, property, receiver) {
+        if (property === "agentNodes") return agentNodes
+        const value = Reflect.get(target, property, receiver)
+        return typeof value === "function" ? value.bind(target) : value
+      },
+    })
+  }
+
+  return {
+    ...storage,
+    transaction: (run, options) =>
+      storage.transaction((tx) => {
+        const runs = tx.workflowRuns
+        return run({ ...tx, ...(runs ? { workflowRuns: wrapRuns(runs) } : {}) })
+      }, options),
+  }
+}
+
+async function terminalWorkflowAgentNode(runs: WorkflowRunStorage, nodeRunId: string) {
+  return waitFor(
+    async () => {
+      const record = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+      return record && record.status !== "queued" && record.status !== "running" ? record : null
+    },
+    { label: "workflow agent node terminal" }
+  )
 }
 
 async function seedRequesterUser(storage: Storage, principal: TestUser = REQUESTER): Promise<void> {
@@ -4392,6 +4437,154 @@ describe("AgentWorker", () => {
       })
     } finally {
       await worker.stop()
+    }
+  })
+
+  test("bounds a workflow node's environment by the node deadline", async () => {
+    // Regression proof: start the deadline after createWorkflowAgentNodeEnvironment in
+    // workflow-node-execution.ts; the environment is never cancelled and waits out its fallback.
+    let environmentCancelled = false
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: structuredAnswerModel(),
+      runId: "workflow-environment-deadline",
+    })
+    attachSixbErrorReporter(sixb, () => {})
+
+    // A slow environment, such as a long download: it waits for cancellation or a 3 s fallback.
+    const createEnvironment = agentEnvironment.createWorkflowAgentNodeEnvironment
+    const environments = spyOn(
+      agentEnvironment,
+      "createWorkflowAgentNodeEnvironment"
+    ).mockImplementation(async (input) => {
+      const { signal } = input
+      environmentCancelled = await new Promise<boolean>((resolve) => {
+        const fallback = setTimeout(() => resolve(false), 3_000)
+        signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(fallback)
+            resolve(true)
+          },
+          { once: true }
+        )
+      })
+      signal?.throwIfAborted()
+      return createEnvironment(input)
+    })
+    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 200 }))
+    await worker.start()
+    try {
+      const node = await terminalWorkflowAgentNode(runs, nodeRunId)
+
+      expect(environmentCancelled).toBe(true)
+      expect(node.status).toBe("failed")
+      expect(node.error?.message).toBe(
+        "Agent execution failed. The task did not finish within the agent worker's turn budget (turnTimeoutMs: 200)."
+      )
+    } finally {
+      await worker.stop()
+      environments.mockRestore()
+    }
+  })
+
+  test("cancels a workflow node's sandbox creation when its deadline elapses", async () => {
+    // Regression proofs:
+    // - drop the signal from ephemeralRunSandbox in createWorkflowAgentNodeEnvironment; creation
+    //   is never cancelled, and the terminal write sees no abort reason.
+    // - call sandboxReadiness.throwIfFailed() unconditionally in runWorkflowAgentNode; the
+    //   provider's cancellation error replaces the deadline as the node's failure.
+    const reasonsAtTerminalWrite: unknown[] = []
+    let creation: AbortSignal | undefined
+    let releaseBoot!: () => void
+    const boot = new Promise<void>((resolve) => {
+      releaseBoot = resolve
+    })
+
+    // A provider that boots until the test releases it, and fails with its own error when its
+    // creation is cancelled first.
+    const recording = new RecordingSandboxFactory()
+    const sandboxes: SandboxFactory = {
+      create: async (options) => {
+        creation = options?.signal
+        await new Promise<void>((resolve, reject) => {
+          void boot.then(resolve)
+          creation?.addEventListener(
+            "abort",
+            () => reject(new Error("[TestSandbox] Creation was cancelled.")),
+            { once: true }
+          )
+        })
+        return recording.create(options)
+      },
+    }
+    const { model } = controlledBlockingAnswerModel()
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model,
+      sandboxes,
+      storage: observeWorkflowAgentNodeFinish(new InMemoryStorage(), () => {
+        reasonsAtTerminalWrite.push(creation?.reason)
+      }),
+      runId: "workflow-sandbox-deadline",
+    })
+    attachSixbErrorReporter(sixb, () => {})
+
+    // Nothing else ends the blocking model: the deadline is the node's only way out.
+    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 300 }))
+    await worker.start()
+    try {
+      const node = await terminalWorkflowAgentNode(runs, nodeRunId)
+      expect(node.status).toBe("failed")
+
+      // The elapsed deadline cancelled creation before the node recorded its fate, not its
+      // teardown, and the deadline is the failure recorded.
+      expect(reasonsAtTerminalWrite).toHaveLength(1)
+      expect(reasonsAtTerminalWrite[0]).toBeInstanceOf(AgentTurnTimeoutError)
+      expect(node.error?.message).toBe(
+        "Agent execution failed. The task did not finish within the agent worker's turn budget (turnTimeoutMs: 300)."
+      )
+    } finally {
+      releaseBoot()
+      await worker.stop()
+    }
+  })
+
+  test("lets a successful workflow node's sandbox finish booting, then destroys it", async () => {
+    // Regression proof: pass the node signal, which ends with the node, to
+    // createWorkflowAgentNodeEnvironment; finishing the node then aborts the boot.
+    let creation: AbortSignal | undefined
+    let releaseBoot!: () => void
+    const boot = new Promise<void>((resolve) => {
+      releaseBoot = resolve
+    })
+    const sandboxes = new RecordingSandboxFactory()
+    const create = sandboxes.create.bind(sandboxes)
+    sandboxes.create = async (options) => {
+      creation = options?.signal
+      await boot
+      return create(options)
+    }
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: structuredAnswerModel(),
+      sandboxes,
+      runId: "workflow-sandbox-slow-boot",
+    })
+    const completion = observeQueueSettlement(sixb.queues.agents)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      expect((await terminalWorkflowAgentNode(runs, nodeRunId)).status).toBe("succeeded")
+      await completion.wait()
+      expect(creation?.aborted).toBe(false)
+
+      releaseBoot()
+      await waitFor(() => sandboxes.sandboxes[0]?.destroyed || null, {
+        label: "late sandbox destroyed",
+      })
+    } finally {
+      // stop() drains the detached teardown, which waits for the boot.
+      releaseBoot()
+      await worker.stop()
+      completion.restore()
     }
   })
 
