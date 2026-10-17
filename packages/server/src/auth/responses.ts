@@ -15,14 +15,15 @@ export function jsonForbiddenResponse(message = "Forbidden"): Response {
 export function htmlAuthRedirectResponse(
   request: Request,
   options: {
-    readonly absoluteReturnTo?: boolean
+    readonly returnToOrigin?: string
   } = {}
 ): Response {
-  const requestUrl = new URL(request.url)
-  const rawReturnTo = options.absoluteReturnTo
-    ? new URL(returnToForRequest(request), requestUrl.origin).toString()
-    : returnToForRequest(request)
-  const params = new URLSearchParams({ returnTo: rawReturnTo })
+  const returnTo = returnToForRequest(request)
+  const params = new URLSearchParams({
+    returnTo: options.returnToOrigin
+      ? new URL(returnTo, options.returnToOrigin).toString()
+      : returnTo,
+  })
 
   return new Response(null, {
     status: 302,

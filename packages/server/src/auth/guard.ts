@@ -69,7 +69,7 @@ export class ServerAuthGuard {
         return {
           kind: "deny",
           response: htmlAuthRedirectResponse(request, {
-            absoluteReturnTo: authContext.absoluteReturnTo ?? false,
+            returnToOrigin: authContext.returnToOrigin,
           }),
         }
       }
@@ -112,7 +112,7 @@ export class ServerAuthGuard {
           return {
             kind: "deny",
             response: htmlAuthRedirectResponse(request, {
-              absoluteReturnTo: authContext.absoluteReturnTo ?? false,
+              returnToOrigin: authContext.returnToOrigin,
             }),
           }
         }
