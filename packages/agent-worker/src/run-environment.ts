@@ -36,7 +36,6 @@ import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import { type AgentSandboxLifecycle, openThreadSandbox } from "./sandbox-lifecycle"
 import type { LoadedAgentThreadModelContext } from "./thread-context"
-import { AgentToolArtifactBudget, createAgentToolArtifacts } from "./tools/artifacts"
 import {
   NO_TOOL_ATTACHMENTS,
   threadToolAttachments,
@@ -45,6 +44,7 @@ import {
 import { createBashTool } from "./tools/bash"
 import { createReadTool } from "./tools/read"
 import { AgentToolResultMediaBridge } from "./tools/result-media"
+import { AgentFileBudget, createAgentToolFiles } from "./tools/tool-files"
 import { createViewFileTool } from "./tools/view-file"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext, AgentTurnContext } from "./types"
@@ -317,22 +317,22 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   })
   let ready: Promise<AgentSandboxHandle>
   const fileRegistry = new AgentSandboxFileRegistry()
-  const artifactBudget = new AgentToolArtifactBudget()
+  const fileBudget = new AgentFileBudget()
   const mediaBridge = new AgentToolResultMediaBridge({
     blobStorage: context.blobStorage,
     sandboxPathForFileRef: (fileRef) => fileRegistry.pathFor(fileRef),
   })
-  const artifactsForToolCall = (input: {
+  const filesForToolCall = (input: {
     readonly toolName: string
     readonly toolCallId: string
     readonly signal: AbortSignal
   }) =>
-    createAgentToolArtifacts({
+    createAgentToolFiles({
       ...input,
       blobStorage: context.blobStorage,
-      budget: artifactBudget,
+      budget: fileBudget,
       resolveSandbox: () => ready,
-      onPublished: (artifact) => fileRegistry.register(artifact.sandboxPath, artifact.fileRef),
+      onPublished: (file) => fileRegistry.register(file.sandboxPath, file.fileRef),
     })
   const tools = [
     ...modelToolsFromAgentDefinitions({
@@ -342,7 +342,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       sixb: context.sixb,
       attachments: input.toolAttachments,
       logger,
-      artifactsForToolCall,
+      filesForToolCall,
       toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
       errorDetails: input.errorDetails,
     }),
@@ -355,8 +355,8 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       resolveSandbox: () => ready,
       attachments: attachmentContext,
       registry: fileRegistry,
-      artifactsForToolCall: ({ toolCallId, signal }) =>
-        artifactsForToolCall({ toolName: "view_file", toolCallId, signal }),
+      filesForToolCall: ({ toolCallId, signal }) =>
+        filesForToolCall({ toolName: "view_file", toolCallId, signal }),
       toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
     })
   )

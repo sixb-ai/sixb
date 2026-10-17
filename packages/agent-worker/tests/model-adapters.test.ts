@@ -19,7 +19,7 @@ import { WorkerTestModel } from "./worker-model-fixture"
 
 const unusedSixb = {} as AgentToolRunContext["sixb"]
 const toolRuntime = {
-  artifactsForToolCall() {
+  filesForToolCall() {
     return {
       async put() {
         throw new Error("unused")

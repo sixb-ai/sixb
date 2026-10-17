@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import {
-  type AgentToolArtifacts,
   type AgentToolAttachments,
   type AgentToolDefinition,
+  type AgentToolFiles,
   AgentToolPublicError,
   type AgentToolRunContext,
   defineConnector,
@@ -25,9 +25,9 @@ import { COMPANY, ENRICHMENT, PERSON } from "./helpers"
 
 type ClientStub = { [K in keyof FullEnrichClient]?: Partial<FullEnrichClient[K]> }
 
-const unusedArtifacts: AgentToolArtifacts = {
+const unusedFiles: AgentToolFiles = {
   async put() {
-    throw new Error("Artifacts are unused by FullEnrich agent tools.")
+    throw new Error("Files are unused by FullEnrich agent tools.")
   },
 }
 
@@ -63,7 +63,7 @@ function run(
       run: { kind: "conversation", id: "run-1", threadId: "thread-1" },
       sixb: { connector } as AgentToolRunContext["sixb"],
       logger: noopLogger,
-      artifacts: unusedArtifacts,
+      files: unusedFiles,
       attachments: unusedAttachments,
     })
   )

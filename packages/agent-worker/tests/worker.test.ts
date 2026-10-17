@@ -7,8 +7,8 @@ import {
   AgentRequestError,
   type AgentRuntime,
   type AgentSkillDefinition,
-  type AgentToolArtifact,
   type AgentToolDefinition,
+  type AgentToolFile,
   AgentToolPublicError,
   type AgentToolResult,
   type AgentToolRunInfo,
@@ -959,7 +959,7 @@ function workerOptions(
   }
 }
 
-function artifactToolThenAnswerModel(
+function toolFileThenAnswerModel(
   capture: {
     readonly live?: (prompt: unknown) => void
     readonly replay?: (prompt: unknown) => void
@@ -1188,7 +1188,7 @@ class RecordingSandbox implements Sandbox {
     if (
       command === "bash" &&
       typeof script === "string" &&
-      script.includes("sixb-list-agent-output-files")
+      script.includes("sixb-list-sandbox-files")
     ) {
       return {
         exitCode: 0,
@@ -1210,33 +1210,14 @@ class RecordingSandbox implements Sandbox {
     if (
       command === "bash" &&
       typeof script === "string" &&
-      script.includes("sixb-read-agent-output-file")
+      script.includes("sixb-read-sandbox-file")
     ) {
-      const encoded = options.env?.SIXB_OUTPUT_REL_B64
-      const relativePath = encoded ? Buffer.from(encoded, "base64").toString("utf-8") : ""
-      const bytes = this.outputFiles.get(relativePath)
-      return bytes
-        ? {
-            exitCode: 0,
-            stdout: Buffer.from(bytes).toString("base64"),
-            stderr: "",
-            durationMs: 1,
-          }
-        : {
-            exitCode: 2,
-            stdout: "",
-            stderr: "output file not found",
-            durationMs: 1,
-          }
-    }
-    if (
-      command === "bash" &&
-      typeof script === "string" &&
-      script.includes("sixb-read-view-file")
-    ) {
-      const encoded = options.env?.SIXB_VIEW_FILE_PATH_B64
+      const encoded = options.env?.SIXB_READ_PATH_B64
       const path = encoded ? Buffer.from(encoded, "base64").toString("utf-8") : ""
-      const bytes = this.files.get(path)
+      const outputPrefix = `${options.env?.SIXB_OUTPUT_DIR}/`
+      const bytes = path.startsWith(outputPrefix)
+        ? this.outputFiles.get(path.slice(outputPrefix.length))
+        : this.files.get(path)
       return bytes
         ? {
             exitCode: 0,
@@ -1320,7 +1301,7 @@ class BlockingOutputCollectionSandbox extends RecordingSandbox {
     if (
       command === "bash" &&
       typeof script === "string" &&
-      script.includes("sixb-list-agent-output-files")
+      script.includes("sixb-list-sandbox-files")
     ) {
       this.commands.push({ command, args, options })
       this.markListStarted()
@@ -5950,8 +5931,8 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("publishes a selected tool artifact to blob storage and the run sandbox", async () => {
-    let published: AgentToolArtifact | undefined
+  test("publishes a selected tool's file to blob storage and the run sandbox", async () => {
+    let published: AgentToolFile | undefined
     let receivedToolCallId: string | undefined
     let livePrompt: unknown
     let replayPrompt: unknown
@@ -5959,9 +5940,9 @@ describe("AgentWorker", () => {
     const createImage = defineAgentTool("create_image")
       .description("Create a test image.")
       .input({})
-      .run(async ({ artifacts, toolCallId }) => {
+      .run(async ({ files, toolCallId }) => {
         receivedToolCallId = toolCallId
-        published = await artifacts.put({
+        published = await files.put({
           body: TEST_PNG_BYTES,
           fileName: "generated.png",
           mediaType: "image/png",
@@ -5976,7 +5957,7 @@ describe("AgentWorker", () => {
       })
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(
-      artifactToolThenAnswerModel({
+      toolFileThenAnswerModel({
         live: (prompt) => {
           livePrompt = prompt
         },
@@ -6004,13 +5985,13 @@ describe("AgentWorker", () => {
           const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
           return record && record.status !== "queued" && record.status !== "running" ? record : null
         },
-        { label: "tool artifact run terminal" }
+        { label: "tool file run terminal" }
       )
 
       expect(run.status).toBe("succeeded")
       expect(receivedToolCallId).toBe("image-call-1")
       expect(published).toBeDefined()
-      if (!published) throw new Error("Expected the selected tool to publish an artifact.")
+      if (!published) throw new Error("Expected the selected tool to publish a file.")
 
       expect(
         new Uint8Array(
@@ -6018,7 +5999,7 @@ describe("AgentWorker", () => {
         )
       ).toEqual(TEST_PNG_BYTES)
       const sandboxFile = sandboxes.sandboxes[0]?.writtenFiles.find((file) =>
-        file.path.includes(".sixb/agent/artifacts/")
+        file.path.includes(".sixb/agent/tool-files/")
       )
       expect(sandboxFile?.contents).toEqual(TEST_PNG_BYTES)
       expect(published.sandboxPath).toEndWith("-generated.png")
@@ -6115,7 +6096,7 @@ describe("AgentWorker", () => {
           })
           return record && record.status !== "queued" && record.status !== "running" ? record : null
         },
-        { label: "tool artifact replay run terminal" }
+        { label: "tool file replay run terminal" }
       )
       expect(replayRun.status).toBe("succeeded")
 
@@ -6160,7 +6141,7 @@ describe("AgentWorker", () => {
       })
       expect(
         sandboxes.sandboxes[1]?.writtenFiles.filter((file) =>
-          file.path.includes(".sixb/agent/artifacts/")
+          file.path.includes(".sixb/agent/tool-files/")
         )
       ).toHaveLength(0)
     } finally {
@@ -8101,7 +8082,7 @@ describe("AgentWorker", () => {
       expect(assistant?.parts.some((part) => part.type === "file")).toBe(false)
       expect(
         sandboxes.sandboxes[0]?.writtenFiles.some((file) =>
-          file.path.includes(".sixb/agent/artifacts/")
+          file.path.includes(".sixb/agent/tool-files/")
         )
       ).toBe(true)
       if (typeof Bun.Image === "function") {
@@ -8221,7 +8202,7 @@ describe("AgentWorker", () => {
       const stored = await sixb.blobStorage.open(filePart.fileRef.blobId)
       expect(await new Response(stored).text()).toBe("generated report")
       const listCommand = sandboxes.sandboxes[0]?.commands.find((command) =>
-        String(command.args.at(-1)).includes("sixb-list-agent-output-files")
+        String(command.args.at(-1)).includes("sixb-list-sandbox-files")
       )
       expect(listCommand).toBeDefined()
       // Vercel's stock sandbox image has no /dev/fd, so Bash process substitution is unavailable.

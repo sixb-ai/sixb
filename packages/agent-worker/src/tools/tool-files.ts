@@ -1,45 +1,44 @@
 import { createHash } from "node:crypto"
 import { posix } from "node:path"
 import type {
-  AgentToolArtifact,
-  AgentToolArtifactPutInput,
-  AgentToolArtifacts,
+  AgentToolFile,
+  AgentToolFilePutInput,
+  AgentToolFiles,
   BlobBody,
   BlobStorage,
   FileRef,
 } from "@sixb/core"
 import { AgentToolPublicError } from "@sixb/core"
+import { sniffFileMediaType } from "@sixb/core/internal/blob-storage"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 
-const DEFAULT_ARTIFACT_FILE_MAX_BYTES = 25 * 1024 * 1024
-const DEFAULT_ARTIFACT_TOTAL_MAX_BYTES = 100 * 1024 * 1024
+const DEFAULT_FILE_MAX_BYTES = 25 * 1024 * 1024
+const DEFAULT_RUN_MAX_BYTES = 100 * 1024 * 1024
 const MAX_FILE_NAME_BYTES = 255
 const MAX_MEDIA_TYPE_LENGTH = 255
 const MEDIA_TYPE_PATTERN = /^[!#$&^_.+A-Za-z0-9-]+\/[!#$&^_.+A-Za-z0-9-]+$/
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 
-interface CreateAgentToolArtifactsInput {
+interface CreateAgentToolFilesInput {
   readonly toolName: string
   readonly toolCallId: string
   readonly signal: AbortSignal
   readonly blobStorage: BlobStorage
   readonly resolveSandbox: () => Promise<AgentSandboxHandle>
-  readonly onPublished?: (artifact: AgentToolArtifact) => void
+  readonly onPublished?: (file: AgentToolFile) => void
   /** Shared across every tool call in one run so parallel publishers cannot oversubscribe it. */
-  readonly budget?: AgentToolArtifactBudget
-  /** Test seam; production uses the same 25 MB limit as generated output attachments. */
+  readonly budget?: AgentFileBudget
+  /** Test seam; production allows 25 MB per file. */
   readonly fileMaxBytes?: number
 }
 
-/** Atomic byte budget shared by all artifact publishers in one agent run. */
-export class AgentToolArtifactBudget {
+/** Atomic byte budget shared by every file publisher in one agent run. */
+export class AgentFileBudget {
   #reservedBytes = 0
 
-  constructor(readonly maxBytes = DEFAULT_ARTIFACT_TOTAL_MAX_BYTES) {
+  constructor(readonly maxBytes = DEFAULT_RUN_MAX_BYTES) {
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
-      throw new Error(
-        "[SixbAgentWorker] Agent tool artifact budget must be a safe non-negative integer."
-      )
+      throw new Error("[SixbAgentWorker] Agent file budget must be a safe non-negative integer.")
     }
   }
 
@@ -47,19 +46,19 @@ export class AgentToolArtifactBudget {
     return this.#reservedBytes
   }
 
-  reserve(bytes: number, toolName: string): AgentToolArtifactReservation {
+  reserve(bytes: number, toolName: string): AgentFileReservation {
     if (!Number.isSafeInteger(bytes) || bytes < 0) {
       throw new Error(
-        "[SixbAgentWorker] Agent tool artifact reservation must be a safe non-negative integer."
+        "[SixbAgentWorker] Agent file reservation must be a safe non-negative integer."
       )
     }
     this.add(bytes, toolName)
-    return new AgentToolArtifactReservation(this, bytes, toolName)
+    return new AgentFileReservation(this, bytes, toolName)
   }
 
   add(bytes: number, toolName: string): void {
     if (this.#reservedBytes + bytes > this.maxBytes) {
-      throw artifactError(toolName, `artifacts exceed the ${this.maxBytes}-byte run limit`)
+      throw toolFileError(toolName, `files exceed the ${this.maxBytes}-byte run limit`)
     }
     this.#reservedBytes += bytes
   }
@@ -69,12 +68,12 @@ export class AgentToolArtifactBudget {
   }
 }
 
-class AgentToolArtifactReservation {
+class AgentFileReservation {
   #bytes: number
   #released = false
 
   constructor(
-    private readonly budget: AgentToolArtifactBudget,
+    private readonly budget: AgentFileBudget,
     bytes: number,
     private readonly toolName: string
   ) {
@@ -93,21 +92,21 @@ class AgentToolArtifactReservation {
   }
 }
 
-/** Build the artifact publisher scoped to one tool call. */
-export function createAgentToolArtifacts(input: CreateAgentToolArtifactsInput): AgentToolArtifacts {
-  const fileMaxBytes = input.fileMaxBytes ?? DEFAULT_ARTIFACT_FILE_MAX_BYTES
-  const budget = input.budget ?? new AgentToolArtifactBudget()
+/** Build the file publisher scoped to one tool call. */
+export function createAgentToolFiles(input: CreateAgentToolFilesInput): AgentToolFiles {
+  const fileMaxBytes = input.fileMaxBytes ?? DEFAULT_FILE_MAX_BYTES
+  const budget = input.budget ?? new AgentFileBudget()
 
   return Object.freeze({
-    async put(artifactInput: AgentToolArtifactPutInput) {
+    async put(fileInput: AgentToolFilePutInput) {
       input.signal.throwIfAborted()
-      const fileName = validateFileName(artifactInput.fileName, input.toolName)
+      const fileName = validateFileName(fileInput.fileName, input.toolName)
       const declaredMediaType = normalizeMediaType(
-        artifactInput.mediaType ?? blobMediaType(artifactInput.body),
+        fileInput.mediaType ?? blobMediaType(fileInput.body),
         input.toolName
       )
-      const body = await readArtifactBody({
-        body: artifactInput.body,
+      const body = await readFileBody({
+        body: fileInput.body,
         budget,
         fileMaxBytes,
         signal: input.signal,
@@ -129,17 +128,17 @@ export function createAgentToolArtifacts(input: CreateAgentToolArtifactsInput): 
 
         const handle = await input.resolveSandbox()
         input.signal.throwIfAborted()
-        const relativePath = artifactSandboxRelativePath(input.toolCallId, fileRef, fileName)
+        const relativePath = toolFileSandboxRelativePath(input.toolCallId, fileRef, fileName)
         await handle.sandbox.writeFiles([{ path: relativePath, contents: body.bytes }])
         input.signal.throwIfAborted()
 
-        const artifact = {
+        const file = {
           fileRef,
           sandboxPath: posix.join(handle.sandbox.workingDirectory, relativePath),
         }
         published = true
-        input.onPublished?.(artifact)
-        return artifact
+        input.onPublished?.(file)
+        return file
       } finally {
         if (!published) body.reservation.release()
       }
@@ -147,15 +146,15 @@ export function createAgentToolArtifacts(input: CreateAgentToolArtifactsInput): 
   })
 }
 
-async function readArtifactBody(input: {
+async function readFileBody(input: {
   readonly body: BlobBody
-  readonly budget: AgentToolArtifactBudget
+  readonly budget: AgentFileBudget
   readonly fileMaxBytes: number
   readonly signal: AbortSignal
   readonly toolName: string
 }): Promise<{
   readonly bytes: Uint8Array
-  readonly reservation: AgentToolArtifactReservation
+  readonly reservation: AgentFileReservation
 }> {
   const { body, signal } = input
   const knownSize = knownBodySize(body)
@@ -179,7 +178,7 @@ async function readArtifactBody(input: {
       return { bytes, reservation }
     }
     if (!(body instanceof ReadableStream)) {
-      throw artifactError(input.toolName, "artifact body must be binary data or a byte stream")
+      throw toolFileError(input.toolName, "file body must be binary data or a byte stream")
     }
 
     const reader = body.getReader()
@@ -197,7 +196,7 @@ async function readArtifactBody(input: {
         const chunk = new Uint8Array(value)
         totalBytes += chunk.byteLength
         if (totalBytes > input.fileMaxBytes) {
-          await reader.cancel("agent tool artifact exceeded its file limit").catch(() => {})
+          await reader.cancel("agent tool file exceeded its file limit").catch(() => {})
           assertWithinFileLimit(totalBytes, input.fileMaxBytes, input.toolName)
         }
         reservation.add(chunk.byteLength)
@@ -230,9 +229,9 @@ function knownBodySize(body: BlobBody): number | undefined {
 
 function assertWithinFileLimit(sizeBytes: number, limit: number, toolName: string): void {
   if (sizeBytes <= limit) return
-  throw artifactError(
+  throw toolFileError(
     toolName,
-    `artifact is ${sizeBytes} bytes and exceeds the ${limit}-byte file limit`
+    `file is ${sizeBytes} bytes and exceeds the ${limit}-byte file limit`
   )
 }
 
@@ -246,11 +245,11 @@ function validateFileName(value: string, toolName: string): string {
     value.includes("\\") ||
     CONTROL_CHARACTER_PATTERN.test(value)
   ) {
-    throw artifactError(toolName, "artifact fileName must be a single safe file name")
+    throw toolFileError(toolName, "fileName must be a single safe file name")
   }
   const sizeBytes = new TextEncoder().encode(value).byteLength
   if (sizeBytes > MAX_FILE_NAME_BYTES) {
-    throw artifactError(toolName, `artifact fileName exceeds the ${MAX_FILE_NAME_BYTES}-byte limit`)
+    throw toolFileError(toolName, `fileName exceeds the ${MAX_FILE_NAME_BYTES}-byte limit`)
   }
   return value
 }
@@ -267,7 +266,7 @@ function normalizeMediaType(value: string | undefined, toolName: string): string
     normalized.length > MAX_MEDIA_TYPE_LENGTH ||
     !MEDIA_TYPE_PATTERN.test(normalized)
   ) {
-    throw artifactError(toolName, "artifact mediaType must be a valid type/subtype value")
+    throw toolFileError(toolName, "mediaType must be a valid type/subtype value")
   }
   return normalized === "image/jpg" ? "image/jpeg" : normalized
 }
@@ -277,15 +276,15 @@ function validatedMediaType(
   declared: string | undefined,
   toolName: string
 ): string {
-  const detected = detectKnownMediaType(bytes)
+  const detected = sniffFileMediaType(bytes)
   if (detected && declared && declared !== "application/octet-stream" && detected !== declared) {
-    throw artifactError(
+    throw toolFileError(
       toolName,
-      `artifact bytes are ${detected}, not the declared media type ${declared}`
+      `file bytes are ${detected}, not the declared media type ${declared}`
     )
   }
   if (declared && SIGNATURE_REQUIRED_MEDIA_TYPES.has(declared) && detected !== declared) {
-    throw artifactError(toolName, `artifact bytes do not match the declared media type ${declared}`)
+    throw toolFileError(toolName, `file bytes do not match the declared media type ${declared}`)
   }
   return detected ?? declared ?? "application/octet-stream"
 }
@@ -298,75 +297,16 @@ const SIGNATURE_REQUIRED_MEDIA_TYPES = new Set([
   "image/webp",
 ])
 
-function detectKnownMediaType(bytes: Uint8Array): string | undefined {
-  if (startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
-    return "image/png"
-  }
-  if (startsWith(bytes, [0xff, 0xd8, 0xff])) {
-    return "image/jpeg"
-  }
-  if (asciiAt(bytes, 0, "GIF87a") || asciiAt(bytes, 0, "GIF89a")) {
-    return "image/gif"
-  }
-  if (asciiAt(bytes, 0, "RIFF") && asciiAt(bytes, 8, "WEBP")) {
-    return "image/webp"
-  }
-  if (asciiAt(bytes, 0, "%PDF-")) {
-    return "application/pdf"
-  }
-  return undefined
-}
-
-/** Infer a stable media type for a sandbox file before publishing it as a tool artifact. */
-export function inferAgentFileMediaType(bytes: Uint8Array, fileName: string): string {
-  return (
-    detectKnownMediaType(bytes) ??
-    MEDIA_TYPES_BY_EXTENSION[posix.extname(fileName).toLowerCase()] ??
-    "application/octet-stream"
-  )
-}
-
-const MEDIA_TYPES_BY_EXTENSION: Readonly<Record<string, string>> = {
-  ".bmp": "image/bmp",
-  ".csv": "text/csv",
-  ".gif": "image/gif",
-  ".html": "text/html",
-  ".jpeg": "image/jpeg",
-  ".jpg": "image/jpeg",
-  ".json": "application/json",
-  ".md": "text/markdown",
-  ".pdf": "application/pdf",
-  ".png": "image/png",
-  ".svg": "image/svg+xml",
-  ".txt": "text/plain",
-  ".webp": "image/webp",
-  ".xml": "application/xml",
-  ".yaml": "application/yaml",
-  ".yml": "application/yaml",
-}
-
-function startsWith(bytes: Uint8Array, signature: readonly number[]): boolean {
-  return signature.every((byte, index) => bytes[index] === byte)
-}
-
-function asciiAt(bytes: Uint8Array, offset: number, value: string): boolean {
-  if (bytes.byteLength < offset + value.length) return false
-  for (let index = 0; index < value.length; index += 1) {
-    if (bytes[offset + index] !== value.charCodeAt(index)) return false
-  }
-  return true
-}
-
-function artifactSandboxRelativePath(
+function toolFileSandboxRelativePath(
   toolCallId: string,
   fileRef: FileRef,
   fileName: string
 ): string {
   const callKey = createHash("sha256").update(toolCallId).digest("hex").slice(0, 16)
   const digestKey = fileRef.digest.slice("sha256:".length, "sha256:".length + 12)
-  return posix.join(".sixb", "agent", "artifacts", callKey, `${digestKey}-${fileName}`)
+  return posix.join(".sixb", "agent", "tool-files", callKey, `${digestKey}-${fileName}`)
 }
 
-function artifactError(toolName: string, message: string): AgentToolPublicError {
+function toolFileError(toolName: string, message: string): AgentToolPublicError {
   return new AgentToolPublicError(`[SixbAgentWorker] Agent tool '${toolName}' ${message}.`)
 }

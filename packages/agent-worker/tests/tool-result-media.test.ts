@@ -13,7 +13,7 @@ describe("agent tool-result media bridge", () => {
     const fileRef = await storeImage(blobStorage)
     const bridge = new AgentToolResultMediaBridge({
       blobStorage,
-      sandboxPathForFileRef: () => "/workspace/.sixb/agent/artifacts/generated.png",
+      sandboxPathForFileRef: () => "/workspace/.sixb/agent/tool-files/generated.png",
       projectFile: async () => ({
         promptText: "projected",
         modelFileData: {

@@ -1,8 +1,8 @@
 import type {
   AgentMessagePart,
-  AgentToolArtifacts,
   AgentToolAttachments,
   AgentToolDefinition,
+  AgentToolFiles,
   AgentToolRunInfo,
   AgentToolRuntimeFacade,
   JsonValue,
@@ -43,11 +43,11 @@ interface ModelToolsFromAgentDefinitionsInput {
   readonly sixb: AgentToolRuntimeFacade
   readonly attachments: AgentToolAttachments
   readonly logger: Logger
-  readonly artifactsForToolCall: (input: {
+  readonly filesForToolCall: (input: {
     readonly toolName: string
     readonly toolCallId: string
     readonly signal: AbortSignal
-  }) => AgentToolArtifacts
+  }) => AgentToolFiles
   readonly toolResultToModelOutput: (input: {
     readonly output: JsonValue
     readonly signal: AbortSignal
@@ -101,7 +101,7 @@ function modelToolFromAgentDefinition(
           run: context.run,
           sixb: context.sixb,
           logger: context.logger,
-          artifacts: context.artifactsForToolCall({
+          files: context.filesForToolCall({
             toolName: definition.name,
             toolCallId,
             signal,

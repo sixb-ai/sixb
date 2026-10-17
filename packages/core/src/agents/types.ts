@@ -80,22 +80,22 @@ export type AgentToolRunInfo =
       readonly stepId: string
     }
 
-/** Input accepted by the run-scoped artifact publisher exposed to agent tools. */
-export interface AgentToolArtifactPutInput {
+/** Input accepted by the run-scoped file publisher exposed to agent tools. */
+export interface AgentToolFilePutInput {
   readonly body: BlobBody
   readonly fileName: string
   readonly mediaType?: string
 }
 
-/** A durable artifact and its path inside the current run sandbox. */
-export interface AgentToolArtifact {
+/** A file a tool stored durably, and the path of its copy inside the current run sandbox. */
+export interface AgentToolFile {
   readonly fileRef: FileRef
   readonly sandboxPath: string
 }
 
-/** The narrow artifact-writing surface available to an agent tool call. */
-export interface AgentToolArtifacts {
-  put(input: AgentToolArtifactPutInput): Promise<AgentToolArtifact>
+/** The narrow file-writing surface available to an agent tool call. */
+export interface AgentToolFiles {
+  put(input: AgentToolFilePutInput): Promise<AgentToolFile>
 }
 
 /**
@@ -159,7 +159,7 @@ export interface AgentToolRunContext<
   readonly run: AgentToolRunInfo
   readonly sixb: AgentToolRuntimeFacade
   readonly logger: Logger
-  readonly artifacts: AgentToolArtifacts
+  readonly files: AgentToolFiles
   readonly attachments: AgentToolAttachments
 }
 

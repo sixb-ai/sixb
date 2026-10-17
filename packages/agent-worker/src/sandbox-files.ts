@@ -1,0 +1,245 @@
+import { posix } from "node:path"
+import type { CommandResult } from "@sixb/core"
+import type { AgentSandboxHandle } from "./sandbox-handle"
+
+// Every read of sandbox files the worker makes goes through these two scripts. A sandbox has no
+// file-read API, so a file comes back as base64 on stdout; the scripts refuse symbolic links and
+// paths that resolve outside the working directory, and bound how much they print.
+
+/** Why a sandbox file could not be listed or read. The message is safe to show to the Agent. */
+export type SandboxFileErrorReason =
+  | "invalid_path"
+  | "outside_root"
+  | "not_found"
+  | "too_large"
+  | "changed"
+  | "failed"
+
+export class SandboxFileError extends Error {
+  constructor(
+    readonly reason: SandboxFileErrorReason,
+    message: string,
+    options?: ErrorOptions
+  ) {
+    super(message, options)
+    this.name = "SandboxFileError"
+  }
+}
+
+export interface SandboxFileEntry {
+  /** Path relative to the listed directory, with `/` separators and no `.` or `..` segments. */
+  readonly relativePath: string
+  readonly sizeBytes: number
+}
+
+export interface SandboxFileListing {
+  /** Regular files under the directory, sorted by path. Symbolic links are never listed. */
+  readonly files: readonly SandboxFileEntry[]
+  /** True when the directory held more than `maxFiles` files; only the first ones are listed. */
+  readonly truncated: boolean
+  /** Lines of the script's output that did not parse as an entry and were skipped. */
+  readonly malformed: number
+}
+
+interface SandboxCommandOptions {
+  readonly signal: AbortSignal
+  readonly timeoutMs: number
+}
+
+/**
+ * Resolve `requestedPath` against the sandbox working directory. Throws when the path is empty or
+ * leaves the directory; symbolic links are checked when the file is read.
+ */
+export function resolveSandboxPath(workingDirectory: string, requestedPath: string): string {
+  if (
+    typeof requestedPath !== "string" ||
+    requestedPath.length === 0 ||
+    requestedPath.includes("\0")
+  ) {
+    throw new SandboxFileError("invalid_path", "path must be a non-empty sandbox file path")
+  }
+  // `resolve`, not `normalize`: it drops a trailing slash, which would break the prefix check.
+  const root = posix.resolve(workingDirectory)
+  const absolutePath = posix.resolve(root, requestedPath)
+  if (absolutePath === root || !absolutePath.startsWith(`${root}/`)) {
+    throw new SandboxFileError(
+      "outside_root",
+      "path must stay inside the sandbox working directory"
+    )
+  }
+  return absolutePath
+}
+
+/** List the regular files under `directory`, up to `maxFiles`. A missing directory lists nothing. */
+export async function listSandboxFiles(
+  handle: AgentSandboxHandle,
+  input: SandboxCommandOptions & {
+    readonly directory: string
+    readonly maxFiles: number
+  }
+): Promise<SandboxFileListing> {
+  const result = await runScript(handle, LIST_SANDBOX_FILES_SCRIPT, input, {
+    SIXB_LIST_DIR: input.directory,
+    SIXB_LIST_MAX_FILES: String(input.maxFiles),
+  })
+  if (result.exitCode !== 0) {
+    throw new SandboxFileError(
+      "failed",
+      `directory could not be listed (${result.stderr.trim() || `exit ${result.exitCode}`})`
+    )
+  }
+
+  const files: SandboxFileEntry[] = []
+  let truncated = false
+  let malformed = 0
+  for (const line of result.stdout.split("\n")) {
+    if (!line.trim()) continue
+    if (line === "LIMIT") {
+      truncated = true
+      continue
+    }
+    const [sizeSource, relativePathBase64] = line.split("\t")
+    const sizeBytes = Number(sizeSource)
+    const relativePath = relativePathBase64 ? decodeBase64Text(relativePathBase64) : null
+    if (
+      !Number.isInteger(sizeBytes) ||
+      sizeBytes < 0 ||
+      !relativePath ||
+      !isSafeRelativePath(relativePath)
+    ) {
+      malformed += 1
+      continue
+    }
+    files.push({ relativePath, sizeBytes })
+  }
+
+  files.sort((left, right) => left.relativePath.localeCompare(right.relativePath))
+  return { files, truncated, malformed }
+}
+
+/**
+ * Read one regular file inside the sandbox working directory. Refuses symbolic links, paths whose
+ * parent resolves outside the working directory, and files larger than `maxBytes`.
+ */
+export async function readSandboxFile(
+  handle: AgentSandboxHandle,
+  input: SandboxCommandOptions & {
+    /** An absolute path, as `resolveSandboxPath` returns it. */
+    readonly path: string
+    readonly maxBytes: number
+  }
+): Promise<Uint8Array> {
+  const result = await runScript(handle, READ_SANDBOX_FILE_SCRIPT, input, {
+    SIXB_READ_PATH_B64: Buffer.from(input.path, "utf-8").toString("base64"),
+    SIXB_READ_ROOT: handle.sandbox.workingDirectory,
+    SIXB_READ_MAX_BYTES: String(input.maxBytes),
+  })
+
+  if (result.exitCode === 2) {
+    throw new SandboxFileError(
+      "not_found",
+      "file does not exist, is not a regular file, or is a symbolic link"
+    )
+  }
+  if (result.exitCode === 3) {
+    throw new SandboxFileError("too_large", `file exceeds the ${input.maxBytes}-byte limit`)
+  }
+  if (result.exitCode === 4) {
+    throw new SandboxFileError(
+      "outside_root",
+      "resolved path escapes the sandbox working directory"
+    )
+  }
+  if (result.exitCode !== 0) {
+    throw new SandboxFileError(
+      "failed",
+      `file could not be read (${result.stderr.trim() || `exit ${result.exitCode}`})`
+    )
+  }
+
+  const separator = result.stdout.indexOf("\n")
+  const sizeBytes = Number(result.stdout.slice(0, separator))
+  const bytes = Buffer.from(
+    separator < 0 ? "" : result.stdout.slice(separator + 1).trim(),
+    "base64"
+  )
+  if (!Number.isInteger(sizeBytes) || sizeBytes < 0 || bytes.byteLength !== sizeBytes) {
+    throw new SandboxFileError("changed", "file changed while it was being read")
+  }
+  return new Uint8Array(bytes)
+}
+
+async function runScript(
+  handle: AgentSandboxHandle,
+  script: string,
+  options: SandboxCommandOptions,
+  env: Readonly<Record<string, string>>
+): Promise<CommandResult> {
+  const result = await handle.sandbox.runCommand("bash", ["-lc", script], {
+    env: { ...(handle.env ?? {}), ...env },
+    timeout: options.timeoutMs,
+    signal: options.signal,
+  })
+  options.signal.throwIfAborted()
+  return result
+}
+
+function isSafeRelativePath(value: string): boolean {
+  if (!value || value.startsWith("/") || value.includes("\0")) return false
+  return value
+    .split("/")
+    .every((segment) => segment.length > 0 && segment !== "." && segment !== "..")
+}
+
+function decodeBase64Text(value: string): string | null {
+  try {
+    return Buffer.from(value, "base64").toString("utf-8")
+  } catch {
+    return null
+  }
+}
+
+// `find | while` rather than process substitution: some sandbox images (Vercel's stock one) have
+// no /dev/fd, so `< <(…)` fails there.
+const LIST_SANDBOX_FILES_SCRIPT = `# sixb-list-sandbox-files
+set -eu
+dir="\${SIXB_LIST_DIR:?}"
+limit="\${SIXB_LIST_MAX_FILES:?}"
+if [ ! -d "$dir" ]; then
+  exit 0
+fi
+count=0
+find "$dir" -type f -print0 | while IFS= read -r -d '' path; do
+  count=$((count + 1))
+  if [ "$count" -gt "$limit" ]; then
+    printf 'LIMIT\\n'
+    break
+  fi
+  rel="\${path#"$dir"/}"
+  size="$(wc -c < "$path" | tr -d ' ')"
+  rel64="$(printf '%s' "$rel" | base64 | tr -d '\\n')"
+  printf '%s\\t%s\\n' "$size" "$rel64"
+done`
+
+// Prints the file's size on the first line and its bytes as base64 on the second, so the caller
+// can tell a file that changed between the two reads.
+const READ_SANDBOX_FILE_SCRIPT = `# sixb-read-sandbox-file
+set -euo pipefail
+requested="$(printf '%s' "\${SIXB_READ_PATH_B64:?}" | base64 -d)"
+root="\${SIXB_READ_ROOT:?}"
+max_bytes="\${SIXB_READ_MAX_BYTES:?}"
+if [ ! -f "$requested" ] || [ -L "$requested" ]; then
+  exit 2
+fi
+parent="$(cd -P -- "$(dirname -- "$requested")" && pwd)"
+resolved="$parent/$(basename -- "$requested")"
+case "$resolved" in
+  "$root"/*) ;;
+  *) exit 4 ;;
+esac
+size="$(wc -c < "$resolved" | tr -d ' ')"
+if [ "$size" -gt "$max_bytes" ]; then
+  exit 3
+fi
+printf '%s\\n' "$size"
+head -c "$max_bytes" "$resolved" | base64 | tr -d '\\n'`
