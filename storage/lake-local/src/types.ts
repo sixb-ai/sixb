@@ -6,6 +6,7 @@ import type {
   CommitDatasetWriteInput,
   DatasetSequenceState,
   DatasetVersion,
+  DatasetVersionLineage,
   DatasetVersionMode,
   DatasetVersionRef,
 } from "@sixb/core/lake-storage"
@@ -29,6 +30,8 @@ export interface StoredDatasetVersionManifest {
   readonly schema: DatasetSchema
   readonly producer?: DatasetProducer
   readonly inputs?: readonly DatasetVersionRef[]
+  /** Returned as stored: core validates it when it reads it. */
+  readonly lineage?: DatasetVersionLineage
   readonly rowCount?: number
   readonly sizeBytes?: number
   // Persist the row file name in metadata so the manifest stays self-describing.

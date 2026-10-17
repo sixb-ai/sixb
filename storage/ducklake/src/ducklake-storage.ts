@@ -35,6 +35,7 @@ import type {
  */
 export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
   readonly standard = { id: "ducklake", version: "1.0" } as const
+  readonly recordsLineage = true
   readonly sql: DuckLakeSqlExecutor
 
   private readonly connections: DuckLakeConnectionManager
@@ -86,7 +87,9 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
   }
 
   async createDataset(definition: DatasetDefinition): Promise<DatasetDefinition> {
-    return this.datasets.createDataset(definition)
+    return this.datasets.createDataset(definition, (runtime, dataset) =>
+      this.snapshotReader.getLatestVersionSummaryAtCurrentSnapshot(runtime, dataset)
+    )
   }
 
   async assertDatasetDefinitionsCompatible(
