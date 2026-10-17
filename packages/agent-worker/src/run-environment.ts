@@ -453,7 +453,7 @@ function renderRunOntologyDocs(context: AgentExecutionContext): RenderedOntology
   const key = JSON.stringify(
     objectTypes.map((objectType) => [
       objectType.id,
-      [...(propertyClearance?.hiddenPropertyIds(objectType.id) ?? [])],
+      [...(propertyClearance?.hiddenProperties(objectType.id)?.ids ?? [])],
       actionsByType.get(objectType.id)?.map((action) => action.id),
     ])
   )
@@ -469,7 +469,10 @@ function renderRunOntologyDocs(context: AgentExecutionContext): RenderedOntology
     actionsFor: (objectType) => actionsByType.get(objectType.id) ?? [],
     ...(propertyClearance === undefined
       ? {}
-      : { restrictedPropertyIds: propertyClearance.hiddenPropertyIds }),
+      : {
+          restrictedPropertyIds: (objectTypeId) =>
+            propertyClearance.hiddenProperties(objectTypeId)?.ids,
+        }),
   })
   views.set(key, rendered)
   const oldest = views.keys().next().value
