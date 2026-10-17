@@ -16,7 +16,7 @@ import {
 import { parseSerializerOutput } from "./plan-json"
 import { type PlanSourceTables, planLineage } from "./plan-walker"
 import { rejectPlanFormat } from "./rejection"
-import { assertSingleSelect } from "./statement-gate"
+import { assertSingleSelect, readsOnlySources } from "./statement-gate"
 
 interface AnalyzeSqlTransformLineageInput {
   readonly sources: Readonly<Record<string, AnalyzeSqlTransformSource>>
@@ -33,7 +33,7 @@ export type SqlLineageAnalysis =
       readonly lineage: SqlTransformLineage
       readonly outputColumns: readonly string[]
     }
-  | { readonly supported: false; readonly reason: string }
+  | { readonly supported: false; readonly reason: string; readonly readsOnlySources: boolean }
 
 interface AnalyzedSql {
   readonly lineage: SqlTransformLineage
@@ -65,7 +65,8 @@ const ISOLATED_INSTANCE_CONFIG = {
  * the transform renders against those tables in the same relation shape it runs with on the lake,
  * and DuckDB binds it. The bound, unoptimized plan is then walked operator by operator. Whatever
  * the walker does not understand exactly is rejected rather than guessed; a rejection or a bind
- * error is an unsupported analysis, while an invalid source pick throws.
+ * error is an unsupported analysis, while an invalid source pick throws. An unsupported analysis
+ * of SQL that parsed still says whether its parse tree reads anything but the sources.
  */
 export async function analyzeSqlTransformLineage(
   input: AnalyzeSqlTransformLineageInput
@@ -76,12 +77,53 @@ export async function analyzeSqlTransformLineage(
   )
 
   try {
-    const analyzed = await withAnalysisConnection(tables, (connection) =>
-      analyzeSql(connection, sql, tables)
-    )
-    return { supported: true, ...analyzed }
+    return await withAnalysisConnection(tables, async (connection) => {
+      const statements = await serialize(
+        connection,
+        `json_serialize_sql(${quoteSqlString(sql)}, skip_null := false, skip_empty := false)`,
+        "statements",
+        "DuckDB could not parse the transform"
+      )
+
+      try {
+        return { supported: true, ...(await analyzeSql(connection, sql, statements, tables)) }
+      } catch (error) {
+        const sourceTables = new Set(tables.map((table) => table.tableName))
+        const functions = await builtinFunctions(connection).catch(() => undefined)
+        return unsupported(
+          error,
+          functions !== undefined && readsOnlySources(statements, sourceTables, functions)
+        )
+      }
+    })
   } catch (error) {
-    return { supported: false, reason: error instanceof Error ? error.message : String(error) }
+    return unsupported(error, false)
+  }
+}
+
+/** The functions DuckDB defines, the same in every fresh instance: read from the first one. */
+let builtins: Promise<ReadonlySet<string>> | undefined
+
+function builtinFunctions(connection: DuckDBConnection): Promise<ReadonlySet<string>> {
+  if (builtins) return builtins
+
+  const read = connection
+    .runAndReadAll("SELECT DISTINCT lower(function_name) FROM duckdb_functions()")
+    .then((reader) => new Set(reader.getRows().map(([name]) => String(name))))
+
+  // A failed read is not kept: the next analysis reads again.
+  builtins = read
+  read.catch(() => {
+    if (builtins === read) builtins = undefined
+  })
+  return read
+}
+
+function unsupported(error: unknown, readsOnlySources: boolean): SqlLineageAnalysis {
+  return {
+    supported: false,
+    reason: error instanceof Error ? error.message : String(error),
+    readsOnlySources,
   }
 }
 
@@ -130,16 +172,10 @@ async function withAnalysisConnection<T>(
 async function analyzeSql(
   connection: DuckDBConnection,
   sql: string,
+  statements: readonly unknown[],
   tables: readonly AnalysisTable[]
 ): Promise<AnalyzedSql> {
-  assertSingleSelect(
-    await serialize(
-      connection,
-      `json_serialize_sql(${quoteSqlString(sql)}, skip_null := false, skip_empty := false)`,
-      "statements",
-      "DuckDB could not parse the transform"
-    )
-  )
+  assertSingleSelect(statements)
 
   const plans = await serialize(
     connection,

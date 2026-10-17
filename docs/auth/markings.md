@@ -77,7 +77,9 @@ definePipelineStep("large-invoices")
 
 `id` holds no amount, but the rows reveal which invoices exceed 100, so `id` and `title` carry `financial`. A `count(*)` or a constant selected from a filtered input carries what decided its rows too. The number of rows a version holds is not protected by markings.
 
-Read data only through the step's inputs. A table read by its lake name, or through a table function that reads files or tables (`read_parquet`, `query_table`), is not tracked. A query Sixb cannot analyze exactly, such as `PIVOT`, is rejected.
+Read data only through the step's inputs: markings cannot follow anything else. A step that reads a table by its lake name, calls a table function that reads files or tables (`read_parquet`, `query_table`), or calls a function your lake setup defines writes versions that carry every marking.
+
+Sixb cannot analyze every query exactly. A query such as `PIVOT` is refused when it reads a marked column. When it reads none, each column it outputs carries the markings of every column it reads. Give a `PIVOT` an explicit `IN` list.
 
 ### TypeScript steps
 
@@ -102,6 +104,12 @@ Sixb checks this before the API server serves traffic, when `sixb dev` starts, a
 Editing a step never declassifies data it already wrote. Each dataset version keeps the markings of the code that wrote it, and so do the versions computed from it. An append or a merge keeps the markings of the rows before it until a snapshot replaces them.
 
 Objects keep the markings of the version their projection applied. Say `title` was computed from `amount`, and you fix the step and remove `financial` from `Invoice.title`: readers without `financial` keep receiving `title` redacted until the pipeline runs again and the projection applies the new version. Every server sees a newly applied version within seconds.
+
+Telemetry points do not keep the markings of the version they were projected from: they are read under the markings the code declares.
+
+### After upgrading
+
+A version a pipeline wrote before Sixb recorded where its columns come from carries every marking. Readers without all of them get none of its columns, and cannot read an object type projected from it. `sixb check` lists these projections: rerun each pipeline it names.
 
 ## Grant a clearance
 
@@ -144,6 +152,7 @@ An omitted property is absent, never `null`, so `null` keeps meaning an empty va
 | Filter, sort, facet, or search by `amount` | Rejected with `403` |
 | Search without `fields` | Searches the other default text fields |
 | Object events | `amount` omitted from `properties` and `propertyChanges` |
+| Object updates and deletions, when a dataset column is marked | Projected properties omitted unless the reader holds every marking a column declares |
 | Events of a type or link the reader cannot read | Not delivered |
 | File stored in `amount` | Not found |
 
@@ -159,7 +168,7 @@ Dataset rows follow the same contract. Marked columns are left out of `columns` 
 
 [Shared access](shared-access.md) links carry no clearance for now: marked properties are always omitted from shared sessions.
 
-Events are redacted with the markings in force when they are read. An object event a projection emitted also keeps the markings of the dataset version it came from; the `before` values of its `propertyChanges` came from the previous version, but are read under that one.
+Events are redacted with the markings in force when they are read, and with those of the versions their values came from. An event a projection emitted keeps the markings of the version it applied. An update or a deletion also holds the values it replaced, and an event an action or a direct write emitted holds the projected values of its object; no event records which versions those came from. So in a project that marks dataset columns, a reader who lacks any of those markings does not receive projected properties in updates and deletions. Read the object for its current values.
 
 In TypeScript, a marked property is optional when read, even if it is required. Writes still require it. A property that keeps a marking from its applied version can be absent too.
 

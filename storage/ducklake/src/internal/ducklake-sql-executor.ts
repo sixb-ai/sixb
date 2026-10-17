@@ -180,7 +180,9 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
       sources: input.sources,
       template: createDuckLakeSqlTransformTemplate(Object.keys(input.sources), input.sql),
     })
-    return analysis.supported ? { supported: true, lineage: analysis.lineage } : analysis
+    return analysis.supported
+      ? { supported: true, lineage: analysis.lineage }
+      : { supported: false, reason: analysis.reason }
   }
 
   private async resolveSources(
@@ -399,9 +401,12 @@ function pinnedSources(
 
 /**
  * Lineage of the SQL about to run, by the sources' dataset ids, against the schemas of the
- * versions it reads; undefined when it cannot be analyzed exactly. A result shaped unlike the
- * target means the analysis tables diverged from what runs on the lake, so that lineage is not
- * recorded either.
+ * versions it reads.
+ *
+ * SQL that cannot be analyzed exactly but reads only its sources, such as a PIVOT, depends on at
+ * most every column it reads. Otherwise there is none: the SQL may read what no lineage names. A
+ * result shaped unlike the target means the analysis tables diverged from what runs on the lake, so
+ * that lineage is not recorded either.
  */
 async function analyzeExecutedLineage(
   template: DuckLakeSqlTransformTemplate,
@@ -416,11 +421,29 @@ async function analyzeExecutedLineage(
     return skipLineage(target, error)
   }
 
-  if (!analysis.supported || !describesTarget(analysis.outputColumns, target)) {
-    return undefined
+  if (!analysis.supported) {
+    return analysis.readsOnlySources
+      ? toDatasetColumnLineage(everySourceColumn(pinnedSources, target), relations)
+      : undefined
   }
 
+  if (!describesTarget(analysis.outputColumns, target)) return undefined
   return toDatasetColumnLineage(analysis.lineage, relations)
+}
+
+/** Every column the sources expose decides every row of the target, and so each of its values. */
+function everySourceColumn(
+  sources: Readonly<Record<string, AnalyzeSqlTransformSource>>,
+  target: DatasetDefinition
+): SqlTransformLineage {
+  const rows = Object.entries(sources).flatMap(([source, { dataset, columns }]) =>
+    (columns ?? dataset.schema.columns.map((column) => column.name)).map((column) => ({
+      source,
+      column,
+    }))
+  )
+
+  return { rows, columns: Object.fromEntries(target.schema.columns.map(({ name }) => [name, []])) }
 }
 
 /**

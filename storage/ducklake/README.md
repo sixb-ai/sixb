@@ -329,12 +329,15 @@ what the source versions read record themselves. An append also keeps the lineag
 keeps. `analyze(...)` returns the SQL's own lineage, by source name, without reading any data or
 requiring a committed source version. The provider binds the SQL in an isolated DuckDB instance
 against empty tables shaped like the sources. SQL it cannot analyze exactly, such as `PIVOT`, still
-executes: a pipeline version then records no lineage, and any other one records an unknown lineage.
-Either way, the version is classified with every marking.
+executes. When its parse tree reads nothing but the sources and calls only functions by names DuckDB
+defines, every column the sources expose is recorded as deciding its rows, so each output column
+carries the markings of all of them. A `PIVOT` needs an explicit `IN` list for that.
 
-Lineage only covers the sources. Data the SQL reads any other way is not tracked, and its markings
-do not follow: a lake table read by its name, or a table function that reads files or other tables,
-such as `read_parquet`, `read_csv`, or `query_table`. Read data only through the sources.
+Lineage only covers the sources. SQL that may read anything else, such as a lake table by its name,
+a table function that reads files or other tables (`read_parquet`, `read_csv`, `query_table`), or a
+macro the lake's setup defines, records no lineage for a pipeline version, and an unknown lineage
+for any other one. Either way, the version is classified with every marking. Read data only through
+the sources.
 
 DuckDB promotes `sum(BIGINT)` results to `HUGEINT`. When the matching target column is a Sixb
 `int64`, the executor applies a checked conversion back to `BIGINT` before comparing or writing

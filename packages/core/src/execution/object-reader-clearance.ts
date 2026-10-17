@@ -58,17 +58,34 @@ export class ObjectReaderClearance {
   }
 
   /**
-   * What the authority cannot read in an object event a projection emitted, which holds the
-   * values of its origin version. Reads that version only for an authority its markings affect.
+   * What the authority cannot read in an object event. Reads the event's origin version only for
+   * an authority its markings affect.
    */
-  forEventOrigin(origin: EventOriginRef): Clearance | Promise<Clearance> {
+  forEvent(sources: EventSources): Clearance | Promise<Clearance> {
     const applied = this.#applied
     const clearances = this.#clearances
     if (!applied || !clearances) return this.#static
 
     return applied
       .current()
-      .then((snapshot) => applied.forEventOrigin(snapshot, origin))
+      .then((snapshot) =>
+        sources.origin ? applied.forEventOrigin(snapshot, sources.origin) : snapshot
+      )
+      .then((snapshot) =>
+        sources.earlier ? applied.forEarlierValues(snapshot, sources.objectTypeId) : snapshot
+      )
       .then((snapshot) => resolvePropertyClearance(this.#ontology, clearances, snapshot))
   }
+}
+
+/** Where the values of an object event came from. */
+export interface EventSources {
+  readonly objectTypeId: string
+  /** The projection that emitted the event, and the version it applied. */
+  readonly origin?: EventOriginRef
+  /**
+   * Whether the event holds values from before it, which came from versions applied earlier: an
+   * update or a deletion, or a record an action or a direct write took of projected values.
+   */
+  readonly earlier: boolean
 }

@@ -22,6 +22,7 @@ import {
   SixbHost,
   type SixbHostOptions,
 } from "@sixb/core"
+import type { SqlTransformBody, SqlTransformRelation } from "@sixb/core/lake-storage"
 import { DuckLakeStorage } from "@sixb/ducklake"
 
 /**
@@ -47,6 +48,8 @@ export interface PipelineMarkingsProjectOptions {
   readonly invoiceDueDate?: boolean
   /** Adds a step that pivots payments, which the lake cannot analyze. */
   readonly paymentPivot?: boolean
+  /** Pivots the latest readings with PIVOT, which the lake cannot analyze, instead of by hand. */
+  readonly readingsPivot?: boolean
   /** Hides the lake's SQL analysis, like a provider that has none. */
   readonly withoutSqlAnalysis?: boolean
 }
@@ -341,6 +344,45 @@ function defineOntology(options: PipelineMarkingsProjectOptions) {
   return { Customer, Invoice, Receivable, Team, Employee, Equipment, Alarm }
 }
 
+// The latest reading of each metric, converted to one unit.
+const NORMALIZED_READINGS = (readings: SqlTransformRelation) => `
+  SELECT
+    equipment_id,
+    metric,
+    CASE
+      WHEN metric = 'supply_temp' AND unit = 'F' THEN (value - 32) * 5.0 / 9.0
+      WHEN metric = 'current' AND unit = 'A' THEN value * 1000.0
+      ELSE value
+    END AS value,
+    row_number() OVER (PARTITION BY equipment_id, metric ORDER BY observed_at DESC) AS rank
+  FROM ${readings}
+`
+
+const caseLatestReadings: SqlTransformBody<"duckdb"> = ({ readings, equipment }) => `
+  WITH normalized AS (${NORMALIZED_READINGS(readings)})
+  SELECT
+    e.equipment_id,
+    CAST(max(CASE WHEN n.metric = 'supply_temp' THEN n.value END) AS DOUBLE) AS supply_temp_c,
+    CAST(max(CASE WHEN n.metric = 'current' THEN n.value END) AS DOUBLE) AS current_ma
+  FROM ${equipment} e
+  JOIN normalized n ON n.equipment_id = e.equipment_id AND n.rank = 1
+  GROUP BY e.equipment_id
+`
+
+// The same result through PIVOT, which the lake runs but cannot analyze exactly.
+const pivotLatestReadings: SqlTransformBody<"duckdb"> = ({ readings, equipment }) => `
+  WITH
+    normalized AS (${NORMALIZED_READINGS(readings)}),
+    latest AS (SELECT equipment_id, metric, value FROM normalized WHERE rank = 1)
+  SELECT
+    e.equipment_id,
+    CAST(p.supply_temp AS DOUBLE) AS supply_temp_c,
+    CAST(p."current" AS DOUBLE) AS current_ma
+  FROM ${equipment} e
+  JOIN (PIVOT latest ON metric IN ('supply_temp', 'current') USING max(value)) p
+    ON p.equipment_id = e.equipment_id
+`
+
 // ── Pipelines ───────────────────────────────────────────────
 
 function definePipelines(
@@ -523,29 +565,7 @@ function definePipelines(
   const latestReadings = definePipelineStep("equipment-status")
     .inputs({ readings: rawReadings, equipment: rawEquipment })
     .output(equipmentStatus)
-    .sql(
-      ({ readings, equipment }) => `
-        WITH normalized AS (
-          SELECT
-            equipment_id,
-            metric,
-            CASE
-              WHEN metric = 'supply_temp' AND unit = 'F' THEN (value - 32) * 5.0 / 9.0
-              WHEN metric = 'current' AND unit = 'A' THEN value * 1000.0
-              ELSE value
-            END AS value,
-            row_number() OVER (PARTITION BY equipment_id, metric ORDER BY observed_at DESC) AS rank
-          FROM ${readings}
-        )
-        SELECT
-          e.equipment_id,
-          CAST(max(CASE WHEN n.metric = 'supply_temp' THEN n.value END) AS DOUBLE) AS supply_temp_c,
-          CAST(max(CASE WHEN n.metric = 'current' THEN n.value END) AS DOUBLE) AS current_ma
-        FROM ${equipment} e
-        JOIN normalized n ON n.equipment_id = e.equipment_id AND n.rank = 1
-        GROUP BY e.equipment_id
-      `
-    )
+    .sql(options.readingsPivot ? pivotLatestReadings : caseLatestReadings)
 
   // The current contract is picked by start date, so only its fee carries `financial`.
   const enrichAlarms = definePipelineStep("alarm-context")

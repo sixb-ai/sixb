@@ -3,12 +3,12 @@ import { resolveRuntimeAuthorizationForProject } from "../execution/authorizatio
 import {
   type AuthorizedObjectReader,
   readerClearance,
-  readerEventOriginClearance,
+  readerEventClearance,
 } from "../execution/authorized-object-reader"
+import type { EventSources } from "../execution/object-reader-clearance"
 import { redactDomainEvent } from "../objects/clearance-redaction"
 import type { PropertyClearance } from "../objects/property-clearance"
 import type { SixbRuntimeContext } from "../runtime/types"
-import type { EventOriginRef } from "../security/applied-markings-contribution"
 import type {
   EventsAppendInput,
   EventsEmitOptions,
@@ -20,8 +20,9 @@ import type { StoredDomainEvent } from "./types"
 export interface EventsRuntime {
   /**
    * The events this execution may read, in order: hidden events are dropped, the others redacted.
-   * Markings apply as they are now. An object event a projection emitted holds the values of the
-   * dataset version it projected, so the markings that version carries apply to it too.
+   * Markings apply as they are now, with those of the versions an object event's values came from:
+   * the version a projection's event applied, and every marking a column declares for projected
+   * values that came from earlier versions.
    */
   visible(events: readonly StoredDomainEvent[]): Promise<readonly StoredDomainEvent[]>
   append(input: EventsAppendInput): Promise<readonly StoredDomainEvent[]>
@@ -128,53 +129,61 @@ export function createEventsRuntime(runtime: SixbRuntimeContext): EventsRuntime 
 }
 
 /**
- * The clearance each event is redacted with. An object event a projection emitted holds the values
- * of the dataset version it projected, so it uses that version's clearance, resolved once per
- * version for the whole batch; any other event uses the reader's clearance.
+ * The clearance each event is redacted with, resolved once per kind of event for the whole batch.
+ * An event that holds only values the current markings describe uses the reader's clearance.
  */
 async function eventClearances(
   reader: AuthorizedObjectReader,
   events: readonly StoredDomainEvent[],
   clearance: PropertyClearance | undefined
 ): Promise<(event: StoredDomainEvent) => PropertyClearance | undefined> {
-  const origins = new Map<string, EventOriginRef>()
+  const kinds = new Map<string, EventSources>()
   for (const event of events) {
-    const origin = projectionOrigin(event)
-    if (origin) origins.set(origin.key, origin.ref)
+    const kind = eventSources(event)
+    if (kind) kinds.set(kind.key, kind.sources)
   }
 
   const resolved = await Promise.all(
-    [...origins].map(
-      async ([key, ref]) => [key, await readerEventOriginClearance(reader, ref)] as const
+    [...kinds].map(
+      async ([key, sources]) => [key, await readerEventClearance(reader, sources)] as const
     )
   )
-  const byOrigin = new Map(resolved)
+  const byKind = new Map(resolved)
 
   return (event) => {
-    const origin = projectionOrigin(event)
-    return origin ? byOrigin.get(origin.key) : clearance
+    const kind = eventSources(event)
+    return kind ? byKind.get(kind.key) : clearance
   }
 }
 
 /**
- * The dataset version an object event's values came from, when a projection emitted it.
+ * Where an object event's values came from, when the current markings do not describe them all.
  *
- * The values of a property it changed came from that version; the `before` values of its
- * `propertyChanges` came from the version before, but are read under this one.
+ * - A projection's event holds the values of the version it applied.
+ * - An update or a deletion also holds the values it replaced. An action's or a direct write's
+ *   record of an object holds the values projections had applied then. Both came from versions
+ *   applied before the event, which it does not name: they read like a version that cannot be read.
+ * - Only an object created by an action or a direct write holds nothing but its own values.
  */
-function projectionOrigin(
+function eventSources(
   event: StoredDomainEvent
-): { readonly key: string; readonly ref: EventOriginRef } | undefined {
-  if (event.topic !== "objects" || event.origin?.kind !== "projection") return undefined
+): { readonly key: string; readonly sources: EventSources } | undefined {
+  if (event.topic !== "objects") return undefined
+
+  const objectTypeId = event.payload.objectTypeId
+  const earlier = event.type !== "object.created"
+
+  if (event.origin?.kind !== "projection") {
+    if (!earlier) return undefined
+    return { key: JSON.stringify([objectTypeId]), sources: { objectTypeId, earlier } }
+  }
 
   const { projectionId, datasetId, datasetVersionId } = event.origin
-  const ref = {
-    projectionId,
-    datasetId,
-    datasetVersionId,
-    objectTypeId: event.payload.objectTypeId,
+  const origin = { projectionId, datasetId, datasetVersionId, objectTypeId }
+  return {
+    key: JSON.stringify([objectTypeId, projectionId, datasetId, datasetVersionId, earlier]),
+    sources: { objectTypeId, origin, earlier },
   }
-  return { key: JSON.stringify(Object.values(ref)), ref }
 }
 
 /**
