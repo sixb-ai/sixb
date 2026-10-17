@@ -3,6 +3,11 @@
 export { normalizeRecordActionRunInput, resolveActionRunEffects } from "./action-runs/record"
 export { assertAiUsageExecutionId, normalizeAiModelCallRecord } from "./ai-usage/record"
 export { normalizeAiModelCallUsage } from "./ai-usage/usage"
+export {
+  artifactStorageErrors,
+  parseArtifactRow,
+  parseArtifactVersionRow,
+} from "./artifacts/record"
 export { parseFileDownloadGrantRow } from "./file-download-grants/record"
 export { createFileUploadId, createUploadExpiresAt } from "./file-upload-sessions/utils"
 export { canRequeuePipelineRunAfterEnqueueFailure } from "./pipeline-runs/idempotency"

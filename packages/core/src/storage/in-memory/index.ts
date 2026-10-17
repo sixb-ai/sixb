@@ -5,6 +5,7 @@ import { type AiAccountingAttribution, type AiCostStorage, InMemoryAiCostStorage
 import { directModelCallAttribution } from "../ai-cost/attribution"
 import { type AiLimitStorage, InMemoryAiLimitStorage } from "../ai-limits"
 import { type AiUsageStorage, InMemoryAiUsageStorage } from "../ai-usage"
+import { type ArtifactStorage, InMemoryArtifactStorage } from "../artifacts"
 import { type AuthStorage, InMemoryAuthStorage } from "../auth"
 import {
   type ConnectorConnectionStorage,
@@ -80,6 +81,7 @@ export class InMemoryStorage implements Storage {
     shareSessions: this.shareSessionStorage,
   })
   private readonly agentStorage = new InMemoryAgentStorage(this.executionStorage)
+  private readonly artifactStorage = new InMemoryArtifactStorage()
   private readonly aiUsageStorage = new InMemoryAiUsageStorage(this.executionStorage)
   private readonly aiCostStorage = new InMemoryAiCostStorage(this.aiUsageStorage, {
     resolve: (input) => this.resolveAiAccountingAttribution(input),
@@ -125,6 +127,7 @@ export class InMemoryStorage implements Storage {
   readonly auth: AuthStorage
   readonly executions: ExecutionStorage
   readonly agents: AgentStorage
+  readonly artifacts: ArtifactStorage
   readonly aiUsage: AiUsageStorage
   readonly aiCosts: AiCostStorage
   readonly aiLimits: AiLimitStorage
@@ -155,6 +158,7 @@ export class InMemoryStorage implements Storage {
     this.auth = createAuthOperationScope(this.authStorage, scope)
     this.executions = createOperationScopedFacade(this.executionStorage, scope)
     this.agents = createAgentOperationScope(this.agentStorage, scope)
+    this.artifacts = createOperationScopedFacade(this.artifactStorage, scope)
     this.aiUsage = createOperationScopedFacade(this.aiUsageStorage, scope)
     this.aiCosts = createOperationScopedFacade(this.aiCostStorage, scope)
     this.aiLimits = createOperationScopedFacade(this.aiLimitStorage, scope)
@@ -368,6 +372,7 @@ export class InMemoryStorage implements Storage {
       auth: this.authStorage,
       executions: this.executionStorage,
       agents: this.agentStorage,
+      artifacts: this.artifactStorage,
       aiUsage: this.aiUsageStorage,
       aiCosts: this.aiCostStorage,
       aiLimits: this.aiLimitStorage,
@@ -399,6 +404,7 @@ export class InMemoryStorage implements Storage {
       auth: this.authStorage.snapshot(),
       executions: this.executionStorage.snapshot(),
       agents: this.agentStorage.snapshot(),
+      artifacts: this.artifactStorage.snapshot(),
       aiUsage: this.aiUsageStorage.snapshot(),
       aiCosts: this.aiCostStorage.snapshot(),
       aiLimits: this.aiLimitStorage.snapshot(),
@@ -425,6 +431,7 @@ export class InMemoryStorage implements Storage {
     this.authStorage.restore(snapshot.auth)
     this.executionStorage.restore(snapshot.executions)
     this.agentStorage.restore(snapshot.agents)
+    this.artifactStorage.restore(snapshot.artifacts)
     this.aiUsageStorage.restore(snapshot.aiUsage)
     this.aiCostStorage.restore(snapshot.aiCosts)
     this.aiLimitStorage.restore(snapshot.aiLimits)
@@ -451,6 +458,7 @@ export interface InMemoryStorageSnapshot {
   readonly auth: ReturnType<InMemoryAuthStorage["snapshot"]>
   readonly executions: ReturnType<InMemoryExecutionStorage["snapshot"]>
   readonly agents: ReturnType<InMemoryAgentStorage["snapshot"]>
+  readonly artifacts: ReturnType<InMemoryArtifactStorage["snapshot"]>
   readonly aiUsage: ReturnType<InMemoryAiUsageStorage["snapshot"]>
   readonly aiCosts: ReturnType<InMemoryAiCostStorage["snapshot"]>
   readonly aiLimits: ReturnType<InMemoryAiLimitStorage["snapshot"]>

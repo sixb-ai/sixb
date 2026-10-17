@@ -36,6 +36,7 @@ import { SqliteAgentStorage } from "./agents"
 import { SqliteAiCostStorage } from "./ai-cost-storage"
 import { SqliteAiLimitStorage } from "./ai-limit-storage"
 import { SqliteAiUsageStorage } from "./ai-usage-storage"
+import { SqliteArtifactStorage } from "./artifact-storage"
 import { SqliteAuthStorage } from "./auth-storage"
 import { SqliteConnectorConnectionStorage } from "./connector-connection-storage"
 import { SqliteExecutionStorage } from "./execution-storage"
@@ -89,6 +90,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly auth: SqliteAuthStorage
   readonly executions: SqliteExecutionStorage
   readonly agents: SqliteAgentStorage
+  readonly artifacts: SqliteArtifactStorage
   readonly aiUsage: AiUsageStorage
   readonly aiCosts: AiCostStorage
   readonly aiLimits: AiLimitStorage
@@ -153,6 +155,7 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.auth = createAuthOperationScope(stores.auth, scope)
     this.executions = createOperationScopedFacade(stores.executions, scope)
     this.agents = createAgentOperationScope(stores.agents, scope)
+    this.artifacts = createOperationScopedFacade(stores.artifacts, scope)
     this.aiUsage = createOperationScopedFacade(stores.aiUsage, scope)
     this.aiCosts = createOperationScopedFacade(stores.aiCosts, scope)
     this.aiLimits = createOperationScopedFacade(stores.aiLimits, scope)
@@ -317,6 +320,7 @@ function createSqliteStores(
     auth,
     executions,
     agents: new SqliteAgentStorage({ connection, executions }),
+    artifacts: new SqliteArtifactStorage(connection),
     aiUsage: new SqliteAiUsageStorage({ connection }),
     aiCosts: new SqliteAiCostStorage(connection),
     aiLimits: new SqliteAiLimitStorage({ connection }),
@@ -343,6 +347,7 @@ interface SqliteStoreSet {
   readonly auth: SqliteAuthStorage
   readonly executions: SqliteExecutionStorage
   readonly agents: SqliteAgentStorage
+  readonly artifacts: SqliteArtifactStorage
   readonly aiUsage: SqliteAiUsageStorage
   readonly aiCosts: SqliteAiCostStorage
   readonly aiLimits: SqliteAiLimitStorage

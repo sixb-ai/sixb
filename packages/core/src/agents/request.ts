@@ -253,6 +253,11 @@ export async function retryAgentRun(
       threadId: failedRun.threadId,
       runId: failedRun.id,
     })
+    // What the failed turn published goes with what it said, so the retry starts clean.
+    await tx.artifacts?.deleteVersionsByOrigin({
+      projectId: runtime.projectId,
+      runId: failedRun.id,
+    })
     await tx.executions.create(durableExecution)
     return agents.runs.create({
       id: runId,

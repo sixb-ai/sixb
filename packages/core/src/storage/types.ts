@@ -3,6 +3,7 @@ import type { AgentStorage } from "./agents"
 import type { AiCostStorage } from "./ai-cost"
 import type { AiLimitStorage } from "./ai-limits"
 import type { AiUsageStorage } from "./ai-usage"
+import type { ArtifactStorage } from "./artifacts"
 import type { AuthStorage } from "./auth"
 import type { ConnectorConnectionStorage } from "./connector-connections"
 import type { ExecutionStorage } from "./executions"
@@ -355,6 +356,7 @@ export interface Storage {
   executions: ExecutionStorage
   auth?: AuthStorage
   agents?: AgentStorage
+  artifacts?: ArtifactStorage
   aiUsage?: AiUsageStorage
   aiCosts?: AiCostStorage
   aiLimits?: AiLimitStorage
