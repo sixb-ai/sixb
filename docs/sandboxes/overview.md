@@ -81,7 +81,16 @@ both, including `{}` to skip them. Dynamic recipes require execution-resolved co
 
 ## Repository authentication
 
-For private GitHub repositories, configure host-side authentication on the Vercel factory:
+For private GitHub repositories, authenticate with a GitHub App:
+
+1. Create a GitHub App (Settings → Developer settings → GitHub Apps); it needs no webhook. Grant
+   the repository permissions Contents: Read and write, Pull requests: Read and write, and
+   Metadata: Read. Read-only access needs only Contents: Read.
+2. Install the App on the repository.
+3. Note the App ID from the App's settings page.
+4. Generate a private key and put its contents in an environment variable.
+
+Then configure host-side authentication on the Vercel factory:
 
 ```ts
 import { githubApp } from "@sixb/connector-github/auth"
@@ -96,11 +105,26 @@ const factory = new VercelSandboxFactory({
 })
 ```
 
-Install the App on the repository with Contents permission. Access defaults to read; set
-`source.access: "write"` and grant Contents write permission to allow pushing.
-Public repositories can omit `auth`. Managed credentials are not written into guest files.
-Use Git normally; Sixb refreshes access for each run and revokes it during normal cleanup.
-A worker crash cannot guarantee immediate revocation.
+Access defaults to read; set `source.access: "write"` to also push and use the GitHub API for that
+repository, for example to open pull requests. A missing permission fails the run: the cause of
+the error reported to [`onError`](../logging/overview.md#report-failures) names the permissions to
+grant.
+
+```bash
+git push -u origin HEAD && gh pr create --fill
+```
+
+Write access lets the agent push to any branch of the repository and, through the API, merge pull
+requests or delete branches. Protect the default branch with branch protection or rulesets, for
+example by requiring a reviewed pull request, so that the agent's work reaches it only through
+review.
+
+Public repositories can omit `auth`. Managed credentials are not written into guest files: use
+`git` and GitHub API clients such as `gh` normally. Commits are attributed to the App's bot
+account. `GH_TOKEN` and `GITHUB_TOKEN` in the sandbox hold a placeholder, because these clients
+require a token; the real token never enters the sandbox.
+Sixb refreshes access for each run and revokes it during normal cleanup. A worker crash cannot
+guarantee immediate revocation.
 
 ## Keep files across conversation runs
 
