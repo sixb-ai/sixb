@@ -1,14 +1,16 @@
-import { Button, DataTable, type DataTableColumn, Markdown } from "@sixb/ui/components"
+import { CsvParseError, parseCsv } from "@sixb/core/artifacts"
+import { Button, Markdown } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { Download, ExternalLink, File as FileIcon } from "lucide-react"
 import { useMemo } from "react"
 import { formatFileSize } from "../file-size"
 import type { FileSource } from "../file-source"
 import { fileView } from "../file-view"
-import { type ArtifactMessages, useArtifactMessages } from "../messages"
+import { useArtifactMessages } from "../messages"
 import { useFileText } from "../queries"
-import { DelimitedTextParseError, type DelimitedTextPreview, parseDelimitedText } from "./delimited"
 import { ViewerLoading, ViewerNotice } from "./notice"
+import { fileSheetModel } from "./sheet/model"
+import { SheetTable } from "./sheet/sheet"
 
 /**
  * One file as its type allows: images, PDFs, Markdown, tables, and plain text in place, anything
@@ -62,66 +64,31 @@ function TextFile({ source, markdown }: { source: FileSource; markdown: boolean 
   )
 }
 
-type Row = readonly string[]
-
 function TableFile({ source, kind }: { source: FileSource; kind: "csv" | "tsv" }) {
   const messages = useArtifactMessages().files
   const file = useFileText(source)
-  const parsed = useMemo(() => parseTable(file.text, kind, messages), [file.text, kind, messages])
-  const rows = useMemo(() => [...(parsed.data?.rows ?? [])], [parsed.data])
-  const columns = useMemo<DataTableColumn<Row>[]>(
-    () =>
-      (parsed.data?.headers ?? []).map((header, index) => ({
-        id: String(index),
-        header,
-        accessor: (row) => row[index] ?? "",
-      })),
-    [parsed.data]
-  )
+  const parsed = useMemo(() => {
+    if (file.text === undefined) return null
+    try {
+      const table = parseCsv(file.text, { delimiter: kind === "tsv" ? "\t" : "," })
+      if (table.header.length === 0) return { error: messages.emptyFile }
+      return { model: fileSheetModel(source.name, table) }
+    } catch (error) {
+      if (error instanceof CsvParseError) return { error: messages.malformedNear(error.line) }
+      throw error
+    }
+  }, [file.text, kind, source.name, messages])
 
   if (file.tooLarge) return <DownloadCard source={source} tooLarge />
   if (file.loading) return <ViewerLoading label={messages.loading} />
-  if (file.error)
+  if (file.error) {
     return <ViewerNotice title={messages.tableFailed} description={messages[file.error]} />
-  if (!parsed.data) {
-    return (
-      <ViewerNotice title={messages.tableFailed} description={parsed.error ?? messages.malformed} />
-    )
   }
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {parsed.data.rowsTruncated ? (
-        <p
-          className="shrink-0 border-b border-border bg-muted/40 px-4 py-2 text-xs text-muted-foreground"
-          role="status"
-        >
-          {messages.showing(parsed.data.rows.length, parsed.data.totalRows)}
-        </p>
-      ) : null}
-      <DataTable columns={columns} data={rows} showRowIndex className="min-h-0 flex-1" />
-    </div>
-  )
-}
-
-function parseTable(
-  text: string | undefined,
-  kind: "csv" | "tsv",
-  messages: ArtifactMessages["files"]
-): { readonly data: DelimitedTextPreview | null; readonly error: string | null } {
-  if (text === undefined) return { data: null, error: null }
-  try {
-    return { data: parseDelimitedText(text, kind, messages.column), error: null }
-  } catch (error) {
-    if (!(error instanceof DelimitedTextParseError))
-      return { data: null, error: messages.malformed }
-    if (error.reason === "empty") return { data: null, error: messages.emptyFile }
-    if (error.reason === "no-header") return { data: null, error: messages.noHeader }
-    return {
-      data: null,
-      error: error.row === undefined ? messages.malformed : messages.malformedNear(error.row),
-    }
+  if (!parsed) return <ViewerLoading label={messages.loading} />
+  if ("error" in parsed) {
+    return <ViewerNotice title={messages.tableFailed} description={parsed.error} />
   }
+  return <SheetTable model={parsed.model} />
 }
 
 function PdfFile({ source }: { source: FileSource }) {

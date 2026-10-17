@@ -179,7 +179,7 @@ function renderRuntimeContext(
           "Message attachments, when present, are listed in $SIXB_ATTACHMENTS and materialized under $SIXB_ATTACHMENT_DIR when size limits allow. Current user attachments are provided directly. To find earlier attachments, inspect $SIXB_ATTACHMENTS. Use view_file with a listed sandbox path; if no path is available, use the listed content URL to retrieve the file.",
           "Attachment metadata is internal context, not reply content. Do not reproduce attachment metadata blocks, internal URLs, or sandbox paths in replies.",
           mode === "conversation"
-            ? "Deliver a report, document, or file the user should keep by publishing it with publish_artifact; read the sixb-artifacts skill before the first publish. $SIXB_ARTIFACTS lists the artifacts this conversation published, with each one's latest version under $SIXB_ARTIFACTS_DIR: revise from there and publish it with publish_artifact_version. If a deliverable could not be published, say so; never describe it as ready."
+            ? "Deliver a report, document, table of data, or file the user should keep by publishing it with publish_artifact; read the sixb-artifacts skill before the first publish. $SIXB_ARTIFACTS lists the artifacts this conversation published, with each one's latest version under $SIXB_ARTIFACTS_DIR: revise from there and publish it with publish_artifact_version. If a deliverable could not be published, say so; never describe it as ready."
             : "Return your result as text; the parent Agent delivers files to the user.",
         ]
       : [

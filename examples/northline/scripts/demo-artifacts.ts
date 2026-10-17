@@ -2,13 +2,14 @@ import { resolve } from "node:path"
 import { apiBaseUrl, apiRequest, isRecord } from "./api"
 
 // Publishes artifacts that exercise the viewer: documents with every element the document page
-// shapes, a second version, artifact themes, and one file artifact per way a file can show.
+// shapes, a second version, artifact themes, sheets with charts and a long one to scroll, and one
+// file artifact per way a file can show.
 // Run it while Northline is up; each run publishes a new set.
 
 const appUrl = (process.env.SIXB_APP_URL ?? "http://localhost:3000").replace(/\/+$/, "")
 
 type FileRef = Record<string, unknown>
-type Kind = "document" | "file"
+type Kind = "document" | "sheet" | "file"
 
 async function upload(name: string, body: BlobPart, mediaType: string): Promise<FileRef> {
   const form = new FormData()
@@ -479,6 +480,101 @@ const bright = await publish({
   },
 })
 
+// The Agent's example workbooks, as its skill ships them.
+const sheetExamples = resolve(
+  import.meta.dir,
+  "../../../packages/agent-worker/src/skills/sixb-artifacts/examples/sheet"
+)
+async function exampleSheetFiles(name: string): Promise<Record<string, FileRef>> {
+  const directory = resolve(sheetExamples, name)
+  const files: Record<string, FileRef> = {}
+  for (const path of new Bun.Glob("**/*").scanSync(directory)) {
+    const mediaType = path.endsWith(".json") ? "application/json" : "text/csv"
+    const name = path.split("/").at(-1) ?? path
+    files[path] = await upload(name, await Bun.file(resolve(directory, path)).text(), mediaType)
+  }
+  return files
+}
+
+/** A visit log long enough to scroll: dates, hours, costs, an SLA flag, and a link per case. */
+function visitLogCsv(rows: number): string {
+  const regions = ["North", "Central", "South", "Coastal"]
+  const issues = ["Compressor", "Fan motor", "Thermostat", "Refrigerant leak", "Control board"]
+  const lines = ["Visit,Date,Region,Site,Issue,Hours,Parts cost,Within SLA,Case"]
+  for (let index = 0; index < rows; index += 1) {
+    const date = new Date(Date.UTC(2026, 6, 1) + Math.floor(index / 55) * 86_400_000)
+    lines.push(
+      [
+        `V-${24_001 + index}`,
+        date.toISOString().slice(0, 10),
+        regions[index % regions.length],
+        `"Site ${(index * 37) % 211}, Bay ${(index % 6) + 1}"`,
+        issues[(index * 7) % issues.length],
+        (((index * 17) % 70) / 10 + 0.5).toFixed(1),
+        (((index * 7919) % 120_000) / 100).toFixed(2),
+        index % 9 === 0 ? 0 : 1,
+        `https://ops.northline.example/cases/${41_000 + index}`,
+      ].join(",")
+    )
+  }
+  return `${lines.join("\n")}\n`
+}
+
+const metrics = await publish({
+  kind: "sheet",
+  title: "Q3 service metrics",
+  files: await exampleSheetFiles("service-metrics"),
+})
+
+const inventory = await publish({
+  kind: "sheet",
+  title: "Parts inventory",
+  files: {
+    ...(await exampleSheetFiles("parts-inventory")),
+    // Its own chart colors, from its theme.
+    "theme.json": await upload(
+      "theme.json",
+      JSON.stringify({
+        tokens: {
+          "--chart-1": "#0d9488",
+          "--chart-2": "#2563eb",
+          "--chart-3": "#f59e0b",
+          "--chart-4": "#e11d48",
+          "--chart-5": "#7c3aed",
+        },
+      }),
+      "application/json"
+    ),
+  },
+})
+
+const visits = await publish({
+  kind: "sheet",
+  title: "Q3 visit log",
+  files: {
+    "workbook.json": await upload(
+      "workbook.json",
+      JSON.stringify({
+        sheets: [
+          {
+            name: "Visits",
+            frozenColumns: 1,
+            columns: {
+              Date: "date",
+              Hours: { type: "number", decimals: 1 },
+              "Parts cost": "currency",
+              "Within SLA": { type: "percent", decimals: 0 },
+              Case: "link",
+            },
+          },
+        ],
+      }),
+      "application/json"
+    ),
+    "sheets/Visits.csv": await upload("Visits.csv", visitLogCsv(5_000), "text/csv"),
+  },
+})
+
 const files = [
   [
     "Sensor readings (CSV, 1,200 rows)",
@@ -553,6 +649,10 @@ const rows: (readonly [string, string])[] = [
   ["  version 1", page(review.id, "?v=1")],
   ["Harbor Point brief (own dark theme)", page(themed.id)],
   ["Morning checklist (pinned light)", page(bright.id)],
+  ["Q3 service metrics (sheet, 2 charts)", page(metrics.id)],
+  ["  at a chart", page(metrics.id, "?part=chart=revenue")],
+  ["Parts inventory (sheet, own chart colors)", page(inventory.id, "?part=Spend")],
+  ["Q3 visit log (sheet, 5,000 rows)", page(visits.id)],
   ...files.map(([label, artifact]) => [label, page(artifact.id)] as const),
   [
     "Beside a conversation",
@@ -562,5 +662,5 @@ const rows: (readonly [string, string])[] = [
   ],
 ]
 const width = Math.max(...rows.map(([label]) => label.length))
-console.log(`[Northline] Published ${3 + files.length} artifacts:\n`)
+console.log(`[Northline] Published ${6 + files.length} artifacts:\n`)
 for (const [label, url] of rows) console.log(`  ${label.padEnd(width)}  ${url}`)

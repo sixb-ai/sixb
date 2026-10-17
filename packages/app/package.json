@@ -60,7 +60,6 @@
     "@tailwindcss/cli": "^4.2.2",
     "@xyflow/react": "^12.10.2",
     "lucide-react": "^0.562.0",
-    "papaparse": "^5.5.4",
     "parse5": "^8.0.0",
     "recharts": "^3.8.0",
     "tailwindcss": "^4.1.18"
@@ -74,7 +73,6 @@
   "devDependencies": {
     "@testing-library/react": "^16.3.2",
     "@types/bun": "latest",
-    "@types/papaparse": "^5.5.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "happy-dom": "^20.11.6",

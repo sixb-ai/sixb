@@ -266,7 +266,7 @@ describe("publish_artifact", () => {
   test("refuses input outside its schema", () => {
     const { create, version } = tools()
     expect(() => create.parseInput({ path: "a", kind: "slides", title: "A" })).toThrow(
-      "kind must be one of document, file"
+      "kind must be one of document, sheet, file"
     )
     expect(() =>
       create.parseInput({ path: "a", kind: "file", title: "A", id: "art_0000000000" })
@@ -289,10 +289,14 @@ describe("the sixb-artifacts skill's examples", () => {
     expect(directories).toEqual([
       "examples/document/operations-review",
       "examples/document/incident-report",
+      "examples/sheet/service-metrics",
+      "examples/sheet/parts-inventory",
     ])
     for (const directory of directories) {
-      expect(await publish({ path: directory, kind: "document", title: directory })).toMatchObject({
+      const kind = directory.split("/")[1] as "document" | "sheet"
+      expect(await publish({ path: directory, kind, title: directory })).toMatchObject({
         version: 1,
+        kind,
         warnings: [],
       })
     }

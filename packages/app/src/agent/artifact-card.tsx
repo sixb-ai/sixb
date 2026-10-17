@@ -1,77 +1,171 @@
-import { getArtifactOptions } from "@sixb/client/hooks"
+import { getArtifactOptions, getArtifactVersionOptions } from "@sixb/client/hooks"
+import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
+import { ChevronRight } from "lucide-react"
+import type { ReactNode } from "react"
+import { versionChanges, versionSummary } from "../artifacts/card-details"
+import { ArtifactPreview } from "../artifacts/card-preview"
+import { ArtifactKindIcon } from "../artifacts/kind-icon"
 import { useArtifactMessages } from "../artifacts/messages"
-import { ArtifactThumbnail } from "../artifacts/thumbnail"
 import { artifactHref } from "../pages/routes"
 import { useArtifactPanel } from "./artifact-panel"
 import { useAgentMessages } from "./i18n"
-import type { PublishedArtifact } from "./publish-artifact/interpret"
+import type { PublishedArtifact, TurnArtifact } from "./publish-artifact/interpret"
 
-/** What one response published: a card per artifact, in one row on the answer's reading path. */
-export function ArtifactCards({ artifacts }: { readonly artifacts: readonly PublishedArtifact[] }) {
+/**
+ * What one response published, on the answer's reading path: a card for each artifact it created,
+ * side by side, and a line for each one it revised, since its card is already in the conversation.
+ */
+export function ArtifactCards({ artifacts }: { readonly artifacts: readonly TurnArtifact[] }) {
   const messages = useAgentMessages().artifacts
   if (artifacts.length === 0) return null
+  const created = artifacts.filter((artifact) => artifact.created)
+  const revised = artifacts.filter((artifact) => !artifact.created)
   return (
-    <ul aria-label={messages.cards} className="flex flex-wrap gap-2.5">
-      {artifacts.map((artifact) => (
-        <li key={artifact.artifactId} className="max-w-full">
-          <ArtifactCard artifact={artifact} />
-        </li>
-      ))}
-    </ul>
+    <div role="group" aria-label={messages.cards} className="flex flex-col gap-2.5">
+      {created.length > 0 ? (
+        <ul className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,13.5rem),1fr))] gap-3">
+          {created.map((artifact) => (
+            <li key={artifact.artifactId} className="min-w-0">
+              <ArtifactCard artifact={artifact} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {revised.length > 0 ? (
+        <ul className="flex flex-col gap-2">
+          {revised.map((artifact) => (
+            <li key={artifact.artifactId} className="min-w-0">
+              <ArtifactRevision artifact={artifact} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   )
 }
 
-/** One artifact at the version the response published: its miniature, title, and kind. */
+/** A new artifact: a preview of it above its title, its kind, and what it holds. */
 function ArtifactCard({ artifact }: { readonly artifact: PublishedArtifact }) {
-  const panel = useArtifactPanel()
-  const messages = useAgentMessages().artifacts
+  const locale = useLocale()
   const artifactMessages = useArtifactMessages()
   const selected = useIsOpen(artifact)
-  const className = cn(
-    "group flex w-[22rem] max-w-full items-center gap-3.5 rounded-2xl border bg-card p-2 pr-4 text-left outline-none transition-[border-color,box-shadow,background-color] duration-200 focus-visible:ring-2 focus-visible:ring-ring",
-    selected
-      ? "border-foreground/20 bg-muted/60"
-      : "border-border/70 shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:border-foreground/15 hover:shadow-[0_2px_8px_rgb(0_0_0/0.06)]"
+  const version = useVersion(artifact.artifactId, artifact.version)
+  return (
+    <OpenArtifact
+      artifact={artifact}
+      selected={selected}
+      className={cn(
+        "flex w-full flex-col overflow-hidden rounded-2xl",
+        !selected && "hover:shadow-[0_4px_14px_rgb(0_0_0/0.07)]"
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className="relative block h-[7.75rem] overflow-hidden border-b border-border/70"
+      >
+        <ArtifactPreview kind={artifact.kind} version={version.data} loading={version.isLoading} />
+      </span>
+      <span className="flex min-w-0 items-center gap-2.5 px-3.5 py-3">
+        <ArtifactKindIcon kind={artifact.kind} className="size-4 shrink-0 text-muted-foreground" />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span
+            className="truncate text-[13.5px] leading-snug font-medium text-foreground"
+            title={artifact.title}
+          >
+            {artifact.title}
+          </span>
+          <span className="truncate text-[12px] leading-snug text-muted-foreground tabular-nums">
+            {version.data
+              ? versionSummary(version.data, artifactMessages, locale)
+              : artifactMessages.kinds[artifact.kind]}
+          </span>
+        </span>
+      </span>
+    </OpenArtifact>
   )
-  const content = (
-    <>
-      <ArtifactThumbnail
-        artifactId={artifact.artifactId}
-        version={artifact.version}
-        kind={artifact.kind}
-      />
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
+}
+
+/** An artifact this response revised: its new version, and what that version changed. */
+function ArtifactRevision({ artifact }: { readonly artifact: PublishedArtifact }) {
+  const artifactMessages = useArtifactMessages()
+  const selected = useIsOpen(artifact)
+  const current = useVersion(artifact.artifactId, artifact.version)
+  const previous = useVersion(artifact.artifactId, artifact.version - 1)
+  const changes =
+    current.data && previous.data
+      ? versionChanges(previous.data, current.data, artifactMessages)
+      : []
+  return (
+    <OpenArtifact
+      artifact={artifact}
+      selected={selected}
+      className="flex w-full max-w-md items-center gap-3 rounded-xl py-2 pr-3 pl-2"
+    >
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+        <ArtifactKindIcon kind={artifact.kind} className="size-4" />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
         <span
-          className="line-clamp-2 text-[14px] leading-snug font-medium text-foreground"
+          className="truncate text-[13.5px] leading-snug font-medium text-foreground"
           title={artifact.title}
         >
           {artifact.title}
         </span>
-        <span className="text-[12.5px] text-muted-foreground tabular-nums">
-          {artifactMessages.kinds[artifact.kind]} ·{" "}
-          {artifactMessages.viewer.versionLabel(artifact.version)}
+        <span className="truncate text-[12px] leading-snug text-muted-foreground tabular-nums">
+          {[artifactMessages.viewer.versionLabel(artifact.version), ...changes.slice(0, 2)].join(
+            " · "
+          )}
         </span>
       </span>
-    </>
+      <ChevronRight
+        className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5"
+        aria-hidden="true"
+      />
+    </OpenArtifact>
   )
+}
 
+/**
+ * The control around a card or line: it opens the artifact beside the conversation, or closes it
+ * when it is the one open. Outside a conversation it links to the artifact's page.
+ */
+function OpenArtifact({
+  artifact,
+  selected,
+  className,
+  children,
+}: {
+  readonly artifact: PublishedArtifact
+  readonly selected: boolean
+  readonly className: string
+  readonly children: ReactNode
+}) {
+  const panel = useArtifactPanel()
+  const messages = useAgentMessages().artifacts
+  const classes = cn(
+    "group border bg-card text-left outline-none transition-[border-color,box-shadow] duration-200 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+    selected
+      ? "border-foreground shadow-[0_0_0_0.5px_var(--foreground)]"
+      : "border-border/80 shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:border-foreground/20",
+    className
+  )
   if (!panel) {
     return (
       <a
         href={artifactHref(artifact.artifactId, { version: artifact.version })}
-        className={className}
+        className={classes}
         aria-label={messages.open(artifact.title)}
       >
-        {content}
+        {children}
       </a>
     )
   }
   return (
     <button
       type="button"
-      className={className}
+      className={classes}
       onClick={() =>
         selected
           ? panel.close()
@@ -84,9 +178,19 @@ function ArtifactCard({ artifact }: { readonly artifact: PublishedArtifact }) {
       aria-label={messages.open(artifact.title)}
       aria-pressed={selected}
     >
-      {content}
+      {children}
     </button>
   )
+}
+
+/** A version of an artifact; a version never changes once published. */
+function useVersion(artifactId: string, version: number) {
+  return useQuery({
+    ...getArtifactVersionOptions({ path: { artifactId, version: String(version) } }),
+    enabled: version >= 1,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  })
 }
 
 /**

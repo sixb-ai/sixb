@@ -10,8 +10,27 @@ import operationsReview from "./sixb-artifacts/examples/document/operations-revi
 import restorationsFigure from "./sixb-artifacts/examples/document/operations-review/figures/restorations.svg" with {
   type: "text",
 }
+import partsInventory from "./sixb-artifacts/examples/sheet/parts-inventory/sheets/Inventory.csv" with {
+  type: "text",
+}
+import partsSpend from "./sixb-artifacts/examples/sheet/parts-inventory/sheets/Spend.csv" with {
+  type: "text",
+}
+import partsWorkbook from "./sixb-artifacts/examples/sheet/parts-inventory/workbook.json" with {
+  type: "text",
+}
+import serviceQuarters from "./sixb-artifacts/examples/sheet/service-metrics/sheets/Quarters.csv" with {
+  type: "text",
+}
+import serviceRegions from "./sixb-artifacts/examples/sheet/service-metrics/sheets/Regions.csv" with {
+  type: "text",
+}
+import serviceWorkbook from "./sixb-artifacts/examples/sheet/service-metrics/workbook.json" with {
+  type: "text",
+}
 import fileGuide from "./sixb-artifacts/file.md" with { type: "text" }
 import skillMarkdown from "./sixb-artifacts/SKILL.md" with { type: "text" }
+import sheetGuide from "./sixb-artifacts/sheet.md" with { type: "text" }
 
 /**
  * Skills the worker ships, in every conversation's catalog. They describe formats the publisher
@@ -25,6 +44,13 @@ export const BUILT_IN_SKILLS: readonly AgentSkillDefinition[] = Object.freeze([
     "examples/document/operations-review/document.md": operationsReview,
     "examples/document/operations-review/figures/restorations.svg": restorationsFigure,
     "examples/document/incident-report/document.md": incidentReport,
+    "sheet.md": sheetGuide,
+    "examples/sheet/service-metrics/workbook.json": text(serviceWorkbook),
+    "examples/sheet/service-metrics/sheets/Quarters.csv": serviceQuarters,
+    "examples/sheet/service-metrics/sheets/Regions.csv": serviceRegions,
+    "examples/sheet/parts-inventory/workbook.json": text(partsWorkbook),
+    "examples/sheet/parts-inventory/sheets/Inventory.csv": partsInventory,
+    "examples/sheet/parts-inventory/sheets/Spend.csv": partsSpend,
   }),
 ])
 
@@ -37,6 +63,14 @@ export function withBuiltInSkills(
     ...projectSkills,
     ...BUILT_IN_SKILLS.filter((skill) => !names.has(skill.name)),
   ])
+}
+
+/** A JSON file imported as text: TypeScript types the import as the parsed value, which it is not. */
+function text(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new Error("[SixbAgentWorker] A built-in skill's JSON file must be imported as text.")
+  }
+  return value
 }
 
 function builtInSkill(skill: string, files: Record<string, string>): AgentSkillDefinition {

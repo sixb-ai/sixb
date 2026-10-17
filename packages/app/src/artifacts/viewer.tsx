@@ -34,6 +34,7 @@ import { type ArtifactVersion, versionFileSource } from "./queries"
 import { DocumentRenderer } from "./renderers/document"
 import { FileRenderer } from "./renderers/file"
 import { ViewerLoading, ViewerNotice } from "./renderers/notice"
+import { SheetRenderer } from "./renderers/sheet/sheet"
 import { type ArtifactTarget, artifactLink, type ViewerTarget } from "./target"
 
 export interface ViewerChrome {
@@ -167,6 +168,7 @@ function ArtifactBody({
   if (kind === "document") {
     return <DocumentRenderer version={version} latestVersion={latestVersion} part={part} />
   }
+  if (kind === "sheet") return <SheetRenderer version={version} part={part} />
   if (kind === "file") {
     const source = versionFileSource(version, version.entry)
     return source ? (
@@ -198,7 +200,8 @@ function ArtifactHeader({
   const messages = useArtifactMessages()
   const locale = useLocale()
   const { artifact } = detail
-  const download = versionFileSource(version, version.entry)
+  // A sheet downloads each sheet as CSV from its tabs; its entry is only the workbook.
+  const download = artifact.kind === "sheet" ? null : versionFileSource(version, version.entry)
   const date = (iso: string) =>
     new Date(iso).toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric" })
 

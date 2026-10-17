@@ -24,6 +24,7 @@ import {
 } from "./files"
 import { validateDocument } from "./validate/document"
 import { validateFileArtifact } from "./validate/file"
+import { validateSheet } from "./validate/sheet"
 
 export interface PublishArtifactContext {
   readonly projectId: string
@@ -90,6 +91,7 @@ async function validateKind(
     case "file":
       return validateFileArtifact(files)
     case "sheet":
+      return validateSheet(blobStorage, files)
     case "slides":
     case "page":
       throw invalidArtifact(`Publishing a ${kind} is not supported yet.`)

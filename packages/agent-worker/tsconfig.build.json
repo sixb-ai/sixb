@@ -9,7 +9,7 @@
     "rootDir": "./src",
     "tsBuildInfoFile": "./.tsbuild/tsconfig.build.tsbuildinfo"
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "src/skills/**/*.json"],
   "references": [
     {
       "path": "../cli-core/tsconfig.build.json"

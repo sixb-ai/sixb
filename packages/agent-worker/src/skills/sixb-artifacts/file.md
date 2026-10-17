@@ -2,7 +2,7 @@
 
 A `file` artifact is exactly one file, delivered as it is. Publish one when the user asked for a
 format (PDF, DOCX, XLSX, PPTX, CSV), or when the deliverable is a binary such as an image or an
-archive. When no format was asked for, write a `document` instead.
+archive. When no format was asked for, write a `document` or a `sheet` instead.
 
 ```text
 publish_artifact({ path: "work/service-report.pdf", kind: "file", title: "Harbor Point service report" })

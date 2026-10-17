@@ -31,7 +31,7 @@
 
 .prose.sixb-document .sixb-document-lede {
   margin: 0 0 2rem;
-  color: color-mix(in oklch, var(--foreground) 78%, var(--background));
+  color: color-mix(in oklab, var(--foreground) 78%, var(--background));
   font-size: 1.25rem;
   line-height: 1.55;
 }

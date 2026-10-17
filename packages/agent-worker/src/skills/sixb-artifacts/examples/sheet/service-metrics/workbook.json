@@ -1,0 +1,43 @@
+{
+  "sheets": [
+    {
+      "name": "Quarters",
+      "columns": {
+        "Calls": "number",
+        "Within SLA": { "type": "percent", "decimals": 1 },
+        "Service revenue": { "type": "currency", "currency": "USD" },
+        "Parts cost": { "type": "currency", "currency": "USD" },
+        "Quarter end": "date"
+      }
+    },
+    {
+      "name": "Regions",
+      "frozenColumns": 1,
+      "columns": {
+        "Visits": "number",
+        "Within SLA": { "type": "percent", "decimals": 1 },
+        "Change": { "type": "percent", "decimals": 1 },
+        "Parts cost": { "type": "currency", "currency": "USD" },
+        "Lead": "link"
+      }
+    }
+  ],
+  "charts": [
+    {
+      "name": "sla-trend",
+      "type": "line",
+      "sheet": "Quarters",
+      "x": "Quarter",
+      "y": "Within SLA",
+      "title": "Priority restorations within SLA"
+    },
+    {
+      "name": "revenue",
+      "type": "bar",
+      "sheet": "Quarters",
+      "x": "Quarter",
+      "y": ["Service revenue", "Parts cost"],
+      "title": "Service revenue and parts cost by quarter"
+    }
+  ]
+}

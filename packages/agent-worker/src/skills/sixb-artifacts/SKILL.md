@@ -1,13 +1,13 @@
 ---
 name: sixb-artifacts
-description: Publish a deliverable the user should see, such as a report, a write-up, or a file they asked for, as an artifact, and revise it as a new version.
+description: Publish a deliverable the user should see, such as a report, a write-up, a table of data, or a file they asked for, as an artifact, and revise it as a new version.
 ---
 
 # Artifacts
 
 An artifact is a deliverable the user opens beside the conversation. It has a kind, a title, and
-versions that stay readable. Publish one when the user asks for a report, a document, or a file,
-or when the answer is long-form work they will read, reuse, or share. When a few sentences answer
+versions that stay readable. Publish one when the user asks for a report, a document, a table, or
+a file, or when the answer is long-form work or data they will read, reuse, or share. When a few sentences answer
 the question, answer in the chat.
 
 ## Kinds
@@ -15,10 +15,12 @@ the question, answer in the chat.
 | Kind | Publish it for | Read first |
 | --- | --- | --- |
 | `document` | A report, brief, memo, plan, or write-up: anything read top to bottom | `document.md` |
+| `sheet` | Tabular data the reader sorts, sums, charts, or downloads: metrics, lists, trackers, exports | `sheet.md` |
 | `file` | One file in a format the user asked for (PDF, DOCX, XLSX, PPTX, CSV), or a binary | `file.md` |
 
-Prefer a `document` to a DOCX or PDF unless the user asked for that format: a document renders in
-the app, and its versions stay readable side by side.
+Prefer a `document` to a DOCX or PDF, and a `sheet` to an XLSX or CSV file, unless the user asked
+for that format: they render in the app, and their versions stay readable side by side. A report
+with a table of a dozen rows is a document; data the reader works with is a sheet.
 
 ## Publish
 
