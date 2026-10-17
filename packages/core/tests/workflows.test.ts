@@ -20,6 +20,8 @@ import {
   prop,
   RuntimeError,
   ref,
+  type SandboxConfig,
+  type SandboxFactory,
   SixbHost,
   stringEnum,
   valueTypeRef,
@@ -188,6 +190,109 @@ describe("defineAgentStep", () => {
       })
     ).toContain("txn_1")
     expect(isAgentStepDefinition(resolveInvoice)).toBe(true)
+  })
+})
+
+describe("agent step sandboxes", () => {
+  const source = { type: "git", url: "https://github.com/acme/app.git" } as const
+  const authorize = async (): Promise<never> => {
+    throw new Error("Definitions do not authorize.")
+  }
+
+  // Hand-built factories reach the step checks without the provider's own validation.
+  function factory(configuration?: unknown, supportsRequestCredentials = true): SandboxFactory {
+    return {
+      supportsRequestCredentials,
+      create: async () => {
+        throw new Error("Definitions do not create sandboxes.")
+      },
+      ...(configuration === undefined ? {} : { configuration: configuration as SandboxConfig }),
+    }
+  }
+
+  const invalid: readonly (readonly [issue: string, sandbox: unknown])[] = [
+    ["must be a sandbox factory with a create function.", { configuration: { source } }],
+    [
+      "must use a static recipe: params and resolve are not supported in workflow steps.",
+      factory({ params: { branch: param("string") }, resolve: () => ({ source }) }),
+    ],
+    [
+      "must use a static recipe: params and resolve are not supported in workflow steps.",
+      factory({ resolve: () => ({ source }) }),
+    ],
+    [
+      "recipe is invalid: Invalid sandbox source URL: expected credential-free HTTPS.",
+      factory({ source: { type: "git", url: "https://token@github.com/acme/app.git" } }),
+    ],
+    // Regression proof: drop the none check from assertAgentStepSandbox; both rejections fail.
+    [
+      'network mode "none" cannot run an agent: the agent needs the Sixb API. Use { mode: "restricted", allow: [...] } with the origins the project needs; Sixb adds its own.',
+      factory({ source, network: { mode: "none" } }),
+    ],
+    ["auth requires an authorize function.", factory({ source, auth: {} })],
+    [
+      'is invalid: Sandbox write access needs source auth: add auth to the sandbox factory or use access "read".',
+      factory({ source: { ...source, access: "write" } }),
+    ],
+    [
+      "is invalid: Sandbox source auth needs a provider that injects request credentials outside the sandbox: use @sixb/sandboxes-vercel, or remove auth.",
+      factory({ source: { ...source, access: "write" }, auth: { authorize } }, false),
+    ],
+  ]
+
+  function stepWith(sandbox: SandboxFactory) {
+    return defineAgentStep("fix-incident", {
+      model: workflowModel,
+      instructions: "Fix the bug.",
+      sandbox,
+    })
+      .input({})
+      .output({ summary: "string" })
+      .prompt(() => "Fix it.")
+  }
+
+  test("keeps a static factory on the step and omits the field without one", () => {
+    const sandbox = factory({ source, setup: ["bun install"], auth: { authorize } })
+
+    expect(stepWith(sandbox).sandbox).toBe(sandbox)
+    expect("sandbox" in resolveInvoice).toBe(false)
+  })
+
+  test("accepts a restricted network that lists only what the project adds", () => {
+    const registry = { name: "npm", origin: "https://registry.npmjs.org" }
+    const sandbox = factory({ source, network: { mode: "restricted", allow: [registry] } })
+
+    expect(stepWith(sandbox).sandbox).toBe(sandbox)
+  })
+
+  test.each(invalid)("defineAgentStep rejects a sandbox that %s", (issue, sandbox) => {
+    // Regression proof: drop assertAgentStepSandbox from sandboxFromAgentStepConfig; it is accepted.
+    expect(() => stepWith(sandbox as SandboxFactory)).toThrow(
+      new WorkflowDefinitionError(`Agent step "fix-incident" sandbox ${issue}`)
+    )
+  })
+
+  test.each(invalid)("createSixb rejects a hand-built step whose sandbox %s", (issue, sandbox) => {
+    // Regression proof: drop the sandbox check from validateAgentNodeDefinition; it is accepted.
+    const workflow = defineWorkflow("repair").input({}).then(stepWith(factory()))
+    const handBuilt: WorkflowDefinition = {
+      ...workflow,
+      nodes: workflow.nodes.map((node) =>
+        node.type === "agent"
+          ? { ...node, agentStep: { ...node.agentStep, sandbox: sandbox as SandboxFactory } }
+          : node
+      ),
+    }
+
+    expect(
+      () =>
+        new SixbHost({
+          ontology: [],
+          models: { language: [workflowModel] },
+          workflows: [handBuilt],
+          ...createTestRuntimeDeps(),
+        })
+    ).toThrow(`Workflow "repair" agent step "fix-incident" sandbox ${issue}`)
   })
 })
 

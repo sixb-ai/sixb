@@ -3,6 +3,7 @@ import { isActionDefinition } from "../actions"
 import { AGENT_REASONING_LEVELS, isAgentToolDefinition } from "../agents"
 import { isModelReasoning } from "../models/language-model"
 import type { SchemaOrRef } from "../ontology"
+import type { SandboxFactory } from "../sandboxes"
 import type { ScheduleDefinition, ScheduleDefinitionForEvent } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
 import { isGroupDefinition } from "../security"
@@ -25,6 +26,7 @@ import type {
   WorkflowTriggerDefinition,
 } from "./types"
 import {
+  assertAgentStepSandbox,
   assertNonEmpty,
   isAgentStepDefinition,
   isInterventionDefinition,
@@ -137,6 +139,7 @@ export function defineAgentStep<const TId extends string>(
   const groupIds = groupIdsFromAgentStepConfig(id, config)
   const toolNames = toolNamesFromAgentStepConfig(id, config)
   const skillNames = skillNamesFromAgentStepConfig(id, config)
+  const sandbox = sandboxFromAgentStepConfig(id, config)
 
   return {
     input(input: RuntimeWorkflowInput): unknown {
@@ -156,6 +159,7 @@ export function defineAgentStep<const TId extends string>(
                 groupIds,
                 toolNames,
                 skillNames,
+                ...(sandbox === undefined ? {} : { sandbox }),
                 input,
                 output,
                 prompt,
@@ -229,6 +233,16 @@ function skillNamesFromAgentStepConfig(
   })
   assertUniqueAgentStepValues(stepId, "skill", skillNames)
   return Object.freeze(skillNames)
+}
+
+function sandboxFromAgentStepConfig(
+  stepId: string,
+  config: DefineAgentStepConfig
+): SandboxFactory | undefined {
+  if (config.sandbox === undefined) return undefined
+
+  assertAgentStepSandbox(config.sandbox, `Agent step "${stepId}"`)
+  return config.sandbox
 }
 
 function assertUniqueAgentStepValues(

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { SixbHostView } from "@sixb/core"
-import { defineWorkflow, defineWorkflowStep } from "@sixb/core"
+import type { SixbHostView, WorkflowDefinition } from "@sixb/core"
+import { defineAgentStep, defineWorkflow, defineWorkflowStep } from "@sixb/core"
 import type {
   ListLatestWorkflowRunsInput,
   ListWorkflowNodeRunsInput,
@@ -42,21 +42,27 @@ type WorkflowRunStorageStub = Partial<Omit<WorkflowRunStorage, "nodes">> & {
   readonly nodes?: Partial<WorkflowNodeRunStorage>
 }
 
-function createSixbStub(workflowRuns: WorkflowRunStorageStub): SixbHostView {
+function createSixbStub(
+  workflowRuns: WorkflowRunStorageStub,
+  workflows: readonly WorkflowDefinition[]
+): SixbHostView {
   return {
     id: "my-app",
     storage: { workflowRuns },
     definitions: {
       workflows: {
-        list: () => [workflow],
-        getById: (id: string) => (id === workflow.id ? workflow : null),
+        list: () => workflows,
+        getById: (id: string) => workflows.find((candidate) => candidate.id === id) ?? null,
       },
     },
   } as unknown as SixbHostView
 }
 
-function createTestApp(workflowRuns: WorkflowRunStorageStub) {
-  const host = createSixbStub(workflowRuns)
+function createTestApp(
+  workflowRuns: WorkflowRunStorageStub,
+  workflows: readonly WorkflowDefinition[] = [workflow]
+) {
+  const host = createSixbStub(workflowRuns, workflows)
   const sixbExecution = {
     workflows: {
       list: () => host.definitions.workflows.list(),
@@ -127,6 +133,38 @@ describe("workflow routes", () => {
     expect(await response.json()).toMatchObject([
       { id: workflow.id, latestRun: { status: "failed", error: FAILURE } },
     ])
+  })
+
+  test("list route describes an agent step without its sandbox", async () => {
+    // Regression proof: pass node.agentStep.sandbox from serializeWorkflow and declare it in the
+    // agent node schema; the factory's recipe then reaches the response.
+    const fixIncident = defineAgentStep("fix-incident", {
+      instructions: "Fix the bug.",
+      sandbox: {
+        supportsRequestCredentials: true,
+        create: async () => {
+          throw new Error("Routes never create sandboxes.")
+        },
+        configuration: {
+          source: { type: "git", url: "https://github.com/acme/app.git" },
+          setup: ["bun install"],
+          env: { RECIPE_ONLY: "recipe-value" },
+        },
+      },
+    })
+      .input({})
+      .output({ summary: "string" })
+      .prompt(() => "Fix it.")
+    const repair = defineWorkflow("repair").input({}).then(fixIncident)
+    const app = createTestApp({ listLatestByWorkflowIds: async () => ({ runs: [] }) }, [repair])
+
+    const response = await app.handle(new Request("http://localhost/api/workflows"))
+    expect(response.status).toBe(200)
+    const [listed] = await response.json()
+
+    expect(Object.keys(listed.nodes[0]).sort()).toEqual(["id", "input", "key", "output", "type"])
+    expect(JSON.stringify(listed)).not.toContain("recipe-value")
+    expect(JSON.stringify(listed)).not.toContain("github.com")
   })
 
   test("detail route exposes the same failure contract for runs and nodes", async () => {

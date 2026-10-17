@@ -4,6 +4,13 @@ import type { ModelCatalog } from "../models"
 import { isModelReasoning, modelReasoningSupportIssue } from "../models/language-model"
 import type { SchemaOrRef, ValueType } from "../ontology"
 import { validateSchemaOrRefValue } from "../ontology/refs"
+import type { SandboxFactory } from "../sandboxes"
+import {
+  type SandboxEnvironment,
+  sandboxCredentialIssue,
+  staticSandboxRecipe,
+} from "../sandboxes/configuration"
+import { SandboxError } from "../sandboxes/errors"
 import type { ScheduleDefinition } from "../schedules"
 import type { SecurityDefinitionCatalog } from "../security"
 import { WorkflowDefinitionError, WorkflowValidationError } from "./errors"
@@ -413,11 +420,76 @@ function validateAgentNodeDefinition(workflowId: string, node: WorkflowAgentNode
   assertUniqueNonEmptyAgentStepValues(workflowId, node.id, "group", node.agentStep.groupIds)
   assertUniqueNonEmptyAgentStepValues(workflowId, node.id, "tool", node.agentStep.toolNames)
   assertUniqueNonEmptyAgentStepValues(workflowId, node.id, "skill", node.agentStep.skillNames)
+
+  // A hand-built node skips defineAgentStep, so its sandbox is checked again here.
+  if (node.agentStep.sandbox !== undefined) {
+    assertAgentStepSandbox(
+      node.agentStep.sandbox,
+      `Workflow "${workflowId}" agent step "${node.id}"`
+    )
+  }
+
   if (node.mapper !== undefined && typeof node.mapper !== "function") {
     throw new WorkflowDefinitionError(
       `Workflow "${workflowId}" agent node "${node.id}" mapper must be a function.`
     )
   }
+}
+
+/**
+ * Reject a value that cannot be an Agent step's sandbox; `step` names it in the error. A step has
+ * no thread to bind params to, so only a static recipe applies. Its network must let the agent
+ * reach the Sixb API. Its source access must pass the rule a project factory passes at startup.
+ */
+export function assertAgentStepSandbox(
+  value: unknown,
+  step: string
+): asserts value is SandboxFactory {
+  const fail = (issue: string, cause?: unknown): never => {
+    throw new WorkflowDefinitionError(
+      `${step} sandbox ${issue}`,
+      cause === undefined ? undefined : { cause }
+    )
+  }
+
+  if (!isRecord(value) || typeof value.create !== "function") {
+    return fail("must be a sandbox factory with a create function.")
+  }
+
+  const { configuration } = value
+  if (configuration === undefined) return
+  if (!isRecord(configuration)) return fail("configuration must be a sandbox recipe object.")
+  if (configuration.params !== undefined || configuration.resolve !== undefined) {
+    return fail("must use a static recipe: params and resolve are not supported in workflow steps.")
+  }
+
+  let recipe: SandboxEnvironment
+  try {
+    recipe = staticSandboxRecipe(configuration)
+  } catch (error) {
+    if (!(error instanceof SandboxError)) throw error
+    // Recipe validation names the invalid field, never its value.
+    return fail(`recipe is invalid: ${error.message.replace(/^\[Sixb\] /, "")}`, error)
+  }
+
+  // Sixb adds its API to every other policy when the step runs, so only none cannot reach it.
+  if (recipe.network?.mode === "none") {
+    return fail(
+      'network mode "none" cannot run an agent: the agent needs the Sixb API. Use { mode: "restricted", allow: [...] } with the origins the project needs; Sixb adds its own.'
+    )
+  }
+
+  const { auth } = configuration
+  if (auth !== undefined && !(isRecord(auth) && typeof auth.authorize === "function")) {
+    return fail("auth requires an authorize function.")
+  }
+
+  const credentialIssue = sandboxCredentialIssue({
+    supportsRequestCredentials: value.supportsRequestCredentials === true,
+    auth,
+    source: recipe.source,
+  })
+  if (credentialIssue) fail(`is invalid: ${credentialIssue}`)
 }
 
 function assertUniqueNonEmptyAgentStepValues(
