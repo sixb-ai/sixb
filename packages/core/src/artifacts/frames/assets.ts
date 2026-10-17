@@ -1,3 +1,5 @@
+import type { ArtifactFrameTarget } from "../../storage/artifacts/types"
+import { isArtifactAddress, parseArtifactAddress } from "../address"
 import { FRAME_ASSET_PREFIX } from "../publish/validate/slides"
 import { FRAME_KIT_CSS } from "./kit"
 import { frameRuntime } from "./runtime"
@@ -38,6 +40,46 @@ export async function injectFrameAssets(html: string): Promise<string> {
         if (injected) return
         injected = true
         element.prepend(INJECTED, { html: true })
+      },
+    })
+    .transform(new Response(html))
+    .text()
+}
+
+/** Where a frame serves a file another artifact lends it: `__ref/<id>@<version>/<path>`. */
+export const FRAME_REFERENCE_PREFIX = `${FRAME_ASSET_PREFIX}ref/`
+
+/** The path, under a frame's base, of a file one of its targets lends it. */
+export function frameReferencePath(target: ArtifactFrameTarget): string | null {
+  const file = parseArtifactAddress(target.address)?.path
+  if (!file) return null
+  const path = file.split("/").map(encodeURIComponent).join("/")
+  return `${FRAME_REFERENCE_PREFIX}${target.artifactId}@${target.version}/${path}`
+}
+
+/**
+ * Points each image a deck shows from another artifact (`<img src="artifact:…">`) at the copy its
+ * frame serves, marked `data-sixb-ref`. An image its reader cannot see, or that the frame has
+ * no target for, loses its source and is marked unavailable: the kit draws it as an empty box.
+ */
+export async function rewriteFrameReferences(
+  html: string,
+  targets: readonly ArtifactFrameTarget[]
+): Promise<string> {
+  return new HTMLRewriter()
+    .on("img[src]", {
+      element(element) {
+        const source = (element.getAttribute("src") ?? "").trim()
+        if (!isArtifactAddress(source)) return
+        const target = targets.find((candidate) => candidate.address === source)
+        const path = target ? frameReferencePath(target) : null
+        if (path) {
+          element.setAttribute("src", path)
+          element.setAttribute("data-sixb-ref", "")
+        } else {
+          element.removeAttribute("src")
+          element.setAttribute("data-sixb-ref", "unavailable")
+        }
       },
     })
     .transform(new Response(html))

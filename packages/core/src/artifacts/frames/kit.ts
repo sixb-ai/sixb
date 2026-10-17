@@ -271,6 +271,37 @@ export const FRAME_KIT_CSS = `
   section.slide.table th { font-size: 20px; font-weight: 500; color: var(--muted-foreground); }
   section.slide.table :is(th, td).num, section.slide.table :is(th, td)[data-numeric] { text-align: right; }
 
+  /*
+   * Another artifact on the slide: the app draws it over this box, sized by the deck's CSS like
+   * any block. Until it does, and in a thumbnail, the box shows where it goes.
+   */
+  sixb-embed {
+    display: block;
+    position: relative;
+    width: 100%;
+    min-width: 0;
+    aspect-ratio: 16 / 9;
+    border-radius: 12px;
+    background: color-mix(in oklab, var(--muted) 80%, transparent);
+  }
+  sixb-embed[title]::after {
+    content: attr(title);
+    position: absolute;
+    inset: auto 24px 20px;
+    font-size: 20px;
+    color: var(--muted-foreground);
+  }
+  section.slide.chart > sixb-embed,
+  section.slide.chart figure > sixb-embed { flex: 1; min-height: 0; aspect-ratio: auto; }
+  /* An image from another artifact its reader cannot see. */
+  section.slide img[data-sixb-ref="unavailable"] {
+    display: block;
+    min-width: 160px;
+    min-height: 90px;
+    border-radius: 12px;
+    background: var(--muted);
+  }
+
   /* Components. */
   section.slide .legend {
     display: flex;

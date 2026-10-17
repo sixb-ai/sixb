@@ -196,6 +196,7 @@ export { AiUsageStorageError, aggregateAiModelCallUsage, InMemoryAiUsageStorage 
 export type {
   ArtifactFile,
   ArtifactFrameGrantRecord,
+  ArtifactFrameTarget,
   ArtifactKind,
   ArtifactOrigin,
   ArtifactOutline,

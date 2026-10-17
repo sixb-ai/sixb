@@ -55,6 +55,8 @@ const DECK = `<!doctype html>
     <svg viewBox="0 0 2000 200" style="width: 400px; height: 40px" role="img" aria-label="Tiny">
       <text x="0" y="120" font-size="60" fill="var(--foreground)">Tiny label</text>
     </svg>
+    <sixb-embed src="artifact:art_0000000000#chart=revenue" title="Revenue" style="height: 160px"></sixb-embed>
+    <img src="artifact:art_0000000000/figures/map.png" alt="" style="width: 200px; height: 80px">
   </section>
 </body>
 </html>`
@@ -72,7 +74,8 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
     "finds each problem on its slide, and nothing on a slide that reads well",
     async () => {
       // Reproduce the SVG case by measuring only CSS backgrounds in the probe: the label on its
-      // bar reads as white on the slide. Reproduce the first slide's by measuring text lines at
+      // bar reads as white on the slide. What the fifth slide shows from other artifacts is the
+      // app's to draw: an empty box here, not a broken image. Reproduce the first slide's by measuring text lines at
       // their font's full height: a number set tight over its label reads as drawn over it.
       const result = await checkDeckLayout({
         handle: {

@@ -6,6 +6,7 @@ import { act, cleanup, render } from "@testing-library/react"
 import { Window } from "happy-dom"
 import { ArtifactFrame } from "../src/artifacts/frame"
 import { deckKeyAction, slideFromPart } from "../src/artifacts/renderers/slides/navigation"
+import { SlidesRenderer } from "../src/artifacts/renderers/slides/slides"
 
 describe("moving through a deck", () => {
   const at = (slide: number, mode: DeckMode = "slide") => ({ slide, total: 6, mode })
@@ -142,5 +143,65 @@ describe("a deck's frame", () => {
       )
     })
     expect(ui.container.querySelector("iframe")?.className).toContain("opacity-100")
+  })
+})
+
+describe("a deck's embeds", () => {
+  test("are drawn over the frame where it reports them, only those the version records", async () => {
+    // Reproduce by drawing every embed the frame reports in DeckEmbeds: the unrecorded address
+    // shows too, so a deck could show an artifact it never published with.
+    const recorded = "artifact:art_m3tr1csq3a#chart=sla-trend"
+    const version: GetArtifactVersionResponse = {
+      artifactId: "art_q3dec4000",
+      version: 1,
+      title: "Q3 review",
+      entry: "index.html",
+      files: [],
+      outline: { kind: "slides", slides: [{ title: "Q3 review" }] },
+      references: [{ address: recorded, as: "embed", at: "1", resolvedVersion: 1 }],
+      author: { type: "user", id: "user-1" },
+      createdAt: "2026-10-17T12:00:00.000Z",
+    }
+    const cache = new QueryClient({ defaultOptions: { queries: { enabled: false } } })
+    cache.setQueryData(["artifact-frame", version.artifactId, version.version], {
+      path: "/api/artifact-frames/token/",
+      expiresAt: "2026-10-17T13:00:00.000Z",
+    })
+    const ui = render(
+      <QueryClientProvider client={cache}>
+        <SlidesRenderer version={version} />
+      </QueryClientProvider>
+    )
+    const frame = ui.container.querySelector("iframe")
+    const fromFrame = async (data: Record<string, unknown>) => {
+      await act(async () => {
+        browser.dispatchEvent(
+          new browser.MessageEvent("message", {
+            data: { protocol: FRAME_PROTOCOL, ...data },
+            source: frame?.contentWindow as never,
+          })
+        )
+      })
+    }
+    await fromFrame({ event: "ready", params: { slides: 1 } })
+    await fromFrame({ id: 1 })
+    const rect = { x: 120, y: 200, width: 600, height: 300 }
+    await fromFrame({
+      event: "embeds",
+      params: {
+        embeds: [
+          { address: recorded, rect, scale: 0.5 },
+          { address: "artifact:art_0000000000#chart=secret", rect, scale: 0.5 },
+        ],
+      },
+    })
+    const drawn = Array.from(ui.container.querySelectorAll<HTMLElement>("[data-sixb-deck-embed]"))
+    expect(drawn.map((element) => element.dataset.sixbDeckEmbed)).toEqual([recorded])
+    expect(drawn[0]?.style.left).toBe("120px")
+    expect(drawn[0]?.style.width).toBe("600px")
+    // Laid out at the box over the slide's scale times 1.5, then scaled back up to fit it.
+    const inner = drawn[0]?.firstElementChild as HTMLElement | null
+    expect(inner?.style.width).toBe("800px")
+    expect(inner?.style.transform).toBe("scale(0.75)")
   })
 })

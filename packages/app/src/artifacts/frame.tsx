@@ -49,6 +49,7 @@ export function ArtifactFrame({
   start,
   decorative = false,
   fallback,
+  overlay,
 }: {
   readonly version: ArtifactVersion
   readonly title: string
@@ -60,6 +61,11 @@ export function ArtifactFrame({
   readonly className?: string
   /** What shows where the frame will be while it loads, and under it as it fades in. */
   readonly fallback?: ReactNode
+  /**
+   * What the app draws over the frame, in the frame's own pixels, once the frame shows: another
+   * artifact a deck embeds. Clicks reach the frame except where the overlay draws.
+   */
+  readonly overlay?: ReactNode
   /** Where to put the handle that asks the frame for things (`ref` is not a prop in React 18). */
   readonly handle?: Ref<ArtifactFrameHandle>
 }) {
@@ -169,6 +175,9 @@ export function ArtifactFrame({
             ? { tabIndex: -1, "aria-hidden": true, style: { pointerEvents: "none" } }
             : {})}
         />
+      ) : null}
+      {overlay && source && shown === source ? (
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">{overlay}</div>
       ) : null}
     </div>
   )

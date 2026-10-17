@@ -4,10 +4,17 @@
  */
 
 export { SLIDES_ENTRY } from "../publish/validate/slides"
-export { FRAME_ASSETS, FRAME_DEFAULT_THEMES, injectFrameAssets } from "./assets"
+export {
+  FRAME_ASSETS,
+  FRAME_DEFAULT_THEMES,
+  FRAME_REFERENCE_PREFIX,
+  injectFrameAssets,
+  rewriteFrameReferences,
+} from "./assets"
 export {
   ARTIFACT_FRAME_ROUTE_PREFIX,
   createArtifactFrame,
+  frameTargets,
   resolveArtifactFrame,
 } from "./grants"
 export { type LayoutProblem, layoutProbe } from "./probe"

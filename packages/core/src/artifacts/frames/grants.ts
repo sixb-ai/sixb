@@ -1,5 +1,10 @@
 import { createHash, randomBytes } from "node:crypto"
-import type { ArtifactStorage, ArtifactVersionRecord } from "../../storage/artifacts/types"
+import type {
+  ArtifactFrameTarget,
+  ArtifactStorage,
+  ArtifactVersionRecord,
+} from "../../storage/artifacts/types"
+import { parseArtifactAddress } from "../address"
 
 /** Path prefix of the route that serves a version's files to its frame. */
 export const ARTIFACT_FRAME_ROUTE_PREFIX = "/api/artifact-frames/"
@@ -16,15 +21,16 @@ export interface ArtifactFrame {
 }
 
 /**
- * Issues a link that serves one version's files to a sandboxed frame. The token in the link is
- * the credential: only its hash is stored. Whoever asks must already have been allowed to read
- * the version.
+ * Issues a link that serves one version's files to a sandboxed frame, and the files it embeds from
+ * other artifacts that `targets` names. The token in the link is the credential: only its hash is
+ * stored. Whoever asks must already have been allowed to read the version.
  */
 export async function createArtifactFrame(input: {
   readonly projectId: string
   readonly storage: ArtifactStorage
   readonly artifactId: string
   readonly version: number
+  readonly targets?: readonly ArtifactFrameTarget[]
   readonly now?: Date
 }): Promise<ArtifactFrame> {
   const createdAt = input.now ?? new Date()
@@ -35,30 +41,69 @@ export async function createArtifactFrame(input: {
     tokenHash: hashToken(token),
     artifactId: input.artifactId,
     version: input.version,
+    targets: input.targets ?? [],
     createdAt,
     expiresAt,
   })
   return { path: `${ARTIFACT_FRAME_ROUTE_PREFIX}${token}/`, expiresAt }
 }
 
-/** The version a frame link serves, or `null` once it is unknown, expired, or its version gone. */
+/**
+ * The files from other artifacts a version's frame may show its reader: each file it embeds
+ * (`<img src="artifact:…/figure.svg">`) that `read`, as the reader, finds, at the version the
+ * address pins or the latest. A chart, range, or section is drawn by the app over the frame, under
+ * the reader's own session, and needs nothing here.
+ */
+export async function frameTargets(
+  version: ArtifactVersionRecord,
+  read: (artifactId: string, version: number | "latest") => Promise<ArtifactVersionRecord | null>
+): Promise<ArtifactFrameTarget[]> {
+  const targets: ArtifactFrameTarget[] = []
+  for (const reference of version.references) {
+    if (
+      reference.as !== "embed" ||
+      targets.some((target) => target.address === reference.address)
+    ) {
+      continue
+    }
+    const address = parseArtifactAddress(reference.address)
+    if (!address?.path) continue
+    const target = await read(address.artifactId, address.version ?? "latest").catch(() => null)
+    if (!target?.files.some((file) => file.path === address.path)) continue
+    targets.push({
+      address: reference.address,
+      artifactId: target.artifactId,
+      version: target.version,
+    })
+  }
+  return targets
+}
+
+/**
+ * What a frame link serves: its version, and what it may show from other artifacts; `null` once
+ * the link is unknown, expired, or its version gone.
+ */
 export async function resolveArtifactFrame(input: {
   readonly projectId: string
   readonly storage: ArtifactStorage
   readonly token: string
   readonly now?: Date
-}): Promise<ArtifactVersionRecord | null> {
+}): Promise<{
+  readonly version: ArtifactVersionRecord
+  readonly targets: readonly ArtifactFrameTarget[]
+} | null> {
   if (!TOKEN_PATTERN.test(input.token)) return null
   const grant = await input.storage.findFrameGrant({
     projectId: input.projectId,
     tokenHash: hashToken(input.token),
   })
   if (!grant || grant.expiresAt <= (input.now ?? new Date())) return null
-  return input.storage.getVersion({
+  const version = await input.storage.getVersion({
     projectId: input.projectId,
     artifactId: grant.artifactId,
     version: grant.version,
   })
+  return version ? { version, targets: grant.targets } : null
 }
 
 function hashToken(token: string): string {

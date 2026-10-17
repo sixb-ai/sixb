@@ -36,6 +36,7 @@ In a Markdown link, write a space as `%20`: `artifact:art_k3m9q2x7tp#Q3%20number
 | --- | --- | --- |
 | A document | `![Revenue by quarter](artifact:…#chart=revenue)` | `[the methodology](artifact:…#methodology)` |
 | A reply | `![Revenue by quarter](artifact:…@2#chart=revenue)` | `[the methodology](artifact:…@2#methodology)` |
+| A deck | `<sixb-embed src="artifact:…#chart=revenue"></sixb-embed>`, or `<img src="artifact:…/figure.png">` for a file | `<a href="artifact:…#methodology">the methodology</a>` |
 | A sheet | An `image` column cell holding the address | A `link` column cell holding the address |
 
 - Show a chart or a range when the reader needs to see it there. Link when they only need to know

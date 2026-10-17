@@ -1,5 +1,5 @@
 import type { ArtifactFile } from "../../../storage/artifacts/types"
-import { isArtifactAddress } from "../../address"
+import { isArtifactAddress, parseArtifactAddress } from "../../address"
 import { ARTIFACT_LIMITS } from "../../limits"
 import type { SlidesOutline } from "../../outline"
 import { type ArtifactBlobStorage, invalidArtifact, readArtifactText } from "../files"
@@ -13,8 +13,10 @@ export const FRAME_ASSET_PREFIX = "__sixb/"
 
 /**
  * Reads a deck: `index.html` with one `<section class="slide">` per 1280×720 slide, and the files
- * it loads beside it. Each slide's first heading becomes its title in the outline; the
- * `artifact:` addresses it links to are returned with the slide each is on, to resolve.
+ * it loads beside it. Each slide's first heading becomes its title in the outline. The `artifact:`
+ * addresses it uses are returned with the slide each is on, to resolve: links (`<a href>`), files
+ * it shows from other artifacts (`<img src>`), and anything else it shows (`<sixb-embed src>`), a
+ * chart, a range, a section, or a slide, which the app draws over the frame.
  */
 export async function validateSlides(
   blobStorage: ArtifactBlobStorage,
@@ -40,7 +42,8 @@ export async function validateSlides(
 
   const slides: { title: string; heading: boolean }[] = []
   const references: FoundReference[] = []
-  let embedded: string | undefined
+  let refused: string | undefined
+  const at = () => String(Math.max(1, slides.length))
   // The heading being read, if it is the first of the current slide.
   let reading: { title: string; heading: boolean } | null = null
   new HTMLRewriter()
@@ -68,27 +71,42 @@ export async function validateSlides(
       element(element) {
         const href = element.getAttribute("href") ?? ""
         if (isArtifactAddress(href)) {
-          references.push({
-            address: href.trim(),
-            as: "link",
-            at: String(Math.max(1, slides.length)),
-          })
+          references.push({ address: href.trim(), as: "link", at: at() })
         }
       },
     })
-    .on("img[src], iframe[src], object[data], embed[src]", {
+    .on("img[src]", {
       element(element) {
-        const source = element.getAttribute("src") ?? element.getAttribute("data") ?? ""
-        if (isArtifactAddress(source)) embedded ??= source.trim()
+        const source = (element.getAttribute("src") ?? "").trim()
+        if (!isArtifactAddress(source)) return
+        if (!parseArtifactAddress(source)?.path) {
+          refused ??= `An <img> shows a file from another artifact, and '${source}' names none: show a chart, a range, a section, or a slide with <sixb-embed src="${source}"></sixb-embed>.`
+          return
+        }
+        references.push({ address: source, as: "embed", at: at() })
+      },
+    })
+    .on("sixb-embed", {
+      element(element) {
+        const source = (element.getAttribute("src") ?? "").trim()
+        if (!isArtifactAddress(source)) {
+          refused ??= `<sixb-embed> shows another artifact: give it src="artifact:…", such as artifact:art_k3m9q2x7tp#chart=revenue.`
+          return
+        }
+        references.push({ address: source, as: "embed", at: at() })
+      },
+    })
+    .on("iframe[src], object[data], embed[src]", {
+      element(element) {
+        const source = (element.getAttribute("src") ?? element.getAttribute("data") ?? "").trim()
+        if (isArtifactAddress(source)) {
+          refused ??= `${SLIDES_ENTRY} frames '${source}': show another artifact with <sixb-embed src="${source}"></sixb-embed>, or a file of one with <img>.`
+        }
       },
     })
     .transform(html)
 
-  if (embedded) {
-    throw invalidArtifact(
-      `${SLIDES_ENTRY} shows '${embedded}'. A deck cannot show another artifact yet: link to it with <a href="…">, or add the image to the deck's files.`
-    )
-  }
+  if (refused) throw invalidArtifact(refused)
   if (slides.length === 0) {
     throw invalidArtifact(
       `${SLIDES_ENTRY} has no slides: put each slide in a <section class="slide">.`

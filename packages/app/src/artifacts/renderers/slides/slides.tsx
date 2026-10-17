@@ -1,4 +1,4 @@
-import type { DeckMode, FrameEvent } from "@sixb/core/artifacts"
+import type { DeckMode, FrameEmbed, FrameEvent } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
 import { ChevronLeft, ChevronRight, Fullscreen, LayoutGrid, type LucideIcon, X } from "lucide-react"
 import {
@@ -6,13 +6,14 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react"
 import { ArtifactFrame, type ArtifactFrameHandle } from "../../frame"
 import { type ArtifactMessages, useArtifactMessages } from "../../messages"
 import { type ArtifactVersion, useArtifactTheme } from "../../queries"
-import { useOpenArtifactAddress } from "../../references/references"
+import { ArtifactEmbed, useOpenArtifactAddress } from "../../references/references"
 import { artifactThemeAttributes } from "../../theme"
 import { type DeckAction, deckKeyAction, slideFromPart } from "./navigation"
 
@@ -40,6 +41,7 @@ export function SlidesRenderer({
   const [start] = useState(() => ({ slide }))
   const [mode, setMode] = useState<DeckMode>("slide")
   const [ready, setReady] = useState(false)
+  const [embeds, setEmbeds] = useState<readonly FrameEmbed[]>([])
 
   const apply = useCallback((action: DeckAction) => {
     if (action.type === "goto") setSlide(action.slide)
@@ -88,6 +90,9 @@ export function SlidesRenderer({
         case "open":
           openAddress(event.params.address)
           return
+        case "embeds":
+          setEmbeds(event.params.embeds)
+          return
       }
     },
     [slide, total, mode, apply, openAddress]
@@ -133,6 +138,7 @@ export function SlidesRenderer({
           onEvent={onEvent}
           className="flex-1"
           fallback={presenting ? null : <SlidePlaceholder />}
+          overlay={<DeckEmbeds version={version} embeds={embeds} />}
         />
         {presenting ? (
           <button
@@ -306,6 +312,62 @@ function SlideThumbnail({
       ) : null}
     </span>
   )
+}
+
+/** The app's text, 13px, reads at about 20px on a slide drawn at 1.5 times the slide's scale. */
+const EMBED_ZOOM = 1.5
+
+/**
+ * What the shown slide embeds from other artifacts, drawn where the deck put each box: laid out
+ * at the box's size in slide pixels over 1.5, then scaled with the slide. Only what the version
+ * records as an embed is drawn, so a deck shows nothing it did not publish with.
+ */
+function DeckEmbeds({
+  version,
+  embeds,
+}: {
+  readonly version: ArtifactVersion
+  readonly embeds: readonly FrameEmbed[]
+}) {
+  const recorded = useMemo(
+    () =>
+      new Set(
+        version.references
+          .filter((reference) => reference.as === "embed")
+          .map((reference) => reference.address)
+      ),
+    [version]
+  )
+  return embeds
+    .filter((embed) => recorded.has(embed.address))
+    .map((embed, index) => {
+      const zoom = embed.scale * EMBED_ZOOM
+      return (
+        <div
+          // biome-ignore lint/suspicious/noArrayIndexKey: a slide may embed one address twice
+          key={`${index}:${embed.address}`}
+          data-sixb-deck-embed={embed.address}
+          className="pointer-events-auto absolute"
+          style={{
+            left: embed.rect.x,
+            top: embed.rect.y,
+            width: embed.rect.width,
+            height: embed.rect.height,
+          }}
+        >
+          <div
+            style={{
+              width: embed.rect.width / zoom,
+              height: embed.rect.height / zoom,
+              transform: `scale(${zoom})`,
+              transformOrigin: "0 0",
+            }}
+          >
+            <ArtifactEmbed address={embed.address} caption="" fill />
+          </div>
+        </div>
+      )
+    })
 }
 
 /**

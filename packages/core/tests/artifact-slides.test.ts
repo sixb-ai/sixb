@@ -44,10 +44,11 @@ async function refusal(promise: Promise<unknown>): Promise<string> {
 }
 
 describe("publishing a deck", () => {
-  test("outlines each slide by its first heading, and records the artifacts it links to", async () => {
+  test("outlines each slide by its first heading, and records the artifacts it links to and shows", async () => {
     const { publish } = setup()
     const target = await publish({
       "index.html": '<section class="slide"><h1>Appendix</h1></section>',
+      "img/flow.svg": "<svg/>",
     })
     const published = await publish({
       "index.html": [
@@ -55,17 +56,33 @@ describe("publishing a deck", () => {
         '<section class="slide stat"><h2>Revenue grew <strong>18%</strong></h2><h3>Not the title</h3></section>',
         `<section class="slide"><p>No heading, but <a href="artifact:${target.artifact.id}">a link</a>.</p></section>`,
         '<section class="notes">Not a slide</section>',
+        `<section class="slide"><img src="artifact:${target.artifact.id}/img/flow.svg" alt=""><sixb-embed src="artifact:${target.artifact.id}#1"></sixb-embed></section>`,
       ].join("\n"),
       "img/chart.svg": "<svg/>",
     })
     expect(published.version.entry).toBe("index.html")
     expect(published.version.outline).toEqual({
       kind: "slides",
-      slides: [{ title: "Q3 review & outlook" }, { title: "Revenue grew 18%" }, {}],
+      slides: [{ title: "Q3 review & outlook" }, { title: "Revenue grew 18%" }, {}, {}],
     })
     expect(published.version.references).toEqual([
       { address: `artifact:${target.artifact.id}`, as: "link", at: "3", resolvedVersion: 1 },
+      {
+        address: `artifact:${target.artifact.id}/img/flow.svg`,
+        as: "embed",
+        at: "4",
+        resolvedVersion: 1,
+      },
+      { address: `artifact:${target.artifact.id}#1`, as: "embed", at: "4", resolvedVersion: 1 },
     ])
+    // What a deck shows must exist, as a document's embeds must.
+    expect(
+      await refusal(
+        publish({
+          "index.html": `<section class="slide"><sixb-embed src="artifact:${target.artifact.id}#9"></sixb-embed></section>`,
+        })
+      )
+    ).toContain("#9")
   })
 
   test("refuses what would not render, saying what to fix", async () => {
@@ -88,7 +105,23 @@ describe("publishing a deck", () => {
             '<section class="slide"><img src="artifact:art_0000000000#chart=x"></section>',
         })
       )
-    ).toContain("A deck cannot show another artifact yet")
+    ).toContain('with <sixb-embed src="artifact:art_0000000000#chart=x"></sixb-embed>')
+    expect(
+      await refusal(
+        publish({
+          "index.html":
+            '<section class="slide"><sixb-embed src="chart.png"></sixb-embed></section>',
+        })
+      )
+    ).toContain('give it src="artifact:…"')
+    expect(
+      await refusal(
+        publish({
+          "index.html":
+            '<section class="slide"><iframe src="artifact:art_0000000000"></iframe></section>',
+        })
+      )
+    ).toContain("show another artifact with <sixb-embed")
   })
 })
 

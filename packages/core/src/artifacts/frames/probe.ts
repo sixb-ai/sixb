@@ -40,7 +40,10 @@ export interface LayoutProblem {
  * - `contrast`: text under WCAG AA against the solid colors painted under it, its own box's,
  *   any box it overlaps, and an SVG shape's fill (4.5:1, or 3:1 from 24px, or 18.66px bold); text
  *   over an image or a gradient is not judged.
- * - `broken_image`: an image that did not load.
+ * - `broken_image`: an image of the deck's own that did not load.
+ *
+ * Another artifact's chart or image is a box here, sized as the deck sizes it: it is measured as
+ * one, and its content is the app's.
  */
 export function layoutProbe(slideNumber: number): LayoutProblem[] {
   const MAX_PER_CODE = 8
@@ -94,7 +97,7 @@ export function layoutProbe(slideNumber: number): LayoutProblem[] {
       (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== ""
     )
   const media = (element: Element) =>
-    /^(img|svg|canvas|video|picture|table)$/i.test(element.tagName)
+    /^(img|svg|canvas|video|picture|table|sixb-embed)$/i.test(element.tagName)
 
   // What a reader sees: elements with text of their own, and media. Each judged once.
   const elements = Array.from(slide.querySelectorAll("*")).filter(
@@ -287,7 +290,10 @@ export function layoutProbe(slideNumber: number): LayoutProblem[] {
     }
   }
 
-  for (const image of Array.from(slide.querySelectorAll("img"))) {
+  // An image from another artifact is the app's to load, not the deck's.
+  for (const image of Array.from(
+    slide.querySelectorAll<HTMLImageElement>("img:not([data-sixb-ref])")
+  )) {
     if (image.getAttribute("src") && image.complete && image.naturalWidth === 0) {
       report("broken_image", image, { text: image.getAttribute("src") ?? "img" })
     }
