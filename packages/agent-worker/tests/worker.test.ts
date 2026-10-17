@@ -62,7 +62,7 @@ import {
 } from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
 import { emptyGrantIndex } from "@sixb/core/internal/authorization"
-import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
+import { attachSixbErrorReporter, flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { enqueueAiModelCallRecovery } from "@sixb/core/internal/model-execution"
 import { renderOntologyDocs } from "@sixb/core/internal/ontology"
@@ -2117,6 +2117,65 @@ describe("AgentWorker", () => {
       await worker.stop()
       completion.restore()
       preflight.mockRestore()
+    }
+  })
+
+  test("reports the integration's authentication error to onError, not to the run", async () => {
+    // Regression proof: throw authError() without the caught error in WorkspaceAuthSession;
+    // the reported chain no longer reaches the integration's message.
+    const reported: Error[] = []
+    const sandbox = Object.assign(new RecordingSandbox("auth-rejected"), {
+      setRequestCredentials: async () => {},
+    })
+    const host = buildSixb(
+      hangingModel(),
+      new InMemoryBroker(),
+      {
+        supportsRequestCredentials: true,
+        create: async () => sandbox,
+        resume: async () => sandbox,
+      },
+      {
+        sandboxConfig: {
+          source: { type: "git", url: "https://example.com/repo.git" },
+          auth: {
+            authorize: async () => {
+              throw new Error("[Integration] Grant the missing permission.")
+            },
+          },
+        },
+      }
+    )
+    attachSixbErrorReporter(host, (error) => {
+      reported.push(error)
+    })
+    const sdk = createTestSixb(host)
+    const thread = await sdk.agent.threads.create({ sandbox: {} })
+    const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
+    const completion = observeQueueSettlement(host.queues.agents)
+    const worker = new AgentWorker(host, workerOptions())
+    await worker.start()
+
+    try {
+      await completion.wait()
+      await flushSixbErrors(host)
+      const run = await agentStorageOf(host).runs.getById({
+        projectId: PROJECT_ID,
+        id: requested.run.id,
+      })
+
+      expect(run?.status).toBe("failed")
+      expect(JSON.stringify(run)).not.toContain("Grant the missing permission")
+      expect(reported).toHaveLength(1)
+      expect(reported[0]?.message).toBe(
+        "[SixbAgentWorker] Workspace authentication could not be confirmed."
+      )
+      expect(reported[0]?.cause).toMatchObject({
+        message: "[Integration] Grant the missing permission.",
+      })
+    } finally {
+      await worker.stop()
+      completion.restore()
     }
   })
 

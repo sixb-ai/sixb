@@ -144,6 +144,7 @@ export interface Sandbox {
    * An empty list removes injection. Secrets must never enter guest files, env or snapshots.
    * Must not resume a stopped session or change defaults inherited by future sessions.
    * Renewal, ephemeral or persistent, targets the handle's session; after stop() it rejects.
+   * A thrown error is reported to onError: it and its causes must never contain a credential.
    */
   readonly setRequestCredentials?: (
     credentials: readonly SandboxRequestCredential[]
