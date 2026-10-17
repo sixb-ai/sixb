@@ -1,7 +1,6 @@
 import type { DatasetDefinition } from "../datasets/types"
 import type { OntologyDefinitionCatalog } from "../ontology/registry"
 import type { ObjectType, Property } from "../ontology/types"
-import { stepReadColumns } from "../pipelines/lineage"
 import type { PipelineDefinition } from "../pipelines/types"
 import type { ProjectionDefinitionCatalog } from "../projections/registry"
 import { SecurityValidationError } from "./errors"
@@ -27,7 +26,6 @@ export function validateMarkingsAtStartup(input: {
 }): void {
   validatePropertyMarkings(input.ontology, input.markingIds)
   validateColumnMarkings(input.datasetsById, input.markingIds)
-  rejectPipelineStepsOverMarkedColumns(input.pipelines, input.datasetsById)
 
   const runLineageOf = runStepLineages(input.datasetsById)
   const markings = new MarkingPropagation(
@@ -152,29 +150,6 @@ function assertMarkingList(
     if (typeof markingId !== "string" || !markingIds.has(markingId)) {
       throw new SecurityValidationError(
         `[Sixb] ${subject} references unknown marking '${String(markingId)}'. Add it to 'security/markings/' or pass it to createSixb({ markings }).`
-      )
-    }
-  }
-}
-
-// ── Pipelines ───────────────────────────────────────────────
-
-/**
- * Pipeline steps cannot read marked columns yet. A step that reads only the unmarked columns of a
- * dataset through `pick()` reads no marking.
- */
-function rejectPipelineStepsOverMarkedColumns(
-  pipelines: readonly PipelineDefinition[],
-  datasetsById: ReadonlyMap<string, DatasetDefinition>
-): void {
-  for (const { pipelineId, step } of registeredSteps(pipelines)) {
-    for (const { datasetId, column } of stepReadColumns(step)) {
-      const markings = datasetsById
-        .get(datasetId)
-        ?.schema.columns.find((candidate) => candidate.name === column)?.markings
-      if (!markings?.length) continue
-      throw new SecurityValidationError(
-        `[Sixb] Pipeline '${pipelineId}' step '${step.id}' reads column '${datasetId}.${column}', which carries [${markings.join(", ")}]. Pipeline steps cannot read marked columns yet.`
       )
     }
   }
