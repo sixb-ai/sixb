@@ -206,6 +206,11 @@ navigation. Add `?v=2` for a version and `?part=revenue` to open at a document's
 sheet (`?part=Regions`), or a chart (`?part=chart=sla`). In an agent
 conversation, artifacts open beside the chat.
 
+`/artifacts` lists every artifact you can open, most recently updated first, each with a preview
+of its latest version: a sheet's first chart, a document's title and lede, a deck's first slide,
+an image. Filter it by kind with `?kind=document`, `sheet`, `slides`, or `file`; the list API
+takes the same `kind`. The user menu, search (⌘K), and a conversation's artifact menu link to it.
+
 The link button in an artifact's header copies a link to its page, and the one beside a heading a
 link to that section. A link to the latest version keeps following the artifact as new versions
 are published; a link copied from an earlier version stays on it.

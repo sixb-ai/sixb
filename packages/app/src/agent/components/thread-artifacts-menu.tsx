@@ -5,16 +5,22 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
-import { Layers } from "lucide-react"
+import { ArrowUpRight, Layers } from "lucide-react"
+import { Link } from "react-router-dom"
 import { ArtifactKindIcon } from "../../artifacts/kind-icon"
 import { useArtifactMessages } from "../../artifacts/messages"
+import { ARTIFACTS_HREF } from "../../pages/routes"
 import { useArtifactPanel } from "../artifact-panel"
 import { useAgentMessages } from "../i18n"
 
-/** The artifacts the Agent published in this conversation, each one opening in the panel. */
+/**
+ * The artifacts the Agent published in this conversation, each one opening in the panel, and the
+ * way to every artifact in the gallery.
+ */
 export function ThreadArtifactsMenu({ threadId }: { readonly threadId: string }) {
   const panel = useArtifactPanel()
   const messages = useAgentMessages().artifacts
@@ -57,6 +63,14 @@ export function ThreadArtifactsMenu({ threadId }: { readonly threadId: string })
             </span>
           </DropdownMenuItem>
         ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild className="gap-2.5 text-muted-foreground">
+          <Link to={ARTIFACTS_HREF}>
+            <Layers className="size-4" />
+            <span className="flex-1">{messages.all}</span>
+            <ArrowUpRight className="size-3.5" />
+          </Link>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )

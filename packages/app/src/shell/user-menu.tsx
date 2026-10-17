@@ -17,9 +17,10 @@ import {
 } from "@sixb/ui/components"
 import { useOptionalTheme } from "@sixb/ui/hooks"
 import { cn } from "@sixb/ui/lib/utils"
-import { ChevronsUpDown, CircleUserRound, LogOut, SunMoon } from "lucide-react"
+import { ChevronsUpDown, CircleUserRound, Layers, LogOut, SunMoon } from "lucide-react"
 import type { ComponentType, ReactNode } from "react"
 import { useAppMessages } from "../locale"
+import { ARTIFACTS_HREF } from "../pages/routes"
 import { useSections } from "../sections/sections"
 import { type CurrentUser, useCurrentUser, useSignOut } from "../session"
 
@@ -44,21 +45,24 @@ function UserMenuRoot({ children }: UserMenuProps) {
   const user = useCurrentUser()
   const signOut = useSignOut()
   const sections = useSections()
-  const messages = useAppMessages().userMenu
+  const appMessages = useAppMessages()
+  const messages = appMessages.userMenu
   // Theme switching appears only where the app provides a theme.
   const themeControls = useOptionalTheme()
   const { isMobile } = useSidebar()
-  const items =
-    sections.length > 0 || children ? (
-      <>
-        {sections.map((section) => (
-          <UserMenuItem key={section.id} href={section.href} icon={section.icon}>
-            {section.label}
-          </UserMenuItem>
-        ))}
-        {children}
-      </>
-    ) : null
+  const items = (
+    <>
+      <UserMenuItem href={ARTIFACTS_HREF} icon={Layers}>
+        {appMessages.artifacts}
+      </UserMenuItem>
+      {sections.map((section) => (
+        <UserMenuItem key={section.id} href={section.href} icon={section.icon}>
+          {section.label}
+        </UserMenuItem>
+      ))}
+      {children}
+    </>
+  )
 
   return (
     <SidebarMenu>

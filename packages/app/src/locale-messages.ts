@@ -40,6 +40,7 @@ export const en = {
     pages: "Pages",
   },
   agent: { title: "Agent", open: "Ask the agent" },
+  artifacts: "Artifacts",
   sections: {
     back: "Back",
     data: {
@@ -130,6 +131,7 @@ export const fr: Translation<AppMessages> = {
     pages: "Pages",
   },
   agent: { title: "Agent", open: "Demander à l’agent" },
+  artifacts: "Artefacts",
   sections: {
     back: "Retour",
     data: {

@@ -34887,6 +34887,16 @@
             }
           },
           {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["document", "sheet", "slides", "page", "file"],
+              "description": "Only artifacts of this kind"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,

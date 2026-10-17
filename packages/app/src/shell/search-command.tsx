@@ -12,11 +12,11 @@ import {
   SidebarMenuItem,
 } from "@sixb/ui/components"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
-import { Box, Search } from "lucide-react"
+import { Box, Layers, Search } from "lucide-react"
 import { useDeferredValue, useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useAppMessages } from "../locale"
-import { objectHref } from "../pages/routes"
+import { ARTIFACTS_HREF, objectHref } from "../pages/routes"
 import { useSections, useSectionsEnabled } from "../sections/sections"
 import { isExternal, type NavEntry, type NavItem } from "./nav-items"
 
@@ -31,7 +31,8 @@ export interface SearchCommandProps {
  * links, which open one page, leave it out.
  */
 export function SearchCommand({ pages = [] }: SearchCommandProps) {
-  const messages = useAppMessages().search
+  const appMessages = useAppMessages()
+  const messages = appMessages.search
   const navigate = useNavigate()
   const sections = useSections()
   const enabled = useSectionsEnabled()
@@ -66,9 +67,10 @@ export function SearchCommand({ pages = [] }: SearchCommandProps) {
     else navigate(href)
   }
   if (!enabled) return null
-  const appPages = pages.flatMap((entry): readonly NavItem[] =>
-    "group" in entry ? entry.items : [entry]
-  )
+  const appPages: readonly NavItem[] = [
+    ...pages.flatMap((entry): readonly NavItem[] => ("group" in entry ? entry.items : [entry])),
+    { label: appMessages.artifacts, href: ARTIFACTS_HREF, icon: Layers },
+  ]
 
   return (
     <>

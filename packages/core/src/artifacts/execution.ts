@@ -25,6 +25,8 @@ export interface ArtifactContentInput {
 export interface ListArtifactsRuntimeInput {
   /** Only artifacts with a version the Agent published in this thread. */
   readonly threadId?: string
+  /** Only artifacts of this kind. */
+  readonly kind?: ArtifactKind
   readonly limit?: number
   readonly offset?: number
 }
@@ -115,6 +117,7 @@ export function createArtifactsRuntime(
         projectId: runtime.projectId,
         ...(ownerFilter ? { owner: ownerFilter } : {}),
         ...(input.threadId === undefined ? {} : { originThreadId: input.threadId }),
+        ...(input.kind === undefined ? {} : { kind: input.kind }),
         ...(input.limit === undefined ? {} : { limit: input.limit }),
         ...(input.offset === undefined ? {} : { offset: input.offset }),
       })

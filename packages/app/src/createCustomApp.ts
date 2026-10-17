@@ -738,7 +738,9 @@ function builtInRoutesFor(routes: readonly PageRoute[]): BuiltInRouteManifestEnt
       moduleSpecifier: builtInPageModule,
       exportName: "ObjectPage",
     },
-    // So does every artifact: its owner reads it wherever a link to it leads.
+    // So does every artifact: its owner reads it wherever a link to it leads, and finds it among
+    // the rest in the gallery.
+    { path: "/artifacts", moduleSpecifier: builtInPageModule, exportName: "ArtifactsPage" },
     {
       path: "/artifacts/:artifactId",
       moduleSpecifier: builtInPageModule,

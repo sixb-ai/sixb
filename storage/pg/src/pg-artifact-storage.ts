@@ -106,6 +106,10 @@ export class PgArtifactStorage implements ArtifactStorage {
       )
       params.push(input.originThreadId)
     }
+    if (input.kind !== undefined) {
+      where.push(`a.kind = $${params.length + 1}`)
+      params.push(input.kind)
+    }
     const clause = where.join(" AND ")
     const [counted] = await this.sql.unsafe<{ total: number }[]>(
       `SELECT COUNT(*)::int AS total FROM artifacts a WHERE ${clause}`,

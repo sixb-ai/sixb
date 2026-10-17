@@ -130,6 +130,10 @@ export class SqliteArtifactStorage implements ArtifactStorage {
       )
       params.push(input.originThreadId)
     }
+    if (input.kind !== undefined) {
+      where.push("a.kind = ?")
+      params.push(input.kind)
+    }
     const clause = where.join(" AND ")
     const { total } = this.db
       .query(`SELECT COUNT(*) AS total FROM artifacts a WHERE ${clause}`)

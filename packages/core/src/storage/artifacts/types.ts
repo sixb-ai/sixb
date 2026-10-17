@@ -89,6 +89,8 @@ export interface ListArtifactsInput {
   readonly owner?: Principal
   /** Only artifacts with a version published from this thread. */
   readonly originThreadId?: string
+  /** Only artifacts of this kind. */
+  readonly kind?: ArtifactKind
   readonly limit?: number
   readonly offset?: number
 }
