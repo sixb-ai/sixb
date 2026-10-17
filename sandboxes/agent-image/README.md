@@ -13,7 +13,7 @@ ghcr.io/sixb-ai/sixb-agent:<version>      linux/amd64, linux/arm64
 
 | Work | Tools |
 | --- | --- |
-| Shell and files | Bash, coreutils, Git, ripgrep, jq, curl, zip/unzip, xz, bzip2, 7z, patch, rsync, SQLite |
+| Shell and files | Bash, coreutils, Git, GitHub CLI, ripgrep, jq, curl, zip/unzip, xz, bzip2, 7z, patch, rsync, SQLite |
 | Runtimes | Node 24, Bun 1.4.2, Python 3.11 |
 | Python tooling | pip, uv, pytest, ruff |
 | Data and images | pandas, NumPy, PyArrow, matplotlib, Pillow, PyYAML, defusedxml |

@@ -13,6 +13,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu-core fonts-liberation2 fonts-noto-core \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/sixb/python
+# GitHub CLI from GitHub's signed apt repository: Bookworm's gh is years behind.
+RUN keyring=/etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && install -d -m 0755 /etc/apt/keyrings \
+    && curl -fsSL -o "$keyring" https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    && chmod 0644 "$keyring" \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=$keyring]" \
+      "https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
 
 FROM base AS runtime
 COPY requirements.lock /opt/sixb/requirements.lock
@@ -35,7 +44,7 @@ RUN node /opt/sixb/js/node_modules/playwright/cli.js install --with-deps --only-
 COPY --chmod=0755 scripts/sixb-render /usr/local/bin/sixb-render
 COPY --chmod=0644 profile.sh /etc/profile.d/sixb.sh
 # Fail the build rather than publish an image missing a tool the skills rely on.
-RUN for tool in bash node bun python python3 pip pip3 uv pytest ruff git rg jq curl zip unzip \
+RUN for tool in bash node bun python python3 pip pip3 uv pytest ruff git gh rg jq curl zip unzip \
       7z xz bzip2 patch rsync sqlite3 pandoc tesseract qpdf libreoffice pdftoppm pdfinfo \
       pdftotext fc-match realpath head tail base64 unshare setpriv sixb-render; do \
       command -v "$tool" >/dev/null || { echo "[SixbImage] missing $tool" >&2; exit 1; }; \
