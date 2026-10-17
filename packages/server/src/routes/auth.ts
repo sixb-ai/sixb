@@ -343,6 +343,8 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
             "<h1>Authorize this device?</h1>",
             `<p><strong>${escapeHtml(authorization.clientName)}</strong> is requesting to sign in as you.</p>`,
             `<p>Code: <strong>${escapeHtml(authorization.userCode)}</strong></p>`,
+            // Whoever starts a request names it, so the code is what ties it to the user's device.
+            "<p>Authorize it only if you started this sign-in, and the device asking shows this same code.</p>",
             "<p>It stays signed in until you sign it out or it goes unused for a while.</p>",
             groups,
             '<form method="post" action="/auth/device">',
@@ -414,6 +416,138 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         parse: "urlencoded",
         detail: { hide: true },
       }
+    )
+    .get(
+      "/auth/sign-in/device",
+      async ({ request }) => {
+        const url = new URL(request.url)
+        const authRedirect = resolveAuthRedirectContext(options, request, {
+          returnTo: url.searchParams.get("returnTo"),
+        })
+        if (authRedirect instanceof Response) return authRedirect
+
+        const current = await host.auth.getSession(request)
+        if (current.authenticated) return redirectResponse(authRedirect.returnTo)
+
+        const storage = requireAuthStorage(host)
+        const now = new Date()
+        const deviceCode = getCookie(request, DEVICE_SIGN_IN_COOKIE_NAME)?.trim()
+        const id = deviceCode ? parseDeviceAuthorizationId(deviceCode) : null
+        const held = id
+          ? await storage.deviceAuthorizations.getById({ projectId: host.id, id })
+          : null
+        const authorization =
+          held && deviceCode && held.deviceCodeHash === hashDeviceCode(deviceCode) ? held : null
+        const clearCookie = deviceSignInCookieHeader({ request, host, value: "", maxAgeSeconds: 0 })
+
+        if (authorization?.status === "approved" && authorization.approvedUserId && deviceCode) {
+          const sessionCredential = createSessionCredential()
+          try {
+            const completed = await storage.completeDeviceAuthorization({
+              projectId: host.id,
+              id: authorization.id,
+              deviceCodeHash: hashDeviceCode(deviceCode),
+              completedAt: now,
+              session: {
+                id: sessionCredential.sessionId,
+                projectId: host.id,
+                userId: authorization.approvedUserId,
+                strategyId: "device",
+                tokenHash: sessionCredential.tokenHash,
+                createdAt: now,
+                ...host.auth.createSessionDeadlines(now),
+                ...resolveSessionDevice(request),
+              },
+            })
+            const response = sessionCallbackCompletionResponse({
+              host,
+              request,
+              apiOrigin: options.resolveAuthRequestOrigin(request),
+              sessionCredential,
+              expiresAt: completed.session.expiresAt,
+              returnTo: authRedirect.returnTo,
+            })
+            response.headers.append("set-cookie", clearCookie)
+            return response
+          } catch (error) {
+            if (
+              !(
+                error instanceof AuthStorageError &&
+                (error.code === "invalid_device_authorization" ||
+                  error.code === "missing_device_authorization")
+              )
+            ) {
+              throw error
+            }
+            // Expired or removed since the approval; answer with the expired page below.
+          }
+        }
+
+        if (authorization?.status === "pending" && authorization.expiresAt > now) {
+          // The code in the URL is how an embedding shell learns which approval page to open. It
+          // is not a credential: the cookie is what ties this browser to the authorization.
+          if (url.searchParams.get("user_code") !== authorization.userCode) {
+            return redirectResponse(deviceSignInPath(url, authorization.userCode))
+          }
+          return deviceSignInPendingResponse(
+            authorization.userCode,
+            deviceVerificationUrl(options, request, authorization.userCode)
+          )
+        }
+
+        // A URL that still names a code belongs to an authorization this browser no longer holds.
+        // Stop here rather than start another: a page left open must not keep minting requests.
+        if (authorization || url.searchParams.has("user_code")) {
+          const response = authPageResponse(
+            [
+              authorization?.status === "denied"
+                ? "<h1>Sign-in was denied</h1>"
+                : "<h1>This sign-in request has expired</h1>",
+              `<p><a href="${escapeHtml(deviceSignInPath(url, null))}">Try again</a></p>`,
+            ].join(""),
+            400
+          )
+          response.headers.append("set-cookie", clearCookie)
+          return response
+        }
+
+        if (
+          !deviceAuthorizationLimiter.tryConsume(getRequestClientAddress(request), now.getTime())
+        ) {
+          return authPageResponse("<h1>Too many sign-in requests</h1><p>Try again later.</p>", 429)
+        }
+        const client = CreateDeviceAuthorizationBodySchema.safeParse({
+          clientName: url.searchParams.get("client") ?? "",
+        })
+        const newId = `dva_${randomUUID()}`
+        const newDeviceCode = `${newId}.${randomBytes(32).toString("base64url")}`
+        const userCode = createDeviceUserCode()
+        try {
+          await storage.deviceAuthorizations.create({
+            id: newId,
+            projectId: host.id,
+            deviceCodeHash: hashDeviceCode(newDeviceCode),
+            userCode,
+            clientName: client.success ? client.data.clientName : "A web browser",
+            createdAt: now,
+            expiresAt: new Date(now.getTime() + DEVICE_AUTHORIZATION_TTL_MS),
+          })
+        } catch (error) {
+          return authRouteErrorResponse(error)
+        }
+        const response = redirectResponse(deviceSignInPath(url, userCode))
+        response.headers.append(
+          "set-cookie",
+          deviceSignInCookieHeader({
+            request,
+            host,
+            value: newDeviceCode,
+            maxAgeSeconds: DEVICE_AUTHORIZATION_TTL_MS / 1000,
+          })
+        )
+        return response
+      },
+      { detail: { hide: true } }
     )
     .get(
       "/api/auth/session",
@@ -1608,6 +1742,75 @@ function normalizeDeviceUserCode(value: string): string | null {
   const compact = value.toUpperCase().replaceAll(/[^A-Z0-9]/g, "")
   if (compact.length !== 8) return null
   return `${compact.slice(0, 4)}-${compact.slice(4)}`
+}
+
+// A browser that cannot finish a sign-in itself, such as one embedded in another program, waits on
+// GET /auth/sign-in/device while a browser the user is signed in to approves it at /auth/device.
+// This cookie holds its device code, so only the browser that started the request can collect the
+// session: a link to someone else's pending page arrives without it, and one's own approved code
+// cannot be planted in another browser.
+const DEVICE_SIGN_IN_COOKIE_NAME = "sixb_device"
+
+// SameSite=Lax, not Strict: an embedding shell may send the browser here from the app's origin.
+function deviceSignInCookieHeader(params: {
+  readonly request: Request
+  readonly host: SixbHostView
+  readonly value: string
+  readonly maxAgeSeconds: number
+}): string {
+  const parts = [
+    `${DEVICE_SIGN_IN_COOKIE_NAME}=${params.value}`,
+    "Path=/auth/sign-in/device",
+    "SameSite=Lax",
+    "HttpOnly",
+    `Max-Age=${params.maxAgeSeconds}`,
+  ]
+  if (shouldUseSecureCookies(params.request, params.host.auth.getCookieOptions())) {
+    parts.push("Secure")
+  }
+  return parts.join("; ")
+}
+
+/** This page's own address, naming `userCode` or, with `null`, starting a new request. */
+function deviceSignInPath(url: URL, userCode: string | null): string {
+  const next = new URL(url)
+  if (userCode) next.searchParams.set("user_code", userCode)
+  else next.searchParams.delete("user_code")
+  return `${next.pathname}${next.search}`
+}
+
+function deviceVerificationUrl(
+  options: AuthRoutesOptions,
+  request: Request,
+  userCode: string
+): string {
+  const url = new URL("/auth/device", options.resolveAuthRequestOrigin(request))
+  url.searchParams.set("user_code", userCode)
+  return url.toString()
+}
+
+// Reloads itself instead of polling from a script, so the page stays script-free like the other
+// auth pages; the reload that follows the approval is the request that signs the browser in.
+function deviceSignInPendingResponse(userCode: string, verificationUrl: string): Response {
+  return new Response(
+    authPageDocument(
+      [
+        "<h1>Continue in your browser</h1>",
+        "<p>Approve this sign-in from a browser where you are signed in. This page continues on its own.</p>",
+        `<p>Code: <strong>${escapeHtml(userCode)}</strong></p>`,
+        `<p><a href="${escapeHtml(verificationUrl)}" target="_blank" rel="noopener">Open the approval page</a></p>`,
+      ].join(""),
+      "Sign in",
+      `<meta http-equiv="refresh" content="${DEVICE_AUTHORIZATION_POLL_INTERVAL_SECONDS}">`
+    ),
+    {
+      status: 200,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+      },
+    }
+  )
 }
 
 // The pending cookie carries the preimage of the `requester` hash embedded in
