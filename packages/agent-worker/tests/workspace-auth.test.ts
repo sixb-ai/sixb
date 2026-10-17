@@ -261,4 +261,56 @@ describe("workspace auth lifecycle", () => {
     }
     expect(fresh.revocations()).toBe(1)
   })
+
+  test("keeps the integration's error as the cause behind the generic message", async () => {
+    // Regression proof: catch without binding in refresh() and throw authError(); no cause remains.
+    const integration = new Error("[GitHub] The App installation does not grant the permissions.")
+    const f = fixture(async () => {
+      throw integration
+    })
+
+    const failure = await f.auth.prepare().catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(Error)
+    expect(failure).toMatchObject({
+      message: "[SixbAgentWorker] Workspace authentication could not be confirmed.",
+      cause: integration,
+    })
+    await expect(f.auth.close()).rejects.toThrow("authentication could not be confirmed")
+  })
+
+  test("reports a failed renewal with the integration's error in its cause chain", async () => {
+    // Regression proof: drop the error from the renewal catch; the chain ends before it.
+    const old = grant("old", 61_000)
+    const integration = new Error("[GitHub] Workspace authentication failed (HTTP 503).")
+    let calls = 0
+    const f = fixture(async () => {
+      if (++calls > 1) throw integration
+      return old.value
+    })
+    const failed = new Promise<void>((resolve) =>
+      f.controller.signal.addEventListener("abort", () => resolve(), { once: true })
+    )
+
+    await f.start()
+    await failed
+
+    expect(f.failures[0]?.message).toBe(
+      "[SixbAgentWorker] Workspace authentication could not be confirmed."
+    )
+    expect(causes(f.failures[0])).toContain(integration)
+    await expect(f.auth.close()).rejects.toThrow("authentication could not be confirmed")
+  })
 })
+
+function causes(error: unknown): unknown[] {
+  const chain: unknown[] = []
+  let current = error instanceof Error ? error.cause : undefined
+
+  while (current !== undefined) {
+    chain.push(current)
+    current = current instanceof Error ? current.cause : undefined
+  }
+
+  return chain
+}

@@ -25,6 +25,7 @@ export interface SandboxSourceCredentials {
 
 /** Integration-owned authentication; grant source.access (read by default), or reject. */
 export interface SandboxSourceAuth {
+  /** A thrown error is reported to onError: it and its causes must never contain a credential. */
   authorize(input: {
     readonly source: SandboxSource
     readonly signal: AbortSignal

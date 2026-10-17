@@ -10,10 +10,14 @@ import { createSixbError } from "@sixb/core/internal/errors"
 const TIMEOUT_MS = 30_000
 const RENEW_BEFORE_MS = 60_000
 
-const authError = () =>
+// The integration's error is the cause, and onError receives it. The stored run failure keeps
+// the catalog message plus any upstream HTTP status or network code found in the cause chain,
+// never the integration's own message.
+const authError = (cause?: unknown) =>
   createSixbError(
     "agent.execution_failed",
-    "[SixbAgentWorker] Workspace authentication could not be confirmed."
+    "[SixbAgentWorker] Workspace authentication could not be confirmed.",
+    { cause }
   )
 
 /** The first grant as the caller sees it. Requests stay host-side; only `env` reaches the guest. */
@@ -145,10 +149,10 @@ export class WorkspaceAuthSession {
             this.input.onFailure(authError())
             return
           }
-          void this.rotate().catch(() => {
+          void this.rotate().catch((error: unknown) => {
             this.failed = true
             this.halted = true
-            this.input.onFailure(authError())
+            this.input.onFailure(authError(error))
           })
         },
         Math.min(
@@ -157,11 +161,11 @@ export class WorkspaceAuthSession {
         )
       )
       this.timer.unref?.()
-    } catch {
+    } catch (error) {
       this.failed = true
       this.halted = true
       // A late token response is revoked by the request continuation above.
-      throw authError()
+      throw authError(error)
     }
   }
 
