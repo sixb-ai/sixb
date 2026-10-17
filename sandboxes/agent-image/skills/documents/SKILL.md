@@ -43,5 +43,5 @@ not calculate formulas. Use LibreOffice on a copy when recalculation is needed a
 
 Create previews inside the workspace so `view_file` can read them, and delete a preview directory
 once you have inspected it: the workspace can outlive the turn. Keep source scripts when another
-turn may need to edit the document. Publish only the requested formats using the worker's output
-instructions; preview PNGs and validation logs are working files unless the user requests them.
+turn may need to edit the document. Deliver each requested file with `publish_artifact` as a
+`file` artifact; preview PNGs and validation logs are working files unless the user requests them.

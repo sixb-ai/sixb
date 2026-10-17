@@ -562,6 +562,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 62,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "063-drop-output-diagnostics",
+    status: "applied",
+    version: 63,
+  },
 ]
 
 afterEach(async () => {

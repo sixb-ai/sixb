@@ -1,7 +1,6 @@
 import type { AgentMessage, AgentMessagePart, AgentMessageRole } from "../../agents/message"
 import type { AgentReasoning } from "../../agents/types"
 import type { Principal } from "../../auth"
-import type { FileRef } from "../../blob-storage"
 import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { JsonValue } from "../../json"
 import type { LanguageModelRef } from "../../models"
@@ -157,15 +156,7 @@ export function coerceAgentRunFinishReason(
 }
 
 /** Stable, user-facing diagnostics emitted by the platform while executing a run. */
-export const AGENT_RUN_DIAGNOSTIC_CODES = [
-  "output_file_limit_exceeded",
-  "output_file_too_large",
-  "output_budget_exhausted",
-  "output_collection_failed",
-  "output_file_changed",
-  "output_storage_failed",
-  "step_limit_reached",
-] as const
+export const AGENT_RUN_DIAGNOSTIC_CODES = ["step_limit_reached"] as const
 
 /**
  * Closed on purpose, and the wire is closed with it.
@@ -181,10 +172,8 @@ export type AgentRunDiagnosticSeverity = "warning" | "error"
 export interface AgentRunDiagnostic {
   readonly code: AgentRunDiagnosticCode
   readonly severity: AgentRunDiagnosticSeverity
-  /** `output` for published files, `run` for the turn as a whole. */
-  readonly scope: "output" | "run"
-  /** Relative path inside the run's published output directory, when one file is involved. */
-  readonly path?: string
+  /** What the diagnostic is about: the turn as a whole. */
+  readonly scope: "run"
   /** Sanitized, stable copy suitable for display to an end user. */
   readonly message: string
 }
@@ -251,8 +240,7 @@ export interface SubagentRunSpec {
 
 /** Durable child output returned to its parent by `wait_agent`. */
 export interface SubagentRunResult {
-  readonly text?: string
-  readonly files?: readonly FileRef[]
+  readonly text: string
 }
 
 export interface SubagentRunRecord extends AgentRunRecordBase {

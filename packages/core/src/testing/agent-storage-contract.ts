@@ -861,23 +861,12 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
             id: "child_1",
             executionToken: "child_token",
             status: "succeeded",
-            result: {},
+            result: { text: "  " },
           }),
           "invalid_input"
         )
 
-        const result = {
-          text: "Three open orders.",
-          files: [
-            {
-              blobId: `blob_${"a".repeat(64)}`,
-              digest: `sha256:${"a".repeat(64)}` as const,
-              fileName: "orders.csv",
-              mediaType: "text/csv",
-              sizeBytes: 42,
-            },
-          ],
-        }
+        const result = { text: "Three open orders." }
         const completed = await storage.runs.finish({
           projectId,
           id: "child_1",
@@ -1087,11 +1076,10 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           finishReason: "stop",
           diagnostics: [
             {
-              code: "output_file_too_large",
+              code: "step_limit_reached",
               severity: "warning",
-              scope: "output",
-              path: "reports/full.csv",
-              message: "This generated file was skipped.",
+              scope: "run",
+              message: "The Agent reached its 100-step limit before producing a final answer.",
             },
           ],
           completedAt: at("2026-06-23T10:07:00.000Z"),
@@ -1103,11 +1091,10 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         })
         expect(finished.diagnostics).toEqual([
           {
-            code: "output_file_too_large",
+            code: "step_limit_reached",
             severity: "warning",
-            scope: "output",
-            path: "reports/full.csv",
-            message: "This generated file was skipped.",
+            scope: "run",
+            message: "The Agent reached its 100-step limit before producing a final answer.",
           },
         ])
         await expect(

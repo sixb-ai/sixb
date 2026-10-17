@@ -202,8 +202,7 @@ export const AgentMessagePartSchema = z.union([
 export const AgentRunDiagnosticSchema = z.object({
   code: z.enum(AGENT_RUN_DIAGNOSTIC_CODES),
   severity: z.enum(["warning", "error"]),
-  scope: z.enum(["output", "run"]),
-  path: z.string().optional(),
+  scope: z.enum(["run"]),
   message: z.string(),
 })
 

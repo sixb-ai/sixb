@@ -11,7 +11,6 @@ import {
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
 import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION } from "./agent-prompt"
-import { assistantPartsWithAttachments } from "./assistant-attachments"
 import {
   attachmentKey,
   modelSupportsInlineImages,
@@ -24,7 +23,6 @@ import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import { loadUserMessageTimes } from "./message-times"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
-import { collectAgentOutputAttachments } from "./output-attachments"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import { type LoadedAgentThreadModelContext, loadAgentThreadModelContext } from "./thread-context"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
@@ -162,7 +160,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         executionToken,
         projectId,
         modelId: plan.model.modelId,
-        projectTools: plan.tools,
         status: "failed",
         finishReason: "timeout",
         error: toAgentExecutionFailure(new AgentTurnTimeoutError(runId, turnTimeoutMs), {
@@ -187,7 +184,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       executionToken,
       projectId,
       modelId: plan.model.modelId,
-      projectTools: plan.tools,
       status: "cancelled",
       ...stopReason(),
       parts: interruptedParts,
@@ -243,7 +239,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         executionToken,
         projectId,
         modelId: plan.model.modelId,
-        projectTools: plan.tools,
         status: "cancelled",
         ...stopReason(),
         parts: interruptedParts,
@@ -253,26 +248,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     const finishReason = coerceAgentRunFinishReason(result.finishReason) ?? "unknown"
     const assistant: AgentMessage = { role: "assistant", parts: interruptedParts }
     const stepLimit = stepLimitDiagnostic(assistant, { finishReason, maxSteps })
-    let outputAttachments: Awaited<ReturnType<typeof collectAgentOutputAttachments>>
-    try {
-      outputAttachments = await collectAgentOutputAttachments({
-        sandboxReady: context.sandboxReady,
-        sandboxWasUsed: context.sandboxWasUsed,
-        blobStorage: context.blobStorage,
-        signal: abortSignal,
-      })
-    } catch (error) {
-      const interrupted = await finalizeIfInterrupted(error)
-      if (interrupted) return interrupted
-      throw error
-    }
-
-    const interruptedAfterCollection = await finalizeIfInterrupted()
-    if (interruptedAfterCollection) return interruptedAfterCollection
-    const assistantParts = assistantPartsWithAttachments(assistant.parts, {
-      projectTools: plan.tools,
-      outputAttachments: outputAttachments.attachments,
-    })
     const assistantMessageId = createAgentMessageId()
 
     const interruptedBeforeCommit = await finalizeIfInterrupted()
@@ -286,7 +261,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         threadId: run.threadId,
         runId,
         role: assistant.role,
-        parts: assistantParts,
+        parts: assistant.parts,
         ...(context.authorPrincipal === undefined
           ? {}
           : { authorPrincipal: context.authorPrincipal }),
@@ -298,11 +273,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         status: "succeeded",
         modelId: plan.model.modelId,
         finishReason,
-        ...(outputAttachments.diagnostics.length === 0 && !stepLimit
-          ? {}
-          : {
-              diagnostics: [...(stepLimit ? [stepLimit] : []), ...outputAttachments.diagnostics],
-            }),
+        ...(stepLimit ? { diagnostics: [stepLimit] } : {}),
       },
     })
 
@@ -352,7 +323,6 @@ async function finalizeInterruptedTurn(input: {
   readonly executionToken: string
   readonly projectId: string
   readonly modelId?: string
-  readonly projectTools: ResolvedAgentExecutionPlan["tools"]
   readonly status: "failed" | "cancelled"
   readonly finishReason?: AgentRunFinishReason
   readonly error?: AgentRunFailure
@@ -372,9 +342,7 @@ async function finalizeInterruptedTurn(input: {
     error,
     completedAt,
   } = input
-  const parts = input.parts?.some((part) => part.type !== "step-start")
-    ? assistantPartsWithAttachments(input.parts, { projectTools: input.projectTools })
-    : undefined
+  const parts = input.parts?.some((part) => part.type !== "step-start") ? input.parts : undefined
 
   await context.beforeFinalize?.()
 

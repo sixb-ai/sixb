@@ -114,7 +114,6 @@ export interface AgentTurnContext {
    * value is irrelevant here (the sandbox tools consume the handle); only its rejection matters.
    */
   readonly sandboxReady?: Promise<AgentSandboxHandle>
-  readonly sandboxWasUsed?: () => boolean
   readonly streamSink: StreamSink
   readonly recoverAiModelCall: RecoverAiModelCall
   readonly turnTimeoutMs: number

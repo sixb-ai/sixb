@@ -35,6 +35,8 @@ import {
 import { useAgentMessages } from "./i18n"
 
 export interface ArtifactPanelValue {
+  /** What is open, or null when nothing is. */
+  readonly openTarget: ViewerTarget | null
   /** The open target's identity, or null when nothing is open. */
   readonly openKey: string | null
   readonly open: (target: ViewerTarget) => void
@@ -132,7 +134,7 @@ export function ArtifactPanelRoot({
   }, [onRouteTargetChange, routeTarget])
 
   const value = useMemo<ArtifactPanelValue>(
-    () => ({ openKey: target ? viewerTargetKey(target) : null, open, close }),
+    () => ({ openTarget: target, openKey: target ? viewerTargetKey(target) : null, open, close }),
     [target, open, close]
   )
   const viewer = target ? (

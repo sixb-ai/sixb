@@ -19,8 +19,14 @@ import {
   useState,
 } from "react"
 import { type ArtifactMessages, useArtifactMessages } from "../messages"
-import { type ArtifactVersion, useArtifactTheme, useFileText, versionFileSource } from "../queries"
-import { artifactAddress } from "../target"
+import {
+  type ArtifactVersion,
+  useArtifactTheme,
+  useFileText,
+  versionFileSource,
+  versionImageSource,
+} from "../queries"
+import { artifactLink } from "../target"
 import { artifactThemeAttributes } from "../theme"
 import { CALLOUT_KINDS, type CalloutKind, rehypeArtifactDocument } from "./document-tree"
 import { ViewerLoading, ViewerNotice } from "./notice"
@@ -35,9 +41,12 @@ const REHYPE_PLUGINS: MarkdownProps["rehypePlugins"] = [rehypeArtifactDocument]
  */
 export function DocumentRenderer({
   version,
+  latestVersion,
   part,
 }: {
   readonly version: ArtifactVersion
+  /** Links to a section of the latest version follow the artifact; others pin this version. */
+  readonly latestVersion: number
   /** The section to show first, by its slug. */
   readonly part?: string
 }) {
@@ -69,8 +78,8 @@ export function DocumentRenderer({
   }, [part, file.text])
 
   const components = useMemo(
-    () => documentComponents(version, messages.document, scrollToSection),
-    [version, messages.document, scrollToSection]
+    () => documentComponents(version, latestVersion, messages.document, scrollToSection),
+    [version, latestVersion, messages.document, scrollToSection]
   )
 
   if (!source) return <ViewerNotice title={messages.viewer.loadFailed} />
@@ -93,7 +102,10 @@ export function DocumentRenderer({
     >
       <div className="mx-auto flex w-full max-w-[66rem] gap-14 px-6 py-10 @lg:px-12 @lg:py-14">
         <article className="min-w-0 flex-1">
-          <p className="sixb-document-meta">{messages.document.meta(version.version, published)}</p>
+          {/* The header says which version this is; a printed page says it here. */}
+          <p className="sixb-document-meta hidden print:block">
+            {messages.document.meta(version.version, published)}
+          </p>
           <Markdown
             className="sixb-document"
             components={components}
@@ -180,6 +192,7 @@ function useActiveHeading(
 
 function documentComponents(
   version: ArtifactVersion,
+  latestVersion: number,
   messages: ArtifactMessages["document"],
   scrollToSection: (slug: string) => void
 ): NonNullable<MarkdownProps["components"]> {
@@ -191,6 +204,7 @@ function documentComponents(
         {id ? (
           <SectionAnchor
             version={version}
+            latestVersion={latestVersion}
             slug={id}
             label={messages.copySection(headingText(version, id))}
           />
@@ -202,7 +216,7 @@ function documentComponents(
     h2: heading("h2"),
     h3: heading("h3"),
     img({ node: _node, src, alt, ...props }) {
-      const source = typeof src === "string" ? versionFileSource(version, decodePath(src)) : null
+      const source = typeof src === "string" ? versionImageSource(version, src) : null
       return source ? (
         <img src={source.inlineUrl} alt={alt ?? ""} loading="lazy" {...props} />
       ) : null
@@ -242,10 +256,12 @@ function documentComponents(
 
 function SectionAnchor({
   version,
+  latestVersion,
   slug,
   label,
 }: {
   readonly version: ArtifactVersion
+  readonly latestVersion: number
   readonly slug: string
   readonly label: string
 }) {
@@ -260,7 +276,16 @@ function SectionAnchor({
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(
-            artifactAddress({ type: "artifact", artifactId: version.artifactId, part: slug })
+            artifactLink(
+              {
+                type: "artifact",
+                artifactId: version.artifactId,
+                version: version.version,
+                part: slug,
+              },
+              latestVersion,
+              location.origin
+            )
           )
           setCopied(true)
           setTimeout(() => setCopied(false), 1500)
@@ -311,25 +336,4 @@ function headingText(version: ArtifactVersion, slug: string): string {
 
 function isCalloutKind(value: unknown): value is CalloutKind {
   return typeof value === "string" && (CALLOUT_KINDS as readonly string[]).includes(value)
-}
-
-/**
- * A relative image path as written in Markdown, back to the artifact path it names, resolved the
- * way publishing checked it.
- */
-function decodePath(src: string): string {
-  const raw = src.split(/[?#]/)[0] ?? ""
-  let decoded = raw
-  try {
-    decoded = decodeURI(raw)
-  } catch {
-    // Keep the path as written; it simply will not match a file.
-  }
-  const segments: string[] = []
-  for (const segment of decoded.split("/")) {
-    if (segment === "" || segment === ".") continue
-    if (segment === "..") segments.pop()
-    else segments.push(segment)
-  }
-  return segments.join("/")
 }

@@ -16,6 +16,7 @@ import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
 import { isAwaitingFirstToken, type LiveRunState } from "../live-run"
 import { normalizeDurableParts } from "../parts"
+import { useLivePublishes } from "../publish-artifact/use-live-publishes"
 import type {
   AgentContextEntryInput,
   AgentContextInput,
@@ -74,7 +75,7 @@ function AssistantMessage({ message }: { message: AgentMessage }) {
       />
       {message.annotations.map((annotation, index) => (
         <Marker
-          key={`${annotation.code}:${annotation.path ?? "run"}:${index}`}
+          key={`${annotation.code}:${index}`}
           className={
             annotation.severity === "error"
               ? "text-destructive"
@@ -91,10 +92,7 @@ function AssistantMessage({ message }: { message: AgentMessage }) {
               }
             />
           </MarkerIcon>
-          <MarkerContent>
-            {annotation.path ? `${annotation.path}: ` : ""}
-            {diagnosticMessage(annotation.code, messages.diagnostics)}
-          </MarkerContent>
+          <MarkerContent>{diagnosticMessage(annotation.code, messages.diagnostics)}</MarkerContent>
         </Marker>
       ))}
     </div>
@@ -141,6 +139,7 @@ export function LiveAssistant({
   continuing?: boolean
 }) {
   const messages = useAgentMessages().transcript
+  useLivePublishes(live)
   if (live.compacting && live.parts.length === 0) {
     return <CompactionMarker />
   }

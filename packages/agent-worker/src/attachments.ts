@@ -4,7 +4,6 @@ import { isAgentToolResult } from "@sixb/core/internal/agents"
 import type { LanguageModel } from "@sixb/core/models"
 import type { AgentMessageRecord } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
-import { fileContentKey } from "./file-ref"
 import { type AgentAttachmentLimits, processAgentImageAttachment } from "./image-attachments"
 
 const DEFAULT_AGENT_ATTACHMENT_LIMITS: AgentAttachmentLimits = {
@@ -234,24 +233,13 @@ function fileWorkItems(messages: readonly AgentMessageRecord[]): AttachmentWorkI
     }
   }
 
-  const toolFilesByMessage = new Set(
-    items
-      .filter((item) => item.origin === "tool-result-file")
-      .map((item) => messageFileIdentity(item.message.id, item.fileRef))
-  )
-  const deduplicated = items.filter(
-    (item) =>
-      item.origin === "tool-result-file" ||
-      item.message.role !== "assistant" ||
-      !toolFilesByMessage.has(messageFileIdentity(item.message.id, item.fileRef))
-  )
   const retainedAssistantKeys = new Set(
-    deduplicated
+    items
       .filter((item) => item.message.role === "assistant")
       .slice(-MAX_ASSISTANT_ATTACHMENTS)
       .map((item) => item.key)
   )
-  return deduplicated.filter(
+  return items.filter(
     (item) => item.message.role !== "assistant" || retainedAssistantKeys.has(item.key)
   )
 }
@@ -262,10 +250,6 @@ function latestUserMessageId(messages: readonly AgentMessageRecord[]): string | 
     if (message?.role === "user") return message.id
   }
   return undefined
-}
-
-function messageFileIdentity(messageId: string, fileRef: FileRef): string {
-  return JSON.stringify([messageId, fileContentKey(fileRef)])
 }
 
 async function prepareOneAttachment(input: {

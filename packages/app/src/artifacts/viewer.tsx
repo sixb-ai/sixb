@@ -1,41 +1,47 @@
 import { type GetArtifactResponse, isSixbApiError } from "@sixb/client"
 import { getArtifactOptions, getArtifactVersionOptions } from "@sixb/client/hooks"
 import {
-  Button,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import {
+  ArrowDownToLine,
+  ArrowLeft,
+  ArrowUpRight,
   Check,
   ChevronDown,
-  Download,
-  ExternalLink,
-  File as FileIcon,
   Link2,
   Maximize2,
   X,
 } from "lucide-react"
 import { type ReactNode, useState } from "react"
+import { Link } from "react-router-dom"
 import { formatFileSize } from "./file-size"
-import { ArtifactKindIcon, type ArtifactKindName } from "./kind-icon"
+import type { ArtifactKindName } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
 import { type ArtifactVersion, versionFileSource } from "./queries"
 import { DocumentRenderer } from "./renderers/document"
 import { FileRenderer } from "./renderers/file"
 import { ViewerLoading, ViewerNotice } from "./renderers/notice"
-import { type ArtifactTarget, artifactAddress, type ViewerTarget } from "./target"
+import { type ArtifactTarget, artifactLink, type ViewerTarget } from "./target"
 
 export interface ViewerChrome {
   /** Show a close button that calls this. */
   readonly onClose?: () => void
-  /** Where "open full page" goes; omitted on the full page itself. */
+  /** Show a back button that calls this, on the full page. */
+  readonly onBack?: () => void
+  /** Where "open full page" goes, as a route in the app; omitted on the full page itself. */
   readonly fullPageHref?: string
 }
 
@@ -135,7 +141,12 @@ function ArtifactView({
           })
         }
       />
-      <ArtifactBody version={version} kind={detail.artifact.kind} part={target.part} />
+      <ArtifactBody
+        version={version}
+        kind={detail.artifact.kind}
+        latestVersion={detail.artifact.latestVersion}
+        part={target.part}
+      />
     </>
   )
 }
@@ -144,14 +155,18 @@ function ArtifactView({
 function ArtifactBody({
   version,
   kind,
+  latestVersion,
   part,
 }: {
   readonly version: ArtifactVersion
   readonly kind: ArtifactKindName
+  readonly latestVersion: number
   readonly part?: string
 }) {
   const messages = useArtifactMessages()
-  if (kind === "document") return <DocumentRenderer version={version} part={part} />
+  if (kind === "document") {
+    return <DocumentRenderer version={version} latestVersion={latestVersion} part={part} />
+  }
   if (kind === "file") {
     const source = versionFileSource(version, version.entry)
     return source ? (
@@ -188,52 +203,53 @@ function ArtifactHeader({
     new Date(iso).toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric" })
 
   return (
-    <ViewerBar chrome={chrome}>
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-        <ArtifactKindIcon kind={artifact.kind} className="size-4" />
-      </span>
-      <h2 className="min-w-0 truncate text-sm font-semibold" title={version.title}>
-        {version.title}
-      </h2>
-      <span className="shrink-0 text-[13px] text-muted-foreground max-sm:hidden">
-        {messages.kinds[artifact.kind]}
-      </span>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="xs" className="shrink-0 gap-0.5 tabular-nums">
-            {messages.viewer.version(version.version)}
-            <ChevronDown className="size-3.5" aria-hidden="true" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="min-w-56">
-          <DropdownMenuLabel>{messages.viewer.versions}</DropdownMenuLabel>
-          <DropdownMenuRadioGroup
-            value={String(version.version)}
-            onValueChange={(value) => onVersionChange(Number(value))}
-          >
-            {detail.versions.map((entry) => (
-              <DropdownMenuRadioItem key={entry.version} value={String(entry.version)}>
-                <span className="flex-1">
-                  {messages.viewer.versionItem(entry.version, date(entry.createdAt))}
-                </span>
-                {entry.version === artifact.latestVersion ? (
-                  <span className="text-xs text-muted-foreground">{messages.viewer.latest}</span>
-                ) : null}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <span className="flex-1" />
-      <CopyAddressButton address={artifactAddress(target, artifact.latestVersion)} />
+    <ViewerBar
+      chrome={chrome}
+      title={version.title}
+      meta={
+        <>
+          <span>{messages.kinds[artifact.kind]}</span>
+          <span aria-hidden="true">·</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger className="-mx-1 inline-flex items-center gap-0.5 rounded-md px-1 tabular-nums outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:text-foreground">
+              {messages.viewer.versionLabel(version.version)}
+              <ChevronDown className="size-3 opacity-70" aria-hidden="true" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-60">
+              <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
+                {messages.viewer.versions}
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={String(version.version)}
+                onValueChange={(value) => onVersionChange(Number(value))}
+              >
+                {detail.versions.map((entry) => (
+                  <DropdownMenuRadioItem key={entry.version} value={String(entry.version)}>
+                    <span className="flex-1 tabular-nums">
+                      {messages.viewer.versionItem(entry.version, date(entry.createdAt))}
+                    </span>
+                    {entry.version === artifact.latestVersion ? (
+                      <span className="text-xs text-muted-foreground">
+                        {messages.viewer.latest}
+                      </span>
+                    ) : null}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      }
+    >
+      <CopyLinkButton link={() => artifactLink(target, artifact.latestVersion, location.origin)} />
       {download ? (
-        <IconLink
+        <HeaderLink
           href={download.downloadUrl}
           download={download.name}
           label={messages.viewer.download(download.name)}
         >
-          <Download />
-        </IconLink>
+          <ArrowDownToLine />
+        </HeaderLink>
       ) : null}
     </ViewerBar>
   )
@@ -250,117 +266,190 @@ function FileHeader({
   const locale = useLocale()
   const { source } = target
   return (
-    <ViewerBar chrome={{ onClose: chrome.onClose }}>
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-        <FileIcon className="size-4" aria-hidden="true" />
-      </span>
-      <h2 className="min-w-0 truncate text-sm font-semibold" title={source.name}>
-        {source.name}
-      </h2>
-      <span className="shrink-0 text-[13px] text-muted-foreground tabular-nums max-sm:hidden">
-        {formatFileSize(source.fileRef.sizeBytes, locale, messages.files)}
-      </span>
-      <span className="flex-1" />
-      <IconLink
+    <ViewerBar
+      chrome={{ ...(chrome.onClose ? { onClose: chrome.onClose } : {}) }}
+      title={source.name}
+      meta={
+        <span className="tabular-nums">
+          {formatFileSize(source.fileRef.sizeBytes, locale, messages.files)}
+        </span>
+      }
+    >
+      <HeaderLink
         href={source.inlineUrl}
         target="_blank"
         label={messages.viewer.openInNewTab(source.name)}
       >
-        <ExternalLink />
-      </IconLink>
-      <IconLink
+        <ArrowUpRight />
+      </HeaderLink>
+      <HeaderLink
         href={source.downloadUrl}
         download={source.name}
         label={messages.viewer.download(source.name)}
       >
-        <Download />
-      </IconLink>
+        <ArrowDownToLine />
+      </HeaderLink>
     </ViewerBar>
   )
 }
 
-/** The header row: the caller's content, then full page and close. */
+/**
+ * The header: back on the full page, the title over a quiet line of what it is, then the actions,
+ * full page, and close.
+ */
 function ViewerBar({
   chrome,
+  title,
+  meta,
   children,
 }: {
   readonly chrome: ViewerChrome
+  readonly title?: string
+  readonly meta?: ReactNode
   readonly children?: ReactNode
 }) {
   const messages = useArtifactMessages().viewer
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border pr-2 pl-3.5 print:hidden">
-      {children ?? <span className="flex-1" />}
-      {chrome.fullPageHref ? (
-        <IconLink href={chrome.fullPageHref} label={messages.openFullPage}>
-          <Maximize2 />
-        </IconLink>
-      ) : null}
-      {chrome.onClose ? (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={chrome.onClose}
-          aria-label={messages.close}
-          title={messages.close}
+    <TooltipProvider delayDuration={400}>
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/60 px-3 print:hidden">
+        {chrome.onBack ? (
+          <HeaderButton label={messages.back} onClick={chrome.onBack}>
+            <ArrowLeft />
+          </HeaderButton>
+        ) : null}
+        <div
+          className={cn("flex min-w-0 flex-1 flex-col justify-center", !chrome.onBack && "pl-1.5")}
         >
-          <X />
-        </Button>
-      ) : null}
-    </header>
+          {title ? (
+            <h2
+              className="truncate text-[14.5px] leading-tight font-semibold tracking-[-0.01em] text-foreground"
+              title={title}
+            >
+              {title}
+            </h2>
+          ) : null}
+          {meta ? (
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12.5px] leading-tight text-muted-foreground">
+              {meta}
+            </div>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">
+          {children}
+          {chrome.fullPageHref ? (
+            <HeaderLink to={chrome.fullPageHref} label={messages.openFullPage}>
+              <Maximize2 />
+            </HeaderLink>
+          ) : null}
+          {chrome.onClose ? (
+            <>
+              <span className="mx-1.5 h-5 w-px bg-border" aria-hidden="true" />
+              <HeaderButton label={messages.close} onClick={chrome.onClose}>
+                <X />
+              </HeaderButton>
+            </>
+          ) : null}
+        </div>
+      </header>
+    </TooltipProvider>
   )
 }
 
-function CopyAddressButton({ address }: { readonly address: string }) {
+const HEADER_ACTION =
+  "inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-[17px] [&_svg]:stroke-[1.75]"
+
+function HeaderTooltip({
+  label,
+  children,
+}: {
+  readonly label: string
+  readonly children: ReactNode
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side="bottom" sideOffset={6}>
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+function HeaderButton({
+  label,
+  onClick,
+  children,
+}: {
+  readonly label: string
+  readonly onClick: () => void
+  readonly children: ReactNode
+}) {
+  return (
+    <HeaderTooltip label={label}>
+      <button type="button" className={HEADER_ACTION} onClick={onClick} aria-label={label}>
+        {children}
+      </button>
+    </HeaderTooltip>
+  )
+}
+
+/** An action that goes somewhere: a route in the app, or a file to open or download. */
+function HeaderLink({
+  label,
+  to,
+  href,
+  download,
+  target,
+  children,
+}: {
+  readonly label: string
+  readonly to?: string
+  readonly href?: string
+  readonly download?: string
+  readonly target?: "_blank"
+  readonly children: ReactNode
+}) {
+  return (
+    <HeaderTooltip label={label}>
+      {to ? (
+        <Link to={to} className={HEADER_ACTION} aria-label={label}>
+          {children}
+        </Link>
+      ) : (
+        <a
+          href={href}
+          download={download}
+          target={target}
+          rel={target ? "noreferrer" : undefined}
+          className={HEADER_ACTION}
+          aria-label={label}
+        >
+          {children}
+        </a>
+      )}
+    </HeaderTooltip>
+  )
+}
+
+/** Copies a link to the artifact's page, and says so for a moment. */
+function CopyLinkButton({ link }: { readonly link: () => string }) {
   const messages = useArtifactMessages().viewer
   const [copied, setCopied] = useState(false)
-  const label = copied ? messages.addressCopied : messages.copyAddress
+  const label = copied ? messages.linkCopied : messages.copyLink
   return (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      aria-label={label}
-      title={`${label}: ${address}`}
+    <HeaderButton
+      label={label}
       onClick={async () => {
         try {
-          await navigator.clipboard.writeText(address)
+          await navigator.clipboard.writeText(link())
           setCopied(true)
-          setTimeout(() => setCopied(false), 1500)
+          setTimeout(() => setCopied(false), 1600)
         } catch {
           // The clipboard can be unavailable, such as on an insecure origin.
         }
       }}
     >
       {copied ? <Check /> : <Link2 />}
-    </Button>
-  )
-}
-
-function IconLink({
-  href,
-  label,
-  download,
-  target,
-  children,
-}: {
-  readonly href: string
-  readonly label: string
-  readonly download?: string
-  readonly target?: "_blank"
-  readonly children: ReactNode
-}) {
-  return (
-    <Button variant="ghost" size="icon-sm" asChild>
-      <a
-        href={href}
-        download={download}
-        target={target}
-        rel={target ? "noreferrer" : undefined}
-        aria-label={label}
-        title={label}
-      >
-        {children}
-      </a>
-    </Button>
+    </HeaderButton>
   )
 }
