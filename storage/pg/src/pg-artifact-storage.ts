@@ -17,6 +17,7 @@ import type {
   ListArtifactsResult,
   ListArtifactVersionsInput,
   ListArtifactVersionsResult,
+  ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
 } from "@sixb/core/storage"
@@ -140,6 +141,26 @@ export class PgArtifactStorage implements ArtifactStorage {
     `
     const total = counted?.total ?? 0
     return { versions: rows.map(versionFromRow), hasMore: offset + rows.length < total, total }
+  }
+
+  async listReferencingVersions(
+    input: ListReferencingVersionsInput
+  ): Promise<ArtifactVersionRecord[]> {
+    // An address names the artifact when the id is followed by nothing, a version, a file, or a
+    // part.
+    const prefix = `artifact:${input.artifactId}`
+    const rows = await this.sql<PgRow[]>`
+      SELECT v.* FROM artifact_versions v
+      JOIN artifacts a
+        ON a.project_id = v.project_id AND a.id = v.artifact_id AND a.latest_version = v.version
+      WHERE v.project_id = ${input.projectId} AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements(v.refs) r
+        WHERE left(r ->> 'address', ${prefix.length}::int) = ${prefix}
+          AND substr(r ->> 'address', ${prefix.length + 1}::int, 1) IN ('', '@', '/', '#')
+      )
+      ORDER BY v.artifact_id
+    `
+    return rows.map(versionFromRow)
   }
 
   async delete(input: DeleteArtifactInput): Promise<boolean> {

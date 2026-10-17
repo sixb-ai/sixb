@@ -26,13 +26,19 @@ import {
   versionFileSource,
   versionImageSource,
 } from "../queries"
+import { ARTIFACT_REHYPE_PLUGINS, artifactUrlTransform } from "../references/embed-tree"
+import { withArtifactReferences } from "../references/references"
 import { artifactLink } from "../target"
 import { artifactThemeAttributes } from "../theme"
 import { CALLOUT_KINDS, type CalloutKind, rehypeArtifactDocument } from "./document-tree"
 import { ViewerLoading, ViewerNotice } from "./notice"
 
 const DOCUMENT_ENTRY = "document.md"
-const REHYPE_PLUGINS: MarkdownProps["rehypePlugins"] = [rehypeArtifactDocument]
+// Embeds first, so an artifact shown alone in its paragraph is an embed, not a captioned figure.
+const REHYPE_PLUGINS: MarkdownProps["rehypePlugins"] = [
+  ...ARTIFACT_REHYPE_PLUGINS,
+  rehypeArtifactDocument,
+]
 
 /**
  * A document as a page to read: its title and lede, a measured column, figures with captions,
@@ -78,7 +84,10 @@ export function DocumentRenderer({
   }, [part, file.text])
 
   const components = useMemo(
-    () => documentComponents(version, latestVersion, messages.document, scrollToSection),
+    () =>
+      withArtifactReferences(
+        documentComponents(version, latestVersion, messages.document, scrollToSection)
+      ),
     [version, latestVersion, messages.document, scrollToSection]
   )
 
@@ -110,6 +119,7 @@ export function DocumentRenderer({
             className="sixb-document"
             components={components}
             rehypePlugins={REHYPE_PLUGINS}
+            urlTransform={artifactUrlTransform}
           >
             {file.text}
           </Markdown>
@@ -190,7 +200,7 @@ function useActiveHeading(
   return active
 }
 
-function documentComponents(
+export function documentComponents(
   version: ArtifactVersion,
   latestVersion: number,
   messages: ArtifactMessages["document"],

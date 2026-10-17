@@ -24,6 +24,7 @@ import {
   useState,
 } from "react"
 import { createPortal } from "react-dom"
+import { ArtifactReferencesProvider } from "../artifacts/references/references"
 import { type ArtifactTarget, type ViewerTarget, viewerTargetKey } from "../artifacts/target"
 import { Viewer } from "../artifacts/viewer"
 import { artifactHref } from "../pages/routes"
@@ -87,6 +88,8 @@ export function ArtifactPanelRoot({
   const idPrefix = useId()
   const [localTarget, setLocalTarget] = useState<ViewerTarget | null>(null)
   const target: ViewerTarget | null = routeTarget ?? localTarget
+  // What the reader followed a reference from, so the panel can take them back.
+  const [trail, setTrail] = useState<readonly ViewerTarget[]>([])
   const presentation = artifactPanelPresentation({
     compact,
     isMobile: useIsMobile(),
@@ -101,6 +104,7 @@ export function ArtifactPanelRoot({
     if (scopeRef.current === scopeKey) return
     scopeRef.current = scopeKey
     setLocalTarget(null)
+    setTrail([])
     openerRef.current = null
   }, [scopeKey])
 
@@ -120,6 +124,7 @@ export function ArtifactPanelRoot({
     (next: ViewerTarget) => {
       const active = typeof document === "undefined" ? null : document.activeElement
       openerRef.current = active instanceof HTMLElement ? active : null
+      setTrail([])
       show(next)
       reveal()
     },
@@ -127,6 +132,7 @@ export function ArtifactPanelRoot({
   )
   const close = useCallback(() => {
     setLocalTarget(null)
+    setTrail([])
     if (onRouteTargetChange && routeTarget) onRouteTargetChange(null)
     const opener = openerRef.current
     openerRef.current = null
@@ -141,8 +147,21 @@ export function ArtifactPanelRoot({
     <Viewer
       target={target}
       onTargetChange={show}
+      onOpenReference={(next) => {
+        setTrail((current) => [...current, target])
+        show(next)
+      }}
       chrome={{
         onClose: close,
+        ...(trail.length > 0
+          ? {
+              onBack: () => {
+                const previous = trail.at(-1)
+                setTrail((current) => current.slice(0, -1))
+                if (previous) show(previous)
+              },
+            }
+          : {}),
         ...(target.type === "artifact"
           ? {
               fullPageHref: artifactHref(target.artifactId, {
@@ -165,7 +184,8 @@ export function ArtifactPanelRoot({
         }
         viewer={presentation === "panel" ? viewer : null}
       >
-        {children}
+        {/* An artifact a reply shows or links to opens here, beside the conversation. */}
+        <ArtifactReferencesProvider open={open}>{children}</ArtifactReferencesProvider>
       </ArtifactWorkspace>
       <Dialog
         open={presentation === "dialog" && target !== null}

@@ -45,6 +45,15 @@ export const en = {
       caution: "Caution",
     },
   },
+  references: {
+    open: "Open",
+    latest: "Latest",
+    loading: "Loading…",
+    unavailable: "Unavailable",
+    unavailableDescription: "It was deleted, or it isn't shared with you.",
+    missingPart: (title: string) => `This part is no longer in “${title}”.`,
+    moreRows: (count: number) => (count === 1 ? "1 more row" : `${number(count)} more rows`),
+  },
   card: {
     sheets: (count: number) => (count === 1 ? "1 sheet" : `${number(count)} sheets`),
     charts: (count: number) => (count === 1 ? "1 chart" : `${number(count)} charts`),
@@ -156,6 +165,15 @@ export const fr: Translation<ArtifactMessages> = {
       warning: "Attention",
       caution: "Prudence",
     },
+  },
+  references: {
+    open: "Ouvrir",
+    latest: "Dernière version",
+    loading: "Chargement…",
+    unavailable: "Indisponible",
+    unavailableDescription: "Il a été supprimé, ou il n’est pas partagé avec vous.",
+    missingPart: (title) => `Cette partie ne figure plus dans « ${title} ».`,
+    moreRows: (count) => (count === 1 ? "1 ligne de plus" : `${numberFr(count)} lignes de plus`),
   },
   card: {
     sheets: (count) => (count === 1 ? "1 feuille" : `${numberFr(count)} feuilles`),

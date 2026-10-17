@@ -3,7 +3,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { Check, Copy } from "lucide-react"
 import * as React from "react"
 import { useEffect, useState } from "react"
-import ReactMarkdown, { type Components, type Options } from "react-markdown"
+import ReactMarkdown, { type Components, defaultUrlTransform, type Options } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { useUiMessages } from "../../lib/i18n/ui"
 
@@ -43,13 +43,25 @@ export interface MarkdownProps extends Omit<React.ComponentProps<"div">, "childr
   readonly components?: Components
   /** HTML-tree plugins run after the built-in ones, such as heading ids or callouts. */
   readonly rehypePlugins?: Options["rehypePlugins"]
+  /**
+   * Rewrites each link and image URL. The default keeps only safe schemes; a host that renders its
+   * own scheme passes a transform that keeps it and defers the rest to `defaultUrlTransform`.
+   */
+  readonly urlTransform?: Options["urlTransform"]
 }
 
 /**
  * Render a markdown string with the shared `.prose` style (see `@sixb/ui/globals.css`) and
  * Shiki-highlighted code blocks. Safe for untrusted input — no raw HTML, sanitized link targets.
  */
-function Markdown({ children, className, components, rehypePlugins, ...props }: MarkdownProps) {
+function Markdown({
+  children,
+  className,
+  components,
+  rehypePlugins,
+  urlTransform,
+  ...props
+}: MarkdownProps) {
   const mergedComponents = React.useMemo(
     () => (components ? { ...COMPONENTS, ...components } : COMPONENTS),
     [components]
@@ -60,6 +72,7 @@ function Markdown({ children, className, components, rehypePlugins, ...props }: 
         remarkPlugins={REMARK_PLUGINS}
         rehypePlugins={rehypePlugins}
         components={mergedComponents}
+        {...(urlTransform ? { urlTransform } : {})}
       >
         {children}
       </ReactMarkdown>
@@ -122,4 +135,4 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
   )
 }
 
-export { Markdown }
+export { defaultUrlTransform, Markdown }

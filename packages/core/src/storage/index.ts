@@ -213,6 +213,7 @@ export type {
   ListArtifactsResult,
   ListArtifactVersionsInput,
   ListArtifactVersionsResult,
+  ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
 } from "./artifacts"

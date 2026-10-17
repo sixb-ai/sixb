@@ -30,8 +30,8 @@ Write values raw. The workbook formats them in the reader's locale:
 | `currency` | `182400` | $182,400 |
 | `percent` | `0.961`, a fraction | 96.1% |
 | `date` | `2026-09-30`, or an ISO 8601 date and time | Sep 30, 2026 |
-| `link` | `https://example.com/cases/4182` | example.com/cases/4182 |
-| `image` | `photos/unit-7.jpg`, a file in the artifact | A thumbnail |
+| `link` | `https://example.com/cases/4182`, or an `artifact:` address | example.com/cases/4182 |
+| `image` | `photos/unit-7.jpg`, a file in the artifact, or an `artifact:` address | A thumbnail |
 | `text` | Anything | As written |
 
 - No symbols, thousands separators, or units in numbers: `4120000`, not `$4.12M` or `4,120,000`.
@@ -83,7 +83,7 @@ Do not draw chart images for a sheet.
 
 | Key | Means |
 | --- | --- |
-| `name` | Lowercase letters, digits, and hyphens: `revenue` |
+| `name` | Lowercase letters, digits, and hyphens: `revenue`. It is the chart's address: keep it in every version, and change `title` to rename the chart |
 | `type` | `line` for a trend over time, `bar` to compare categories, `area` for parts of a total over time, `pie` for the share of a whole |
 | `sheet` | The sheet it plots |
 | `x` | The column along the x axis, or a pie's slice labels |

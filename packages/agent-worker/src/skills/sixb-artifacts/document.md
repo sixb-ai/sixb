@@ -31,7 +31,9 @@ Use one or two callouts in a document, for what the reader must not miss.
 ## Images
 
 An image is a file in the artifact, referenced by its relative path: `figures/revenue.svg`. Remote
-URLs and `data:` URIs are refused. SVG and PNG work best. Draw charts in fixed colors that read on
+URLs and `data:` URIs are refused. To show a chart or a table that lives in a sheet, show it by its
+address instead of drawing a copy: `![Revenue by quarter](artifact:…#chart=revenue)`. It stays
+current when the sheet changes; `references.md` has the addresses. SVG and PNG work best. Draw charts in fixed colors that read on
 both light and dark pages, and label the axes and units.
 
 ## Numbers

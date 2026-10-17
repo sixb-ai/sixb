@@ -171,3 +171,41 @@
     display: none;
   }
 }
+
+/* An embed: another artifact shown inside a document or a reply. It sets its own table, link, and
+   spacing rules over the host's prose. */
+.prose .sixb-embed .sixb-embed-table {
+  margin: 0;
+  font-size: 13px;
+}
+
+.prose .sixb-embed .sixb-embed-table :is(th, td) {
+  padding: 7px 12px;
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 65%, transparent);
+  white-space: nowrap;
+  text-align: left;
+}
+
+.prose .sixb-embed .sixb-embed-table th {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  border-bottom-color: var(--border);
+}
+
+.prose .sixb-embed .sixb-embed-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.prose .sixb-embed .sixb-embed-table :is(th, td)[data-numeric] {
+  text-align: right;
+}
+
+.prose .sixb-embed :is(.sixb-embed-card, .sixb-embed-source) {
+  font-weight: inherit;
+  text-decoration: none;
+}
+
+.prose .sixb-embed .sixb-embed-section > .prose > :first-child {
+  margin-top: 0;
+}

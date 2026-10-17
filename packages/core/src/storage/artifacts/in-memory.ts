@@ -15,6 +15,7 @@ import type {
   ListArtifactsResult,
   ListArtifactVersionsInput,
   ListArtifactVersionsResult,
+  ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
 } from "./types"
@@ -111,6 +112,23 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     return { versions: page.map(cloneArtifactVersionRecord), hasMore, total }
   }
 
+  async listReferencingVersions(
+    input: ListReferencingVersionsInput
+  ): Promise<ArtifactVersionRecord[]> {
+    const prefix = `artifact:${input.artifactId}`
+    const referencing: ArtifactVersionRecord[] = []
+    for (const stored of this.artifacts.values()) {
+      if (stored.record.projectId !== input.projectId) continue
+      const latest = stored.versions.find(
+        (candidate) => candidate.version === stored.record.latestVersion
+      )
+      if (latest?.references.some((reference) => refersTo(reference.address, prefix))) {
+        referencing.push(cloneArtifactVersionRecord(latest))
+      }
+    }
+    return referencing
+  }
+
   async delete(input: DeleteArtifactInput): Promise<boolean> {
     return this.artifacts.delete(artifactKey(input.projectId, input.id))
   }
@@ -174,4 +192,9 @@ function cloneArtifacts(
 
 function artifactKey(projectId: string, id: string): string {
   return `${projectId}\0${id}`
+}
+
+/** Whether an address names the artifact `artifact:<id>` is, at any version, file, or part. */
+function refersTo(address: string, prefix: string): boolean {
+  return address.startsWith(prefix) && /^(?:$|[@/#])/.test(address.slice(prefix.length))
 }

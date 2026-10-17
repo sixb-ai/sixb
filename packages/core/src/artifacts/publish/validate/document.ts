@@ -1,20 +1,27 @@
 import { posix } from "node:path"
 import type { ArtifactFile } from "../../../storage/artifacts/types"
+import { isArtifactAddress } from "../../address"
 import { ARTIFACT_LIMITS } from "../../limits"
 import { createHeadingSlugger, type DocumentHeading, type DocumentOutline } from "../../outline"
 import { type ArtifactBlobStorage, invalidArtifact, readArtifactText } from "../files"
+import type { FoundReference } from "../references"
 
 /** The file a document renders from. */
 export const DOCUMENT_ENTRY = "document.md"
 
 /**
  * Reads a document's Markdown: its headings become the outline, and every image must be a file in
- * the version, so the document renders the same wherever it is opened.
+ * the version or an `artifact:` address, so the document renders the same wherever it is opened.
+ * The addresses it shows and links to are returned with the section each sits in, to resolve.
  */
 export async function validateDocument(
   blobStorage: ArtifactBlobStorage,
   files: readonly ArtifactFile[]
-): Promise<{ readonly entry: string; readonly outline: DocumentOutline }> {
+): Promise<{
+  readonly entry: string
+  readonly outline: DocumentOutline
+  readonly references: readonly FoundReference[]
+}> {
   const entry = files.find((file) => file.path === DOCUMENT_ENTRY)
   if (!entry) throw invalidArtifact(`A document needs its Markdown in '${DOCUMENT_ENTRY}'.`)
   const markdown = await readArtifactText(blobStorage, entry, ARTIFACT_LIMITS.maxDocumentBytes)
@@ -28,6 +35,8 @@ export async function validateDocument(
   })
   const headings: { depth: number; text: string }[] = []
   const images: string[] = []
+  // Each address with the index of the heading it follows, -1 before the first.
+  const addresses: { address: string; as: "embed" | "link"; heading: number }[] = []
   let heading: { depth: number; text: string } | null = null
   new HTMLRewriter()
     .on("h1, h2, h3, h4, h5, h6", {
@@ -44,7 +53,20 @@ export async function validateDocument(
     })
     .on("img", {
       element(element) {
-        images.push(decodeHtml(element.getAttribute("src") ?? ""))
+        const source = decodeHtml(element.getAttribute("src") ?? "")
+        if (isArtifactAddress(source)) {
+          addresses.push({ address: source.trim(), as: "embed", heading: headings.length - 1 })
+        } else {
+          images.push(source)
+        }
+      },
+    })
+    .on("a", {
+      element(element) {
+        const href = decodeHtml(element.getAttribute("href") ?? "")
+        if (isArtifactAddress(href)) {
+          addresses.push({ address: href.trim(), as: "link", heading: headings.length - 1 })
+        }
       },
     })
     .transform(html)
@@ -53,27 +75,25 @@ export async function validateDocument(
   for (const source of images) checkImage(source, paths)
 
   const slug = createHeadingSlugger()
+  const outlined = headings.map(({ depth, text }): DocumentHeading => {
+    const plain = decodeHtml(text).replace(/\s+/g, " ").trim()
+    return { depth, text: plain, slug: slug(plain) }
+  })
   return {
     entry: DOCUMENT_ENTRY,
-    outline: {
-      kind: "document",
-      headings: headings.map(({ depth, text }): DocumentHeading => {
-        const plain = decodeHtml(text).replace(/\s+/g, " ").trim()
-        return { depth, text: plain, slug: slug(plain) }
-      }),
-    },
+    outline: { kind: "document", headings: outlined },
+    references: addresses.map(({ address, as, heading: index }) => ({
+      address,
+      as,
+      at: outlined[index]?.slug ?? "",
+    })),
   }
 }
 
 function checkImage(source: string, paths: ReadonlySet<string>): void {
-  if (/^artifact:/i.test(source)) {
-    throw invalidArtifact(
-      `'${source}': showing another artifact in a document is not supported yet.`
-    )
-  }
   if (source === "" || source.startsWith("//") || /^[a-z][a-z\d+.-]*:/i.test(source)) {
     throw invalidArtifact(
-      `${DOCUMENT_ENTRY} shows the image '${source}'. Images must be files in the artifact: add it to the artifact's folder and refer to it by its relative path.`
+      `${DOCUMENT_ENTRY} shows the image '${source}'. Images must be files in the artifact, by their relative path, or another artifact's address, such as artifact:art_k3m9q2x7tp#chart=revenue.`
     )
   }
   const path = posix.normalize(safeDecodeUri(source.split(/[?#]/)[0] ?? ""))

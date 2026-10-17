@@ -139,6 +139,22 @@ describe("the sheet grid", () => {
     expect(status()).toMatchObject({ range: "C1:C4", numericCount: 3 })
   })
 
+  test("opens on the range an address named, selected", () => {
+    // Reproduce by ignoring `selected` in SheetGrid: the grid opens on A2.
+    const statuses: SheetGridStatus[] = []
+    render(
+      <SheetGrid
+        model={model}
+        locale="en-US"
+        selected={{ top: 1, left: 1, bottom: 2, right: 2 }}
+        onStatusChange={(status) => statuses.push(status)}
+      />
+    )
+    const last = statuses.at(-1)
+    expect(last ? rangeLabel(last.range) : null).toBe("B2:C3")
+    expect(last?.stats.sum).toBeCloseTo(4120000 + 3900000 + 0.269 + 0.281)
+  })
+
   test("copies the selection as tab-separated values", async () => {
     const { press } = mount()
     await press("ArrowDown", { shiftKey: true })

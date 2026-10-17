@@ -127,7 +127,7 @@ describe("publishing a document", () => {
     await expectRequestError(
       create("![x](artifact:art_other#chart=revenue)"),
       "invalid_artifact",
-      "not supported yet"
+      "is not an artifact address"
     )
     await expectRequestError(
       create("![x](../outside.png)"),

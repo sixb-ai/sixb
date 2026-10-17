@@ -22,6 +22,7 @@ import {
   invalidArtifact,
   readArtifactText,
 } from "./files"
+import { brokenDependents, type FoundReference, resolveReferences } from "./references"
 import { validateDocument } from "./validate/document"
 import { validateFileArtifact } from "./validate/file"
 import { validateSheet } from "./validate/sheet"
@@ -62,14 +63,22 @@ export async function publishArtifact(
   const title = checkTitle(input.title)
   await checkArtifactFiles(context.blobStorage, input.files)
   if (input.kind !== "file") await checkTheme(context.blobStorage, input.files)
-  const { entry, outline } = await validateKind(context.blobStorage, input.kind, input.files)
+  const validated = await validateKind(context.blobStorage, input.kind, input.files)
+  const { entry, outline } = validated
+  const referenceContext = {
+    projectId: context.projectId,
+    storage: context.storage,
+    author: input.author,
+    ...(input.artifactId ? { artifactId: input.artifactId } : {}),
+  }
+  const references = await resolveReferences(referenceContext, validated.references ?? [])
 
   const version: ArtifactVersionInput = {
     title,
     entry,
     files: input.files.map(({ path, file }) => ({ path, file: { ...file } })),
     outline,
-    references: [],
+    references,
     author: input.author,
     ...(input.origin ? { origin: input.origin } : {}),
     createdAt: new Date(),
@@ -77,14 +86,31 @@ export async function publishArtifact(
   const stored = input.artifactId
     ? await publishVersion(context, input.artifactId, input.kind, version)
     : await createArtifact(context, input.kind, input.author, version)
-  return { ...stored, warnings: [] }
+  // A first version breaks nothing: no other artifact could name it yet. The version is stored by
+  // now, and for the Agent inside its run's transaction, so a failed check only loses warnings.
+  let warnings: readonly ArtifactWarning[] = []
+  if (input.artifactId) {
+    try {
+      warnings = await brokenDependents(referenceContext, stored.artifact, stored.version)
+    } catch (error) {
+      console.warn(
+        `[Sixb] Could not check which artifacts version ${stored.version.version} of '${stored.artifact.id}' breaks:`,
+        error
+      )
+    }
+  }
+  return { ...stored, warnings }
 }
 
 async function validateKind(
   blobStorage: ArtifactBlobStorage,
   kind: ArtifactKind,
   files: readonly ArtifactFile[]
-): Promise<{ readonly entry: string; readonly outline: ArtifactOutline }> {
+): Promise<{
+  readonly entry: string
+  readonly outline: ArtifactOutline
+  readonly references?: readonly FoundReference[]
+}> {
   switch (kind) {
     case "document":
       return validateDocument(blobStorage, files)

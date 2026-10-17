@@ -1,4 +1,5 @@
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { artifactHref } from "../pages/routes"
 import { type ArtifactTarget, artifactTargetFromSearch, withArtifactTarget } from "./target"
 import { Viewer } from "./viewer"
 
@@ -29,12 +30,22 @@ export function ArtifactPage() {
           // Back to where the link was followed from, or into the app for a link opened cold.
           onBack: () => (canGoBack() ? navigate(-1) : navigate("/")),
         }}
+        // A version or part of this artifact replaces the address; it is the same page.
         onTargetChange={(next) => {
           if (next.type !== "artifact") return
           const nextParams = withArtifactTarget(searchParams, next)
           nextParams.delete("artifact")
           setSearchParams(nextParams, { replace: true })
         }}
+        // Another artifact is another page, so back returns to this one.
+        onOpenReference={(next) =>
+          navigate(
+            artifactHref(next.artifactId, {
+              ...(next.version === undefined ? {} : { version: next.version }),
+              ...(next.part === undefined ? {} : { part: next.part }),
+            })
+          )
+        }
       />
     </div>
   )
