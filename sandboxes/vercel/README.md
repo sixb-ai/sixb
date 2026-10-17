@@ -183,11 +183,14 @@ new VercelSandboxFactory({
 
 ## Credential injection
 
-Persistent sessions support `sandbox.setRequestCredentials()`: replace host-side Authorization
-injection for exact HTTPS paths and GET/POST methods, or pass `[]` to remove it. Injection never
-widens the egress allowlist, changes persistent defaults or writes secrets inside the VM.
-The worker manages workspace token issuance, renewal and revocation; stop removes network access
-before saving. This capability does not guarantee revocation after a worker crash.
+Ephemeral and persistent sandboxes support `sandbox.setRequestCredentials()`: replace host-side
+Authorization injection for exact HTTPS paths and GET/POST methods, or pass `[]` to remove it.
+`create({ requestCredentials })` applies the initial credentials before the source clone and setup.
+Injection never widens the egress allowlist, changes sandbox defaults or writes secrets inside the
+VM: secrets are sent only as the current session's network policy, never at sandbox creation.
+Renewal targets that session and rejects once the handle is stopped; it never resumes a new VM.
+The worker manages workspace token issuance, renewal and revocation; persistent stop removes
+network access before saving. This capability does not guarantee revocation after a worker crash.
 
 ## Tests
 
@@ -204,6 +207,7 @@ consume metered Vercel Sandbox resources:
 SIXB_VERCEL_SANDBOX_INTEGRATION=1 bun --filter @sixb/sandboxes-vercel test
 ```
 
-Persistence tests use the installed SDK with a simulated transport: they make no Vercel requests
-and incur no Vercel usage. There is no live persistence test. These tests verify the adapter's
-behavior, not actual file preservation by the Vercel service.
+Persistence and credential injection tests use the installed SDK with a simulated transport: they
+make no Vercel requests and incur no Vercel usage. There is no live persistence or injection test.
+These tests verify the adapter's behavior, not actual file preservation or header injection by the
+Vercel service.

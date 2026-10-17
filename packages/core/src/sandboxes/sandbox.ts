@@ -123,6 +123,7 @@ export interface Sandbox {
   /** Optional secure injection capability. Replaces all credentials on this session only.
    * An empty list removes injection. Secrets must never enter guest files, env or snapshots.
    * Must not resume a stopped session or change defaults inherited by future sessions.
+   * Renewal, ephemeral or persistent, targets the handle's session; after stop() it rejects.
    */
   readonly setRequestCredentials?: (
     credentials: readonly SandboxRequestCredential[]
@@ -166,7 +167,7 @@ export interface Sandbox {
  * Credentials and current authority must be supplied again, never inferred from saved files.
  */
 export interface SandboxFactory<in out TParams extends ParamsConfig = ParamsConfig> {
-  /** Supports initial and renewable host-only credentials on named persistent sessions. */
+  /** Supports initial and renewable host-only credentials on ephemeral and named sessions. */
   readonly supportsRequestCredentials?: boolean
   /** Common host-side environment recipe. Never a discovered Agent definition. */
   readonly configuration?: SandboxConfig<TParams>

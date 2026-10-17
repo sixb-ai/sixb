@@ -103,11 +103,6 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
   }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
-    if (options.requestCredentials !== undefined && options.persistence === undefined) {
-      throw new SandboxError(
-        "[Sandbox] Vercel request credentials require a named persistent session."
-      )
-    }
     const environment = sandboxCreationEnvironment(this.configuration, options)
     assertNoLegacyPersistence(this.defaults)
     assertNoLegacyPersistence(options)
@@ -123,7 +118,11 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
       }
       return this.createPersistent(options.persistence.name, resolved, environment, options.signal)
     }
-    const { env = {}, network = { mode: "none" } } = resolved
+    const { env = {}, network = { mode: "none" }, requestCredentials = [] } = resolved
+
+    // Reject disallowed targets before provisioning. Secrets reach only the session, never the
+    // creation defaults Vercel reapplies to later sessions and keeps until deletion.
+    withRequestCredentials(network, requestCredentials)
     const params = buildCreateParams({
       defaults: this.defaults,
       env,
@@ -138,9 +137,21 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
       const sandbox = new VercelSandbox({
         client,
         env,
+        network,
         timeout: options.timeout ?? this.defaults.timeout,
         workingDirectory: options.workingDirectory,
       })
+
+      // Inject before any setup command so the source clone already authenticates host-side.
+      if (requestCredentials.length > 0) {
+        if (sandbox.setRequestCredentials === undefined) {
+          throw new SandboxError(
+            "[Sandbox] Vercel sandbox client cannot inject request credentials."
+          )
+        }
+        await sandbox.setRequestCredentials(requestCredentials)
+      }
+
       await ensureWorkingDirectory({
         client,
         workingDirectory: sandbox.workingDirectory,
@@ -369,11 +380,25 @@ async function safeStderr(finished: VercelCommandFinishedClient): Promise<string
   }
 }
 
-async function createVercelSandbox(
+/** Bind every operation to the created session, never the SDK's automatically-resuming handle. */
+export async function createVercelSandbox(
   params: VercelCreateSandboxParams
 ): Promise<VercelSandboxClient> {
   const sandbox = await VercelSdkSandbox.create(params)
-  return sandbox as unknown as VercelSandboxClient
+  const session = sandbox.currentSession()
+
+  return {
+    name: sandbox.name,
+    cwd: session.cwd,
+    get status() {
+      return session.status
+    },
+    runCommand: (command) => session.runCommand({ ...command, args: [...(command.args ?? [])] }),
+    writeFiles: (files, opts) => session.writeFiles([...files], opts),
+    stop: (opts) => session.stop(opts),
+    updateNetworkPolicy: (policy) => session.update({ networkPolicy: policy }),
+    delete: (opts) => sandbox.delete(opts),
+  }
 }
 
 function errorMessage(error: unknown): string {

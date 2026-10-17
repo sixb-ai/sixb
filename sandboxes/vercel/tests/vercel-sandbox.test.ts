@@ -334,6 +334,31 @@ describe("VercelSandboxFactory", () => {
     expect(captured).toMatchObject({ runtime: DEFAULT_VERCEL_SANDBOX_RUNTIME })
   })
 
+  test("a client without session policy updates rejects credentials before any command", async () => {
+    // Regression proof: call sandbox.setRequestCredentials?.() in create(); the clone then runs
+    // unauthenticated instead of failing.
+    const client = new FakeVercelClient()
+    const factory = new VercelSandboxFactory({}, async () => client)
+
+    await expect(
+      factory.create({
+        network: { mode: "all" },
+        requestCredentials: [
+          {
+            origin: "https://github.com",
+            path: "/acme/repo.git/info/refs",
+            method: "GET",
+            headers: { Authorization: "Basic secret" },
+          },
+        ],
+        environment: { source: { type: "git", url: "https://github.com/acme/repo.git" } },
+      })
+    ).rejects.toThrow("[Sandbox] Vercel sandbox client cannot inject request credentials.")
+
+    expect(client.commands).toHaveLength(0)
+    expect(client.deleteCalls).toBe(1)
+  })
+
   test("rejects snapshot configuration conflicts", async () => {
     const factory = new VercelSandboxFactory({ snapshotId: "snap_1", image: "agent:latest" })
     await expect(factory.create()).rejects.toThrow("snapshotId cannot be combined")

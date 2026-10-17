@@ -6,10 +6,11 @@ import {
   SandboxError,
   type SandboxFileRecord,
   SandboxNotRunningError,
-  type SandboxRequestCredential,
   type SandboxSessionOptions,
   type SandboxStatus,
 } from "@sixb/core"
+import type { NetworkPolicy } from "@vercel/sandbox"
+import { withRequestCredentials } from "./network"
 
 const DEFAULT_WORKING_DIRECTORY = "/vercel/sandbox"
 const KILLED_EXIT_CODE = 137
@@ -35,9 +36,8 @@ export interface VercelCommandClient {
 }
 
 export interface VercelSandboxClient {
-  readonly setRequestCredentials?: (
-    credentials: readonly SandboxRequestCredential[]
-  ) => Promise<void>
+  /** Replace the network policy of this client's session only, never the sandbox defaults. */
+  readonly updateNetworkPolicy?: (policy: NetworkPolicy) => Promise<void>
   readonly name: string
   readonly cwd?: string
   readonly status?: string
@@ -82,12 +82,17 @@ export class VercelSandbox implements Sandbox {
     )
     this.sandboxEnv = options.env ?? {}
     this.defaultTimeoutMs = options.timeout
-    if (options.client.setRequestCredentials) {
-      const setCredentials = options.client.setRequestCredentials.bind(options.client)
+    if (options.client.updateNetworkPolicy) {
+      const updateNetworkPolicy = options.client.updateNetworkPolicy.bind(options.client)
+      const network = options.network
+
+      // Each update replaces the session policy: configured egress plus these exact targets.
       this.setRequestCredentials = async (credentials) => {
         this.assertRunning("update request credentials")
+        const policy = withRequestCredentials(network, credentials)
+
         try {
-          await setCredentials(credentials)
+          await updateNetworkPolicy(policy)
         } catch {
           // SDK request errors can include the injected headers.
           throw new SandboxError("[Sandbox] Vercel credential injection update failed.")

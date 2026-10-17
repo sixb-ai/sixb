@@ -33,9 +33,10 @@ Vercel requests can outlive their worker: storage fencing cannot cancel provider
 Uncertain sandboxes stay blocked; explicit recreation uses a new name without deleting old state.
 Saved files remain subject to provider retention.
 
-Source `auth` stays host-side. Named providers advertising `supportsRequestCredentials` must apply
+Source `auth` stays host-side. Providers advertising `supportsRequestCredentials` must apply
 execution-prepared credentials; direct create/resume never invoke `auth` implicitly. They apply
-initial credentials before setup and expose session-scoped renewal. Unsupported providers reject
-credentials before provisioning. During initial provisioning/setup, the worker aborts before token
-expiry if no session handle is available yet; renewal begins after acquisition. Normal teardown
-removes injection and revokes grants. A crash cannot guarantee immediate revocation.
+initial credentials before setup and expose session-scoped renewal, for ephemeral and named
+sandboxes alike. Unsupported providers reject credentials before provisioning. During initial
+provisioning/setup, the worker aborts before token expiry if no session handle is available yet;
+renewal begins after acquisition. Normal teardown removes injection and revokes grants. A crash
+cannot guarantee immediate revocation.
