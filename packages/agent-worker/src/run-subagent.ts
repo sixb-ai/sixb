@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@sixb/core"
 import { runModelLoop } from "@sixb/core/internal/agents"
-import { createSixbError } from "@sixb/core/internal/errors"
+import { createSixbError, withFailureMessage } from "@sixb/core/internal/errors"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import { coerceAgentRunFinishReason, type SubagentRunRecord } from "@sixb/core/storage"
 import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION, withCurrentTime } from "./agent-prompt"
@@ -55,6 +55,18 @@ export async function runSubagent(input: {
   assertSubagentCanFinalize({ runtime, sandboxReadiness })
   if (generation.status === "aborted")
     throw new DOMException("Subagent stream was aborted.", "AbortError")
+  // The parent would read a cut-short answer as complete: it gets the cause instead.
+  if (generation.finishReason === "length") {
+    const remedy = "Spawn it again with lower reasoning or a narrower task."
+    throw withFailureMessage(
+      createSixbError(
+        "agent.execution_failed",
+        `[SixbAgentWorker] Subagent run '${run.id}' reached the model's output limit before finishing its answer. ${remedy}`,
+        { details: { parentRunId: run.parentRunId, runId: run.id } }
+      ),
+      `The subagent's model reached its output limit before finishing its answer. ${remedy}`
+    )
+  }
   const parts = agentTraceFromModelSteps(generation.steps, {
     parentRunId: run.parentRunId,
     runId: run.id,

@@ -38,6 +38,7 @@ export function responsesInput(messages: readonly ModelMessage[], providerId: st
         phases.set(data.messageId, data.phase)
       }
     }
+    const firstItem = input.length
     const assistantText: JsonValue[] = []
     let assistantMessageId: string | undefined
     const flushAssistantText = () => {
@@ -90,6 +91,9 @@ export function responsesInput(messages: readonly ModelMessage[], providerId: st
       }
     }
     flushAssistantText()
+    // A reasoning item only replays with the item it led to. An answer cut short by the output
+    // limit, or cancelled, can end on reasoning alone, and Responses rejects it.
+    while (input.length > firstItem && object(input.at(-1))?.type === "reasoning") input.pop()
   }
   return input
 }

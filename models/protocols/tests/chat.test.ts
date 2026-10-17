@@ -392,3 +392,31 @@ test("serializes portable history and isolates reasoning to same-provider curren
     )[2]?.reasoning_content
   ).toBeUndefined()
 })
+
+test("does not replay an answer cut short while reasoning", () => {
+  // Chat replays reasoning only beside the tool calls it led to: a turn left with reasoning alone,
+  // or whose cut-short tool call was dropped, has nothing to send and is skipped.
+  const question = { role: "user" as const, content: [{ type: "text" as const, text: "Go" }] }
+  expect(
+    chatInput(
+      [
+        question,
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "reasoning",
+              text: "Hmm",
+              providerData: { provider: { reasoning_content: "Hmm" } },
+            },
+          ],
+        },
+        question,
+      ],
+      { providerId: "provider", errorPrefix: "[Test]", reasoningReplay: "tool-continuation" }
+    )
+  ).toEqual([
+    { role: "user", content: [{ type: "text", text: "Go" }] },
+    { role: "user", content: [{ type: "text", text: "Go" }] },
+  ])
+})

@@ -7,7 +7,7 @@ import {
 import { prepareAgentModel, resolveAgentContextBudget } from "../src/context-budget"
 import { WorkerTestModel } from "./worker-model-fixture"
 
-function selection(limits: Partial<LanguageModelDefinition> = {}) {
+function selection(limits: Partial<LanguageModelDefinition> = {}, maxOutputTokens?: number) {
   return {
     model: new WorkerTestModel({
       definition: defineLanguageModel({
@@ -17,6 +17,7 @@ function selection(limits: Partial<LanguageModelDefinition> = {}) {
         capabilities: {},
         ...limits,
       }),
+      ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
     }),
   }
 }
@@ -91,6 +92,53 @@ describe("agent context budget resolution", () => {
     expect(outputs).toEqual([400, 100, 400])
     expect(model.definition.contextWindow).toBeUndefined()
   })
+  test("uses the binding's output limit as the allowance, beyond the default", async () => {
+    // Removal proof: ignore `selection.model.maxOutputTokens` in resolveAgentContextBudget; the
+    // allowance falls back to 16,384 and requests stay below the binding's limit.
+    const base = selection({ contextWindow: 200_000, maxOutputTokens: 64_000 }, 32_000)
+    const outputs: (number | undefined)[] = []
+    base.model.stream = async (request) => {
+      outputs.push(request.maxOutputTokens)
+      return { events: (async function* () {})() }
+    }
+    const { model, budget } = await prepareAgentModel(base)
+    await model.stream({
+      callId: "call",
+      tools: [],
+      messages: [],
+      signal: AbortSignal.timeout(1_000),
+    })
+    expect(budget).toMatchObject({ reserveTokens: 32_000, inputBudgetTokens: 168_000 })
+    expect(model.definition.maxOutputTokens).toBe(32_000)
+    expect(outputs).toEqual([32_000])
+  })
+
+  test("caps the binding's output limit at the resolved model maximum", async () => {
+    // Removal proof: drop the `definition.maxOutputTokens` cap on the binding's limit; the
+    // reserve keeps 32,000 tokens the model can never produce.
+    const base = selection({}, 32_000)
+    const model = Object.assign(base.model, {
+      resolve: async () =>
+        new WorkerTestModel({
+          definition: defineLanguageModel({
+            ...base.model.definition,
+            contextWindow: 128_000,
+            maxOutputTokens: 20_000,
+          }),
+          maxOutputTokens: 32_000,
+        }),
+    })
+    const { budget } = await prepareAgentModel({ model })
+    expect(budget).toMatchObject({ reserveTokens: 20_000, inputBudgetTokens: 108_000 })
+  })
+
+  test("names the binding whose output limit leaves no input budget", async () => {
+    // Removal proof: throw the generic reserve message; the binding and the fix go unnamed.
+    await expect(prepareAgentModel(selection({ contextWindow: 32_000 }, 32_000))).rejects.toThrow(
+      "'mock/model' sets maxOutputTokens to 32,000 in a 32,000-token window. Lower maxOutputTokens on the model binding."
+    )
+  })
+
   // Regression proof: remove maxInputTokens from the budget calculation.
   test("respects separate context and input limits", () => {
     expect(

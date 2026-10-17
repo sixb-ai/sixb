@@ -34,6 +34,7 @@ export interface WorkerTestModelOptions {
   readonly capabilities?: ModelCapabilities
   readonly definition?: LanguageModelDefinition
   readonly defaultReasoning?: ModelReasoningLevel
+  readonly maxOutputTokens?: number
   readonly stream?: (request: LanguageModelRequest) => Promise<WorkerTestStream>
   readonly generate?: (request: LanguageModelRequest) => Promise<WorkerTestGeneration>
 }
@@ -44,6 +45,7 @@ export class WorkerTestModel implements LanguageModel {
   readonly modelId: string
   readonly definition: LanguageModelDefinition
   readonly defaultReasoning?: ModelReasoningLevel
+  readonly maxOutputTokens?: number
   private readonly handler: (request: LanguageModelRequest) => Promise<WorkerTestStream>
 
   constructor(options: WorkerTestModelOptions = {}) {
@@ -73,6 +75,7 @@ export class WorkerTestModel implements LanguageModel {
     this.providerId = this.definition.providerId
     this.modelId = this.definition.modelId
     if (options.defaultReasoning !== undefined) this.defaultReasoning = options.defaultReasoning
+    if (options.maxOutputTokens !== undefined) this.maxOutputTokens = options.maxOutputTokens
     this.handler =
       options.stream ??
       (options.generate

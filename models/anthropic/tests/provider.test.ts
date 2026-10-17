@@ -1476,3 +1476,14 @@ test("carries a default reasoning set on the model binding", async () => {
     "[SixbAnthropic] reasoning must be one of:"
   )
 })
+
+test("exposes the binding's output limit only when the binding sets one", async () => {
+  // Proven by removal: drop the `this.maxOutputTokens` assignment from the model constructor.
+  const provider = createAnthropic({ apiKey: "test", fetch: async () => Response.json({}) })
+  const model = provider("claude-opus-5", { maxOutputTokens: 64_000 })
+
+  expect(model.maxOutputTokens).toBe(64_000)
+  expect((await model.resolve?.({ offline: true }))?.maxOutputTokens).toBe(64_000)
+  // The model maximum still bounds every request, but it is not the developer's choice.
+  expect(provider("claude-opus-5").maxOutputTokens).toBeUndefined()
+})

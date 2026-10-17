@@ -252,7 +252,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
     const finishReason = coerceAgentRunFinishReason(result.finishReason) ?? "unknown"
     const assistant: AgentMessage = { role: "assistant", parts: interruptedParts }
-    const stepLimit = stepLimitDiagnostic(assistant, { finishReason, maxSteps })
+    const runDiagnostics = [
+      stepLimitDiagnostic(assistant, { finishReason, maxSteps }),
+      outputLimitDiagnostic(finishReason),
+    ].filter((diagnostic) => diagnostic !== undefined)
     let outputAttachments: Awaited<ReturnType<typeof collectAgentOutputAttachments>>
     try {
       outputAttachments = await collectAgentOutputAttachments({
@@ -298,11 +301,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         status: "succeeded",
         modelId: plan.model.modelId,
         finishReason,
-        ...(outputAttachments.diagnostics.length === 0 && !stepLimit
+        ...(outputAttachments.diagnostics.length === 0 && runDiagnostics.length === 0
           ? {}
-          : {
-              diagnostics: [...(stepLimit ? [stepLimit] : []), ...outputAttachments.diagnostics],
-            }),
+          : { diagnostics: [...runDiagnostics, ...outputAttachments.diagnostics] }),
       },
     })
 
@@ -336,6 +337,20 @@ function stepLimitDiagnostic(
     severity: "warning",
     scope: "run",
     message: `The Agent reached its ${input.maxSteps}-step limit before producing a final answer.`,
+  }
+}
+
+/**
+ * An answer the output limit cut short keeps what the model produced, reasoning included, and says
+ * so the same way. Its unfinished tool calls were dropped unexecuted.
+ */
+function outputLimitDiagnostic(finishReason: AgentRunFinishReason): AgentRunDiagnostic | undefined {
+  if (finishReason !== "length") return undefined
+  return {
+    code: "output_limit_reached",
+    severity: "warning",
+    scope: "run",
+    message: "The model reached its output limit before finishing the answer.",
   }
 }
 

@@ -32,6 +32,40 @@ export function findPreStreamFailedRun(
     : latest
 }
 
+/** Diagnostics of a turn that stopped short of its answer, which a continuation can finish. */
+const CONTINUABLE_DIAGNOSTIC_CODES: ReadonlySet<string> = new Set([
+  "step_limit_reached",
+  "output_limit_reached",
+])
+
+export function isContinuableDiagnostic(code: string): boolean {
+  return CONTINUABLE_DIAGNOSTIC_CODES.has(code)
+}
+
+/**
+ * Whether the conversation offers Continue: a turn cut short with its progress saved, or, once
+ * nothing runs, a newest answer whose diagnostic says it stopped short of finishing.
+ */
+export function offersContinue(input: {
+  readonly presentation: ActiveTurnPresentation
+  readonly isRunning: boolean
+  readonly sandboxRecovery: boolean
+  readonly messages: readonly AgentMessage[]
+}): boolean {
+  const { presentation } = input
+  if (input.sandboxRecovery) return false
+  if (presentation.kind === "timeout" || presentation.kind === "interrupted") {
+    return presentation.hasProgress
+  }
+  const latest = input.messages.at(-1)
+  return (
+    presentation.kind === "idle" &&
+    !input.isRunning &&
+    latest?.role === "assistant" &&
+    latest.annotations.some((annotation) => isContinuableDiagnostic(annotation.code))
+  )
+}
+
 // ── Active turn presentation ─────────────────────────────────────────────────────────────────────
 
 /** Pick the run the conversation should follow: pending send, thread claim, then durable history. */

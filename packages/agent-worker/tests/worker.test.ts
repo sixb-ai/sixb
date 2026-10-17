@@ -4590,6 +4590,63 @@ describe("AgentWorker", () => {
     }
   })
 
+  test.each([
+    "",
+    "Partial",
+  ])("fails a workflow agent step the output limit cut short (text: '%s')", async (text) => {
+    // Removal proof: drop the `finishReason === "length"` check from runWorkflowAgentNode; the
+    // partial answer is structured as if complete, or the failure no longer names the cause.
+    const calls: string[] = []
+    const model = new WorkerTestModel({
+      generate: async (request) => {
+        calls.push(request.responseFormat ? "finalize" : "research")
+        return {
+          content: request.responseFormat
+            ? [{ type: "text", text: JSON.stringify({ answer: "Partial", confidence: 0.5 }) }]
+            : text
+              ? [{ type: "text", text }]
+              : [],
+          finishReason: request.responseFormat ? "stop" : "length",
+          usage: USAGE,
+        }
+      },
+    })
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model,
+      runId: `workflow-output-limit-${text || "empty"}`,
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "cut-short workflow agent step" }
+      )
+      expect(execution).toMatchObject({
+        status: "failed",
+        finishReason: "length",
+        error: {
+          code: "agent.execution_failed",
+          message:
+            "Agent execution failed. The model reached its output limit before finishing its answer. Raise maxOutputTokens on the model binding or lower the step's reasoning.",
+        },
+      })
+      expect(calls).toEqual(["research"])
+      expect(
+        (await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId }))?.error
+      ).toMatchObject({
+        code: "workflow.node_failed",
+        message: expect.stringContaining("The model reached its output limit"),
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("keeps workflow usage when structured output validation fails", async () => {
     const { sixb, runs, nodeRunId, agentExecutionId } = await queueWorkflowAgentNode({
       model: invalidStructuredAnswerModel(),
@@ -7067,6 +7124,60 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("tells the parent a subagent's answer was cut short instead of passing it on", async () => {
+    // Removal proof: drop the `finishReason === "length"` check from runSubagent; the child
+    // succeeds and the parent receives "Partial" as if it were the complete answer.
+    let childRunId = ""
+    const parentCalls: LanguageModelRequest[] = []
+    const childModel = new WorkerTestModel({
+      providerId: "gateway",
+      modelId: "zai/glm-5.3-flash",
+      stream: async () =>
+        stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "child-answer" },
+          { type: "text-delta", id: "child-answer", delta: "Partial" },
+          { type: "text-end", id: "child-answer" },
+          finish("length"),
+        ]),
+    })
+    const parentModel = delegatingParentModel({
+      childRunId: () => childRunId,
+      childModel: { provider: childModel.providerId, modelId: childModel.modelId },
+      onCall: (options) => parentCalls.push(options),
+    })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { text: "Delegate this research task." })
+    childRunId = createSubagentRunId(requested.run.id, "research")
+    const worker = new AgentWorker(sixb, workerOptions())
+    const delegation = injectDelegationForTest(sixb)
+    await worker.start()
+    try {
+      await waitFor(
+        async () =>
+          (await storage.runs.getById({ projectId: PROJECT_ID, id: requested.run.id }))?.status ===
+          "succeeded",
+        { label: "delegating parent run terminal" }
+      )
+      const message =
+        "Agent execution failed. The subagent's model reached its output limit before finishing its answer. Spawn it again with lower reasoning or a narrower task."
+      expect(await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })).toMatchObject({
+        status: "failed",
+        error: { code: "agent.execution_failed", message },
+      })
+      const waited = JSON.stringify(parentCalls[2]?.messages.at(-1))
+      expect(waited).toContain(JSON.stringify(message).slice(1, -1))
+      expect(waited).not.toContain("Partial")
+    } finally {
+      await worker.stop()
+      delegation.mockRestore()
+    }
+  })
+
   test("rejects unconfigured subagent model pairs before admission with exact recovery choices", async () => {
     const invalidModels = [
       { provider: "gateway/deepseek", modelId: "deepseek-v4-flash-vision-exp" },
@@ -7949,6 +8060,148 @@ describe("AgentWorker", () => {
       const parts = assistant?.parts ?? []
       expect(parts.filter((part) => part.type === "tool-call")).toHaveLength(4)
       expect(parts.some((part) => part.type === "text")).toBe(false)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Removal proof: drop `outputLimitDiagnostic` from runAgentTurn and the diagnostic is missing;
+  // drop `withoutLocalToolCalls` from runModelLoop and the cut-short tool call fails the run; drop
+  // `settleTruncatedParts` from the stream accumulator and spans left open fail it; drop the
+  // trailing-reasoning loop from responsesInput and the next turn replays a lone reasoning item.
+  test.each([
+    {
+      name: "reasoning only",
+      cutShort: [],
+      replayed: ["system", "user", "user"],
+    },
+    {
+      name: "partial text",
+      cutShort: [
+        { type: "response.output_text.delta", item_id: "message", delta: "Partial" },
+        { type: "response.output_text.done", item_id: "message", text: "Partial" },
+      ],
+      replayed: ["system", "user", "reasoning", "assistant", "user"],
+    },
+    {
+      name: "a cut-short tool call",
+      cutShort: [
+        {
+          type: "response.output_item.added",
+          item: { id: "fc", type: "function_call", call_id: "call", name: "echo", arguments: "" },
+        },
+        {
+          type: "response.function_call_arguments.done",
+          item_id: "fc",
+          arguments: '{"value":"x"}',
+        },
+      ],
+      replayed: ["system", "user", "user"],
+    },
+    {
+      name: "spans left open",
+      cutShort: [
+        { type: "response.output_text.delta", item_id: "message", delta: "Partial" },
+        {
+          type: "response.output_item.added",
+          item: { id: "fc", type: "function_call", call_id: "call", name: "echo", arguments: "" },
+        },
+        { type: "response.function_call_arguments.delta", item_id: "fc", delta: '{"value":' },
+      ],
+      replayed: ["system", "user", "reasoning", "assistant", "user"],
+    },
+  ])("keeps an answer the output limit cut short ($name) and replays it safely", async ({
+    cutShort,
+    replayed,
+  }) => {
+    const requests: {
+      readonly input: readonly { readonly role?: string; readonly type?: string }[]
+    }[] = []
+    const gateway = createVercelGateway({
+      fetch: async (url, init) => {
+        if (String(url).endsWith("/models")) {
+          return Response.json({
+            data: [{ id: "zai/glm-5.3-flash", type: "language", context_window: 64_000 }],
+          })
+        }
+        requests.push(JSON.parse(String(init?.body)))
+        const events =
+          requests.length === 1
+            ? [
+                {
+                  type: "response.output_item.done",
+                  item: {
+                    type: "reasoning",
+                    id: "rs",
+                    summary: [{ type: "summary_text", text: "Thinking" }],
+                    encrypted_content: "opaque",
+                  },
+                },
+                ...cutShort,
+                {
+                  type: "response.incomplete",
+                  response: {
+                    status: "incomplete",
+                    incomplete_details: { reason: "max_output_tokens" },
+                    usage: { input_tokens: 10, output_tokens: 7 },
+                  },
+                },
+              ]
+            : [
+                { type: "response.output_text.done", item_id: "answer", text: "Done" },
+                {
+                  type: "response.completed",
+                  response: { status: "completed", usage: { input_tokens: 10, output_tokens: 1 } },
+                },
+              ]
+        return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""))
+      },
+    })
+    let executed = 0
+    const echo = defineAgentTool("echo")
+      .description("Echo a value back.")
+      .input({ value: "string" })
+      .run(({ input }) => {
+        executed += 1
+        return { echoed: input.value }
+      })
+    const sixb = buildSixb(gateway("zai/glm-5.3-flash"), new InMemoryBroker(), undefined, {
+      agentTools: [echo],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const first = await requestAgent(sixb, { text: "Think hard" })
+      const finished = (id: string) =>
+        waitFor(
+          async () => {
+            const run = await storage.runs.getById({ projectId: PROJECT_ID, id })
+            return run && run.status !== "queued" && run.status !== "running" ? run : null
+          },
+          { label: "cut-short run terminal" }
+        )
+      expect(await finished(first.run.id)).toMatchObject({
+        status: "succeeded",
+        finishReason: "length",
+        diagnostics: [
+          {
+            code: "output_limit_reached",
+            severity: "warning",
+            scope: "run",
+            message: "The model reached its output limit before finishing the answer.",
+          },
+        ],
+      })
+      expect(executed).toBe(0)
+      const [, assistant] = await listMessages(storage, first.run.threadId)
+      expect(assistant?.parts.some((part) => part.type === "tool-call")).toBe(false)
+
+      const next = await requestAgent(sixb, { threadId: first.run.threadId, text: "Again" })
+      const answered = await finished(next.run.id)
+      expect(answered).toMatchObject({ status: "succeeded", finishReason: "stop" })
+      expect(answered.diagnostics).toBeUndefined()
+      expect(requests[1]?.input.map((item) => item.role ?? item.type)).toEqual([...replayed])
     } finally {
       await worker.stop()
     }
