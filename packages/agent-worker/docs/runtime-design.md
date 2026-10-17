@@ -91,6 +91,10 @@ For a blank sandbox:
    `bash` call becomes `runCommand("bash", ["-lc", script], ...)`.
 4. On run teardown the worker releases it, which calls `destroy()`.
 
+A workflow node's deadline also covers provisioning: it starts before the environment is created,
+and it, a cancellation or a worker shutdown cancels `create()`. Finishing the node never does: a
+sandbox still booting then is destroyed once it is ready.
+
 A thread's workspace is ready before the first model call instead, so the system prompt can
 describe it, and its network follows its recipe, which always includes the gateway.
 
