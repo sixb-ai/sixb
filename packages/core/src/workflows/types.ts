@@ -22,6 +22,7 @@ import type { InferSchemaOrRef, ObjectRef, SchemaOrRef } from "../ontology"
 import type { PipelinesRuntime } from "../pipelines/execution"
 import type { ProjectionsRuntime } from "../projections/execution"
 import type { RulesRuntime } from "../rules/execution"
+import type { SandboxFactory } from "../sandboxes"
 import type { ScheduleDefinition, ScheduleDefinitionForEvent } from "../schedules"
 import type { SchedulesRuntime } from "../schedules/execution"
 import type { GroupDefinition } from "../security"
@@ -147,6 +148,13 @@ export interface DefineAgentStepConfig {
   readonly tools?: readonly AgentToolDefinition[]
   /** Names of the project Agent Skills (`skills/<name>/`) this workflow task may use. Defaults to none. */
   readonly skills?: readonly string[]
+  /**
+   * The step's own sandbox: each run gets a fresh one from this factory's static recipe (source,
+   * setup, env, network and auth), destroyed when the run ends. Without it, each run gets an empty
+   * sandbox from the project's `sandboxes` that reaches only the Sixb API. Factories with `params`
+   * or `resolve` are not supported.
+   */
+  readonly sandbox?: SandboxFactory
 }
 
 export interface AgentStepDefinition<
@@ -164,6 +172,7 @@ export interface AgentStepDefinition<
   readonly groupIds: readonly string[]
   readonly toolNames: readonly string[]
   readonly skillNames: readonly string[]
+  readonly sandbox?: SandboxFactory
   readonly input: TInput
   readonly output: TOutput
   readonly prompt: AgentStepPrompt<Record<string, unknown>>

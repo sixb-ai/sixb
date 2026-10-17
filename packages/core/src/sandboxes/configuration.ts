@@ -112,12 +112,7 @@ export function createSandboxDefinition<TParams extends ParamsConfig>(
     }
   }
   const params = structuredClone(config.params ?? {}) as ParamsConfig
-  const environment = captureEnvironment({
-    ...(config.source === undefined ? {} : { source: config.source }),
-    ...(config.setup === undefined ? {} : { setup: config.setup }),
-    ...(config.env === undefined ? {} : { env: config.env }),
-    ...(config.network === undefined ? {} : { network: config.network }),
-  })
+  const environment = staticSandboxRecipe(config)
   // Capture the function too: later mutation of application config must not change this host.
   // Erase inference only after capturing its schema; every invocation validates and coerces below.
   const resolve = config.resolve as SandboxConfig["resolve"]
@@ -171,6 +166,22 @@ export function sandboxCredentialIssue(input: SandboxCredentialRuleInput): strin
   }
 
   return undefined
+}
+
+/** The static part of a recipe, captured: all a run without thread params can apply. */
+export function staticSandboxRecipe(configuration: {
+  readonly source?: unknown
+  readonly setup?: unknown
+  readonly env?: unknown
+  readonly network?: unknown
+}): SandboxEnvironment {
+  const { source, setup, env, network } = configuration
+  return captureEnvironment({
+    ...(source === undefined ? {} : { source }),
+    ...(setup === undefined ? {} : { setup }),
+    ...(env === undefined ? {} : { env }),
+    ...(network === undefined ? {} : { network }),
+  })
 }
 
 /** Capture declarative data only; never retain caller-owned objects or include values in errors. */

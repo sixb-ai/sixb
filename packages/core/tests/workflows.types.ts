@@ -14,8 +14,10 @@ import {
   param,
   prop,
   ref,
+  type SandboxConfig,
   stringEnum,
 } from "../src"
+import { sandboxConfig } from "../src/sandboxes"
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
@@ -402,5 +404,39 @@ defineWorkflow("bad-global-action-subject")
       transaction: input.transaction,
     },
   }))
+
+// A step has no thread to bind sandbox params to: a parameterized factory is a type error.
+// Regression proof: type DefineAgentStepConfig.sandbox as an object with `create`; the params
+// factory below then type-checks.
+const notExecuted = async (): Promise<never> => {
+  throw new Error("Not executed")
+}
+declare const providerDefault: { readonly configuration: SandboxConfig<Record<never, never>> }
+
+defineAgentStep("static-sandbox", {
+  instructions: "Fix the bug.",
+  sandbox: {
+    create: notExecuted,
+    configuration: sandboxConfig({ source: { type: "git", url: "https://github.com/acme/app" } }),
+  },
+})
+defineAgentStep("provider-default-sandbox", {
+  instructions: "Fix the bug.",
+  sandbox: { ...providerDefault, create: notExecuted },
+})
+const parameterized = {
+  create: notExecuted,
+  configuration: sandboxConfig({
+    params: { branch: param("string") },
+    resolve: ({ params }) => ({
+      source: { type: "git", url: "https://github.com/acme/app", revision: params.branch },
+    }),
+  }),
+}
+defineAgentStep("params-sandbox", {
+  instructions: "Fix the bug.",
+  // @ts-expect-error a parameterized recipe needs a thread binding
+  sandbox: parameterized,
+})
 
 void workflow

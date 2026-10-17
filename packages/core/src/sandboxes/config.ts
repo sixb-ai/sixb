@@ -1,5 +1,5 @@
 import type { ParamsConfig } from "../shared/params/types"
-import { captureEnvironment, type SandboxConfig } from "./configuration"
+import { type SandboxConfig, staticSandboxRecipe } from "./configuration"
 import { SandboxError } from "./errors"
 
 /** Extract only the common recipe; provider credentials and infrastructure stay on the factory. */
@@ -22,12 +22,7 @@ export function sandboxConfig<TParams extends ParamsConfig>(
   ) {
     throw new SandboxError("[Sixb] Use either static source/setup or resolve, not both.")
   }
-  const environment = captureEnvironment({
-    ...(options.source === undefined ? {} : { source: options.source }),
-    ...(options.setup === undefined ? {} : { setup: options.setup }),
-    ...(options.env === undefined ? {} : { env: options.env }),
-    ...(options.network === undefined ? {} : { network: options.network }),
-  })
+  const environment = staticSandboxRecipe(options)
   return Object.freeze({
     ...(authorize ? { auth: Object.freeze({ authorize }) } : {}),
     ...environment,
