@@ -3,7 +3,6 @@ import { cn } from "@sixb/ui/lib/utils"
 import { type ReactNode, useCallback, useState } from "react"
 import { AgentChat } from "./agent-chat"
 import { useRegisteredAgentContext } from "./agent-context-provider"
-import type { AgentDocumentPreviewRenderer } from "./document-preview/types"
 
 export interface AgentPanelProps {
   /** Omitted uses AgentContextProvider; provided is the complete controlled ambient list. */
@@ -13,18 +12,16 @@ export interface AgentPanelProps {
   readonly defaultThreadId?: string | null
   readonly onThreadChange?: (threadId: string | null) => void
   readonly onNewThread?: () => void
-  /** Optional modeless document canvas owned by an enclosing application shell. */
-  readonly documentPreviewHost?: HTMLElement | null
-  /** Keep documents beside the chat on desktop instead of opening a modal. */
-  readonly splitDocumentPreview?: boolean
+  /** Optional modeless artifact canvas owned by an enclosing application shell. */
+  readonly artifactHost?: HTMLElement | null
+  /** Keep artifacts beside the chat on desktop instead of opening a modal. */
+  readonly splitArtifacts?: boolean
   readonly conversationHeaderActions?: ReactNode
   readonly composerPlaceholder?: string
   readonly compact?: boolean
   readonly className?: string
   /** Centered content for an empty conversation. Omit for the agent identity; null hides it. */
   readonly welcomeContent?: ReactNode
-  /** Additional file viewers supplied by the host application. */
-  readonly documentPreviewRenderers?: readonly AgentDocumentPreviewRenderer[]
 }
 
 /** Embeddable chat that never reads or changes the host application's route. */
@@ -34,14 +31,13 @@ export function AgentPanel({
   defaultThreadId = null,
   onThreadChange,
   onNewThread,
-  documentPreviewHost,
-  splitDocumentPreview,
+  artifactHost,
+  splitArtifacts,
   conversationHeaderActions,
   composerPlaceholder,
   compact = true,
   className,
   welcomeContent,
-  documentPreviewRenderers,
 }: AgentPanelProps) {
   const registeredContext = useRegisteredAgentContext()
   const ambientContext = context === undefined ? registeredContext : context
@@ -62,8 +58,8 @@ export function AgentPanel({
       threadId={threadId}
       ambientContext={ambientContext}
       compact={compact}
-      documentPreviewHost={documentPreviewHost}
-      splitDocumentPreview={splitDocumentPreview}
+      artifactHost={artifactHost}
+      splitArtifacts={splitArtifacts}
       conversationHeaderActions={conversationHeaderActions}
       composerPlaceholder={composerPlaceholder}
       welcomeContent={welcomeContent}
@@ -72,7 +68,6 @@ export function AgentPanel({
         onNewThread?.()
       }}
       onNavigateThread={changeThread}
-      documentPreviewRenderers={documentPreviewRenderers}
       className={cn("min-h-0 overflow-hidden bg-background", className)}
     />
   )

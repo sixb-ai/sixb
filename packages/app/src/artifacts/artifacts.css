@@ -1,0 +1,173 @@
+@source "./**/*.{ts,tsx}";
+
+/*
+ * The document page, on top of the shared `.prose`: a measured reading column, a title block, and
+ * the parts a report needs. Theme tokens only, so the app's theme, dark mode, and an artifact's own
+ * `theme.json` all apply.
+ */
+.sixb-document-meta {
+  margin: 0 0 0.75rem;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.prose.sixb-document {
+  max-width: 70ch;
+  font-size: 1.0625rem;
+  line-height: 1.7;
+  text-wrap: pretty;
+}
+
+.prose.sixb-document .sixb-document-title {
+  margin: 0 0 1rem;
+  font-family: var(--font-serif);
+  font-size: clamp(2.25rem, 1.8rem + 1.6vw, 2.875rem);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.08;
+  text-wrap: balance;
+}
+
+.prose.sixb-document .sixb-document-lede {
+  margin: 0 0 2rem;
+  color: color-mix(in oklch, var(--foreground) 78%, var(--background));
+  font-size: 1.25rem;
+  line-height: 1.55;
+}
+
+.prose.sixb-document h2 {
+  margin-top: 3.25rem;
+}
+
+/* The section anchor shows beside a heading the reader points at, and copies its address. */
+.prose.sixb-document :is(h2, h3) {
+  position: relative;
+}
+
+.sixb-section-anchor {
+  display: inline-flex;
+  margin-left: 0.5rem;
+  padding: 0.125rem;
+  vertical-align: middle;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--muted-foreground);
+  opacity: 0;
+  transition: opacity 120ms ease;
+  cursor: pointer;
+}
+
+.sixb-section-anchor svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.prose.sixb-document :is(h2, h3):hover .sixb-section-anchor,
+.sixb-section-anchor:focus-visible,
+.sixb-section-anchor[data-copied] {
+  opacity: 1;
+}
+
+.prose.sixb-document figure {
+  margin: 2rem 0;
+}
+
+.prose.sixb-document figure img,
+.prose.sixb-document p > img {
+  display: block;
+  margin-inline: auto;
+  border-radius: var(--radius);
+}
+
+.prose.sixb-document figcaption {
+  margin-top: 0.75rem;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.sixb-callout {
+  display: flex;
+  gap: 0.75rem;
+  margin: 1.75rem 0;
+  padding: 0.875rem 1rem;
+  border-radius: var(--radius);
+  background: var(--muted);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.sixb-callout[data-callout="warning"],
+.sixb-callout[data-callout="caution"] {
+  background: color-mix(in oklch, var(--warning) 12%, var(--background));
+}
+
+.sixb-callout-icon {
+  flex-shrink: 0;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: 0.1875rem;
+  color: var(--muted-foreground);
+}
+
+.sixb-callout-body {
+  min-width: 0;
+}
+
+.prose .sixb-callout-label {
+  margin: 0 0 0.25rem;
+  font-weight: 600;
+}
+
+.prose .sixb-callout-body > :last-child {
+  margin-bottom: 0;
+}
+
+.prose.sixb-document .sixb-numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.prose.sixb-document table {
+  font-variant-numeric: tabular-nums;
+}
+
+.prose.sixb-document section[data-footnotes] {
+  margin-top: 3.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+}
+
+/* Printing an artifact prints only the artifact, on plain paper. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  [data-sixb-artifact-print],
+  [data-sixb-artifact-print] * {
+    visibility: visible;
+  }
+
+  [data-sixb-artifact-print] {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    overflow: visible;
+  }
+
+  .prose.sixb-document {
+    max-width: none;
+    font-size: 11pt;
+  }
+
+  .prose.sixb-document :is(figure, table, pre, .sixb-callout) {
+    break-inside: avoid;
+  }
+
+  .sixb-section-anchor {
+    display: none;
+  }
+}

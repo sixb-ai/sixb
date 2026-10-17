@@ -1,4 +1,4 @@
-import { ARTIFACT_KINDS } from "@sixb/core/internal/artifacts"
+import { ARTIFACT_KINDS } from "@sixb/core/artifacts"
 import { z } from "zod"
 import { ErrorResponseSchema, PrincipalSchema } from "./common"
 import { FileContentQuerySchema, FileRefSchema } from "./files"

@@ -28,7 +28,7 @@ the same browser tab.
 ### Optional Operations Assistant
 
 The button at the bottom-right opens an agent dock with the current route and detail object attached
-as context. Files open in a closable tabbed canvas over Northline while the dock remains interactive.
+as context. Files and artifacts open in a closable canvas over Northline while the dock remains interactive.
 The dock header keeps collapse, thread history, and one-click compose immediately available. The
 history dialog shows the current thread, recent activity, and meaningful work status; it becomes a
 full-page search surface on small screens. The dock's open state, width, and current thread persist
@@ -114,6 +114,7 @@ bun run demo:reset          # recreate source and runtime state
 bun run demo:sync           # reconcile every source through the data plane
 bun run demo:alarm          # deliver the signed RTU-7 alarm webhook
 bun run demo:approve-quote  # approve a pending source-system quote
+bun run demo:artifacts      # publish sample artifacts and print their links
 ```
 
 Mutable source state lives under `.sixb/demo-sources/` and survives ordinary restarts. Only

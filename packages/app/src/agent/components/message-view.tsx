@@ -11,8 +11,7 @@ import {
 } from "@sixb/ui/components"
 import { AlertTriangle, ArrowRight, ChevronRight, Clock3, RotateCcw, Unplug } from "lucide-react"
 import { memo } from "react"
-import { createAgentDocumentSource } from "../document-preview/source"
-import type { AgentDocumentSource } from "../document-preview/types"
+import { type FileSource, messageFileSource } from "../../artifacts/file-source"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
 import { isAwaitingFirstToken, type LiveRunState } from "../live-run"
@@ -49,11 +48,7 @@ function UserMessage({ message }: { message: AgentMessage }) {
             <UserFileAttachment
               key={index}
               fileRef={part.fileRef}
-              document={agentMessageDocumentSource(
-                message,
-                part.fileRef,
-                `/parts/${index}/fileRef`
-              )}
+              source={agentMessageFileSource(message, part.fileRef, `/parts/${index}/fileRef`)}
             />
           ))}
         </div>
@@ -74,7 +69,7 @@ function AssistantMessage({ message }: { message: AgentMessage }) {
       {message.compaction ? <CompactionResult summary={message.compaction.summary} /> : null}
       <AssistantBody
         parts={normalizeDurableParts(message.parts, {
-          fileSource: (fileRef, path) => agentMessageDocumentSource(message, fileRef, path),
+          fileSource: (fileRef, path) => agentMessageFileSource(message, fileRef, path),
         })}
       />
       {message.annotations.map((annotation, index) => (
@@ -350,12 +345,12 @@ export function ReconnectingMarker() {
 
 export function UserFileAttachment({
   fileRef,
-  document,
+  source,
 }: {
   fileRef: AgentFileRef
-  document?: AgentDocumentSource
+  source?: FileSource
 }) {
-  return <FileAttachmentCard fileRef={fileRef} document={document} />
+  return <FileAttachmentCard fileRef={fileRef} source={source} />
 }
 
 export function RunErrorMarker({ message }: { message: string }) {
@@ -414,12 +409,12 @@ function contextPartsOf(message: AgentMessage): AgentContextEntryInput[] {
   )
 }
 
-function agentMessageDocumentSource(
+function agentMessageFileSource(
   message: AgentMessage,
   fileRef: AgentFileRef,
   path: string
-): AgentDocumentSource {
-  return createAgentDocumentSource({
+): FileSource {
+  return messageFileSource({
     threadId: message.threadId,
     messageId: message.id,
     path,

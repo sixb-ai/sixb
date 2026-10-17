@@ -5,6 +5,18 @@ export function objectHref(objectTypeId: string, primaryId: string): string {
   return `/objects/${encodeURIComponent(objectTypeId)}/${encodeURIComponent(primaryId)}`
 }
 
+/** An artifact's own page, at a version and part when given. */
+export function artifactHref(
+  artifactId: string,
+  options: { readonly version?: number; readonly part?: string } = {}
+): string {
+  const params = new URLSearchParams()
+  if (options.version !== undefined) params.set("v", String(options.version))
+  if (options.part) params.set("part", options.part)
+  const query = params.toString()
+  return `/artifacts/${encodeURIComponent(artifactId)}${query ? `?${query}` : ""}`
+}
+
 /** An object type's page in Ontology › Object types. */
 export function objectTypeHref(objectTypeId: string): string {
   return `/ontology/object-types/${encodeURIComponent(objectTypeId)}`

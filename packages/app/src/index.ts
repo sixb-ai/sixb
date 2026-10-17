@@ -16,13 +16,8 @@ export { AgentPanel, type AgentPanelProps } from "./agent/agent-panel"
 export { AgentSurface, type AgentSurfaceMode, type AgentSurfaceProps } from "./agent/agent-surface"
 export { setAgentSurfaceMode } from "./agent/agent-surface-state"
 export { Composer, type ComposerProps } from "./agent/components/composer"
-export type {
-  AgentDocumentPreviewRenderer,
-  AgentDocumentPreviewRendererProps,
-} from "./agent/document-preview/types"
 export { AgentChatPage, type AgentChatPageProps } from "./agent/react-router"
 export type { LanguageModel } from "./agent/types"
-export { AgentWorkspaceProvider, type AgentWorkspaceProviderProps } from "./agent/workspace"
 export type { AuthExperienceActions, AuthExperienceProps, AuthExperienceState } from "./auth"
 export type { AppMetadata } from "./metadata"
 export { SyncButton, type SyncButtonProps } from "./pages/data/sync-button"

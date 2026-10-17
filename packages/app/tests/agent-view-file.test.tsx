@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import { latestWorkLabel } from "../src/agent/activity-label"
-import { createAgentDocumentSource } from "../src/agent/document-preview/source"
 import { type NormalizedTool, normalizeDurableParts } from "../src/agent/parts"
 import type { AgentFileRef, AgentMessagePart } from "../src/agent/types"
 import { ViewFileToolView } from "../src/agent/view-file/view-file-tool-view"
+import { messageFileSource } from "../src/artifacts/file-source"
 
 const page: AgentFileRef = {
   blobId: "blob-page",
@@ -41,7 +41,7 @@ function viewFileCall(fileRef: AgentFileRef): AgentMessagePart {
 function savedTool(fileRef: AgentFileRef): NormalizedTool {
   const [part] = normalizeDurableParts([viewFileCall(fileRef)], {
     fileSource: (file, path) =>
-      createAgentDocumentSource({
+      messageFileSource({
         threadId: "thread",
         messageId: "message",
         path,
@@ -58,7 +58,7 @@ describe("view_file in the work trace", () => {
     const tool = savedTool(page)
 
     expect(tool.files).toHaveLength(1)
-    expect(tool.files?.[0]?.document?.path).toBe("/parts/0/output/content/1/fileRef")
+    expect(tool.files?.[0]?.source?.id).toBe("message:message/parts/0/output/content/1/fileRef")
   })
 
   test("shows a viewed image as a small preview on its row", () => {

@@ -1,4 +1,4 @@
-import type { AgentDocumentSource } from "./document-preview/types"
+import type { FileSource } from "../artifacts/file-source"
 import type { AgentFileRef, AgentMessagePart } from "./types"
 
 // The render-ready vocabulary shared by the durable transcript and the live streaming row.
@@ -15,10 +15,10 @@ export type NormalizedTool = {
   readonly files?: readonly NormalizedFile[]
 }
 
-/** A file shown in a message. The document source exists once the message is saved. */
+/** A file shown in a message. Its source, which reads the bytes, exists once the message is saved. */
 export type NormalizedFile = {
   readonly fileRef: AgentFileRef
-  readonly document?: AgentDocumentSource
+  readonly source?: FileSource
 }
 
 export type NormalizedPart =
@@ -32,12 +32,12 @@ export function normalizeDurableParts(
   parts: readonly AgentMessagePart[],
   options: {
     /** Resolve a file of the message from its JSON pointer, such as `/parts/2/fileRef`. */
-    readonly fileSource?: (fileRef: AgentFileRef, path: string) => AgentDocumentSource | undefined
+    readonly fileSource?: (fileRef: AgentFileRef, path: string) => FileSource | undefined
   } = {}
 ): NormalizedPart[] {
   const file = (fileRef: AgentFileRef, path: string): NormalizedFile => {
-    const document = options.fileSource?.(fileRef, path)
-    return document === undefined ? { fileRef } : { fileRef, document }
+    const source = options.fileSource?.(fileRef, path)
+    return source === undefined ? { fileRef } : { fileRef, source }
   }
   const toolFiles = (output: unknown, partIndex: number): { files?: NormalizedFile[] } => {
     const files = toolResultFiles(output).map(({ fileRef, contentIndex }) =>

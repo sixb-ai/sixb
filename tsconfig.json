@@ -57,6 +57,7 @@
       "@sixb/core": ["./packages/core/src/index.ts"],
       "@sixb/core/agents/context": ["./packages/core/src/agents/context/index.ts"],
       "@sixb/core/agents/streams": ["./packages/core/src/agents/streams/index.ts"],
+      "@sixb/core/artifacts": ["./packages/core/src/artifacts/index.ts"],
       "@sixb/core/auth/strategy": ["./packages/core/src/auth/strategy.ts"],
       "@sixb/core/blob-storage": ["./packages/core/src/blob-storage/browser.ts"],
       "@sixb/core/blob-storage/server": ["./packages/core/src/blob-storage/index.ts"],
@@ -69,7 +70,6 @@
       "@sixb/core/internal/actions": ["./packages/core/src/actions/index.ts"],
       "@sixb/core/internal/agents/streams": ["./packages/core/src/agents/streams/internal.ts"],
       "@sixb/core/internal/agents": ["./packages/core/src/agents/index.ts"],
-      "@sixb/core/internal/artifacts": ["./packages/core/src/artifacts/index.ts"],
       "@sixb/core/internal/agent-run-storage-provider": [
         "./packages/core/src/storage/agents/provider.ts"
       ],

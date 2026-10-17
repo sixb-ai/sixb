@@ -1,6 +1,5 @@
 import Papa from "papaparse"
-import { en } from "../i18n/en"
-import type { AgentDocumentKind } from "./types"
+import { en } from "../messages"
 
 // Keep the DOM bounded; larger files remain available through the viewer's download action.
 export const MAX_DELIMITED_PREVIEW_ROWS = 500
@@ -29,10 +28,11 @@ export class DelimitedTextParseError extends Error {
 
 export function parseDelimitedText(
   source: string,
-  kind: Extract<AgentDocumentKind, "csv" | "tsv">,
-  columnLabel: (index: number) => string = en.documents.column
+  kind: "csv" | "tsv",
+  columnLabel: (index: number) => string = en.files.column
 ): DelimitedTextPreview {
-  const normalized = source.startsWith("\uFEFF") ? source.slice(1) : source
+  // A byte-order mark is not part of the first header.
+  const normalized = source.charCodeAt(0) === 0xfeff ? source.slice(1) : source
   if (!normalized.trim()) {
     throw new DelimitedTextParseError("The file is empty.", "empty")
   }

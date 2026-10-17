@@ -4,7 +4,10 @@
 @import "tw-animate-css";
 @custom-variant dark (&:is(.dark *));
 
-:root {
+/* `.light` brings the light values back under a `.dark` ancestor, for content that pins itself to
+   light mode, such as an artifact whose theme says so. */
+:root,
+.light {
   --background: #fafafa;
   --foreground: #101010;
   --card: #ffffff;

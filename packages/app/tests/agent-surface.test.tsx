@@ -40,7 +40,7 @@ test("adaptive agent surface exposes only the collapsed launcher and compact doc
 
   const dock = renderSurface("dock")
   expect(dock).toContain('data-agent-surface="dock"')
-  expect(dock).toContain('data-agent-document-host=""')
+  expect(dock).toContain('data-agent-artifact-host=""')
   expect(dock).toContain('aria-label="Collapse assistant"')
   expect(dock).toContain('aria-label="Resize assistant"')
   expect(dock).not.toContain(">Operations Assistant</span>")

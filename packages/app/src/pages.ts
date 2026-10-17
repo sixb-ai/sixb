@@ -6,7 +6,8 @@
 import { createElement } from "react"
 import { SectionIndex } from "./pages/section-page"
 
-export { AgentsPage } from "./agent/workspace"
+export { AgentsPage } from "./agent/agents-page"
+export { ArtifactPage } from "./artifacts/artifact-page"
 export {
   DataConnectorPage,
   DataConnectorsPage,

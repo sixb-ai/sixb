@@ -1,9 +1,9 @@
 import { badgeLabel, highlightCode } from "@sixb/ui/lib/shiki"
 import { cn } from "@sixb/ui/lib/utils"
 import { Check, Copy } from "lucide-react"
-import type * as React from "react"
+import * as React from "react"
 import { useEffect, useState } from "react"
-import ReactMarkdown, { type Components } from "react-markdown"
+import ReactMarkdown, { type Components, type Options } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { useUiMessages } from "../../lib/i18n/ui"
 
@@ -39,16 +39,28 @@ const COMPONENTS: Components = {
 export interface MarkdownProps extends Omit<React.ComponentProps<"div">, "children"> {
   /** The markdown source to render. */
   readonly children: string
+  /** Element renderers that replace the defaults, such as an `img` that resolves relative paths. */
+  readonly components?: Components
+  /** HTML-tree plugins run after the built-in ones, such as heading ids or callouts. */
+  readonly rehypePlugins?: Options["rehypePlugins"]
 }
 
 /**
  * Render a markdown string with the shared `.prose` style (see `@sixb/ui/globals.css`) and
  * Shiki-highlighted code blocks. Safe for untrusted input — no raw HTML, sanitized link targets.
  */
-function Markdown({ children, className, ...props }: MarkdownProps) {
+function Markdown({ children, className, components, rehypePlugins, ...props }: MarkdownProps) {
+  const mergedComponents = React.useMemo(
+    () => (components ? { ...COMPONENTS, ...components } : COMPONENTS),
+    [components]
+  )
   return (
     <div data-slot="markdown" className={cn("prose", className)} {...props}>
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
+      <ReactMarkdown
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={rehypePlugins}
+        components={mergedComponents}
+      >
         {children}
       </ReactMarkdown>
     </div>

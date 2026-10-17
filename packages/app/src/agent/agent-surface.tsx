@@ -111,7 +111,7 @@ export function AgentSurface({
   const [sessionState, setSessionState] = useState(() =>
     readAgentSurfaceState(storageKey, defaults, minimumWidth, maximumWidth)
   )
-  const [documentHost, setDocumentHost] = useState<HTMLDivElement | null>(null)
+  const [artifactHost, setArtifactHost] = useState<HTMLDivElement | null>(null)
   const [resizing, setResizing] = useState(false)
   const resizeStart = useRef<{
     readonly pointerId: number
@@ -245,8 +245,8 @@ export function AgentSurface({
       ) : null}
 
       <div
-        ref={setDocumentHost}
-        data-agent-document-host=""
+        ref={setArtifactHost}
+        data-agent-artifact-host=""
         aria-hidden={!visible}
         inert={!visible}
         className={cn(
@@ -349,7 +349,7 @@ export function AgentSurface({
                 </Button>
               ) : null
             }
-            documentPreviewHost={fullPage ? null : documentHost}
+            artifactHost={fullPage ? null : artifactHost}
             className={cn(
               "min-h-0 flex-1",
               !fullPage && "[&_[data-agent-conversation-header]]:pl-12",

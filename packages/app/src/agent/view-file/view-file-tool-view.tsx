@@ -1,16 +1,18 @@
+import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { Eye, File as FileIcon } from "lucide-react"
 import type { ReactNode } from "react"
+import { formatFileSize } from "../../artifacts/file-size"
+import { fileView } from "../../artifacts/file-view"
+import { useArtifactPanel } from "../artifact-panel"
 import { ActivityStatusText } from "../components/activity-status"
-import { useDocumentPreview } from "../document-preview/document-preview-root"
-import { formatFileSize } from "../document-preview/file-size"
 import { useAgentMessages } from "../i18n"
 import type { NormalizedFile, NormalizedTool } from "../parts"
 import { describeViewFile } from "./interpret"
 
 /**
  * A file the agent viewed. It belongs to the work, not to the answer, so it stays in the trace: an
- * image as a small preview, any other file as a compact chip, each opening the document preview.
+ * image as a small preview, any other file as a compact chip, each opening in the artifact panel.
  */
 export function ViewFileToolView({ tool }: { tool: NormalizedTool }) {
   const messages = useAgentMessages().viewFile
@@ -43,15 +45,16 @@ export function ViewFileToolView({ tool }: { tool: NormalizedTool }) {
 }
 
 function ViewedFile({ file }: { file: NormalizedFile }) {
-  const unnamed = useAgentMessages().files.file
-  const { fileRef, document } = file
-  const name = fileRef.fileName?.trim() || unnamed
+  const messages = useAgentMessages().files
+  const locale = useLocale()
+  const { fileRef, source } = file
+  const name = fileRef.fileName?.trim() || messages.file
 
-  if (document?.kind === "image") {
+  if (source && fileView(fileRef) === "image") {
     return (
       <OpenFile file={file} name={name}>
         <img
-          src={document.inlineUrl}
+          src={source.inlineUrl}
           alt={name}
           loading="lazy"
           className="block h-auto max-h-28 w-auto max-w-[min(10rem,100%)] rounded-md border border-border/70 bg-muted/40 object-contain"
@@ -66,14 +69,14 @@ function ViewedFile({ file }: { file: NormalizedFile }) {
         <FileIcon className="size-3.5 shrink-0" />
         <span className="min-w-0 truncate font-medium text-foreground/80">{name}</span>
         <span className="shrink-0 text-muted-foreground/60">
-          {formatFileSize(fileRef.sizeBytes)}
+          {formatFileSize(fileRef.sizeBytes, locale, messages)}
         </span>
       </span>
     </OpenFile>
   )
 }
 
-/** Open a saved file in the document preview, or in a new tab when no viewer handles it. */
+/** Open a saved file in the artifact panel, or in a new tab outside a conversation. */
 function OpenFile({
   file,
   name,
@@ -83,30 +86,30 @@ function OpenFile({
   name: string
   children: ReactNode
 }) {
-  const preview = useDocumentPreview()
+  const panel = useArtifactPanel()
   const messages = useAgentMessages()
-  const { document } = file
+  const { source } = file
   const className = cn(
     "block w-fit max-w-full rounded-md outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring",
-    document && "hover:opacity-80"
+    source && "hover:opacity-80"
   )
 
-  if (document && preview?.canPreview(document)) {
+  if (source && panel) {
     return (
       <button
         type="button"
         className={className}
-        onClick={() => preview.openDocument(document)}
-        aria-label={messages.documents.preview(name)}
+        onClick={() => panel.open({ type: "file", source })}
+        aria-label={messages.files.preview(name)}
       >
         {children}
       </button>
     )
   }
-  if (document) {
+  if (source) {
     return (
       <a
-        href={document.inlineUrl}
+        href={source.inlineUrl}
         target="_blank"
         rel="noreferrer"
         className={className}
