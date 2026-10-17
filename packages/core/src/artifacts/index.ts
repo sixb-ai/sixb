@@ -19,6 +19,7 @@ export {
   type DeckMode,
   FRAME_PROTOCOL,
   FRAME_THEME_TOKENS,
+  type FrameEmbed,
   type FrameEvent,
   type FrameRequest,
   type FrameResponse,

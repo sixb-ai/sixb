@@ -146,8 +146,12 @@ previous and next, an overview of every slide, and present, where the slide fill
 - Slides open in a sandboxed frame from a short-lived link. A deck runs its own scripts, but it
   can't read the app's cookies or call the API as the reader, and it loads only its own files and a
   few public CDNs (jsDelivr, cdnjs, unpkg, and Google Fonts).
-- A link to another artifact (`<a href="artifact:…">`) opens it where the reader is. A deck can't
-  show another artifact in place yet.
+- A link to another artifact (`<a href="artifact:…">`) opens it where the reader is.
+  `<sixb-embed src="artifact:…#chart=revenue">` shows another artifact on a slide: a chart, a
+  range, a section, or a slide of another deck, drawn by the app over the slide at the size the
+  deck gives the box, as documents show it. `<img src="artifact:…/figure.png">` shows an image
+  file of another artifact. Either shows only what its reader can open; anything else is an empty
+  box. Thumbnails and the overview show each box empty, with its `title`.
 - `?part=4` opens a deck at slide 4, and `![…](artifact:…#4)` shows that slide in a document.
 - When the Agent publishes a deck, it lays the deck out in its sandbox's headless browser and
   gets a warning for each slide with content past its edge or over the footer, overlapping or cut

@@ -436,6 +436,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("063-artifacts", artifactsSql),
     pgSql("064-drop-output-diagnostics", dropOutputDiagnosticsSql),
     pgSql("065-artifact-frame-grants", artifactFrameGrantsSql),
+    pgSql("066-artifact-frame-targets", artifactFrameTargetsSql),
   ],
 })
 
@@ -471,5 +472,8 @@ import dropOutputDiagnosticsSql from "./migrations/064-drop-output-diagnostics.s
   type: "text",
 }
 import artifactFrameGrantsSql from "./migrations/065-artifact-frame-grants.sql" with {
+  type: "text",
+}
+import artifactFrameTargetsSql from "./migrations/066-artifact-frame-targets.sql" with {
   type: "text",
 }

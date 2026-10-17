@@ -6,6 +6,7 @@ import {
 } from "@sixb/core/internal/storage"
 import type {
   ArtifactFrameGrantRecord,
+  ArtifactFrameTarget,
   ArtifactRecord,
   ArtifactStorage,
   ArtifactVersionInput,
@@ -207,14 +208,15 @@ export class SqliteArtifactStorage implements ArtifactStorage {
       this.db
         .query(
           `INSERT INTO artifact_frame_grants
-             (project_id, token_hash, artifact_id, version, created_at, expires_at)
-           VALUES (?, ?, ?, ?, ?, ?)`
+             (project_id, token_hash, artifact_id, version, targets, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           record.projectId,
           record.tokenHash,
           record.artifactId,
           record.version,
+          JSON.stringify(record.targets),
           record.createdAt.toISOString(),
           record.expiresAt.toISOString()
         )
@@ -227,7 +229,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     const row = this.db
       .query(
         `SELECT project_id AS projectId, token_hash AS tokenHash, artifact_id AS artifactId,
-                version, created_at AS createdAt, expires_at AS expiresAt
+                version, targets, created_at AS createdAt, expires_at AS expiresAt
          FROM artifact_frame_grants WHERE project_id = ? AND token_hash = ?`
       )
       .get(input.projectId, input.tokenHash) as Record<string, unknown> | null
@@ -366,6 +368,7 @@ function frameGrantFromRow(row: Record<string, unknown>): ArtifactFrameGrantReco
     tokenHash: String(row.tokenHash),
     artifactId: String(row.artifactId),
     version: Number(row.version),
+    targets: JSON.parse(String(row.targets)) as ArtifactFrameTarget[],
     createdAt: new Date(String(row.createdAt)),
     expiresAt: new Date(String(row.expiresAt)),
   }

@@ -61,6 +61,25 @@ export type FrameEvent =
   | FrameEventOf<"key", { readonly key: string }>
   /** A link to another artifact, which opens where the reader is. */
   | FrameEventOf<"open", { readonly address: string }>
+  /**
+   * Where the shown slide's `<sixb-embed>` boxes are, for the app to draw each over the frame: in
+   * the frame's pixels, with the scale the slide is drawn at. Empty in the overview, where an
+   * embed stays a placeholder, as it does in a filled frame, which never reports.
+   */
+  | FrameEventOf<"embeds", { readonly embeds: readonly FrameEmbed[] }>
+
+/** One `<sixb-embed>` on the shown slide. */
+export interface FrameEmbed {
+  readonly address: string
+  readonly rect: {
+    readonly x: number
+    readonly y: number
+    readonly width: number
+    readonly height: number
+  }
+  /** The slide's scale: the embed is drawn at `rect / scale`, then scaled with the slide. */
+  readonly scale: number
+}
 
 interface FrameEventOf<Event extends string, Params> {
   readonly protocol: typeof FRAME_PROTOCOL

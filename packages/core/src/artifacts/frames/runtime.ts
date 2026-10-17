@@ -62,6 +62,31 @@ export function frameRuntime(): void {
     )
   }
 
+  /** The shown slide's embeds, for the app to draw over the frame; once a frame, when they move. */
+  let reported = ""
+  let reporting = false
+  const reportEmbeds = () => {
+    if (reporting || root.dataset.mode === "fill") return
+    reporting = true
+    requestAnimationFrame(() => {
+      reporting = false
+      const scale = Number(root.style.getPropertyValue("--sixb-scale")) || 1
+      const slide = root.dataset.mode === "overview" ? undefined : slides()[current - 1]
+      const embeds = Array.from(slide?.querySelectorAll("sixb-embed[src]") ?? []).map((element) => {
+        const rect = element.getBoundingClientRect()
+        return {
+          address: (element.getAttribute("src") ?? "").trim(),
+          rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+          scale,
+        }
+      })
+      const next = JSON.stringify(embeds)
+      if (next === reported) return
+      reported = next
+      post({ event: "embeds", params: { embeds } })
+    })
+  }
+
   const show = (slide: number) => {
     const all = slides()
     current = Math.min(Math.max(1, Math.round(slide) || 1), Math.max(1, all.length))
@@ -71,6 +96,7 @@ export function frameRuntime(): void {
     if (root.dataset.mode === "overview") {
       all[current - 1]?.scrollIntoView({ block: "nearest" })
     }
+    reportEmbeds()
   }
 
   const handle = (method: string, params: Record<string, unknown>) => {
@@ -163,7 +189,10 @@ export function frameRuntime(): void {
     post({ event: "select", params: { slide: slides().indexOf(slide) + 1 } })
   })
 
-  window.addEventListener("resize", fit)
+  window.addEventListener("resize", () => {
+    fit()
+    reportEmbeds()
+  })
   const ready = () => {
     slides().forEach((element, index) => {
       element.dataset.number = String(index + 1)
@@ -171,6 +200,13 @@ export function frameRuntime(): void {
     fit()
     show(current)
     post({ event: "ready", params: { slides: slides().length } })
+    // Fonts and images that arrive later move what is laid out after them.
+    const resized = new ResizeObserver(reportEmbeds)
+    for (const element of Array.from(document.querySelectorAll("section.slide > *, sixb-embed"))) {
+      resized.observe(element)
+    }
+    window.addEventListener("load", reportEmbeds)
+    document.fonts?.ready.then(reportEmbeds)
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", ready)
   else ready()

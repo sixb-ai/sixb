@@ -1,9 +1,12 @@
 import type { SixbHostView } from "@sixb/core"
+import { parseArtifactAddress } from "@sixb/core/artifacts"
 import {
   ARTIFACT_FRAME_ROUTE_PREFIX,
   FRAME_ASSETS,
+  FRAME_REFERENCE_PREFIX,
   injectFrameAssets,
   resolveArtifactFrame,
+  rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
 import type { Elysia } from "elysia"
 import { type FrameOrigins, frameContentSecurityPolicy } from "../artifacts/frame"
@@ -60,26 +63,49 @@ async function frameResponse(
   const storage = host.storage.artifacts
   if (!storage) return notFound()
   // An unknown or expired token and a deleted version all answer the same 404.
-  const version = await resolveArtifactFrame({
+  const frame = await resolveArtifactFrame({
     projectId: host.id,
     storage,
     token: params.token,
   })
-  if (!version) return notFound()
+  if (!frame) return notFound()
+  let version = frame.version
 
-  const path = decodePath(params["*"])
+  let path = decodePath(params["*"])
   const asset = path === null ? undefined : FRAME_ASSETS[path]
   if (asset) {
     headers.set("content-type", asset.type)
     headers.set("cache-control", "private, max-age=3600")
     return new Response(options.head ? null : asset.body, { headers })
   }
+  let lent = false
+  if (path?.startsWith(FRAME_REFERENCE_PREFIX)) {
+    // A file another artifact lends the deck: only one its frame was issued with, at that version.
+    const match = /^([^/@]+)@(\d+)\/(.+)$/.exec(path.slice(FRAME_REFERENCE_PREFIX.length))
+    const target = frame.targets.find(
+      (candidate) =>
+        candidate.artifactId === match?.[1] &&
+        candidate.version === Number(match?.[2]) &&
+        parseArtifactAddress(candidate.address)?.path === match?.[3]
+    )
+    const lender = target
+      ? await storage.getVersion({
+          projectId: host.id,
+          artifactId: target.artifactId,
+          version: target.version,
+        })
+      : null
+    if (!lender || !match) return notFound()
+    version = lender
+    path = match[3] ?? null
+    lent = true
+  }
   const file = version.files.find((candidate) => candidate.path === path)
   if (!file) return notFound()
 
-  if (file.path === version.entry) {
+  if (!lent && file.path === version.entry) {
     const text = await new Response(await host.blobStorage.open(file.file.blobId)).text()
-    const html = await injectFrameAssets(text)
+    const html = await injectFrameAssets(await rewriteFrameReferences(text, frame.targets))
     headers.set("content-type", "text/html; charset=utf-8")
     headers.set("cache-control", "private, no-cache")
     return new Response(options.head ? null : html, { headers })

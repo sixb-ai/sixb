@@ -229,9 +229,15 @@ export function ArtifactAddressLabel({ address }: { readonly address: string }) 
 export function ArtifactEmbed({
   address,
   caption,
+  fill = false,
 }: {
   readonly address: string
   readonly caption: string
+  /**
+   * Fill the box it is given, as a deck's slide gives it, with no caption or source line under
+   * it: the slide says what it shows, and a corner link opens it.
+   */
+  readonly fill?: boolean
 }) {
   const { depth, open } = useContext(References)
   const parsed = parseArtifactAddress(address)
@@ -244,7 +250,7 @@ export function ArtifactEmbed({
   }
   return (
     <References.Provider value={{ depth: depth + 1, ...(open ? { open } : {}) }}>
-      <LoadedEmbed address={parsed} written={address} caption={caption} />
+      <LoadedEmbed address={parsed} written={address} caption={caption} fill={fill} />
     </References.Provider>
   )
 }
@@ -253,10 +259,12 @@ function LoadedEmbed({
   address,
   written,
   caption,
+  fill,
 }: {
   readonly address: ArtifactAddress
   readonly written: string
   readonly caption: string
+  readonly fill: boolean
 }) {
   const messages = useArtifactMessages().references
   const query = useQuery({
@@ -268,6 +276,38 @@ function LoadedEmbed({
     retry: false,
   })
   const version = query.data
+  if (fill) {
+    if (!version) {
+      return (
+        <FilledFigure>
+          <Pending loading={query.isLoading} fill />
+        </FilledFigure>
+      )
+    }
+    const resolved = resolveArtifactAddress(address, {
+      kind: version.outline.kind,
+      outline: version.outline,
+      files: version.files,
+    })
+    return (
+      <FilledFigure address={written}>
+        {"problem" in resolved ? (
+          <Unavailable
+            title={messages.unavailable}
+            description={messages.missingPart(version.title)}
+          />
+        ) : (
+          <EmbedBody
+            part={resolved.part}
+            version={version}
+            address={written}
+            caption={caption}
+            fill
+          />
+        )}
+      </FilledFigure>
+    )
+  }
   if (!version) {
     return (
       <Figure caption={caption}>
@@ -316,26 +356,36 @@ function EmbedBody({
   version,
   address,
   caption,
+  fill = false,
 }: {
   readonly part: ResolvedArtifactPart
   readonly version: ArtifactVersion
   readonly address: string
   readonly caption: string
+  readonly fill?: boolean
 }) {
   switch (part.type) {
     case "sheet":
       return <SheetEmbed version={version} sheet={part.sheet} range={part.range} />
     case "chart":
-      return <ChartEmbed version={version} chart={part.chart} />
+      return <ChartEmbed version={version} chart={part.chart} fill={fill} />
     case "section":
       return <SectionEmbed version={version} slug={part.slug} />
     case "file":
-      return <FileEmbed version={version} path={part.path} address={address} caption={caption} />
+      return (
+        <FileEmbed
+          version={version}
+          path={part.path}
+          address={address}
+          caption={caption}
+          fill={fill}
+        />
+      )
     case "slide":
-      return <SlideEmbed version={version} slide={part.slide} />
+      return <SlideEmbed version={version} slide={part.slide} fill={fill} />
     case "artifact":
       return version.outline.kind === "slides" ? (
-        <SlideEmbed version={version} slide={1} />
+        <SlideEmbed version={version} slide={1} fill={fill} />
       ) : (
         <CardEmbed version={version} address={address} />
       )
@@ -411,9 +461,11 @@ function SheetEmbed({
 function ChartEmbed({
   version,
   chart,
+  fill = false,
 }: {
   readonly version: ArtifactVersion
   readonly chart: string
+  readonly fill?: boolean
 }) {
   const locale = useLocale()
   const workbook = useWorkbook(version)
@@ -421,7 +473,7 @@ function ChartEmbed({
   const { model, loading } = useSheetModel(version, declared?.sheet)
   if (!declared || !model) return <Pending loading={workbook.loading || loading} />
   return (
-    <div className="h-64 px-3 pt-3 pb-2">
+    <div className={cn("px-3 pt-3 pb-2", fill ? "h-full" : "h-64")}>
       <Suspense fallback={<div className="h-full animate-pulse rounded-lg bg-muted/50" />}>
         <SheetChart chart={declared} model={model} locale={locale} />
       </Suspense>
@@ -473,16 +525,22 @@ function SectionEmbed({
 function SlideEmbed({
   version,
   slide,
+  fill = false,
 }: {
   readonly version: ArtifactVersion
   readonly slide: number
+  readonly fill?: boolean
 }) {
   return (
     <ArtifactFrame
       version={version}
       title={version.title}
       start={{ slide, fill: true }}
-      className="aspect-video w-full overflow-hidden rounded-xl border border-border bg-background"
+      className={
+        fill
+          ? "size-full bg-background"
+          : "aspect-video w-full overflow-hidden rounded-xl border border-border bg-background"
+      }
     />
   )
 }
@@ -492,11 +550,13 @@ function FileEmbed({
   path,
   address,
   caption,
+  fill = false,
 }: {
   readonly version: ArtifactVersion
   readonly path: string
   readonly address: string
   readonly caption: string
+  readonly fill?: boolean
 }) {
   const source = versionFileSource(version, path)
   if (source?.fileRef.mediaType?.startsWith("image/")) {
@@ -505,7 +565,10 @@ function FileEmbed({
         src={source.inlineUrl}
         alt={caption}
         loading="lazy"
-        className="m-0 block h-auto max-w-full rounded-xl"
+        className={cn(
+          "m-0 block",
+          fill ? "size-full object-contain" : "h-auto max-w-full rounded-xl"
+        )}
       />
     )
   }
@@ -532,6 +595,31 @@ function CardEmbed({
         loading={false}
       />
     </ArtifactLink>
+  )
+}
+
+/** An embed filling a deck's box: framed as a card, with a corner link that opens it. */
+function FilledFigure({
+  address,
+  children,
+}: {
+  readonly address?: string
+  readonly children: ReactNode
+}) {
+  const messages = useArtifactMessages().references
+  return (
+    <div className="sixb-embed-filled group/embed relative flex size-full flex-col overflow-hidden rounded-xl border border-border/70 bg-card text-foreground">
+      <div className="min-h-0 flex-1 overflow-hidden [&>*]:h-full">{children}</div>
+      {address ? (
+        <ArtifactLink
+          address={address}
+          className="absolute top-2 right-2 inline-flex items-center gap-0.5 rounded-md bg-background/90 px-1.5 py-0.5 font-medium text-[11px] text-foreground/80 opacity-0 shadow-sm ring-1 ring-border/70 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/embed:opacity-100"
+        >
+          {messages.open}
+          <ArrowUpRight className="size-3" aria-hidden="true" />
+        </ArtifactLink>
+      ) : null}
+    </div>
   )
 }
 
@@ -616,10 +704,19 @@ function Unavailable({
   )
 }
 
-function Pending({ loading }: { readonly loading: boolean }) {
+function Pending({
+  loading,
+  fill = false,
+}: {
+  readonly loading: boolean
+  readonly fill?: boolean
+}) {
   const messages = useArtifactMessages().references
   return loading ? (
-    <div className="h-32 animate-pulse bg-muted/50" aria-label={messages.loading} />
+    <div
+      className={cn("animate-pulse bg-muted/50", fill ? "h-full" : "h-32")}
+      aria-label={messages.loading}
+    />
   ) : (
     <Unavailable title={messages.unavailable} description={messages.unavailableDescription} />
   )

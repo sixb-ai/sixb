@@ -207,6 +207,78 @@ describe("a deck's frame", () => {
   })
 })
 
+describe("a deck's images from other artifacts", () => {
+  test("are served under its frame, those it shows and no others, while its reader may read them", async () => {
+    // Reproduce by matching a lent file on its artifact and version alone in the frame route: the
+    // lender's other files are served too.
+    const { app, put, storage } = createApp()
+    const alice = await session(storage, "alice")
+    const publish = async (files: Awaited<ReturnType<typeof put>>[]) => {
+      const response = await app.fetch(
+        new Request(url("/api/artifacts"), {
+          method: "POST",
+          headers: alice.mutationHeaders,
+          body: JSON.stringify({ kind: "slides", title: "Deck", files }),
+        })
+      )
+      expect(response.status).toBe(201)
+      return (await response.json()).artifact.id as string
+    }
+    const figures = await publish([
+      await put("index.html", '<section class="slide"><h1>Figures</h1></section>', "text/html"),
+      await put("img/flow.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>", "image/svg+xml"),
+      await put("img/other.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>", "image/svg+xml"),
+    ])
+    const appendix = await publish([
+      await put("index.html", '<section class="slide"><h1>Appendix</h1></section>', "text/html"),
+      await put("img/map.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>", "image/svg+xml"),
+    ])
+    const deck = await publish([
+      await put(
+        "index.html",
+        `<section class="slide"><img src="artifact:${figures}/img/flow.svg" alt=""><img src="artifact:${appendix}/img/map.svg" alt=""></section>`,
+        "text/html"
+      ),
+    ])
+    // The appendix is gone by the time the deck is opened: its reader can no longer see the map.
+    await app.fetch(
+      new Request(url(`/api/artifacts/${appendix}`), {
+        method: "DELETE",
+        headers: alice.mutationHeaders,
+      })
+    )
+    const minted = await app.fetch(
+      new Request(url(`/api/artifacts/${deck}/versions/1/frame`), {
+        method: "POST",
+        headers: alice.mutationHeaders,
+      })
+    )
+    const frame = (await minted.json()) as { path: string }
+
+    const html = await (await app.fetch(new Request(url(`${frame.path}index.html`)))).text()
+    expect(html).toContain(
+      `<img src="__sixb/ref/${figures}@1/img/flow.svg" alt="" data-sixb-ref="">`
+    )
+    expect(html).toContain('<img alt="" data-sixb-ref="unavailable">')
+
+    const shown = await app.fetch(
+      new Request(url(`${frame.path}__sixb/ref/${figures}@1/img/flow.svg`))
+    )
+    expect(shown.status).toBe(200)
+    expect(shown.headers.get("content-security-policy")).toContain("sandbox allow-scripts")
+    // The same artifact's other files, and its entry, are not the deck's to show.
+    for (const path of [
+      `${figures}@1/img/other.svg`,
+      `${figures}@1/index.html`,
+      `${appendix}@1/img/map.svg`,
+    ]) {
+      expect((await app.fetch(new Request(url(`${frame.path}__sixb/ref/${path}`)))).status).toBe(
+        404
+      )
+    }
+  })
+})
+
 describe("injecting the kit and the runtime", () => {
   test("goes in the head, else the html element, else after the doctype", async () => {
     const tag = '<link rel="stylesheet" href="__sixb/kit.css">'

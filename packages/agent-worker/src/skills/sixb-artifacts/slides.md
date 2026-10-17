@@ -77,9 +77,32 @@ follows the theme: `fill="var(--chart-1)"`. Draw the series that matters in `--c
 others in `--chart-4`; light gridlines in `--border`; axis labels and values in
 `--muted-foreground`, at 20px or more. Name two or more series in a legend above the chart:
 `<ul class="legend"><li style="--swatch: var(--chart-1)">Restored within SLA</li>…</ul>`. Label the
-axes or the bars and give the units. When the
-numbers live in a published sheet, also link to it: `<a href="artifact:…">the Q3 numbers</a>`
-opens it beside the conversation. A deck cannot show another artifact in place yet.
+axes or the bars and give the units.
+
+## Show another artifact
+
+When the numbers live in a published sheet, show its chart or range on the slide instead of
+redrawing or retyping them: it is the same chart the sheet draws, and it cannot drift from it.
+
+```html
+<section class="slide chart">
+  <p class="eyebrow">Service levels</p>
+  <h2>Within-SLA rose every quarter, fastest in Q3</h2>
+  <sixb-embed src="artifact:art_k3m9q2x7tp#chart=sla-trend" title="SLA trend"></sixb-embed>
+  <p class="source">Source: Q3 service metrics</p>
+</section>
+```
+
+- `<sixb-embed src="artifact:…">` shows a chart (`#chart=…`), a range (`#Regions!A1:D5`, the
+  header row and up to a dozen rows fit a slide), a document's section (`#methodology`), or a slide
+  of another deck (`#4`). It is a block as wide as its column, 16:9 unless the deck's CSS sizes it;
+  in the `chart` layout it takes the slide's height. `title` names it where it is not drawn yet,
+  such as in the slide thumbnails.
+- `<img src="artifact:…/figures/map.png">` shows an image file of another artifact, laid out like
+  any image.
+- `<a href="artifact:…">the Q3 numbers</a>` opens the artifact beside the conversation.
+- The layout check sees what a slide shows from another artifact as an empty box of its size, and
+  the screenshots show it so: it is drawn when the reader opens the deck.
 
 ## Check
 

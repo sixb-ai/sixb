@@ -137,14 +137,17 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     if (!this.artifacts.has(artifactKey(record.projectId, record.artifactId))) {
       throw artifactStorageErrors.notFound(record.artifactId)
     }
-    this.frameGrants.set(artifactKey(record.projectId, record.tokenHash), { ...record })
+    this.frameGrants.set(artifactKey(record.projectId, record.tokenHash), {
+      ...record,
+      targets: record.targets.map((target) => ({ ...target })),
+    })
   }
 
   async findFrameGrant(
     input: FindArtifactFrameGrantInput
   ): Promise<ArtifactFrameGrantRecord | null> {
     const grant = this.frameGrants.get(artifactKey(input.projectId, input.tokenHash))
-    return grant ? { ...grant } : null
+    return grant ? { ...grant, targets: grant.targets.map((target) => ({ ...target })) } : null
   }
 
   async deleteExpiredFrameGrants(input: DeleteExpiredArtifactFrameGrantsInput): Promise<number> {

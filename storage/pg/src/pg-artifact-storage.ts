@@ -5,6 +5,7 @@ import {
 } from "@sixb/core/internal/storage"
 import type {
   ArtifactFrameGrantRecord,
+  ArtifactFrameTarget,
   ArtifactRecord,
   ArtifactStorage,
   ArtifactVersionInput,
@@ -169,9 +170,10 @@ export class PgArtifactStorage implements ArtifactStorage {
   async createFrameGrant(record: ArtifactFrameGrantRecord): Promise<void> {
     const rows = await this.sql`
       INSERT INTO artifact_frame_grants
-        (project_id, token_hash, artifact_id, version, created_at, expires_at)
+        (project_id, token_hash, artifact_id, version, targets, created_at, expires_at)
       SELECT ${record.projectId}, ${record.tokenHash}, ${record.artifactId}, ${record.version},
-             ${record.createdAt}, ${record.expiresAt}
+             ${JSON.stringify(record.targets)}::text::jsonb, ${record.createdAt},
+             ${record.expiresAt}
       WHERE EXISTS (
         SELECT 1 FROM artifacts WHERE project_id = ${record.projectId} AND id = ${record.artifactId}
       )
@@ -193,6 +195,7 @@ export class PgArtifactStorage implements ArtifactStorage {
           tokenHash: String(row.token_hash),
           artifactId: String(row.artifact_id),
           version: Number(row.version),
+          targets: row.targets as ArtifactFrameTarget[],
           createdAt: new Date(row.created_at as string | Date),
           expiresAt: new Date(row.expires_at as string | Date),
         }

@@ -6,7 +6,7 @@ import {
   isFileRef,
   type SixbHostView,
 } from "@sixb/core"
-import { createArtifactFrame } from "@sixb/core/internal/artifacts/frames"
+import { createArtifactFrame, frameTargets } from "@sixb/core/internal/artifacts/frames"
 import type { Elysia } from "elysia"
 import { ZodError } from "zod"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
@@ -341,8 +341,10 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       async (context) => {
         try {
           const storage = host.storage.artifacts
-          // Reading the version as the caller is the check: whoever may read it may frame it.
-          const version = await requireRequestSixb(context).artifacts.getVersion(
+          // Reading the version as the caller is the check: whoever may read it may frame it, with
+          // the files it embeds from artifacts the caller may read too.
+          const artifacts = requireRequestSixb(context).artifacts
+          const version = await artifacts.getVersion(
             context.params.artifactId,
             versionParam(context.params.version)
           )
@@ -352,6 +354,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
             storage,
             artifactId: version.artifactId,
             version: version.version,
+            targets: await frameTargets(version, (id, number) => artifacts.getVersion(id, number)),
           })
           return ArtifactFrameResponseSchema.parse({
             path: frame.path,

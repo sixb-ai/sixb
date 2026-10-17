@@ -139,8 +139,17 @@ export interface ArtifactFrameGrantRecord {
   readonly tokenHash: string
   readonly artifactId: string
   readonly version: number
+  /** What the frame may show from other artifacts, decided for its reader when it was issued. */
+  readonly targets: readonly ArtifactFrameTarget[]
   readonly createdAt: Date
   readonly expiresAt: Date
+}
+
+/** An address a version embeds, and the version of its target a frame shows. */
+export interface ArtifactFrameTarget {
+  readonly address: string
+  readonly artifactId: string
+  readonly version: number
 }
 
 export interface FindArtifactFrameGrantInput {

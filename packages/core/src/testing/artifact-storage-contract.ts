@@ -198,6 +198,13 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
           tokenHash: seed.repeat(64).slice(0, 64),
           artifactId: "art_report",
           version: 1,
+          targets: [
+            {
+              address: "artifact:art_other/figures/revenue.svg",
+              artifactId: "art_other",
+              version: 3,
+            },
+          ],
           createdAt: t0,
           expiresAt: at(expiresInMinutes),
         })
