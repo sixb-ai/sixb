@@ -129,6 +129,7 @@ repo's `typecheck` chain reads source.
 - The framework never speaks in the user's logger. Report terminal failures through `onError` and write everything else to a prefixed `console.*`. A swallowed `events.append()` is a lost trigger edge: emit through `events.emit(input, { source })` when the work that produced the events has already succeeded, and `events.append(input)` when the caller owns the outcome. Never write a bare `catch` around an append.
 - Keep builders and definitions declarative; avoid unnecessary indirection around ontology setup.
 - Preserve the existing visual language in `packages/atlas` (and `packages/ui`) and keep both desktop and mobile behavior working.
+- The code should be well-spaced and easy to read.
 
 ## Tests
 
