@@ -70,7 +70,9 @@ import {
   createSandboxDefinition,
   type InferSandboxParams,
   type SandboxDefinition,
+  sandboxCredentialIssue,
 } from "../sandboxes/configuration"
+import { SandboxError } from "../sandboxes/errors"
 import { type SchedulerController, SchedulerRuntime } from "../scheduler"
 import type { ScheduleDefinition } from "../schedules"
 import type {
@@ -225,6 +227,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       options.sandboxes?.configuration === undefined
         ? undefined
         : createSandboxDefinition(options.sandboxes.configuration, definitions.ontology)
+    assertSandboxCredentials(options.sandboxes)
     registerProjectionRegistry(this, definitions.projections)
 
     this.datasetVersionMarkings = createDatasetVersionMarkings({
@@ -525,4 +528,18 @@ function assertWebhookRunStorage(
       )
     }
   }
+}
+
+/** Reject source access the factory cannot provide: a run checks what `resolve` returns. */
+function assertSandboxCredentials<TParams extends ParamsConfig>(
+  sandboxes: SandboxFactory<TParams> | undefined
+): void {
+  if (!sandboxes) return
+
+  const issue = sandboxCredentialIssue({
+    supportsRequestCredentials: sandboxes.supportsRequestCredentials,
+    auth: sandboxes.configuration?.auth,
+    source: sandboxes.configuration?.source,
+  })
+  if (issue) throw new SandboxError(`[Sixb] ${issue}`)
 }

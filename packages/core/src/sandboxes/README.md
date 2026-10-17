@@ -6,6 +6,11 @@ Factories define environments; threads retain immutable parameters; runs provide
   Dynamic recipes require an execution-resolved environment; providers never invoke resolvers.
 - Selection and validation happen before provisioning. Initial source access must be allowed by
   the session network policy. Creation runs setup once; resume never replays it.
+- One rule decides whether source access can work (`sandboxCredentialIssue` in
+  [configuration](./configuration.ts)): write access needs `auth`, and `auth` a provider with
+  `supportsRequestCredentials`, even for a recipe without a source. `SixbHost` applies it to the
+  factory's static recipe at construction. The worker applies it again to each recipe a run
+  resolves: `resolve` results are unknown at startup, and a worker host is structural.
 - Runs without a thread binding explicitly select `{}`; shared env/network defaults remain session
   settings, not an implicit project binding. Unsupported provider capabilities fail explicitly.
 

@@ -144,6 +144,35 @@ export function createSandboxDefinition<TParams extends ParamsConfig>(
   })
 }
 
+/** What the source access rule reads: the provider's capability and one recipe's source. */
+interface SandboxCredentialRuleInput {
+  readonly supportsRequestCredentials?: boolean
+  /** The factory's source auth; it applies to every recipe the factory resolves. */
+  readonly auth?: unknown
+  readonly source?: SandboxSource
+}
+
+/**
+ * Why a recipe cannot get the source access it declares, as a whole message, or undefined.
+ *
+ * Write access needs source auth. Source auth needs a provider that injects request credentials
+ * outside the sandbox, even for a recipe without a source: auth is the factory's, so startup and
+ * every run give the same answer. Source auth without a source is otherwise fine; that recipe
+ * does not use it.
+ */
+export function sandboxCredentialIssue(input: SandboxCredentialRuleInput): string | undefined {
+  const { supportsRequestCredentials, auth, source } = input
+
+  if (source?.access === "write" && auth === undefined) {
+    return 'Sandbox write access needs source auth: add auth to the sandbox factory or use access "read".'
+  }
+  if (auth !== undefined && !supportsRequestCredentials) {
+    return "Sandbox source auth needs a provider that injects request credentials outside the sandbox: use @sixb/sandboxes-vercel, or remove auth."
+  }
+
+  return undefined
+}
+
 /** Capture declarative data only; never retain caller-owned objects or include values in errors. */
 export function captureEnvironment(value: unknown): SandboxEnvironment {
   if (
