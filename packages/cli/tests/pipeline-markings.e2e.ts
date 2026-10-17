@@ -435,7 +435,7 @@ describe("security markings through pipelines (e2e)", () => {
 
 const BROWSER = {
   publicOrigin: "http://api.localhost",
-  allowedOrigins: [{ origin: "http://atlas.localhost", audience: "atlas" as const }],
+  allowedOrigins: ["http://app.localhost"],
 }
 
 function project(options: Partial<PipelineMarkingsProjectOptions> = {}): SixbHost {
@@ -754,13 +754,12 @@ async function signIn(reader: Reader, groupId: string): Promise<string> {
     projectId,
     userId,
     strategyId: "dev",
-    audience: "atlas",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-10-09T10:00:00.000Z"),
     expiresAt: new Date("2099-10-09T10:00:00.000Z"),
   })
 
-  return `sixb_session=${credential.cookieValue}; sixb_csrf=csrf_1`
+  return `sixb_session_app=${credential.cookieValue}; sixb_csrf_app=csrf_1`
 }
 
 const apis = new WeakMap<SixbHost, ReturnType<typeof createSixbApi>>()
