@@ -41,7 +41,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@duckdb/node-api": "^1.5.2-r.1"
+    "@duckdb/node-api": "1.5.2-r.2"
   },
   "peerDependencies": {
     "@sixb/core": "workspace:^"

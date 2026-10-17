@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto"
 import type { DatasetColumnDefinition, DatasetDefinition, DatasetRow } from "@sixb/core"
 import {
+  type AnalyzeSqlTransformInput,
+  type AnalyzeSqlTransformSource,
+  type DatasetColumnLineage,
+  type DatasetColumnRef,
   type DatasetProducer,
+  type DatasetVersion,
   type DatasetVersionLineage,
   type DatasetVersionRef,
   type DatasetWriteCommitResult,
@@ -10,6 +15,10 @@ import {
   type LakeSqlExecutor,
   LakeStorageError,
   type PreviewSqlTransformInput,
+  resolveStepLineage,
+  type SqlTransformAnalysis,
+  type SqlTransformColumnRef,
+  type SqlTransformLineage,
 } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import {
@@ -22,13 +31,17 @@ import { getString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
-import type { DuckLakeSnapshotReader } from "./ducklake-snapshot-reader"
+import type { DuckLakeSnapshotReader, DuckLakeTableVersionRef } from "./ducklake-snapshot-reader"
 import type { DuckLakeWriteCoordinator } from "./ducklake-write-coordinator"
 import { datasetColumnTypeToDuckDbSql } from "./schema"
 import { quoteIdentifier } from "./sql"
+import { analyzeSqlTransformLineage, type SqlLineageAnalysis } from "./sql-lineage/analysis"
 import {
+  createDuckLakeSqlTransformTemplate,
   type DuckLakeSqlTransformSourceRelation,
-  renderDuckLakeSqlTransformSql,
+  type DuckLakeSqlTransformTemplate,
+  pickSourceColumns,
+  renderDuckLakeSourceRelations,
 } from "./sql-transform-relations"
 import { parseVersionId } from "./versions"
 
@@ -37,7 +50,14 @@ const MAX_PREVIEW_LIMIT = 1_000
 
 interface ResolvedDuckLakeSqlTransformSources {
   readonly relations: Readonly<Record<string, DuckLakeSqlTransformSourceRelation>>
+  readonly tables: Readonly<Record<string, ResolvedDuckLakeSourceTable>>
   readonly inputs: readonly DatasetVersionRef[]
+}
+
+/** A source's stored definition, and the version it resolved to. */
+interface ResolvedDuckLakeSourceTable {
+  readonly definition: DatasetDefinition
+  readonly version: DuckLakeTableVersionRef
 }
 
 interface ApplySqlTransformInput {
@@ -81,13 +101,11 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
   async *preview(input: PreviewSqlTransformInput<"duckdb">): AsyncIterable<DatasetRow> {
     this.connections.assertOpen()
 
+    const template = createDuckLakeSqlTransformTemplate(Object.keys(input.sources), input.sql)
+
     const rows = await this.connections.withAttachedRuntime(async (runtime) => {
       const sources = await this.resolveSources(runtime, input.sources)
-      const sql = renderDuckLakeSqlTransformSql({
-        options: this.options,
-        sources: sources.relations,
-        sql: input.sql,
-      })
+      const sql = template.render(renderDuckLakeSourceRelations(this.options, sources.relations))
       return runtime.query(buildPreviewSql(sql, previewLimit(input.limit)))
     })
 
@@ -100,16 +118,29 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
     this.connections.assertOpen()
     assertDatasetWriteMode(input.mode, "SQL transform")
 
+    const template = createDuckLakeSqlTransformTemplate(Object.keys(input.sources), input.sql)
+
     return this.writes.withCommitRuntime(async (runtime) => {
       const target = await this.resolveTargetDataset(runtime, input.target)
       const sources = await this.resolveSources(runtime, input.sources)
-      const sql = renderDuckLakeSqlTransformSql({
-        options: this.options,
-        sources: sources.relations,
-        sql: input.sql,
-      })
+      const sql = template.render(renderDuckLakeSourceRelations(this.options, sources.relations))
 
-      const checkedCasts = await this.assertResultSchemaMatchesTarget(runtime, target, sql)
+      const sourceVersions = await this.readSourceVersions(runtime, sources).catch(
+        (error: unknown) => skipLineage(target, error)
+      )
+
+      // The analysis binds in its own DuckDB instance while the lake checks the result schema.
+      const [checkedCasts, stepLineage] = await Promise.all([
+        this.assertResultSchemaMatchesTarget(runtime, target, sql),
+        sourceVersions === undefined
+          ? undefined
+          : analyzeExecutedLineage(
+              template,
+              pinnedSources(sources, sourceVersions),
+              sources.relations,
+              target
+            ),
+      ])
 
       return this.writes.commitDatasetVersionOnExclusiveRuntime(runtime, {
         dataset: target,
@@ -118,7 +149,10 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
         commitMessage: input.commitMessage ?? `execute SQL transform for dataset ${target.id}`,
         producer: input.producer,
         inputs: sources.inputs,
-        lineage: unanalyzedLineage(target, input.producer),
+        lineage:
+          stepLineage === undefined || sourceVersions === undefined
+            ? unanalyzedLineage(target, input.producer)
+            : resolveStepLineage(stepLineage, [...sourceVersions.values()]),
         applyChanges: (runtime, context) =>
           this.applySqlTransform({
             runtime,
@@ -132,21 +166,45 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
     })
   }
 
+  /**
+   * Column lineage bound against the definitions passed in, without reading the lake: it works
+   * before any source version exists. Their columns are bound in the order given, which can differ
+   * from the lake's stored order; `execute` binds each source's stored version schema instead.
+   */
+  async analyze(input: AnalyzeSqlTransformInput<"duckdb">): Promise<SqlTransformAnalysis> {
+    for (const source of Object.values(input.sources)) {
+      this.datasets.assertSchema(source.dataset)
+    }
+
+    const analysis = await analyzeSqlTransformLineage({
+      sources: input.sources,
+      template: createDuckLakeSqlTransformTemplate(Object.keys(input.sources), input.sql),
+    })
+    return analysis.supported ? { supported: true, lineage: analysis.lineage } : analysis
+  }
+
   private async resolveSources(
     runtime: DuckDbQueryRuntime,
     sources: PreviewSqlTransformInput<"duckdb">["sources"]
   ): Promise<ResolvedDuckLakeSqlTransformSources> {
     const relations: Record<string, DuckLakeSqlTransformSourceRelation> = Object.create(null)
+    const tables: Record<string, ResolvedDuckLakeSourceTable> = Object.create(null)
     const inputs: DatasetVersionRef[] = []
 
     for (const [sourceName, source] of Object.entries(sources)) {
       const definition = await this.resolveSourceDataset(runtime, source.dataset)
+
+      // Rejects a pick of columns the stored definition does not have before any SQL renders it.
+      pickSourceColumns(sourceName, definition, source.columns)
+
       const versionRef = await this.resolveSourceVersion(runtime, definition, source.versionId)
 
       relations[sourceName] = {
         datasetId: definition.id,
         versionId: versionRef.versionId,
+        ...(source.columns === undefined ? {} : { columns: source.columns }),
       }
+      tables[sourceName] = { definition, version: versionRef }
       inputs.push({
         datasetId: definition.id,
         versionId: versionRef.versionId,
@@ -155,6 +213,7 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
 
     return {
       relations: Object.freeze(relations),
+      tables: Object.freeze(tables),
       inputs: Object.freeze(inputs),
     }
   }
@@ -188,11 +247,25 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
     return definition
   }
 
+  /** The source versions read, by source name, with their schemas from one catalog read. */
+  private async readSourceVersions(
+    runtime: DuckDbQueryRuntime,
+    sources: ResolvedDuckLakeSqlTransformSources
+  ): Promise<ReadonlyMap<string, DatasetVersion>> {
+    const names = Object.keys(sources.tables)
+    const versions = await this.snapshots.getVersionsForRefs(
+      runtime,
+      names.map((sourceName) => sources.tables[sourceName].version)
+    )
+
+    return new Map(names.map((sourceName, index) => [sourceName, versions[index]]))
+  }
+
   private async resolveSourceVersion(
     runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition,
     versionId?: string
-  ): Promise<DatasetVersionRef> {
+  ): Promise<DuckLakeTableVersionRef> {
     if (versionId !== undefined) {
       const snapshotId = parseVersionId(versionId)
       const versionRef = await this.snapshots.getVersionRefForSnapshot(runtime, dataset, snapshotId)
@@ -305,9 +378,54 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
 }
 
 /**
- * This provider does not analyze the SQL it executes yet. A pipeline write without lineage is
- * classified with every marking. Any other write without it would depend on its own columns only,
- * so it records that its lineage is unknown.
+ * Each source as the transform binds it on the lake: the schema of the version it reads, in the
+ * stored column order, then its pick. Today's definition may have gained columns since, and a new
+ * column can change what a name in the SQL resolves to, such as a lateral alias.
+ */
+function pinnedSources(
+  sources: ResolvedDuckLakeSqlTransformSources,
+  versions: ReadonlyMap<string, DatasetVersion>
+): Readonly<Record<string, AnalyzeSqlTransformSource>> {
+  const pinned: Record<string, AnalyzeSqlTransformSource> = Object.create(null)
+  for (const [sourceName, version] of versions) {
+    pinned[sourceName] = {
+      dataset: { ...sources.tables[sourceName].definition, schema: version.schema },
+      columns: sources.relations[sourceName].columns,
+    }
+  }
+
+  return pinned
+}
+
+/**
+ * Lineage of the SQL about to run, by the sources' dataset ids, against the schemas of the
+ * versions it reads; undefined when it cannot be analyzed exactly. A result shaped unlike the
+ * target means the analysis tables diverged from what runs on the lake, so that lineage is not
+ * recorded either.
+ */
+async function analyzeExecutedLineage(
+  template: DuckLakeSqlTransformTemplate,
+  pinnedSources: Readonly<Record<string, AnalyzeSqlTransformSource>>,
+  relations: Readonly<Record<string, DuckLakeSqlTransformSourceRelation>>,
+  target: DatasetDefinition
+): Promise<DatasetColumnLineage | undefined> {
+  let analysis: SqlLineageAnalysis
+  try {
+    analysis = await analyzeSqlTransformLineage({ sources: pinnedSources, template })
+  } catch (error) {
+    return skipLineage(target, error)
+  }
+
+  if (!analysis.supported || !describesTarget(analysis.outputColumns, target)) {
+    return undefined
+  }
+
+  return toDatasetColumnLineage(analysis.lineage, relations)
+}
+
+/**
+ * A pipeline write without lineage is classified with every marking. Any other write without it
+ * would depend on its own columns only, so one whose SQL cannot be analyzed records that.
  */
 function unanalyzedLineage(
   target: DatasetDefinition,
@@ -316,6 +434,48 @@ function unanalyzedLineage(
   return producer?.kind === "pipeline"
     ? undefined
     : { unknown: `a SQL transform into '${target.id}' could not be analyzed` }
+}
+
+/**
+ * Lineage never fails a transform: invalid SQL or picks fail where the transform binds on the lake.
+ * When the analysis cannot even start, the version records no lineage of its own SQL.
+ */
+function skipLineage(target: DatasetDefinition, error: unknown): undefined {
+  const message = error instanceof Error ? error.message : String(error)
+  console.warn(
+    `[SixbDuckLake] SQL transform into dataset '${target.id}' records no column lineage: ${message}`
+  )
+  return undefined
+}
+
+function describesTarget(outputColumns: readonly string[], target: DatasetDefinition): boolean {
+  return (
+    outputColumns.length === target.schema.columns.length &&
+    target.schema.columns.every((column, index) => outputColumns[index] === column.name)
+  )
+}
+
+/** Source names become dataset ids; two sources reading one dataset share its column refs. */
+function toDatasetColumnLineage(
+  lineage: SqlTransformLineage,
+  relations: Readonly<Record<string, DuckLakeSqlTransformSourceRelation>>
+): DatasetColumnLineage {
+  const toRefs = (refs: readonly SqlTransformColumnRef[]): DatasetColumnRef[] => {
+    const unique = new Map<string, DatasetColumnRef>()
+    for (const { source, column } of refs) {
+      const datasetId = relations[source].datasetId
+      unique.set(JSON.stringify([datasetId, column]), { datasetId, column })
+    }
+
+    return [...unique.values()]
+  }
+
+  return {
+    rows: toRefs(lineage.rows),
+    columns: Object.fromEntries(
+      Object.entries(lineage.columns).map(([column, refs]) => [column, toRefs(refs)])
+    ),
+  }
 }
 
 function previewLimit(limit: number | undefined): number {
