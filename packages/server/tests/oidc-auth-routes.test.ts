@@ -217,24 +217,7 @@ async function completeSignIn(app: ReturnType<typeof createRuntime>["app"]): Pro
 }
 
 describe("oidc auth routes", () => {
-  test("redirects sign-in to the OIDC provider", async () => {
-    const { app } = createRuntime()
-
-    const response = await app.fetch(
-      new Request(
-        "http://api.localhost/auth/sign-in?returnTo=http%3A%2F%2Fapp.localhost%2Fobjects",
-        { redirect: "manual" }
-      )
-    )
-    const location = new URL(response.headers.get("location") ?? "")
-
-    expect(response.status).toBe(303)
-    expect(location.origin).toBe("https://idp.example")
-    expect(location.searchParams.get("redirect_uri")).toBe("http://api.localhost/auth/callback")
-    expect(location.searchParams.get("state")).toStartWith("oidc_")
-  })
-
-  test("callback creates a session, sets cookies, and exposes the session shape", async () => {
+  test("callback creates a session at the stored return target and exposes its shape", async () => {
     const { app } = createRuntime()
     const signIn = await app.fetch(
       new Request(
@@ -245,11 +228,17 @@ describe("oidc auth routes", () => {
     const providerUrl = new URL(signIn.headers.get("location") ?? "")
     const state = providerUrl.searchParams.get("state")
 
+    expect(signIn.status).toBe(303)
+    expect(providerUrl.origin).toBe("https://idp.example")
+    expect(providerUrl.searchParams.get("redirect_uri")).toBe("http://api.localhost/auth/callback")
+    expect(state).toStartWith("oidc_")
+
+    // A return target added to the callback URL loses to the one stored with the attempt.
     const callback = await app.fetch(
-      new Request(`http://api.localhost/auth/callback?code=code&state=${state}`, {
-        headers: { cookie: stateCookie(signIn) },
-        redirect: "manual",
-      })
+      new Request(
+        `http://api.localhost/auth/callback?code=code&state=${state}&returnTo=http%3A%2F%2Fevil.localhost%2Fsteal`,
+        { headers: { cookie: stateCookie(signIn) }, redirect: "manual" }
+      )
     )
 
     expect(callback.status).toBe(303)
@@ -280,33 +269,6 @@ describe("oidc auth routes", () => {
         id: expect.any(String),
       },
     })
-  })
-
-  test("API browser OIDC callbacks use the stored return target", async () => {
-    const { app } = createRuntime()
-    const signIn = await app.fetch(
-      new Request(
-        "http://api.localhost/auth/sign-in?returnTo=http%3A%2F%2Fapp.localhost%2Fdashboard",
-        { redirect: "manual" }
-      )
-    )
-    const providerUrl = new URL(signIn.headers.get("location") ?? "")
-    const state = providerUrl.searchParams.get("state")
-
-    const callback = await app.fetch(
-      new Request(
-        `http://api.localhost/auth/callback?code=code&state=${state}&returnTo=http%3A%2F%2Fevil.localhost%2Fsteal`,
-        { headers: { cookie: stateCookie(signIn) }, redirect: "manual" }
-      )
-    )
-
-    expect(signIn.status).toBe(303)
-    expect(providerUrl.searchParams.get("redirect_uri")).toBe("http://api.localhost/auth/callback")
-    expect(callback.status).toBe(303)
-    expect(callback.headers.get("location")).toBe("http://app.localhost/dashboard")
-    const setCookie = callback.headers.get("set-cookie")
-    const sessionCookie = cookieValue(setCookie, "sixb_session_app")
-    expect(sessionCookie).toContain(".")
   })
 
   test("callback replay returns a generic error without setting session cookies", async () => {
@@ -428,6 +390,7 @@ describe("oidc auth routes", () => {
     )
 
     expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({ error: "OIDC invitation delivery failed" })
     await expect(storage.auth.invitations.list({ projectId })).resolves.toMatchObject({
       total: 1,
       invitations: [{ email: "ava@acme.com", status: "revoked" }],

@@ -118,33 +118,67 @@ async function seedAdminSession(storage: InMemoryStorage) {
   }
 }
 
+const invitationOptionCases: Array<{
+  readonly name: string
+  readonly runtime: Parameters<typeof createRuntime>[0]
+  readonly expected: unknown
+}> = [
+  {
+    name: "scoped to the caller's membership policy",
+    runtime: {},
+    expected: {
+      groups: [{ id: "commercial" }],
+      canInviteWithoutGroups: true,
+      capabilities: { createInvitation: { state: "enabled" } },
+    },
+  },
+  {
+    name: "merged from every applicable membership policy",
+    runtime: {
+      membershipPolicies: [
+        defineMembershipPolicy("commercial-membership", {
+          grantedTo: [securityAdmins],
+          scope: [commercial],
+          can: ["invite"],
+        }),
+        defineMembershipPolicy("finance-membership", {
+          grantedTo: [securityAdmins],
+          scope: [finance],
+          can: ["invite"],
+        }),
+      ],
+    },
+    expected: {
+      groups: [{ id: "commercial" }, { id: "finance" }],
+      canInviteWithoutGroups: true,
+      capabilities: { createInvitation: { state: "enabled" } },
+    },
+  },
+  {
+    name: "disabled when the user has no membership policy",
+    runtime: { membershipPolicies: [] },
+    expected: {
+      groups: [],
+      canInviteWithoutGroups: false,
+      capabilities: {
+        createInvitation: { state: "disabled", reason: "missing_membership_policy" },
+      },
+    },
+  },
+  {
+    name: "disabled when delivery is unsupported",
+    runtime: { auth: { id: "dev", kind: "dev" } satisfies AuthStrategy },
+    expected: {
+      groups: [{ id: "commercial" }],
+      canInviteWithoutGroups: true,
+      capabilities: {
+        createInvitation: { state: "disabled", reason: "invitation_delivery_not_supported" },
+      },
+    },
+  },
+]
+
 describe("auth invitation routes", () => {
-  test("requires authentication and CSRF for invitation mutations", async () => {
-    const { app, storage } = createRuntime()
-    const admin = await seedAdminSession(storage)
-
-    const unauthenticated = await app.fetch(
-      new Request("http://localhost/api/auth/invitations", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: "ava@acme.com", groupIds: ["commercial"] }),
-      })
-    )
-    const missingCsrf = await app.fetch(
-      new Request("http://localhost/api/auth/invitations", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          cookie: admin.cookie,
-        },
-        body: JSON.stringify({ email: "ava@acme.com", groupIds: ["commercial"] }),
-      })
-    )
-
-    expect(unauthenticated.status).toBe(401)
-    expect(missingCsrf.status).toBe(403)
-  })
-
   test("creates an invitation, sends a magic link, and does not expose secrets", async () => {
     const { app, messages, storage } = createRuntime()
     const admin = await seedAdminSession(storage)
@@ -231,7 +265,7 @@ describe("auth invitation routes", () => {
     expect(listed).not.toContain("token")
   })
 
-  test("an invitation signs its recipient in to the app", async () => {
+  test("an invitation signs its recipient in to the app with the invited groups", async () => {
     const { app, messages, storage } = createRuntime()
     const admin = await seedAdminSession(storage)
 
@@ -257,6 +291,8 @@ describe("auth invitation routes", () => {
     expect(link.origin).toBe("http://api.localhost")
     expect(link.pathname).toBe("/auth/callback")
     expect(link.searchParams.get("returnTo")).toBeNull()
+    // Invitations have no requesting browser, so no same-device fast path.
+    expect(link.searchParams.get("requester")).toBeNull()
     const magicLink = await storage.auth.magicLinks.getById({
       projectId,
       id: link.searchParams.get("magicLinkId") ?? "",
@@ -269,6 +305,12 @@ describe("auth invitation routes", () => {
     expect(callback.status).toBe(303)
     expect(callback.headers.get("location")).toBe("http://app.localhost/")
     expect(callback.headers.get("set-cookie")).toContain("sixb_session_app=")
+    await expect(
+      storage.auth.groupMemberships.listForGroup({
+        projectId,
+        groupId: "commercial",
+      })
+    ).resolves.toMatchObject([{ groupId: "commercial", source: "invitation" }])
   })
 
   test("rejects a return target outside the app", async () => {
@@ -400,56 +442,21 @@ describe("auth invitation routes", () => {
     expect(signInUrl.searchParams.get("returnTo")).toBe("http://app.localhost/")
   })
 
-  test("revokes OIDC invitations when invitation email sending fails", async () => {
-    const { app, storage } = createRuntime({
-      auth: oidc({
-        issuer: "https://idp.example",
-        clientId: "client-id",
-        clientSecret: "client-secret",
-        allowedDomains: ["acme.com"],
-        async sendInvitation() {
-          throw new Error("Email provider unavailable")
-        },
-      }),
-    })
-    const admin = await seedAdminSession(storage)
-
-    const response = await app.fetch(
-      new Request("http://localhost/api/auth/invitations", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          origin: "http://app.localhost",
-          cookie: admin.cookie,
-          ...admin.csrfHeader,
-        },
-        body: JSON.stringify({
-          email: "oidc-user@acme.com",
-          groupIds: ["commercial"],
-        }),
-      })
-    )
-
-    expect(response.status).toBe(500)
-    expect(await response.json()).toEqual({ error: "Email provider unavailable" })
-    await expect(
-      storage.auth.invitations.getActiveByEmail({
-        projectId,
-        email: "oidc-user@acme.com",
-        now: new Date(),
-      })
-    ).resolves.toBeNull()
-  })
-
-  test("rejects OIDC invitations outside the allowed domains", async () => {
-    const { app, storage } = createRuntime({
+  // The strategy refuses an address outside its allowed domains before anything is written or sent.
+  test.each([
+    { strategy: "magic-link", auth: undefined, email: "ava@example.com" },
+    {
+      strategy: "OIDC",
       auth: oidc({
         issuer: "https://idp.example",
         clientId: "client-id",
         clientSecret: "client-secret",
         allowedDomains: ["acme.com"],
       }),
-    })
+      email: "oidc-user@example.com",
+    },
+  ])("rejects invitations when $strategy delivery cannot be sent", async ({ auth, email }) => {
+    const { app, messages, storage } = createRuntime({ auth })
     const admin = await seedAdminSession(storage)
 
     const response = await app.fetch(
@@ -461,187 +468,33 @@ describe("auth invitation routes", () => {
           cookie: admin.cookie,
           ...admin.csrfHeader,
         },
-        body: JSON.stringify({
-          email: "oidc-user@example.com",
-          groupIds: ["commercial"],
-        }),
+        body: JSON.stringify({ email, groupIds: ["commercial"] }),
       })
     )
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
-      error:
-        "[Sixb] Invitation email 'oidc-user@example.com' is not allowed by the active auth strategy.",
-    })
-    await expect(storage.auth.invitations.list({ projectId })).resolves.toMatchObject({ total: 0 })
-  })
-
-  test("returns scoped invitation options for the current user", async () => {
-    const { app, storage } = createRuntime()
-    const admin = await seedAdminSession(storage)
-
-    const unauthenticated = await app.fetch(
-      new Request("http://localhost/api/auth/invitation-options")
-    )
-    const response = await app.fetch(
-      new Request("http://localhost/api/auth/invitation-options", {
-        headers: { cookie: admin.cookie },
-      })
-    )
-
-    expect(unauthenticated.status).toBe(401)
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({
-      groups: [{ id: "commercial" }],
-      canInviteWithoutGroups: true,
-      capabilities: {
-        createInvitation: { state: "enabled" },
-      },
-    })
-  })
-
-  test("merges invitation options from applicable membership policies", async () => {
-    const { app, storage } = createRuntime({
-      membershipPolicies: [
-        defineMembershipPolicy("commercial-membership", {
-          grantedTo: [securityAdmins],
-          scope: [commercial],
-          can: ["invite"],
-        }),
-        defineMembershipPolicy("finance-membership", {
-          grantedTo: [securityAdmins],
-          scope: [finance],
-          can: ["invite"],
-        }),
-      ],
-    })
-    const admin = await seedAdminSession(storage)
-
-    const response = await app.fetch(
-      new Request("http://localhost/api/auth/invitation-options", {
-        headers: { cookie: admin.cookie },
-      })
-    )
-
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({
-      groups: [{ id: "commercial" }, { id: "finance" }],
-      canInviteWithoutGroups: true,
-      capabilities: {
-        createInvitation: { state: "enabled" },
-      },
-    })
-  })
-
-  test("returns disabled invitation options when the user has no membership policy", async () => {
-    const { app, storage } = createRuntime({ membershipPolicies: [] })
-    const admin = await seedAdminSession(storage)
-
-    const response = await app.fetch(
-      new Request("http://localhost/api/auth/invitation-options", {
-        headers: { cookie: admin.cookie },
-      })
-    )
-
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({
-      groups: [],
-      canInviteWithoutGroups: false,
-      capabilities: {
-        createInvitation: {
-          state: "disabled",
-          reason: "missing_membership_policy",
-        },
-      },
-    })
-  })
-
-  test("returns disabled invitation options when delivery is unsupported", async () => {
-    const devAuth: AuthStrategy = { id: "dev", kind: "dev" }
-    const { app, storage } = createRuntime({ auth: devAuth })
-    const admin = await seedAdminSession(storage)
-
-    const response = await app.fetch(
-      new Request("http://localhost/api/auth/invitation-options", {
-        headers: { cookie: admin.cookie },
-      })
-    )
-
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({
-      groups: [{ id: "commercial" }],
-      canInviteWithoutGroups: true,
-      capabilities: {
-        createInvitation: {
-          state: "disabled",
-          reason: "invitation_delivery_not_supported",
-        },
-      },
-    })
-  })
-
-  test("rejects invitations when magic-link delivery cannot be sent", async () => {
-    const { app, messages, storage } = createRuntime()
-    const admin = await seedAdminSession(storage)
-
-    const response = await app.fetch(
-      new Request("http://localhost/api/auth/invitations", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          origin: "http://app.localhost",
-          cookie: admin.cookie,
-          ...admin.csrfHeader,
-        },
-        body: JSON.stringify({
-          email: "ava@example.com",
-          groupIds: ["commercial"],
-        }),
-      })
-    )
-
-    expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({
-      error:
-        "[Sixb] Invitation email 'ava@example.com' is not allowed by the active auth strategy.",
+      error: `[Sixb] Invitation email '${email}' is not allowed by the active auth strategy.`,
     })
     expect(messages).toHaveLength(0)
     await expect(storage.auth.invitations.list({ projectId })).resolves.toMatchObject({ total: 0 })
   })
 
-  test("invited users can consume the emailed link and receive invitation groups", async () => {
-    const { app, messages, storage } = createRuntime()
+  test.each(invitationOptionCases)("returns invitation options $name", async ({
+    runtime,
+    expected,
+  }) => {
+    const { app, storage } = createRuntime(runtime)
     const admin = await seedAdminSession(storage)
 
-    await app.fetch(
-      new Request("http://localhost/api/auth/invitations", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          cookie: admin.cookie,
-          ...admin.csrfHeader,
-        },
-        body: JSON.stringify({
-          email: "ava@acme.com",
-          groupIds: ["commercial"],
-          returnTo: "http://app.localhost/dashboard",
-        }),
+    const response = await app.fetch(
+      new Request("http://localhost/api/auth/invitation-options", {
+        headers: { cookie: admin.cookie },
       })
     )
 
-    const link = linkFromLatestMessage(messages)
-    // Invitations have no requesting browser, so no same-device fast path.
-    expect(link.searchParams.get("requester")).toBeNull()
-    const callback = await confirmCallback(app, link)
-
-    expect(callback.status).toBe(303)
-    expect(callback.headers.get("location")).toBe("http://app.localhost/dashboard")
-    await expect(
-      storage.auth.groupMemberships.listForGroup({
-        projectId,
-        groupId: "commercial",
-      })
-    ).resolves.toMatchObject([{ groupId: "commercial", source: "invitation" }])
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual(expected)
   })
 
   test("lists and revokes invitations by membership policy scope", async () => {

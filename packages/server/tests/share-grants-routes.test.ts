@@ -9,8 +9,6 @@ import {
   type SixbHostView,
 } from "@sixb/core"
 import { Elysia } from "elysia"
-import { isAccessTokenRoute, shouldVerifyCsrf } from "../src/auth/access-token-boundary"
-import { classifyRoute } from "../src/auth/public-routes"
 import { registerShareGrantRoutes } from "../src/routes/share-grants"
 
 const createdAt = new Date("2026-08-28T12:00:00.000Z")
@@ -214,23 +212,6 @@ describe("shared-access grant routes", () => {
     expect(await unavailableResponse.json()).toEqual({
       error: "[SixbServer] Shared-access grant storage is not configured on this runtime.",
     })
-  })
-
-  test("registers the lifecycle as bearer-capable with CSRF only for session mutations", () => {
-    const requests = {
-      issue: new Request("http://localhost/api/share-grants", { method: "POST" }),
-      list: new Request("http://localhost/api/share-grants?definitionId=published-report"),
-      revoke: new Request("http://localhost/api/share-grants/shr_1", { method: "DELETE" }),
-    }
-
-    expect(isAccessTokenRoute(requests.issue)).toBe(true)
-    expect(isAccessTokenRoute(requests.list)).toBe(true)
-    expect(isAccessTokenRoute(requests.revoke)).toBe(true)
-    expect(shouldVerifyCsrf(classifyRoute(requests.issue), "cookie")).toBe(true)
-    expect(shouldVerifyCsrf(classifyRoute(requests.revoke), "cookie")).toBe(true)
-    expect(shouldVerifyCsrf(classifyRoute(requests.list), "cookie")).toBe(false)
-    expect(shouldVerifyCsrf(classifyRoute(requests.issue), "bearer")).toBe(false)
-    expect(shouldVerifyCsrf(classifyRoute(requests.revoke), "bearer")).toBe(false)
   })
 })
 

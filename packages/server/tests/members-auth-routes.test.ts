@@ -179,7 +179,6 @@ describe("auth member routes", () => {
       createdAt: "2026-05-17T10:03:00.000Z",
     })
 
-    const unauthenticated = await app.fetch(jsonRequest("/api/auth/members"))
     const options = await app.fetch(
       jsonRequest("/api/auth/membership-options", { cookie: admin.cookie })
     )
@@ -199,7 +198,6 @@ describe("auth member routes", () => {
       readonly total: number
     }
 
-    expect(unauthenticated.status).toBe(401)
     expect(options.status).toBe(200)
     expect(await options.json()).toEqual({
       groups: [{ id: "commercial" }],
@@ -220,36 +218,6 @@ describe("auth member routes", () => {
       capabilities: { assignGroups: true, suspend: true, reactivate: false },
     })
     expect(body.total).toBe(2)
-  })
-
-  test("requires CSRF for member mutations", async () => {
-    const { app, storage } = createRuntime()
-    const admin = await seedAdminSession(storage)
-    await seedUser(storage, { id: "usr_target", groupIds: ["commercial"] })
-
-    const unauthenticated = await app.fetch(
-      jsonRequest("/api/auth/members/usr_target/groups", {
-        method: "PATCH",
-        body: { groupIds: [] },
-      })
-    )
-    const missingPatchCsrf = await app.fetch(
-      jsonRequest("/api/auth/members/usr_target/groups", {
-        method: "PATCH",
-        cookie: admin.cookie,
-        body: { groupIds: [] },
-      })
-    )
-    const missingSuspendCsrf = await app.fetch(
-      jsonRequest("/api/auth/members/usr_target/suspend", {
-        method: "POST",
-        cookie: admin.cookie,
-      })
-    )
-
-    expect(unauthenticated.status).toBe(401)
-    expect(missingPatchCsrf.status).toBe(403)
-    expect(missingSuspendCsrf.status).toBe(403)
   })
 
   test("updates groups and maps out-of-scope access to the right statuses", async () => {

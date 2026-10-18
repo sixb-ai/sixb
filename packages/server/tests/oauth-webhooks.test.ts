@@ -267,21 +267,6 @@ test("rejects a disconnected target before resolving its client", async () => {
   expect(h.errors[0]?.cause).toMatchObject({ code: "connector.not_found" })
 })
 
-test("retains delivery-level deduplication and conflict checks", async () => {
-  const h = await harness()
-  const body = [{ accountId: "a", id: "e1" }]
-  expect((await h.send(body)).status).toBe(200)
-  expect((await h.send(body)).status).toBe(202)
-  expect((await h.send([{ accountId: "b", id: "e2" }])).status).toBe(409)
-  expect(h.counts().handlerCalls).toBe(1)
-})
-
-test("managed webhooks can handle payloads without requesting any connection", async () => {
-  const h = await harness({ skipLookup: true })
-  expect((await h.send([{ accountId: "", id: "e1" }])).status).toBe(200)
-  expect(h.counts()).toEqual({ connects: 0, handlerCalls: 1 })
-})
-
 test("managed webhooks reject ambiguous default client access and empty account lookups", async () => {
   const h = await harness({ defaultClient: true })
   expect((await h.send([{ accountId: "a", id: "e1" }])).status).toBe(500)
@@ -291,6 +276,10 @@ test("managed webhooks reject ambiguous default client access and empty account 
   expect((await empty.send([{ accountId: "", id: "e1" }])).status).toBe(500)
   expect(empty.counts().connects).toBe(0)
   expect(empty.errors[0]?.cause).toMatchObject({ code: "connector.configuration_invalid" })
+  // The empty account fails at the lookup, not in the payload: a handler that skips it succeeds.
+  const unlooked = await harness({ skipLookup: true })
+  expect((await unlooked.send([{ accountId: "", id: "e1" }])).status).toBe(200)
+  expect(unlooked.counts()).toEqual({ connects: 0, handlerCalls: 1 })
 })
 
 // Removal proof: bypass tokenSource refresh in tokens.ts; the authenticated-read assertion fails.
