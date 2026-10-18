@@ -1,6 +1,6 @@
 import type { GetArtifactVersionResponse } from "@sixb/client"
 import { ARTIFACT_THEME_FILE, type ArtifactTheme, parseArtifactTheme } from "@sixb/core/artifacts"
-import { useQuery } from "@tanstack/react-query"
+import { type QueryClient, useQuery } from "@tanstack/react-query"
 import { useMemo } from "react"
 import { artifactFileSource, type FileSource } from "./file-source"
 import { type FileLoadError, fileLoadError, MAX_TEXT_PREVIEW_BYTES } from "./file-view"
@@ -31,7 +31,7 @@ export function useFileText(
     retry: false,
     queryFn: async ({ signal }) => {
       if (!source) throw new Error("[SixbApp] No file to read.")
-      return (await source.load(signal)).text()
+      return readText(source, signal)
     },
   })
   return {
@@ -40,6 +40,23 @@ export function useFileText(
     error: query.error ? fileLoadError(query.error) : null,
     tooLarge,
   }
+}
+
+/**
+ * A file's text through the cache {@link useFileText} fills, for work done outside a render, such
+ * as building a download from files a reader has not opened.
+ */
+export function fetchFileText(client: QueryClient, source: FileSource): Promise<string> {
+  return client.fetchQuery({
+    queryKey: fileTextQueryKey(source),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+    queryFn: ({ signal }) => readText(source, signal),
+  })
+}
+
+async function readText(source: FileSource, signal: AbortSignal): Promise<string> {
+  return (await source.load(signal)).text()
 }
 
 /** A file of a version, by its path in the artifact. */

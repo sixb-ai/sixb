@@ -127,7 +127,8 @@ or between, and the status bar counts the rows the filters keep. Readers fit a c
 double-clicking its edge too, select cells, rows,
 or columns to see their sum, average, min, max, and count, read a cell's whole value above the
 grid, find values with ⌘F or Ctrl+F, copy cells as a table that pastes into other spreadsheets, and
-download each sheet as CSV. A CSV or TSV `file` artifact opens in the same grid.
+download each sheet as CSV or the whole workbook as an `.xlsx` file, with its column formats, frozen
+panes, widths, and links. A CSV or TSV `file` artifact opens in the same grid.
 
 ## Write slides
 

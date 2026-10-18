@@ -21,6 +21,7 @@ import { type ArtifactMessages, useArtifactMessages } from "../../messages"
 import { type ArtifactVersion, versionImageSource } from "../../queries"
 import { useArtifactThemeAttributes } from "../../theme"
 import { ViewerLoading, ViewerNotice } from "../notice"
+import { SheetDownloads } from "./downloads"
 import { FindBar, useSheetFind } from "./find-bar"
 import { cellFormatter, numberFormat } from "./format"
 import { SheetGrid, type SheetGridStatus } from "./grid"
@@ -176,18 +177,13 @@ function WorkbookView({
             <Search className="size-3.5" aria-hidden="true" />
           </button>
         ) : null}
-        {source ? (
-          <a
-            href={source.downloadUrl}
-            download={`${sheetName}.csv`}
-            aria-label={messages.sheet.downloadCsv(sheetName)}
-            title={messages.sheet.downloadCsv(sheetName)}
-            className="flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-          >
-            <Download className="size-3.5" aria-hidden="true" />
-            {messages.sheet.csv}
-          </a>
-        ) : null}
+        <SheetDownloads
+          version={version}
+          workbook={workbook}
+          sheet={sheetName}
+          source={source}
+          title={version.title}
+        />
       </div>
 
       <div
