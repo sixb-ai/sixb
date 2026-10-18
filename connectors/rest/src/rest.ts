@@ -68,22 +68,22 @@ function createRestClient(options: RestConnectorOptions, context: ConnectorConte
       let response: Response | null = null
       let error: unknown = null
 
-      let dispatch: (() => void) | undefined
       try {
-        // The queue reserves a distinct start slot for every initial request and retry.
-        dispatch = await schedule(requestSignal)
-        const resolvedInit = await resolveRequestInit(
+        const headers = await resolveRequestHeaders(
           baseRequestContext.init,
           options.headers,
-          options.timeoutMs,
           baseRequestContext
         )
-        dispatch()
-        response = await fetch(new URL(path, options.baseUrl), resolvedInit)
+        // The queue reserves a distinct start slot for every initial request and retry. Slots pace
+        // sends, so one is taken only once the headers are ready, right before fetch: resolving them
+        // cannot shorten the spacing, and a slow resolver holds no other request back.
+        await schedule(requestSignal)
+        response = await fetch(
+          new URL(path, options.baseUrl),
+          withRequestTimeout(baseRequestContext.init, headers, options.timeoutMs)
+        )
       } catch (caughtError) {
         error = caughtError
-      } finally {
-        dispatch?.()
       }
 
       const retryContext: RestRetryContext = {
@@ -171,18 +171,24 @@ function prepareRequestInit(init: RestRequestInit): RequestInit {
   }
 }
 
-async function resolveRequestInit(
+async function resolveRequestHeaders(
   init: RequestInit,
   headersResolver: RestHeadersResolver | undefined,
-  timeoutMs: number | undefined,
   context: RestRequestContext
-): Promise<RequestInit> {
+): Promise<Headers> {
   const headers = new Headers(await resolveHeaders(headersResolver, context))
 
   for (const [key, value] of new Headers(init.headers)) {
     headers.set(key, value)
   }
+  return headers
+}
 
+function withRequestTimeout(
+  init: RequestInit,
+  headers: Headers,
+  timeoutMs: number | undefined
+): RequestInit {
   const signal =
     timeoutMs === undefined
       ? init.signal
@@ -241,47 +247,24 @@ function combineSignals(
   return AbortSignal.any([contextSignal, requestSignal])
 }
 
-/**
- * Grants each request its start slot and resolves with the function the request calls when it hands
- * itself to `fetch` (idempotent). Spacing counts from that moment, so the next slot opens only once
- * this request has been sent or has given up: resolving headers in between cannot shorten the gap.
- */
-function createRequestScheduler(minDelayMs: number): (signal: AbortSignal) => Promise<() => void> {
+function createRequestScheduler(minDelayMs: number): (signal: AbortSignal) => Promise<void> {
   assertMinDelay(minDelayMs)
   if (minDelayMs === 0) {
-    return (signal) =>
-      signal.aborted ? Promise.reject(abortReason(signal)) : Promise.resolve(() => {})
+    return (signal) => (signal.aborted ? Promise.reject(abortReason(signal)) : Promise.resolve())
   }
 
   let nextAvailableAt = 0
   let queue = Promise.resolve()
 
   return (signal) => {
-    let release!: () => void
-    const released = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    let dispatched = false
-    const dispatch = () => {
-      if (dispatched) return
-      dispatched = true
+    const scheduled = queue.then(async () => {
+      await sleepUntil(nextAvailableAt, signal)
       nextAvailableAt = performance.now() + minDelayMs
-      release()
-    }
-    const slot = queue.then(() => sleepUntil(nextAvailableAt, signal))
-    queue = slot.then(
-      () => released,
-      () => undefined
-    )
+    })
+    queue = scheduled.catch(() => undefined)
     // A request can sit behind another request's pacing slot. Reject its caller immediately when
     // aborted; the queued task will later observe the same signal and release the queue cleanly.
-    const granted = abortable(
-      slot.then(() => dispatch),
-      signal
-    )
-    // A caller that gave up as its slot opened never dispatches; release the queue for it.
-    granted.catch(() => slot.then(release, () => undefined))
-    return granted
+    return abortable(scheduled, signal)
   }
 }
 
