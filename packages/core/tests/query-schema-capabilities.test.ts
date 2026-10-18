@@ -262,17 +262,15 @@ describe("resolved property query capabilities", () => {
     }
   })
 
-  test("need the matching query flag, not just a capable schema", () => {
-    expect(capabilitiesOf(registryFor("string", {}), "value")).toEqual({
+  test("need the matching query flag, except primary ids, which accept eq and in", () => {
+    const ontology = registryFor("string", {})
+    expect(capabilitiesOf(ontology, "value")).toEqual({
       operators: [],
       sortable: false,
       facet: false,
       text: false,
     })
-  })
-
-  test("primary ids accept eq and in without query metadata", () => {
-    expect(capabilitiesOf(registryFor("string", {}), "id")).toEqual({
+    expect(capabilitiesOf(ontology, "id")).toEqual({
       operators: ["eq", "in"],
       sortable: false,
       facet: false,

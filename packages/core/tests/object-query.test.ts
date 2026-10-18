@@ -4,6 +4,7 @@ import {
   defineObjectType,
   InMemoryStorage,
   link,
+  type ObjectExpansion,
   type ObjectQuery,
   ObjectQueryExecutionError,
   ObjectQueryPlanningError,
@@ -565,7 +566,7 @@ describe("object query validation", () => {
     ).toContainEqual(expect.objectContaining({ path: "$.refs", code: "too_many_refs" }))
   })
 
-  test("resolves and canonicalizes exact decimal predicate and sort semantics", () => {
+  test("resolves scalar kinds from the ontology, canonicalizing exact decimals", () => {
     const validated = validateObjectQuery(
       {
         kind: "sort",
@@ -589,10 +590,9 @@ describe("object query validation", () => {
         },
       },
     })
-  })
 
-  test("ignores caller-authored scalar kinds and resolves them from the ontology", () => {
-    const validated = validateObjectQuery(
+    // Caller-authored scalar kinds are ignored.
+    const authored = validateObjectQuery(
       {
         kind: "sort",
         fields: [{ kind: "property", propertyId: "name", scalarKind: "decimal" }],
@@ -610,64 +610,10 @@ describe("object query validation", () => {
       { ontology }
     )
 
-    expect(validated.query).toMatchObject({
+    expect(authored.query).toMatchObject({
       fields: [{ propertyId: "name", scalarKind: "string" }],
       input: { predicate: { propertyId: "status", scalarKind: "string" } },
     })
-  })
-
-  test("accepts text, filter, sort, project, and limit queries", () => {
-    const query: ObjectQuery = {
-      kind: "limit",
-      limit: 20,
-      input: {
-        kind: "project",
-        properties: ["id", "name", "status"],
-        input: {
-          kind: "sort",
-          fields: [{ kind: "property", propertyId: "name", direction: "asc" }],
-          input: {
-            kind: "filter",
-            predicate: { op: "eq", propertyId: "status", value: "active" },
-            input: {
-              kind: "text",
-              query: "acme",
-              input: { kind: "start", objectTypeId: "Customer" },
-            },
-          },
-        },
-      },
-    }
-
-    const validated = validateObjectQuery(query, { ontology })
-
-    expect(validated.result.objectTypeIds).toEqual(["Customer"])
-    expect(validated.query.kind).toBe("limit")
-  })
-
-  test("resolves outgoing and incoming traversal result types", () => {
-    const outgoing = validateObjectQuery(
-      {
-        kind: "traverse",
-        direction: "outgoing",
-        linkId: "orders",
-        input: { kind: "start", objectTypeId: "Customer" },
-      },
-      { ontology }
-    )
-
-    const incoming = validateObjectQuery(
-      {
-        kind: "traverse",
-        direction: "incoming",
-        linkId: "orders",
-        input: { kind: "start", objectTypeId: "Order" },
-      },
-      { ontology }
-    )
-
-    expect(outgoing.result.objectTypeIds).toEqual(["Order"])
-    expect(incoming.result.objectTypeIds).toEqual(["Customer"])
   })
 
   test("constrains incoming traversal to a declared source object type", () => {
@@ -703,8 +649,9 @@ describe("object query validation", () => {
     expect(constrained.result.objectTypeIds).toEqual(["Reseller"])
   })
 
-  test("rejects traverse source misuse", () => {
-    const unknownSource = collectObjectQueryValidationIssues(
+  test.each<[string, ObjectQuery, Record<string, number> | undefined, readonly string[]]>([
+    [
+      "an unknown traverse source",
       {
         kind: "traverse",
         direction: "incoming",
@@ -712,11 +659,11 @@ describe("object query validation", () => {
         sourceObjectTypeId: "Nope",
         input: { kind: "start", objectTypeId: "Order" },
       },
-      { ontology }
-    )
-    expect(unknownSource.map((issue) => issue.code)).toContain("unknown_traverse_source")
-
-    const outgoingSource = collectObjectQueryValidationIssues(
+      undefined,
+      ["unknown_traverse_source"],
+    ],
+    [
+      "a source type on an outgoing traverse",
       {
         kind: "traverse",
         direction: "outgoing",
@@ -724,28 +671,11 @@ describe("object query validation", () => {
         sourceObjectTypeId: "Customer",
         input: { kind: "start", objectTypeId: "Customer" },
       },
-      { ontology }
-    )
-    expect(outgoingSource.map((issue) => issue.code)).toContain("traverse_source_not_applicable")
-  })
-
-  test("accepts vector queries for declared vector search profiles", () => {
-    const validated = validateObjectQuery(
-      {
-        kind: "vector",
-        vector: [0.1, 0.2, 0.3],
-        profile: "content",
-        k: 5,
-        input: { kind: "start", objectTypeId: "Customer" },
-      },
-      { ontology }
-    )
-
-    expect(validated.result.objectTypeIds).toEqual(["Customer"])
-  })
-
-  test("collects structured issues for invalid predicates and text fields", () => {
-    const issues = collectObjectQueryValidationIssues(
+      undefined,
+      ["traverse_source_not_applicable"],
+    ],
+    [
+      "invalid predicates and text fields",
       {
         kind: "filter",
         predicate: {
@@ -762,16 +692,11 @@ describe("object query validation", () => {
           input: { kind: "start", objectTypeId: "Customer" },
         },
       },
-      { ontology }
-    )
-
-    expect(issues.map((issue) => issue.code)).toContain("query_field_not_enabled")
-    expect(issues.map((issue) => issue.code)).toContain("property_not_filterable")
-    expect(issues.map((issue) => issue.code)).toContain("unknown_property")
-  })
-
-  test("collects structural validation failures with stable issue codes", () => {
-    const issues = collectObjectQueryValidationIssues(
+      undefined,
+      ["query_field_not_enabled", "property_not_filterable", "unknown_property"],
+    ],
+    [
+      "structural failures",
       {
         kind: "project",
         properties: [],
@@ -797,23 +722,18 @@ describe("object query validation", () => {
           },
         },
       },
-      { ontology, maxLimit: 10 }
-    )
-
-    expect(issues.map((issue) => issue.code)).toEqual(
-      expect.arrayContaining([
+      { maxLimit: 10 },
+      [
         "empty_projection",
         "invalid_page_size",
         "empty_page_token",
         "limit_too_large",
         "duplicate_sort_field",
         "empty_predicate_group",
-      ])
-    )
-  })
-
-  test("rejects incompatible set inputs", () => {
-    const issues = collectObjectQueryValidationIssues(
+      ],
+    ],
+    [
+      "set inputs of different object types",
       {
         kind: "set",
         op: "union",
@@ -822,24 +742,23 @@ describe("object query validation", () => {
           { kind: "start", objectTypeId: "Order" },
         ],
       },
-      { ontology }
-    )
-
-    expect(issues.map((issue) => issue.code)).toContain("incompatible_set_input")
-  })
-
-  test("rejects outgoing wildcard traversal because the target type is ambiguous", () => {
-    const issues = collectObjectQueryValidationIssues(
+      undefined,
+      ["incompatible_set_input"],
+    ],
+    [
+      "an outgoing wildcard traversal, whose target type is ambiguous",
       {
         kind: "traverse",
         direction: "outgoing",
         linkId: "anything",
         input: { kind: "start", objectTypeId: "WildcardSource" },
       },
-      { ontology }
-    )
-
-    expect(issues.map((issue) => issue.code)).toContain("wildcard_traverse_target")
+      undefined,
+      ["wildcard_traverse_target"],
+    ],
+  ])("reports %s with stable issue codes", (_, query, bounds, codes) => {
+    const issues = collectObjectQueryValidationIssues(query, { ontology, ...bounds })
+    expect(issues.map((issue) => issue.code)).toEqual(expect.arrayContaining([...codes]))
   })
 
   test("uses search profile defaults and reports missing or mismatched profiles", () => {
@@ -857,6 +776,16 @@ describe("object query validation", () => {
         query: "acme",
         fields: ["name"],
         input: { kind: "start", objectTypeId: "TextNoDefault" },
+      },
+      { ontology }
+    )
+    const declaredVector = validateObjectQuery(
+      {
+        kind: "vector",
+        vector: [0.1, 0.2, 0.3],
+        profile: "content",
+        k: 5,
+        input: { kind: "start", objectTypeId: "Customer" },
       },
       { ontology }
     )
@@ -888,6 +817,7 @@ describe("object query validation", () => {
       })
     }
     expect(explicitText.result.objectTypeIds).toEqual(["TextNoDefault"])
+    expect(declaredVector.result.objectTypeIds).toEqual(["Customer"])
     expect(missingDefaultIssues.map((issue) => issue.code)).toContain("missing_text_fields")
     expect(vectorProfileIssues.map((issue) => issue.code)).toContain("unknown_vector_profile")
   })
@@ -918,7 +848,7 @@ describe("object query explain", () => {
     expect(formatted).toContain('text "acme"')
   })
 
-  test("formats validation issues", () => {
+  test("formats validation issues, honoring the configured refs bound", () => {
     const explanation = explainObjectQuery(
       {
         kind: "filter",
@@ -934,10 +864,8 @@ describe("object query explain", () => {
     expect(formatted).toContain("ObjectQuery invalid")
     expect(formatted).toContain("Issues:")
     expect(formatted).toContain("[unknown_property]")
-  })
 
-  test("uses the configured refs bound", () => {
-    const explanation = explainObjectQuery(
+    const tooManyRefs = explainObjectQuery(
       {
         kind: "refs",
         refs: [
@@ -948,8 +876,8 @@ describe("object query explain", () => {
       { ontology, maxRefs: 1 }
     )
 
-    expect(explanation.valid).toBe(false)
-    expect(explanation.issues).toContainEqual(
+    expect(tooManyRefs.valid).toBe(false)
+    expect(tooManyRefs.issues).toContainEqual(
       expect.objectContaining({ path: "$.refs", code: "too_many_refs" })
     )
   })
@@ -1257,8 +1185,8 @@ describe("object query planner and executor", () => {
     expect(result.objects.map((row) => row.primaryId)).toEqual(["large-b"])
   })
 
-  test("falls back when a provider cannot guarantee exact decimal semantics", () => {
-    const validated = validateObjectQuery(
+  test("plans scalar operations by declared capability, decimal included", () => {
+    const decimalQuery = validateObjectQuery(
       {
         kind: "limit",
         limit: 10,
@@ -1274,7 +1202,7 @@ describe("object query planner and executor", () => {
       },
       { ontology }
     )
-    const plan = planObjectQuery(validated.query, {
+    const decimalPlan = planObjectQuery(decimalQuery.query, {
       capabilities: {
         queryObjects: true,
         nodes: { start: true, filter: true, sort: true, limit: true },
@@ -1285,14 +1213,12 @@ describe("object query planner and executor", () => {
       maxFallbackRows: 10,
     })
 
-    expect(plan.mode).toBe("fallback")
-    expect(plan.providerIssues.map((issue) => issue.code)).toEqual([
+    expect(decimalPlan.mode).toBe("fallback")
+    expect(decimalPlan.providerIssues.map((issue) => issue.code)).toEqual([
       "scalar_operation_not_supported",
       "scalar_operation_not_supported",
     ])
-  })
 
-  test("plans scalar operation capabilities independently of decimal", () => {
     const validated = validateObjectQuery(
       {
         kind: "limit",
@@ -1336,238 +1262,139 @@ describe("object query planner and executor", () => {
     expect(pushdown.mode).toBe("pushdown")
   })
 
-  test("plans and executes full provider pushdown", async () => {
+  test("executes the same bounded query through provider pushdown or the bounded fallback", async () => {
     const testStorage = createTestStorage()
     const { storage, calls } = countQueryCalls(testStorage.objects)
     await seedCustomers(testStorage.fixture)
 
-    const plan = planObjectQuery(boundedCustomerQuery, {
-      capabilities: storage.queryCapabilities(),
-      hasQueryObjects: true,
-    })
-    const result = await executeObjectQuery(
+    const pushdown = await executeObjectQuery(
       { projectId: "p1", query: boundedCustomerQuery },
       { ontology, storage }
     )
-
-    expect(plan.mode).toBe("pushdown")
-    expect(result.plan.mode).toBe("pushdown")
+    expect(pushdown.plan.mode).toBe("pushdown")
     expect(calls.queryObjects).toBe(1)
-    expect(result.objects.map((row) => row.primaryId)).toEqual(["cust-3", "cust-1"])
-    expect(result.objects[0].properties).toEqual({ id: "cust-3", name: "Acme Co" })
-  })
 
-  test("executes bounded fallback when provider pushdown is unavailable", async () => {
-    const { objects, fixture } = createTestStorage()
-    await seedCustomers(fixture)
-    const storageWithoutPushdown = disableQueryObjects(objects)
-
-    const result = await executeObjectQuery(
+    const fallback = await executeObjectQuery(
       { projectId: "p1", query: boundedCustomerQuery },
-      { ontology, storage: storageWithoutPushdown, maxFallbackRows: 10 }
+      { ontology, storage: disableQueryObjects(testStorage.objects), maxFallbackRows: 10 }
     )
-
-    expect(result.plan.mode).toBe("fallback")
-    expect(result.plan.providerIssues.map((issue) => issue.code)).toContain(
+    expect(fallback.plan.mode).toBe("fallback")
+    expect(fallback.plan.providerIssues.map((issue) => issue.code)).toContain(
       "query_objects_not_enabled"
     )
-    expect(result.objects.map((row) => row.primaryId)).toEqual(["cust-3", "cust-1"])
-    expect(result.objects[0].properties).toEqual({ id: "cust-3", name: "Acme Co" })
+
+    for (const result of [pushdown, fallback]) {
+      expect(result.objects.map((row) => row.primaryId)).toEqual(["cust-3", "cust-1"])
+      expect(result.objects[0].properties).toEqual({ id: "cust-3", name: "Acme Co" })
+    }
   })
 
-  test("plans expand pushdown only when every expansion has a resolved cardinality", () => {
+  test("plans expand pushdown only with the capability and a resolved cardinality at every level", () => {
     const capabilities: ObjectQueryCapabilities = {
       queryObjects: true,
       nodes: { start: true, limit: true, expand: true },
     }
-    const resolved: ObjectQuery = {
+    const expand = (expansions: ObjectExpansion[]): ObjectQuery => ({
       kind: "expand",
       input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: "Customer" } },
-      expansions: [{ linkId: "orders", direction: "outgoing", cardinality: "many" }],
-    }
-    expect(planObjectQuery(resolved, { capabilities, hasQueryObjects: true }).mode).toBe("pushdown")
-
-    // An unresolved cardinality (e.g. a polymorphic parent whose branches
-    // disagree) keeps the query on the bounded fallback.
-    const unresolved: ObjectQuery = {
-      kind: "expand",
-      input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: "Customer" } },
-      expansions: [{ linkId: "orders", direction: "outgoing" }],
-    }
-    const plan = planObjectQuery(unresolved, {
-      capabilities,
-      hasQueryObjects: true,
-      maxFallbackRows: 10,
+      expansions,
     })
-    expect(plan.mode).toBe("fallback")
-    expect(plan.providerIssues.map((issue) => issue.code)).toContain(
-      "expand_cardinality_unresolved"
-    )
-  })
+    const plan = (query: ObjectQuery, planned = capabilities) =>
+      planObjectQuery(query, { capabilities: planned, hasQueryObjects: true, maxFallbackRows: 10 })
+    const resolved = expand([{ linkId: "orders", direction: "outgoing", cardinality: "many" }])
 
-  test("keeps expand on the fallback when the provider lacks the capability", () => {
-    const capabilities: ObjectQueryCapabilities = {
-      queryObjects: true,
-      nodes: { start: true, limit: true },
-    }
-    const query: ObjectQuery = {
-      kind: "expand",
-      input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: "Customer" } },
-      expansions: [{ linkId: "orders", direction: "outgoing", cardinality: "many" }],
-    }
-    const plan = planObjectQuery(query, {
-      capabilities,
-      hasQueryObjects: true,
-      maxFallbackRows: 10,
-    })
-    expect(plan.mode).toBe("fallback")
-    expect(plan.providerIssues.map((issue) => issue.code)).toContain("query_node_not_supported")
-  })
+    expect(plan(resolved).mode).toBe("pushdown")
 
-  test("requires a resolved cardinality on nested expansions too", () => {
-    const capabilities: ObjectQueryCapabilities = {
-      queryObjects: true,
-      nodes: { start: true, limit: true, expand: true },
-    }
-    const query: ObjectQuery = {
-      kind: "expand",
-      input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: "Customer" } },
-      expansions: [
+    // An unresolved cardinality (e.g. a polymorphic parent whose branches disagree), at the top
+    // or on a nested hop, keeps the query on the bounded fallback.
+    for (const unresolved of [
+      expand([{ linkId: "orders", direction: "outgoing" }]),
+      expand([
         {
           linkId: "orders",
           direction: "outgoing",
           cardinality: "many",
           expand: [{ linkId: "items", direction: "outgoing" }],
         },
-      ],
+      ]),
+    ]) {
+      const fallback = plan(unresolved)
+      expect(fallback.mode).toBe("fallback")
+      expect(fallback.providerIssues.map((issue) => issue.code)).toContain(
+        "expand_cardinality_unresolved"
+      )
     }
-    const plan = planObjectQuery(query, {
-      capabilities,
-      hasQueryObjects: true,
-      maxFallbackRows: 10,
+
+    const withoutExpand = plan(resolved, {
+      queryObjects: true,
+      nodes: { start: true, limit: true },
     })
-    expect(plan.mode).toBe("fallback")
-    expect(plan.providerIssues.map((issue) => issue.code)).toContain(
-      "expand_cardinality_unresolved"
+    expect(withoutExpand.mode).toBe("fallback")
+    expect(withoutExpand.providerIssues.map((issue) => issue.code)).toContain(
+      "query_node_not_supported"
     )
   })
 
-  test("counts through provider pushdown without materializing rows", async () => {
+  test("sends count, exists, and facets to their own provider terminal without materializing rows", async () => {
     const testStorage = createTestStorage()
     const { storage, calls } = countQueryCalls(testStorage.objects)
     await seedCustomers(testStorage.fixture)
-
-    const result = await countObjects(
-      {
-        projectId: "p1",
-        query: {
-          kind: "limit",
-          limit: 1,
-          input: {
-            kind: "filter",
-            predicate: { op: "eq", propertyId: "status", value: "active" },
-            input: { kind: "start", objectTypeId: "Customer" },
-          },
-        },
+    const activeCustomers = (limit: number): ObjectQuery => ({
+      kind: "limit",
+      limit,
+      input: {
+        kind: "filter",
+        predicate: { op: "eq", propertyId: "status", value: "active" },
+        input: { kind: "start", objectTypeId: "Customer" },
       },
+    })
+
+    const counted = await countObjects(
+      { projectId: "p1", query: activeCustomers(1) },
       { ontology, storage }
     )
+    expect(counted.plan.mode).toBe("pushdown")
+    expect(counted.count).toBe(2)
 
-    expect(result.plan.mode).toBe("pushdown")
-    expect(result.count).toBe(2)
-    expect(calls.countObjects).toBe(1)
-    expect(calls.queryObjects).toBe(0)
-  })
-
-  test("checks existence through provider pushdown without materializing rows or counts", async () => {
-    const testStorage = createTestStorage()
-    const { storage, calls } = countQueryCalls(testStorage.objects)
-    await seedCustomers(testStorage.fixture)
-
-    const result = await existsObjects(
-      {
-        projectId: "p1",
-        query: {
-          kind: "limit",
-          limit: 0,
-          input: {
-            kind: "filter",
-            predicate: { op: "eq", propertyId: "status", value: "active" },
-            input: { kind: "start", objectTypeId: "Customer" },
-          },
-        },
-      },
+    const exists = await existsObjects(
+      { projectId: "p1", query: activeCustomers(0) },
       { ontology, storage }
     )
+    expect(exists.plan.mode).toBe("pushdown")
+    expect(exists.exists).toBe(true)
 
-    expect(result.plan.mode).toBe("pushdown")
-    expect(result.exists).toBe(true)
-    expect(calls.existsObjects).toBe(1)
-    expect(calls.countObjects).toBe(0)
-    expect(calls.queryObjects).toBe(0)
-  })
-
-  test("facets through provider pushdown without materializing rows or scalar counts", async () => {
-    const testStorage = createTestStorage()
-    const { storage, calls } = countQueryCalls(testStorage.objects)
-    await seedCustomers(testStorage.fixture)
-
-    const result = await facetObjects(
+    const faceted = await facetObjects(
       {
         projectId: "p1",
-        query: {
-          kind: "limit",
-          limit: 0,
-          input: {
-            kind: "filter",
-            predicate: { op: "eq", propertyId: "status", value: "active" },
-            input: { kind: "start", objectTypeId: "Customer" },
-          },
-        },
+        query: activeCustomers(0),
         facets: [{ propertyId: "status", limit: 10 }],
       },
       { ontology, storage }
     )
-
-    expect(result.plan.mode).toBe("pushdown")
-    expect(result.facets).toEqual([
+    expect(faceted.plan.mode).toBe("pushdown")
+    expect(faceted.facets).toEqual([
       { propertyId: "status", buckets: [{ value: "active", count: 2 }] },
     ])
-    expect(calls.facetObjects).toBe(1)
-    expect(calls.queryObjects).toBe(0)
-    expect(calls.countObjects).toBe(0)
-    expect(calls.existsObjects).toBe(0)
+
+    expect(calls).toEqual({ queryObjects: 0, countObjects: 1, existsObjects: 1, facetObjects: 1 })
   })
 
   test("rejects facet requests for properties not marked facetable", async () => {
     const { objects: storage } = createTestStorage()
 
-    await expect(
-      facetObjects(
-        {
-          projectId: "p1",
-          query: { kind: "start", objectTypeId: "Customer" },
-          facets: [{ propertyId: "email", limit: 10 }],
-        },
-        { ontology, storage }
-      )
-    ).rejects.toBeInstanceOf(ObjectQueryValidationError)
+    const error = await facetObjects(
+      {
+        projectId: "p1",
+        query: { kind: "start", objectTypeId: "Customer" },
+        facets: [{ propertyId: "email", limit: 10 }],
+      },
+      { ontology, storage }
+    ).catch((caught: unknown) => caught)
 
-    try {
-      await facetObjects(
-        {
-          projectId: "p1",
-          query: { kind: "start", objectTypeId: "Customer" },
-          facets: [{ propertyId: "email", limit: 10 }],
-        },
-        { ontology, storage }
-      )
-    } catch (error) {
-      expect(error).toBeInstanceOf(ObjectQueryValidationError)
-      if (error instanceof ObjectQueryValidationError) {
-        expect(error.issues.map((issue) => issue.code)).toContain("property_not_facetable")
-      }
-    }
+    expect(error).toBeInstanceOf(ObjectQueryValidationError)
+    expect((error as ObjectQueryValidationError).issues.map((issue) => issue.code)).toContain(
+      "property_not_facetable"
+    )
   })
 
   test("bounds facet fan-out before consulting storage", async () => {
@@ -1595,7 +1422,7 @@ describe("object query planner and executor", () => {
     expect(calls.existsObjects).toBe(0)
   })
 
-  test("falls back when provider capabilities are incomplete but fallback is safe", () => {
+  test("falls back safely when provider capabilities or limits fall short", () => {
     const limitedCapabilities: ObjectQueryCapabilities = {
       queryObjects: true,
       nodes: {
@@ -1619,10 +1446,8 @@ describe("object query planner and executor", () => {
     expect(plan.providerIssues.map((issue) => issue.code)).toEqual(
       expect.arrayContaining(["query_node_not_supported", "sort_kind_not_supported"])
     )
-  })
 
-  test("falls back when provider limit capabilities are exceeded", () => {
-    const capabilities: ObjectQueryCapabilities = {
+    const limitedSizes: ObjectQueryCapabilities = {
       queryObjects: true,
       nodes: {
         start: true,
@@ -1641,7 +1466,7 @@ describe("object query planner and executor", () => {
         limit: 2,
         input: { kind: "start", objectTypeId: "Customer" },
       },
-      { capabilities, hasQueryObjects: true, maxFallbackRows: 10 }
+      { capabilities: limitedSizes, hasQueryObjects: true, maxFallbackRows: 10 }
     )
     const pagePlan = planObjectQuery(
       {
@@ -1649,7 +1474,7 @@ describe("object query planner and executor", () => {
         pageSize: 2,
         input: { kind: "start", objectTypeId: "Customer" },
       },
-      { capabilities, hasQueryObjects: true, maxFallbackRows: 10 }
+      { capabilities: limitedSizes, hasQueryObjects: true, maxFallbackRows: 10 }
     )
 
     expect(limitPlan.mode).toBe("fallback")
@@ -1660,105 +1485,6 @@ describe("object query planner and executor", () => {
     expect(pagePlan.providerIssues.map((issue) => issue.code)).toContain(
       "provider_page_size_too_large"
     )
-  })
-
-  test("pushes includeSubtypes starts down as concrete unions when the provider can run them", async () => {
-    const BaseAsset = defineObjectType({
-      id: "BaseAsset",
-      name: "Base Asset",
-      properties: [prop("id", "string", { required: true, primary: true })],
-    })
-    const LaptopAsset = defineObjectType({
-      id: "LaptopAsset",
-      name: "Laptop Asset",
-      extends: BaseAsset,
-      properties: [],
-    })
-    const subtypeOntology = new OntologyRegistry({ sources: [BaseAsset, LaptopAsset] })
-    const { objects: storage, fixture } = createTestStorage(subtypeOntology)
-    await fixture.seed({
-      objects: [
-        {
-          ref: { objectTypeId: "BaseAsset", primaryId: "asset-1" },
-          properties: { id: "asset-1" },
-        },
-        {
-          ref: { objectTypeId: "LaptopAsset", primaryId: "laptop-1" },
-          properties: { id: "laptop-1" },
-        },
-      ],
-    })
-
-    const result = await executeObjectQuery(
-      {
-        projectId: "p1",
-        query: {
-          kind: "limit",
-          limit: 10,
-          input: { kind: "start", objectTypeId: "BaseAsset", includeSubtypes: true },
-        },
-      },
-      { ontology: subtypeOntology, storage, maxFallbackRows: 10 }
-    )
-
-    expect(result.plan.mode).toBe("pushdown")
-    expect(result.plan.query.kind).toBe("limit")
-    if (result.plan.query.kind === "limit") {
-      expect(result.plan.query.input.kind).toBe("set")
-    }
-    expect(new Set(result.objects.map((row) => row.primaryId))).toEqual(
-      new Set(["asset-1", "laptop-1"])
-    )
-  })
-
-  test("scopes default text fields by object type when querying subtypes", async () => {
-    const DefaultTextBase = defineObjectType({
-      id: "DefaultTextBase",
-      name: "Default Text Base",
-      properties: [
-        prop("id", "string", { required: true, primary: true }),
-        prop("name", "string", { query: { searchable: true, text: true } }),
-        prop("alias", "string"),
-      ],
-      search: { defaultText: ["name"] },
-    })
-    const DefaultTextChild = defineObjectType({
-      id: "DefaultTextChild",
-      name: "Default Text Child",
-      extends: DefaultTextBase,
-      properties: [prop("alias", "string", { query: { searchable: true, text: true } })],
-      search: { defaultText: ["alias"] },
-    })
-    const subtypeOntology = new OntologyRegistry({
-      sources: [DefaultTextBase, DefaultTextChild],
-    })
-    const { objects: storage, fixture } = createTestStorage(subtypeOntology)
-    await fixture.seed({
-      objects: [
-        {
-          ref: { objectTypeId: "DefaultTextBase", primaryId: "base-1" },
-          properties: { id: "base-1", name: "ordinary", alias: "secret" },
-        },
-        {
-          ref: { objectTypeId: "DefaultTextChild", primaryId: "child-1" },
-          properties: { id: "child-1", name: "ordinary", alias: "secret" },
-        },
-      ],
-    })
-
-    const result = await executeObjectQuery(
-      {
-        projectId: "p1",
-        query: {
-          kind: "text",
-          query: "secret",
-          input: { kind: "start", objectTypeId: "DefaultTextBase", includeSubtypes: true },
-        },
-      },
-      { ontology: subtypeOntology, storage, maxFallbackRows: 10 }
-    )
-
-    expect(result.objects.map((row) => row.primaryId)).toEqual(["child-1"])
   })
 
   test("keeps includeSubtypes fallback for providers without query pushdown", async () => {
@@ -1806,80 +1532,36 @@ describe("object query planner and executor", () => {
     )
   })
 
-  test("rejects fallback without an explicit result bound", async () => {
-    const { objects: storage, fixture } = createTestStorage()
+  test("rejects fallback without an explicit result bound or past the bounded scan cap", async () => {
+    const { objects, fixture } = createTestStorage()
     await seedCustomers(fixture)
+    const storage = disableQueryObjects(objects)
 
-    await expect(
-      executeObjectQuery(
-        {
-          projectId: "p1",
-          query: {
-            kind: "filter",
-            predicate: { op: "eq", propertyId: "status", value: "active" },
-            input: { kind: "start", objectTypeId: "Customer" },
-          },
+    const unbounded = await executeObjectQuery(
+      {
+        projectId: "p1",
+        query: {
+          kind: "filter",
+          predicate: { op: "eq", propertyId: "status", value: "active" },
+          input: { kind: "start", objectTypeId: "Customer" },
         },
-        { ontology, storage: disableQueryObjects(storage), maxFallbackRows: 10 }
-      )
-    ).rejects.toBeInstanceOf(ObjectQueryPlanningError)
+      },
+      { ontology, storage, maxFallbackRows: 10 }
+    ).catch((caught: unknown) => caught)
+    expect(unbounded).toBeInstanceOf(ObjectQueryPlanningError)
+    expect((unbounded as ObjectQueryPlanningError).issues.map((issue) => issue.code)).toContain(
+      "fallback_requires_bound"
+    )
 
-    try {
-      await executeObjectQuery(
-        {
-          projectId: "p1",
-          query: {
-            kind: "filter",
-            predicate: { op: "eq", propertyId: "status", value: "active" },
-            input: { kind: "start", objectTypeId: "Customer" },
-          },
-        },
-        { ontology, storage: disableQueryObjects(storage), maxFallbackRows: 10 }
-      )
-    } catch (error) {
-      expect(error).toBeInstanceOf(ObjectQueryPlanningError)
-      if (error instanceof ObjectQueryPlanningError) {
-        expect(error.issues.map((issue) => issue.code)).toContain("fallback_requires_bound")
-      }
-    }
-  })
-
-  test("rejects fallback execution when the bounded scan cap is exceeded", async () => {
-    const { objects: storage, fixture } = createTestStorage()
-    await seedCustomers(fixture)
-
-    await expect(
-      executeObjectQuery(
-        {
-          projectId: "p1",
-          query: {
-            kind: "limit",
-            limit: 1,
-            input: { kind: "start", objectTypeId: "Customer" },
-          },
-        },
-        { ontology, storage: disableQueryObjects(storage), maxFallbackRows: 2 }
-      )
-    ).rejects.toBeInstanceOf(ObjectQueryExecutionError)
-
-    try {
-      await executeObjectQuery(
-        {
-          projectId: "p1",
-          query: {
-            kind: "limit",
-            limit: 1,
-            input: { kind: "start", objectTypeId: "Customer" },
-          },
-        },
-        { ontology, storage: disableQueryObjects(storage), maxFallbackRows: 2 }
-      )
-    } catch (error) {
-      expect(error).toBeInstanceOf(ObjectQueryExecutionError)
-      if (error instanceof ObjectQueryExecutionError) {
-        expect(error.code).toBe("fallback_row_limit_exceeded")
-      }
-    }
+    const overScan = await executeObjectQuery(
+      {
+        projectId: "p1",
+        query: { kind: "limit", limit: 1, input: { kind: "start", objectTypeId: "Customer" } },
+      },
+      { ontology, storage, maxFallbackRows: 2 }
+    ).catch((caught: unknown) => caught)
+    expect(overScan).toBeInstanceOf(ObjectQueryExecutionError)
+    expect((overScan as ObjectQueryExecutionError).code).toBe("fallback_row_limit_exceeded")
   })
 
   test("rejects fallback when policy is disabled or relevance sorting is required", () => {
@@ -1911,115 +1593,6 @@ describe("object query planner and executor", () => {
     expect(relevance.fallbackIssues.map((issue) => issue.code)).toContain(
       "fallback_sort_kind_not_supported"
     )
-  })
-
-  test("executes traversal and set operations through provider pushdown", async () => {
-    const testStorage = createTestStorage()
-    const { storage, calls } = countQueryCalls(testStorage.objects)
-    await seedCustomerOrders(testStorage.fixture)
-
-    const traversedOrders = await executeObjectQuery(
-      {
-        projectId: "p1",
-        query: {
-          kind: "traverse",
-          direction: "outgoing",
-          linkId: "orders",
-          input: {
-            kind: "filter",
-            predicate: { op: "eq", propertyId: "status", value: "active" },
-            input: { kind: "start", objectTypeId: "Customer" },
-          },
-        },
-      },
-      { ontology, storage }
-    )
-    const union = await executeObjectQuery(
-      {
-        projectId: "p1",
-        query: {
-          kind: "set",
-          op: "union",
-          inputs: [
-            {
-              kind: "filter",
-              predicate: { op: "eq", propertyId: "status", value: "active" },
-              input: { kind: "start", objectTypeId: "Customer" },
-            },
-            {
-              kind: "filter",
-              predicate: { op: "eq", propertyId: "status", value: "paused" },
-              input: { kind: "start", objectTypeId: "Customer" },
-            },
-          ],
-        },
-      },
-      { ontology, storage }
-    )
-
-    expect(traversedOrders.plan.mode).toBe("pushdown")
-    expect(traversedOrders.objects.map((row) => row.primaryId)).toEqual(["order-1", "order-3"])
-    expect(union.plan.mode).toBe("pushdown")
-    expect(union.objects.map((row) => row.primaryId)).toEqual(["cust-1", "cust-3", "cust-2"])
-    expect(calls.queryObjects).toBe(2)
-  })
-
-  test("filters incoming traversal by source object type during execution", async () => {
-    const Reseller = defineObjectType({
-      id: "Reseller",
-      name: "Reseller",
-      properties: [prop("id", "string", { required: true, primary: true })],
-      links: [link("orders", Order)],
-    })
-    const sharedLinkOntology = new OntologyRegistry({ sources: [Customer, Reseller, Order] })
-
-    const testStorage = createTestStorage(sharedLinkOntology)
-    const { storage } = countQueryCalls(testStorage.objects)
-    await seedCustomerOrders(testStorage.fixture)
-    await testStorage.fixture.seed({
-      objects: [
-        {
-          ref: { objectTypeId: "Reseller", primaryId: "reseller-1" },
-          properties: { id: "reseller-1" },
-        },
-      ],
-      links: [
-        {
-          ref: {
-            source: { objectTypeId: "Reseller", primaryId: "reseller-1" },
-            linkId: "orders",
-            target: { objectTypeId: "Order", primaryId: "order-1" },
-          },
-        },
-      ],
-    })
-
-    const orderOneSources: ObjectQuery = {
-      kind: "traverse",
-      direction: "incoming",
-      linkId: "orders",
-      input: {
-        kind: "filter",
-        predicate: { op: "eq", propertyId: "id", value: "order-1" },
-        input: { kind: "start", objectTypeId: "Order" },
-      },
-    }
-
-    const unconstrained = await executeObjectQuery(
-      { projectId: "p1", query: orderOneSources },
-      { ontology: sharedLinkOntology, storage }
-    )
-    expect(unconstrained.objects.map((row) => row.primaryId).sort()).toEqual([
-      "cust-1",
-      "reseller-1",
-    ])
-
-    const constrained = await executeObjectQuery(
-      { projectId: "p1", query: { ...orderOneSources, sourceObjectTypeId: "Reseller" } },
-      { ontology: sharedLinkOntology, storage }
-    )
-    expect(constrained.plan.mode).toBe("pushdown")
-    expect(constrained.objects.map((row) => row.primaryId)).toEqual(["reseller-1"])
   })
 
   test("rejects fallback for search, traversal, and set nodes", async () => {
@@ -2068,14 +1641,16 @@ describe("object query planner and executor", () => {
       },
     ]
 
+    const storage = disableQueryObjects(createTestStorage().objects)
     for (const query of unsupportedQueries) {
-      const { objects: storage } = createTestStorage()
-      await expect(
-        executeObjectQuery(
-          { projectId: "p1", query },
-          { ontology, storage: disableQueryObjects(storage), maxFallbackRows: 10 }
-        )
-      ).rejects.toBeInstanceOf(ObjectQueryPlanningError)
+      const error = await executeObjectQuery(
+        { projectId: "p1", query },
+        { ontology, storage, maxFallbackRows: 10 }
+      ).catch((caught: unknown) => caught)
+      expect(error).toBeInstanceOf(ObjectQueryPlanningError)
+      expect((error as ObjectQueryPlanningError).issues.map((issue) => issue.code)).toContain(
+        "fallback_node_not_supported"
+      )
     }
   })
 })

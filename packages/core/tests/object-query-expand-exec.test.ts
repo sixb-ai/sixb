@@ -257,11 +257,14 @@ beforeEach(async () => {
 })
 
 describe("object query expand — execution", () => {
-  test("plans as fallback and attaches a 'one' link as a single object", async () => {
+  test("plans as fallback and attaches 'one' links as objects, 'many' links as arrays with edge properties", async () => {
     const result = await executeObjectQuery(
       {
         projectId: PROJECT,
-        query: expandProjects([{ linkId: "opportunity", direction: "outgoing" }]),
+        query: expandProjects([
+          { linkId: "opportunity", direction: "outgoing" },
+          { linkId: "members", direction: "outgoing" },
+        ]),
       },
       { ontology, storage }
     )
@@ -271,41 +274,14 @@ describe("object query expand — execution", () => {
     const opportunity = single(proj1.links?.opportunity)
     expect(opportunity.objectTypeId).toBe("Opportunity")
     expect(opportunity.properties.title).toBe("Deal A")
-  })
 
-  test("attaches a 'many' link as an array carrying edge linkProperties", async () => {
-    const result = await executeObjectQuery(
-      { projectId: PROJECT, query: expandProjects([{ linkId: "members", direction: "outgoing" }]) },
-      { ontology, storage }
-    )
-
-    const members = list(byId(result.objects, "proj-1").links?.members)
+    const members = list(proj1.links?.members)
     expect(members).toHaveLength(3)
     const roles = members.map((member) => member.linkProperties?.role).sort()
     expect(roles).toEqual(["dev", "lead", "qa"])
   })
 
-  test("hydrates a nested two-hop expansion", async () => {
-    const result = await executeObjectQuery(
-      {
-        projectId: PROJECT,
-        query: expandProjects([
-          {
-            linkId: "opportunity",
-            direction: "outgoing",
-            expand: [{ linkId: "company", direction: "outgoing" }],
-          },
-        ]),
-      },
-      { ontology, storage }
-    )
-
-    const opportunity = single(byId(result.objects, "proj-1").links?.opportunity)
-    const company = single(opportunity.links?.company)
-    expect(company.properties.name).toBe("Acme")
-  })
-
-  test("hydrates a three-hop expansion end to end", async () => {
+  test("hydrates a three-hop expansion, fetching a target shared across parents once", async () => {
     const result = await executeObjectQuery(
       {
         projectId: PROJECT,
@@ -331,29 +307,13 @@ describe("object query expand — execution", () => {
     expect(opportunity.properties.title).toBe("Deal A")
     const company = single(opportunity.links?.company)
     expect(company.primaryId).toBe("acme")
+    expect(company.properties.name).toBe("Acme")
     const parent = single(company.links?.parent)
     expect(parent.primaryId).toBe("globex")
     expect(parent.properties.name).toBe("Globex")
-  })
-
-  test("fetches a target shared across parents exactly once", async () => {
-    await executeObjectQuery(
-      {
-        projectId: PROJECT,
-        query: expandProjects([
-          {
-            linkId: "opportunity",
-            direction: "outgoing",
-            expand: [{ linkId: "company", direction: "outgoing" }],
-          },
-        ]),
-      },
-      { ontology, storage }
-    )
 
     // opp-1 and opp-2 both link to acme; the nested hop must batch it once.
-    const acmeFetches = fetchedKeys.filter((key) => key === "Company:acme")
-    expect(acmeFetches).toHaveLength(1)
+    expect(fetchedKeys.filter((key) => key === "Company:acme")).toHaveLength(1)
   })
 
   test("applies orderBy + limit as a per-parent top-N trim", async () => {

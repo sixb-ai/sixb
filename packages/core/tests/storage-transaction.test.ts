@@ -20,18 +20,6 @@ const Room = defineObjectType({
 const ontology = new OntologyRegistry({ sources: [Room] })
 
 describe("InMemoryStorage.transaction", () => {
-  test("commits writes atomically", async () => {
-    const storage = new InMemoryStorage()
-
-    await storage.transaction(async (tx) => {
-      await recordTestActionRun(tx, actionRunInput("run_commit"))
-    })
-
-    expect(
-      await storage.actionRuns.getById({ projectId: "my-app", id: "run_commit" })
-    ).not.toBeNull()
-  })
-
   test("rejects root storage calls inside a transaction callback", async () => {
     const storage = new InMemoryStorage()
     await expect(
@@ -84,7 +72,7 @@ describe("InMemoryStorage.transaction", () => {
     expect(sessionCalls).toBe(1)
   })
 
-  test("rolls back writes across every mutated store when the transaction fails", async () => {
+  test("rolls back or commits writes across every mutated store together", async () => {
     const storage = new InMemoryStorage()
 
     await expect(
@@ -103,10 +91,6 @@ describe("InMemoryStorage.transaction", () => {
     expect(
       await storage.webhookRuns.getById({ projectId: "my-app", id: "webhook_rollback" })
     ).toBeNull()
-  })
-
-  test("commits writes across every mutated store atomically", async () => {
-    const storage = new InMemoryStorage()
 
     await storage.transaction(async (tx) => {
       requireTransactionalRunStores(tx)

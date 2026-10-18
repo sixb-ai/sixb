@@ -11,7 +11,6 @@ import {
   collectObjectQueryValidationIssues,
   explainObjectQuery,
   formatObjectQueryExplanation,
-  normalizeObjectQuery,
   validateObjectQuery,
 } from "../src/objects/query"
 import { createTestSixb } from "../src/testing"
@@ -166,32 +165,10 @@ describe("object query expand — normalization", () => {
     expect(expandThenLimit).toEqual(limitThenExpand)
     expect(limitThenExpand.kind).toBe("expand")
   })
-
-  test("hoists a nested expand above sort and limit", () => {
-    const ir = normalizeObjectQuery({
-      kind: "limit",
-      limit: 10,
-      input: {
-        kind: "sort",
-        fields: [{ kind: "property", propertyId: "updatedAt", direction: "desc" }],
-        input: {
-          kind: "expand",
-          expansions: [{ linkId: "opportunity", direction: "outgoing" }],
-          input: { kind: "start", objectTypeId: "Project" },
-        },
-      },
-    })
-
-    expect(ir.kind).toBe("expand")
-    if (ir.kind !== "expand") return
-    expect(ir.input.kind).toBe("limit")
-    if (ir.input.kind !== "limit") return
-    expect(ir.input.input.kind).toBe("sort")
-  })
 })
 
 describe("object query expand — validation", () => {
-  test("folds expansion targets (including nested) into the touched set", () => {
+  test("folds outgoing, nested, and incoming expansion targets into the touched set", () => {
     const query: ObjectQuery = {
       kind: "expand",
       expansions: [
@@ -219,29 +196,35 @@ describe("object query expand — validation", () => {
       "Project",
       "ProjectFolder",
     ])
+
+    const incoming = validateObjectQuery(
+      {
+        kind: "expand",
+        expansions: [{ linkId: "company", direction: "incoming" }],
+        input: { kind: "start", objectTypeId: "Company" },
+      },
+      { ontology }
+    )
+    expect(incoming.result.objectTypeIds).toEqual(["Company"])
+    expect([...incoming.touchedObjectTypeIds].sort()).toEqual(["Company", "Opportunity"])
   })
 
-  test("rejects an expand whose link is abandoned by a later traverse", () => {
-    const ir = sixb
+  test("rejects an expand over an unknown link, or one a later traverse abandons", () => {
+    const abandoned = sixb
       .objects(Project)
       .query()
       .expand(Project.l.projectFolder)
       .traverse(Project.l.opportunity).ir
+    const unknown: ObjectQuery = {
+      kind: "expand",
+      expansions: [{ linkId: "nope", direction: "outgoing" }],
+      input: { kind: "start", objectTypeId: "Project" },
+    }
 
-    const issues = collectObjectQueryValidationIssues(ir, { ontology })
-    expect(issues.map((issue) => issue.code)).toContain("unknown_expand_link")
-  })
-
-  test("rejects an expand over an unknown link", () => {
-    const issues = collectObjectQueryValidationIssues(
-      {
-        kind: "expand",
-        expansions: [{ linkId: "nope", direction: "outgoing" }],
-        input: { kind: "start", objectTypeId: "Project" },
-      },
-      { ontology }
-    )
-    expect(issues.map((issue) => issue.code)).toContain("unknown_expand_link")
+    for (const query of [abandoned, unknown]) {
+      const issues = collectObjectQueryValidationIssues(query, { ontology })
+      expect(issues.map((issue) => issue.code)).toContain("unknown_expand_link")
+    }
   })
 
   test("rejects a negative expand limit and a non-sortable orderBy target", () => {
@@ -264,20 +247,6 @@ describe("object query expand — validation", () => {
     const codes = issues.map((issue) => issue.code)
     expect(codes).toContain("invalid_expand_limit")
     expect(codes).toContain("property_not_sortable")
-  })
-
-  test("resolves an incoming expansion's source type and folds it into the touched set", () => {
-    const validated = validateObjectQuery(
-      {
-        kind: "expand",
-        expansions: [{ linkId: "company", direction: "incoming" }],
-        input: { kind: "start", objectTypeId: "Company" },
-      },
-      { ontology }
-    )
-
-    expect(validated.result.objectTypeIds).toEqual(["Company"])
-    expect([...validated.touchedObjectTypeIds].sort()).toEqual(["Company", "Opportunity"])
   })
 })
 

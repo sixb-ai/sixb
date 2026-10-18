@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import { InMemoryBroker, InMemoryStorage } from "../src"
 import { DomainEventService, OntologyOutboxDispatcher } from "../src/events"
 import { OntologyMaintenance } from "../src/maintenance"
@@ -10,9 +10,14 @@ import {
   sourceEntry,
 } from "./materializer-fixture"
 
+afterEach(() => {
+  jest.useRealTimers()
+})
+
 describe("OntologyMaintenance", () => {
   // Regression proof: return after settlesWithin times out; cleanup can then access closed storage.
   test("shutdown warns after its grace period but waits for the active maintenance pass", async () => {
+    jest.useFakeTimers()
     const storage = new InMemoryStorage()
     const dispatcher = new DelayedDispatcher(storage)
     const errors: unknown[] = []
@@ -30,8 +35,14 @@ describe("OntologyMaintenance", () => {
       stopped = true
     })
     try {
-      await Bun.sleep(20)
+      jest.advanceTimersByTime(4)
+      await flush()
+      expect(errors).toHaveLength(0)
+
+      jest.advanceTimersByTime(1)
+      await flush()
       expect(errors).toHaveLength(1)
+      expect(String(errors[0])).toContain("still stopping after 5ms")
       expect(stopped).toBe(false)
     } finally {
       dispatcher.release()
@@ -41,6 +52,7 @@ describe("OntologyMaintenance", () => {
   })
 
   test("does not start timers from construction and drains once when hosted", async () => {
+    jest.useFakeTimers()
     const storage = new InMemoryStorage()
     const broker = new InMemoryBroker()
     const events = new DomainEventService({ projectId: "project", broker })
@@ -54,18 +66,20 @@ describe("OntologyMaintenance", () => {
     const { materializer } = createMaterializerFixture({ storage })
     await seedObject(materializer)
 
-    await Bun.sleep(20)
+    expect(jest.getTimerCount()).toBe(0)
     expect(await events.read()).toHaveLength(0)
 
     const handle = await maintenance.start()
-    await waitFor(async () => (await events.read()).length === 1)
+    await waitFor(() => maintenance.getSnapshot().lastCompletedAt !== null)
     expect(await events.read()).toHaveLength(1)
     expect(maintenance.getSnapshot()).toMatchObject({
       running: false,
       consecutiveFailures: 0,
       outbox: { pendingCount: 0, retryingCount: 0 },
     })
+    expect(jest.getTimerCount()).toBe(1)
     await handle.stop()
+    expect(jest.getTimerCount()).toBe(0)
   })
 
   test("returns its handle before startup catch-up completes", async () => {
@@ -88,6 +102,7 @@ describe("OntologyMaintenance", () => {
   })
 
   test("never overlaps periodic passes", async () => {
+    jest.useFakeTimers()
     const storage = new InMemoryStorage()
     const dispatcher = new DelayedDispatcher(storage)
     const maintenance = new OntologyMaintenance({
@@ -99,19 +114,25 @@ describe("OntologyMaintenance", () => {
 
     const starting = maintenance.start()
     await dispatcher.started
-    await Bun.sleep(20)
+    jest.advanceTimersByTime(20)
+    await flush()
     expect(dispatcher.maxConcurrent).toBe(1)
     expect(dispatcher.calls).toBe(1)
 
     dispatcher.release()
     const handle = await starting
-    await Bun.sleep(20)
+    await flush()
+    for (let pass = 0; pass < 3; pass++) {
+      jest.advanceTimersByTime(5)
+      await flush()
+    }
     expect(dispatcher.maxConcurrent).toBe(1)
-    expect(dispatcher.calls).toBeGreaterThan(1)
+    expect(dispatcher.calls).toBe(4)
     await handle.stop()
   })
 
   test("shares one loop across multiple lifecycle owners", async () => {
+    jest.useFakeTimers()
     const storage = new InMemoryStorage()
     const dispatcher = new CountingDispatcher(storage)
     const maintenance = new OntologyMaintenance({
@@ -123,18 +144,22 @@ describe("OntologyMaintenance", () => {
 
     const first = await maintenance.start()
     const second = await maintenance.start()
+    await flush()
     expect(dispatcher.calls).toBe(1)
 
     await first.stop()
-    await waitFor(() => dispatcher.calls > 1)
-    await second.stop()
-    const callsAfterStop = dispatcher.calls
-    await Bun.sleep(15)
+    jest.advanceTimersByTime(5)
+    await flush()
+    expect(dispatcher.calls).toBe(2)
 
-    expect(dispatcher.calls).toBe(callsAfterStop)
+    await second.stop()
+    expect(jest.getTimerCount()).toBe(0)
+    jest.advanceTimersByTime(60_000)
+    await flush()
+    expect(dispatcher.calls).toBe(2)
   })
 
-  test("degrades only after repeated or overdue delivery failures", async () => {
+  test("degrades only after repeated delivery failures", async () => {
     const storage = new InMemoryStorage()
     const events = new DomainEventService({ projectId: "project", broker: new UnavailableBroker() })
     let nowMs = Date.parse("2026-01-02T03:04:05.000Z")
@@ -177,35 +202,39 @@ describe("OntologyMaintenance", () => {
     await handle.stop()
   })
 
-  test("purges only old published rows during a bounded pass", async () => {
+  test("purges published rows only once they are older than the retention", async () => {
     const storage = new InMemoryStorage()
     const broker = new InMemoryBroker()
     const events = new DomainEventService({ projectId: "project", broker })
-    const now = new Date("2026-06-02T00:00:00.000Z")
+    const publishedAt = Date.parse("2026-06-01T00:00:00.000Z")
     const dispatcher = new OntologyOutboxDispatcher({
       projectId: "project",
       storage,
       events,
-      now: () => new Date("2026-06-01T00:00:00.000Z"),
+      now: () => new Date(publishedAt),
     })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObject(materializer)
     await dispatcher.drain()
     expect(outboxRows(storage)).toHaveLength(1)
 
+    // The cutoff is exclusive: a row published exactly one retention ago stays.
+    let nowMs = publishedAt + 1_000
     const maintenance = new OntologyMaintenance({
       projectId: "project",
       storage,
       dispatcher,
-      now: () => now,
-      options: { publishedOutboxRetentionMs: 1, intervalMs: 60_000 },
+      now: () => new Date(nowMs),
+      options: { publishedOutboxRetentionMs: 1_000, intervalMs: 60_000 },
     })
-    const handle = await maintenance.start()
-    await waitFor(() => outboxRows(storage).length === 0)
+    await maintenance.runNow()
+    expect(outboxRows(storage)).toHaveLength(1)
+    expect(maintenance.getSnapshot().cleanup?.publishedOutboxRowsDeleted).toBe(0)
 
+    nowMs += 1
+    await maintenance.runNow()
     expect(outboxRows(storage)).toHaveLength(0)
     expect(maintenance.getSnapshot().cleanup?.publishedOutboxRowsDeleted).toBe(1)
-    await handle.stop()
   })
 
   test("deletes an abandoned candidate on the next pass, whatever the retention", async () => {
@@ -348,14 +377,16 @@ function outboxRows(storage: InMemoryStorage) {
   return [...getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot().outbox.values()]
 }
 
-async function waitFor(
-  predicate: () => boolean | Promise<boolean>,
-  timeoutMs = 1_000
-): Promise<void> {
-  const startedAt = Date.now()
-  while (Date.now() - startedAt < timeoutMs) {
-    if (await predicate()) return
-    await Bun.sleep(5)
+/** `setImmediate` stays real under Bun's fake timers, so this drains every pending microtask. */
+function flush(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
+/** Waits for a pass that needs no timer: every step of it is a promise the loop can drain. */
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let turn = 0; turn < 100; turn++) {
+    if (predicate()) return
+    await flush()
   }
   throw new Error("Timed out waiting for maintenance condition.")
 }

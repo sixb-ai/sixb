@@ -1,22 +1,8 @@
-import { describe, expect, mock, test } from "bun:test"
-import {
-  defineObjectType,
-  type InMemoryBroker,
-  link,
-  ObjectNotFoundError,
-  OntologyValidationError,
-  prop,
-} from "../src"
+import { describe, expect, test } from "bun:test"
+import { defineObjectType, link, ObjectNotFoundError, OntologyValidationError, prop } from "../src"
+import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { createTestSixb } from "../src/testing"
-import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
-
-/** Mutations publish durable outbox facts, so delivery is observed on the publication boundary. */
-function spyPublishedFacts(broker: InMemoryBroker) {
-  const publish = broker.append.bind(broker)
-  const spy = mock(publish)
-  broker.append = spy
-  return spy
-}
+import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 // ── Test fixtures ────────────────────────────────────────────
 
@@ -46,106 +32,56 @@ const Sensor = defineObjectType({
   properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
 })
 
-// ── upsertObjectBatch ────────────────────────────────────────
+function createRuntime() {
+  const deps = createTestRuntimeDeps()
+  const sixb = createTestSixb({ ontology: [Building, Room, Sensor], ...deps })
+  /** Durable outbox facts: every event a commit will publish, readable without waiting. */
+  const facts = () => [
+    ...getInMemoryOntologyStorageTestingAdapter(deps.storage.ontology).snapshot().outbox.values(),
+  ]
+  return { deps, sixb, facts }
+}
 
 describe("upsertObjectBatch", () => {
-  test("happy path — 3 objects, all ok", async () => {
-    const deps = createTestRuntimeDeps()
-    const sixb = createTestSixb({ ontology: [Building, Room, Sensor], ...deps })
+  test("applies valid items in order, merges existing objects, and fails invalid items alone", async () => {
+    const { deps, sixb } = createRuntime()
+    await sixb.objects.upsert("room", { id: "r1", name: "Old Name" })
 
     const results = await sixb.objects.upsertBatch("room", [
-      { properties: { id: "r1", name: "Kitchen" } },
-      { properties: { id: "r2", name: "Bedroom" } },
-      { properties: { id: "r3", name: "Bathroom" } },
-    ])
-
-    expect(results).toHaveLength(3)
-    expect(results.every((r) => r.ok)).toBe(true)
-
-    if (results[0].ok) expect(results[0].value.primaryId).toBe("r1")
-    if (results[1].ok) expect(results[1].value.primaryId).toBe("r2")
-    if (results[2].ok) expect(results[2].value.primaryId).toBe("r3")
-
-    // Verify storage
-    const r1 = await deps.storage.objects.getByPrimaryId({
-      projectId: sixb.execution.projectId,
-      objectTypeId: "room",
-      primaryId: "r1",
-    })
-    expect(r1?.properties.name).toBe("Kitchen")
-  })
-
-  test("partial failure — mix valid/invalid", async () => {
-    const deps = createTestRuntimeDeps()
-    const sixb = createTestSixb({ ontology: [Building, Room, Sensor], ...deps })
-
-    const results = await sixb.objects.upsertBatch("room", [
-      { properties: { id: "r1", name: "Kitchen" } },
+      { properties: { id: "r1", name: "New Name" } },
       { properties: { id: "r2", name: 12345 } }, // invalid type for "name"
       { properties: { id: "r3", name: "Bathroom" } },
     ])
 
-    expect(results).toHaveLength(3)
-    expect(results[0].ok).toBe(true)
-    expect(results[1].ok).toBe(false)
-    expect(results[2].ok).toBe(true)
+    expect(results.map((result) => result.ok)).toEqual([true, false, true])
+    if (results[0].ok) expect(results[0].value.primaryId).toBe("r1")
+    if (results[2].ok) expect(results[2].value.primaryId).toBe("r3")
+    if (!results[1].ok) expect(results[1].error).toBeInstanceOf(OntologyValidationError)
 
-    if (!results[1].ok) {
-      expect(results[1].error).toBeInstanceOf(Error)
-    }
+    const stored = await deps.storage.objects.getByPrimaryIdBatch({
+      projectId: sixb.execution.projectId,
+      items: ["r1", "r2", "r3"].map((primaryId) => ({ objectTypeId: "room", primaryId })),
+    })
+    expect([...stored.values()].map((row) => [row.primaryId, row.properties.name])).toEqual([
+      ["r1", "New Name"],
+      ["r3", "Bathroom"],
+    ])
   })
 
-  test("all fail — no events created", async () => {
-    const deps = createTestRuntimeDeps()
-    const sixb = createTestSixb({ ontology: [Building, Room, Sensor], ...deps })
+  test("emits no events when every item fails", async () => {
+    const { sixb, facts } = createRuntime()
 
     const results = await sixb.objects.upsertBatch("room", [
       { properties: { id: "r1" } }, // missing required "name"
       { properties: { id: "r2" } }, // missing required "name"
     ])
 
-    expect(results).toHaveLength(2)
-    expect(results.every((r) => !r.ok)).toBe(true)
-
-    // No events should have been created
-    const events = await sixb.events.read({ types: ["object.created"] })
-    expect(events).toHaveLength(0)
+    expect(results.map((result) => result.ok)).toEqual([false, false])
+    expect(facts()).toEqual([])
   })
 
-  test("empty batch returns empty array", async () => {
-    const deps = createTestRuntimeDeps()
-    const sixb = createTestSixb({ ontology: [Building, Room, Sensor], ...deps })
-
-    const results = await sixb.objects.upsertBatch("room", [])
-    expect(results).toEqual([])
-  })
-
-  test("merge with existing object", async () => {
-    const deps = createTestRuntimeDeps()
-    const sixb = createTestSixb({ ontology: [Building, Room, Sensor], ...deps })
-
-    // Pre-create
-    await sixb.objects.upsert("room", { id: "r1", name: "Old Name" })
-
-    const results = await sixb.objects.upsertBatch("room", [
-      { properties: { id: "r1", name: "New Name" } },
-    ])
-
-    expect(results).toHaveLength(1)
-    expect(results[0].ok).toBe(true)
-
-    const obj = await deps.storage.objects.getByPrimaryId({
-      projectId: sixb.execution.projectId,
-      objectTypeId: "room",
-      primaryId: "r1",
-    })
-    expect(obj?.properties.name).toBe("New Name")
-  })
-
-  test("publishes one batch of facts for the whole commit", async () => {
-    const deps = createTestRuntimeDeps()
-    const sixb = createTestSixb({ ontology: [Building, Room, Sensor], ...deps })
-    const publishSpy = spyPublishedFacts(deps.broker)
+  test("commits the whole batch once", async () => {
+    const { sixb, facts } = createRuntime()
 
     await sixb.objects.upsertBatch("room", [
       { properties: { id: "r1", name: "A" } },
@@ -153,31 +89,31 @@ describe("upsertObjectBatch", () => {
       { properties: { id: "r3", name: "C" } },
     ])
 
-    await waitFor(
-      () => publishSpy.mock.calls.length,
-      (callCount) => callCount === 1
-    )
-    expect(publishSpy).toHaveBeenCalledTimes(1)
-    expect(publishSpy.mock.calls[0]?.[0].records.map((event) => event.name)).toEqual([
+    const batchFacts = facts()
+    expect(batchFacts.map((row) => row.event.type)).toEqual([
       "object.created",
       "object.created",
       "object.created",
     ])
+    expect(new Set(batchFacts.map((row) => row.commitId)).size).toBe(1)
+  })
+
+  test("returns an empty result for an empty batch, of objects or links", async () => {
+    const { sixb } = createRuntime()
+
+    expect(await sixb.objects.upsertBatch("room", [])).toEqual([])
+    expect(await sixb.objects.upsertLinkBatch([])).toEqual([])
   })
 })
 
-// ── upsertLinkBatch ──────────────────────────────────────────
-
 describe("upsertLinkBatch", () => {
-  test("happy path — 3 links, all ok", async () => {
-    const deps = createTestRuntimeDeps()
-    const sixb = createTestSixb({ ontology: [Building, Room, Sensor], ...deps })
-
-    // Pre-create objects
+  test("creates every link of the batch in one commit", async () => {
+    const { deps, sixb, facts } = createRuntime()
     await sixb.objects.upsert("room", { id: "r1", name: "Room 1" })
     await sixb.objects.upsert("room", { id: "r2", name: "Room 2" })
     await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
     await sixb.objects.upsert("sensor", { id: "s2", name: "Humidity" })
+    const before = facts().length
 
     const results = await sixb.objects.upsertLinkBatch([
       {
@@ -200,21 +136,26 @@ describe("upsertLinkBatch", () => {
       },
     ])
 
-    expect(results).toHaveLength(3)
-    expect(results.every((r) => r.ok)).toBe(true)
-
+    expect(results.map((result) => result.ok)).toEqual([true, true, true])
     const links = await deps.storage.objects.listLinks({
       projectId: sixb.execution.projectId,
       objectTypeId: "room",
       objectId: "r1",
       linkId: "hasSensors",
     })
-    expect(links).toHaveLength(2)
+    expect(links.map((row) => row.targetId).sort()).toEqual(["s1", "s2"])
+
+    const batchFacts = facts().slice(before)
+    expect(batchFacts.map((row) => row.event.type)).toEqual([
+      "link.created",
+      "link.created",
+      "link.created",
+    ])
+    expect(new Set(batchFacts.map((row) => row.commitId)).size).toBe(1)
   })
 
   test("ObjectNotFoundError per-item for missing source/target", async () => {
-    const deps = createTestRuntimeDeps()
-    const sixb = createTestSixb({ ontology: [Building, Room, Sensor], ...deps })
+    const { sixb } = createRuntime()
 
     // Only create the sensor, not the room
     await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
@@ -251,8 +192,7 @@ describe("upsertLinkBatch", () => {
   })
 
   test("cardinality violation per-item", async () => {
-    const deps = createTestRuntimeDeps()
-    const sixb = createTestSixb({ ontology: [Building, Room, Sensor], ...deps })
+    const { sixb } = createRuntime()
 
     await sixb.objects.upsert("building", { id: "b1", name: "HQ" })
     await sixb.objects.upsert("building", { id: "b2", name: "Branch" })
@@ -278,54 +218,5 @@ describe("upsertLinkBatch", () => {
     if (!results[0].ok) {
       expect(results[0].error).toBeInstanceOf(OntologyValidationError)
     }
-  })
-
-  test("empty batch returns empty array", async () => {
-    const deps = createTestRuntimeDeps()
-    const sixb = createTestSixb({ ontology: [Building, Room, Sensor], ...deps })
-
-    const results = await sixb.objects.upsertLinkBatch([])
-    expect(results).toEqual([])
-  })
-
-  test("publishes one batch of facts for the whole commit", async () => {
-    const deps = createTestRuntimeDeps()
-    const sixb = createTestSixb({ ontology: [Building, Room, Sensor], ...deps })
-    const publishSpy = spyPublishedFacts(deps.broker)
-
-    await sixb.objects.upsert("room", { id: "r1", name: "Room 1" })
-    await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
-    await sixb.objects.upsert("sensor", { id: "s2", name: "Humidity" })
-
-    await waitFor(
-      () => sixb.events.read(),
-      (published) => published.length === 3
-    )
-    publishSpy.mockClear()
-
-    await sixb.objects.upsertLinkBatch([
-      {
-        objectTypeId: "room",
-        sourceId: "r1",
-        linkId: "hasSensors",
-        target: { targetTypeId: "sensor", targetId: "s1" },
-      },
-      {
-        objectTypeId: "room",
-        sourceId: "r1",
-        linkId: "hasSensors",
-        target: { targetTypeId: "sensor", targetId: "s2" },
-      },
-    ])
-
-    await waitFor(
-      () => publishSpy.mock.calls.length,
-      (callCount) => callCount === 1
-    )
-    expect(publishSpy).toHaveBeenCalledTimes(1)
-    expect(publishSpy.mock.calls[0]?.[0].records.map((event) => event.name)).toEqual([
-      "link.created",
-      "link.created",
-    ])
   })
 })

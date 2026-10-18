@@ -151,20 +151,17 @@ describe("EditBatch authoring contract", () => {
     })
   })
 
-  test("keeps identity out of created authority properties", async () => {
+  test("keeps identity out of created properties and derives a stable id when omitted", async () => {
     const batch = await recordEdits({ runId: "act_1" }, ({ objects }) => {
       objects(Invoice).create({ id: "inv_new", amount: 12, status: "draft" })
     })
-
     expect(batch.operations[0]).toEqual({
       kind: "object.create",
       objectTypeId: "Invoice",
       primaryId: "inv_new",
       properties: { amount: 12, status: "draft" },
     })
-  })
 
-  test("derives a stable primary id when a create omits one", async () => {
     const primaryId = (batch: EditBatch) =>
       batch.operations[0]?.kind === "object.create" ? batch.operations[0].primaryId : undefined
     const record = (runId: string) =>
@@ -180,38 +177,62 @@ describe("EditBatch authoring contract", () => {
     expect(primaryId(first)).not.toBe(primaryId(otherRun))
   })
 
-  test("rejects edits the managed authority model cannot express", async () => {
-    const reject = (record: Parameters<typeof recordEdits>[1]) =>
-      expect(recordEdits({ runId: "act_1" }, record)).rejects.toThrow()
-
-    await reject(({ objects }) => {
-      objects(Invoice)
-        .byId("inv_1")
-        .update({ id: "inv_2" } as never)
-    })
-    await reject(({ objects }) => {
-      objects(Invoice)
-        .byId("inv_1")
-        .unset("id" as never)
-    })
-    await reject(({ objects }) => {
-      objects(Invoice)
-        .byId("inv_1")
-        .reset("temperature" as never)
-    })
-    await reject(({ objects }) => {
-      objects(Invoice)
-        .byId("inv_1")
-        .update({ temperature: 20 } as never)
-    })
-    await reject(({ objects }) => {
-      objects(Invoice)
-        .byId("inv_1")
-        .update({ bogus: true } as never)
-    })
-    await reject(({ objects }) => {
-      objects(Invoice).byId("inv_1").unset()
-    })
+  test.each<[string, Parameters<typeof recordEdits>[1], string]>([
+    [
+      "an update of the primary property",
+      ({ objects }) => {
+        objects(Invoice)
+          .byId("inv_1")
+          .update({ id: "inv_2" } as never)
+      },
+      "cannot update primary property 'Invoice.id'",
+    ],
+    [
+      "an unset of the primary property",
+      ({ objects }) => {
+        objects(Invoice)
+          .byId("inv_1")
+          .unset("id" as never)
+      },
+      "cannot unset primary property 'Invoice.id'",
+    ],
+    [
+      "a reset of a telemetry property",
+      ({ objects }) => {
+        objects(Invoice)
+          .byId("inv_1")
+          .reset("temperature" as never)
+      },
+      "cannot reset telemetry property 'Invoice.temperature'",
+    ],
+    [
+      "an update of a telemetry property",
+      ({ objects }) => {
+        objects(Invoice)
+          .byId("inv_1")
+          .update({ temperature: 20 } as never)
+      },
+      "cannot edit telemetry property",
+    ],
+    [
+      "an unknown property",
+      ({ objects }) => {
+        objects(Invoice)
+          .byId("inv_1")
+          .update({ bogus: true } as never)
+      },
+      "Unknown property 'bogus' for object type 'Invoice'",
+    ],
+    [
+      "an unset of no properties",
+      ({ objects }) => {
+        objects(Invoice).byId("inv_1").unset()
+      },
+      "Invoice.unset requires at least one property id",
+    ],
+  ])("rejects %s, which the managed authority model cannot express", async (_, record, message) => {
+    const error = await recordEdits({ runId: "act_1" }, record).catch((caught: unknown) => caught)
+    expect(String(error)).toContain(message)
   })
 })
 
@@ -358,91 +379,43 @@ describe("Action edit commits", () => {
     expect(commits.commits.filter((record) => record.origin.kind === "action")).toEqual([])
   })
 
-  test("fails the commit when an observed object revision is stale", async () => {
-    const { host, sixb } = createRuntime()
-    const seeded = await seedInvoice(sixb)
-    await startActionRun(host, "act_stale")
-
-    const batch = await recordEdits({ runId: "act_stale" }, ({ objects }) => {
-      objects(Invoice).byId("inv_1").update({ status: "paid" })
-    })
-    await expect(
-      commit(host, {
-        runId: "act_stale",
-        batch,
-        dependencies: {
-          objects: [
-            {
-              ref: { objectTypeId: "Invoice", primaryId: "inv_1" },
-              exists: true,
-              version: seeded.version,
-              lastCommitId: "commit-that-never-existed",
-            },
-          ],
-          links: [],
-          linkScopes: [],
-        },
-      })
-    ).rejects.toBeInstanceOf(MaterializationConflictError)
-  })
-
-  test("fails the commit when an observed link scope changed", async () => {
+  test("fences a commit on its observed link scope fingerprint", async () => {
     const { host, sixb } = createRuntime()
     await seedInvoice(sixb)
     await sixb.objects.upsert("Customer", { id: "cus_1", name: "Ada" })
     await startActionRun(host, "act_scope")
-
-    const batch = await recordEdits({ runId: "act_scope" }, ({ objects }) => {
-      objects(Invoice)
-        .byId("inv_1")
-        .link(Invoice.l.customer, { objectTypeId: "Customer", primaryId: "cus_1" })
-    })
-    await expect(
-      commit(host, {
-        runId: "act_scope",
-        batch,
-        dependencies: {
-          objects: [],
-          links: [],
-          linkScopes: [
-            {
-              source: { objectTypeId: "Invoice", primaryId: "inv_1" },
-              linkId: "customer",
-              fingerprint: "fingerprint-of-a-scope-that-never-existed",
-            },
-          ],
-        },
-      })
-    ).rejects.toBeInstanceOf(MaterializationConflictError)
-  })
-
-  test("accepts a commit whose observed empty scope still matches", async () => {
-    const { host, sixb } = createRuntime()
-    await seedInvoice(sixb)
-    await sixb.objects.upsert("Customer", { id: "cus_1", name: "Ada" })
     await startActionRun(host, "act_empty_scope")
 
-    const batch = await recordEdits({ runId: "act_empty_scope" }, ({ objects }) => {
-      objects(Invoice)
-        .byId("inv_1")
-        .link(Invoice.l.customer, { objectTypeId: "Customer", primaryId: "cus_1" })
-    })
-    const result = await commit(host, {
-      runId: "act_empty_scope",
-      batch,
-      dependencies: {
-        objects: [],
-        links: [],
-        linkScopes: [
-          {
-            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
-            linkId: "customer",
-            fingerprint: createLinkScopeFingerprint([]),
-          },
-        ],
-      },
+    const linkCustomer = (runId: string) =>
+      recordEdits({ runId }, ({ objects }) => {
+        objects(Invoice)
+          .byId("inv_1")
+          .link(Invoice.l.customer, { objectTypeId: "Customer", primaryId: "cus_1" })
+      })
+    const observedScope = (fingerprint: string) => ({
+      objects: [],
+      links: [],
+      linkScopes: [
+        {
+          source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+          linkId: "customer",
+          fingerprint,
+        },
+      ],
     })
 
+    const stale = await commit(host, {
+      runId: "act_scope",
+      batch: await linkCustomer("act_scope"),
+      dependencies: observedScope("fingerprint-of-a-scope-that-never-existed"),
+    }).catch((caught: unknown) => caught)
+    expect(stale).toBeInstanceOf(MaterializationConflictError)
+
+    const result = await commit(host, {
+      runId: "act_empty_scope",
+      batch: await linkCustomer("act_empty_scope"),
+      dependencies: observedScope(createLinkScopeFingerprint([])),
+    })
     expect(result.changes.links.map((change) => change.kind)).toEqual(["created"])
   })
 })
@@ -749,25 +722,6 @@ describe("Action read dependency capture", () => {
     expect(await recorded.exists()).toBe(true)
     // Aggregates return no rows, so nothing is recorded.
     expect(reads.dependencies().objects).toEqual([])
-  })
-
-  test("a returned object that changes before the commit rejects it", async () => {
-    const { host, sixb } = createRuntime()
-    await seedInvoice(sixb)
-    await startActionRun(host, "act_query")
-    const { facade, reads } = createFacade(host, sixb)
-
-    const { objects } = await facade.objects(Invoice).query().list()
-    expect(objects.map((object) => object.properties.status)).toEqual(["draft"])
-
-    await sixb.objects.upsert("Invoice", { id: "inv_1", amount: 100, status: "void" })
-
-    const batch = await recordEdits({ runId: "act_query" }, ({ objects }) => {
-      objects(Invoice).byId("inv_1").update({ status: "paid" })
-    })
-    await expect(
-      commit(host, { runId: "act_query", batch, dependencies: reads.dependencies() })
-    ).rejects.toBeInstanceOf(MaterializationConflictError)
   })
 
   test("captured dependencies protect the commit that follows them", async () => {

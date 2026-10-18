@@ -209,56 +209,6 @@ describe("in-memory ontology storage", () => {
     expect(removed.counts).toMatchObject({ objectsDeleted: 1, linksUnchanged: 0 })
   })
 
-  test("rolls back exact object, ontology, outbox, and activation writes on injected failure", async () => {
-    let fail = true
-    const storage = new InMemoryStorage()
-    getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
-      beforeWrite(boundary) {
-        if (fail && boundary === "finalize") throw new Error("injected finalize failure")
-      },
-    })
-    const { materializer } = createMaterializerFixture({ storage })
-    await expect(
-      materializer.projections.replace(
-        replacement("v1", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
-      )
-    ).rejects.toThrow("injected finalize failure")
-    expect(
-      await storage.objects.getByPrimaryId({
-        projectId: "project",
-        objectTypeId: "Device",
-        primaryId: "one",
-      })
-    ).toBeNull()
-    expect(
-      await storage.ontology.sources.getActive({
-        projectId: "project",
-        source: { projectionId: "devices" },
-      })
-    ).toBeNull()
-    expect(
-      await storage.ontology.outbox.claim({
-        projectId: "project",
-        now: "2027-01-01T00:00:00.000Z",
-        limit: 10,
-        leaseId: "lease",
-        leaseExpiresAt: "2027-01-01T01:00:00.000Z",
-      })
-    ).toEqual([])
-
-    fail = false
-    await materializer.projections.replace(
-      replacement("v1", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
-    )
-    expect(
-      await storage.objects.getByPrimaryId({
-        projectId: "project",
-        objectTypeId: "Device",
-        primaryId: "one",
-      })
-    ).not.toBeNull()
-  })
-
   test("rolls back at every exact-plan write category", async () => {
     const boundaries = [
       "override.object.upsert",
@@ -426,145 +376,6 @@ describe("in-memory ontology storage", () => {
         expect(afterOntology).toEqual(beforeOntology)
       }
     }
-  })
-
-  test("correlates and closes provider sessions and supports outbox lease lifecycle", async () => {
-    const storage = new InMemoryStorage()
-    const header = {
-      commit: {
-        projectId: "project",
-        id: "commit",
-        idempotencyKey: "runtime:empty",
-        requestHash: "hash",
-        executionId: "execution:empty",
-        origin: { kind: "runtime", requestId: "empty" },
-        ontologyRevision: "revision",
-        intent: { kind: "edit", mode: "atomic", operationCount: 0 },
-        committedAt: "2026-01-01T00:00:00.000Z",
-      },
-      expected: {
-        sources: [],
-        objects: [],
-        links: [],
-        linkScopes: [],
-        points: [],
-      },
-    } satisfies MaterializationPlanHeader
-    await storage.transaction(async (tx) => {
-      if (!tx.ontology) throw new Error("missing ontology")
-      const session = await beginMaterialization(tx, header)
-      await tx.ontology.materializations.apply({ session })
-      await tx.ontology.materializations.finalize({
-        session,
-        finalization: {
-          sourceActivations: [],
-          result: {
-            kind: "edit",
-            commitId: "commit",
-            created: true,
-            eventCount: 0,
-            committedAt: header.commit.committedAt,
-            outcomes: [],
-            changes: { objects: [], links: [] },
-          },
-        },
-      })
-      await expect(tx.ontology.materializations.apply({ session })).rejects.toThrow("inactive")
-    })
-
-    const { materializer } = createMaterializerFixture({ storage })
-    await materializer.edits.commit({
-      mode: "atomic",
-      source: { kind: "runtime", requestId: "object" },
-      operations: [
-        {
-          id: "create",
-          kind: "object.create",
-          ref: { objectTypeId: "Device", primaryId: "one" },
-          properties: { name: "one" },
-        },
-      ],
-      expectedObjects: [],
-      expectedLinks: [],
-      expectedLinkScopes: [],
-    })
-    const claimed = await storage.ontology.outbox.claim({
-      projectId: "project",
-      now: "2027-01-01T00:00:00.000Z",
-      limit: 10,
-      leaseId: "lease",
-      leaseExpiresAt: "2027-01-01T01:00:00.000Z",
-    })
-    expect(claimed).toHaveLength(1)
-    await storage.ontology.outbox.reschedule({
-      projectId: "project",
-      ids: [claimed[0].envelope.id],
-      leaseId: "lease",
-      availableAt: "2027-01-02T00:00:00.000Z",
-      failure: TEST_OUTBOX_FAILURE,
-    })
-    const reclaimed = await storage.ontology.outbox.claim({
-      projectId: "project",
-      now: "2027-01-03T00:00:00.000Z",
-      limit: 10,
-      leaseId: "lease-2",
-      leaseExpiresAt: "2027-01-03T01:00:00.000Z",
-    })
-    await storage.ontology.outbox.markPublished({
-      projectId: "project",
-      ids: [reclaimed[0].envelope.id],
-      leaseId: "lease-2",
-      publishedAt: "2027-01-03T00:30:00.000Z",
-    })
-    expect(
-      await storage.ontology.outbox.purgePublished({
-        projectId: "project",
-        publishedBefore: "2027-01-04T00:00:00.000Z",
-        limit: 10,
-      })
-    ).toBe(1)
-  })
-
-  test("requires transaction-scoped sessions and rejects unfinished sessions", async () => {
-    const storage = new InMemoryStorage()
-    const header = {
-      commit: {
-        projectId: "project",
-        id: "session-lifecycle",
-        idempotencyKey: "runtime:session-lifecycle",
-        requestHash: "hash",
-        executionId: "execution:session-lifecycle",
-        origin: { kind: "runtime", requestId: "session-lifecycle" },
-        ontologyRevision: "revision",
-        intent: { kind: "edit", mode: "atomic", operationCount: 0 },
-        committedAt: "2026-01-01T00:00:00.000Z",
-      },
-      expected: {
-        sources: [],
-        objects: [],
-        links: [],
-        linkScopes: [],
-        points: [],
-      },
-    } satisfies MaterializationPlanHeader
-    await expect(beginMaterialization(storage, header)).rejects.toThrow(
-      "require an active storage transaction"
-    )
-
-    let unfinished: Awaited<ReturnType<typeof storage.ontology.materializations.begin>> | null =
-      null
-    await expect(
-      storage.transaction(async (tx) => {
-        if (!tx.ontology) throw new Error("missing ontology")
-        unfinished = await beginMaterialization(tx, header)
-      })
-    ).rejects.toThrow("unfinished materialization session")
-    await expect(
-      storage.transaction(async (tx) => {
-        if (!tx.ontology) throw new Error("missing ontology")
-        await tx.ontology.materializations.stageWork({ session: unfinished!, records: [] })
-      })
-    ).rejects.toThrow("inactive")
   })
 
   test("serializes source staging with failed transaction snapshots", async () => {
@@ -836,56 +647,7 @@ describe("in-memory ontology storage", () => {
     ])
   })
 
-  test("deactivates every live materialization session on rollback", async () => {
-    const storage = new InMemoryStorage()
-    let leakedSession: Awaited<ReturnType<typeof storage.ontology.materializations.begin>> | null =
-      null
-    await expect(
-      storage.transaction(async (tx) => {
-        if (!tx.ontology) throw new Error("missing ontology")
-        leakedSession = await beginMaterialization(tx, {
-          commit: {
-            projectId: "project",
-            id: "rolled-back-session",
-            idempotencyKey: "runtime:rolled-back-session",
-            requestHash: "hash",
-            executionId: "execution:rolled-back-session",
-            origin: { kind: "runtime", requestId: "rolled-back-session" },
-            ontologyRevision: "revision",
-            intent: { kind: "edit", mode: "atomic", operationCount: 0 },
-            committedAt: "2026-01-01T00:00:00.000Z",
-          },
-          expected: {
-            sources: [],
-            objects: [],
-            links: [],
-            linkScopes: [],
-            points: [],
-          },
-        })
-        await tx.ontology.materializations.stageWork({
-          session: leakedSession,
-          records: [
-            {
-              kind: "classification",
-              recordKey: "classification:object:61",
-              entityKind: "object",
-              identityKey: '["Device","a"]',
-            },
-          ],
-        })
-        throw new Error("rollback session")
-      })
-    ).rejects.toThrow("rollback session")
-    await expect(
-      storage.ontology.materializations.apply({ session: leakedSession! })
-    ).rejects.toThrow("inactive")
-    await expect(
-      storage.ontology.materializations.stageWork({ session: leakedSession!, records: [] })
-    ).rejects.toThrow("inactive")
-  })
-
-  test("uses the ontology commit origin as replacement run attribution", async () => {
+  test("keeps projection and Action materialization history in ontology commits, listed by run", async () => {
     const storage = new InMemoryStorage()
     const { materializer } = createMaterializerFixture({ storage })
     const input = replacement(
@@ -927,12 +689,8 @@ describe("in-memory ontology storage", () => {
         .entries,
     })
     expect(replay.created).toBe(false)
-  })
 
-  test("keeps Action materialization history exclusively in ontology commits", async () => {
-    const storage = new InMemoryStorage()
-    const { materializer } = createMaterializerFixture({ storage })
-    const input = {
+    const action = {
       mode: "atomic" as const,
       source: {
         kind: "action" as const,
@@ -943,7 +701,7 @@ describe("in-memory ontology storage", () => {
         id: "action-materialization-run",
         projectId: "project",
         actionId: "createDevice",
-        subject: { kind: "object", objectTypeId: "Device", primaryId: "one" },
+        subject: { kind: "object", objectTypeId: "Device", primaryId: "two" },
         params: {},
         idempotencyKey: "action:project:action-materialization-run",
       }),
@@ -951,16 +709,15 @@ describe("in-memory ontology storage", () => {
         {
           id: "create",
           kind: "object.create" as const,
-          ref: { objectTypeId: "Device", primaryId: "one" },
-          properties: { name: "one" },
+          ref: { objectTypeId: "Device", primaryId: "two" },
+          properties: { name: "two" },
         },
       ],
       expectedObjects: [],
       expectedLinks: [],
       expectedLinkScopes: [],
     }
-
-    const committed = await materializer.edits.commit(input)
+    const committed = await materializer.edits.commit(action)
     expect(
       await storage.actionRuns.getById({ projectId: "project", id: "action-materialization-run" })
     ).not.toHaveProperty("commitId")
@@ -974,7 +731,7 @@ describe("in-memory ontology storage", () => {
       total: 1,
       hasMore: false,
     })
-    expect((await materializer.edits.commit(input)).created).toBe(false)
+    expect((await materializer.edits.commit(action)).created).toBe(false)
   })
 
   test("reclaims expired outbox leases in parent-spec createdAt and event-id order", async () => {

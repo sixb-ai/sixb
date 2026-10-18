@@ -28,17 +28,13 @@ describe("exact decimal values", () => {
     expect(() => normalizeDecimalValue(".5")).toThrow(TypeError)
   })
 
-  test("rejects exponent notation and non-finite values", () => {
-    for (const value of ["1e3", "NaN", "Infinity", "1.", ".1", ""]) {
+  test("rejects exponent notation, non-finite values, and excess precision", () => {
+    const excessiveFraction = `0.${"1".repeat(16_384)}`
+    for (const value of ["1e3", "NaN", "Infinity", "1.", ".1", "", excessiveFraction]) {
       expect(() => decimal(value)).toThrow(TypeError)
       expect(isDecimalString(value)).toBe(false)
     }
-  })
-
-  test("rejects values outside the cross-provider exact precision", () => {
-    const excessiveFraction = `0.${"1".repeat(16_384)}`
     expect(() => decimal(excessiveFraction)).toThrow("exceeds the supported precision")
-    expect(isDecimalString(excessiveFraction)).toBe(false)
   })
 
   test("distinguishes valid input strings from canonical values", () => {

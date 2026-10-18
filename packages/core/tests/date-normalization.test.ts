@@ -19,56 +19,44 @@ const Task = defineObjectType({
 })
 
 describe("date/timestamp normalization on upsert", () => {
-  test("single upsert serializes Date props to ISO strings", async () => {
+  test("serializes Date props to ISO strings through upsert and upsertBatch", async () => {
     const deps = createTestRuntimeDeps()
     const sixb = createTestSixb({ ontology: [Task], ...deps })
+    const stored = async (primaryId: string) =>
+      (
+        await deps.storage.objects.getByPrimaryId({
+          projectId: sixb.execution.projectId,
+          objectTypeId: "task",
+          primaryId,
+        })
+      )?.properties
 
     const at = new Date("2026-06-20T12:34:56.000Z")
     const row = await sixb.objects(Task).upsert({
       properties: { id: "t1", createdAt: at, due: at },
     })
-
-    expect(row.properties.createdAt).toBe("2026-06-20T12:34:56.000Z")
-    expect(row.properties.due).toBe("2026-06-20")
-
-    const stored = await deps.storage.objects.getByPrimaryId({
-      projectId: sixb.execution.projectId,
-      objectTypeId: "task",
-      primaryId: "t1",
+    expect(row.properties).toMatchObject({
+      createdAt: "2026-06-20T12:34:56.000Z",
+      due: "2026-06-20",
     })
-    expect(stored?.properties.createdAt).toBe("2026-06-20T12:34:56.000Z")
-    expect(stored?.properties.due).toBe("2026-06-20")
-  })
+    expect(await stored("t1")).toMatchObject({
+      createdAt: "2026-06-20T12:34:56.000Z",
+      due: "2026-06-20",
+    })
 
-  test("ISO string input is preserved", async () => {
-    const sixb = createTestSixb({ ontology: [Task], ...createTestRuntimeDeps() })
-
-    const row = await sixb.objects(Task).upsert({
+    const iso = await sixb.objects(Task).upsert({
       properties: { id: "t2", createdAt: "2026-01-02T03:04:05.000Z" },
     })
+    expect(iso.properties.createdAt).toBe("2026-01-02T03:04:05.000Z")
 
-    expect(row.properties.createdAt).toBe("2026-01-02T03:04:05.000Z")
-  })
-
-  test("batch upsert serializes Date props to ISO strings", async () => {
-    const deps = createTestRuntimeDeps()
-    const sixb = createTestSixb({ ontology: [Task], ...deps })
-
-    const at = new Date("2026-06-20T12:34:56.000Z")
     const results = await sixb.objects.upsertBatch("task", [
       { properties: { id: "b1", createdAt: at } },
       { properties: { id: "b2", createdAt: at } },
     ])
-
-    expect(results.every((r) => r.ok)).toBe(true)
-    if (results[0].ok)
-      expect(results[0].value.properties.createdAt).toBe("2026-06-20T12:34:56.000Z")
-
-    const stored = await deps.storage.objects.getByPrimaryId({
-      projectId: sixb.execution.projectId,
-      objectTypeId: "task",
-      primaryId: "b2",
-    })
-    expect(stored?.properties.createdAt).toBe("2026-06-20T12:34:56.000Z")
+    expect(results.map((result) => result.ok && result.value.properties.createdAt)).toEqual([
+      "2026-06-20T12:34:56.000Z",
+      "2026-06-20T12:34:56.000Z",
+    ])
+    expect((await stored("b2"))?.createdAt).toBe("2026-06-20T12:34:56.000Z")
   })
 })
