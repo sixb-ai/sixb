@@ -186,6 +186,18 @@ describe("selection", () => {
     })
   })
 
+  test("sums the numbers of a text column too, as a spreadsheet sums any number", () => {
+    const mixed = fileSheetModel("Mixed", parseCsv("Value,Note\n5100 USD,a\n42,b\n8,c\n"))
+    // fileSheetModel types a column of not only numbers as text.
+    expect(mixed.columns[0]?.numeric).toBe(false)
+    const stats = rangeStats(
+      cellRange({ row: 1, column: 0 }, { row: 3, column: 0 }),
+      mixed,
+      [0, 1, 2]
+    )
+    expect(stats).toMatchObject({ count: 3, numericCount: 2, sum: 50 })
+  })
+
   test("finds the smallest and largest number in what is selected", () => {
     const stats = rangeStats(cellRange({ row: 1, column: 1 }, { row: 4, column: 1 }), model, order)
     expect(stats).toMatchObject({ min: -15000, max: 5560000 })

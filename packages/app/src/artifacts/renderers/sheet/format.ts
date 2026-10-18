@@ -16,6 +16,8 @@ export interface FormattedCell {
   readonly reference?: string
   /** An image cell's path in the artifact. */
   readonly image?: string
+  /** A number in a text column, which aligns right as a spreadsheet aligns any number. */
+  readonly number?: boolean
 }
 
 /**
@@ -104,7 +106,8 @@ export function cellFormatter(
         return path ? { text: path.split("/").at(-1) ?? path, image: path } : { text: "" }
       }
     case "text":
-      return (value) => ({ text: value })
+      return (value) =>
+        parseSheetNumber(value) === undefined ? { text: value } : { text: value, number: true }
   }
 }
 

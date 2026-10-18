@@ -25,14 +25,21 @@ import {
   useState,
 } from "react"
 import { useArtifactMessages } from "../../messages"
-import { CellContent, columnTypeLabel, GridCell, HeaderContent, selectionEdges } from "./cells"
+import {
+  CellContent,
+  columnTypeLabel,
+  EmptyCell,
+  GridCell,
+  HeaderContent,
+  selectionEdges,
+} from "./cells"
 import { CONTEXT_PARTS, type ColumnActions, ColumnMenu, ColumnMenuItems } from "./column-menu"
 import { filteredOrder } from "./filter"
 import { FilterPanel } from "./filter-panel"
 import { findMatches } from "./find"
 import { modulo, type SheetFind, type SheetFindCount } from "./find-bar"
 import { elementTextMeasure, fitWidth, type TextMeasure } from "./fit"
-import { cellFormatter } from "./format"
+import { cellFormatter, type FormattedCell } from "./format"
 import type { SheetColumn, SheetModel } from "./model"
 import {
   type CellPoint,
@@ -60,8 +67,12 @@ import {
 } from "./view"
 import { prefixOffsets, visibleRowSpan, visibleSpan } from "./virtual"
 
-const ROW_HEIGHT = 32
-const LETTER_HEIGHT = 26
+const ROW_HEIGHT = 28
+const LETTER_HEIGHT = 24
+/** The width of the empty columns past a sheet's data, as a spreadsheet's default column. */
+const EMPTY_COLUMN_WIDTH = 96
+/** A cell's padding on each side, which text that runs on keeps from the gridline. */
+const CELL_PADDING = 8
 const MIN_COLUMN_WIDTH = 48
 const MAX_COLUMN_WIDTH = 800
 const OVERSCAN_ROWS = 8
@@ -151,6 +162,8 @@ export function SheetGrid({
   /** What a drag selects: cells from a cell, rows from a row number, columns from a letter. */
   const dragging = useRef<"cells" | "rows" | "columns" | null>(null)
   const measure = useRef<TextMeasure | null>(null)
+  /** Text widths already measured, for the cells whose text may run on over empty neighbours. */
+  const textWidths = useRef(new Map<string, number>())
 
   const sorted = useMemo(() => sortedOrder(model, sort, locale), [model, sort, locale])
   const order = useMemo(
@@ -214,6 +227,12 @@ export function SheetGrid({
     viewport.top + viewport.height - headerHeight,
     OVERSCAN_ROWS
   )
+  // Past the sheet's data, empty columns and rows fill the view, as a spreadsheet's grid runs on.
+  const viewWidth = Math.max(totalWidth, viewport.width)
+  const emptyColumns = Math.ceil((viewWidth - totalWidth) / EMPTY_COLUMN_WIDTH)
+  const contentHeight = headerHeight + bodyRows * ROW_HEIGHT
+  const viewHeight = Math.max(contentHeight, viewport.height)
+  const emptyRows = Math.ceil((viewHeight - contentHeight) / ROW_HEIGHT)
 
   useLayoutEffect(() => {
     const element = scrollRef.current
@@ -593,11 +612,71 @@ export function SheetGrid({
       ? (model.columns[column]?.name ?? "")
       : (model.rows[order[row - 1] ?? -1]?.[column] ?? "")
 
+  const textWidth = (text: string): number => {
+    if (!measure.current && gridRef.current) measure.current = elementTextMeasure(gridRef.current)
+    const known = textWidths.current.get(text)
+    if (known !== undefined) return known
+    const width = measure.current ? measure.current(text, false) : text.length * 7.4
+    if (textWidths.current.size > 5_000) textWidths.current.clear()
+    textWidths.current.set(text, width)
+    return width
+  }
+
+  /**
+   * Which cells of a row's run of columns carry text over empty cells to their right, as a
+   * spreadsheet lets text run on: only plain text wider than its cell, only over cells with no
+   * value, and, at the end of the data, over the empty columns that fill the view.
+   */
+  const runOn = (row: number, segment: readonly number[], trailing: number) => {
+    const spills = new Map<number, number>()
+    const covered = new Map<number, "through" | "end">()
+    for (let index = 0; index < segment.length; index += 1) {
+      const column = segment[index] as number
+      const cell = cellAt(row, column)
+      if (!cell || model.columns[column]?.numeric || cell.number) continue
+      if (cell.href || cell.reference || cell.image || !cell.text.trim()) continue
+      const need = textWidth(cell.text) + CELL_PADDING * 2
+      let width = widths[column] ?? 0
+      if (need <= width) continue
+      const over: number[] = []
+      let next = index + 1
+      while (width < need && next < segment.length) {
+        const neighbour = segment[next] as number
+        if (valueAt(row, neighbour).trim()) break
+        over.push(neighbour)
+        width += widths[neighbour] ?? 0
+        next += 1
+      }
+      // Past the last column of the data, the empty columns that fill the view.
+      if (width < need && next === segment.length) {
+        for (let empty = 0; empty < trailing && width < need; empty += 1) {
+          over.push(columnCount + empty)
+          width += EMPTY_COLUMN_WIDTH
+        }
+      }
+      if (over.length === 0) continue
+      spills.set(column, Math.min(width, need))
+      over.forEach((neighbour, at) => {
+        covered.set(neighbour, at === over.length - 1 ? "end" : "through")
+      })
+      index = next - 1
+    }
+    return { spills, covered }
+  }
+
+  const cellAt = (row: number, column: number): FormattedCell | undefined =>
+    row === 0 ? undefined : formatters[column]?.(valueAt(row, column))
+
   /** One grid row: its number, the frozen cells, then the cells in view. */
   const renderRow = (row: number) => {
     const header = row === 0
     const rowSelected = row >= range.top && row <= range.bottom
+    const frozenRun = header ? null : runOn(row, fixedColumns, 0)
+    const scrollingRun = header ? null : runOn(row, scrollingColumns, emptyColumns)
     const cell = (column: number, fixed: boolean) => {
+      const run = fixed ? frozenRun : scrollingRun
+      const spill = run?.spills.get(column)
+      const covered = run?.covered.get(column)
       const width = widths[column] ?? 0
       const style: CSSProperties = {
         width,
@@ -613,8 +692,12 @@ export function SheetGrid({
           header={header}
           fixed={fixed}
           lastFixed={fixed && column === frozenColumns - 1}
+          scrolled={viewport.left > 0}
           selected={inRange(range, row, column)}
           active={row === focus.row && column === focus.column}
+          corner={row === range.bottom && column === range.right}
+          {...(spill === undefined ? {} : { spill })}
+          {...(covered ? { covered } : {})}
           sort={header && sort?.column === column ? sort.direction : undefined}
           {...(header && model.columns[column]
             ? {
@@ -657,8 +740,9 @@ export function SheetGrid({
             />
           ) : (
             <CellContent
-              cell={formatters[column]?.(valueAt(row, column)) ?? { text: "" }}
+              cell={cellAt(row, column) ?? { text: "" }}
               numeric={model.columns[column]?.numeric ?? false}
+              {...(spill === undefined ? {} : { spill })}
               imageUrl={imageUrl}
             />
           )}
@@ -670,18 +754,16 @@ export function SheetGrid({
         key={row}
         role="row"
         aria-rowindex={row + 1}
-        className="flex"
-        style={{ width: totalWidth, height: ROW_HEIGHT }}
+        className="flex overflow-clip"
+        style={{ width: viewWidth, height: ROW_HEIGHT }}
       >
         <div
           data-cell=""
           data-row={row}
           data-column={-1}
           className={cn(
-            "sticky left-0 z-[2] flex shrink-0 items-center justify-center border-r border-b border-border text-[11px] text-muted-foreground tabular-nums select-none",
-            GUTTER,
-            rowSelected && "bg-muted font-medium text-foreground",
-            header && "border-b-border"
+            "sticky left-0 z-[2] flex shrink-0 items-center justify-center border-r border-b border-border text-[11px] tabular-nums select-none",
+            rowSelected ? SELECTED_ROW_NUMBER : GUTTER
           )}
           style={{ width: rowNumberWidth }}
           role="rowheader"
@@ -692,9 +774,48 @@ export function SheetGrid({
         {fixedColumns.map((column) => cell(column, true))}
         {leadingSpace > 0 ? <div className="shrink-0" style={{ width: leadingSpace }} /> : null}
         {scrollingColumns.map((column) => cell(column, false))}
+        {Array.from({ length: emptyColumns }, (_, index) => (
+          <EmptyCell
+            key={`empty-${index}`}
+            width={EMPTY_COLUMN_WIDTH}
+            {...(scrollingRun?.covered.get(columnCount + index) === "through"
+              ? { through: true }
+              : {})}
+          />
+        ))}
       </div>
     )
   }
+
+  /** A row past the sheet's data: its number, and empty cells under the columns in view. */
+  const emptyRow = (row: number) => (
+    <div key={row} className="flex overflow-clip" style={{ width: viewWidth, height: ROW_HEIGHT }}>
+      <div
+        className={cn(
+          "sticky left-0 z-[2] flex shrink-0 items-center justify-center border-r border-b border-border text-[11px] text-muted-foreground/70 tabular-nums select-none",
+          GUTTER
+        )}
+        style={{ width: rowNumberWidth }}
+      >
+        {row + 1}
+      </div>
+      {fixedColumns.map((column) => (
+        <EmptyCell
+          key={column}
+          width={widths[column] ?? 0}
+          fixed
+          left={rowNumberWidth + (offsets[column] ?? 0)}
+        />
+      ))}
+      {leadingSpace > 0 ? <div className="shrink-0" style={{ width: leadingSpace }} /> : null}
+      {scrollingColumns.map((column) => (
+        <EmptyCell key={column} width={widths[column] ?? 0} />
+      ))}
+      {Array.from({ length: emptyColumns }, (_, index) => (
+        <EmptyCell key={`empty-${index}`} width={EMPTY_COLUMN_WIDTH} />
+      ))}
+    </div>
+  )
 
   /**
    * A column's letter, and the separator that resizes it: by dragging, by a double-click that fits
@@ -713,10 +834,12 @@ export function SheetGrid({
         data-row={-1}
         data-column={column}
         className={cn(
-          "relative flex shrink-0 items-center justify-center border-r border-b border-border text-[11px] text-muted-foreground select-none",
-          GUTTER,
-          fixed && "sticky z-[2]",
-          selected && "bg-muted font-medium text-foreground"
+          "relative flex shrink-0 items-center justify-center border-r border-b border-border text-[11px] select-none",
+          selected ? SELECTED_LETTER : GUTTER,
+          // The selection's own outline marks a column it reaches the top of: a rule there too
+          // would draw a double line over the header row.
+          selected && range.top > 0 && "shadow-[inset_0_-2px_0_var(--primary)]",
+          fixed && "sticky z-[2]"
         )}
         style={{
           width,
@@ -759,15 +882,16 @@ export function SheetGrid({
           ref={scrollRef}
           onContextMenu={onContextMenu}
           className={cn(
-            "relative min-h-0 min-w-0 overflow-auto bg-background text-[13px] text-foreground has-[[role=grid]:focus-visible]:ring-2 has-[[role=grid]:focus-visible]:ring-ring has-[[role=grid]:focus-visible]:ring-inset",
+            "relative min-h-0 min-w-0 overflow-auto bg-(--sheet-cell) text-[13px] text-foreground has-[[role=grid]:focus-visible]:ring-2 has-[[role=grid]:focus-visible]:ring-ring has-[[role=grid]:focus-visible]:ring-inset",
+            SHEET_PALETTE,
             className
           )}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
         >
           <div
-            className="flex flex-col"
-            style={{ width: totalWidth, height: headerHeight + bodyRows * ROW_HEIGHT }}
+            className="flex flex-col overflow-clip"
+            style={{ width: viewWidth, height: viewHeight }}
           >
             <div
               ref={gridRef}
@@ -784,7 +908,13 @@ export function SheetGrid({
             >
               <div
                 role="rowgroup"
-                className="sticky z-[3] shadow-[0_1px_0_var(--border)]"
+                className={cn(
+                  "sticky z-[3]",
+                  // Rows scrolled under the frozen ones pass beneath a shadow, as in a spreadsheet.
+                  viewport.top > 0
+                    ? "shadow-[0_1px_0_var(--border),0_5px_8px_-5px_rgb(0_0_0/0.18)]"
+                    : "shadow-[0_1px_0_var(--border)]"
+                )}
                 style={{ top: LETTER_HEIGHT }}
               >
                 {frozen.map(renderRow)}
@@ -792,12 +922,18 @@ export function SheetGrid({
               <div role="rowgroup" style={{ paddingTop: rows.first * ROW_HEIGHT }}>
                 {body.map(renderRow)}
               </div>
+              {emptyRows > 0 ? (
+                <div aria-hidden="true">
+                  {Array.from({ length: emptyRows }, (_, index) => emptyRow(rowCount + index))}
+                </div>
+              ) : null}
             </div>
             {/* The letters lead the grid on screen and follow it in the tab order: they are not
             cells, only the columns' names and the handles that resize them. */}
             <div
-              className="sticky top-0 z-[4] order-first flex"
-              style={{ width: totalWidth, height: LETTER_HEIGHT }}
+              // It keeps its height while the empty rows past the data overflow the clipped view.
+              className="sticky top-0 z-[4] order-first flex shrink-0 overflow-clip"
+              style={{ width: viewWidth, height: LETTER_HEIGHT }}
             >
               <button
                 type="button"
@@ -828,6 +964,19 @@ export function SheetGrid({
                 <div className="shrink-0" style={{ width: leadingSpace }} />
               ) : null}
               {scrollingColumns.map((column) => letter(column, false))}
+              {Array.from({ length: emptyColumns }, (_, index) => (
+                <div
+                  key={`empty-${index}`}
+                  aria-hidden="true"
+                  className={cn(
+                    "flex shrink-0 items-center justify-center border-r border-b border-border text-[11px] text-muted-foreground/70 select-none",
+                    GUTTER
+                  )}
+                  style={{ width: EMPTY_COLUMN_WIDTH }}
+                >
+                  {columnLetter(columnCount + index)}
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -926,7 +1075,25 @@ function FilterButton({
 // Column letters and row numbers are opaque: a translucent blur on every sticky cell costs a
 // backdrop filter per cell on each scrolled frame. Mixes of theme surfaces use oklab: near-grey
 // surfaces have no reliable hue, and an oklch mix can fall back to hue 0 and tint them pink.
-const GUTTER = "bg-[color-mix(in_oklab,var(--muted)_60%,var(--background))]"
+const GUTTER = "bg-(--sheet-chrome) text-muted-foreground"
+
+/**
+ * A selected column's letter and a selected row's number, tinted. A letter also takes the accent's
+ * rule when the selection starts below the header; a rule beside a row's number would double the
+ * selection's outline next to it.
+ */
+const SELECTED_LETTER =
+  "bg-[color-mix(in_oklab,var(--primary)_10%,var(--sheet-chrome))] font-semibold text-foreground"
+const SELECTED_ROW_NUMBER =
+  "bg-[color-mix(in_oklab,var(--primary)_10%,var(--sheet-chrome))] font-semibold text-foreground"
+
+/**
+ * The grid's surfaces from the theme: white cells on the chrome of letters and row numbers, a
+ * header row a shade off the cells, and hairline gridlines, so a project's theme and dark mode
+ * carry through.
+ */
+const SHEET_PALETTE =
+  "[--sheet-cell:var(--card)] [--sheet-chrome:color-mix(in_oklab,var(--muted)_65%,var(--background))] [--sheet-header:color-mix(in_oklab,var(--muted)_42%,var(--card))] [--sheet-line:color-mix(in_oklab,var(--border)_80%,transparent)]"
 
 /** The most of the grid's width frozen columns may take, so the rest still scrolls. */
 const FROZEN_SHARE = 0.6

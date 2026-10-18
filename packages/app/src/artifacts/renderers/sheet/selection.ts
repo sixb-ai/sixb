@@ -49,7 +49,7 @@ export function rangeLabel(range: CellRange): string {
 export interface RangeStats {
   /** Cells with a value. */
   readonly count: number
-  /** Cells of numeric columns that hold a number; the sum and average are theirs. */
+  /** Cells that hold a number; the sum and average are theirs. */
   readonly numericCount: number
   readonly sum: number
   readonly average?: number
@@ -80,7 +80,7 @@ export function rangeStats(
       const value = values[column] ?? ""
       if (!value.trim()) continue
       count += 1
-      if (!model.columns[column]?.numeric) continue
+      // Any cell that holds a number sums, a text column's too, as in a spreadsheet.
       const number = parseSheetNumber(value)
       if (number === undefined) continue
       numericCount += 1
