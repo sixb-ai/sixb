@@ -451,6 +451,8 @@ describe("rest reliability contract", () => {
     queued.catch(() => {
       queuedSettled = true
     })
+    // Let /three resolve its headers and wait behind /two's slot before it is aborted.
+    await flush()
     controller.abort(new DOMException("cancelled", "AbortError"))
     // A request whose signal is already aborted rejects without leaving a rejection unhandled.
     const preAborted = client
