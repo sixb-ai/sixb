@@ -17,6 +17,7 @@ the question, answer in the chat.
 | `document` | A report, brief, memo, plan, or write-up: anything read top to bottom | `document.md` |
 | `sheet` | Tabular data the reader sorts, sums, charts, or downloads: metrics, lists, trackers, exports | `sheet.md` |
 | `slides` | A deck to present: a review, a pitch, a plan for a meeting | `slides.md` |
+| `page` | A small web app the reader works with: a calculator, a planner, a dashboard with filters | `page.md` |
 | `file` | One file in a format the user asked for (PDF, DOCX, XLSX, PPTX, CSV), or a binary | `file.md` |
 
 To show or link to another artifact, such as a sheet's chart in a report, read `references.md`.
@@ -38,7 +39,8 @@ with a table of a dozen rows is a document; data the reader works with is a shee
 3. If it refuses, nothing was published. Fix what the message names and publish again. If you
    cannot, tell the user the deliverable could not be published; never describe it as ready.
 4. Fix what each warning names and publish its next version when it matters to the reader. A
-   deck also comes back with a screenshot of each slide: look at them (`slides.md`, Check).
+   deck also comes back with a screenshot of each slide, and a page with one at a laptop's width
+   and one at a phone's: look at them (`slides.md`, `page.md`, Check).
 5. In the reply, say in a sentence or two what you published and what stands out. Do not paste
    its content, a path, or its id as text: the user sees the artifact. To show a chart or a range
    of it in place, use its address (`references.md`).

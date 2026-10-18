@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Service levels</title>
+  <style>
+    .toolbar { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 0 32px; }
+    .toolbar .field { min-width: 220px; margin: 4px 0 24px; }
+    #chart { height: 260px; }
+    #chart svg { display: block; width: 100%; height: 100%; overflow: visible; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="toolbar">
+      <div>
+        <p class="eyebrow">Q3 2026 · Field service</p>
+        <h1>Service levels</h1>
+        <p class="lede" id="lede">–</p>
+      </div>
+      <div class="field">
+        <label for="region">Region</label>
+        <select id="region"><option value="">All regions</option></select>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card stat"><div class="label">Within SLA</div><div class="value" id="within">–</div><div class="delta" id="within-delta">–</div></div>
+      <div class="card stat"><div class="label">Calls</div><div class="value" id="calls">–</div><div class="delta" id="calls-delta">–</div></div>
+      <div class="card stat"><div class="label">Regions under target</div><div class="value" id="under">–</div><div class="delta" id="target">–</div></div>
+    </div>
+
+    <div class="card">
+      <h3>Within SLA by quarter</h3>
+      <div id="chart" role="img" aria-label="Share of calls restored within SLA, by quarter"></div>
+    </div>
+
+    <div class="card">
+      <h3>By region, latest quarter</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Region</th><th class="num">Calls</th><th class="num">Within SLA</th><th class="num">Change</th><th>Status</th></tr></thead>
+          <tbody id="regions"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <p class="note">Source: field service records, Q4 2025 to Q3 2026. Within SLA is the share of calls restored inside the region's agreed time.</p>
+  </main>
+
+  <script>
+    const percent = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 1 })
+    const change = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 1, signDisplay: "exceptZero" })
+    const number = new Intl.NumberFormat("en-US")
+    const points = (value) => `${value >= 0 ? "+" : "−"}${Math.abs(value * 100).toFixed(1)} pts`
+    const select = document.getElementById("region")
+    const chart = document.getElementById("chart")
+    let data = null
+
+    /** The quarters' calls and calls-weighted share within SLA, for some regions. */
+    function totals(regions) {
+      return data.quarters.map((_, quarter) => {
+        const calls = regions.reduce((sum, row) => sum + row.calls[quarter], 0)
+        const within = regions.reduce((sum, row) => sum + row.calls[quarter] * row.withinSla[quarter], 0)
+        return { calls, share: within / calls }
+      })
+    }
+
+    function svg(tag, attributes, text) {
+      const element = document.createElementNS("http://www.w3.org/2000/svg", tag)
+      for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value)
+      if (text !== undefined) element.textContent = text
+      return element
+    }
+
+    /** A line of the share within SLA against the target, drawn at the chart's own width. */
+    function drawChart(series) {
+      const width = chart.clientWidth
+      const height = chart.clientHeight
+      const pad = { top: 16, right: 16, bottom: 32, left: 48 }
+      const low = 0.75
+      const high = 1
+      const x = (index) => pad.left + (index / (series.length - 1)) * (width - pad.left - pad.right)
+      const y = (share) => pad.top + ((high - share) / (high - low)) * (height - pad.top - pad.bottom)
+      const root = svg("svg", { viewBox: `0 0 ${width} ${height}` })
+
+      for (const tick of [0.75, 0.8, 0.85, 0.9, 0.95, 1]) {
+        root.append(svg("line", { x1: pad.left, x2: width - pad.right, y1: y(tick), y2: y(tick), stroke: "var(--border)" }))
+        root.append(svg("text", { x: pad.left - 8, y: y(tick) + 4, "text-anchor": "end", "font-size": 12, fill: "var(--muted-foreground)" }, percent.format(tick)))
+      }
+      root.append(svg("line", { x1: pad.left, x2: width - pad.right, y1: y(data.target), y2: y(data.target), stroke: "var(--chart-4)", "stroke-dasharray": "4 4", "stroke-width": 1.5 }))
+      root.append(svg("text", { x: pad.left + 8, y: y(data.target) - 6, "font-size": 12, fill: "var(--muted-foreground)" }, `Target ${percent.format(data.target)}`))
+
+      const path = series.map((point, index) => `${index ? "L" : "M"}${x(index)},${y(point.share)}`).join(" ")
+      root.append(svg("path", { d: path, fill: "none", stroke: "var(--chart-1)", "stroke-width": 2.5, "stroke-linejoin": "round" }))
+      series.forEach((point, index) => {
+        root.append(svg("circle", { cx: x(index), cy: y(point.share), r: 4, fill: "var(--chart-1)" }))
+        root.append(svg("text", { x: x(index), y: height - 8, "text-anchor": "middle", "font-size": 12, fill: "var(--muted-foreground)" }, data.quarters[index]))
+      })
+      chart.replaceChildren(root)
+    }
+
+    function cell(content, className) {
+      const td = document.createElement("td")
+      if (className) td.className = className
+      td.append(content)
+      return td
+    }
+
+    function render() {
+      const chosen = data.regions.filter((row) => !select.value || row.region === select.value)
+      const series = totals(chosen)
+      const latest = series.at(-1)
+      const previous = series.at(-2)
+      const last = data.quarters.length - 1
+      const under = data.regions.filter((row) => row.withinSla[last] < data.target)
+
+      document.getElementById("lede").textContent =
+        `${select.value ? `In ${select.value}` : "Across all regions"}, ${percent.format(latest.share)} of calls were restored within SLA in ${data.quarters[last]}, ${points(latest.share - previous.share)} on the quarter before.`
+      document.getElementById("within").textContent = percent.format(latest.share)
+      document.getElementById("within-delta").textContent = `${points(latest.share - previous.share)} on ${data.quarters[last - 1]}`
+      document.getElementById("calls").textContent = number.format(latest.calls)
+      document.getElementById("calls-delta").textContent =
+        `${change.format(latest.calls / previous.calls - 1)} on ${data.quarters[last - 1]}`
+      document.getElementById("under").textContent = String(under.length)
+      document.getElementById("target").textContent = `Target ${percent.format(data.target)} within SLA`
+
+      drawChart(series)
+      document.getElementById("regions").replaceChildren(
+        ...chosen.map((row) => {
+          const tr = document.createElement("tr")
+          const status = document.createElement("span")
+          status.className = "tag"
+          status.textContent = row.withinSla[last] < data.target ? "Under target" : "On target"
+          tr.append(
+            cell(row.region),
+            cell(number.format(row.calls[last]), "num"),
+            cell(percent.format(row.withinSla[last]), "num"),
+            cell(points(row.withinSla[last] - row.withinSla[last - 1]), "num"),
+            cell(status)
+          )
+          return tr
+        })
+      )
+    }
+
+    select.addEventListener("change", render)
+    new ResizeObserver(() => data && render()).observe(chart)
+
+    fetch("data/service.json")
+      .then((response) => response.json())
+      .then((service) => {
+        data = service
+        for (const row of data.regions) select.append(new Option(row.region, row.region))
+        render()
+      })
+  </script>
+</body>
+</html>

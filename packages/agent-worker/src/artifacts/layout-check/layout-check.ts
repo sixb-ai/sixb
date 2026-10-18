@@ -4,6 +4,7 @@ import type { ArtifactTheme } from "@sixb/core/artifacts"
 import {
   FRAME_ASSETS,
   FRAME_DEFAULT_THEMES,
+  type FrameLayout,
   injectFrameAssets,
   type LayoutProblem,
   layoutProbe,
@@ -14,7 +15,7 @@ import checkScript from "./check.cjs" with { type: "text" }
 
 const LIBRARY = ".sixb/agent/lib/layout-check"
 const CHECKS = ".sixb/agent/checks"
-/** Chromium's start, a deck's fonts, and two passes over up to 100 slides. */
+/** Chromium's start, a deck's fonts, and two passes over up to 100 slides, or a page at two widths. */
 const CHECK_TIMEOUT_MS = 120_000
 /**
  * Sandboxes the check's library is written in. `.sixb/agent` lasts the run, and each run has its
@@ -27,7 +28,7 @@ export type LayoutCheck =
   | {
       readonly status: "checked"
       readonly warnings: readonly LayoutWarning[]
-      /** One per slide, relative to the sandbox's working directory. */
+      /** One per slide, or a page's at each width, relative to the sandbox's working directory. */
       readonly screenshots: readonly string[]
     }
   | { readonly status: "skipped"; readonly reason: string }
@@ -35,11 +36,13 @@ export type LayoutCheck =
 export interface LayoutWarning {
   readonly code: string
   readonly message: string
-  /** The slide's number; none for the deck as a whole. */
+  /** The slide's number, or the width a page was checked at: `desktop` or `phone`. */
   readonly part?: string
 }
 
 interface CheckReport {
+  /** The layout the check laid the entry out in, which says it ran to the end of its setup. */
+  readonly layout?: FrameLayout
   readonly slides?: number
   readonly problems?: readonly CheckedProblem[]
   readonly errors?: readonly string[]
@@ -51,22 +54,27 @@ interface CheckReport {
   readonly failed?: string
 }
 
+/** A width a page is checked at, as a laptop and a phone show it. */
+export type PageView = "desktop" | "phone"
+
 /**
- * Lays a published deck out in the sandbox's headless Chromium, as the app's frame does, and
- * reports what a reader would find wrong with each slide, with a screenshot of each for the Agent
- * to look at. A sandbox without the agent image's browser skips it; so does a check that fails,
- * which never costs the Agent its publish.
+ * Lays a published deck or page out in the sandbox's headless Chromium, as the app's frame does,
+ * and reports what a reader would find wrong: on each slide of a deck, or on a page at a laptop's
+ * width and a phone's, with a screenshot of each for the Agent to look at. A sandbox without the
+ * agent image's browser skips it; so does a check that fails, which never costs the Agent its
+ * publish.
  */
-export async function checkDeckLayout(input: {
+export async function checkLayout(input: {
   readonly handle: AgentSandboxHandle
-  /** The deck's directory in the sandbox. */
+  readonly layout: FrameLayout
+  /** The version's directory in the sandbox. */
   readonly directory: string
   /** The paths the version publishes, relative to the directory: the check serves no others. */
   readonly files: readonly string[]
   readonly entry: Uint8Array
   /** Names the check's directory, so each version's screenshots stay apart. */
   readonly name: string
-  /** The deck's `theme.json`, which the reader's frame applies over the app's theme. */
+  /** The version's `theme.json`, which the reader's frame applies over the app's theme. */
   readonly theme?: ArtifactTheme
   readonly signal: AbortSignal
   /** Test seam; production allows 120 seconds. */
@@ -76,10 +84,11 @@ export async function checkDeckLayout(input: {
   const timeoutMs = input.timeoutMs ?? CHECK_TIMEOUT_MS
   const library = posix.join(sandbox.workingDirectory, LIBRARY)
   const output = posix.join(sandbox.workingDirectory, CHECKS, input.name)
-  // The sandbox has no way to the API: what the deck shows from other artifacts is a placeholder.
+  // The sandbox has no way to the API: what the version shows from other artifacts is a
+  // placeholder.
   const entry = await injectFrameAssets(
     await rewriteFrameReferences(new TextDecoder().decode(input.entry), []),
-    "deck"
+    input.layout
   )
   await sandbox.writeFiles([
     ...(installed.has(sandbox)
@@ -87,6 +96,7 @@ export async function checkDeckLayout(input: {
       : [
           { path: posix.join(library, "check.cjs"), contents: checkScript },
           { path: posix.join(library, "deck.css"), contents: asset("__sixb/deck.css") },
+          { path: posix.join(library, "page.css"), contents: asset("__sixb/page.css") },
           { path: posix.join(library, "runtime.js"), contents: asset("__sixb/runtime.js") },
           { path: posix.join(library, "probe.js"), contents: `(${layoutProbe.toString()})` },
         ]),
@@ -102,7 +112,7 @@ export async function checkDeckLayout(input: {
     "bash",
     [
       "-lc",
-      'command -v node >/dev/null 2>&1 || { echo \'{"skipped":"no_node"}\'; exit 0; }; exec node "$SIXB_CHECK/check.cjs" "$SIXB_CHECK_DECK" "$SIXB_CHECK_OUT" "$SIXB_CHECK" "$SIXB_CHECK_DEADLINE_MS"',
+      'command -v node >/dev/null 2>&1 || { echo \'{"skipped":"no_node"}\'; exit 0; }; exec node "$SIXB_CHECK/check.cjs" "$SIXB_CHECK_DECK" "$SIXB_CHECK_OUT" "$SIXB_CHECK" "$SIXB_CHECK_DEADLINE_MS" "$SIXB_CHECK_LAYOUT"',
     ],
     {
       env: {
@@ -111,6 +121,7 @@ export async function checkDeckLayout(input: {
         SIXB_CHECK_DECK: input.directory,
         SIXB_CHECK_OUT: output,
         SIXB_CHECK_DEADLINE_MS: String(deadlineMs),
+        SIXB_CHECK_LAYOUT: input.layout,
       },
       timeout: timeoutMs,
       signal: input.signal,
@@ -129,7 +140,7 @@ export async function checkDeckLayout(input: {
           : "the sandbox has no headless browser (the agent image has one)",
     }
   }
-  if (!report || report.failed || report.slides === undefined) {
+  if (!report || report.failed || report.layout !== input.layout) {
     if (result.timedOut) {
       return { status: "skipped", reason: `it took longer than ${timeoutMs / 1000} seconds` }
     }
@@ -137,6 +148,7 @@ export async function checkDeckLayout(input: {
     console.warn(`[SixbAgentWorker] The layout check failed: ${detail.slice(0, 500)}`)
     return { status: "skipped", reason: "the check failed in the sandbox" }
   }
+  const noun = input.layout === "deck" ? "deck" : "page"
   const relative = (path: string) => posix.relative(sandbox.workingDirectory, path)
   const screenshots = (report.screenshots ?? []).map(relative)
   return {
@@ -146,14 +158,14 @@ export async function checkDeckLayout(input: {
       ...layoutWarnings(report.problems ?? []),
       ...(report.errors ?? []).map((error) => ({
         code: "layout_load_error",
-        message: `While the deck loaded: ${error.slice(0, 200)}.`,
+        message: `While the ${noun} loaded: ${error.slice(0, 200)}.`,
       })),
       ...(report.stopped === undefined
         ? []
         : [
             {
               code: "layout_incomplete",
-              message: `The check stopped early: ${report.stopped.slice(0, 200)}. Slides it did not reach were not checked.`,
+              message: `The check stopped early: ${report.stopped.slice(0, 200)}. ${noun === "deck" ? "Slides" : "Widths"} it did not reach were not checked.`,
             },
           ]),
     ],
@@ -196,59 +208,83 @@ const MAX_WARNINGS = 12
 const SEVERITY: readonly LayoutProblem["code"][] = [
   "broken_image",
   "outside",
+  "wide",
   "footer",
   "overlap",
   "clipped",
   "contrast",
+  "small_target",
   "small_text",
 ]
+const VIEWS: readonly PageView[] = ["desktop", "phone"]
 
-type CheckedProblem = LayoutProblem & { slide: number; theme: "light" | "dark" }
+/** A problem where the check found it: on a deck's slide, or on a page at one width. */
+type CheckedProblem = LayoutProblem & {
+  readonly theme: "light" | "dark"
+  readonly slide?: number
+  readonly view?: PageView
+}
 
 /**
- * The problems as warnings, worst first. A layout break is one warning per element; small text
- * and low contrast with one cause, the same element at the same size or in the same colors, is
- * one warning naming every slide it is on, so a deck's eyebrow at 17px is one line, not nine.
- * Contrast says which theme it fails in when it fails in one.
+ * The problems as warnings, worst first. A layout break is one warning per element; small text,
+ * a small control, and low contrast with one cause, the same element at the same size or in the
+ * same colors, is one warning naming every slide or width it is at, so a deck's eyebrow at 17px
+ * is one line, not nine. Contrast says which theme it fails in when it fails in one.
  */
 export function layoutWarnings(problems: readonly CheckedProblem[]): LayoutWarning[] {
   const groups = new Map<
     string,
-    { problem: CheckedProblem; slides: Set<number>; texts: Set<string>; themes: Set<string> }
+    {
+      problem: CheckedProblem
+      slides: Set<number>
+      views: Set<PageView>
+      texts: Set<string>
+      themes: Set<string>
+    }
   >()
   for (const problem of problems) {
+    const at = problem.slide ?? problem.view
     const cause =
-      problem.code === "small_text"
+      problem.code === "small_text" || problem.code === "small_target"
         ? `${problem.selector}|${problem.size}`
         : problem.code === "contrast"
           ? `${problem.selector}|${problem.colors?.join("|")}`
-          : `${problem.slide}|${problem.selector}|${problem.text}|${problem.rect.x},${problem.rect.y}`
+          : `${at}|${problem.selector}|${problem.text}|${problem.rect.x},${problem.rect.y}`
     const key = `${problem.code}|${cause}`
     const group = groups.get(key) ?? {
       problem,
       slides: new Set(),
+      views: new Set(),
       texts: new Set(),
       themes: new Set(),
     }
-    group.slides.add(problem.slide)
+    if (problem.slide !== undefined) group.slides.add(problem.slide)
+    if (problem.view) group.views.add(problem.view)
     group.texts.add(problem.text)
     group.themes.add(problem.theme)
     groups.set(key, group)
   }
+  const first = (group: { slides: Set<number>; views: Set<PageView> }) =>
+    group.slides.size > 0
+      ? Math.min(...group.slides)
+      : Math.min(...[...group.views].map((view) => VIEWS.indexOf(view)))
   const ordered = [...groups.values()].sort(
     (a, b) =>
-      SEVERITY.indexOf(a.problem.code) - SEVERITY.indexOf(b.problem.code) ||
-      Math.min(...a.slides) - Math.min(...b.slides)
+      SEVERITY.indexOf(a.problem.code) - SEVERITY.indexOf(b.problem.code) || first(a) - first(b)
   )
   const warnings: LayoutWarning[] = ordered
     .slice(0, MAX_WARNINGS)
-    .map(({ problem, slides, texts, themes }) => {
+    .map(({ problem, slides, views, texts, themes }) => {
       const theme =
         problem.code === "contrast" && themes.size === 1 ? ` in ${[...themes][0]} mode` : ""
+      const page = slides.size === 0
+      const where = page ? viewList([...views]) : slideList([...slides])
       return {
         code: `layout_${problem.code}`,
-        part: String(Math.min(...slides)),
-        message: `${slideList([...slides])}: ${describeProblem(problem, [...texts])}${theme}.`,
+        part: page
+          ? (VIEWS.find((view) => views.has(view)) ?? "desktop")
+          : String(Math.min(...slides)),
+        message: `${where}: ${describeProblem(problem, [...texts], page)}${theme}.`,
       }
     })
   const more = ordered.length - warnings.length
@@ -275,7 +311,13 @@ function slideList(slides: number[]): string {
   return `${sorted.length === 1 ? "Slide" : "Slides"} ${label}`
 }
 
-function describeProblem(problem: LayoutProblem, texts: readonly string[]): string {
+/** `On a phone (390px)`, `At 1280px and on a phone`. */
+function viewList(views: PageView[]): string {
+  if (views.length > 1) return "At 1280px and on a phone (390px)"
+  return views[0] === "phone" ? "On a phone (390px)" : "At 1280px"
+}
+
+function describeProblem(problem: LayoutProblem, texts: readonly string[], page: boolean): string {
   const { x, y, width, height } = problem.rect
   const where = `at ${x},${y} (${width}×${height})`
   const quoted = texts
@@ -288,12 +330,18 @@ function describeProblem(problem: LayoutProblem, texts: readonly string[]): stri
       return `${what} runs past the slide's edge ${where}, which cuts it off`
     case "footer":
       return `${what} runs into the footer ${where}; keep content above the source line`
+    case "wide":
+      return `${what} runs past the screen's right edge ${where}, so the whole page scrolls sideways; let it wrap or shrink, or put it in a box that scrolls (.table-scroll)`
     case "overlap":
       return `${what} is drawn over “${problem.other}” ${where}`
     case "clipped":
       return `${what} is cut off by its own box ${where}`
     case "small_text":
-      return `${what} ${texts.length === 1 ? "is" : "are"} ${problem.size}px; nothing on a slide may be under 18px`
+      return page
+        ? `${what} ${texts.length === 1 ? "is" : "are"} ${problem.size}px; nothing on a page may be under 12px`
+        : `${what} ${texts.length === 1 ? "is" : "are"} ${problem.size}px; nothing on a slide may be under 18px`
+    case "small_target":
+      return `${what} ${texts.length === 1 ? "is" : "are"} ${problem.size}px across; make each control at least 24px each way`
     case "contrast":
       return `${what} ${texts.length === 1 ? "has" : "have"} a contrast of ${problem.ratio}:1 (${problem.colors?.join(" on ")}), under WCAG AA`
     case "broken_image":

@@ -438,8 +438,8 @@ export const FRAME_PAGE_CSS = kit(`  html { color-scheme: light; }
     text-transform: uppercase;
     color: var(--muted-foreground);
   }
-  small, .muted { color: var(--muted-foreground); }
-  small { font-size: 13px; }
+  small, .muted, .note { color: var(--muted-foreground); }
+  small, .note { font-size: 13px; }
   a { color: var(--foreground); text-decoration-color: color-mix(in oklab, var(--foreground) 35%, transparent); text-underline-offset: 3px; }
   a:hover { text-decoration-color: currentColor; }
   strong { font-weight: 600; }
@@ -458,7 +458,7 @@ export const FRAME_PAGE_CSS = kit(`  html { color-scheme: light; }
   th { font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--muted-foreground); white-space: nowrap; }
   :is(th, td):first-child { padding-left: 0; }
   :is(th, td):last-child { padding-right: 0; }
-  :is(th, td).num, :is(th, td)[data-numeric] { text-align: right; }
+  :is(th, td).num, :is(th, td)[data-numeric] { text-align: right; white-space: nowrap; }
   .table-scroll { overflow-x: auto; }
 
   /* Forms and buttons, drawn like the app's. */
@@ -522,6 +522,9 @@ export const FRAME_PAGE_CSS = kit(`  html { color-scheme: light; }
     box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
   }
   .card > :last-child { margin-bottom: 0; }
+  /* Cards stack with room between them; in a grid or a row, its gap spaces them. */
+  .card { margin-bottom: 16px; }
+  :is(.grid, .row) > .card { margin-bottom: 0; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px; margin-bottom: 24px; }
   .row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
   .stat .label { font-size: 13px; color: var(--muted-foreground); }
@@ -537,6 +540,7 @@ export const FRAME_PAGE_CSS = kit(`  html { color-scheme: light; }
     font-size: 12px;
     font-weight: 600;
     line-height: 1.6;
+    white-space: nowrap;
   }
   .callout { margin: 0 0 1em; padding: 14px 16px; border-radius: var(--radius); background: var(--muted); }
   .callout > :last-child { margin-bottom: 0; }

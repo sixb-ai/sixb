@@ -215,13 +215,18 @@ fleet-planner/
 - Sixb adds a kit and the runtime to the page, as it does to a deck. The kit makes plain HTML look
   finished in your app's theme: `<main>` is a centered column, and headings, tables, forms, and
   buttons are drawn like the app's. A page picks a few components by class: `.eyebrow`, `.lede`,
-  `.card`, `.grid`, `.row`, `.stat` (with `.label`, `.value`, `.delta`), `.tag`, and `.callout`.
+  `.card`, `.grid`, `.row`, `.stat` (with `.label`, `.value`, `.delta`), `.tag`, `.callout`,
+  `.note`, and `.table-scroll`.
   The page's own CSS overrides the kit and the theme.
 - The page's `<title>`, else its first `<h1>`, names it in cards and lists.
 - A page runs its own scripts, with the same limits as a deck: it can't read the app's cookies or
   call the API as the reader, and it loads only its own files and a few public CDNs (jsDelivr,
   cdnjs, unpkg, and Google Fonts). Read data from JSON files published beside it with `fetch`.
 - A link to another artifact (`<a href="artifact:…">`) opens it where the reader is.
+- When the Agent publishes a page, its sandbox's headless browser loads it at 1280px and at a
+  phone's 390px, as it checks a deck, and warns about content past the screen's right edge,
+  overlapping or cut off text, text under 12px, a control under 24px, low contrast, a broken image,
+  or a script error, with a screenshot at each width to look at before it revises.
 
 ## Reference another artifact
 

@@ -10,6 +10,18 @@ import operationsReview from "./sixb-artifacts/examples/document/operations-revi
 import restorationsFigure from "./sixb-artifacts/examples/document/operations-review/figures/restorations.svg" with {
   type: "text",
 }
+import fleetPlannerRegions from "./sixb-artifacts/examples/page/fleet-planner/data/regions.json" with {
+  type: "text",
+}
+import fleetPlannerPage from "./sixb-artifacts/examples/page/fleet-planner/index.html" with {
+  type: "text",
+}
+import slaDashboardService from "./sixb-artifacts/examples/page/sla-dashboard/data/service.json" with {
+  type: "text",
+}
+import slaDashboardPage from "./sixb-artifacts/examples/page/sla-dashboard/index.html" with {
+  type: "text",
+}
 import partsInventory from "./sixb-artifacts/examples/sheet/parts-inventory/sheets/Inventory.csv" with {
   type: "text",
 }
@@ -35,6 +47,7 @@ import q3ReviewDeck from "./sixb-artifacts/examples/slides/q3-review/index.html"
   type: "text",
 }
 import fileGuide from "./sixb-artifacts/file.md" with { type: "text" }
+import pageGuide from "./sixb-artifacts/page.md" with { type: "text" }
 import referencesGuide from "./sixb-artifacts/references.md" with { type: "text" }
 import skillMarkdown from "./sixb-artifacts/SKILL.md" with { type: "text" }
 import sheetGuide from "./sixb-artifacts/sheet.md" with { type: "text" }
@@ -63,6 +76,11 @@ export const BUILT_IN_SKILLS: readonly AgentSkillDefinition[] = Object.freeze([
     "examples/sheet/parts-inventory/workbook.json": text(partsWorkbook),
     "examples/sheet/parts-inventory/sheets/Inventory.csv": partsInventory,
     "examples/sheet/parts-inventory/sheets/Spend.csv": partsSpend,
+    "page.md": pageGuide,
+    "examples/page/fleet-planner/index.html": text(fleetPlannerPage),
+    "examples/page/fleet-planner/data/regions.json": text(fleetPlannerRegions),
+    "examples/page/sla-dashboard/index.html": text(slaDashboardPage),
+    "examples/page/sla-dashboard/data/service.json": text(slaDashboardService),
   }),
 ])
 
