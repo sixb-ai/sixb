@@ -54,6 +54,7 @@ export function CanvasRenderer({
       <Suspense fallback={loading}>
         <CanvasBoard
           canvas={canvas}
+          version={version}
           title={version.title}
           mode={mode}
           {...(part ? { focus: part } : {})}

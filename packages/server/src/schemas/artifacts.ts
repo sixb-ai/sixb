@@ -36,11 +36,17 @@ const PageOutlineSchema = z.object({ kind: z.literal("page"), title: z.string().
 const CanvasOutlineSchema = z.object({
   kind: z.literal("canvas"),
   items: z.array(
-    z.object({
-      id: z.string(),
-      type: z.enum(["board", "section"]),
-      title: z.string().optional(),
-    })
+    z.discriminatedUnion("type", [
+      z.object({
+        id: z.string(),
+        type: z.literal("board"),
+        title: z.string().optional(),
+        file: z.string(),
+        w: z.number(),
+        h: z.number(),
+      }),
+      z.object({ id: z.string(), type: z.literal("section"), title: z.string().optional() }),
+    ])
   ),
 })
 

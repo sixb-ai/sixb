@@ -23,8 +23,16 @@ export const FRAME_ASSETS: Readonly<
 }
 
 /** The kit for the layout and the runtime, which reads the layout from its own tag. */
-function injected(layout: FrameLayout): string {
-  return `<link rel="stylesheet" href="${FRAME_ASSET_PREFIX}${layout}.css"><script src="${FRAME_ASSET_PREFIX}runtime.js" data-sixb-layout="${layout}"></script>`
+function injected(layout: FrameLayout, base: string): string {
+  return `<link rel="stylesheet" href="${base}${FRAME_ASSET_PREFIX}${layout}.css"><script src="${base}${FRAME_ASSET_PREFIX}runtime.js" data-sixb-layout="${layout}"></script>`
+}
+
+/**
+ * The way from an entry back to its frame's root, where `__sixb/` is: none for `index.html`,
+ * `../` for a canvas's `boards/home.html`.
+ */
+function rootOf(entry: string): string {
+  return "../".repeat(entry.split("/").length - 1)
 }
 
 /**
@@ -32,10 +40,11 @@ function injected(layout: FrameLayout): string {
  * own, so its styles and scripts build on them. Exactly once, whatever the markup: in `<head>`
  * when the page has one, else first in `<html>`, else right after the doctype, so a page without
  * either still renders in standards mode. Each element is looked for by parsing, not by matching
- * text, so a `<head>` inside a comment or a script's string is not one.
+ * text, so a `<head>` inside a comment or a script's string is not one. `entry` is where the page
+ * is in the version, so an entry in a folder, as a canvas's boards are, finds them.
  */
-export function injectFrameAssets(html: string, layout: FrameLayout): string {
-  const assets = injected(layout)
+export function injectFrameAssets(html: string, layout: FrameLayout, entry = "index.html"): string {
+  const assets = injected(layout, rootOf(entry))
   for (const selector of ["head", "html"]) {
     let injected = false
     const rewritten = new HTMLRewriter()
@@ -56,12 +65,12 @@ export function injectFrameAssets(html: string, layout: FrameLayout): string {
 /** Where a frame serves a file another artifact lends it: `__sixb/ref/<id>@<version>/<path>`. */
 export const FRAME_REFERENCE_PREFIX = `${FRAME_ASSET_PREFIX}ref/`
 
-/** The path, under a frame's base, of a file one of its targets lends it. */
-function frameReferencePath(target: ArtifactFrameTarget): string | null {
+/** The path, from an entry, of a file one of its frame's targets lends it. */
+function frameReferencePath(target: ArtifactFrameTarget, entry: string): string | null {
   const file = parseArtifactAddress(target.address)?.path
   if (!file) return null
   const path = file.split("/").map(encodeURIComponent).join("/")
-  return `${FRAME_REFERENCE_PREFIX}${target.artifactId}@${target.version}/${path}`
+  return `${rootOf(entry)}${FRAME_REFERENCE_PREFIX}${target.artifactId}@${target.version}/${path}`
 }
 
 /**
@@ -72,7 +81,8 @@ function frameReferencePath(target: ArtifactFrameTarget): string | null {
  */
 export function rewriteFrameReferences(
   html: string,
-  targets: readonly ArtifactFrameTarget[]
+  targets: readonly ArtifactFrameTarget[],
+  entry = "index.html"
 ): string {
   return new HTMLRewriter()
     .on("img[src]", {
@@ -80,7 +90,7 @@ export function rewriteFrameReferences(
         const source = decodeHtmlEntities(element.getAttribute("src") ?? "").trim()
         if (!isArtifactAddress(source)) return
         const target = targets.find((candidate) => candidate.address === source)
-        const path = target ? frameReferencePath(target) : null
+        const path = target ? frameReferencePath(target, entry) : null
         if (path) {
           element.setAttribute("src", path)
           element.setAttribute("data-sixb-ref", "")

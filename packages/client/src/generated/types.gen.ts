@@ -11905,11 +11905,21 @@ export type CreateArtifactResponses = {
           }
         | {
             kind: "canvas"
-            items: Array<{
-              id: string
-              type: "board" | "section"
-              title?: string
-            }>
+            items: Array<
+              | {
+                  id: string
+                  type: "board"
+                  title?: string
+                  file: string
+                  w: number
+                  h: number
+                }
+              | {
+                  id: string
+                  type: "section"
+                  title?: string
+                }
+            >
           }
         | {
             kind: "file"
@@ -12211,11 +12221,21 @@ export type PublishArtifactVersionResponses = {
           }
         | {
             kind: "canvas"
-            items: Array<{
-              id: string
-              type: "board" | "section"
-              title?: string
-            }>
+            items: Array<
+              | {
+                  id: string
+                  type: "board"
+                  title?: string
+                  file: string
+                  w: number
+                  h: number
+                }
+              | {
+                  id: string
+                  type: "section"
+                  title?: string
+                }
+            >
           }
         | {
             kind: "file"
@@ -12406,11 +12426,21 @@ export type GetArtifactVersionResponses = {
         }
       | {
           kind: "canvas"
-          items: Array<{
-            id: string
-            type: "board" | "section"
-            title?: string
-          }>
+          items: Array<
+            | {
+                id: string
+                type: "board"
+                title?: string
+                file: string
+                w: number
+                h: number
+              }
+            | {
+                id: string
+                type: "section"
+                title?: string
+              }
+          >
         }
       | {
           kind: "file"

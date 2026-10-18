@@ -115,9 +115,10 @@ async function frameResponse(
     headers.set("cache-control", "private, no-cache")
     if (options.head) return new Response(null, { headers })
     const text = await new Response(opened.body).text()
-    return new Response(injectFrameAssets(rewriteFrameReferences(text, frame.targets), layout), {
-      headers,
-    })
+    return new Response(
+      injectFrameAssets(rewriteFrameReferences(text, frame.targets, file.path), layout, file.path),
+      { headers }
+    )
   }
 
   const response = await createFileContentResponse({

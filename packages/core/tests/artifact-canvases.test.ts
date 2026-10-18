@@ -3,6 +3,7 @@ import type { ArtifactFile } from "../src"
 import { ArtifactRequestError, SixbHost } from "../src"
 import { parseArtifactAddress } from "../src/artifacts/address"
 import { parseCanvas } from "../src/artifacts/canvas"
+import { frameEntries, frameLayout } from "../src/artifacts/frames/entries"
 import { resolveArtifactAddress } from "../src/artifacts/resolve"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { createTestSixb } from "../src/testing"
@@ -202,8 +203,15 @@ describe("publishing a canvas", () => {
       kind: "canvas",
       items: [
         { id: "signup", type: "section", title: "Sign-up flow" },
-        { id: "home", type: "board", title: "Home" },
-        { id: "pricing", type: "board", title: "Pricing" },
+        { id: "home", type: "board", title: "Home", file: "boards/home.html", w: 1280, h: 800 },
+        {
+          id: "pricing",
+          type: "board",
+          title: "Pricing",
+          file: "boards/pricing.html",
+          w: 1280,
+          h: 800,
+        },
       ],
     })
     expect(
@@ -212,6 +220,10 @@ describe("publishing a canvas", () => {
       { address: `artifact:${report.artifact.id}`, as: "link", at: "home" },
       { address: `artifact:${report.artifact.id}#plans`, as: "embed", at: "plans" },
     ])
+
+    // Each board opens in a frame laid out as a page, under the version's one link.
+    expect(frameLayout("canvas")).toBe("page")
+    expect(frameEntries(published.version)).toEqual(["boards/home.html", "boards/pricing.html"])
 
     // An address names a board or a section by its id.
     const target = {
