@@ -29,7 +29,7 @@ test("storage, projection, and neutral contracts never import the materializer l
     for (const file of await typescriptFiles(root)) {
       const contents = await readFile(file, "utf8")
       expect(contents, relative(repositoryRoot, file)).not.toMatch(
-        /(?:from|import\()["'][^"']*materializer(?:\/|["'])/
+        /(?:\bfrom\s*|\bimport\s*\(\s*)["'][^"']*materializer(?:\/|["'])/
       )
     }
   }
