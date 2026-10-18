@@ -58,8 +58,13 @@ describe("parseWorkbook", () => {
         sheets: [
           {
             name: "Summary",
-            columns: { Revenue: "currency", Margin: { type: "percent", decimals: 1 } },
+            columns: {
+              Revenue: { type: "currency", compact: true },
+              Margin: { type: "percent", decimals: 1, signed: true },
+            },
             widths: { Quarter: 120 },
+            descriptions: { Margin: "  Revenue less cost, over revenue. " },
+            totals: { Revenue: "sum", Margin: "average", Quarter: "count" },
           },
         ],
         charts: [{ name: "revenue", type: "bar", sheet: "Summary", x: "Quarter", y: "Revenue" }],
@@ -72,8 +77,13 @@ describe("parseWorkbook", () => {
             name: "Summary",
             frozenRows: 1,
             frozenColumns: 0,
-            columns: { Revenue: { type: "currency" }, Margin: { type: "percent", decimals: 1 } },
+            columns: {
+              Revenue: { type: "currency", compact: true },
+              Margin: { type: "percent", decimals: 1, signed: true },
+            },
             widths: { Quarter: 120 },
+            descriptions: { Margin: "Revenue less cost, over revenue." },
+            totals: { Revenue: "sum", Margin: "average", Quarter: "count" },
           },
         ],
         charts: [
@@ -100,6 +110,28 @@ describe("parseWorkbook", () => {
       { sheets: [{ name: "A", columns: { X: { type: "number", currency: "USD" } } }] },
       "is not a currency column",
     ],
+    [
+      { sheets: [{ name: "A", columns: { X: { type: "percent", compact: true } } }] },
+      'sets "compact" but is not a number or currency column',
+    ],
+    [
+      { sheets: [{ name: "A", columns: { X: { type: "date", signed: true } } }] },
+      'sets "signed" but is not a number, currency, or percent column',
+    ],
+    [
+      { sheets: [{ name: "A", columns: { X: { type: "number", signed: "yes" } } }] },
+      '"signed" must be true or false',
+    ],
+    [
+      { sheets: [{ name: "A", totals: { X: "median" } }] },
+      "use one of sum, average, min, max, count",
+    ],
+    [
+      { sheets: [{ name: "A", totals: { X: "sum" } }] },
+      "only a number, currency, or percent column",
+    ],
+    [{ sheets: [{ name: "A", descriptions: { X: "" } }] }, "at most 300 characters"],
+    [{ sheets: [{ name: "A", descriptions: { X: "x".repeat(301) } }] }, "at most 300 characters"],
     [
       {
         sheets: [{ name: "A" }],
@@ -261,6 +293,27 @@ describe("publishing a sheet", () => {
           }),
         },
         "plots column 'Cost', which sheet 'Summary' does not have",
+      ],
+      [
+        {
+          "workbook.json": JSON.stringify({
+            ...WORKBOOK,
+            sheets: [{ ...WORKBOOK.sheets[0], totals: { Cost: "count" } }, WORKBOOK.sheets[1]],
+          }),
+        },
+        "sheet 'Summary' names column 'Cost', which 'sheets/Summary.csv' does not have",
+      ],
+      [
+        {
+          "workbook.json": JSON.stringify({
+            ...WORKBOOK,
+            sheets: [
+              { ...WORKBOOK.sheets[0], descriptions: { Cost: "Parts" } },
+              WORKBOOK.sheets[1],
+            ],
+          }),
+        },
+        "sheet 'Summary' names column 'Cost'",
       ],
       [
         {

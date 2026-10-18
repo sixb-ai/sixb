@@ -1,15 +1,22 @@
-import { isArtifactAddress, parseSheetDate, parseSheetNumber } from "@sixb/core/artifacts"
+import {
+  isArtifactAddress,
+  parseSheetDate,
+  parseSheetNumber,
+  type SheetTotal,
+} from "@sixb/core/artifacts"
 import { currencySymbol } from "./format"
 import type { SheetColumn, SheetModel } from "./model"
 import { columnLetter } from "./selection"
+import { columnTotals } from "./totals"
 import { zipFiles } from "./zip"
 
 export const XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 /**
  * A workbook as an `.xlsx` file: one worksheet per sheet, in order, with the header row bold, each
- * column's values typed and in its format (grouped numbers, the currency's sign, percents, dates),
- * links that open, the frozen rows and columns, and the column widths the grid shows.
+ * column's values typed and in its format (grouped or compact numbers, the currency's sign, signs on
+ * signed columns, percents, dates), links that open, the frozen rows and columns, the column widths
+ * the grid shows, and the totals row as formulas.
  */
 export async function workbookXlsx(sheets: readonly SheetModel[]): Promise<Uint8Array> {
   const styles = new StyleSheet()
@@ -111,6 +118,7 @@ function worksheet(
     })
     return `<row r="${row}">${cells.join("")}</row>`
   })
+  const totals = totalsRow(sheet, styles)
 
   const xml = [
     XML,
@@ -122,11 +130,52 @@ function worksheet(
           `<col min="${index + 1}" max="${index + 1}" width="${characterWidth(column.width)}" customWidth="1"/>`
       )
       .join("")}</cols>`,
-    `<sheetData><row r="1">${header}</row>${rows.join("")}</sheetData>`,
+    `<sheetData><row r="1">${header}</row>${rows.join("")}${totals}</sheetData>`,
     hyperlinks.length > 0 ? `<hyperlinks>${hyperlinks.join("")}</hyperlinks>` : "",
     "</worksheet>",
   ].join("")
   return { xml, links }
+}
+
+/** Excel's SUBTOTAL function for each total, in the forms that pass rows a filter hides. */
+const SUBTOTAL: Record<SheetTotal, number> = {
+  average: 101,
+  count: 103,
+  max: 104,
+  min: 105,
+  sum: 109,
+}
+
+/**
+ * The totals row under the data, bold: each total as a SUBTOTAL formula over its column, so a
+ * filter in Excel keeps it right, with its value computed here for readers that do not
+ * recalculate; "Total" in the first column without one.
+ */
+function totalsRow(sheet: SheetModel, styles: StyleSheet): string {
+  if (!sheet.totals || sheet.rows.length === 0) return ""
+  const row = sheet.rows.length + 2
+  const totals = columnTotals(
+    sheet,
+    sheet.rows.map((_, index) => index)
+  )
+  const label = sheet.columns.findIndex((column) => !column.total)
+  const cells = sheet.columns.map((column, index) => {
+    const ref = `${columnLetter(index)}${row}`
+    const entry = totals.get(index)
+    if (!entry) {
+      return index === label
+        ? `<c r="${ref}" s="${HEADER_STYLE}" t="inlineStr"><is><t>Total</t></is></c>`
+        : ""
+    }
+    const style = styles.numberFormat(
+      entry.total === "count" ? "#,##0" : numberFormatCode(column),
+      true
+    )
+    const range = `${columnLetter(index)}2:${columnLetter(index)}${row - 1}`
+    const cached = entry.value === undefined ? "" : `<v>${entry.value}</v>`
+    return `<c r="${ref}" s="${style}"><f>SUBTOTAL(${SUBTOTAL[entry.total]},${range})</f>${cached}</c>`
+  })
+  return `<row r="${row}">${cells.join("")}</row>`
 }
 
 /** How one column's cells are written: as typed values in its format, or as text. */
@@ -173,19 +222,27 @@ function cellWriter(
   }
 }
 
-/** The Excel number format that matches how the grid shows a numeric column. */
+/**
+ * The Excel number format that matches how the grid shows a numeric column. A signed column
+ * shows `+` on positive values in a section of its own. A compact one scales by thousands and
+ * millions with Excel's two conditional sections, so a negative value shows in full; a column both
+ * compact and signed shows signed and in full, since Excel's sections can't hold both.
+ */
 function numberFormatCode(column: SheetColumn): string {
-  const decimals = column.decimals > 0 ? `.${"0".repeat(column.decimals)}` : ""
-  switch (column.format.type) {
-    case "percent":
-      return `0${decimals}%`
-    case "currency": {
-      const sign = currencySymbol(column.format.currency ?? "USD")
-      return `"${sign.replace(/"/g, "")}"#,##0${decimals}`
-    }
-    default:
-      return `#,##0${decimals}`
+  const { format } = column
+  const digits = (count: number) => (count > 0 ? `.${"0".repeat(count)}` : "")
+  const decimals = digits(column.decimals)
+  const prefix =
+    format.type === "currency"
+      ? `"${currencySymbol(format.currency ?? "USD").replace(/"/g, "")}"`
+      : ""
+  const plain = format.type === "percent" ? `0${decimals}%` : `${prefix}#,##0${decimals}`
+  if (format.signed) return `+${plain};-${plain};${plain}`
+  if (format.compact) {
+    const scaled = `${prefix}#,##0${digits(format.decimals ?? 1)}`
+    return `[>=1000000]${scaled},,"M";[>=1000]${scaled},"K";${prefix}#,##0`
   }
+  return plain
 }
 
 /** Frozen rows and columns as a split pane, so they stay in view as the sheet scrolls. */
@@ -244,27 +301,35 @@ function escapeXml(text: string): string {
     .replace(/"/g, "&quot;")
 }
 
-/** Style 0 is the default, 1 the bold header; the rest are added as the columns need them. */
+/** Style 0 is the default, 1 the bold header and totals label; the rest are added as needed. */
 const HEADER_STYLE = 1
 
 class StyleSheet {
+  /** Each number format's id, by its code. */
   private readonly formats = new Map<string, number>()
+  /** Each style's index, by its format and weight. */
+  private readonly styles = new Map<string, number>()
   private readonly cells: string[] = [
     '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>',
     '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>',
   ]
   private linkStyle: number | undefined
 
-  /** The style for a number format; custom formats are numbered from 164, as Excel's are. */
-  numberFormat(code: string): number {
-    const known = this.formats.get(code)
+  /** The style for a number format, bold or not; custom formats are numbered from 164, as Excel's. */
+  numberFormat(code: string, bold = false): number {
+    const key = `${bold ? "b" : ""}\u0000${code}`
+    const known = this.styles.get(key)
     if (known !== undefined) return known
+    let id = this.formats.get(code)
+    if (id === undefined) {
+      id = 164 + this.formats.size
+      this.formats.set(code, id)
+    }
     const style = this.cells.length
-    const id = 164 + this.formats.size
     this.cells.push(
-      `<xf numFmtId="${id}" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>`
+      `<xf numFmtId="${id}" fontId="${bold ? 1 : 0}" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"${bold ? ' applyFont="1"' : ""}/>`
     )
-    this.formats.set(code, style)
+    this.styles.set(key, style)
     return style
   }
 
@@ -279,8 +344,8 @@ class StyleSheet {
   }
 
   xml(): string {
-    const formats = Array.from(this.formats.keys())
-      .map((code, index) => `<numFmt numFmtId="${164 + index}" formatCode="${escapeXml(code)}"/>`)
+    const formats = Array.from(this.formats)
+      .map(([code, id]) => `<numFmt numFmtId="${id}" formatCode="${escapeXml(code)}"/>`)
       .join("")
     return [
       XML,

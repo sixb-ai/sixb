@@ -22,6 +22,14 @@ const workbook = (() => {
           widths: { Quarter: 145 },
         },
         { name: "Q3: plan [draft] with a name longer than Excel takes?", frozenRows: 0 },
+        {
+          name: "Regions",
+          columns: {
+            Visits: { type: "number", compact: true },
+            Change: { type: "percent", decimals: 1, signed: true },
+          },
+          totals: { Visits: "sum", Change: "average" },
+        },
       ],
     })
   )
@@ -45,6 +53,11 @@ const plan = sheetModel(
   parseCsv("Item,Count\nPumps,3\n")
 )
 
+const regions = sheetModel(
+  workbook.sheets[2] as Workbook["sheets"][number],
+  parseCsv("Region,Visits,Change\nNorth,1284000,0.04\nSouth,962000,-0.01\n")
+)
+
 const unzip = Bun.which("unzip")
 let directory = ""
 let file = ""
@@ -52,7 +65,7 @@ let file = ""
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), "sixb-xlsx-"))
   file = join(directory, "workbook.xlsx")
-  await writeFile(file, await workbookXlsx([summary, plan]))
+  await writeFile(file, await workbookXlsx([summary, plan, regions]))
 })
 afterAll(async () => {
   await rm(directory, { recursive: true, force: true })
@@ -137,5 +150,25 @@ describe.skipIf(!unzip)("a workbook as .xlsx", () => {
     )
     expect(sheet).toContain("artifact:art_k3m9q2x7tp")
     expect(links).not.toContain("artifact:")
+  })
+
+  test("totals with formulas a filter in Excel keeps right, and styles compact and signed", async () => {
+    const sheet = await run("-p", file, "xl/worksheets/sheet3.xml")
+    const styles = await run("-p", file, "xl/styles.xml")
+    // Under the data, bold: "Total" in the first column without one, then SUBTOTAL formulas
+    // with their values. Reproduce with SUM in place of SUBTOTAL(109): Excel's filter
+    // would leave the hidden rows in the total.
+    expect(sheet).toContain('<row r="4"><c r="A4" s="1" t="inlineStr"><is><t>Total</t></is></c>')
+    expect(sheet).toMatch(/<c r="B4" s="\d+"><f>SUBTOTAL\(109,B2:B3\)<\/f><v>2246000<\/v><\/c>/)
+    expect(sheet).toMatch(/<c r="C4" s="\d+"><f>SUBTOTAL\(101,C2:C3\)<\/f><v>0\.015\d*<\/v><\/c>/)
+    expect(styles).toContain('formatCode="+0.0%;-0.0%;0.0%"')
+    expect(styles).toContain(
+      'formatCode="[&gt;=1000000]#,##0.0,,&quot;M&quot;;[&gt;=1000]#,##0.0,&quot;K&quot;;#,##0"'
+    )
+    expect(styles).toMatch(
+      /<xf numFmtId="\d+" fontId="1" [^>]*applyNumberFormat="1" applyFont="1"\/>/
+    )
+    // A sheet without totals has no totals row.
+    expect(await run("-p", file, "xl/worksheets/sheet1.xml")).not.toContain("SUBTOTAL")
   })
 })

@@ -3,6 +3,7 @@ import {
   NUMERIC_COLUMN_TYPES,
   parseSheetNumber,
   type SheetColumnFormat,
+  type SheetTotal,
   type WorkbookSheet,
 } from "@sixb/core/artifacts"
 
@@ -14,6 +15,10 @@ export interface SheetColumn {
   /** Digits after the decimal point: the format's, else as many as the column's values need. */
   readonly decimals: number
   readonly width: number
+  /** What the column means, from the workbook. */
+  readonly description?: string
+  /** What the totals row shows under it. */
+  readonly total?: SheetTotal
 }
 
 /** A sheet ready to draw: its columns, and its data rows each as wide as the columns. */
@@ -24,18 +29,27 @@ export interface SheetModel {
   /** Grid rows that stay in view, the header row included. */
   readonly frozenRows: number
   readonly frozenColumns: number
+  /** Whether a totals row is pinned under the rows: some column has a total. */
+  readonly totals: boolean
 }
 
 type SheetLayout = Pick<
   WorkbookSheet,
   "name" | "frozenRows" | "frozenColumns" | "columns" | "widths"
->
+> &
+  Partial<Pick<WorkbookSheet, "descriptions" | "totals">>
 
 /** A sheet of a workbook, laid out as its workbook says. */
 export function sheetModel(sheet: SheetLayout, table: CsvTable): SheetModel {
   const columns = table.header.map((name, index) => {
     const format = sheet.columns[name] ?? { type: "text" as const }
-    return column(name, format, table.rows, index, sheet.widths[name])
+    const description = sheet.descriptions?.[name]
+    const total = sheet.totals?.[name]
+    return {
+      ...column(name, format, table.rows, index, sheet.widths[name]),
+      ...(description ? { description } : {}),
+      ...(total ? { total } : {}),
+    }
   })
   return {
     name: sheet.name,
@@ -43,6 +57,7 @@ export function sheetModel(sheet: SheetLayout, table: CsvTable): SheetModel {
     rows: table.rows.map((row) => pad(row, columns.length)),
     frozenRows: Math.min(sheet.frozenRows, table.rows.length + 1),
     frozenColumns: Math.min(sheet.frozenColumns, columns.length),
+    totals: columns.some((entry) => entry.total),
   }
 }
 
@@ -67,6 +82,7 @@ export function fileSheetModel(name: string, table: CsvTable): SheetModel {
     rows: table.rows.map((row) => pad(row, width)),
     frozenRows: 1,
     frozenColumns: 0,
+    totals: false,
   }
 }
 
@@ -116,9 +132,14 @@ function estimatedWidth(
   sample: readonly string[],
   format: SheetColumnFormat
 ): number {
-  // Formatting adds currency signs, grouping, and month names.
-  const extra =
-    format.type === "currency" ? 4 : format.type === "number" || format.type === "date" ? 2 : 0
+  // Formatting adds currency signs, grouping, and month names; compact takes digits away.
+  const extra = format.compact
+    ? -2
+    : format.type === "currency"
+      ? 4
+      : format.type === "number" || format.type === "date"
+        ? 2
+        : 0
   const longest = Math.max(
     ...sample.map((value) => value.length + extra),
     format.type === "image" ? 4 : 0

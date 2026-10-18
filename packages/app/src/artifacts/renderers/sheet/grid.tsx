@@ -32,6 +32,7 @@ import {
   GridCell,
   HeaderContent,
   selectionEdges,
+  TotalCell,
 } from "./cells"
 import { CONTEXT_PARTS, type ColumnActions, ColumnMenu, ColumnMenuItems } from "./column-menu"
 import { filteredOrder } from "./filter"
@@ -39,7 +40,7 @@ import { FilterPanel } from "./filter-panel"
 import { findMatches } from "./find"
 import { modulo, type SheetFind, type SheetFindCount } from "./find-bar"
 import { elementTextMeasure, fitWidth, type TextMeasure } from "./fit"
-import { cellFormatter, type FormattedCell } from "./format"
+import { cellFormatter, type FormattedCell, numberFormat } from "./format"
 import type { SheetColumn, SheetModel } from "./model"
 import {
   type CellPoint,
@@ -56,6 +57,7 @@ import {
   type SortDirection,
   sortedOrder,
 } from "./selection"
+import { columnTotals } from "./totals"
 import {
   hideColumn,
   INITIAL_SHEET_VIEW,
@@ -182,6 +184,8 @@ export function SheetGrid({
   )
   const rowCount = order.length + 1
   const columnCount = model.columns.length
+  // Totals follow what the reader sees: the filters change them, the sort does not.
+  const totals = useMemo(() => (model.totals ? columnTotals(model, order) : null), [model, order])
   const range = useMemo(() => cellRange(anchor, focus), [anchor, focus])
 
   const findQuery = find?.query ?? ""
@@ -203,6 +207,7 @@ export function SheetGrid({
   const frozenWidth = offsets[frozenColumns] ?? 0
   const totalWidth = rowNumberWidth + (offsets.at(-1) ?? 0)
   const headerHeight = LETTER_HEIGHT + frozenRows * ROW_HEIGHT
+  const footerHeight = totals ? ROW_HEIGHT : 0
   const bodyRows = rowCount - frozenRows
 
   const columns = visibleSpan(
@@ -230,7 +235,7 @@ export function SheetGrid({
   // Past the sheet's data, empty columns and rows fill the view, as a spreadsheet's grid runs on.
   const viewWidth = Math.max(totalWidth, viewport.width)
   const emptyColumns = Math.ceil((viewWidth - totalWidth) / EMPTY_COLUMN_WIDTH)
-  const contentHeight = headerHeight + bodyRows * ROW_HEIGHT
+  const contentHeight = headerHeight + bodyRows * ROW_HEIGHT + footerHeight
   const viewHeight = Math.max(contentHeight, viewport.height)
   const emptyRows = Math.ceil((viewHeight - contentHeight) / ROW_HEIGHT)
 
@@ -302,8 +307,9 @@ export function SheetGrid({
       if (point.row >= frozenRows) {
         const top = headerHeight + (point.row - frozenRows) * ROW_HEIGHT
         if (top < element.scrollTop + headerHeight) element.scrollTop = top - headerHeight
-        else if (top + ROW_HEIGHT > element.scrollTop + element.clientHeight) {
-          element.scrollTop = top + ROW_HEIGHT - element.clientHeight
+        // The totals row covers the bottom of the view.
+        else if (top + ROW_HEIGHT > element.scrollTop + element.clientHeight - footerHeight) {
+          element.scrollTop = top + ROW_HEIGHT - element.clientHeight + footerHeight
         }
       }
       if (point.column >= frozenColumns) {
@@ -316,7 +322,7 @@ export function SheetGrid({
         }
       }
     },
-    [frozenRows, frozenColumns, headerHeight, rowNumberWidth, offsets, frozenWidth]
+    [frozenRows, frozenColumns, headerHeight, footerHeight, rowNumberWidth, offsets, frozenWidth]
   )
 
   useEffect(() => {
@@ -476,7 +482,10 @@ export function SheetGrid({
       setAnchor(focus)
       return
     }
-    const page = Math.max(1, Math.floor((viewport.height - headerHeight) / ROW_HEIGHT) - 1)
+    const page = Math.max(
+      1,
+      Math.floor((viewport.height - headerHeight - footerHeight) / ROW_HEIGHT) - 1
+    )
     let next: CellPoint | null = null
     if (event.key === "PageDown") next = { ...focus, row: Math.min(rowCount - 1, focus.row + page) }
     else if (event.key === "PageUp") next = { ...focus, row: Math.max(0, focus.row - page) }
@@ -700,12 +709,7 @@ export function SheetGrid({
           {...(covered ? { covered } : {})}
           sort={header && sort?.column === column ? sort.direction : undefined}
           {...(header && model.columns[column]
-            ? {
-                title: `${model.columns[column]?.name} · ${columnTypeLabel(
-                  model.columns[column] as SheetColumn,
-                  messages
-                )}`,
-              }
+            ? headerTitle(model.columns[column] as SheetColumn)
             : {})}
           matched={matched.has(`${row}:${column}`)}
           style={style}
@@ -783,6 +787,85 @@ export function SheetGrid({
               : {})}
           />
         ))}
+      </div>
+    )
+  }
+
+  /** A header's hover text, its name and type then what it means, and its description. */
+  const headerTitle = (column: SheetColumn) => ({
+    title: [`${column.name} · ${columnTypeLabel(column, messages)}`, column.description]
+      .filter(Boolean)
+      .join("\n"),
+    ...(column.description ? { description: column.description } : {}),
+  })
+
+  /**
+   * The totals row, pinned under the rows in view and right after the last one: each total in its
+   * column's format, a count as a whole number, and "Total" in the first column without one.
+   */
+  const totalsRow = () => {
+    if (!totals) return null
+    const labelColumn = model.columns.findIndex(
+      (column, index) => !hidden.has(index) && !column.total
+    )
+    const count = numberFormat(locale, { maximumFractionDigits: 0 })
+    const cell = (column: number, fixed: boolean) => {
+      const entry = totals.get(column)
+      const value = entry?.value
+      const text =
+        entry && value !== undefined
+          ? entry.total === "count"
+            ? count.format(value)
+            : (formatters[column]?.(String(value)).text ?? "")
+          : column === labelColumn
+            ? messages.total
+            : ""
+      return (
+        <TotalCell
+          key={column}
+          text={text}
+          label={!entry}
+          {...(entry ? { title: messages[entry.total] } : {})}
+          fixed={fixed}
+          lastFixed={fixed && column === frozenColumns - 1}
+          scrolled={viewport.left > 0}
+          style={{
+            width: widths[column] ?? 0,
+            ...(fixed ? { left: rowNumberWidth + (offsets[column] ?? 0) } : {}),
+          }}
+        />
+      )
+    }
+    return (
+      <div
+        role="row"
+        aria-label={messages.totals}
+        aria-rowindex={rowCount + 1}
+        className="sticky bottom-0 z-[3] flex overflow-clip shadow-[0_-1px_0_var(--border)]"
+        style={{ width: viewWidth, height: ROW_HEIGHT }}
+      >
+        <div
+          role="rowheader"
+          aria-hidden="true"
+          className={cn(
+            "sticky left-0 z-[2] flex shrink-0 items-center justify-center border-r border-border text-[12px] select-none",
+            GUTTER
+          )}
+          style={{ width: rowNumberWidth }}
+        >
+          Σ
+        </div>
+        {fixedColumns.map((column) => cell(column, true))}
+        {leadingSpace > 0 ? (
+          <div className="shrink-0 bg-(--sheet-header)" style={{ width: leadingSpace }} />
+        ) : null}
+        {scrollingColumns.map((column) => cell(column, false))}
+        {emptyColumns > 0 ? (
+          <div
+            className="shrink-0 bg-(--sheet-header)"
+            style={{ width: emptyColumns * EMPTY_COLUMN_WIDTH }}
+          />
+        ) : null}
       </div>
     )
   }
@@ -897,7 +980,7 @@ export function SheetGrid({
               ref={gridRef}
               role="grid"
               aria-label={messages.grid(model.name)}
-              aria-rowcount={rowCount}
+              aria-rowcount={rowCount + (totals ? 1 : 0)}
               // The row numbers are the first column.
               aria-colcount={columnCount + 1}
               aria-multiselectable="true"
@@ -922,6 +1005,7 @@ export function SheetGrid({
               <div role="rowgroup" style={{ paddingTop: rows.first * ROW_HEIGHT }}>
                 {body.map(renderRow)}
               </div>
+              {totalsRow()}
               {emptyRows > 0 ? (
                 <div aria-hidden="true">
                   {Array.from({ length: emptyRows }, (_, index) => emptyRow(rowCount + index))}

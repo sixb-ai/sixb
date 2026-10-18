@@ -809,3 +809,59 @@ describe("a sheet artifact", () => {
     expect(Number.parseFloat(third?.style.width ?? "0")).toBeGreaterThan(0)
   })
 })
+
+describe("a sheet's totals row", () => {
+  const totaled = (() => {
+    const workbook = parseWorkbook(
+      JSON.stringify({
+        sheets: [
+          {
+            name: "Summary",
+            columns: { Revenue: "currency", Margin: "percent" },
+            descriptions: { Margin: "Revenue less cost, over revenue." },
+            totals: { Revenue: "sum", Margin: "average" },
+          },
+        ],
+      })
+    )
+    if (!("workbook" in workbook) || !workbook.workbook.sheets[0]) throw new Error("No workbook.")
+    return sheetModel(
+      workbook.workbook.sheets[0],
+      parseCsv("Quarter,Revenue,Margin\nQ4 2025,4000000,0.2\nQ1 2026,6000000,0.4\n")
+    )
+  })()
+  const totalsText = (container: HTMLElement) =>
+    [
+      ...(container.querySelector('[aria-label="Totals"]')?.querySelectorAll('[role="gridcell"]') ??
+        []),
+    ].map((cell) => cell.textContent)
+
+  test("totals the rows the reader sees, under the sheet, outside its cells", () => {
+    const all = render(<SheetGrid model={totaled} locale="en-US" />)
+    expect(totalsText(all.container)).toEqual(["Total", "$10,000,000", "30%"])
+    // Not a cell of the sheet: nothing there to select or address.
+    const row = all.container.querySelector('[aria-label="Totals"]')
+    expect(row?.querySelector("[data-cell]")).toBeNull()
+    expect(all.getByRole("grid").getAttribute("aria-rowcount")).toBe("4")
+    all.unmount()
+
+    // Reproduce by totaling every row: the filtered sheet still shows $10,000,000.
+    const filtered = render(
+      <SheetGrid
+        model={totaled}
+        locale="en-US"
+        view={{ ...INITIAL_SHEET_VIEW, filters: { 0: { kind: "values", excluded: ["Q4 2025"] } } }}
+      />
+    )
+    expect(totalsText(filtered.container)).toEqual(["Total", "$6,000,000", "40%"])
+    filtered.unmount()
+  })
+
+  test("describes a column on its header", () => {
+    const view = render(<SheetGrid model={totaled} locale="en-US" />)
+    const header = view.getAllByRole("columnheader")[2]
+    expect(header?.getAttribute("aria-description")).toBe("Revenue less cost, over revenue.")
+    expect(header?.getAttribute("title")).toBe("Margin · Percent\nRevenue less cost, over revenue.")
+    view.unmount()
+  })
+})

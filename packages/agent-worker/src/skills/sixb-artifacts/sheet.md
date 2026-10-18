@@ -37,8 +37,8 @@ Write values raw. The workbook formats them in the reader's locale:
 - No symbols, thousands separators, or units in numbers: `4120000`, not `$4.12M` or `4,120,000`.
   Put the unit in the column name: `Lead time (weeks)`.
 - An empty cell is a gap; it is not drawn as zero.
-- One row per record. Leave out total rows, notes, and blank rows: the reader selects a column to
-  see its sum, and a chart would plot a total as one more record.
+- One row per record. Leave out total rows, notes, and blank rows: a chart would plot a total as
+  one more record. Give the sheet `totals` instead.
 
 A sheet holds at most 200 columns and 100,000 rows; a workbook, 20 sheets and 10 charts.
 
@@ -53,9 +53,12 @@ A sheet holds at most 200 columns and 100,000 rows; a workbook, 20 sheets and 10
       "columns": {
         "Visits": "number",
         "Within SLA": { "type": "percent", "decimals": 1 },
-        "Parts cost": { "type": "currency", "currency": "USD" }
+        "Change": { "type": "percent", "decimals": 1, "signed": true },
+        "Parts cost": { "type": "currency", "currency": "USD", "compact": true }
       },
-      "widths": { "Region": 140 }
+      "widths": { "Region": 140 },
+      "descriptions": { "Within SLA": "Priority calls restored inside the agreed time." },
+      "totals": { "Visits": "sum", "Within SLA": "average", "Parts cost": "sum" }
     }
   ],
   "charts": [
@@ -67,14 +70,22 @@ A sheet holds at most 200 columns and 100,000 rows; a workbook, 20 sheets and 10
 | Key | Means | Default |
 | --- | --- | --- |
 | `name` | The sheet's tab, and its file: `sheets/<name>.csv` | Required |
-| `columns` | A type for each column by name, or `{ type, currency, decimals }` | Text |
+| `columns` | A type for each column by name, or `{ type, currency, decimals, compact, signed }` | Text |
 | `frozenRows` | Rows that stay in view while scrolling, header included, 0 to 10 | 1 |
 | `frozenColumns` | Columns that stay in view while scrolling sideways, 0 to 5 | 0 |
 | `widths` | Column widths in pixels, 40 to 800 | Fitted to the values |
+| `descriptions` | What a column means, by name, at most 300 characters; shown on its header | None |
+| `totals` | A row pinned under the sheet: `sum`, `average`, `min`, or `max` of a numeric column, or `count` of any column's values | None |
 
 `currency` is an ISO 4217 code and defaults to USD. `decimals` is 0 to 6; without it a column shows
-the decimals its values need. Sheets appear in the order listed. Freeze the first column when it
-names each row and the sheet is wider than a screen.
+the decimals its values need. `compact: true` shows a number or currency short, `$4.1M` or `12K`,
+for large amounts read at a glance. `signed: true` shows `+` on positive values, for changes and
+variances. Sheets appear in the order listed. Freeze the first column when it names each row and
+the sheet is wider than a screen.
+
+Totals cover the rows the reader sees, so a filter changes them, and the first column without a
+total reads "Total". Describe a column whose name alone could be read two ways: how it is
+counted, what it includes, its source.
 
 ## Charts
 

@@ -92,8 +92,11 @@ workbook says how to read them:
       "columns": {
         "Visits": "number",
         "Within SLA": { "type": "percent", "decimals": 1 },
-        "Parts cost": { "type": "currency", "currency": "USD" }
-      }
+        "Change": { "type": "percent", "decimals": 1, "signed": true },
+        "Parts cost": { "type": "currency", "compact": true }
+      },
+      "descriptions": { "Within SLA": "Priority calls restored inside the agreed time." },
+      "totals": { "Visits": "sum", "Within SLA": "average", "Parts cost": "sum" }
     }
   ],
   "charts": [{ "name": "sla", "type": "bar", "sheet": "Regions", "x": "Region", "y": "Within SLA" }]
@@ -102,15 +105,21 @@ workbook says how to read them:
 
 ```text
 sheets/Regions.csv
-Region,Visits,Within SLA,Parts cost
-North,1284,0.961,182400
-Central,962,0.934,141950
+Region,Visits,Within SLA,Change,Parts cost
+North,1284,0.961,0.042,182400
+Central,962,0.934,-0.013,141950
 ```
 
 - A column is `text` unless the workbook gives it a type: `number`, `currency`, `percent` (written
   as a fraction, `0.961`), `date` (`2026-09-30`), `link` (a full `https://` or `http://` address),
   or `image` (the path of an image file in the artifact).
 - Values are formatted in the reader's locale, so write them without symbols or separators.
+  `compact` shows a number or currency as `$182K` or `1.2M`; `signed` puts `+` on positive
+  numbers, currencies, and percents.
+- `totals` pins a row under the sheet with a column's `sum`, `average`, `min`, `max`, or `count`
+  of the rows the reader sees, so a filter changes it; the first column without a total says
+  "Total". Leave total rows out of the CSV. `descriptions` explain a column on its header, in at
+  most 300 characters.
 - `frozenRows` (default 1, the header) and `frozenColumns` (default 0) stay in view while the
   sheet scrolls; `widths` sets columns' widths in pixels.
 - A chart is a `bar`, `line`, `area`, or `pie` chart of up to five `y` columns against an `x`
@@ -131,7 +140,7 @@ double-clicking its edge too, select cells, rows,
 or columns to see their sum, average, min, max, and count, read a cell's whole value above the
 grid, find values with ⌘F or Ctrl+F, copy cells as a table that pastes into other spreadsheets, and
 download each sheet as CSV or the whole workbook as an `.xlsx` file, with its column formats, frozen
-panes, widths, and links. A CSV or TSV `file` artifact opens in the same grid.
+panes, widths, links, and totals as `SUBTOTAL` formulas. A CSV or TSV `file` artifact opens in the same grid.
 
 ## Write slides
 

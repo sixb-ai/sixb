@@ -25,6 +25,7 @@ import {
   rangeTsv,
   sortedOrder,
 } from "../src/artifacts/renderers/sheet/selection"
+import { columnTotals } from "../src/artifacts/renderers/sheet/totals"
 import {
   hideColumn,
   INITIAL_SHEET_VIEW,
@@ -533,5 +534,77 @@ describe("a chart's data", () => {
     // A gap in the last row is left out of the total, and a row of gaps has no label.
     expect(latestValue({ ...data, rows: [{ x: "Q4 2026", s0: null, s1: 12 }] }, true)).toBe(12)
     expect(latestValue({ ...data, rows: [{ x: "Q4 2026", s0: null, s1: null }] }, true)).toBeNull()
+  })
+})
+
+describe("totals and number styles", () => {
+  const regions = (() => {
+    const parsed = parseWorkbook(
+      JSON.stringify({
+        sheets: [
+          {
+            name: "Regions",
+            columns: {
+              Visits: { type: "number", compact: true },
+              Cost: { type: "currency", compact: true },
+              Change: { type: "percent", decimals: 1, signed: true },
+            },
+            totals: { Visits: "sum", Cost: "max", Change: "average", Lead: "count" },
+          },
+        ],
+      })
+    )
+    if (!("workbook" in parsed)) throw new Error(parsed.error)
+    return sheetModel(
+      parsed.workbook.sheets[0] as Workbook["sheets"][number],
+      parseCsv(
+        [
+          "Region,Visits,Cost,Change,Lead",
+          "North,1204330,182400,0.032,Ana",
+          "South,962000,141950,-0.014,",
+          "Coastal,448000,,0,Lee",
+        ].join("\n")
+      )
+    )
+  })()
+  const format = (name: string, value: string, locale: string) => {
+    const column = regions.columns.find((candidate) => candidate.name === name)
+    if (!column) throw new Error(`No column ${name}`)
+    return cellFormatter(column, locale)(value).text.replace(/\s/g, " ")
+  }
+
+  test("read compact and signed in the reader's locale", () => {
+    expect(format("Visits", "1204330", "en-US")).toBe("1.2M")
+    expect(format("Visits", "1204330", "de-DE")).toBe("1,2 Mio.")
+    expect(format("Cost", "182400", "en-US")).toBe("$182.4K")
+    expect(format("Cost", "1992500", "en-US")).toBe("$2.0M")
+    expect(format("Change", "0.032", "en-US")).toBe("+3.2%")
+    expect(format("Change", "-0.014", "en-US")).toBe("-1.4%")
+    expect(format("Change", "0", "en-US")).toBe("0.0%")
+    expect(format("Change", "0.032", "de-DE")).toBe("+3,2 %")
+  })
+
+  test("total what the filters leave, and count values in any column", () => {
+    const all = regions.rows.map((_, index) => index)
+    expect(regions.totals).toBe(true)
+    expect(Object.fromEntries(columnTotals(regions, all))).toEqual({
+      1: { total: "sum", value: 2_614_330 },
+      2: { total: "max", value: 182_400 },
+      3: { total: "average", value: (0.032 - 0.014 + 0) / 3 },
+      4: { total: "count", value: 2 },
+    })
+    // Filtering North out takes it out of every total; sorting changes none.
+    // Reproduce by totaling every row of the model: the sum stays 2,614,330.
+    const shown = filteredOrder(
+      regions,
+      all,
+      { 0: { kind: "values", excluded: ["North"] } },
+      "en-US"
+    )
+    expect(columnTotals(regions, shown).get(1)).toEqual({ total: "sum", value: 1_410_000 })
+    expect(columnTotals(regions, [...shown].reverse()).get(1)?.value).toBe(1_410_000)
+    // A column with no numbers left has no total but a count.
+    expect(columnTotals(regions, []).get(1)?.value).toBeUndefined()
+    expect(columnTotals(regions, []).get(4)?.value).toBe(0)
   })
 })

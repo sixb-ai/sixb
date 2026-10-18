@@ -22,8 +22,8 @@ export interface FormattedCell {
 
 /**
  * A number formatter for the reader's locale, in a column's style when one is given: its currency,
- * or percents from fractions. Formatters are built once for each locale and options, since a
- * sheet asks for the same few on every cell it draws.
+ * percents from fractions, and a sign on positive values for a signed column. Formatters are built
+ * once for each locale and options, since a sheet asks for the same few on every cell it draws.
  */
 export function numberFormat(
   locale: string,
@@ -36,6 +36,7 @@ export function numberFormat(
       : format?.type === "percent"
         ? { style: "percent" }
         : {}),
+    ...(format?.signed ? { signDisplay: "exceptZero" } : {}),
     ...options,
   }
   const key = `${locale}\u0000${JSON.stringify(resolved)}`
@@ -59,9 +60,9 @@ export function currencySymbol(currency: string): string {
 }
 
 /**
- * How a column's values read in the reader's locale: grouped numbers, the column's currency and
- * decimals, percents from fractions, dates without a time zone shift, links by their address.
- * A value that does not read as its type shows as written.
+ * How a column's values read in the reader's locale: grouped or compact numbers, the column's
+ * currency, decimals, and sign, percents from fractions, dates without a time zone shift, links by
+ * their address. A value that does not read as its type shows as written.
  */
 export function cellFormatter(
   column: SheetColumn,
@@ -74,7 +75,15 @@ export function cellFormatter(
     case "percent": {
       const formatter = numberFormat(
         locale,
-        { minimumFractionDigits: decimals, maximumFractionDigits: decimals },
+        // Compact keeps one decimal unless the format says otherwise, so a column reads alike:
+        // `$2.0M` beside `$1.5M`.
+        format.compact
+          ? {
+              notation: "compact",
+              minimumFractionDigits: format.decimals ?? 1,
+              maximumFractionDigits: format.decimals ?? 1,
+            }
+          : { minimumFractionDigits: decimals, maximumFractionDigits: decimals },
         format
       )
       return (value) => {
