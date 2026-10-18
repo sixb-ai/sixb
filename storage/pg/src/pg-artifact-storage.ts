@@ -1,11 +1,11 @@
 import {
   artifactStorageErrors,
+  parseArtifactFrameGrantRow,
   parseArtifactRow,
   parseArtifactVersionRow,
 } from "@sixb/core/internal/storage"
 import type {
   ArtifactFrameGrantRecord,
-  ArtifactFrameTarget,
   ArtifactRecord,
   ArtifactStorage,
   ArtifactVersionInput,
@@ -32,12 +32,31 @@ interface PgRow {
   readonly [column: string]: unknown
 }
 
+// Quoted aliases give the shared row parsers their camelCase keys; an unquoted alias would fold to
+// lower case.
+const ARTIFACT_COLUMNS = `
+  project_id AS "projectId", id, kind, title,
+  owner_principal_type AS "ownerPrincipalType", owner_principal_id AS "ownerPrincipalId",
+  latest_version AS "latestVersion", created_at AS "createdAt", updated_at AS "updatedAt"
+`
+
+const VERSION_COLUMNS = `
+  project_id AS "projectId", artifact_id AS "artifactId", version, title, entry, files, outline,
+  refs, author_principal_type AS "authorPrincipalType", author_principal_id AS "authorPrincipalId",
+  origin_thread_id AS "originThreadId", origin_run_id AS "originRunId", created_at AS "createdAt"
+`
+
+const FRAME_GRANT_COLUMNS = `
+  project_id AS "projectId", token_hash AS "tokenHash", artifact_id AS "artifactId", version,
+  targets, created_at AS "createdAt", expires_at AS "expiresAt"
+`
+
 export class PgArtifactStorage implements ArtifactStorage {
   constructor(private readonly sql: PgStoreClient) {}
 
   async create(input: CreateArtifactInput): Promise<PublishedArtifactVersion> {
     return runPgTransaction(this.sql, async (tx) => {
-      const [inserted] = await tx<PgRow[]>`
+      const [artifact] = await tx<PgRow[]>`
         INSERT INTO artifacts (
           project_id, id, kind, title, owner_principal_type, owner_principal_id,
           latest_version, next_version, created_at, updated_at
@@ -47,11 +66,13 @@ export class PgArtifactStorage implements ArtifactStorage {
           ${input.version.createdAt}, ${input.version.createdAt}
         )
         ON CONFLICT (project_id, id) DO NOTHING
-        RETURNING id
+        RETURNING ${tx.unsafe(ARTIFACT_COLUMNS)}
       `
-      if (!inserted) throw artifactStorageErrors.exists(input.id)
-      await insertVersion(tx, input.projectId, input.id, 1, input.version)
-      return published(tx, input.projectId, input.id, 1)
+      if (!artifact) throw artifactStorageErrors.exists(input.id)
+      return {
+        artifact: parseArtifactRow(artifact),
+        version: await insertVersion(tx, input.projectId, input.id, 1, input.version),
+      }
     })
   }
 
@@ -68,23 +89,30 @@ export class PgArtifactStorage implements ArtifactStorage {
       if (kind !== input.kind) {
         throw artifactStorageErrors.kindMismatch(input.artifactId, kind, input.kind)
       }
-      const version = Number(current.next_version)
-      await insertVersion(tx, input.projectId, input.artifactId, version, input.version)
-      await tx`
+      const version = await insertVersion(
+        tx,
+        input.projectId,
+        input.artifactId,
+        Number(current.next_version),
+        input.version
+      )
+      const [artifact] = await tx<PgRow[]>`
         UPDATE artifacts
-        SET title = ${input.version.title}, latest_version = ${version},
-            next_version = ${version + 1}, updated_at = ${input.version.createdAt}
+        SET title = ${input.version.title}, latest_version = ${version.version},
+            next_version = ${version.version + 1}, updated_at = ${input.version.createdAt}
         WHERE project_id = ${input.projectId} AND id = ${input.artifactId}
+        RETURNING ${tx.unsafe(ARTIFACT_COLUMNS)}
       `
-      return published(tx, input.projectId, input.artifactId, version)
+      return { artifact: parseArtifactRow(artifact), version }
     })
   }
 
   async get(input: GetArtifactInput): Promise<ArtifactRecord | null> {
     const [row] = await this.sql<PgRow[]>`
-      SELECT * FROM artifacts WHERE project_id = ${input.projectId} AND id = ${input.id}
+      SELECT ${this.sql.unsafe(ARTIFACT_COLUMNS)} FROM artifacts
+      WHERE project_id = ${input.projectId} AND id = ${input.id}
     `
-    return row ? artifactFromRow(row) : null
+    return row ? parseArtifactRow(row) : null
   }
 
   async list(input: ListArtifactsInput): Promise<ListArtifactsResult> {
@@ -117,22 +145,22 @@ export class PgArtifactStorage implements ArtifactStorage {
     )
     const offset = input.offset ?? 0
     const rows = await this.sql.unsafe<PgRow[]>(
-      `SELECT a.* FROM artifacts a WHERE ${clause}
+      `SELECT ${ARTIFACT_COLUMNS} FROM artifacts a WHERE ${clause}
        ORDER BY a.updated_at DESC, a.id ASC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, input.limit ?? null, offset]
     )
     const total = counted?.total ?? 0
-    return { artifacts: rows.map(artifactFromRow), hasMore: offset + rows.length < total, total }
+    return { artifacts: rows.map(parseArtifactRow), hasMore: offset + rows.length < total, total }
   }
 
   async getVersion(input: GetArtifactVersionInput): Promise<ArtifactVersionRecord | null> {
     const [row] = await this.sql<PgRow[]>`
-      SELECT * FROM artifact_versions
+      SELECT ${this.sql.unsafe(VERSION_COLUMNS)} FROM artifact_versions
       WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
         AND version = ${input.version}
     `
-    return row ? versionFromRow(row) : null
+    return row ? parseArtifactVersionRow(row) : null
   }
 
   async listVersions(input: ListArtifactVersionsInput): Promise<ListArtifactVersionsResult> {
@@ -142,13 +170,17 @@ export class PgArtifactStorage implements ArtifactStorage {
     `
     const offset = input.offset ?? 0
     const rows = await this.sql<PgRow[]>`
-      SELECT * FROM artifact_versions
+      SELECT ${this.sql.unsafe(VERSION_COLUMNS)} FROM artifact_versions
       WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
       ORDER BY version DESC
       LIMIT ${input.limit ?? null} OFFSET ${offset}
     `
     const total = counted?.total ?? 0
-    return { versions: rows.map(versionFromRow), hasMore: offset + rows.length < total, total }
+    return {
+      versions: rows.map(parseArtifactVersionRow),
+      hasMore: offset + rows.length < total,
+      total,
+    }
   }
 
   async listReferencingVersions(
@@ -158,17 +190,17 @@ export class PgArtifactStorage implements ArtifactStorage {
     // part.
     const prefix = `artifact:${input.artifactId}`
     const rows = await this.sql<PgRow[]>`
-      SELECT v.* FROM artifact_versions v
-      JOIN artifacts a
-        ON a.project_id = v.project_id AND a.id = v.artifact_id AND a.latest_version = v.version
-      WHERE v.project_id = ${input.projectId} AND EXISTS (
+      SELECT ${this.sql.unsafe(VERSION_COLUMNS)} FROM artifact_versions v
+      WHERE project_id = ${input.projectId} AND (artifact_id, version) IN (
+        SELECT id, latest_version FROM artifacts WHERE project_id = ${input.projectId}
+      ) AND EXISTS (
         SELECT 1 FROM jsonb_array_elements(v.refs) r
         WHERE left(r ->> 'address', ${prefix.length}::int) = ${prefix}
           AND substr(r ->> 'address', ${prefix.length + 1}::int, 1) IN ('', '@', '/', '#')
       )
-      ORDER BY v.artifact_id
+      ORDER BY artifact_id
     `
-    return rows.map(versionFromRow)
+    return rows.map(parseArtifactVersionRow)
   }
 
   async createFrameGrant(record: ArtifactFrameGrantRecord): Promise<void> {
@@ -190,20 +222,10 @@ export class PgArtifactStorage implements ArtifactStorage {
     input: FindArtifactFrameGrantInput
   ): Promise<ArtifactFrameGrantRecord | null> {
     const [row] = await this.sql<PgRow[]>`
-      SELECT * FROM artifact_frame_grants
+      SELECT ${this.sql.unsafe(FRAME_GRANT_COLUMNS)} FROM artifact_frame_grants
       WHERE project_id = ${input.projectId} AND token_hash = ${input.tokenHash}
     `
-    return row
-      ? {
-          projectId: String(row.project_id),
-          tokenHash: String(row.token_hash),
-          artifactId: String(row.artifact_id),
-          version: Number(row.version),
-          targets: row.targets as ArtifactFrameTarget[],
-          createdAt: new Date(row.created_at as string | Date),
-          expiresAt: new Date(row.expires_at as string | Date),
-        }
-      : null
+    return row ? parseArtifactFrameGrantRow(row) : null
   }
 
   async deleteExpiredFrameGrants(input: DeleteExpiredArtifactFrameGrantsInput): Promise<number> {
@@ -230,13 +252,29 @@ export class PgArtifactStorage implements ArtifactStorage {
 
   async deleteVersionsByOrigin(input: DeleteArtifactVersionsByOriginInput): Promise<number> {
     return runPgTransaction(this.sql, async (tx) => {
-      const deleted = await tx<{ artifact_id: string }[]>`
+      // Lock the run's artifacts first, in id order so two of these never deadlock. `publish`
+      // holds the same lock while it adds a version, and under READ COMMITTED each statement
+      // below then reads a snapshot taken after any publish that held it committed. Without the
+      // lock they would wait on a publish's row lock and then apply what they read before it: the
+      // UPDATE would point `latest_version` back past the new version, and the DELETE would drop
+      // an artifact whose versions were all the run's, cascading the new version with it.
+      const locked = await tx<{ id: string }[]>`
+        SELECT id FROM artifacts
+        WHERE project_id = ${input.projectId} AND id IN (
+          SELECT artifact_id FROM artifact_versions
+          WHERE project_id = ${input.projectId} AND origin_run_id = ${input.runId}
+        )
+        ORDER BY id
+        FOR UPDATE
+      `
+      const affected = locked.map((row) => row.id)
+      if (affected.length === 0) return 0
+      const deleted = await tx`
         DELETE FROM artifact_versions
         WHERE project_id = ${input.projectId} AND origin_run_id = ${input.runId}
-        RETURNING artifact_id
+          AND artifact_id IN ${tx(affected)}
+        RETURNING version
       `
-      const affected = [...new Set(deleted.map((row) => row.artifact_id))]
-      if (affected.length === 0) return 0
       // An artifact left without versions goes; the rest point at their newest remaining one.
       await tx`
         DELETE FROM artifacts a
@@ -268,8 +306,8 @@ async function insertVersion(
   artifactId: string,
   version: number,
   input: ArtifactVersionInput
-): Promise<void> {
-  await sql`
+): Promise<ArtifactVersionRecord> {
+  const [row] = await sql<PgRow[]>`
     INSERT INTO artifact_versions (
       project_id, artifact_id, version, title, entry, files, outline, refs,
       author_principal_type, author_principal_id, origin_thread_id, origin_run_id, created_at
@@ -281,54 +319,7 @@ async function insertVersion(
       ${input.author.type}, ${input.author.id},
       ${input.origin?.threadId ?? null}, ${input.origin?.runId ?? null}, ${input.createdAt}
     )
+    RETURNING ${sql.unsafe(VERSION_COLUMNS)}
   `
-}
-
-async function published(
-  sql: SQLClient,
-  projectId: string,
-  artifactId: string,
-  version: number
-): Promise<PublishedArtifactVersion> {
-  const [artifact] = await sql<PgRow[]>`
-    SELECT * FROM artifacts WHERE project_id = ${projectId} AND id = ${artifactId}
-  `
-  const [stored] = await sql<PgRow[]>`
-    SELECT * FROM artifact_versions
-    WHERE project_id = ${projectId} AND artifact_id = ${artifactId} AND version = ${version}
-  `
-  if (!artifact || !stored) throw artifactStorageErrors.notFound(artifactId)
-  return { artifact: artifactFromRow(artifact), version: versionFromRow(stored) }
-}
-
-function artifactFromRow(row: PgRow): ArtifactRecord {
-  return parseArtifactRow({
-    projectId: row.project_id,
-    id: row.id,
-    kind: row.kind,
-    title: row.title,
-    ownerPrincipalType: row.owner_principal_type,
-    ownerPrincipalId: row.owner_principal_id,
-    latestVersion: row.latest_version,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  })
-}
-
-function versionFromRow(row: PgRow): ArtifactVersionRecord {
-  return parseArtifactVersionRow({
-    projectId: row.project_id,
-    artifactId: row.artifact_id,
-    version: row.version,
-    title: row.title,
-    entry: row.entry,
-    files: row.files,
-    outline: row.outline,
-    refs: row.refs,
-    authorPrincipalType: row.author_principal_type,
-    authorPrincipalId: row.author_principal_id,
-    originThreadId: row.origin_thread_id,
-    originRunId: row.origin_run_id,
-    createdAt: row.created_at,
-  })
+  return parseArtifactVersionRow(row)
 }

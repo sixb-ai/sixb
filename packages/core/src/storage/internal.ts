@@ -5,6 +5,7 @@ export { assertAiUsageExecutionId, normalizeAiModelCallRecord } from "./ai-usage
 export { normalizeAiModelCallUsage } from "./ai-usage/usage"
 export {
   artifactStorageErrors,
+  parseArtifactFrameGrantRow,
   parseArtifactRow,
   parseArtifactVersionRow,
 } from "./artifacts/record"

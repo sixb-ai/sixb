@@ -4,7 +4,14 @@ import type { ArtifactReference } from "../../artifacts/references"
 import type { Principal } from "../../auth"
 import { isFileRef } from "../../blob-storage"
 import { ArtifactStorageError } from "./errors"
-import type { ArtifactFile, ArtifactKind, ArtifactRecord, ArtifactVersionRecord } from "./types"
+import type {
+  ArtifactFile,
+  ArtifactFrameGrantRecord,
+  ArtifactFrameTarget,
+  ArtifactKind,
+  ArtifactRecord,
+  ArtifactVersionRecord,
+} from "./types"
 
 // Rows arrive from providers with camelCase keys. JSON columns may arrive parsed (jsonb) or as text
 // (SQLite), and timestamps as `Date` or ISO text. A row that does not read back as a valid record
@@ -60,12 +67,19 @@ export function parseArtifactVersionRow(row: Row): ArtifactVersionRecord {
   }
 }
 
-export function cloneArtifactRecord(record: ArtifactRecord): ArtifactRecord {
-  return structuredClone(record)
-}
-
-export function cloneArtifactVersionRecord(record: ArtifactVersionRecord): ArtifactVersionRecord {
-  return structuredClone(record)
+/** Targets are checked one by one: they decide what a frame may show from other artifacts. */
+export function parseArtifactFrameGrantRow(row: Row): ArtifactFrameGrantRecord {
+  const artifactId = text(row.artifactId, "artifactId", "artifact frame grant")
+  const where = `frame grant for artifact '${artifactId}'`
+  return {
+    projectId: text(row.projectId, "projectId", where),
+    tokenHash: text(row.tokenHash, "tokenHash", where),
+    artifactId,
+    version: positiveInteger(row.version, "version", where),
+    targets: frameTargets(json(row.targets, "targets", where), where),
+    createdAt: date(row.createdAt, "createdAt", where),
+    expiresAt: date(row.expiresAt, "expiresAt", where),
+  }
 }
 
 /** The errors every provider raises, with one wording. */
@@ -116,6 +130,26 @@ function references(value: unknown, where: string): ArtifactReference[] {
       as: entry.as,
       at: entry.at,
       resolvedVersion: entry.resolvedVersion as number,
+    }
+  })
+}
+
+function frameTargets(value: unknown, where: string): ArtifactFrameTarget[] {
+  if (!Array.isArray(value)) throw corrupt(where, "targets is not a list")
+  return value.map((entry) => {
+    if (
+      !isObject(entry) ||
+      typeof entry.address !== "string" ||
+      typeof entry.artifactId !== "string" ||
+      !Number.isSafeInteger(entry.version) ||
+      (entry.version as number) < 1
+    ) {
+      throw corrupt(where, "a target is not an address, an artifact, and a version")
+    }
+    return {
+      address: entry.address,
+      artifactId: entry.artifactId,
+      version: entry.version as number,
     }
   })
 }

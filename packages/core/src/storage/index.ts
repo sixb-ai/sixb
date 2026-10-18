@@ -203,6 +203,7 @@ export type {
   ArtifactRecord,
   ArtifactReference,
   ArtifactStorage,
+  ArtifactStorageError,
   ArtifactStorageErrorCode,
   ArtifactVersionInput,
   ArtifactVersionRecord,
@@ -221,7 +222,6 @@ export type {
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
 } from "./artifacts"
-export { ArtifactStorageError } from "./artifacts"
 export type {
   AccessTokenRecord,
   AuthAccessTokenStore,

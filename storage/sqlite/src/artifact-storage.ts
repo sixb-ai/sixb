@@ -1,12 +1,12 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite"
 import {
   artifactStorageErrors,
+  parseArtifactFrameGrantRow,
   parseArtifactRow,
   parseArtifactVersionRow,
 } from "@sixb/core/internal/storage"
 import type {
   ArtifactFrameGrantRecord,
-  ArtifactFrameTarget,
   ArtifactRecord,
   ArtifactStorage,
   ArtifactVersionInput,
@@ -40,6 +40,13 @@ const VERSION_COLUMNS = `
   origin_thread_id AS originThreadId, origin_run_id AS originRunId, created_at AS createdAt
 `
 
+const FRAME_GRANT_COLUMNS = `
+  project_id AS projectId, token_hash AS tokenHash, artifact_id AS artifactId, version, targets,
+  created_at AS createdAt, expires_at AS expiresAt
+`
+
+type Row = Record<string, unknown>
+
 export class SqliteArtifactStorage implements ArtifactStorage {
   private readonly db: Database
 
@@ -49,18 +56,17 @@ export class SqliteArtifactStorage implements ArtifactStorage {
 
   async create(input: CreateArtifactInput): Promise<PublishedArtifactVersion> {
     return runImmediateTransaction(this.db, () => {
-      if (this.artifactRow(input.projectId, input.id)) {
-        throw artifactStorageErrors.exists(input.id)
-      }
       const createdAt = input.version.createdAt.toISOString()
-      this.db
+      const artifact = this.db
         .query(
           `INSERT INTO artifacts (
             project_id, id, kind, title, owner_principal_type, owner_principal_id,
             latest_version, next_version, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, 1, 2, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, 1, 2, ?, ?)
+          ON CONFLICT (project_id, id) DO NOTHING
+          RETURNING ${ARTIFACT_COLUMNS}`
         )
-        .run(
+        .get(
           input.projectId,
           input.id,
           input.kind,
@@ -69,9 +75,12 @@ export class SqliteArtifactStorage implements ArtifactStorage {
           input.owner.id,
           createdAt,
           createdAt
-        )
-      this.insertVersion(input.projectId, input.id, 1, input.version)
-      return this.published(input.projectId, input.id, 1)
+        ) as Row | null
+      if (!artifact) throw artifactStorageErrors.exists(input.id)
+      return {
+        artifact: parseArtifactRow(artifact),
+        version: this.insertVersion(input.projectId, input.id, 1, input.version),
+      }
     })
   }
 
@@ -89,28 +98,35 @@ export class SqliteArtifactStorage implements ArtifactStorage {
       if (current.kind !== input.kind) {
         throw artifactStorageErrors.kindMismatch(input.artifactId, current.kind, input.kind)
       }
-      const version = current.nextVersion
-      this.insertVersion(input.projectId, input.artifactId, version, input.version)
-      this.db
+      const version = this.insertVersion(
+        input.projectId,
+        input.artifactId,
+        current.nextVersion,
+        input.version
+      )
+      const artifact = this.db
         .query(
           `UPDATE artifacts
            SET title = ?, latest_version = ?, next_version = ?, updated_at = ?
-           WHERE project_id = ? AND id = ?`
+           WHERE project_id = ? AND id = ?
+           RETURNING ${ARTIFACT_COLUMNS}`
         )
-        .run(
+        .get(
           input.version.title,
-          version,
-          version + 1,
+          version.version,
+          version.version + 1,
           input.version.createdAt.toISOString(),
           input.projectId,
           input.artifactId
-        )
-      return this.published(input.projectId, input.artifactId, version)
+        ) as Row
+      return { artifact: parseArtifactRow(artifact), version }
     })
   }
 
   async get(input: GetArtifactInput): Promise<ArtifactRecord | null> {
-    const row = this.artifactRow(input.projectId, input.id)
+    const row = this.db
+      .query(`SELECT ${ARTIFACT_COLUMNS} FROM artifacts WHERE project_id = ? AND id = ?`)
+      .get(input.projectId, input.id) as Row | null
     return row ? parseArtifactRow(row) : null
   }
 
@@ -144,7 +160,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         `SELECT ${ARTIFACT_COLUMNS} FROM artifacts a WHERE ${clause}
          ORDER BY a.updated_at DESC, a.id ASC LIMIT ? OFFSET ?`
       )
-      .all(...params, input.limit ?? -1, offset) as Record<string, unknown>[]
+      .all(...params, input.limit ?? -1, offset) as Row[]
     return {
       artifacts: rows.map(parseArtifactRow),
       hasMore: offset + rows.length < total,
@@ -153,7 +169,12 @@ export class SqliteArtifactStorage implements ArtifactStorage {
   }
 
   async getVersion(input: GetArtifactVersionInput): Promise<ArtifactVersionRecord | null> {
-    const row = this.versionRow(input.projectId, input.artifactId, input.version)
+    const row = this.db
+      .query(
+        `SELECT ${VERSION_COLUMNS} FROM artifact_versions
+         WHERE project_id = ? AND artifact_id = ? AND version = ?`
+      )
+      .get(input.projectId, input.artifactId, input.version) as Row | null
     return row ? parseArtifactVersionRow(row) : null
   }
 
@@ -170,10 +191,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
          WHERE project_id = ? AND artifact_id = ?
          ORDER BY version DESC LIMIT ? OFFSET ?`
       )
-      .all(input.projectId, input.artifactId, input.limit ?? -1, offset) as Record<
-      string,
-      unknown
-    >[]
+      .all(input.projectId, input.artifactId, input.limit ?? -1, offset) as Row[]
     return {
       versions: rows.map(parseArtifactVersionRow),
       hasMore: offset + rows.length < total,
@@ -199,7 +217,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
          )
          ORDER BY artifact_id`
       )
-      .all(input.projectId, prefix.length, prefix, prefix.length) as Record<string, unknown>[]
+      .all(input.projectId, prefix.length, prefix, prefix.length) as Row[]
     return rows.map(parseArtifactVersionRow)
   }
 
@@ -232,12 +250,11 @@ export class SqliteArtifactStorage implements ArtifactStorage {
   ): Promise<ArtifactFrameGrantRecord | null> {
     const row = this.db
       .query(
-        `SELECT project_id AS projectId, token_hash AS tokenHash, artifact_id AS artifactId,
-                version, targets, created_at AS createdAt, expires_at AS expiresAt
-         FROM artifact_frame_grants WHERE project_id = ? AND token_hash = ?`
+        `SELECT ${FRAME_GRANT_COLUMNS} FROM artifact_frame_grants
+         WHERE project_id = ? AND token_hash = ?`
       )
-      .get(input.projectId, input.tokenHash) as Record<string, unknown> | null
-    return row ? frameGrantFromRow(row) : null
+      .get(input.projectId, input.tokenHash) as Row | null
+    return row ? parseArtifactFrameGrantRow(row) : null
   }
 
   async deleteExpiredFrameGrants(input: DeleteExpiredArtifactFrameGrantsInput): Promise<number> {
@@ -310,15 +327,16 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     artifactId: string,
     version: number,
     input: ArtifactVersionInput
-  ): void {
-    this.db
+  ): ArtifactVersionRecord {
+    const row = this.db
       .query(
         `INSERT INTO artifact_versions (
           project_id, artifact_id, version, title, entry, files, outline, refs,
           author_principal_type, author_principal_id, origin_thread_id, origin_run_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        RETURNING ${VERSION_COLUMNS}`
       )
-      .run(
+      .get(
         projectId,
         artifactId,
         version,
@@ -332,48 +350,7 @@ export class SqliteArtifactStorage implements ArtifactStorage {
         input.origin?.threadId ?? null,
         input.origin?.runId ?? null,
         input.createdAt.toISOString()
-      )
-  }
-
-  private published(
-    projectId: string,
-    artifactId: string,
-    version: number
-  ): PublishedArtifactVersion {
-    const artifact = this.artifactRow(projectId, artifactId)
-    const stored = this.versionRow(projectId, artifactId, version)
-    if (!artifact || !stored) throw artifactStorageErrors.notFound(artifactId)
-    return { artifact: parseArtifactRow(artifact), version: parseArtifactVersionRow(stored) }
-  }
-
-  private artifactRow(projectId: string, id: string): Record<string, unknown> | null {
-    return this.db
-      .query(`SELECT ${ARTIFACT_COLUMNS} FROM artifacts WHERE project_id = ? AND id = ?`)
-      .get(projectId, id) as Record<string, unknown> | null
-  }
-
-  private versionRow(
-    projectId: string,
-    artifactId: string,
-    version: number
-  ): Record<string, unknown> | null {
-    return this.db
-      .query(
-        `SELECT ${VERSION_COLUMNS} FROM artifact_versions
-         WHERE project_id = ? AND artifact_id = ? AND version = ?`
-      )
-      .get(projectId, artifactId, version) as Record<string, unknown> | null
-  }
-}
-
-function frameGrantFromRow(row: Record<string, unknown>): ArtifactFrameGrantRecord {
-  return {
-    projectId: String(row.projectId),
-    tokenHash: String(row.tokenHash),
-    artifactId: String(row.artifactId),
-    version: Number(row.version),
-    targets: JSON.parse(String(row.targets)) as ArtifactFrameTarget[],
-    createdAt: new Date(String(row.createdAt)),
-    expiresAt: new Date(String(row.expiresAt)),
+      ) as Row
+    return parseArtifactVersionRow(row)
   }
 }

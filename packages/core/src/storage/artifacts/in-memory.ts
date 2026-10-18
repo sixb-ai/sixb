@@ -1,6 +1,6 @@
 import { principalsEqual } from "../../auth"
 import { paginate } from "../pagination"
-import { artifactStorageErrors, cloneArtifactRecord, cloneArtifactVersionRecord } from "./record"
+import { artifactStorageErrors } from "./record"
 import type {
   ArtifactFrameGrantRecord,
   ArtifactRecord,
@@ -29,6 +29,11 @@ interface StoredArtifact {
   readonly versions: readonly ArtifactVersionRecord[]
   /** The number the next version gets; it only grows, so a deleted number is never reused. */
   readonly nextVersion: number
+}
+
+interface InMemoryArtifactSnapshot {
+  readonly artifacts: ReadonlyMap<string, StoredArtifact>
+  readonly frameGrants: ReadonlyMap<string, ArtifactFrameGrantRecord>
 }
 
 export class InMemoryArtifactStorage implements ArtifactStorage {
@@ -82,7 +87,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
 
   async get(input: GetArtifactInput): Promise<ArtifactRecord | null> {
     const stored = this.artifacts.get(artifactKey(input.projectId, input.id))
-    return stored ? cloneArtifactRecord(stored.record) : null
+    return stored ? structuredClone(stored.record) : null
   }
 
   async list(input: ListArtifactsInput): Promise<ListArtifactsResult> {
@@ -101,20 +106,20 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
           right.updatedAt.getTime() - left.updatedAt.getTime() || left.id.localeCompare(right.id)
       )
     const { page, hasMore, total } = paginate(matching, input)
-    return { artifacts: page.map(cloneArtifactRecord), hasMore, total }
+    return { artifacts: structuredClone(page), hasMore, total }
   }
 
   async getVersion(input: GetArtifactVersionInput): Promise<ArtifactVersionRecord | null> {
     const stored = this.artifacts.get(artifactKey(input.projectId, input.artifactId))
     const version = stored?.versions.find((candidate) => candidate.version === input.version)
-    return version ? cloneArtifactVersionRecord(version) : null
+    return version ? structuredClone(version) : null
   }
 
   async listVersions(input: ListArtifactVersionsInput): Promise<ListArtifactVersionsResult> {
     const stored = this.artifacts.get(artifactKey(input.projectId, input.artifactId))
     const newestFirst = [...(stored?.versions ?? [])].reverse()
     const { page, hasMore, total } = paginate(newestFirst, input)
-    return { versions: page.map(cloneArtifactVersionRecord), hasMore, total }
+    return { versions: structuredClone(page), hasMore, total }
   }
 
   async listReferencingVersions(
@@ -128,27 +133,25 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
         (candidate) => candidate.version === stored.record.latestVersion
       )
       if (latest?.references.some((reference) => refersTo(reference.address, prefix))) {
-        referencing.push(cloneArtifactVersionRecord(latest))
+        referencing.push(structuredClone(latest))
       }
     }
-    return referencing
+    // Code-unit order, as SQLite compares text.
+    return referencing.sort((left, right) => (left.artifactId < right.artifactId ? -1 : 1))
   }
 
   async createFrameGrant(record: ArtifactFrameGrantRecord): Promise<void> {
     if (!this.artifacts.has(artifactKey(record.projectId, record.artifactId))) {
       throw artifactStorageErrors.notFound(record.artifactId)
     }
-    this.frameGrants.set(artifactKey(record.projectId, record.tokenHash), {
-      ...record,
-      targets: record.targets.map((target) => ({ ...target })),
-    })
+    this.frameGrants.set(artifactKey(record.projectId, record.tokenHash), structuredClone(record))
   }
 
   async findFrameGrant(
     input: FindArtifactFrameGrantInput
   ): Promise<ArtifactFrameGrantRecord | null> {
     const grant = this.frameGrants.get(artifactKey(input.projectId, input.tokenHash))
-    return grant ? { ...grant, targets: grant.targets.map((target) => ({ ...target })) } : null
+    return grant ? structuredClone(grant) : null
   }
 
   async deleteExpiredFrameGrants(input: DeleteExpiredArtifactFrameGrantsInput): Promise<number> {
@@ -163,11 +166,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
   }
 
   async delete(input: DeleteArtifactInput): Promise<boolean> {
-    const key = artifactKey(input.projectId, input.id)
-    for (const [grantKey, grant] of this.frameGrants) {
-      if (artifactKey(grant.projectId, grant.artifactId) === key) this.frameGrants.delete(grantKey)
-    }
-    return this.artifacts.delete(key)
+    return this.deleteArtifact(artifactKey(input.projectId, input.id))
   }
 
   async deleteVersionsByOrigin(input: DeleteArtifactVersionsByOriginInput): Promise<number> {
@@ -179,7 +178,7 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
       deleted += stored.versions.length - remaining.length
       const latest = remaining.at(-1)
       if (!latest) {
-        this.artifacts.delete(key)
+        this.deleteArtifact(key)
         continue
       }
       this.artifacts.set(key, {
@@ -196,12 +195,22 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     return deleted
   }
 
-  snapshot(): ReadonlyMap<string, StoredArtifact> {
-    return cloneArtifacts(this.artifacts)
+  snapshot(): InMemoryArtifactSnapshot {
+    return structuredClone({ artifacts: this.artifacts, frameGrants: this.frameGrants })
   }
 
-  restore(snapshot: ReadonlyMap<string, StoredArtifact>): void {
-    this.artifacts = cloneArtifacts(snapshot)
+  restore(snapshot: InMemoryArtifactSnapshot): void {
+    const restored = structuredClone(snapshot)
+    this.artifacts = new Map(restored.artifacts)
+    this.frameGrants = new Map(restored.frameGrants)
+  }
+
+  /** Deletes an artifact with its frame grants, as the SQL providers' cascade does. */
+  private deleteArtifact(key: string): boolean {
+    for (const [grantKey, grant] of this.frameGrants) {
+      if (artifactKey(grant.projectId, grant.artifactId) === key) this.frameGrants.delete(grantKey)
+    }
+    return this.artifacts.delete(key)
   }
 }
 
@@ -211,20 +220,14 @@ function versionRecord(
   version: number,
   input: ArtifactVersionInput
 ): ArtifactVersionRecord {
-  return cloneArtifactVersionRecord({ ...input, projectId, artifactId, version })
+  return structuredClone({ ...input, projectId, artifactId, version })
 }
 
 function published(
   record: ArtifactRecord,
   version: ArtifactVersionRecord
 ): PublishedArtifactVersion {
-  return { artifact: cloneArtifactRecord(record), version: cloneArtifactVersionRecord(version) }
-}
-
-function cloneArtifacts(
-  artifacts: ReadonlyMap<string, StoredArtifact>
-): Map<string, StoredArtifact> {
-  return new Map([...artifacts].map(([key, stored]) => [key, structuredClone(stored)]))
+  return structuredClone({ artifact: record, version })
 }
 
 function artifactKey(projectId: string, id: string): string {
