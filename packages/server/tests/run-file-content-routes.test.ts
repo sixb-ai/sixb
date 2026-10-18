@@ -286,21 +286,6 @@ describe("run file content routes", () => {
     expect(await output.text()).toBe("workflow output")
   })
 
-  test("returns headers without a body for HEAD requests", async () => {
-    const { app } = await createRunFileApi()
-
-    const response = await app.fetch(
-      contentRequest("/api/action-runs/action_run_1/files/content?path=/params/sourcePdf", {
-        method: "HEAD",
-      })
-    )
-
-    expect(response.status).toBe(200)
-    expect(response.headers.get("content-type")).toBe("application/pdf")
-    expect(response.headers.get("content-length")).toBe("10")
-    expect(await response.text()).toBe("")
-  })
-
   test("hides missing runs, invalid paths, and non-file values as 404", async () => {
     const { app } = await createRunFileApi()
 

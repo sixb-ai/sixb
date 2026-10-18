@@ -252,15 +252,17 @@ describe("AI accounting routes", () => {
     expect(result.items[0].executions[0].label).toBe(viewer.visible ? "research" : undefined)
   })
 
-  test("validates group pagination and valuation filters", async () => {
+  test("validates pagination and valuation filters", async () => {
     const app = await createSubagentApp()
-    for (const extra of ["limit=201", "offset=-1", "valuationStatus=invalid"]) {
-      const response = await app.handle(
-        new Request(
-          `http://localhost/api/ai/model-call-groups?from=2026-09-10T12:00:00Z&to=2026-09-10T14:00:00Z&${extra}`
-        )
-      )
-      expect([400, 422]).toContain(response.status)
+    const range = "from=2026-09-10T12:00:00Z&to=2026-09-10T14:00:00Z"
+    for (const [path, status] of [
+      [`model-call-groups?${range}&limit=201`, 400],
+      [`model-call-groups?${range}&offset=-1`, 422],
+      [`model-call-groups?${range}&valuationStatus=invalid`, 422],
+      [`model-calls?${range}&limit=25garbage`, 422],
+    ] as const) {
+      const response = await app.handle(new Request(`http://localhost/api/ai/${path}`))
+      expect(response.status, path).toBe(status)
     }
   })
 
@@ -402,21 +404,6 @@ describe("AI accounting routes", () => {
         },
       ],
     })
-  })
-
-  test("rejects malformed model-call pagination integers", async () => {
-    const app = await createApp()
-    const response = await app.handle(
-      new Request(
-        "http://localhost/api/ai/model-calls?" +
-          new URLSearchParams({
-            from: "2026-09-10T00:00:00.000Z",
-            to: "2026-09-11T00:00:00.000Z",
-            limit: "25garbage",
-          })
-      )
-    )
-    expect(response.status).toBe(422)
   })
 
   test("reports unavailable AI cost storage explicitly", async () => {

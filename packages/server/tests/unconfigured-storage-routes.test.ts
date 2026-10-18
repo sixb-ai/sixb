@@ -101,6 +101,8 @@ const ROUTES: ReadonlyArray<{
   },
 ]
 
+// The regression this family guards against: a run-history route that answers `200 {total: 0}`
+// reads as "nothing happened yet" when the truth is "nothing is being recorded".
 describe("routes whose storage role is not configured", () => {
   for (const route of ROUTES) {
     test(`${route.name} answers 501 and names the missing role`, async () => {
@@ -114,15 +116,4 @@ describe("routes whose storage role is not configured", () => {
       })
     })
   }
-
-  // The regression this whole family guards against: a run-history route that
-  // answers `200 {total: 0}` reads as "nothing happened yet" when the truth is
-  // "nothing is being recorded".
-  test("no route reports an empty history instead of an unrecorded one", async () => {
-    for (const route of ROUTES) {
-      const app = appFor(route.register)
-      const response = await app.handle(new Request(route.request))
-      expect(response.status).not.toBe(200)
-    }
-  })
 })

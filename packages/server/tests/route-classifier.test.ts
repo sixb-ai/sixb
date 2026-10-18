@@ -54,55 +54,41 @@ describe("classifyRoute", () => {
     }
   })
 
-  test("an unrecognized path requires authentication", () => {
+  test("an unrecognized path requires authentication, and CSRF protection to mutate", () => {
     // These 404 in the router before the guard runs, so none of them was ever exposed.
     // The default still matters: it decides what happens to the next route someone
     // mounts outside /api, /ws and /docs. See the auth-guard integration test for the
     // registered-route case.
     for (const path of ["/", "/admin", "/internal/metrics", "/.env", "/api-docs"]) {
-      expect(classifyRoute(request("GET", path)).kind, `GET ${path}`).toBe("api")
-      expect(classifyRoute(request("POST", path)).kind, `POST ${path}`).toBe("api")
+      expect(classifyRoute(request("GET", path)), `GET ${path}`).toEqual({
+        kind: "api",
+        csrfProtected: false,
+      })
+      // Failing closed has to fail closed all the way: an unclassified POST that needed
+      // auth but skipped CSRF would still be reachable from another origin's page.
+      expect(classifyRoute(request("POST", path)), `POST ${path}`).toEqual({
+        kind: "api",
+        csrfProtected: true,
+      })
     }
   })
 
-  test("a webhook path is public for POST alone", () => {
-    // `WebhookDefinition.method` is the literal "POST", so no other method is ever
-    // registered under this prefix and a wider allow-list allows nothing real. It was
-    // written method-blind, which made the entry read like a path-shaped hole.
-    expect(classifyRoute(request("POST", "/api/webhooks/github/events")).kind).toBe("public")
-    for (const method of ["GET", "PUT", "PATCH", "DELETE"]) {
-      expect(
-        classifyRoute(request(method, "/api/webhooks/github/events")).kind,
-        `${method} /api/webhooks/github/events`
-      ).toBe("api")
-    }
-  })
-
-  test("a signed download path is public for reads alone", () => {
-    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
-      expect(
-        classifyRoute(request(method, "/api/files/downloads/payload.signature")).kind,
-        `${method} /api/files/downloads/payload.signature`
-      ).toBe("api")
-    }
-  })
-
-  test("a frame path is public for reads alone", () => {
-    // Reproduce by dropping the method check from the frame rule in classifyRoute.
-    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
-      expect(classifyRoute(request(method, FRAME_FILE)).kind, `${method} ${FRAME_FILE}`).toBe("api")
+  // The allow-list holds the methods each of these is public for; every other one needs a session.
+  // Reproduce by dropping the method check from one of their rules in classifyRoute.
+  test.each([
+    // `WebhookDefinition.method` is the literal "POST", so no other method is ever registered
+    // under this prefix and a wider allow-list allows nothing real.
+    ["/api/webhooks/github/events", ["GET", "PUT", "PATCH", "DELETE"]],
+    ["/api/files/downloads/payload.signature", ["POST", "PUT", "PATCH", "DELETE"]],
+    [FRAME_FILE, ["POST", "PUT", "PATCH", "DELETE"]],
+  ] as const)("%s needs a session for any other method", (path, methods) => {
+    for (const method of methods) {
+      expect(classifyRoute(request(method, path)).kind, `${method} ${path}`).toBe("api")
     }
   })
 
   test("shared-access lifecycle routes are public only for their exact method and shape", () => {
-    const exact = [
-      ["POST", "/api/shared-access/shr_1/exchange"],
-      ["GET", "/api/shared-access/shr_1/session"],
-      ["POST", "/api/shared-access/shr_1/sign-out"],
-    ] as const
-    for (const [method, path] of exact) {
-      expect(classifyRoute(request(method, path)).kind).toBe("public")
-    }
+    // The exact routes are in the allow-list above.
     for (const [method, path] of [
       ["GET", "/api/shared-access/shr_1/exchange"],
       ["POST", "/api/shared-access/shr_1/session"],
@@ -135,12 +121,5 @@ describe("classifyRoute", () => {
     expect(classifyRoute(request("GET", "/docs")).kind).toBe("html")
     expect(classifyRoute(request("GET", "/docs/json")).kind).toBe("html")
     expect(classifyRoute(request("GET", "/auth/device?user_code=BCDF-HJKM")).kind).toBe("html")
-  })
-
-  test("a mutation to an unrecognized path is CSRF-protected", () => {
-    // Failing closed has to fail closed all the way: an unclassified POST that needed
-    // auth but skipped CSRF would still be reachable from another origin's page.
-    expect(classifyRoute(request("POST", "/whatever")).csrfProtected).toBe(true)
-    expect(classifyRoute(request("GET", "/whatever")).csrfProtected).toBe(false)
   })
 })

@@ -90,7 +90,7 @@ function createTestApp(pipelineRuns: Partial<PipelineRunStorage>) {
 }
 
 describe("pipeline routes", () => {
-  test("list route exposes the specialized latest-run failure", async () => {
+  test("list route exposes the specialized latest-run failure and the columns a step input picks", async () => {
     let bulkCalls = 0
     const requestedPipelineIds: string[][] = []
     const app = createTestApp({
@@ -119,24 +119,13 @@ describe("pipeline routes", () => {
     expect(response.status).toBe(200)
     expect(bulkCalls).toBe(1)
     expect(requestedPipelineIds).toEqual([["customers"]])
-    expect(await response.json()).toMatchObject([
-      {
-        id: "customers",
-        latestRun: { status: "failed", error: FAILURE },
-      },
-    ])
-  })
-
-  test("lists the columns a step input picks", async () => {
-    const app = createTestApp({})
-
-    const response = await app.handle(new Request("http://localhost/api/pipelines"))
-
-    expect(response.status).toBe(200)
-
     const [listed] = (await response.json()) as [
       { graph: { nodes: [{ step: { inputs: unknown } }] } },
     ]
+    expect(listed).toMatchObject({
+      id: "customers",
+      latestRun: { status: "failed", error: FAILURE },
+    })
     expect(listed.graph.nodes[0].step.inputs).toEqual([
       {
         name: "raw",

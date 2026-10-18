@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { createServer } from "node:net"
 import {
   type AuthorizationContext,
   InMemoryBlobStorage,
@@ -31,33 +30,24 @@ import {
   parseAgentStreamMessage,
 } from "../src/routes/ws/agents"
 import { SixbServer } from "../src/server"
-import { createTestBrowserPolicy } from "./helpers"
+import { createTestBrowserPolicy, getFreePort, nextWsMessage } from "./helpers"
 
 const projectId = "agent-ws-test-project"
 const runId = "agt_run_ws_1"
 const threadId = "thr_ws_1"
 
 describe("parseAgentStreamMessage", () => {
-  test("accepts subscribe, replay, and unsubscribe messages", () => {
-    expect(parseAgentStreamMessage({ type: "subscribe", runId, afterCursor: "1" })).toEqual({
-      ok: true,
-      data: { type: "subscribe", runId, afterCursor: "1" },
-    })
-    expect(parseAgentStreamMessage({ type: "replay", runId, limit: 25 })).toEqual({
-      ok: true,
-      data: { type: "replay", runId, limit: 25 },
-    })
-    expect(parseAgentStreamMessage({ type: "unsubscribe", runId })).toEqual({
-      ok: true,
-      data: { type: "unsubscribe", runId },
-    })
-    expect(parseAgentStreamMessage({ type: "subscribe.activity" })).toEqual({
-      ok: true,
-      data: { type: "subscribe.activity" },
-    })
-  })
+  test("accepts the four message types and rejects invalid ones", () => {
+    for (const message of [
+      { type: "subscribe", runId, afterCursor: "1" },
+      { type: "replay", runId, limit: 25 },
+      { type: "unsubscribe", runId },
+      { type: "subscribe.activity" },
+    ]) {
+      const parsed: unknown = parseAgentStreamMessage(message)
+      expect(parsed).toEqual({ ok: true, data: message })
+    }
 
-  test("rejects non-object and invalid messages", () => {
     expect(parseAgentStreamMessage("subscribe")).toEqual({
       ok: false,
       error: "Message must be a JSON object.",
@@ -143,7 +133,7 @@ describe("/ws/agents", () => {
         expect(await nextWsMessage(ws)).toEqual({ type: "unsubscribed", runId })
 
         await appendAgentStreamRecord(sixb, { type: "agent.run.finished", runId })
-        await expectNoWsMessage(ws)
+        await expectNothingSent(ws)
       } finally {
         ws.close()
       }
@@ -184,7 +174,7 @@ describe("/ws/agents", () => {
           type: "run.snapshot",
           run: { id: runId, status: "queued", attempt: 0 },
         })
-        await expectNoWsMessage(ws)
+        await expectNothingSent(ws)
       } finally {
         ws.close()
       }
@@ -222,7 +212,7 @@ describe("/ws/agents", () => {
           type: "agent.run.finished",
           runId: "agt_run_ws_replay",
         })
-        await expectNoWsMessage(ws)
+        await expectNothingSent(ws)
       } finally {
         ws.close()
       }
@@ -278,7 +268,7 @@ describe("/ws/agents", () => {
 })
 
 describe("canAccessAgentRunStream", () => {
-  test("allows owners and rejects other authenticated principals", async () => {
+  test("allows owners and rejects other principals and unknown runs", async () => {
     const sixb = createSixbInstance({
       id: projectId,
       ontology: [],
@@ -324,26 +314,6 @@ describe("canAccessAgentRunStream", () => {
         runId
       )
     ).resolves.toEqual({ ok: false, message: "Agent run not found." })
-  })
-
-  test("rejects unknown run ids instead of authorizing them through a supplied thread", async () => {
-    const sixb = createSixbInstance({
-      id: projectId,
-      ontology: [],
-      broker: new InMemoryBroker(),
-      storage: new InMemoryStorage(),
-      lakeStorage: new InMemoryLakeStorage(),
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-      auth: { id: "test", kind: "dev" },
-    })
-    const owner: Principal = { type: "user", id: "usr_owner" }
-    await agentStorage(sixb).threads.create({
-      id: threadId,
-      projectId,
-      ownerPrincipal: owner,
-    })
-
     await expect(
       canAccessAgentRunStream(requestSdk(sixb, authz(owner, true)), "agt_run_missing")
     ).resolves.toEqual({ ok: false, message: "Agent run not found." })
@@ -580,80 +550,15 @@ function agentStreamPayload(
   }
 }
 
-async function getFreePort(): Promise<number> {
-  return await new Promise<number>((resolvePromise, reject) => {
-    const server = createServer() as ReturnType<typeof createServer> & {
-      on(event: string, listener: (error: Error) => void): void
-    }
-    server.on("error", reject)
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address()
-      if (!address || typeof address === "string") {
-        reject(new Error("Could not resolve an open port"))
-        return
-      }
-
-      server.close((error) => {
-        if (error) reject(error)
-        else resolvePromise(address.port)
-      })
-    })
-  })
-}
-
-async function nextWsMessage(ws: WebSocket, timeoutMs = 3000): Promise<Record<string, unknown>> {
-  return await new Promise<Record<string, unknown>>((resolvePromise, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup()
-      reject(new Error("Timed out waiting for websocket message"))
-    }, timeoutMs)
-
-    const onMessage = (event: MessageEvent) => {
-      cleanup()
-      try {
-        resolvePromise(JSON.parse(decodeWsData(event.data)) as Record<string, unknown>)
-      } catch (error) {
-        reject(error)
-      }
-    }
-    const onError = () => {
-      cleanup()
-      reject(new Error("WebSocket error"))
-    }
-    const cleanup = () => {
-      clearTimeout(timeout)
-      ws.removeEventListener("message", onMessage)
-      ws.removeEventListener("error", onError)
-    }
-
-    ws.addEventListener("message", onMessage)
-    ws.addEventListener("error", onError)
-  })
-}
-
-async function expectNoWsMessage(ws: WebSocket): Promise<void> {
-  await new Promise<void>((resolvePromise, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup()
-      resolvePromise()
-    }, 650)
-
-    const onMessage = (event: MessageEvent) => {
-      cleanup()
-      reject(new Error(`Unexpected websocket message: ${decodeWsData(event.data)}`))
-    }
-    const onError = () => {
-      cleanup()
-      reject(new Error("WebSocket error"))
-    }
-    const cleanup = () => {
-      clearTimeout(timeout)
-      ws.removeEventListener("message", onMessage)
-      ws.removeEventListener("error", onError)
-    }
-
-    ws.addEventListener("message", onMessage)
-    ws.addEventListener("error", onError)
+/**
+ * Run records are sent as they are appended, and the socket answers messages in order, so a
+ * record pushed before this call arrives ahead of the reply to the message sent here.
+ */
+async function expectNothingSent(ws: WebSocket): Promise<void> {
+  ws.send("not json")
+  expect(await nextWsMessage(ws)).toEqual({
+    type: "error",
+    message: "Message must be a JSON object.",
   })
 }
 
@@ -669,7 +574,7 @@ async function expectWebSocketRejected(url: string): Promise<void> {
     const onMessage = (event: MessageEvent) => {
       cleanup()
       ws.close()
-      reject(new Error(`Unexpected websocket message: ${decodeWsData(event.data)}`))
+      reject(new Error(`Unexpected websocket message: ${String(event.data)}`))
     }
     const onOpen = () => {
       // A denied upgrade may still emit close after open depending on the runtime.
@@ -695,18 +600,6 @@ async function expectWebSocketRejected(url: string): Promise<void> {
     ws.addEventListener("close", onClose)
     ws.addEventListener("error", onError)
   })
-}
-
-function decodeWsData(value: unknown): string {
-  if (typeof value === "string") {
-    return value
-  }
-
-  if (value instanceof ArrayBuffer) {
-    return new TextDecoder().decode(value)
-  }
-
-  return String(value)
 }
 
 function authz(principal: Principal, canRunAgent = false): AuthorizationContext {

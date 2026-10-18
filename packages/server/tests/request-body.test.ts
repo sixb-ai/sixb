@@ -25,12 +25,7 @@ function streamRequest(chunks: readonly Uint8Array[]): Request {
 }
 
 describe("readRequestBodyWithLimit", () => {
-  test("reads the full body when within the limit", async () => {
-    const bytes = await readRequestBodyWithLimit(streamRequest([new Uint8Array([1, 2, 3])]), 10)
-    expect([...bytes]).toEqual([1, 2, 3])
-  })
-
-  test("concatenates multiple chunks in order", async () => {
+  test("concatenates the chunks of a body within the limit in order", async () => {
     const bytes = await readRequestBodyWithLimit(
       streamRequest([new Uint8Array([1, 2]), new Uint8Array([3, 4])]),
       10
@@ -45,26 +40,17 @@ describe("readRequestBodyWithLimit", () => {
     ).rejects.toBeInstanceOf(RequestBodyTooLargeError)
   })
 
-  test("rejects oversized bodies via the content-length fast path", async () => {
+  test("rejects oversized bodies via the content-length fast path, with the given message", async () => {
     const request = new Request("http://localhost/upload", {
       method: "PUT",
       headers: { "content-length": "100" },
       body: "tiny",
     })
-    await expect(readRequestBodyWithLimit(request, 10)).rejects.toBeInstanceOf(
-      RequestBodyTooLargeError
+    const error = await readRequestBodyWithLimit(request, 10, "custom limit message").catch(
+      (caught: unknown) => caught
     )
-  })
-
-  test("surfaces the provided too-large message", async () => {
-    const request = new Request("http://localhost/upload", {
-      method: "PUT",
-      headers: { "content-length": "100" },
-      body: "tiny",
-    })
-    await expect(readRequestBodyWithLimit(request, 10, "custom limit message")).rejects.toThrow(
-      "custom limit message"
-    )
+    expect(error).toBeInstanceOf(RequestBodyTooLargeError)
+    expect((error as Error).message).toBe("custom limit message")
   })
 
   test("returns an empty array for a bodyless request", async () => {

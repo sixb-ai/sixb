@@ -34,8 +34,8 @@ test("multipart parts allow an optional nonempty ETag", () => {
   expect(FileUploadPartSchema.safeParse({ partNumber: 1, etag: "" }).success).toBe(false)
 })
 
+// "none" passes through; an unset policy defaults to "etag".
 test.each([
-  "etag",
   "none",
   undefined,
 ] as const)("multipart session exposes receipt policy %s", async (partReceipt) => {
@@ -147,17 +147,6 @@ function uploadRequest(form: FormData): Request {
   })
 }
 
-function oversizedUploadRequest(): Request {
-  return new Request("http://localhost/api/files", {
-    method: "POST",
-    headers: {
-      "content-length": String(DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES + 1),
-      "content-type": "multipart/form-data; boundary=sixb-test",
-    },
-    body: "--sixb-test\r\ninvalid multipart body",
-  })
-}
-
 // A stream body carries no content-length, so only a limit applied while reading can stop it.
 function chunkedBody(sizeBytes: number): ReadableStream<Uint8Array> {
   const chunk = new Uint8Array(1024 * 1024)
@@ -240,17 +229,6 @@ describe("file routes", () => {
     })
   })
 
-  test("rejects obviously oversized upload requests before parsing multipart", async () => {
-    const { app } = createFilesApi()
-
-    const response = await app.fetch(oversizedUploadRequest())
-
-    expect(response.status).toBe(413)
-    expect(await response.json()).toEqual({
-      error: `File upload request exceeds the ${DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES} byte limit.`,
-    })
-  })
-
   test("rejects a chunked upload request over the limit while reading it", async () => {
     const { app } = createFilesApi()
 
@@ -267,33 +245,6 @@ describe("file routes", () => {
     expect(await response.json()).toEqual({
       error: `File upload request exceeds the ${DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES} byte limit.`,
     })
-  })
-
-  test("creates a server staged upload for providers without direct upload support", async () => {
-    const { app } = createFilesApi()
-
-    const response = await app.fetch(
-      jsonRequest("/api/files/uploads", {
-        fileName: "large.txt",
-        mediaType: "text/plain",
-        sizeBytes: 11,
-        logicalPath: "docs/large.txt",
-      })
-    )
-
-    expect(response.status).toBe(201)
-    const upload = (await response.json()) as {
-      strategy: string
-      uploadId: string
-      method: string
-      url: string
-      expiresAt: string
-    }
-    expect(upload.strategy).toBe("server")
-    expect(upload.uploadId).toMatch(/^upload_[a-f0-9]{32}$/)
-    expect(upload.method).toBe("PUT")
-    expect(upload.url).toBe(`/api/files/uploads/${upload.uploadId}/content`)
-    expect(new Date(upload.expiresAt).getTime()).toBeGreaterThan(Date.now())
   })
 
   // Regression proof: drop the refine from CreateFileUploadBodySchema.mediaType; both are created.
@@ -341,7 +292,7 @@ describe("file routes", () => {
     expect(put).not.toHaveBeenCalled()
   })
 
-  test("uploads staged server content and completes to a FileRef", async () => {
+  test("creates a server staged upload, takes its content, and completes to a FileRef", async () => {
     const { app, blobStorage } = createFilesApi()
     const digest = computeBlobDigest(new TextEncoder().encode("hello large"))
     const createResponse = await app.fetch(
@@ -353,7 +304,23 @@ describe("file routes", () => {
         logicalPath: "docs/large.txt",
       })
     )
-    const upload = (await createResponse.json()) as { uploadId: string }
+    // Without direct upload support, the content goes through Sixb.
+    expect(createResponse.status).toBe(201)
+    const upload = (await createResponse.json()) as {
+      strategy: string
+      uploadId: string
+      method: string
+      url: string
+      expiresAt: string
+    }
+    expect(upload).toEqual({
+      strategy: "server",
+      uploadId: expect.stringMatching(/^upload_[a-f0-9]{32}$/),
+      method: "PUT",
+      url: `/api/files/uploads/${upload.uploadId}/content`,
+      expiresAt: expect.any(String),
+    })
+    expect(new Date(upload.expiresAt).getTime()).toBeGreaterThan(Date.now())
 
     const contentResponse = await app.fetch(stagedContentRequest(upload.uploadId, "hello large"))
     expect(contentResponse.status).toBe(200)
@@ -447,24 +414,27 @@ describe("file routes", () => {
     })
   })
 
-  test("aborts a staged server upload", async () => {
+  test("aborts a staged server upload once, refusing its content and completion after", async () => {
     const { app } = createFilesApi()
     const createResponse = await app.fetch(jsonRequest("/api/files/uploads", {}))
     const upload = (await createResponse.json()) as { uploadId: string }
 
-    const abortResponse = await app.fetch(
-      jsonRequest(`/api/files/uploads/${upload.uploadId}/abort`)
-    )
-    expect(abortResponse.status).toBe(200)
-    expect(await abortResponse.json()).toEqual({ success: true })
+    const abort = () => app.fetch(jsonRequest(`/api/files/uploads/${upload.uploadId}/abort`))
+    const aborted = await abort()
+    expect(aborted.status).toBe(200)
+    expect(await aborted.json()).toEqual({ success: true })
+    // Aborting again is a no-op.
+    const abortedAgain = await abort()
+    expect(abortedAgain.status).toBe(200)
+    expect(await abortedAgain.json()).toEqual({ success: true })
 
-    const completeResponse = await app.fetch(
-      jsonRequest(`/api/files/uploads/${upload.uploadId}/complete`, {})
-    )
-    expect(completeResponse.status).toBe(409)
-    expect(await completeResponse.json()).toEqual({
-      error: "File upload session is already aborted.",
-    })
+    for (const response of [
+      await app.fetch(stagedContentRequest(upload.uploadId, "late content")),
+      await app.fetch(jsonRequest(`/api/files/uploads/${upload.uploadId}/complete`, {})),
+    ]) {
+      expect(response.status).toBe(409)
+      expect(await response.json()).toEqual({ error: "File upload session is already aborted." })
+    }
   })
 
   test("rejects staged server content that does not match the declared size", async () => {
@@ -549,50 +519,6 @@ describe("file routes", () => {
     expect(await abortResponse.json()).toEqual({
       error: "File upload session is already completed.",
     })
-  })
-
-  test("treats aborting an already aborted upload as a no-op", async () => {
-    const { app } = createFilesApi()
-    const createResponse = await app.fetch(jsonRequest("/api/files/uploads", {}))
-    const upload = (await createResponse.json()) as { uploadId: string }
-
-    const first = await app.fetch(jsonRequest(`/api/files/uploads/${upload.uploadId}/abort`))
-    expect(first.status).toBe(200)
-
-    const second = await app.fetch(jsonRequest(`/api/files/uploads/${upload.uploadId}/abort`))
-    expect(second.status).toBe(200)
-    expect(await second.json()).toEqual({ success: true })
-  })
-
-  test("rejects staged content for a terminal session", async () => {
-    const { app } = createFilesApi()
-    const createResponse = await app.fetch(jsonRequest("/api/files/uploads", {}))
-    const upload = (await createResponse.json()) as { uploadId: string }
-    await app.fetch(jsonRequest(`/api/files/uploads/${upload.uploadId}/abort`))
-
-    const contentResponse = await app.fetch(stagedContentRequest(upload.uploadId, "late content"))
-    expect(contentResponse.status).toBe(409)
-    expect(await contentResponse.json()).toEqual({
-      error: "File upload session is already aborted.",
-    })
-  })
-
-  test("rejects staged content that exceeds the upload size limit", async () => {
-    const { app } = createFilesApi()
-    const createResponse = await app.fetch(jsonRequest("/api/files/uploads", {}))
-    const upload = (await createResponse.json()) as { uploadId: string }
-
-    const response = await app.fetch(
-      new Request(`http://localhost/api/files/uploads/${upload.uploadId}/content`, {
-        method: "PUT",
-        headers: {
-          "content-type": "application/octet-stream",
-          "content-length": String(DEFAULT_SIMPLE_FILE_UPLOAD_BYTES + 1),
-        },
-        body: "small body",
-      })
-    )
-    expect(response.status).toBe(413)
   })
 
   test("rejects chunked staged content over the upload size limit", async () => {

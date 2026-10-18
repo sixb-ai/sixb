@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { createServer } from "node:net"
 import {
   type AuthorizationContext,
   can,
@@ -24,56 +23,35 @@ import { Elysia } from "elysia"
 import { registerLogRoutes } from "../src/routes/logs"
 import { parseLogSubscriptionMessage } from "../src/routes/ws/logs"
 import { SixbServer } from "../src/server"
-import { createTestBrowserPolicy } from "./helpers"
+import { createTestBrowserPolicy, getFreePort, nextWsMessage } from "./helpers"
 
 describe("parseLogSubscriptionMessage", () => {
-  test("accepts a kind-, level-, and run-scoped message", () => {
-    expect(
-      parseLogSubscriptionMessage({
-        type: "subscribe",
-        kinds: ["workflow"],
-        levels: ["warn", "error"],
-        run: { kind: "workflow", id: "wf-1" },
-        afterCursor: "10",
-      })
-    ).toEqual({
-      ok: true,
-      data: {
+  test("accepts scoped subscribes and unsubscribes, and rejects invalid messages", () => {
+    for (const message of [
+      {
         type: "subscribe",
         kinds: ["workflow"],
         levels: ["warn", "error"],
         run: { kind: "workflow", id: "wf-1" },
         afterCursor: "10",
       },
-    })
-  })
+      { type: "unsubscribe" },
+    ]) {
+      const parsed: unknown = parseLogSubscriptionMessage(message)
+      expect(parsed).toEqual({ ok: true, data: message })
+    }
 
-  test("rejects mismatched kind and run scopes", () => {
-    expect(
-      parseLogSubscriptionMessage({
-        type: "subscribe",
-        kinds: ["pipeline"],
-        run: { kind: "workflow", id: "wf-1" },
-      }).ok
-    ).toBe(false)
-    expect(
-      parseLogSubscriptionMessage({
-        type: "subscribe",
-        run: { kind: "workflow", id: "   " },
-      }).ok
-    ).toBe(false)
-  })
-
-  test("accepts unsubscribe and rejects invalid payloads", () => {
-    expect(parseLogSubscriptionMessage({ type: "unsubscribe" })).toEqual({
-      ok: true,
-      data: { type: "unsubscribe" },
-    })
     expect(parseLogSubscriptionMessage("subscribe")).toEqual({
       ok: false,
       error: "Message must be a JSON object.",
     })
-    expect(parseLogSubscriptionMessage({ type: "subscribe", kinds: ["nope"] }).ok).toBe(false)
+    for (const message of [
+      { type: "subscribe", kinds: ["nope"] },
+      { type: "subscribe", kinds: ["pipeline"], run: { kind: "workflow", id: "wf-1" } },
+      { type: "subscribe", run: { kind: "workflow", id: "   " } },
+    ]) {
+      expect(parseLogSubscriptionMessage(message).ok).toBe(false)
+    }
   })
 })
 
@@ -187,13 +165,13 @@ describe("/ws/logs", () => {
         await seed(sixb, { kind: "pipeline", id: "p1" }, "kept one", "info")
         await seed(sixb, { kind: "pipeline", id: "p1" }, "kept two", "error")
 
+        // The filtered lines were written first, so they would lead this frame.
         const frame = await nextWsMessage(ws)
         expect(frame.type).toBe("logs")
         expect((frame.logs as Array<{ message: string }>).map((line) => line.message)).toEqual([
           "kept one",
           "kept two",
         ])
-        await expectNoWsMessage(ws)
       } finally {
         ws.close()
       }
@@ -446,51 +424,6 @@ function webSocketWithHeaders(url: string, headers: Record<string, string>): Web
   return new WebSocket(url, { headers } as unknown as string[])
 }
 
-async function getFreePort(): Promise<number> {
-  return await new Promise<number>((resolvePromise, reject) => {
-    const server = createServer() as ReturnType<typeof createServer> & {
-      on(event: string, listener: (error: Error) => void): void
-    }
-    server.on("error", reject)
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address()
-      if (!address || typeof address === "string") {
-        reject(new Error("Could not resolve an open port"))
-        return
-      }
-      server.close((error) => (error ? reject(error) : resolvePromise(address.port)))
-    })
-  })
-}
-
-async function nextWsMessage(ws: WebSocket, timeoutMs = 3_000): Promise<Record<string, unknown>> {
-  return await new Promise((resolvePromise, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup()
-      reject(new Error("Timed out waiting for websocket message"))
-    }, timeoutMs)
-    const onMessage = (event: MessageEvent) => {
-      cleanup()
-      try {
-        resolvePromise(JSON.parse(String(event.data)) as Record<string, unknown>)
-      } catch (error) {
-        reject(error)
-      }
-    }
-    const onError = () => {
-      cleanup()
-      reject(new Error("WebSocket error"))
-    }
-    const cleanup = () => {
-      clearTimeout(timeout)
-      ws.removeEventListener("message", onMessage)
-      ws.removeEventListener("error", onError)
-    }
-    ws.addEventListener("message", onMessage)
-    ws.addEventListener("error", onError)
-  })
-}
-
 async function nextWsMessages(
   ws: WebSocket,
   count: number,
@@ -569,23 +502,5 @@ async function expectWsRejected(ws: WebSocket): Promise<void> {
     ws.addEventListener("error", done, { once: true })
     ws.addEventListener("close", done, { once: true })
     ws.addEventListener("open", opened, { once: true })
-  })
-}
-
-async function expectNoWsMessage(ws: WebSocket): Promise<void> {
-  await new Promise<void>((resolvePromise, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup()
-      resolvePromise()
-    }, 150)
-    const onMessage = () => {
-      cleanup()
-      reject(new Error("Unexpected websocket message"))
-    }
-    const cleanup = () => {
-      clearTimeout(timeout)
-      ws.removeEventListener("message", onMessage)
-    }
-    ws.addEventListener("message", onMessage)
   })
 }

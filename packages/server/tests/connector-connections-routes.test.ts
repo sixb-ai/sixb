@@ -256,6 +256,9 @@ async function connectAccount(
   return { connectionId: run.connections[0].id, runId: started.runId }
 }
 
+/** Stands for the run's own state in a callback parameter table. */
+const STATE = "<run state>"
+
 describe("connector connection Headless API", () => {
   test("lists pending selection only for its initiating user without a callback URL", async () => {
     // Remove the pending-run route or actor filter to see the corresponding assertion fail.
@@ -274,20 +277,80 @@ describe("connector connection Headless API", () => {
     expect((await list({})).status).toBe(401)
   })
 
-  test.each(["state", "code"])("rejects repeated framework callback field %s", async (name) => {
+  test.each([
+    {
+      name: "rejects a repeated framework state field",
+      path: "callback",
+      params: [
+        ["code", "authorization-code"],
+        ["state", STATE],
+        ["state", STATE],
+      ],
+      status: 400,
+      exchanges: 0,
+    },
+    {
+      name: "rejects a repeated framework code field",
+      path: "callback",
+      params: [
+        ["state", STATE],
+        ["code", "authorization-code"],
+        ["code", "authorization-code"],
+      ],
+      status: 400,
+      exchanges: 0,
+    },
+    {
+      name: "accepts TikTok's auth_code on a callback URI ending in a slash",
+      path: "callback/",
+      params: [
+        ["state", STATE],
+        ["auth_code", "authorization-code"],
+      ],
+      status: 302,
+      exchanges: 1,
+    },
+    {
+      // Regression guard: restoring the three-way exact-one count in the callback schema makes
+      // this return 400 before the provider code reaches the connector.
+      name: "accepts matching OAuth authorization code aliases from one callback",
+      path: "callback",
+      params: [
+        ["state", STATE],
+        ["code", "authorization-code"],
+        ["auth_code", "authorization-code"],
+      ],
+      status: 302,
+      exchanges: 1,
+    },
+    {
+      name: "rejects conflicting OAuth authorization code aliases",
+      path: "callback",
+      params: [
+        ["state", STATE],
+        ["code", "standard-code"],
+        ["auth_code", "provider-code"],
+      ],
+      status: 400,
+      exchanges: 0,
+    },
+  ] as const)("$name", async ({ path, params, status, exchanges }) => {
     const harness = await createHarness()
     const started = await startRun(harness)
-    const callbackUrl = new URL("http://localhost/auth/connectors/callback")
-    callbackUrl.searchParams.set("state", started.state)
-    callbackUrl.searchParams.set("code", "authorization-code")
-    callbackUrl.searchParams.append(name, callbackUrl.searchParams.get(name)!)
-    const response = await harness.app.handle(
+    const callbackUrl = new URL(`http://localhost/auth/connectors/${path}`)
+    for (const [name, value] of params) {
+      callbackUrl.searchParams.append(name, value === STATE ? started.state : value)
+    }
+
+    const callback = await harness.app.handle(
       new Request(callbackUrl, {
+        redirect: "manual",
         headers: { cookie: started.callbackCookie },
       })
     )
-    expect(response.status).toBe(400)
-    expect(harness.exchangeCount()).toBe(0)
+
+    expect(callback.status, await callback.clone().text()).toBe(status)
+    expect(harness.exchangeCount()).toBe(exchanges)
   })
 
   test("passes allowlisted callback context through browser-bound authorization without leaking it", async () => {
@@ -351,64 +414,6 @@ describe("connector connection Headless API", () => {
       status: "failed",
       error: { code: "connector.authorization_invalid" },
     })
-  })
-
-  test("accepts TikTok's auth_code on a callback URI ending in a slash", async () => {
-    const harness = await createHarness()
-    const started = await startRun(harness)
-    const callbackUrl = new URL("http://localhost/auth/connectors/callback/")
-    callbackUrl.searchParams.set("state", started.state)
-    callbackUrl.searchParams.set("auth_code", "authorization-code")
-
-    const callback = await harness.app.handle(
-      new Request(callbackUrl, {
-        redirect: "manual",
-        headers: { cookie: started.callbackCookie },
-      })
-    )
-
-    expect(callback.status, await callback.clone().text()).toBe(302)
-    expect(harness.exchangeCount()).toBe(1)
-  })
-
-  test("accepts matching OAuth authorization code aliases from one callback", async () => {
-    // Regression guard: restoring the three-way exact-one count in the callback schema makes this
-    // return 400 before the provider code reaches the connector.
-    const harness = await createHarness()
-    const started = await startRun(harness)
-    const callbackUrl = new URL("http://localhost/auth/connectors/callback")
-    callbackUrl.searchParams.set("state", started.state)
-    callbackUrl.searchParams.set("code", "authorization-code")
-    callbackUrl.searchParams.set("auth_code", "authorization-code")
-
-    const callback = await harness.app.handle(
-      new Request(callbackUrl, {
-        redirect: "manual",
-        headers: { cookie: started.callbackCookie },
-      })
-    )
-
-    expect(callback.status, await callback.clone().text()).toBe(302)
-    expect(harness.exchangeCount()).toBe(1)
-  })
-
-  test("rejects conflicting OAuth authorization code aliases", async () => {
-    const harness = await createHarness()
-    const started = await startRun(harness)
-    const callbackUrl = new URL("http://localhost/auth/connectors/callback")
-    callbackUrl.searchParams.set("state", started.state)
-    callbackUrl.searchParams.set("code", "standard-code")
-    callbackUrl.searchParams.set("auth_code", "provider-code")
-
-    const callback = await harness.app.handle(
-      new Request(callbackUrl, {
-        redirect: "manual",
-        headers: { cookie: started.callbackCookie },
-      })
-    )
-
-    expect(callback.status).toBe(400)
-    expect(harness.exchangeCount()).toBe(0)
   })
 
   test("returns coded boundaries when a connector cannot have managed connections", async () => {

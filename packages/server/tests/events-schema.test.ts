@@ -29,49 +29,36 @@ const materializedObject = {
   },
 } as const
 
+const { commitId: _commitId, ...withoutCommit } = materializedObject
+const { executor: _executor, ...withoutExecutor } = materializedObject
+
 describe("EventSchema", () => {
-  test("accepts exact materialized ontology events", () => {
-    expect(EventSchema.safeParse(materializedObject).success).toBe(true)
-  })
-
-  test("requires commit identity for ontology events", () => {
-    const { commitId: _, ...withoutCommit } = materializedObject
-
-    expect(EventSchema.safeParse(withoutCommit).success).toBe(false)
-  })
-
-  test("requires the executor that made an ontology change", () => {
-    const { executor: _, ...withoutExecutor } = materializedObject
-
-    expect(EventSchema.safeParse(withoutExecutor).success).toBe(false)
-  })
-
-  test("validates authoritative property changes", () => {
-    const invalid = {
-      ...materializedObject,
-      payload: {
-        ...materializedObject.payload,
-        propertyChanges: {
-          name: { operation: "cleared", before: "old", after: "not-null" },
+  test.each([
+    ["accepts an exact materialized ontology event", materializedObject, true],
+    ["requires commit identity for ontology events", withoutCommit, false],
+    ["requires the executor that made an ontology change", withoutExecutor, false],
+    [
+      "validates authoritative property changes",
+      {
+        ...materializedObject,
+        payload: {
+          ...materializedObject.payload,
+          propertyChanges: { name: { operation: "cleared", before: "old", after: "not-null" } },
         },
       },
-    }
-
-    expect(EventSchema.safeParse(invalid).success).toBe(false)
-  })
-
-  test("keeps authorable events outside the materialization contract", () => {
-    const event = {
-      ...storedEventBase,
-      type: "sync.run.finished",
-      topic: "syncs",
-      payload: {
-        syncId: "import-devices",
-        runId: "run-1",
-        status: "succeeded",
+      false,
+    ],
+    [
+      "keeps authorable events outside the materialization contract",
+      {
+        ...storedEventBase,
+        type: "sync.run.finished",
+        topic: "syncs",
+        payload: { syncId: "import-devices", runId: "run-1", status: "succeeded" },
       },
-    } as const
-
-    expect(EventSchema.safeParse(event).success).toBe(true)
+      true,
+    ],
+  ] as const)("%s", (_case, event, success) => {
+    expect(EventSchema.safeParse(event).success).toBe(success)
   })
 })

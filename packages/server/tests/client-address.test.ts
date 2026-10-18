@@ -5,23 +5,36 @@ import { ClientAddressRateLimiter } from "../src/auth/rate-limit"
 describe("client address", () => {
   const resolve = createClientAddressResolver([PRIVATE_NETWORKS])
 
-  test("ignores forwarding headers from a peer that is not a trusted proxy", () => {
-    expect(resolve("198.51.100.9", "203.0.113.7")).toBe("198.51.100.9")
-  })
-
-  test("reads the entry a trusted proxy appended, not the ones a client wrote", () => {
-    expect(resolve("127.0.0.1", "203.0.113.7")).toBe("203.0.113.7")
-    expect(resolve("127.0.0.1", "1.2.3.4, 203.0.113.7")).toBe("203.0.113.7")
-    expect(resolve("10.0.0.5", "1.2.3.4, 203.0.113.7, 192.168.1.2")).toBe("203.0.113.7")
-  })
-
-  test("normalizes IPv4-mapped peers from dual-stack listeners", () => {
-    expect(resolve("::ffff:198.51.100.9", null)).toBe("198.51.100.9")
-    expect(resolve("::FFFF:127.0.0.1", "2001:DB8::1")).toBe("2001:db8::1")
-  })
-
-  test("stops at a malformed entry", () => {
-    expect(resolve("127.0.0.1", "203.0.113.7, unknown")).toBe("127.0.0.1")
+  test.each([
+    [
+      "ignores forwarding headers from a peer that is not a trusted proxy",
+      "198.51.100.9",
+      "203.0.113.7",
+      "198.51.100.9",
+    ],
+    ["reads the entry a trusted proxy appended", "127.0.0.1", "203.0.113.7", "203.0.113.7"],
+    [
+      "skips the entries a client wrote before it",
+      "127.0.0.1",
+      "1.2.3.4, 203.0.113.7",
+      "203.0.113.7",
+    ],
+    ["skips trusted hops after it", "10.0.0.5", "1.2.3.4, 203.0.113.7, 192.168.1.2", "203.0.113.7"],
+    [
+      "normalizes an IPv4-mapped peer from a dual-stack listener",
+      "::ffff:198.51.100.9",
+      null,
+      "198.51.100.9",
+    ],
+    [
+      "normalizes an IPv4-mapped trusted peer and an IPv6 entry",
+      "::FFFF:127.0.0.1",
+      "2001:DB8::1",
+      "2001:db8::1",
+    ],
+    ["stops at a malformed entry", "127.0.0.1", "203.0.113.7, unknown", "127.0.0.1"],
+  ])("%s", (_case, peer, forwardedFor, expected) => {
+    expect(resolve(peer, forwardedFor)).toBe(expected)
   })
 
   test("trusts only the configured proxies", () => {

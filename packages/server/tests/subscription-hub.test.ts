@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, spyOn, test } from "bun:test"
 import { InMemoryBroker } from "@sixb/core"
 import { LOGS_STREAM, LoggingService } from "@sixb/core/internal/logging"
 import { createLogSubscriptionHub, logSubscription } from "../src/routes/ws/logs"
@@ -70,6 +70,10 @@ class DelayedSubscribeBroker extends InMemoryBroker {
 }
 
 describe("SubscriptionHub", () => {
+  // The hub batches sends on a flush timer; `advanceUntil` drives it.
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
   test("replays more than the client queue capacity without treating catch-up as a slow client", async () => {
     const { anchorCursor, hub, logging } = await createReplayHub()
     const socket = new TestLogSocket()
@@ -81,7 +85,7 @@ describe("SubscriptionHub", () => {
         logSubscription(logging, { afterCursor: anchorCursor }),
         () => undefined
       )
-      await waitFor(
+      await advanceUntil(
         () => socket.closeCode !== undefined || socket.deliveredLogCount === REPLAY_COUNT
       )
 
@@ -103,7 +107,7 @@ describe("SubscriptionHub", () => {
         logSubscription(logging, { afterCursor: anchorCursor }),
         () => undefined
       )
-      await waitFor(() => socket.closeCode !== undefined)
+      await advanceUntil(() => socket.closeCode !== undefined)
 
       expect(socket.closeCode).toBe(1013)
       expect(socket.deliveredLogCount).toBe(0)
@@ -209,7 +213,7 @@ describe("SubscriptionHub", () => {
       hub.unsubscribe(first)
       expect(broker.active).toBe(1)
       hub.unsubscribe(second)
-      await waitFor(() => broker.active === 0)
+      await advanceUntil(() => broker.active === 0)
 
       await hub.subscribe(first, new TestLogSocket(), logSubscription(logging, {}), () => undefined)
       // The last client leaves while the next subscribe waits on the started subscription.
@@ -217,17 +221,17 @@ describe("SubscriptionHub", () => {
       const pending = hub.subscribe(second, socket, logSubscription(logging, {}), () => undefined)
       hub.unsubscribe(first)
       await pending
-      await waitFor(() => broker.active === 1)
+      await advanceUntil(() => broker.active === 1)
       await broker.append({
         projectId: PROJECT_ID,
         streamId: LOGS_STREAM.id,
         records: [{ name: "workflow.info", payload: logPayload("after restart") }],
       })
-      await waitFor(() => socket.deliveredLogCount === 1)
+      await advanceUntil(() => socket.deliveredLogCount === 1)
     } finally {
       await hub.close()
     }
-    await waitFor(() => broker.active === 0)
+    await advanceUntil(() => broker.active === 0)
   })
 
   // Reproduce: drop the `sending` check from `flush` in subscription-hub.ts; the second batch is
@@ -254,13 +258,13 @@ describe("SubscriptionHub", () => {
       )
 
       deliver([{ cursor: "1", value: "first" }])
-      await waitFor(() => views === 1)
+      await advanceUntil(() => views === 1)
       deliver([{ cursor: "2", value: "second" }])
-      await Bun.sleep(30)
+      await advanceFlushes(100)
       expect(socket.values).toEqual([])
 
       firstView.resolve()
-      await waitFor(() => socket.values.length === 2)
+      await advanceUntil(() => socket.values.length === 2)
       expect(socket.values).toEqual(["viewed first", "viewed second"])
     } finally {
       await hub.close()
@@ -294,7 +298,7 @@ describe("SubscriptionHub", () => {
       await hub.subscribe({}, other, { matches: () => true }, () => undefined)
 
       deliver([{ cursor: "1", value: "secret" }])
-      await waitFor(() => warn.mock.calls.length === 1)
+      await advanceUntil(() => warn.mock.calls.length === 1)
       expect(String(warn.mock.calls[0]?.[0])).toBe(
         "[SixbServer] Closed a stream subscription at cursor '1': 1 record(s) could not be viewed: clearance unavailable"
       )
@@ -302,7 +306,7 @@ describe("SubscriptionHub", () => {
 
       fail = false
       deliver([{ cursor: "2", value: "later" }])
-      await waitFor(() => other.values.length === 2)
+      await advanceUntil(() => other.values.length === 2)
       expect(socket.values).toEqual([])
       expect(socket.messages).toEqual([
         {
@@ -404,13 +408,18 @@ function logPayload(message: string) {
   } as const
 }
 
-async function waitFor(condition: () => boolean, timeoutMs = 1_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (!condition()) {
-    if (Date.now() >= deadline) {
-      throw new Error("Timed out waiting for log replay to finish")
-    }
-    await Bun.sleep(5)
+/** Advances fake time one flush delay at a time, letting the hub run between steps. */
+async function advanceFlushes(count: number): Promise<void> {
+  for (let step = 0; step < count; step += 1) {
+    jest.advanceTimersByTime(10)
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+}
+
+async function advanceUntil(condition: () => boolean): Promise<void> {
+  for (let step = 0; !condition(); step += 1) {
+    if (step === 1_000) throw new Error("[Test] Timed out waiting for the hub")
+    await advanceFlushes(1)
   }
 }
 

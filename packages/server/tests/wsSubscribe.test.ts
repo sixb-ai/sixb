@@ -1,5 +1,4 @@
-import { describe, expect, test } from "bun:test"
-import { createServer } from "node:net"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import {
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -13,7 +12,7 @@ import { BrokerCursorExpiredError } from "@sixb/core/broker"
 import type { DomainEventService, StableEventEnvelope } from "@sixb/core/internal/events"
 import { parseSubscriptionMessage } from "../src/routes/ws/events"
 import { SixbServer } from "../src/server"
-import { createTestBrowserPolicy } from "./helpers"
+import { createTestBrowserPolicy, getFreePort, nextWsMessage } from "./helpers"
 
 const WORKFLOW_EVENT_TYPES = [
   "workflow.run.queued",
@@ -24,203 +23,68 @@ const WORKFLOW_EVENT_TYPES = [
 ] as const
 
 describe("parseSubscriptionMessage", () => {
-  test("accepts a valid subscribe message", () => {
-    const result = parseSubscriptionMessage({
+  test.each([
+    {
       type: "subscribe",
       topic: "telemetry",
       types: ["telemetry.appended"],
       afterCursor: "10",
       limit: 50,
-    })
-
-    expect(result).toEqual({
-      ok: true,
-      data: {
-        type: "subscribe",
-        topic: "telemetry",
-        types: ["telemetry.appended"],
-        afterCursor: "10",
-        limit: 50,
-      },
-    })
+    },
+    { type: "subscribe", topic: "workflows", types: [...WORKFLOW_EVENT_TYPES] },
+    { type: "subscribe", topic: "telemetry", objectTypeId: "device", primaryId: "fan-1" },
+    { type: "subscribe", topic: "syncs", types: ["sync.run.finished"], runId: "run-1" },
+    { type: "unsubscribe" },
+  ])("accepts %j", (message) => {
+    const parsed: unknown = parseSubscriptionMessage(message)
+    expect(parsed).toEqual({ ok: true, data: message })
   })
 
-  test("accepts workflow event subscriptions", () => {
-    const result = parseSubscriptionMessage({
-      type: "subscribe",
-      topic: "workflows",
-      types: [...WORKFLOW_EVENT_TYPES],
-    })
-
-    expect(result).toEqual({
-      ok: true,
-      data: {
-        type: "subscribe",
-        topic: "workflows",
-        types: [...WORKFLOW_EVENT_TYPES],
-      },
-    })
-  })
-
-  test("accepts object-scoped subscriptions", () => {
-    const result = parseSubscriptionMessage({
-      type: "subscribe",
-      topic: "telemetry",
-      objectTypeId: "device",
-      primaryId: "fan-1",
-    })
-
-    expect(result).toEqual({
-      ok: true,
-      data: {
-        type: "subscribe",
-        topic: "telemetry",
-        objectTypeId: "device",
-        primaryId: "fan-1",
-      },
-    })
-  })
-
-  test("accepts run-scoped subscriptions", () => {
-    const result = parseSubscriptionMessage({
-      type: "subscribe",
-      topic: "syncs",
-      types: ["sync.run.finished"],
-      runId: "run-1",
-    })
-
-    expect(result).toEqual({
-      ok: true,
-      data: {
-        type: "subscribe",
-        topic: "syncs",
-        types: ["sync.run.finished"],
-        runId: "run-1",
-      },
-    })
-  })
-
-  test("rejects non-object payloads", () => {
-    const result = parseSubscriptionMessage("subscribe")
-
-    expect(result).toEqual({
+  test("rejects non-objects, unknown topics, and the removed actions topic", () => {
+    expect(parseSubscriptionMessage("subscribe")).toEqual({
       ok: false,
       error: "Message must be a JSON object.",
     })
-  })
-
-  test("rejects invalid topic values", () => {
-    const result = parseSubscriptionMessage({
-      type: "subscribe",
-      topic: "invalid-topic",
+    expect(parseSubscriptionMessage({ type: "subscribe", topic: "invalid-topic" })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("Invalid input"),
     })
-
-    expect(result.ok).toBe(false)
-    if (result.ok) {
-      throw new Error("Expected invalid subscription message")
-    }
-
-    expect(result.error).toContain("Invalid input")
-  })
-
-  test("rejects the actions topic, whose events were removed", () => {
-    const result = parseSubscriptionMessage({ type: "subscribe", topic: "actions" })
-
-    expect(result.ok).toBe(false)
-  })
-
-  test("accepts unsubscribe messages", () => {
-    const result = parseSubscriptionMessage({ type: "unsubscribe" })
-
-    expect(result).toEqual({
-      ok: true,
-      data: { type: "unsubscribe" },
-    })
+    expect(parseSubscriptionMessage({ type: "subscribe", topic: "actions" }).ok).toBe(false)
   })
 })
 
 describe("/ws/events subscriptions", () => {
+  // A fake-timer test that times out skips its `finally`.
+  afterEach(() => jest.useRealTimers())
+
   test("accepts an immediate subscription while the initial cursor is loading", async () => {
+    const broker = new GatedLatestCursorBroker()
     await withWsServer(
       async ({ baseUrl }) => {
         const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/events`)
 
         try {
-          const messages = await new Promise<Record<string, unknown>[]>((resolve, reject) => {
-            const received: Record<string, unknown>[] = []
-            const timeout = setTimeout(
-              () => reject(new Error("Timed out waiting for subscribe")),
-              3_000
-            )
-
-            ws.addEventListener("open", () => {
-              ws.send(JSON.stringify({ type: "subscribe", topic: "objects" }))
-            })
-            ws.addEventListener("message", (event) => {
-              const message = JSON.parse(decodeWsData(event.data)) as Record<string, unknown>
-              received.push(message)
-              if (message.type === "error") {
-                clearTimeout(timeout)
-                reject(new Error(String(message.message)))
-              } else if (message.type === "subscribed") {
-                clearTimeout(timeout)
-                resolve(received)
-              }
-            })
-            ws.addEventListener("error", () => {
-              clearTimeout(timeout)
-              reject(new Error("WebSocket error"))
-            })
+          const barrier = nextWsMessage(ws)
+          ws.addEventListener("open", () => {
+            ws.send(JSON.stringify({ type: "subscribe", topic: "objects" }))
+            ws.send("not json")
+          })
+          // The socket handles messages in order, so the reply to the second proves the subscribe
+          // arrived while the cursor was still loading.
+          expect(await barrier).toEqual({
+            type: "error",
+            message: "Message must be a JSON object.",
           })
 
-          expect(messages.map((message) => message.type)).toContain("connected")
-          expect(messages.map((message) => message.type)).toContain("subscribed")
+          broker.releaseLatestCursor()
+          expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
+          expect(await nextWsMessage(ws)).toMatchObject({ type: "subscribed", topic: "objects" })
         } finally {
           ws.close()
         }
       },
-      { broker: new SlowLatestCursorBroker() }
+      { broker }
     )
-  })
-
-  test("streams after subscribe and keeps events emitted after open", async () => {
-    await withWsServer(async ({ baseUrl, sixb }) => {
-      const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/events`)
-
-      try {
-        expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
-
-        const [stored] = await (sixb.events as DomainEventService).publishEnvelopes([
-          telemetryEnvelope(sixb.id, "fan-1", 1200, "2026-02-18T10:00:10.000Z"),
-        ])
-
-        await expectNoWsMessage(ws)
-
-        ws.send(
-          JSON.stringify({
-            type: "subscribe",
-            topic: "telemetry",
-            types: ["telemetry.appended"],
-          })
-        )
-
-        expect(await nextWsMessage(ws)).toMatchObject({
-          type: "subscribed",
-          topic: "telemetry",
-          types: ["telemetry.appended"],
-        })
-        expect(await nextWsMessage(ws)).toMatchObject({
-          type: "event",
-          event: {
-            cursor: stored?.cursor,
-            type: "telemetry.appended",
-            topic: "telemetry",
-          },
-        })
-      } finally {
-        ws.close()
-      }
-    })
   })
 
   test("reports initialization failures and closes the websocket", async () => {
@@ -250,11 +114,11 @@ describe("/ws/events subscriptions", () => {
       try {
         expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
 
-        const [matching] = await (sixb.events as DomainEventService).publishEnvelopes([
-          telemetryEnvelope(sixb.id, "fan-1", 1200, "2026-02-18T10:00:10.000Z"),
-        ])
         await (sixb.events as DomainEventService).publishEnvelopes([
-          telemetryEnvelope(sixb.id, "fan-2", 800, "2026-02-18T10:00:11.000Z"),
+          telemetryEnvelope(sixb.id, "fan-2", 800, "2026-02-18T10:00:10.000Z"),
+        ])
+        const [matching] = await (sixb.events as DomainEventService).publishEnvelopes([
+          telemetryEnvelope(sixb.id, "fan-1", 1200, "2026-02-18T10:00:11.000Z"),
         ])
 
         ws.send(
@@ -268,12 +132,12 @@ describe("/ws/events subscriptions", () => {
         )
 
         expect(await nextWsMessage(ws)).toMatchObject({ type: "subscribed" })
-        // Only the fan-1 event is delivered; fan-2 is filtered server-side.
+        // The replay is ordered, so fan-1 arriving first proves the earlier fan-2 event was
+        // filtered server-side.
         expect(await nextWsMessage(ws)).toMatchObject({
           type: "event",
           event: { cursor: matching?.cursor, payload: { objectId: "fan-1" } },
         })
-        await expectNoWsMessage(ws)
       } finally {
         ws.close()
       }
@@ -287,19 +151,19 @@ describe("/ws/events subscriptions", () => {
       try {
         expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
 
-        const [matching] = await sixb.events.append({
-          events: [
-            {
-              type: "sync.run.finished",
-              payload: { syncId: "import-quotes", runId: "run-1", status: "succeeded" },
-            },
-          ],
-        })
         await sixb.events.append({
           events: [
             {
               type: "sync.run.finished",
               payload: { syncId: "import-quotes", runId: "run-2", status: "succeeded" },
+            },
+          ],
+        })
+        const [matching] = await sixb.events.append({
+          events: [
+            {
+              type: "sync.run.finished",
+              payload: { syncId: "import-quotes", runId: "run-1", status: "succeeded" },
             },
           ],
         })
@@ -313,12 +177,18 @@ describe("/ws/events subscriptions", () => {
           })
         )
 
-        expect(await nextWsMessage(ws)).toMatchObject({ type: "subscribed" })
+        // Nothing is pushed before the subscription: its acknowledgement is the next message. The
+        // events written since the socket opened are replayed after it.
+        expect(await nextWsMessage(ws)).toMatchObject({
+          type: "subscribed",
+          topic: "syncs",
+          types: ["sync.run.finished"],
+        })
+        // The earlier run-2 event is filtered out, so the run-1 event is the first one sent.
         expect(await nextWsMessage(ws)).toMatchObject({
           type: "event",
           event: { cursor: matching?.cursor, payload: { syncId: "import-quotes", runId: "run-1" } },
         })
-        await expectNoWsMessage(ws)
       } finally {
         ws.close()
       }
@@ -330,6 +200,8 @@ describe("/ws/events subscriptions", () => {
     const broker = new CountingEventsBroker()
     await withWsServer(
       async ({ baseUrl, sixb }) => {
+        // Fake time before the sockets subscribe, so a poll they start would run on it.
+        jest.useFakeTimers()
         const sockets: WebSocket[] = []
         try {
           for (const url of [0, 1].map(() => `${baseUrl.replace("http://", "ws://")}/ws/events`)) {
@@ -341,26 +213,25 @@ describe("/ws/events subscriptions", () => {
           }
           expect(broker.eventSubscriptions).toBe(1)
 
-          await Bun.sleep(50)
-          const reads = broker.eventReads
-          await expectNoWsMessage(sockets[0] as WebSocket)
-          expect(broker.eventReads).toBe(reads)
+          // One replay read per socket; a minute of idle time reads nothing more.
+          expect(broker.eventReads).toBe(2)
+          jest.advanceTimersByTime(60_000)
+          expect(broker.eventReads).toBe(2)
 
           const [stored] = await (sixb.events as DomainEventService).publishEnvelopes([
             telemetryEnvelope(sixb.id, "fan-1", 1200, "2026-02-18T10:00:10.000Z"),
           ])
-          for (const ws of sockets) {
-            expect(await nextWsMessage(ws)).toMatchObject({
-              type: "event",
-              event: { cursor: stored?.cursor },
-            })
+          const delivered = sockets.map((ws) => nextWsMessage(ws))
+          jest.advanceTimersByTime(10)
+          for (const message of await Promise.all(delivered)) {
+            expect(message).toMatchObject({ type: "event", event: { cursor: stored?.cursor } })
           }
+          expect(broker.eventReads).toBe(2)
         } finally {
+          jest.useRealTimers()
           for (const ws of sockets) ws.close()
         }
-        const deadline = Date.now() + 1_000
-        while (broker.eventSubscriptions > 0 && Date.now() < deadline) await Bun.sleep(5)
-        expect(broker.eventSubscriptions).toBe(0)
+        await broker.released
       },
       { broker }
     )
@@ -382,8 +253,8 @@ describe("/ws/events subscriptions", () => {
             message:
               "[SixbServer] Event cursor expired; refetch current state. Live events continue.",
           })
-          await expectNoWsMessage(ws)
 
+          // Reported once: the live event is the next message on the still-open socket.
           const [stored] = await (sixb.events as DomainEventService).publishEnvelopes([
             telemetryEnvelope(sixb.id, "fan-1", 1200, "2026-02-18T10:00:10.000Z"),
           ])
@@ -408,6 +279,9 @@ function createSixbInstance(options: SixbHostOptions): SixbHost {
 class CountingEventsBroker extends InMemoryBroker {
   eventReads = 0
   eventSubscriptions = 0
+  private readonly lastRelease = Promise.withResolvers<void>()
+  /** Settles when the last live subscription to the event stream is released. */
+  readonly released = this.lastRelease.promise
 
   override async read(params: Parameters<InMemoryBroker["read"]>[0]) {
     if (params.streamId === "__events") this.eventReads += 1
@@ -426,6 +300,7 @@ class CountingEventsBroker extends InMemoryBroker {
       if (subscribed) this.eventSubscriptions -= 1
       subscribed = false
       unsubscribe()
+      if (this.eventSubscriptions === 0) this.lastRelease.resolve()
     }
   }
 }
@@ -440,9 +315,16 @@ class ExpiredCursorBroker extends InMemoryBroker {
   }
 }
 
-class SlowLatestCursorBroker extends InMemoryBroker {
+/** Holds the cursor a socket loads on open until the test releases it. */
+class GatedLatestCursorBroker extends InMemoryBroker {
+  private readonly gate = Promise.withResolvers<void>()
+
+  releaseLatestCursor(): void {
+    this.gate.resolve()
+  }
+
   override async latestCursor(params: Parameters<InMemoryBroker["latestCursor"]>[0]) {
-    await new Promise<void>((resolve) => setTimeout(resolve, 100))
+    await this.gate.promise
     return super.latestCursor(params)
   }
 }
@@ -482,95 +364,6 @@ async function withWsServer(
   } finally {
     await server.stop()
   }
-}
-
-async function getFreePort(): Promise<number> {
-  return await new Promise<number>((resolvePromise, reject) => {
-    const server = createServer() as ReturnType<typeof createServer> & {
-      on(event: string, listener: (error: Error) => void): void
-    }
-    server.on("error", reject)
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address()
-      if (!address || typeof address === "string") {
-        reject(new Error("Could not resolve an open port"))
-        return
-      }
-
-      server.close((error) => {
-        if (error) reject(error)
-        else resolvePromise(address.port)
-      })
-    })
-  })
-}
-
-async function nextWsMessage(ws: WebSocket, timeoutMs = 3000): Promise<Record<string, unknown>> {
-  return await new Promise<Record<string, unknown>>((resolvePromise, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup()
-      reject(new Error("Timed out waiting for websocket message"))
-    }, timeoutMs)
-
-    const onMessage = (event: MessageEvent) => {
-      cleanup()
-      try {
-        resolvePromise(JSON.parse(decodeWsData(event.data)) as Record<string, unknown>)
-      } catch (error) {
-        reject(error)
-      }
-    }
-    const onError = () => {
-      cleanup()
-      reject(new Error("WebSocket error"))
-    }
-    const cleanup = () => {
-      clearTimeout(timeout)
-      ws.removeEventListener("message", onMessage)
-      ws.removeEventListener("error", onError)
-    }
-
-    ws.addEventListener("message", onMessage)
-    ws.addEventListener("error", onError)
-  })
-}
-
-async function expectNoWsMessage(ws: WebSocket): Promise<void> {
-  await new Promise<void>((resolvePromise, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup()
-      resolvePromise()
-    }, 650)
-
-    const onMessage = (event: MessageEvent) => {
-      cleanup()
-      reject(new Error(`Unexpected websocket message: ${decodeWsData(event.data)}`))
-    }
-    const onError = () => {
-      cleanup()
-      reject(new Error("WebSocket error"))
-    }
-    const cleanup = () => {
-      clearTimeout(timeout)
-      ws.removeEventListener("message", onMessage)
-      ws.removeEventListener("error", onError)
-    }
-
-    ws.addEventListener("message", onMessage)
-    ws.addEventListener("error", onError)
-  })
-}
-
-function decodeWsData(value: unknown): string {
-  if (typeof value === "string") {
-    return value
-  }
-
-  if (value instanceof ArrayBuffer) {
-    return new TextDecoder().decode(value)
-  }
-
-  return String(value)
 }
 
 function telemetryEnvelope(

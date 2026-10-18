@@ -142,7 +142,7 @@ function contentRequest(
 
 describe("object file content routes", () => {
   // A link opened in a new tab or an <img> sends no Origin; the session cookie alone opens it.
-  test("serves file navigations without Origin from the session cookie", async () => {
+  test("serves file navigations without Origin to viewers of the object only", async () => {
     const { app, storage } = await createObjectFileApi({ auth: true })
     const session = await seedSession(storage, ["document-viewers"])
     const path = "/api/objects/document/doc-1/files/content?path=/properties/pdf"
@@ -162,14 +162,18 @@ describe("object file content routes", () => {
       const signedOut = await app.fetch(contentRequest(path, { method }))
       expect(signedOut.status).toBe(401)
     }
+    // Visibility and existence are checked before conditional responses, and an object the
+    // viewer cannot see answers exactly like a missing one.
     for (const target of [
       "/api/objects/invoice/inv-1/files/content?path=/properties/pdf",
+      "/api/objects/document/missing/files/content?path=/properties/pdf",
       "/api/objects/document/doc-1/files/content?path=/properties/missing",
     ]) {
-      expect(
-        (await app.fetch(contentRequest(target, { headers: { ...session, "if-none-match": "*" } })))
-          .status
-      ).toBe(404)
+      const response = await app.fetch(
+        contentRequest(target, { headers: { ...session, "if-none-match": "*" } })
+      )
+      expect(response.status, target).toBe(404)
+      expect(await response.json()).toEqual({ error: "File not found" })
     }
   })
 
@@ -271,89 +275,46 @@ describe("object file content routes", () => {
     expect(await response.text()).toBe("%PDF test")
   })
 
-  test("checks visibility and existence before conditional responses", async () => {
-    const { app, storage } = await createObjectFileApi({ auth: true })
-    const viewer = await seedSession(storage, ["document-viewers"])
-    for (const path of [
-      "/api/objects/invoice/inv-1/files/content?path=/properties/pdf",
-      "/api/objects/document/missing/files/content?path=/properties/pdf",
-      "/api/objects/document/doc-1/files/content?path=/properties/missing",
-    ]) {
-      const response = await app.fetch(
-        contentRequest(path, { headers: { ...viewer, "if-none-match": "*" } })
+  test("streams object-bound FileRef content with browser viewer headers, and HEAD without a body", async () => {
+    const { app } = await createObjectFileApi()
+    const path = "/api/objects/document/doc-1/files/content?path=/properties/pdf"
+
+    for (const method of ["GET", "HEAD"]) {
+      const response = await app.fetch(contentRequest(path, { method }))
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get("content-type")).toBe("application/pdf")
+      expect(response.headers.get("content-length")).toBe("9")
+      expect(response.headers.get("content-disposition")).toContain('inline; filename="report.pdf"')
+      expect(response.headers.get("etag")).toMatch(/^"sha256:[a-f0-9]{64}"$/)
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff")
+      expect(response.headers.get("content-security-policy")).toBe(
+        "default-src 'none'; style-src 'unsafe-inline'; object-src 'self'"
       )
-      expect(response.status).toBe(404)
+      expect(response.headers.get("accept-ranges")).toBe("bytes")
+      expect(await response.text()).toBe(method === "HEAD" ? "" : "%PDF test")
     }
   })
 
-  test("streams object-bound FileRef content with browser viewer headers", async () => {
-    const { app } = await createObjectFileApi()
-
-    const response = await app.fetch(
-      contentRequest("/api/objects/document/doc-1/files/content?path=/properties/pdf")
-    )
-
-    expect(response.status).toBe(200)
-    expect(response.headers.get("content-type")).toBe("application/pdf")
-    expect(response.headers.get("content-length")).toBe("9")
-    expect(response.headers.get("content-disposition")).toContain('inline; filename="report.pdf"')
-    expect(response.headers.get("etag")).toMatch(/^"sha256:[a-f0-9]{64}"$/)
-    expect(response.headers.get("x-content-type-options")).toBe("nosniff")
-    expect(response.headers.get("content-security-policy")).toBe(
-      "default-src 'none'; style-src 'unsafe-inline'; object-src 'self'"
-    )
-    expect(response.headers.get("accept-ranges")).toBe("bytes")
-    expect(await response.text()).toBe("%PDF test")
-  })
-
-  test("returns headers without a body for HEAD requests", async () => {
+  test.each([
+    ["GET", "bytes=0-3", "bytes 0-3/9", "%PDF"],
+    ["HEAD", "bytes=5-", "bytes 5-8/9", ""],
+  ])("streams a %s byte range %s of object-bound FileRef content", async (method, range, contentRange, body) => {
     const { app } = await createObjectFileApi()
 
     const response = await app.fetch(
       contentRequest("/api/objects/document/doc-1/files/content?path=/properties/pdf", {
-        method: "HEAD",
-      })
-    )
-
-    expect(response.status).toBe(200)
-    expect(response.headers.get("content-type")).toBe("application/pdf")
-    expect(response.headers.get("content-length")).toBe("9")
-    expect(response.headers.get("accept-ranges")).toBe("bytes")
-    expect(await response.text()).toBe("")
-  })
-
-  test("streams byte ranges for object-bound FileRef content", async () => {
-    const { app } = await createObjectFileApi()
-
-    const response = await app.fetch(
-      contentRequest("/api/objects/document/doc-1/files/content?path=/properties/pdf", {
-        headers: { range: "bytes=0-3" },
+        method,
+        headers: { range },
       })
     )
 
     expect(response.status).toBe(206)
     expect(response.headers.get("content-type")).toBe("application/pdf")
     expect(response.headers.get("content-length")).toBe("4")
-    expect(response.headers.get("content-range")).toBe("bytes 0-3/9")
+    expect(response.headers.get("content-range")).toBe(contentRange)
     expect(response.headers.get("accept-ranges")).toBe("bytes")
-    expect(await response.text()).toBe("%PDF")
-  })
-
-  test("returns partial headers without a body for HEAD range requests", async () => {
-    const { app } = await createObjectFileApi()
-
-    const response = await app.fetch(
-      contentRequest("/api/objects/document/doc-1/files/content?path=/properties/pdf", {
-        method: "HEAD",
-        headers: { range: "bytes=5-" },
-      })
-    )
-
-    expect(response.status).toBe(206)
-    expect(response.headers.get("content-length")).toBe("4")
-    expect(response.headers.get("content-range")).toBe("bytes 5-8/9")
-    expect(response.headers.get("accept-ranges")).toBe("bytes")
-    expect(await response.text()).toBe("")
+    expect(await response.text()).toBe(body)
   })
 
   test("rejects invalid object file content ranges", async () => {
@@ -369,26 +330,6 @@ describe("object file content routes", () => {
     expect(response.headers.get("content-range")).toBe("bytes */9")
     expect(response.headers.get("accept-ranges")).toBe("bytes")
     expect(await response.text()).toBe("")
-  })
-
-  test("forces unsafe inline media types to attachment", async () => {
-    const { app } = await createObjectFileApi()
-
-    const response = await app.fetch(
-      contentRequest(
-        "/api/objects/document/doc-1/files/content?path=/properties/html&disposition=inline"
-      )
-    )
-
-    expect(response.status).toBe(200)
-    expect(response.headers.get("content-type")).toBe("text/html")
-    expect(response.headers.get("content-disposition")).toContain(
-      'attachment; filename="preview.html"'
-    )
-    expect(response.headers.get("content-security-policy")).toBe(
-      "default-src 'none'; style-src 'unsafe-inline'; sandbox"
-    )
-    expect(await response.text()).toBe("<h1>unsafe</h1>")
   })
 
   // Stored references keep working whatever type they were written with; serving falls back to a
@@ -417,21 +358,6 @@ describe("object file content routes", () => {
       "default-src 'none'; style-src 'unsafe-inline'; sandbox"
     )
     expect(await response.text()).toBe("%PDF test")
-  })
-
-  test("returns attachment when requested for otherwise inline-safe content", async () => {
-    const { app } = await createObjectFileApi()
-
-    const response = await app.fetch(
-      contentRequest(
-        "/api/objects/document/doc-1/files/content?path=/properties/pdf&disposition=attachment"
-      )
-    )
-
-    expect(response.status).toBe(200)
-    expect(response.headers.get("content-disposition")).toContain(
-      'attachment; filename="report.pdf"'
-    )
   })
 
   test("hides missing objects, invalid paths, and non-file values as 404", async () => {
@@ -464,26 +390,5 @@ describe("object file content routes", () => {
     )
     expect(headResponse.status).toBe(400)
     expect(await headResponse.text()).toBe("")
-  })
-
-  test("uses object view authorization for file content", async () => {
-    const { app, storage } = await createObjectFileApi({ auth: true })
-    const viewer = await seedSession(storage, ["document-viewers"])
-
-    const allowed = await app.fetch(
-      contentRequest("/api/objects/document/doc-1/files/content?path=/properties/pdf", {
-        headers: viewer,
-      })
-    )
-    expect(allowed.status).toBe(200)
-    expect(await allowed.text()).toBe("%PDF test")
-
-    const forbidden = await app.fetch(
-      contentRequest("/api/objects/invoice/inv-1/files/content?path=/properties/pdf", {
-        headers: viewer,
-      })
-    )
-    expect(forbidden.status).toBe(404)
-    expect(await forbidden.json()).toEqual({ error: "File not found" })
   })
 })

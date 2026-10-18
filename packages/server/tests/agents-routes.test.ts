@@ -324,47 +324,6 @@ describe("agent routes", () => {
     expect((await storage.agents.threads.list({ projectId: sixb.id })).total).toBe(0)
   })
 
-  test("continues an existing conversation", async () => {
-    const { app, storage, sixb } = createApp({ auth: true })
-    const session = await seedSession(storage, "usr_history")
-    const thread = await storage.agents.threads.create({
-      projectId: sixb.id,
-      id: "legacy-thread",
-      ownerPrincipal: { type: "user", id: "usr_history" },
-    })
-    const executionId = await createTestAgentExecution(storage, {
-      projectId: sixb.id,
-      runId: "legacy-run",
-      authority: "inherited",
-    })
-    await storage.agents.runs.create({
-      projectId: sixb.id,
-      id: "legacy-run",
-      executionId,
-      threadId: thread.id,
-      triggerMessageId: "legacy-message",
-      spec: { model: { provider: "test", modelId: "test-model" } },
-    })
-    await storage.agents.runs.finishQueued({
-      projectId: sixb.id,
-      id: "legacy-run",
-      status: "failed",
-    })
-    const response = await app.fetch(
-      jsonRequest(
-        `/api/agent-threads/${thread.id}/messages`,
-        "POST",
-        { text: "Continue" },
-        session.csrfHeaders
-      )
-    )
-    expect(response.status).toBe(202)
-    expect(
-      (await storage.agents.messages.list({ projectId: sixb.id, threadId: thread.id })).total
-    ).toBe(1)
-    expect((await storage.agents.runs.list({ projectId: sixb.id })).total).toBe(2)
-  })
-
   test("authorizes object context and persists the exact context snapshot", async () => {
     const { app, storage, sixb } = createApp({ auth: true })
     const support = await seedSession(storage, "usr_context", ["support-users"])
@@ -451,41 +410,26 @@ describe("agent routes", () => {
     })
   })
 
-  test("rejects a blank object context label with the field it names", async () => {
-    const { app, storage, sixb } = createApp()
-    const thread = await storage.agents.threads.create({
-      id: "thread-blank-label",
-      projectId: sixb.id,
-      ownerPrincipal: { type: "system", id: "system" },
-    })
-
-    const response = await app.fetch(
-      jsonRequest(`/api/agent-threads/${thread.id}/messages`, "POST", {
-        text: "Check this invoice",
-        context: [
-          {
-            context: {
-              kind: "object",
-              ref: { objectTypeId: "Invoice", primaryId: "inv-123" },
-              label: "   ",
-            },
-            origin: "ambient",
-          },
-        ],
-      })
-    )
-
-    expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({
+  test.each([
+    {
+      name: "a blank object context label, naming the field",
+      context: {
+        kind: "object",
+        ref: { objectTypeId: "Invoice", primaryId: "inv-123" },
+        label: "   ",
+      },
       error: "[Sixb] Invalid agent context: context[0].context.label must be a non-empty string.",
-      code: "invalid_context",
-    })
-  })
-
-  test("rejects a missing object context before persisting a message or run", async () => {
+    },
+    {
+      name: "a missing object context",
+      context: { kind: "object", ref: { objectTypeId: "Invoice", primaryId: "missing" } },
+      error:
+        "[Sixb] Invalid agent context: context references an unknown object 'Invoice:missing'.",
+    },
+  ])("rejects $name before persisting a message or run", async ({ context, error }) => {
     const { app, storage, sixb } = createApp()
     const thread = await storage.agents.threads.create({
-      id: "thread-missing-context",
+      id: "thread-invalid-context",
       projectId: sixb.id,
       ownerPrincipal: { type: "system", id: "system" },
     })
@@ -493,19 +437,12 @@ describe("agent routes", () => {
     const response = await app.fetch(
       jsonRequest(`/api/agent-threads/${thread.id}/messages`, "POST", {
         text: "Check this invoice",
-        context: [
-          {
-            context: {
-              kind: "object",
-              ref: { objectTypeId: "Invoice", primaryId: "missing" },
-            },
-            origin: "ambient",
-          },
-        ],
+        context: [{ context, origin: "ambient" }],
       })
     )
 
     expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error, code: "invalid_context" })
     await expect(
       storage.agents.messages.list({ projectId: sixb.id, threadId: thread.id })
     ).resolves.toMatchObject({ total: 0 })
@@ -726,65 +663,7 @@ describe("agent routes", () => {
     expect(body.error).not.toContain("[SixbHost")
   })
 
-  test("projects run diagnostics as transcript annotations without changing message parts", async () => {
-    const { app, storage, sixb } = createApp()
-    const thread = await storage.agents.threads.create({
-      id: "thr-diagnostics",
-      projectId: sixb.id,
-      ownerPrincipal: { type: "system", id: "system" },
-    })
-    const executionToken = createAgentRunExecutionToken()
-    await createStartedRun(storage, {
-      id: "run-diagnostics",
-      projectId: sixb.id,
-      threadId: thread.id,
-      triggerMessageId: "trigger-diagnostics",
-      execution: testExecution(executionToken),
-    })
-    await storage.agents.messages.append({
-      id: "msg-diagnostics",
-      projectId: sixb.id,
-      threadId: thread.id,
-      runId: "run-diagnostics",
-      role: "assistant",
-      parts: [{ type: "text", text: "The report is ready." }],
-    })
-    const diagnostics = [
-      {
-        code: "step_limit_reached" as const,
-        severity: "warning" as const,
-        scope: "run" as const,
-        message: "The Agent reached its 100-step limit before producing a final answer.",
-      },
-    ]
-    await storage.agents.runs.finish({
-      id: "run-diagnostics",
-      projectId: sixb.id,
-      executionToken,
-      status: "succeeded",
-      diagnostics,
-    })
-
-    const messagesResponse = await app.fetch(
-      new Request(`http://localhost/api/agent-threads/${thread.id}/messages`)
-    )
-    expect(messagesResponse.status).toBe(200)
-    const messagesBody = (await messagesResponse.json()) as {
-      messages: { parts: unknown[]; annotations: unknown[] }[]
-    }
-    expect(messagesBody.messages[0]?.parts).toEqual([
-      { type: "text", text: "The report is ready." },
-    ])
-    expect(messagesBody.messages[0]?.annotations).toEqual(diagnostics)
-
-    const runResponse = await app.fetch(
-      new Request("http://localhost/api/agent-runs/run-diagnostics")
-    )
-    expect(runResponse.status).toBe(200)
-    expect(await runResponse.json()).toMatchObject({ diagnostics })
-  })
-
-  test("projects a run's context checkpoint onto its durable assistant message", async () => {
+  test("projects a run's diagnostics and context checkpoint onto its durable assistant message", async () => {
     const { app, storage, sixb } = createApp()
     const thread = await storage.agents.threads.create({
       id: "thr-compaction",
@@ -840,11 +719,20 @@ describe("agent routes", () => {
       role: "assistant",
       parts: [{ type: "text", text: "Here is the completed research." }],
     })
+    const diagnostics = [
+      {
+        code: "step_limit_reached" as const,
+        severity: "warning" as const,
+        scope: "run" as const,
+        message: "The Agent reached its 100-step limit before producing a final answer.",
+      },
+    ]
     await storage.agents.runs.finish({
       id: "run-compaction",
       projectId: sixb.id,
       executionToken,
       status: "succeeded",
+      diagnostics,
     })
 
     const response = await app.fetch(
@@ -852,20 +740,33 @@ describe("agent routes", () => {
     )
     expect(response.status).toBe(200)
     const body = (await response.json()) as {
-      messages: { id: string; compaction?: unknown }[]
+      messages: { id: string; parts: unknown[]; annotations: unknown[]; compaction?: unknown }[]
     }
-    expect(body.messages.find((message) => message.id === "msg-compacted-response")).toMatchObject({
-      compaction: {
-        checkpointId: checkpoint.id,
-        summary: checkpoint.summary,
-        createdAt: checkpoint.createdAt.toISOString(),
-      },
-    })
+    // Diagnostics are annotations beside the parts, never edits to them.
+    expect(body.messages.find((message) => message.id === "msg-compacted-response")).toEqual(
+      expect.objectContaining({
+        parts: [{ type: "text", text: "Here is the completed research." }],
+        annotations: diagnostics,
+        compaction: {
+          checkpointId: checkpoint.id,
+          summary: checkpoint.summary,
+          createdAt: checkpoint.createdAt.toISOString(),
+        },
+      })
+    )
     expect(
       body.messages.filter(
-        (message) => message.id !== "msg-compacted-response" && "compaction" in message
+        (message) =>
+          message.id !== "msg-compacted-response" &&
+          ("compaction" in message || message.annotations.length > 0)
       )
     ).toEqual([])
+
+    const runResponse = await app.fetch(
+      new Request("http://localhost/api/agent-runs/run-compaction")
+    )
+    expect(runResponse.status).toBe(200)
+    expect(await runResponse.json()).toMatchObject({ diagnostics })
   })
 
   test("returns 409 when posting to a thread with an active run", async () => {

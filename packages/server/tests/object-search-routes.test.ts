@@ -84,53 +84,32 @@ async function seedSession(storage: InMemoryStorage, userId: string, groupIds: r
 }
 
 describe("object search routes", () => {
-  test("searches visible objects by text and primary id", async () => {
+  test("searches visible objects by text and primary id, and hides them from others", async () => {
     const { app, sixb, storage } = createApp()
-    const headers = await seedSession(storage, "usr_viewer", [invoiceViewers.id])
+    const viewer = await seedSession(storage, "usr_viewer", [invoiceViewers.id])
+    const hidden = await seedSession(storage, "usr_hidden", [])
     await createTestSixb(sixb)
       .objects(Invoice)
       .upsert({
         properties: { id: "inv-123", name: "July maintenance" },
       })
+    const search = (q: string, headers: Record<string, string>) =>
+      app.fetch(new Request(`http://localhost/api/objects/search?q=${q}`, { headers }))
 
-    const textSearch = await app.fetch(
-      new Request("http://localhost/api/objects/search?q=maintenance", { headers })
-    )
-    expect(textSearch.status).toBe(200)
-    expect(await textSearch.json()).toEqual({
-      items: [
-        {
-          ref: { objectTypeId: "Invoice", primaryId: "inv-123" },
-          label: "Invoice: July maintenance (inv-123)",
-        },
-      ],
-    })
-
-    const primaryIdSearch = await app.fetch(
-      new Request("http://localhost/api/objects/search?q=inv-1", { headers })
-    )
-    expect(await primaryIdSearch.json()).toEqual({
-      items: [
-        {
-          ref: { objectTypeId: "Invoice", primaryId: "inv-123" },
-          label: "Invoice: July maintenance (inv-123)",
-        },
-      ],
-    })
-  })
-
-  test("does not return objects the principal cannot view", async () => {
-    const { app, sixb, storage } = createApp()
-    const headers = await seedSession(storage, "usr_hidden", [])
-    await createTestSixb(sixb)
-      .objects(Invoice)
-      .upsert({
-        properties: { id: "inv-123", name: "July maintenance" },
+    for (const q of ["maintenance", "inv-1"]) {
+      const response = await search(q, viewer)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        items: [
+          {
+            ref: { objectTypeId: "Invoice", primaryId: "inv-123" },
+            label: "Invoice: July maintenance (inv-123)",
+          },
+        ],
       })
+    }
 
-    const response = await app.fetch(
-      new Request("http://localhost/api/objects/search?q=inv-1", { headers })
-    )
+    const response = await search("inv-1", hidden)
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ items: [] })
   })
