@@ -1,8 +1,8 @@
 /**
  * What a client needs to show an artifact the way publishing read it: the kinds and what each
  * holds, the slugs its headings get, its theme, a sheet's workbook and CSV, the limits a version
- * keeps within, and the `artifact:` addresses that point into it. Browser-safe: no storage, no Bun
- * APIs. How the app talks to a deck's frame is internal: `@sixb/core/internal/artifacts/frame-protocol`.
+ * keeps within, the `artifact:` addresses that point into it, and the messages a viewer and a
+ * deck's frame exchange, versioned as `sixb-frame/1`. Browser-safe: no storage, no Bun APIs.
  */
 
 export {
@@ -15,6 +15,18 @@ export {
   type SheetPart,
 } from "./address"
 export { CsvParseError, type CsvTable, parseCsv } from "./csv"
+export {
+  type DeckMode,
+  FRAME_PROTOCOL,
+  FRAME_THEME_TOKENS,
+  type FrameEmbed,
+  type FrameEvent,
+  type FrameRequest,
+  type FrameResponse,
+  type FrameStart,
+  frameStartHash,
+  parseFrameEvent,
+} from "./frames/protocol"
 export { ARTIFACT_KINDS, type ArtifactKind } from "./kinds"
 export { ARTIFACT_LIMITS } from "./limits"
 export {
