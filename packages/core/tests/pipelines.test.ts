@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   col,
+  type DatasetDefinition,
   defineDataset,
   defineObjectType,
   definePipeline,
@@ -52,55 +53,42 @@ function makeRunStep(id = "normalize-orders") {
     })
 }
 
+test.each([
+  ["a step with an empty id", () => definePipelineStep(""), "Pipeline step id must not be empty"],
+  [
+    "a step with no inputs",
+    () => definePipelineStep("step").inputs({}),
+    "Pipeline step input dataset must contain at least one entry",
+  ],
+  [
+    "a step with an empty input name",
+    () => definePipelineStep("step").inputs({ "  ": rawOrdersDataset } as never),
+    "Pipeline step input name must not be empty",
+  ],
+  [
+    "a step with an empty input dataset id",
+    () =>
+      definePipelineStep("step").inputs({
+        rawOrders: { kind: "dataset", id: "   ", schema: { columns: [] } },
+      } as never),
+    "Pipeline step input dataset must not be empty",
+  ],
+  [
+    "a step with an empty output dataset id",
+    () =>
+      definePipelineStep("step")
+        .inputs({ rawOrders: rawOrdersDataset })
+        .output({ kind: "dataset", id: "   ", schema: { columns: [] } } as never),
+    "Pipeline step output dataset must not be empty",
+  ],
+  ["a pipeline with an empty id", () => definePipeline(""), "Pipeline id must not be empty"],
+] as const)("rejects %s", (_case, define, message) => {
+  expect(define).toThrow(PipelineError)
+  expect(define).toThrow(message)
+})
+
 describe("definePipelineStep", () => {
-  test("rejects empty ids", () => {
-    expect(() => definePipelineStep("")).toThrow(PipelineError)
-    expect(() => definePipelineStep("")).toThrow("Pipeline step id must not be empty")
-  })
-
-  test("rejects empty inputs", () => {
-    expect(() => definePipelineStep("step").inputs({})).toThrow(PipelineError)
-    expect(() => definePipelineStep("step").inputs({})).toThrow(
-      "Pipeline step input dataset must contain at least one entry"
-    )
-  })
-
-  test("rejects empty input names", () => {
-    expect(() => definePipelineStep("step").inputs({ "  ": rawOrdersDataset } as never)).toThrow(
-      PipelineError
-    )
-    expect(() => definePipelineStep("step").inputs({ "  ": rawOrdersDataset } as never)).toThrow(
-      "Pipeline step input name must not be empty"
-    )
-  })
-
-  test("rejects empty input dataset ids", () => {
-    expect(() =>
-      definePipelineStep("step").inputs({
-        rawOrders: { kind: "dataset", id: "   ", schema: { columns: [] } },
-      } as never)
-    ).toThrow(PipelineError)
-    expect(() =>
-      definePipelineStep("step").inputs({
-        rawOrders: { kind: "dataset", id: "   ", schema: { columns: [] } },
-      } as never)
-    ).toThrow("Pipeline step input dataset must not be empty")
-  })
-
-  test("rejects empty output dataset ids", () => {
-    expect(() =>
-      definePipelineStep("step")
-        .inputs({ rawOrders: rawOrdersDataset })
-        .output({ kind: "dataset", id: "   ", schema: { columns: [] } } as never)
-    ).toThrow(PipelineError)
-    expect(() =>
-      definePipelineStep("step")
-        .inputs({ rawOrders: rawOrdersDataset })
-        .output({ kind: "dataset", id: "   ", schema: { columns: [] } } as never)
-    ).toThrow("Pipeline step output dataset must not be empty")
-  })
-
-  test("builds a run step with snapshot output by default", () => {
+  test("builds a run step with snapshot output by default, or append when asked", () => {
     const step = makeRunStep()
 
     expect(step).toMatchObject({
@@ -114,15 +102,12 @@ describe("definePipelineStep", () => {
     if (step.executor.kind === "run") {
       expect(typeof step.executor.handler).toBe("function")
     }
-  })
 
-  test("supports append output mode", () => {
-    const step = definePipelineStep("append-orders")
+    const append = definePipelineStep("append-orders")
       .inputs({ rawOrders: rawOrdersDataset })
       .output(canonicalOrdersDataset, { mode: "append" })
       .run(async () => {})
-
-    expect(step.mode).toBe("append")
+    expect(append.mode).toBe("append")
   })
 
   test("builds a SQL step with the default dialect", () => {
@@ -143,11 +128,6 @@ describe("definePipelineStep", () => {
 })
 
 describe("definePipeline", () => {
-  test("rejects empty ids", () => {
-    expect(() => definePipeline("")).toThrow(PipelineError)
-    expect(() => definePipeline("")).toThrow("Pipeline id must not be empty")
-  })
-
   test("composes steps in sequence order", () => {
     const clean = makeRunStep("clean-orders")
     const insights = definePipelineStep("order-insights")
@@ -186,34 +166,22 @@ describe("definePipeline", () => {
   })
 })
 
-describe("isPipelineDefinition", () => {
-  test("returns true for valid sequential pipelines", () => {
-    const pipeline = definePipeline("p1").then(makeRunStep())
-
-    expect(isPipelineDefinition(pipeline)).toBe(true)
-  })
-
-  test("returns false for standalone steps", () => {
-    expect(isPipelineStepDefinition(makeRunStep())).toBe(true)
-    expect(isPipelineDefinition(makeRunStep())).toBe(false)
-  })
-
-  test("returns false for null", () => {
-    expect(isPipelineDefinition(null)).toBe(false)
-  })
-
-  test("returns false for old batch pipeline shape", () => {
-    expect(
-      isPipelineDefinition({
-        kind: "pipeline",
-        id: "p1",
-        mode: "batch",
-        sources: [],
-        target: { kind: "dataset", dataset: rawOrdersDataset },
-        handler: () => {},
-      })
-    ).toBe(false)
-  })
+test("isPipelineDefinition accepts sequential pipelines only", () => {
+  expect(isPipelineDefinition(definePipeline("p1").then(makeRunStep()))).toBe(true)
+  expect(isPipelineStepDefinition(makeRunStep())).toBe(true)
+  expect(isPipelineDefinition(makeRunStep())).toBe(false)
+  expect(isPipelineDefinition(null)).toBe(false)
+  // The old batch pipeline shape.
+  expect(
+    isPipelineDefinition({
+      kind: "pipeline",
+      id: "p1",
+      mode: "batch",
+      sources: [],
+      target: { kind: "dataset", dataset: rawOrdersDataset },
+      handler: () => {},
+    })
+  ).toBe(false)
 })
 
 describe("SixbHost pipeline registration", () => {
@@ -232,156 +200,84 @@ describe("SixbHost pipeline registration", () => {
     expect(sixb.pipelines.getById("missing-pipeline")).toBeNull()
   })
 
-  test("rejects duplicate pipeline ids", () => {
-    const p1 = definePipeline("normalize-orders").then(makeRunStep("clean-orders"))
-    const p2 = definePipeline("normalize-orders").then(
-      definePipelineStep("clean-customers")
-        .inputs({ rawCustomers: rawCustomersDataset })
-        .output(canonicalCustomersDataset)
-        .run(async () => {})
-    )
-    const pipelines: PipelineDefinition[] = [p1, p2]
-    const runtimeDeps = createTestRuntimeDeps()
-
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        datasets: [
-          rawOrdersDataset,
-          rawCustomersDataset,
-          canonicalOrdersDataset,
-          canonicalCustomersDataset,
-        ],
-        pipelines,
-        ...runtimeDeps,
-      })
-    ).toThrow(RuntimeError)
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        datasets: [
-          rawOrdersDataset,
-          rawCustomersDataset,
-          canonicalOrdersDataset,
-          canonicalCustomersDataset,
-        ],
-        pipelines,
-        ...runtimeDeps,
-      })
-    ).toThrow("Duplicate pipeline id: normalize-orders")
+  const missingInputDataset = defineDataset("missing.orders", {
+    schema: [col("id", "string")],
   })
 
-  test("rejects empty pipeline graphs", () => {
-    const pipeline = definePipeline("empty-pipeline")
-
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        datasets: [rawOrdersDataset, canonicalOrdersDataset],
-        pipelines: [pipeline],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow(RuntimeError)
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        datasets: [rawOrdersDataset, canonicalOrdersDataset],
-        pipelines: [pipeline],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow("Pipeline 'empty-pipeline' must contain at least one step")
-  })
-
-  test("rejects duplicate step ids within one pipeline", () => {
-    const firstStep = makeRunStep("duplicate-step")
-    const secondStep = definePipelineStep("duplicate-step")
-      .inputs({ orders: canonicalOrdersDataset })
-      .output(orderInsightsDataset)
-      .run(async () => {})
-    const pipeline = definePipeline("orders").then(firstStep).then(secondStep)
-
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        datasets: [rawOrdersDataset, canonicalOrdersDataset, orderInsightsDataset],
-        pipelines: [pipeline],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow(RuntimeError)
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        datasets: [rawOrdersDataset, canonicalOrdersDataset, orderInsightsDataset],
-        pipelines: [pipeline],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow("Pipeline 'orders' contains duplicate step id 'duplicate-step'")
-  })
-
-  test("rejects step input datasets not registered with the runtime", () => {
-    const missingInputDataset = defineDataset("missing.orders", {
-      schema: [col("id", "string")],
-    })
-    const step = definePipelineStep("normalize-orders")
-      .inputs({ rawOrders: missingInputDataset })
-      .output(canonicalOrdersDataset)
-      .run(async () => {})
-    const pipeline = definePipeline("orders").then(step)
-
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        datasets: [canonicalOrdersDataset],
-        pipelines: [pipeline],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow(RuntimeError)
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        datasets: [canonicalOrdersDataset],
-        pipelines: [pipeline],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow(
-      "Pipeline 'orders' step 'normalize-orders' input 'rawOrders' references unknown dataset 'missing.orders'"
-    )
-  })
-
-  test("rejects step output datasets not registered with the runtime", () => {
-    const pipeline = definePipeline("orders").then(makeRunStep())
-
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        datasets: [rawOrdersDataset],
-        pipelines: [pipeline],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow(RuntimeError)
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        datasets: [rawOrdersDataset],
-        pipelines: [pipeline],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow(
-      "Pipeline 'orders' step 'normalize-orders' outputs unknown dataset 'canonical.orders'"
-    )
-  })
-
-  test("rejects references to unregistered schedules", () => {
-    const missing = defineSchedule("missing").cron("0 * * * *")
-    const pipeline = definePipeline("orders").when(missing).then(makeRunStep())
-
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        datasets: [rawOrdersDataset, canonicalOrdersDataset],
-        pipelines: [pipeline],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow("Pipeline 'orders' references unknown schedule 'missing'")
+  test.each([
+    [
+      "duplicate pipeline ids",
+      [rawOrdersDataset, rawCustomersDataset, canonicalOrdersDataset, canonicalCustomersDataset],
+      [
+        definePipeline("normalize-orders").then(makeRunStep("clean-orders")),
+        definePipeline("normalize-orders").then(
+          definePipelineStep("clean-customers")
+            .inputs({ rawCustomers: rawCustomersDataset })
+            .output(canonicalCustomersDataset)
+            .run(async () => {})
+        ),
+      ],
+      "Duplicate pipeline id: normalize-orders",
+    ],
+    [
+      "empty pipeline graphs",
+      [rawOrdersDataset, canonicalOrdersDataset],
+      [definePipeline("empty-pipeline")],
+      "Pipeline 'empty-pipeline' must contain at least one step",
+    ],
+    [
+      "duplicate step ids within one pipeline",
+      [rawOrdersDataset, canonicalOrdersDataset, orderInsightsDataset],
+      [
+        definePipeline("orders")
+          .then(makeRunStep("duplicate-step"))
+          .then(
+            definePipelineStep("duplicate-step")
+              .inputs({ orders: canonicalOrdersDataset })
+              .output(orderInsightsDataset)
+              .run(async () => {})
+          ),
+      ],
+      "Pipeline 'orders' contains duplicate step id 'duplicate-step'",
+    ],
+    [
+      "step input datasets not registered with the runtime",
+      [canonicalOrdersDataset],
+      [
+        definePipeline("orders").then(
+          definePipelineStep("normalize-orders")
+            .inputs({ rawOrders: missingInputDataset })
+            .output(canonicalOrdersDataset)
+            .run(async () => {})
+        ),
+      ],
+      "Pipeline 'orders' step 'normalize-orders' input 'rawOrders' references unknown dataset 'missing.orders'",
+    ],
+    [
+      "step output datasets not registered with the runtime",
+      [rawOrdersDataset],
+      [definePipeline("orders").then(makeRunStep())],
+      "Pipeline 'orders' step 'normalize-orders' outputs unknown dataset 'canonical.orders'",
+    ],
+    [
+      "references to unregistered schedules",
+      [rawOrdersDataset, canonicalOrdersDataset],
+      [
+        definePipeline("orders")
+          .when(defineSchedule("missing").cron("0 * * * *"))
+          .then(makeRunStep()),
+      ],
+      "Pipeline 'orders' references unknown schedule 'missing'",
+    ],
+  ] satisfies [
+    string,
+    DatasetDefinition[],
+    PipelineDefinition[],
+    string,
+  ][])("rejects %s", (_case, datasets, pipelines, message) => {
+    const start = () =>
+      createTestSixb({ ontology: [], datasets, pipelines, ...createTestRuntimeDeps() })
+    expect(start).toThrow(RuntimeError)
+    expect(start).toThrow(message)
   })
 })

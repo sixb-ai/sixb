@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   change,
   col,
+  type DatasetDefinition,
   defineConnector,
   defineDataset,
   defineObjectType,
@@ -13,8 +14,6 @@ import {
   events,
   noopLogger,
   prop,
-  type SyncDefinition,
-  type SyncReadContext,
 } from "../src"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -63,11 +62,7 @@ const RoomReading = defineObjectType({
 })
 
 describe("defineSync", () => {
-  test("rejects empty ids", () => {
-    expect(() => defineSync("")).toThrow("Sync id must not be empty")
-  })
-
-  test("defaults to batch snapshot mode", () => {
+  test("defaults to batch snapshot mode without triggers", () => {
     const sync = defineSync("sync-orders")
       .from(erpDb)
       .read(() => [])
@@ -82,19 +77,15 @@ describe("defineSync", () => {
       kind: "dataset",
       dataset: rawOrdersDataset,
     })
+    expect(sync.triggers).toEqual([])
   })
 
-  test("preserves append mode", () => {
-    const sync = defineSync("sync-order-events", { mode: "append" })
+  test("preserves append and keyed merge modes", () => {
+    const append = defineSync("sync-order-events", { mode: "append" })
       .from(erpDb)
       .read(() => [])
       .intoDataset(rawOrderEventsDataset)
-
-    expect(sync.config.mode).toBe("append")
-  })
-
-  test("preserves merge mode for a keyed dataset", () => {
-    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
+    const merge = defineSync("sync-keyed-orders", { mode: "merge" })
       .from(erpDb)
       .read(() => [
         change.upsert({ orderId: "ord_1", status: "open" }),
@@ -102,36 +93,8 @@ describe("defineSync", () => {
       ])
       .intoDataset(keyedOrdersDataset)
 
-    expect(sync.config).toEqual({ kind: "batch", mode: "merge" })
-  })
-
-  test("rejects an unkeyed merge target defensively", () => {
-    expect(() =>
-      defineSync("sync-orders-merge", { mode: "merge" })
-        .from(erpDb)
-        .read(() => [])
-        .intoDataset(rawOrdersDataset as never)
-    ).toThrow("Merge sync dataset 'raw.erp.orders' must define a primaryKey")
-  })
-
-  test("attaches schedule via .when()", () => {
-    const nightly = defineSchedule("nightly").cron("0 0 * * *")
-    const sync = defineSync("sync-order-events")
-      .when(nightly)
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(rawOrderEventsDataset)
-
-    expect(sync.triggers).toEqual([{ type: "schedule", scheduleId: "nightly" }])
-  })
-
-  test("triggers is empty when .when() is not called", () => {
-    const sync = defineSync("sync-orders")
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(rawOrdersDataset)
-
-    expect(sync.triggers).toEqual([])
+    expect(append.config).toEqual({ kind: "batch", mode: "append" })
+    expect(merge.config).toEqual({ kind: "batch", mode: "merge" })
   })
 
   test("accumulates multiple triggers via .when() (OR semantics)", () => {
@@ -156,44 +119,57 @@ describe("defineSync", () => {
     ])
   })
 
-  test("rejects non-schedule values in .when()", () => {
-    expect(() =>
-      defineSync("sync-order-events").when({ type: "dataset.updated" } as never)
-    ).toThrow("Sync .when(...) only accepts schedules")
+  test.each([
+    ["an empty id", () => defineSync(""), "Sync id must not be empty"],
+    [
+      "an unkeyed merge target",
+      () =>
+        defineSync("sync-orders-merge", { mode: "merge" })
+          .from(erpDb)
+          .read(() => [])
+          .intoDataset(rawOrdersDataset as never),
+      "Merge sync dataset 'raw.erp.orders' must define a primaryKey",
+    ],
+    [
+      "a non-schedule value in .when()",
+      () => defineSync("sync-order-events").when({ type: "dataset.updated" } as never),
+      "Sync .when(...) only accepts schedules",
+    ],
+    [
+      "an invalid mode",
+      () => defineSync("sync-orders", { mode: "invalid" as never }),
+      "Invalid sync mode",
+    ],
+    [
+      "an empty dataset target name",
+      () =>
+        defineSync("sync-orders")
+          .from(erpDb)
+          .read(() => [])
+          .intoDataset({ kind: "dataset", id: "   ", schema: { columns: [] } } as never),
+      "Sync dataset id must not be empty",
+    ],
+  ] as const)("rejects %s", (_case, define, message) => {
+    expect(define).toThrow(message)
   })
 
-  test("rejects invalid modes", () => {
-    expect(() => defineSync("sync-orders", { mode: "invalid" as never })).toThrow(
-      "Invalid sync mode"
-    )
-  })
-
-  test("validates dataset target names", () => {
-    expect(() =>
-      defineSync("sync-orders")
-        .from(erpDb)
-        .read(() => [])
-        .intoDataset({ kind: "dataset", id: "   ", schema: { columns: [] } } as never)
-    ).toThrow("Sync dataset id must not be empty")
-  })
-
-  test("exposes typed checkpoints to read handlers", async () => {
+  test("stores the connector and passes typed checkpoints to its read handler", async () => {
     type OrdersCheckpoint = { cursor: string }
     const checkpoints: OrdersCheckpoint[] = []
     const sync = defineSync("sync-orders", { mode: "append" })
       .checkpoint<OrdersCheckpoint>()
       .from(erpDb)
-      .read((_client, context) => {
+      .read((client, context) => {
         if (context.checkpoint) {
           checkpoints.push(context.checkpoint)
         }
         context.setCheckpoint({ cursor: "cursor-2" })
-        return []
+        return client.query("select * from orders") as never
       })
       .intoDataset(rawOrdersDataset)
 
     let nextCheckpoint: OrdersCheckpoint | undefined
-    await sync.read(
+    const result = await sync.read(
       {
         query(sql: string) {
           return sql
@@ -212,38 +188,10 @@ describe("defineSync", () => {
       }
     )
 
-    expect(checkpoints).toEqual([{ cursor: "cursor-1" }])
-    expect(nextCheckpoint).toEqual({ cursor: "cursor-2" })
-  })
-
-  test("stores the connector and read handler", async () => {
-    const calls: SyncReadContext[] = []
-    const sync = defineSync("sync-orders")
-      .from(erpDb)
-      .read(async (client, context) => {
-        calls.push(context)
-        return client.query("select * from orders")
-      })
-      .intoDataset(rawOrdersDataset)
-
-    const result = await sync.read(
-      {
-        query(sql: string) {
-          return sql
-        },
-      },
-      {
-        projectId: "project-1",
-        syncId: "sync-orders",
-        signal: new AbortController().signal,
-        blobs: createTestRuntimeDeps().blobStorage,
-        logger: noopLogger,
-      }
-    )
-
     expect(sync.connector).toBe(erpDb)
     expect(result).toBe("select * from orders")
-    expect(calls).toHaveLength(1)
+    expect(checkpoints).toEqual([{ cursor: "cursor-1" }])
+    expect(nextCheckpoint).toEqual({ cursor: "cursor-2" })
   })
 })
 
@@ -266,135 +214,106 @@ describe("SixbHost sync registration", () => {
     expect(sixb.syncs.getById("missing-sync")).toBeNull()
   })
 
-  test("rejects duplicate sync ids", () => {
-    const sync1 = defineSync("sync-orders")
+  const syncInto = (
+    id: string,
+    dataset: DatasetDefinition,
+    mode: "snapshot" | "merge" = "snapshot"
+  ) =>
+    defineSync(id, { mode })
       .from(erpDb)
       .read(() => [])
-      .intoDataset(rawOrdersDataset)
-    const sync2 = defineSync("sync-orders")
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(rawOrdersCopyDataset)
-    const syncs: SyncDefinition[] = [sync1, sync2]
-    const runtimeDeps = createTestRuntimeDeps()
+      .intoDataset(dataset as never)
+  const readings = defineDataset("raw.room-readings", {
+    schema: [
+      col("id", "string"),
+      col("room_id", "string"),
+      col("observed_at", "timestamp"),
+      col("temperature", "float64"),
+    ],
+    primaryKey: "id",
+  })
 
-    expect(() =>
-      createTestSixb({
-        ontology: [],
+  test.each([
+    [
+      "duplicate sync ids",
+      {
         datasets: [rawOrdersDataset, rawOrdersCopyDataset],
-        syncs,
-        ...runtimeDeps,
-      })
-    ).toThrow("Duplicate sync id: sync-orders")
-  })
-
-  test("rejects references to unregistered schedules", () => {
-    const missing = defineSchedule("missing").cron("0 * * * *")
-    const sync = defineSync("sync-orders")
-      .when(missing)
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(rawOrdersDataset)
-
-    expect(() =>
-      createTestSixb({
-        ontology: [],
+        syncs: [
+          syncInto("sync-orders", rawOrdersDataset),
+          syncInto("sync-orders", rawOrdersCopyDataset),
+        ],
+      },
+      "Duplicate sync id: sync-orders",
+    ],
+    [
+      "references to unregistered schedules",
+      {
         datasets: [rawOrdersDataset],
-        syncs: [sync],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow("Sync 'sync-orders' references unknown schedule 'missing'")
-  })
-
-  test("allows only one registered writer for a keyed dataset", () => {
-    const first = defineSync("sync-keyed-orders", { mode: "merge" })
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(keyedOrdersDataset)
-    const second = defineSync("snapshot-keyed-orders")
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(keyedOrdersDataset)
-
-    expect(() =>
-      createTestSixb({
-        ontology: [],
+        syncs: [
+          defineSync("sync-orders")
+            .when(defineSchedule("missing").cron("0 * * * *"))
+            .from(erpDb)
+            .read(() => [])
+            .intoDataset(rawOrdersDataset),
+        ],
+      },
+      "Sync 'sync-orders' references unknown schedule 'missing'",
+    ],
+    [
+      "a second registered writer for a keyed dataset",
+      {
         datasets: [keyedOrdersDataset],
-        syncs: [first, second],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow(
-      "Keyed dataset 'raw.erp.keyed-orders' has multiple registered writers: sync 'sync-keyed-orders' and sync 'snapshot-keyed-orders'"
-    )
-  })
-
-  test("counts pipeline outputs as keyed dataset writers", () => {
-    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(keyedOrdersDataset)
-    const step = definePipelineStep("copy-keyed-orders")
-      .inputs({ orders: rawOrdersDataset })
-      .output(keyedOrdersDataset)
-      .run(() => {})
-    const pipeline = definePipeline("orders-pipeline").then(step)
-
-    expect(() =>
-      createTestSixb({
-        ontology: [],
+        syncs: [
+          syncInto("sync-keyed-orders", keyedOrdersDataset, "merge"),
+          syncInto("snapshot-keyed-orders", keyedOrdersDataset),
+        ],
+      },
+      "Keyed dataset 'raw.erp.keyed-orders' has multiple registered writers: sync 'sync-keyed-orders' and sync 'snapshot-keyed-orders'",
+    ],
+    [
+      "a pipeline output as a second keyed dataset writer",
+      {
         datasets: [rawOrdersDataset, keyedOrdersDataset],
-        syncs: [sync],
-        pipelines: [pipeline],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow("sync 'sync-keyed-orders' and pipeline 'orders-pipeline' step 'copy-keyed-orders'")
-  })
-
-  test("validates the registered merge target instead of trusting the builder copy", () => {
-    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(keyedOrdersDataset)
-    const unkeyedRegisteredCopy = defineDataset(keyedOrdersDataset.id, {
-      schema: keyedOrdersDataset.schema.columns,
-    })
-
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        datasets: [unkeyedRegisteredCopy],
-        syncs: [sync],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow("Merge sync 'sync-keyed-orders' targets dataset 'raw.erp.keyed-orders'")
-  })
-
-  test("rejects telemetry projections backed by merge-written datasets", () => {
-    const readings = defineDataset("raw.room-readings", {
-      schema: [
-        col("id", "string"),
-        col("room_id", "string"),
-        col("observed_at", "timestamp"),
-        col("temperature", "float64"),
-      ],
-      primaryKey: "id",
-    })
-    const sync = defineSync("sync-room-readings", { mode: "merge" })
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(readings)
-    const projection = defineProjection("room-temperatures", RoomReading.p.temperature)
-      .fromDataset(readings)
-      .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
-
-    expect(() =>
-      createTestSixb({
-        ontology: [RoomReading] as never,
+        syncs: [syncInto("sync-keyed-orders", keyedOrdersDataset, "merge")],
+        pipelines: [
+          definePipeline("orders-pipeline").then(
+            definePipelineStep("copy-keyed-orders")
+              .inputs({ orders: rawOrdersDataset })
+              .output(keyedOrdersDataset)
+              .run(() => {})
+          ),
+        ],
+      },
+      "sync 'sync-keyed-orders' and pipeline 'orders-pipeline' step 'copy-keyed-orders'",
+    ],
+    [
+      // The registered merge target is validated instead of the builder's copy.
+      "a merge sync whose registered target is unkeyed",
+      {
+        datasets: [
+          defineDataset(keyedOrdersDataset.id, { schema: keyedOrdersDataset.schema.columns }),
+        ],
+        syncs: [syncInto("sync-keyed-orders", keyedOrdersDataset, "merge")],
+      },
+      "Merge sync 'sync-keyed-orders' targets dataset 'raw.erp.keyed-orders'",
+    ],
+    [
+      "telemetry projections backed by merge-written datasets",
+      {
+        ontology: [RoomReading],
         datasets: [readings],
-        syncs: [sync],
-        projections: [projection],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow("Telemetry projection 'room-temperatures' cannot read merge-written dataset")
+        syncs: [syncInto("sync-room-readings", readings, "merge")],
+        projections: [
+          defineProjection("room-temperatures", RoomReading.p.temperature)
+            .fromDataset(readings)
+            .points({ objectId: "room_id", at: "observed_at", value: "temperature" }),
+        ],
+      },
+      "Telemetry projection 'room-temperatures' cannot read merge-written dataset",
+    ],
+  ] as const)("rejects %s", (_case, definitions, message) => {
+    expect(() =>
+      createTestSixb({ ontology: [], ...definitions, ...createTestRuntimeDeps() } as never)
+    ).toThrow(message)
   })
 })

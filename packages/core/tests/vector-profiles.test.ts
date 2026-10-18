@@ -173,14 +173,23 @@ describe("named vector profiles", () => {
     expect(f.embed).not.toHaveBeenCalled()
   })
 
-  test("invalid text, unsupported composition and cancellation do not call the model", async () => {
+  test("invalid text, top-k, pagination, fusion and cancellation do not call the model", async () => {
     const f = fixture()
     for (const text of ["   ", "x".repeat(8001)]) {
       await expect(f.objects.query().vector("content", text, { k: 1 }).list()).rejects.toThrow()
     }
-    await expect(f.objects.query().vector("content", "search", { k: 0 }).list()).rejects.toThrow()
+    for (const k of [0, 1001]) {
+      await expect(f.objects.query().vector("content", "search", { k }).list()).rejects.toThrow()
+    }
     await expect(
       f.objects.query().vector("content", "search", { k: 1 }).page({ pageSize: 1 }).list()
+    ).rejects.toThrow()
+    await expect(
+      f.objects
+        .query()
+        .vector("content", "search", { k: 1 })
+        .vector("context", "search", { k: 1 })
+        .list()
     ).rejects.toThrow()
     await expect(
       f.objects.query().vector("content", "search", { k: 1 }).list({ signal: AbortSignal.abort() })
@@ -330,7 +339,7 @@ describe("named vector profiles", () => {
     ).toHaveLength(0)
   })
 
-  test("filters before top-k and rejects pagination or post-ranking filtering", async () => {
+  test("filters before top-k and rejects filtering after ranking", async () => {
     const f = fixture()
     await seed(f)
     await seed(f, "b")
@@ -348,25 +357,6 @@ describe("named vector profiles", () => {
         .query()
         .vector("content", "search", { k: 1 })
         .where((p) => p.p.status.eq("active"))
-        .list()
-    ).rejects.toThrow()
-  })
-
-  test("rejects pagination, fusion and oversized top-k", async () => {
-    const f = fixture()
-    await seed(f)
-    await index(f)
-    await expect(
-      f.objects.query().vector("content", "search", { k: 1 }).page({ pageSize: 1 }).list()
-    ).rejects.toThrow()
-    await expect(
-      f.objects.query().vector("content", "search", { k: 1001 }).list()
-    ).rejects.toThrow()
-    await expect(
-      f.objects
-        .query()
-        .vector("content", "search", { k: 1 })
-        .vector("context", "search", { k: 1 })
         .list()
     ).rejects.toThrow()
   })

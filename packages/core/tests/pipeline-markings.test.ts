@@ -119,8 +119,8 @@ function analyzingLake(analyses: ReadonlyMap<SqlTransformBody, SqlTransformAnaly
         concurrency.running += 1
         concurrency.most = Math.max(concurrency.most, concurrency.running)
 
-        // Analyses take time, so concurrent ones overlap.
-        await Bun.sleep(1)
+        // Yield past the microtask queue, so every analysis already started overlaps this one.
+        await new Promise((resolve) => setImmediate(resolve))
         concurrency.running -= 1
 
         const result = analyses.get(input.sql)
@@ -268,10 +268,6 @@ describe("pipeline steps at startup", () => {
     ).toThrow(
       "[Sixb] Projection 'invoices': column 'normalized_invoices.id' becomes the id of 'Invoice' and cannot carry markings, but carries [financial] from 'raw_invoices.amount' through steps 'invoices/review-invoices', 'invoices/publish-invoices'."
     )
-  })
-
-  test("SQL steps derive nothing until the preflight analyzes them", () => {
-    expect(() => startHost()).not.toThrow()
   })
 
   // Reproduce: do not report a change when only the output's row markings grow in

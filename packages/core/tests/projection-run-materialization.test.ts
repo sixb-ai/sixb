@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { ProjectionMaterializationIdentity } from "../src/materialization/model"
-import { InMemoryAuthStorage } from "../src/storage/auth"
-import { InMemoryExecutionStorage } from "../src/storage/executions/in-memory"
 import type { ExecutionStorage } from "../src/storage/executions/types"
 import { InMemoryStorage } from "../src/storage/in-memory/index"
-import { InMemoryProjectionRunStorage } from "../src/storage/projection-runs/in-memory"
 import type {
   ProjectionRunStorage,
   StartOrReclaimProjectionRunInput,
@@ -50,233 +47,60 @@ const telemetryIdentity = {
   ownershipHash: "ownership-telemetry-1",
 } as const satisfies ProjectionMaterializationIdentity
 
-describe("projection run materialization ownership", () => {
-  test("rotates execution tokens on reclaim and fences stale attempts", async () => {
-    const tokens = ["execution-1", "execution-2"]
-    const { executions, projectionRuns: storage } = createProjectionRunStorage({
-      executionToken: () => tokens.shift() ?? "unexpected-token",
+// The shared projection-run storage contract (projection-runs.test.ts) proves reclaim rotation,
+// stale-token fencing, contiguous checkpoint advance and explicit EOF. These are the in-memory
+// telemetry checkpoint guards it does not reach.
+test("telemetry runs move progress only through bounded, unexhausted checkpoints", async () => {
+  const storage = new InMemoryStorage()
+  const input = {
+    id: "telemetry-run",
+    projectId: "project",
+    identity: telemetryIdentity,
+    target: { objectTypeId: "Device" },
+    fixedBatchSize: 2,
+  } as const
+  await admitProjectionRun(storage.executions, storage.projectionRuns, input)
+  const { execution } = await storage.projectionRuns.startOrReclaim(input)
+  const batch = {
+    id: "telemetry-run",
+    projectId: "project",
+    identity: telemetryIdentity,
+    executionToken: execution.executionToken,
+    batchRowsSkipped: 0,
+  }
+
+  await expect(
+    storage.projectionRuns.finish({
+      ...batch,
+      protocol: "telemetry",
+      status: "failed",
+      progress: { sourceRowsSkipped: 1 },
     })
-    const input = {
-      id: "replacement-run",
-      projectId: "project",
-      identity: replacementIdentity,
-      target: { objectTypeId: "Device" },
-    } as const
-
-    await admitProjectionRun(executions, storage, input)
-    const first = await storage.startOrReclaim(input)
-    const second = await storage.startOrReclaim(input)
-    expect(first).toMatchObject({
-      run: { attempt: 1 },
-      execution: { executionToken: "execution-1" },
-    })
-    expect(second).toMatchObject({
-      run: { attempt: 2 },
-      execution: { executionToken: "execution-2" },
-    })
-
-    await expect(
-      storage.update({
-        id: input.id,
-        projectId: input.projectId,
-        identity: replacementIdentity,
-        executionToken: "execution-1",
-        progress: { sourceRowsRead: 1 },
-      })
-    ).rejects.toThrow("execution token is stale")
-    await expect(
-      storage.update({
-        id: input.id,
-        projectId: input.projectId,
-        identity: replacementIdentity,
-        executionToken: "execution-2",
-        progress: { sourceRowsRead: 1 },
-      })
-    ).resolves.toMatchObject({ progress: { sourceRowsRead: 1 } })
-  })
-
-  test("stores only telemetry resume state and advances it contiguously", async () => {
-    const { executions, projectionRuns: storage } = createProjectionRunStorage({
-      executionToken: () => "execution",
-    })
-    const input = {
-      id: "telemetry-run",
-      projectId: "project",
-      identity: telemetryIdentity,
-      target: { objectTypeId: "Device" },
-      fixedBatchSize: 2,
-    } as const
-    await admitProjectionRun(executions, storage, input)
-    await storage.startOrReclaim(input)
-
-    expect(await storage.getById({ projectId: "project", id: "telemetry-run" })).toMatchObject({
-      telemetryCheckpoint: {
-        fixedBatchSize: 2,
-        nextBatchOrdinal: 0,
-        nextRowOffset: 0,
-        inputExhausted: false,
-      },
-    })
-
-    await expect(
-      storage.update({
-        id: "telemetry-run",
-        projectId: "project",
-        identity: telemetryIdentity,
-        executionToken: "execution",
-        progress: { sourceRowsRead: 1 },
-      })
-    ).rejects.toThrow("can only advance with its checkpoint")
-    await expect(
-      storage.finish({
-        id: "telemetry-run",
-        projectId: "project",
-        identity: telemetryIdentity,
-        executionToken: "execution",
-        protocol: "telemetry",
-        status: "failed",
-        progress: { sourceRowsSkipped: 1 },
-      })
-    ).rejects.toThrow("can only advance with its checkpoint")
-
-    await storage.advanceTelemetryCheckpoint({
-      id: "telemetry-run",
-      projectId: "project",
-      identity: telemetryIdentity,
-      executionToken: "execution",
+  ).rejects.toThrow("can only advance with its checkpoint")
+  await expect(
+    storage.projectionRuns.advanceTelemetryCheckpoint({
+      ...batch,
       batchOrdinal: 0,
-      batchRowCount: 2,
-      batchRowsSkipped: 0,
-      inputExhausted: false,
-    })
-    expect(await storage.getById({ projectId: "project", id: "telemetry-run" })).toMatchObject({
-      telemetryCheckpoint: {
-        nextBatchOrdinal: 1,
-        nextRowOffset: 2,
-        inputExhausted: false,
-      },
-    })
-
-    await expect(
-      storage.advanceTelemetryCheckpoint({
-        id: "telemetry-run",
-        projectId: "project",
-        identity: telemetryIdentity,
-        executionToken: "execution",
-        batchOrdinal: 2,
-        batchRowCount: 1,
-        batchRowsSkipped: 0,
-        inputExhausted: false,
-      })
-    ).rejects.toThrow("expected batch ordinal 1")
-
-    await expect(
-      storage.advanceTelemetryCheckpoint({
-        id: "telemetry-run",
-        projectId: "project",
-        identity: telemetryIdentity,
-        executionToken: "execution",
-        batchOrdinal: 1,
-        batchRowCount: 1,
-        batchRowsSkipped: 0,
-        inputExhausted: false,
-      })
-    ).rejects.toThrow("partial non-final batch")
-    await expect(
-      storage.advanceTelemetryCheckpoint({
-        id: "telemetry-run",
-        projectId: "project",
-        identity: telemetryIdentity,
-        executionToken: "execution",
-        batchOrdinal: 1,
-        batchRowCount: 3,
-        batchRowsSkipped: 0,
-        inputExhausted: true,
-      })
-    ).rejects.toThrow("exceeds its fixed size")
-
-    await storage.advanceTelemetryCheckpoint({
-      id: "telemetry-run",
-      projectId: "project",
-      identity: telemetryIdentity,
-      executionToken: "execution",
-      batchOrdinal: 1,
-      batchRowCount: 1,
-      batchRowsSkipped: 0,
+      batchRowCount: 3,
       inputExhausted: true,
     })
-    expect(await storage.getById({ projectId: "project", id: "telemetry-run" })).toMatchObject({
-      telemetryCheckpoint: {
-        nextBatchOrdinal: 2,
-        nextRowOffset: 3,
-        inputExhausted: true,
-      },
-    })
+  ).rejects.toThrow("exceeds its fixed size")
 
-    await expect(
-      storage.advanceTelemetryCheckpoint({
-        id: "telemetry-run",
-        projectId: "project",
-        identity: telemetryIdentity,
-        executionToken: "execution",
-        batchOrdinal: 2,
-        batchRowCount: 1,
-        batchRowsSkipped: 0,
-        inputExhausted: true,
-      })
-    ).rejects.toThrow("already exhausted")
+  await storage.projectionRuns.advanceTelemetryCheckpoint({
+    ...batch,
+    batchOrdinal: 0,
+    batchRowCount: 1,
+    inputExhausted: true,
   })
-
-  test("requires explicit EOF before storage-level telemetry success", async () => {
-    const { executions, projectionRuns: storage } = createProjectionRunStorage({
-      executionToken: () => "execution",
+  await expect(
+    storage.projectionRuns.advanceTelemetryCheckpoint({
+      ...batch,
+      batchOrdinal: 1,
+      batchRowCount: 1,
+      inputExhausted: true,
     })
-    const input = {
-      id: "telemetry-run",
-      projectId: "project",
-      identity: telemetryIdentity,
-      target: { objectTypeId: "Device" },
-      fixedBatchSize: 10,
-    } as const
-    await admitProjectionRun(executions, storage, input)
-    await storage.startOrReclaim(input)
-
-    await expect(
-      storage.finish({
-        id: "telemetry-run",
-        projectId: "project",
-        identity: telemetryIdentity,
-        executionToken: "execution",
-        protocol: "telemetry",
-        status: "succeeded",
-      } as Parameters<typeof storage.finish>[0])
-    ).rejects.toThrow("cannot succeed before input exhaustion")
-
-    await expect(
-      storage.finish({
-        id: "telemetry-run",
-        projectId: "project",
-        identity: telemetryIdentity,
-        executionToken: "execution",
-        protocol: "telemetry",
-        status: "succeeded",
-        inputExhausted: true,
-      })
-    ).resolves.toMatchObject({
-      status: "succeeded",
-      telemetryCheckpoint: { inputExhausted: true },
-    })
-  })
+  ).rejects.toThrow("already exhausted")
 })
-
-function createProjectionRunStorage(input: { readonly executionToken: () => string }) {
-  const auth = new InMemoryAuthStorage()
-  const executions = new InMemoryExecutionStorage(auth)
-  return {
-    executions,
-    projectionRuns: new InMemoryProjectionRunStorage({ executions, ...input }),
-  }
-}
 
 async function admitProjectionRun(
   executions: ExecutionStorage,

@@ -108,81 +108,35 @@ describe("InMemorySyncRunStorage", () => {
     })
   })
 
-  test("stores a checkpoint for a successful empty append without an output version", async () => {
+  // Only an initial merge no-op may consume changes without an output version.
+  test.each([
+    ["an empty append", "append", 0, { cursor: "cursor-1" }],
+    ["an initial merge no-op that consumed changes", "merge", 1, { cursor: "cursor-2" }],
+    ["an empty snapshot", "snapshot", 0, undefined],
+  ] as const)("stores %s without an output version", async (_case, mode, rowsRead, checkpoint) => {
     const storage = new InMemoryStorage()
     await startSyncRun(storage, {
       id: "syncrun_empty",
       projectId: "my-app",
-      syncId: "sync-events",
-      datasetId: "raw.erp.events",
-      mode: "append",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode,
     })
 
     const finished = await storage.syncRuns.finish({
       id: "syncrun_empty",
       projectId: "my-app",
       status: "succeeded",
-      rowsRead: 0,
-      checkpoint: { cursor: "cursor-1" },
+      rowsRead,
+      checkpoint,
     })
 
-    expect(finished).toMatchObject({
-      status: "succeeded",
-      rowsRead: 0,
-      checkpoint: { cursor: "cursor-1" },
-    })
+    expect(finished).toMatchObject({ mode, status: "succeeded", rowsRead })
+    expect(finished.checkpoint).toEqual(checkpoint)
     expect(finished.output).toBeUndefined()
   })
 
-  test("stores an initial merge no-op with consumed changes and no output version", async () => {
-    const storage = new InMemoryStorage()
-    const started = await startSyncRun(storage, {
-      id: "syncrun_merge_noop",
-      projectId: "my-app",
-      syncId: "sync-orders",
-      datasetId: "raw.erp.orders",
-      mode: "merge",
-    })
-
-    const finished = await storage.syncRuns.finish({
-      id: started.id,
-      projectId: started.projectId,
-      status: "succeeded",
-      rowsRead: 1,
-      checkpoint: { cursor: "cursor-2" },
-    })
-
-    expect(finished).toMatchObject({
-      mode: "merge",
-      status: "succeeded",
-      rowsRead: 1,
-      checkpoint: { cursor: "cursor-2" },
-    })
-    expect(finished.output).toBeUndefined()
-  })
-
-  test("stores a successful empty snapshot without an output version", async () => {
-    const storage = new InMemoryStorage()
-    await startSyncRun(storage, {
-      id: "syncrun_empty_snapshot",
-      projectId: "my-app",
-      syncId: "sync-orders",
-      datasetId: "raw.erp.orders",
-      mode: "snapshot",
-    })
-
-    const finished = await storage.syncRuns.finish({
-      id: "syncrun_empty_snapshot",
-      projectId: "my-app",
-      status: "succeeded",
-      rowsRead: 0,
-    })
-
-    expect(finished).toMatchObject({ status: "succeeded", rowsRead: 0 })
-    expect(finished.output).toBeUndefined()
-  })
-
-  test("rejects duplicate starts and missing finishes", async () => {
+  test("rejects duplicate starts, missing finishes, foreign outputs, and another Sync's execution", async () => {
     const storage = new InMemoryStorage()
 
     await startSyncRun(storage, {
@@ -209,6 +163,35 @@ describe("InMemorySyncRunStorage", () => {
         projectId: "my-app",
         status: "failed",
         error: { ...FAILURE, message: "boom" },
+      })
+    ).rejects.toBeInstanceOf(SyncRunError)
+
+    await expect(
+      storage.syncRuns.finish({
+        id: "syncrun_1",
+        projectId: "my-app",
+        status: "succeeded",
+        rowsRead: 10,
+        output: {
+          datasetId: "raw.erp.invoices",
+          versionId: "ver_1",
+        },
+      })
+    ).rejects.toBeInstanceOf(SyncRunError)
+
+    const executionId = await createTestSyncExecution(storage.executions, {
+      projectId: "my-app",
+      syncId: "sync-customers",
+      runId: "run-1",
+    })
+    await expect(
+      storage.syncRuns.queue({
+        id: "run-1",
+        projectId: "my-app",
+        executionId,
+        syncId: "sync-orders",
+        datasetId: "raw.erp.orders",
+        mode: "snapshot",
       })
     ).rejects.toBeInstanceOf(SyncRunError)
   })
@@ -338,50 +321,5 @@ describe("InMemorySyncRunStorage", () => {
     })
 
     expect(latest.runs.map((run) => run.id)).toEqual(["run-customers", "run-orders-z"])
-  })
-
-  test("rejects success outputs for a different dataset", async () => {
-    const storage = new InMemoryStorage()
-
-    await startSyncRun(storage, {
-      id: "syncrun_1",
-      projectId: "my-app",
-      syncId: "sync-orders",
-      datasetId: "raw.erp.orders",
-      mode: "snapshot",
-    })
-
-    await expect(
-      storage.syncRuns.finish({
-        id: "syncrun_1",
-        projectId: "my-app",
-        status: "succeeded",
-        rowsRead: 10,
-        output: {
-          datasetId: "raw.erp.invoices",
-          versionId: "ver_1",
-        },
-      })
-    ).rejects.toBeInstanceOf(SyncRunError)
-  })
-
-  test("rejects a run whose execution authorizes a different Sync", async () => {
-    const storage = new InMemoryStorage()
-    const executionId = await createTestSyncExecution(storage.executions, {
-      projectId: "my-app",
-      syncId: "sync-customers",
-      runId: "run-1",
-    })
-
-    await expect(
-      storage.syncRuns.queue({
-        id: "run-1",
-        projectId: "my-app",
-        executionId,
-        syncId: "sync-orders",
-        datasetId: "raw.erp.orders",
-        mode: "snapshot",
-      })
-    ).rejects.toBeInstanceOf(SyncRunError)
   })
 })

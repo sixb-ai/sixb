@@ -7,8 +7,6 @@ import {
   defineConnector,
   defineDataset,
   defineObjectType,
-  definePipeline,
-  definePipelineStep,
   defineSync,
   getDatasetRowValidationError,
   prop,
@@ -47,6 +45,11 @@ describe("change", () => {
 
     expect(change.upsert(row)).toEqual({ kind: "upsert", row })
     expect(change.delete(key)).toEqual({ kind: "delete", key })
+    expect(change.delete({ id: "42" }, { sequence: 9 })).toEqual({
+      kind: "delete",
+      key: { id: "42" },
+      sequence: 9,
+    })
   })
 })
 
@@ -73,24 +76,6 @@ describe("defineDataset", () => {
       defineDataset("ordered-derived").derive(source, { primaryKey: "id", sequenceBy: "revision" })
         .sequenceBy
     ).toBe("revision")
-    expect(change.delete({ id: "42" }, { sequence: 9 })).toEqual({
-      kind: "delete",
-      key: { id: "42" },
-      sequence: 9,
-    })
-  })
-  test("builds single and composite primary keys", () => {
-    const customers = defineDataset("canonical.customers", {
-      schema: [col("id", "string")],
-      primaryKey: "id",
-    })
-    const lineItems = defineDataset("canonical.line-items", {
-      schema: [col("invoiceId", "string"), col("lineItemId", "string", { nullable: false })],
-      primaryKey: ["invoiceId", "lineItemId"],
-    })
-
-    expect(customers.primaryKey).toBe("id")
-    expect(lineItems.primaryKey).toEqual(["invoiceId", "lineItemId"])
   })
 
   test("snapshots composite primary keys", () => {
@@ -108,85 +93,30 @@ describe("defineDataset", () => {
     expect(lineItems.primaryKey).not.toBe(primaryKey)
   })
 
-  test("validates primary-key shape", () => {
-    // Regression guard: removing assertDatasetPrimaryKey from assertDatasetDefinition makes these
-    // invalid definitions succeed.
-    expect(() =>
-      defineDataset("canonical.invalid-key", {
-        schema: [col("id", "string")],
-        primaryKey: 42,
-      } as never)
-    ).toThrow("Dataset primaryKey must be a column name or an array of at least two column names.")
-    expect(() =>
-      defineDataset("canonical.invalid-key", {
-        schema: [col("id", "string")],
-        primaryKey: [],
-      } as never)
-    ).toThrow(
-      "Dataset primaryKey arrays must contain at least two column names. Use a string for a single-column key."
+  // Regression guard: removing assertDatasetPrimaryKey from assertDatasetDefinition makes these
+  // invalid definitions succeed.
+  const singleColumnKey = "Dataset primaryKey arrays must contain at least two column names."
+  const id = [col("id", "string")]
+  const idAndTenant = [col("id", "string"), col("tenantId", "string")]
+  test.each([
+    [42, "Dataset primaryKey must be a column name or an array", id],
+    [[], singleColumnKey, id],
+    [["id"], singleColumnKey, id],
+    ["", "Dataset primaryKey columns must be non-empty strings.", id],
+    [["id", ""], "Dataset primaryKey columns must be non-empty strings.", idAndTenant],
+    [["id", 42], "Dataset primaryKey columns must be non-empty strings.", idAndTenant],
+    [["id", "id"], "Dataset primaryKey contains duplicate column 'id'.", id],
+    ["missing", "Dataset primaryKey column 'missing' is not declared in the schema.", id],
+    ["id", "Dataset primaryKey column 'id' must have type 'string'.", [col("id", "int64")]],
+    [
+      "id",
+      "Dataset primaryKey column 'id' must not be nullable.",
+      [col("id", "string", { nullable: true })],
+    ],
+  ] as const)("rejects primary key %j: %s", (primaryKey, message, schema) => {
+    expect(() => defineDataset("canonical.invalid-key", { schema, primaryKey } as never)).toThrow(
+      message
     )
-    expect(() =>
-      defineDataset("canonical.invalid-key", {
-        schema: [col("id", "string")],
-        primaryKey: "",
-      } as never)
-    ).toThrow("Dataset primaryKey columns must be non-empty strings.")
-    expect(() =>
-      defineDataset("canonical.invalid-key", {
-        schema: [col("id", "string")],
-        primaryKey: ["id"],
-      } as never)
-    ).toThrow(
-      "Dataset primaryKey arrays must contain at least two column names. Use a string for a single-column key."
-    )
-    expect(() =>
-      defineDataset("canonical.invalid-key", {
-        schema: [col("id", "string"), col("tenantId", "string")],
-        primaryKey: ["id", ""],
-      } as never)
-    ).toThrow("Dataset primaryKey columns must be non-empty strings.")
-    expect(() =>
-      defineDataset("canonical.invalid-key", {
-        schema: [col("id", "string"), col("tenantId", "string")],
-        primaryKey: ["id", 42],
-      } as never)
-    ).toThrow("Dataset primaryKey columns must be non-empty strings.")
-  })
-
-  test("rejects duplicate primary-key columns", () => {
-    expect(() =>
-      defineDataset("canonical.invalid-key", {
-        schema: [col("id", "string")],
-        primaryKey: ["id", "id"],
-      } as never)
-    ).toThrow("Dataset primaryKey contains duplicate column 'id'.")
-  })
-
-  test("requires primary-key columns to exist in the schema", () => {
-    expect(() =>
-      defineDataset("canonical.invalid-key", {
-        schema: [col("id", "string")],
-        primaryKey: "missing",
-      } as never)
-    ).toThrow("Dataset primaryKey column 'missing' is not declared in the schema.")
-  })
-
-  test("requires primary-key columns to be strings", () => {
-    expect(() =>
-      defineDataset("canonical.invalid-key", {
-        schema: [col("id", "int64")],
-        primaryKey: "id",
-      } as never)
-    ).toThrow("Dataset primaryKey column 'id' must have type 'string'.")
-  })
-
-  test("requires primary-key columns to be non-nullable", () => {
-    expect(() =>
-      defineDataset("canonical.invalid-key", {
-        schema: [col("id", "string", { nullable: true })],
-        primaryKey: "id",
-      } as never)
-    ).toThrow("Dataset primaryKey column 'id' must not be nullable.")
   })
 
   test("builds a dataset definition with a wrapped schema", () => {
@@ -204,7 +134,7 @@ describe("defineDataset", () => {
     })
   })
 
-  test("derives a dataset with the parent schema", () => {
+  test("derives a dataset with the parent schema, optionally adding columns", () => {
     const activeOrdersDataset = defineDataset("raw.erp.active-orders").derive(rawOrdersDataset)
 
     expect<DatasetDefinition>(activeOrdersDataset).toEqual({
@@ -219,6 +149,16 @@ describe("defineDataset", () => {
     })
     expect(activeOrdersDataset.partitionBy).toBeUndefined()
     expect(activeOrdersDataset.description).toBeUndefined()
+
+    const enrichedOrdersDataset = defineDataset("raw.erp.enriched-orders").derive(
+      rawOrdersDataset,
+      { add: [col("priority", "int64")] }
+    )
+    expect(enrichedOrdersDataset.schema.columns).toEqual([
+      { name: "orderId", type: "string" },
+      { name: "customerId", type: "string", nullable: true },
+      { name: "priority", type: "int64" },
+    ])
   })
 
   test("derives a dataset with picked and added columns", () => {
@@ -248,32 +188,13 @@ describe("defineDataset", () => {
     })
   })
 
-  test("derives a dataset with the parent schema and added columns", () => {
-    const enrichedOrdersDataset = defineDataset("raw.erp.enriched-orders").derive(
-      rawOrdersDataset,
-      {
-        add: [col("priority", "int64")],
-      }
-    )
-
-    expect(enrichedOrdersDataset.schema.columns).toEqual([
-      { name: "orderId", type: "string" },
-      { name: "customerId", type: "string", nullable: true },
-      { name: "priority", type: "int64" },
-    ])
-  })
-
   test("rejects derived datasets that pick unknown parent columns", () => {
-    expect(() =>
+    const derive = () =>
       defineDataset("raw.erp.missing-column").derive(rawOrdersDataset, {
         pick: ["missing"],
       } as never)
-    ).toThrow(DatasetValidationError)
-    expect(() =>
-      defineDataset("raw.erp.missing-column").derive(rawOrdersDataset, {
-        pick: ["missing"],
-      } as never)
-    ).toThrow(
+    expect(derive).toThrow(DatasetValidationError)
+    expect(derive).toThrow(
       "Dataset derive pick column 'missing' is not declared on parent dataset 'raw.erp.orders'."
     )
   })
@@ -326,45 +247,9 @@ describe("SixbHost dataset registration", () => {
       .from(erpDb)
       .read(() => [])
       .intoDataset(rawOrdersDataset)
+    const start = () => createTestSixb({ ontology: [], syncs: [sync], ...createTestRuntimeDeps() })
 
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        syncs: [sync],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow(RuntimeError)
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        syncs: [sync],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow("targets unknown dataset 'raw.erp.orders'")
-  })
-
-  test("rejects pipelines that reference unknown datasets", () => {
-    const step = definePipelineStep("normalize-orders")
-      .inputs({ rawOrders: rawOrdersDataset })
-      .output(canonicalOrdersDataset)
-      .run(async () => {})
-    const pipeline = definePipeline("normalize-orders").then(step)
-
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        datasets: [rawOrdersDataset],
-        pipelines: [pipeline],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow(RuntimeError)
-    expect(() =>
-      createTestSixb({
-        ontology: [],
-        datasets: [rawOrdersDataset],
-        pipelines: [pipeline],
-        ...createTestRuntimeDeps(),
-      })
-    ).toThrow("outputs unknown dataset 'canonical.orders'")
+    expect(start).toThrow(RuntimeError)
+    expect(start).toThrow("targets unknown dataset 'raw.erp.orders'")
   })
 })

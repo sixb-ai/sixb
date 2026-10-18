@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "../src"
 import type { PipelineRunFailureCode, QueuePipelineRunInput, SixbFailure } from "../src/storage"
-import { InMemoryPipelineRunStorage, PipelineRunError } from "../src/storage"
+import { PipelineRunError } from "../src/storage"
 import { createTestPipelineExecution } from "../src/testing"
 
 type TestStartPipelineRunInput = Omit<QueuePipelineRunInput, "executionId" | "queuedAt"> & {
@@ -353,7 +353,7 @@ describe("InMemoryPipelineRunStorage", () => {
     expect(failedSteps.steps[0]?.rowsWritten).toBe(3)
   })
 
-  test("rejects duplicate starts, missing finishes, terminal rewrites, and mismatched outputs", async () => {
+  test("rejects duplicate starts, missing finishes, terminal rewrites, mismatched outputs, and another Pipeline's execution", async () => {
     const storage = new InMemoryStorage()
 
     await startPipelineRun(storage, {
@@ -446,21 +446,13 @@ describe("InMemoryPipelineRunStorage", () => {
         error: { ...FAILURE, message: "Too late" },
       })
     ).rejects.toBeInstanceOf(PipelineRunError)
-  })
 
-  test("InMemoryStorage includes pipeline run storage", () => {
-    const storage = new InMemoryStorage()
-    expect(storage.pipelineRuns).toBeInstanceOf(InMemoryPipelineRunStorage)
-  })
-
-  test("rejects a run whose execution authorizes a different Pipeline", async () => {
-    const storage = new InMemoryStorage()
+    // A run cannot claim an execution that authorizes a different Pipeline.
     const executionId = await createTestPipelineExecution(storage.executions, {
       projectId: "my-app",
       pipelineId: "pipeline-customers",
       runId: "run-1",
     })
-
     await expect(
       storage.pipelineRuns.queue({
         id: "run-1",
