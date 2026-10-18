@@ -240,8 +240,8 @@ function realLoopTurn(): Promise<void> {
 
 /**
  * Drive fake timers until `check` holds. Each step takes one real event-loop turn, then moves fake
- * time forward by `stepMs`. A step of 0 fires only timers already due, to wait for a phase
- * without letting a deadline pass.
+ * time forward by `stepMs`. A step of 0 never moves the clock, to wait for a phase without letting
+ * a deadline pass (Bun's `advanceTimersByTime(0)` moves it 1ms, so it is not called).
  */
 async function underFakeTime<T>(
   check: () => T | null | undefined | false | Promise<T | null | undefined | false>,
@@ -252,7 +252,7 @@ async function underFakeTime<T>(
     await realLoopTurn()
     const value = await check()
     if (value !== null && value !== undefined && value !== false) return value
-    jest.advanceTimersByTime(stepMs)
+    if (stepMs > 0) jest.advanceTimersByTime(stepMs)
   }
   throw new Error(`[test] ${label} did not settle under fake time.`)
 }
@@ -276,6 +276,16 @@ async function settleUnderFakeTime<T>(promise: Promise<T>, label: string): Promi
 /** Stop a worker started under fake timers: its shutdown may still wait on a backoff. */
 function stopUnderFakeTime(worker: AgentWorker): Promise<void> {
   return settleUnderFakeTime(worker.stop(), "worker stop")
+}
+
+/**
+ * Pin a production backoff: the fake time spent since `start` covers the whole backoff and at
+ * most a few driver steps more, so a shortened or stretched backoff fails.
+ */
+function expectBackoffSpent(start: number, backoffMs: number): void {
+  const spent = Date.now() - start
+  expect(spent).toBeGreaterThanOrEqual(backoffMs)
+  expect(spent).toBeLessThan(backoffMs + 500)
 }
 
 async function terminalRun(storage: AgentStorage, runId: string) {
@@ -3363,9 +3373,11 @@ describe("AgentWorker", () => {
     })
 
     // Hold the run open until the first grant has been renewed.
+    let modelStarted = false
     const model = new WorkerTestModel({
       modelId: "mock-model",
       stream: async () => {
+        modelStarted = true
         await renewal
         return stream([
           { type: "stream-start", warnings: [] },
@@ -3399,7 +3411,7 @@ describe("AgentWorker", () => {
                   { origin: repository, path: "/repository.git/info/refs", method: "GET" as const },
                   { origin: graphql, path: "/graphql", method: "POST" as const },
                 ].map((target) => ({ ...target, headers: { Authorization: token } })),
-                // The first grant is renewed about one second after issuance.
+                // The first grant is renewed one second after issuance.
                 expiresAt: new Date(Date.now() + (issued === 1 ? 61_000 : 3_600_000)),
                 revoke: async () => {},
               }
@@ -3412,15 +3424,20 @@ describe("AgentWorker", () => {
     const thread = await sdk.agent.threads.create({ sandbox: {} })
     const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
     const completion = observeQueueSettlement(host.queues.agents)
+    // The renewal is due one second after the first grant is issued: drive that with fake time.
+    jest.useFakeTimers()
     const worker = new AgentWorker(host, workerOptions())
-    await worker.start()
     try {
-      await completion.wait()
+      await worker.start()
+      await underFakeTime(() => modelStarted, "model held for the renewal", 0)
+      jest.advanceTimersByTime(1_000)
+      await underFakeTime(completion.settled, "queue delivery settled", 0)
       expect(
         await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
       ).toMatchObject({ status: "succeeded" })
     } finally {
-      await worker.stop()
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
       completion.restore()
     }
 
@@ -5713,6 +5730,7 @@ describe("AgentWorker", () => {
     }
     // Fake timers stand in for the recorder's storage retry backoff.
     jest.useFakeTimers()
+    const start = Date.now()
     const worker = new AgentWorker(workerHost, workerOptions())
     try {
       await worker.start()
@@ -5720,6 +5738,8 @@ describe("AgentWorker", () => {
         () => terminalAgentNode(runs, nodeRunId),
         "workflow accounting failure"
       )
+      // The recorder's storage retries: 50 + 200 + 600ms.
+      expectBackoffSpent(start, 850)
 
       expect(execution.status).toBe("failed")
       expect(execution.error).toMatchObject({
@@ -7866,6 +7886,7 @@ describe("AgentWorker", () => {
 
     // Fake timers stand in for the recorder's storage retry backoff.
     jest.useFakeTimers()
+    const start = Date.now()
     const worker = new AgentWorker(workerHost, workerOptions())
     try {
       await worker.start()
@@ -7874,6 +7895,8 @@ describe("AgentWorker", () => {
         () => terminalRun(storage, request.run.id),
         "usage recovery run terminal"
       )
+      // The recorder's storage retries: 50 + 200 + 600ms.
+      expectBackoffSpent(start, 850)
 
       expect(run.status).toBe("failed")
       expect(run.error).toMatchObject({
@@ -9444,6 +9467,7 @@ describe("AgentWorker", () => {
 
     // Fake timers stand in for the in-place preparation backoff.
     jest.useFakeTimers()
+    const start = Date.now()
     const worker = new AgentWorker(host, workerOptions())
     try {
       await worker.start()
@@ -9452,6 +9476,8 @@ describe("AgentWorker", () => {
         () => terminalRun(storage, request.run.id),
         "run prepared after a storage blip"
       )
+      // One in-place preparation retry: 250ms.
+      expectBackoffSpent(start, 250)
       expect(run).toMatchObject({ status: "succeeded", attempt: 1 })
       expect(reads.count).toBeGreaterThanOrEqual(2)
     } finally {
@@ -9481,6 +9507,7 @@ describe("AgentWorker", () => {
     const retried = spyOn(sixb.queues.agents, "retry")
 
     jest.useFakeTimers()
+    const start = Date.now()
     const worker = new AgentWorker(host, workerOptions())
     try {
       await worker.start()
@@ -9488,6 +9515,8 @@ describe("AgentWorker", () => {
         () => terminalRun(storage, request.run.id),
         "run failed after its last preparation retry"
       )
+      // The last in-place preparation retry: 250ms.
+      expectBackoffSpent(start, 250)
       expect(run).toMatchObject({ status: "failed", attempt: 1 })
       expect(reads.count).toBe(2)
       expect(
@@ -9808,6 +9837,7 @@ describe("AgentWorker", () => {
 
     // Fake timers stand in for the in-place finalization backoff.
     jest.useFakeTimers()
+    const start = Date.now()
     const worker = new AgentWorker(workerSixb, workerOptions())
     try {
       await worker.start()
@@ -9815,6 +9845,8 @@ describe("AgentWorker", () => {
         run: { threadId, id: runId },
       } = await requestAgent(sixb, { text: "echo hi" })
       const run = await underFakeTime(() => terminalRun(storage, runId), "run finalized after blip")
+      // Two finalization retries: 50 + 200ms.
+      expectBackoffSpent(start, 250)
 
       // The in-place retry recovered: the run succeeded on this delivery, with exactly one assistant
       // message (no redelivery, so no duplicate turn), and the thread is released (no silent lock).
@@ -9847,6 +9879,7 @@ describe("AgentWorker", () => {
     const failingStorage = withAlwaysFailingTransactionalFinish(sixb.storage)
     // Fake timers stand in for the in-place finalization backoff the failure exhausts.
     jest.useFakeTimers()
+    const start = Date.now()
     try {
       const turn = runAgentTurn({
         context: {
@@ -9872,6 +9905,8 @@ describe("AgentWorker", () => {
         (caught: unknown) => caught
       )
       expect(error).toBeInstanceOf(AgentFinalizationError)
+      // Every finalization retry: 50 + 200 + 600ms.
+      expectBackoffSpent(start, 850)
     } finally {
       jest.useRealTimers()
     }
@@ -10771,6 +10806,7 @@ describe("agent tools act as the requester", () => {
     }
     // Fake timers stand in for the recorder's storage and recovery retry backoff.
     jest.useFakeTimers()
+    const start = Date.now()
     const worker = new AgentWorker(workerHost, workerOptions())
     try {
       await worker.start()
@@ -10779,6 +10815,8 @@ describe("agent tools act as the requester", () => {
         () => terminalRun(agentStorageOf(sixb), request.run.id),
         "unaccounted tool call run terminal"
       )
+      // The recorder's storage retries, then its recovery retries: 2 × (50 + 200 + 600)ms.
+      expectBackoffSpent(start, 1_700)
       expect(run.status).toBe("failed")
       expect(run.error?.code).toBe("agent.execution_failed")
       expect(callIds).toHaveLength(2)
@@ -10810,12 +10848,15 @@ describe("finishRunOrThrow", () => {
     })
     // Fake timers stand in for the in-place backoff between attempts.
     jest.useFakeTimers()
+    const start = Date.now()
     try {
       const error = await settleUnderFakeTime(
         finishRunOrThrow(storage, succeededInput),
         "finalization retries"
       ).catch((caught: unknown) => caught)
       expect(error).toBeInstanceOf(AgentFinalizationError)
+      // Every finalization retry: 50 + 200 + 600ms.
+      expectBackoffSpent(start, 850)
     } finally {
       jest.useRealTimers()
     }
