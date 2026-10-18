@@ -3,7 +3,7 @@ import { aiUsageLimitExceededError } from "@sixb/core/internal/ai-limit-enforcem
 import { createSixbError } from "@sixb/core/internal/errors"
 import { AgentRuntimeProfileError } from "../src/agent-runtime/errors"
 import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
-import { toAgentExecutionFailure } from "../src/failure"
+import { type AgentRunFailure, toAgentExecutionFailure } from "../src/failure"
 
 const at = new Date("2026-08-14T12:00:00.000Z")
 const details = {
@@ -13,44 +13,56 @@ const details = {
 }
 
 describe("Agent execution failure", () => {
-  test("classifies native active-execution errors without exposing their message", () => {
-    const error = new Error("provider unavailable")
-
-    expect(toAgentExecutionFailure(error, { status: "failed", at, details })).toEqual({
-      code: "agent.execution_failed",
-      message: "Agent execution failed.",
-      retryable: false,
-      at: at.toISOString(),
-      details,
-    })
-  })
-
-  test("preserves coded internal invariants without exposing their message", () => {
-    const error = createSixbError("internal.unexpected", "Execution state is inconsistent.", {
-      details: { actorId: details.actorId, runId: details.runId },
-    })
-
-    expect(toAgentExecutionFailure(error, { status: "failed", at, details })).toEqual({
-      code: "internal.unexpected",
-      message: "An unexpected internal error occurred.",
-      retryable: false,
-      at: at.toISOString(),
-      details: { actorId: details.actorId, runId: details.runId },
-    })
-  })
-
-  test("preserves AI usage-limit failures as a distinct terminal state", () => {
-    const error = aiUsageLimitExceededError(new Date("2026-09-01T00:00:00.000Z"))
-
-    expect(toAgentExecutionFailure(error, { status: "failed", at, details })).toEqual({
-      code: "ai.usage_limit_exceeded",
-      message: "AI usage limit exceeded.",
-      retryable: false,
-      at: at.toISOString(),
-      details: {
-        resetAt: "2026-09-01T00:00:00.000Z",
+  test.each<{
+    readonly error: string
+    readonly cause: unknown
+    readonly failure: Omit<AgentRunFailure, "retryable" | "at">
+  }>([
+    {
+      error: "a native active-execution error",
+      cause: new Error("provider unavailable"),
+      failure: { code: "agent.execution_failed", message: "Agent execution failed.", details },
+    },
+    {
+      error: "a coded internal invariant",
+      cause: createSixbError("internal.unexpected", "Execution state is inconsistent.", {
+        details: { actorId: details.actorId, runId: details.runId },
+      }),
+      failure: {
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: { actorId: details.actorId, runId: details.runId },
       },
-    })
+    },
+    {
+      error: "an AI usage-limit failure",
+      cause: aiUsageLimitExceededError(new Date("2026-09-01T00:00:00.000Z")),
+      failure: {
+        code: "ai.usage_limit_exceeded",
+        message: "AI usage limit exceeded.",
+        details: { resetAt: "2026-09-01T00:00:00.000Z" },
+      },
+    },
+    {
+      error: "a runtime-profile failure",
+      cause: new AgentRuntimeProfileError("smolvm", "javascript-runtime", "unsupported-version"),
+      failure: {
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
+        details: {
+          ...details,
+          provider: "smolvm",
+          runtimeProfile: AGENT_RUNTIME_PROFILE,
+          runtimeCheck: "javascript-runtime",
+          runtimeFailure: "unsupported-version",
+          remediation: "Provide Bun 1.3+ or Node 22+ in the configured sandbox host or image.",
+        },
+      },
+    },
+  ])("records $error without exposing its message", ({ cause, failure }) => {
+    const recorded = toAgentExecutionFailure(cause, { status: "failed", at, details })
+    expect(recorded).toEqual({ ...failure, retryable: false, at: at.toISOString() })
+    expect(JSON.stringify(recorded)).not.toContain("http")
   })
 
   test("keeps cancellation in the runtime vocabulary", () => {
@@ -67,30 +79,5 @@ describe("Agent execution failure", () => {
       at: at.toISOString(),
       details,
     })
-  })
-
-  test("records actionable runtime-profile context without exposing a gateway URL", () => {
-    const error = new AgentRuntimeProfileError(
-      "smolvm",
-      "javascript-runtime",
-      "unsupported-version"
-    )
-    const failure = toAgentExecutionFailure(error, { status: "failed", at, details })
-
-    expect(failure).toEqual({
-      code: "agent.execution_failed",
-      message: "Agent execution failed.",
-      retryable: false,
-      at: at.toISOString(),
-      details: {
-        ...details,
-        provider: "smolvm",
-        runtimeProfile: AGENT_RUNTIME_PROFILE,
-        runtimeCheck: "javascript-runtime",
-        runtimeFailure: "unsupported-version",
-        remediation: "Provide Bun 1.3+ or Node 22+ in the configured sandbox host or image.",
-      },
-    })
-    expect(JSON.stringify(failure)).not.toContain("http")
   })
 })

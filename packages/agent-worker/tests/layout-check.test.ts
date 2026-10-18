@@ -277,15 +277,21 @@ exports.chromium = {
 }
 `
       )
-      const handle = { sandbox: new LocalBashSandbox(root), env: { SIXB_PLAYWRIGHT: playwright } }
-      expect(await check(handle, { timeoutMs: 3_000 })).toEqual({
+      // A 600ms timeout puts the check's deadline at 500ms. The sandbox kills the command only
+      // after five seconds, so a slow start of node never reads as the deadline.
+      const sandbox = new LocalBashSandbox(root)
+      const run = sandbox.runCommand.bind(sandbox)
+      sandbox.runCommand = (command, args, options) =>
+        run(command, args, { ...options, timeout: 5_000 })
+      const handle = { sandbox, env: { SIXB_PLAYWRIGHT: playwright } }
+      expect(await check(handle, { timeoutMs: 600 })).toEqual({
         status: "checked",
         screenshots: [".sixb/agent/checks/art_0000000000-v1/slide-01.png"],
         warnings: [
           {
             code: "layout_incomplete",
             message:
-              "The check stopped early: the check took longer than 3 seconds. Slides it did not reach were not checked.",
+              "The check stopped early: the check took longer than 1 seconds. Slides it did not reach were not checked.",
           },
         ],
       })

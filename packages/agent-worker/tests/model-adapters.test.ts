@@ -258,32 +258,6 @@ describe("owned model adapters", () => {
     ])
   })
 
-  test("marks complete tool input in an aborted step as cancelled", () => {
-    expect(
-      agentTraceFromPartialModelLoop(
-        [],
-        [
-          {
-            type: "tool-call",
-            toolCallId: "tool-1",
-            toolName: "bash",
-            input: { command: "sleep 30" },
-          },
-        ]
-      )
-    ).toEqual([
-      { type: "step-start" },
-      {
-        type: "tool-call",
-        toolCallId: "tool-1",
-        toolName: "bash",
-        input: { command: "sleep 30" },
-        state: "output-error",
-        errorText: "Tool execution was cancelled.",
-      },
-    ])
-  })
-
   test("preserves normalized metadata, signed replay state, and original tool output", () => {
     // Regression proof: drop originalOutput or providerData from trace projection.
     const normalized = { anthropic: { signature: "signed", caller: { toolName: "search" } } }

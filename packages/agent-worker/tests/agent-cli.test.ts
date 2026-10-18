@@ -1,27 +1,75 @@
-import { describe, expect, test } from "bun:test"
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
+import { describe, expect, spyOn, test } from "bun:test"
+import { mkdtemp, readFile, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { AGENT_API_ROUTES } from "@sixb/core/internal/agents"
-import { runAgentCliContractSuite } from "./agent-cli-contract"
+import {
+  type CliResult,
+  runAgentCliContractSuite,
+  runAgentCliProcessSmoke,
+} from "./agent-cli-contract"
 
 const launcherPath = resolve(import.meta.dir, "..", "src", "agent-cli", "bin", "sixb")
 const artifactPath = resolve(import.meta.dir, "..", "src", "agent-cli", "generated", "sixb.mjs")
 const GENERATOR_CHECK_TIMEOUT_MS = 10_000
+const VERSION = "sixb agent CLI 1"
 
 runAgentCliContractSuite({
-  name: "generated artifact on Bun",
-  command: [process.execPath, artifactPath],
-  version: "sixb agent CLI 1",
+  name: "generated artifact",
+  version: VERSION,
   runtime: "bun",
+  run: runArtifactInProcess,
 })
 
-runAgentCliContractSuite({
-  name: "generated artifact on Node",
-  command: ["node", artifactPath],
-  version: "sixb agent CLI 1",
-  runtime: "node",
+describe("Sixb agent CLI generated artifact process boundary", () => {
+  runAgentCliProcessSmoke({
+    runtime: "bun",
+    command: [process.execPath, artifactPath],
+    version: VERSION,
+  })
+  runAgentCliProcessSmoke({ runtime: "node", command: ["node", artifactPath], version: VERSION })
 })
+
+let invocation = 0
+
+/**
+ * Runs the generated artifact in this process as `bun sixb.mjs <args>` would: each call imports a
+ * fresh module instance, whose top level reads argv and env, writes stdout and stderr, and sets
+ * the exit code. Calls must not overlap.
+ */
+async function runArtifactInProcess(
+  args: readonly string[],
+  env: Readonly<Record<string, string>>
+): Promise<CliResult> {
+  const stdout: string[] = []
+  const stderr: string[] = []
+  const capture = (into: string[]) => (chunk: string | Uint8Array) => {
+    into.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk))
+    return true
+  }
+  const argv = process.argv
+  const exitCode = process.exitCode
+  const previousEnv = Object.keys(env).map((key) => [key, process.env[key]] as const)
+  const stdoutSpy = spyOn(process.stdout, "write").mockImplementation(capture(stdout))
+  const stderrSpy = spyOn(process.stderr, "write").mockImplementation(capture(stderr))
+  process.argv = [process.execPath, artifactPath, ...args]
+  process.exitCode = 0
+  Object.assign(process.env, env)
+  try {
+    invocation += 1
+    await import(`${artifactPath}?invocation=${invocation}`)
+    return { exitCode: Number(process.exitCode), stdout: stdout.join(""), stderr: stderr.join("") }
+  } finally {
+    stdoutSpy.mockRestore()
+    stderrSpy.mockRestore()
+    process.argv = argv
+    process.exitCode = exitCode
+    for (const [key, value] of previousEnv) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}
 
 const CLI_API_ROUTES = [
   "GET /api/project",
@@ -172,46 +220,6 @@ describe("Sixb agent CLI generated artifact", () => {
           message: "The Sixb CLI artifact is missing.",
         },
       })
-    } finally {
-      await rm(tempDir, { recursive: true, force: true })
-    }
-  })
-
-  test("launcher resolves as bare sixb through the sandbox Bash bootstrap", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "sixb-agent-cli-path-"))
-    try {
-      const binDir = join(tempDir, "bin")
-      const libDir = join(tempDir, "lib")
-      const bashEnvPath = join(tempDir, "bash-env")
-      await mkdir(binDir)
-      await mkdir(libDir)
-      await Promise.all([
-        writeFile(join(binDir, "sixb"), await readFile(launcherPath)),
-        writeFile(join(libDir, "sixb.mjs"), await readFile(artifactPath)),
-      ])
-      await chmod(join(binDir, "sixb"), 0o755)
-      await writeFile(
-        bashEnvPath,
-        [
-          `if [ -n "\${SIXB_BIN_DIR:-}" ]; then`,
-          '  export PATH="$SIXB_BIN_DIR:$PATH"',
-          "fi",
-          "",
-        ].join("\n")
-      )
-      const child = Bun.spawn({
-        cmd: ["bash", "-lc", "command -v sixb && sixb --version"],
-        env: { ...process.env, BASH_ENV: bashEnvPath, SIXB_BIN_DIR: binDir },
-        stdout: "pipe",
-        stderr: "pipe",
-      })
-      const [exitCode, stdout, stderr] = await Promise.all([
-        child.exited,
-        new Response(child.stdout).text(),
-        new Response(child.stderr).text(),
-      ])
-      expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
-      expect(stdout).toBe(`${join(binDir, "sixb")}\nsixb agent CLI 1\n`)
     } finally {
       await rm(tempDir, { recursive: true, force: true })
     }

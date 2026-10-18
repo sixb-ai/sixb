@@ -42,23 +42,16 @@ describe("workspace network", () => {
     })
   })
 
-  test("keeps the project's name for an origin it already lists", () => {
+  test("lists each origin once, under the project's name when it lists it", () => {
     const github = { name: "github", origin: repository }
 
     expect(
       workspaceNetwork({ mode: "restricted", allow: [github] }, api, repository, [repository])
     ).toEqual({ mode: "restricted", allow: [github, baseline.allow[0]] })
-  })
-
-  test("opens credential origins once, without repeating required ones", () => {
-    const inferred: SandboxNetworkPolicy = {
+    expect(workspaceNetwork(undefined, api, repository, [credential, credential, api])).toEqual({
       mode: "restricted",
       allow: [...baseline.allow, { name: "workspace-auth", origin: credential }],
-    }
-
-    expect(workspaceNetwork(undefined, api, repository, [credential, credential, api])).toEqual(
-      inferred
-    )
+    })
   })
 
   test("keeps an all policy unchanged", () => {

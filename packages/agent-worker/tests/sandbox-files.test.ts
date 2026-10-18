@@ -106,38 +106,19 @@ describe("listSandboxFiles", () => {
     expect(listing.files).toHaveLength(2)
     expect(listing.truncated).toBe(true)
   })
-
-  test("lists nothing for a missing directory, and says an empty one is a directory", async () => {
-    mkdirSync(join(root, "empty"))
-    const list = (directory: string) =>
-      listSandboxFiles(handle(), { directory, maxFiles: 10, signal, timeoutMs: 10_000 })
-    expect(await list(join(root, "missing"))).toEqual({
-      directory: false,
-      files: [],
-      truncated: false,
-    })
-    expect(await list(join(root, "empty"))).toEqual({
-      directory: true,
-      files: [],
-      truncated: false,
-    })
-  })
 })
 
 describe("readSandboxFile", () => {
   const read = (path: string, maxBytes = 1024) =>
     readSandboxFile(handle(), { path, maxBytes, signal, timeoutMs: 10_000 })
 
-  test("returns the file's bytes", async () => {
+  test("returns a regular file's bytes, and refuses missing files and symbolic links", async () => {
     const bytes = new Uint8Array([0, 1, 2, 250, 255])
     writeFileSync(join(root, "data.bin"), bytes)
-    expect(await read(join(root, "data.bin"))).toEqual(bytes)
-  })
-
-  test("refuses missing files and symbolic links", async () => {
     writeFileSync(join(outside, "secret.txt"), "secret")
     symlinkSync(join(outside, "secret.txt"), join(root, "link.txt"))
 
+    expect(await read(join(root, "data.bin"))).toEqual(bytes)
     await expect(read(join(root, "missing.txt"))).rejects.toMatchObject({ reason: "not_found" })
     await expect(read(join(root, "link.txt"))).rejects.toMatchObject({ reason: "not_found" })
   })

@@ -91,35 +91,35 @@ describe("agent context budget resolution", () => {
     expect(outputs).toEqual([400, 100, 400])
     expect(model.definition.contextWindow).toBeUndefined()
   })
-  // Regression proof: remove maxInputTokens from the budget calculation.
-  test("respects separate context and input limits", () => {
-    expect(
-      resolveAgentContextBudget(selection({ contextWindow: 1_050_000, maxInputTokens: 922_000 }))
-    ).toEqual({
-      windowTokens: 1_050_000,
-      inputBudgetTokens: 922_000,
+  // Regression proof: remove maxInputTokens from the budget calculation (first row), or the
+  // fallback from resolveAgentContextBudget (last row).
+  test.each([
+    {
+      limits: "separate context and input limits",
+      definition: { contextWindow: 1_050_000, maxInputTokens: 922_000 },
+      budget: { windowTokens: 1_050_000, inputBudgetTokens: 922_000, source: "model" },
+    },
+    {
+      limits: "only an input limit, which it treats as a conservative window",
+      definition: { maxInputTokens: 32_000 },
+      budget: {
+        windowTokens: 32_000,
+        inputBudgetTokens: 24_000,
+        reserveTokens: 8_000,
+        keepRecentTokens: 12_000,
+      },
+    },
+    {
+      limits: "no model limit, which falls back to 128k",
+      definition: {},
+      budget: { windowTokens: 128_000, inputBudgetTokens: 111_616, source: "fallback" },
+    },
+  ] as const)("derives the budget from $limits", ({ definition, budget }) => {
+    expect(resolveAgentContextBudget(selection(definition))).toMatchObject({
       reserveTokens: 16_384,
       keepRecentTokens: 20_000,
       source: "model",
-    })
-  })
-
-  test("reserves space conservatively when only an input limit is known", () => {
-    expect(resolveAgentContextBudget(selection({ maxInputTokens: 32_000 }))).toMatchObject({
-      windowTokens: 32_000,
-      inputBudgetTokens: 24_000,
-      source: "model",
-    })
-  })
-
-  // Regression proof: remove the fallback in resolveAgentContextBudget.
-  test("uses the 128k fallback only when no model limit is available", () => {
-    expect(resolveAgentContextBudget(selection())).toEqual({
-      windowTokens: 128_000,
-      inputBudgetTokens: 111_616,
-      reserveTokens: 16_384,
-      keepRecentTokens: 20_000,
-      source: "fallback",
+      ...budget,
     })
   })
 
@@ -133,39 +133,29 @@ describe("agent context budget resolution", () => {
   })
 
   // Regression proof: skip model resolution and the discovered window is lost.
-  test("resolves model metadata without mutating the configured binding", async () => {
-    const base = selection()
+  test("resolves each binding's metadata once, without mutating or conflating bindings", async () => {
     let calls = 0
-    const model = Object.assign(base.model, {
-      resolve: async () => {
-        calls += 1
-        return new WorkerTestModel({
-          definition: defineLanguageModel({ ...base.model.definition, contextWindow: 32_000 }),
-        })
-      },
-    })
-    const { budget } = await prepareAgentModel({ ...base, model })
-    expect(calls).toBe(1)
-    expect(budget.inputBudgetTokens).toBe(24_000)
-    expect(model.definition.contextWindow).toBeUndefined()
-  })
-
-  test("does not conflate different bindings of the same provider and model", async () => {
-    const bindings = [32_000, 64_000].map((contextWindow, index) => {
+    const bindings = [32_000, 64_000].map((contextWindow) => {
       const base = selection()
       return {
         ...base,
-        id: `agent-${index}`,
         model: Object.assign(base.model, {
-          resolve: async () =>
-            new WorkerTestModel({
+          resolve: async () => {
+            calls += 1
+            return new WorkerTestModel({
               definition: defineLanguageModel({ ...base.model.definition, contextWindow }),
-            }),
+            })
+          },
         }),
       }
     })
     const prepared = await Promise.all(bindings.map(prepareAgentModel))
-    expect(prepared.map(({ budget }) => budget.windowTokens)).toEqual([32_000, 64_000])
+    expect(calls).toBe(2)
+    expect(prepared.map(({ budget }) => budget.inputBudgetTokens)).toEqual([24_000, 48_000])
+    expect(bindings.map(({ model }) => model.definition.contextWindow)).toEqual([
+      undefined,
+      undefined,
+    ])
   })
 
   test("starts offline with sufficient local metadata", async () => {

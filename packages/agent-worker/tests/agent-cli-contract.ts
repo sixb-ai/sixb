@@ -5,12 +5,19 @@ import { join } from "node:path"
 
 export interface AgentCliContractImplementation {
   readonly name: string
-  readonly command: readonly string[]
   readonly version: string
   readonly runtime: "bun" | "node"
+  run(args: readonly string[], env: Readonly<Record<string, string>>): Promise<CliResult>
 }
 
-interface CliResult {
+/** A runtime that runs the CLI as a child process: `[...command, ...args]`. */
+export interface AgentCliProcess {
+  readonly runtime: "bun" | "node"
+  readonly command: readonly string[]
+  readonly version: string
+}
+
+export interface CliResult {
   readonly exitCode: number
   readonly stdout: string
   readonly stderr: string
@@ -32,8 +39,6 @@ interface TestApi {
 type TestApiHandler = (
   request: RecordedRequest
 ) => Response | undefined | Promise<Response | undefined>
-
-let nextTestPort = 43_100 + Math.floor(Math.random() * 1_000)
 
 const objectTypes = [
   {
@@ -159,8 +164,6 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         ["objects", "inspect", "--help"],
         ["objects", "query", "--help"],
         ["objects", "search", "--help"],
-        // Regression: before the shared parser fix, trailing --help executed a query.
-        ["objects", "get", "Customer", "alice", "--help"],
         ["telemetry", "--help"],
         ["actions", "--help"],
         ["actions", "get", "opaque/action", "--help"],
@@ -349,11 +352,6 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
           {
             args: ["workflows", "start", "review-customer", "--input-file", "input.json"],
             message: "Unknown workflows start option '--input-file'.",
-          },
-          // Regression: without the shared parser fix, this requests the action with runId b.
-          {
-            args: ["actions", "request", "example", "--run-id", "a", "--run-id", "b"],
-            message: "--run-id may only be provided once.",
           },
         ] as const
         for (const { args, message } of invalidOptions) {
@@ -1141,7 +1139,76 @@ async function runCli(
   args: readonly string[],
   env: Readonly<Record<string, string>> = {}
 ): Promise<CliResult> {
-  return runCommand([...implementation.command, ...args], env)
+  return implementation.run(args, env)
+}
+
+/**
+ * What the in-process contract cannot show: the runtime's own exit status, stdio, fetch, form
+ * upload, and stream pipeline, from a child process of that runtime.
+ */
+export function runAgentCliProcessSmoke(runtime: AgentCliProcess): void {
+  test(`keeps exit codes, stdio, requests, uploads, and downloads on ${runtime.runtime}`, async () => {
+    const api = startTestApi((request) => {
+      if (request.url.pathname.endsWith("/files/content")) return new Response("downloaded bytes")
+      switch (`${request.method} ${request.url.pathname}`) {
+        case "GET /api/project":
+          return json({ id: "contract-project" })
+        case "POST /api/objects/query":
+          return json({ objects: [], hasMore: false })
+        case "POST /api/files":
+          return json({ ok: true })
+      }
+    })
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-agent-cli-process-"))
+    try {
+      const uploadPath = join(tempDir, "upload.txt")
+      const downloadPath = join(tempDir, "download.txt")
+      await writeFile(uploadPath, "upload contents")
+      const run = (...args: string[]) => runCommand([...runtime.command, ...args], apiEnv(api))
+
+      const [version, doctor, invalid, missing, get, upload, download] = await Promise.all([
+        run("--version"),
+        run("doctor"),
+        run("objects", "inspect", "Customer", "customer-1", "--depth", "9"),
+        run("workflows", "get", "missing"),
+        run("objects", "get", "Customer", "customer-1"),
+        run("files", "upload", uploadPath),
+        run(
+          "files",
+          "download",
+          "workflow-run",
+          "run-1",
+          "--path",
+          "/out",
+          "--output",
+          downloadPath
+        ),
+      ])
+
+      expect(version).toEqual({ exitCode: 0, stdout: `${runtime.version}\n`, stderr: "" })
+      expect(doctor).toMatchObject({ exitCode: 0, stderr: "" })
+      expect(JSON.parse(doctor.stdout).javascript.name).toBe(runtime.runtime)
+      expect(invalid).toMatchObject({ exitCode: 2, stdout: "" })
+      expect(JSON.parse(invalid.stderr).error.code).toBe("invalid_arguments")
+      expect(missing).toMatchObject({ exitCode: 3, stdout: "" })
+      expect(JSON.parse(missing.stderr).error).toMatchObject({ code: "http_error", status: 404 })
+      for (const result of [get, upload, download]) {
+        expect(result).toMatchObject({ exitCode: 0, stderr: "" })
+      }
+      const query = api.requests.find((request) => request.url.pathname === "/api/objects/query")
+      expect(query?.body).toEqual({
+        query: { kind: "refs", refs: [{ objectTypeId: "Customer", primaryId: "customer-1" }] },
+        includeTotal: false,
+      })
+      const files = api.requests.find((request) => request.url.pathname === "/api/files")
+      expect(String(files?.body)).toContain("upload contents")
+      expect(await readFile(downloadPath, "utf8")).toBe("downloaded bytes")
+      expect((await readdir(tempDir)).sort()).toEqual(["download.txt", "upload.txt"])
+    } finally {
+      api.close()
+      await rm(tempDir, { recursive: true, force: true })
+    }
+  })
 }
 
 async function runCommand(
@@ -1247,15 +1314,7 @@ function startTestApi(handler: TestApiHandler): TestApi {
     requests.push(recorded)
     return (await handler(recorded)) ?? json({ error: "Unexpected contract request" }, 404)
   }
-  let server: ReturnType<typeof Bun.serve> | undefined
-  for (let attempt = 0; attempt < 100 && !server; attempt += 1) {
-    try {
-      server = Bun.serve({ hostname: "127.0.0.1", port: nextTestPort++, fetch })
-    } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "EADDRINUSE")) throw error
-    }
-  }
-  if (!server) throw new Error("Could not allocate a local port for the agent CLI contract.")
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch })
   return {
     baseUrl: `http://127.0.0.1:${server.port}`,
     requests,

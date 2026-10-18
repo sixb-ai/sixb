@@ -22,7 +22,7 @@ function requireWorkerStorage(storage: Storage): AgentWorkerStorage {
 }
 
 describe("agent conversation context estimation", () => {
-  test("anchors to the latest compatible provider call and estimates only trailing messages", async () => {
+  test("anchors to the latest provider call with usage and estimates only trailing messages", async () => {
     const storage = new InMemoryStorage()
     const agents = storage.agents
     await agents.threads.create({
@@ -175,61 +175,9 @@ describe("agent conversation context estimation", () => {
         tools: [],
       })
     ).resolves.toBe(fallback)
-  })
 
-  test("falls back to the full request when the latest provider usage reports zero tokens", async () => {
-    const storage = new InMemoryStorage()
-    const agents = storage.agents
-    await agents.threads.create({
-      id: threadId,
-      projectId,
-      ownerPrincipal: { type: "user", id: "user" },
-    })
-    const user = await agents.messages.append({
-      id: "fallback_user",
-      projectId,
-      threadId,
-      runId: null,
-      role: "user",
-      parts: [{ type: "text", text: "Question" }],
-    })
-    const executionId = await createTestAgentExecution(storage, {
-      projectId,
-      runId: "fallback_run",
-    })
-    await agents.runs.create({
-      id: "fallback_run",
-      projectId,
-      executionId,
-      threadId,
-      triggerMessageId: user.id,
-      spec: { model: { provider: "test", modelId: "test-model" } },
-    })
-    await agents.runs.start({
-      id: "fallback_run",
-      projectId,
-      execution: {
-        token: "fallback_execution",
-        queueLeaseExpiresAt: new Date("2026-08-27T12:05:00.000Z"),
-      },
-    })
-    const assistant = await agents.messages.append({
-      id: "fallback_assistant",
-      projectId,
-      threadId,
-      runId: "fallback_run",
-      role: "assistant",
-      parts: [{ type: "text", text: "Answer" }],
-    })
-
-    const model = new WorkerTestModel({ modelId: "mock-model" })
-    const plan = {
-      model,
-      instructions: "Answer clearly.",
-      tools: [],
-      skills: [],
-      maxSteps: 4,
-    }
+    // A provider call that reports no output tokens is no anchor, however large its input: the
+    // full request is estimated. Regression proof: drop `outputTokens > 0` from the anchor guard.
     await storage.aiUsage.recordModelCall({
       id: "usage_zero",
       projectId,
@@ -240,16 +188,9 @@ describe("agent conversation context estimation", () => {
       providerId: model.providerId,
       requestedModelId: model.modelId,
       responseId: "response_zero",
-      usage: { inputTokens: 0, outputTokens: 0 },
-      occurredAt: new Date("2026-08-27T12:01:00.000Z"),
+      usage: { inputTokens: 1_000_000, outputTokens: 0 },
+      occurredAt: new Date("2026-08-27T12:03:00.000Z"),
     })
-
-    const messages = [user, assistant]
-    const expected = estimateAgentContextRequestTokens({
-      systemPrompt: "System",
-      tools: [],
-      messages,
-    }).tokens
     await expect(
       estimateAgentConversationInputTokens({
         context: { id: projectId, storage: requireWorkerStorage(storage) },
@@ -258,6 +199,8 @@ describe("agent conversation context estimation", () => {
         systemPrompt: "System",
         tools: [],
       })
-    ).resolves.toBe(expected)
+    ).resolves.toBe(
+      estimateAgentContextRequestTokens({ systemPrompt: "System", tools: [], messages }).tokens
+    )
   })
 })

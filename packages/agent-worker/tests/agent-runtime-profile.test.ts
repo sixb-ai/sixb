@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
 import { chmod, mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import type { CommandResult, RunCommandOptions, Sandbox } from "@sixb/core"
@@ -47,14 +47,15 @@ class StubSandbox implements Sandbox {
   readonly status = "running" as const
   readonly commands: RecordedCommand[] = []
 
-  private readonly delayMs: number
+  private readonly gatewayProbeMs: number
 
+  /** `gatewayProbeMs` moves the frozen clock by that much for every command after the first. */
   constructor(
     private readonly responses: CommandResult[],
-    options: { readonly provider?: string; readonly delayMs?: number } = {}
+    options: { readonly provider?: string; readonly gatewayProbeMs?: number } = {}
   ) {
     this.provider = options.provider ?? "test-provider"
-    this.delayMs = options.delayMs ?? 0
+    this.gatewayProbeMs = options.gatewayProbeMs ?? 0
   }
 
   async runCommand(
@@ -63,7 +64,9 @@ class StubSandbox implements Sandbox {
     options: RunCommandOptions = {}
   ): Promise<CommandResult> {
     this.commands.push({ command, args, options })
-    if (this.delayMs > 0 && this.commands.length > 1) await Bun.sleep(this.delayMs)
+    if (this.gatewayProbeMs > 0 && this.commands.length > 1) {
+      setSystemTime(new Date(Date.now() + this.gatewayProbeMs))
+    }
     const response = this.responses.shift()
     if (!response) throw new Error("https://capability.invalid/run-secret/ was unavailable")
     return response
@@ -75,6 +78,8 @@ class StubSandbox implements Sandbox {
 }
 
 describe("sixb-agent-runtime/v1 preflight", () => {
+  afterEach(() => setSystemTime())
+
   test("checks local behavior once, then reaches the gateway through the installed CLI", async () => {
     const sandbox = new StubSandbox([SUCCESSFUL_LOCAL_PROBE, SUCCESSFUL_GATEWAY_PROBE])
 
@@ -250,6 +255,8 @@ describe("sixb-agent-runtime/v1 preflight", () => {
   test("bounds gateway retries by a short window after the first probe", async () => {
     // Regression proof: give every retry the full probe timeout and ignore the window; the
     // retried timeouts grow past the window and the probe count reaches the backoff list's length.
+    // The clock is frozen; each probe moves it by its simulated duration.
+    setSystemTime(new Date("2026-01-01T00:00:00.000Z"))
     const unreachable: CommandResult = {
       exitCode: 3,
       stdout: "",
@@ -257,7 +264,7 @@ describe("sixb-agent-runtime/v1 preflight", () => {
       durationMs: 100,
     }
     const slow = new StubSandbox([SUCCESSFUL_LOCAL_PROBE, ...Array(20).fill(unreachable)], {
-      delayMs: 100,
+      gatewayProbeMs: 100,
     })
     const startedAt = Date.now()
     await expect(
@@ -278,7 +285,7 @@ describe("sixb-agent-runtime/v1 preflight", () => {
     // A first probe that used its full timeout has outlived the window: it is not retried.
     const hung = new StubSandbox(
       [SUCCESSFUL_LOCAL_PROBE, { ...unreachable, exitCode: 137, stderr: "", timedOut: true }],
-      { delayMs: 50 }
+      { gatewayProbeMs: 50 }
     )
     await expect(
       assertAgentRuntimeProfile({
