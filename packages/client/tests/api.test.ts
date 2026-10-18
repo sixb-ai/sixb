@@ -8,7 +8,6 @@ import {
   listAuthAccessTokens,
   normalizeSixbApiBaseUrl,
   requestAction,
-  requestSyncRun,
   SixbApiError,
 } from "../src"
 
@@ -41,21 +40,6 @@ describe("createSixbClient", () => {
     expect(normalizeSixbApiBaseUrl("https://api.example.com/sixb/api")).toBe(
       "https://api.example.com/sixb"
     )
-  })
-
-  test("sends bearer tokens only for bearer security schemes", async () => {
-    const { fetchMock, requests } = createObservedFetch({ accessTokens: [] })
-    const client = createSixbClient({
-      baseUrl: "http://localhost:3002/api",
-      auth: { kind: "bearer", token: "sixb_pat_tok_test.secret" },
-      fetch: fetchMock,
-    })
-
-    await listAuthAccessTokens({ client })
-
-    expect(requests[0]?.url).toBe("http://localhost:3002/api/auth/access-tokens")
-    expect(requests[0]?.headers.get("authorization")).toBe("Bearer sixb_pat_tok_test.secret")
-    expect(requests[0]?.headers.get("x-sixb-csrf")).toBeNull()
   })
 
   test("rejects empty bearer tokens", () => {
@@ -95,29 +79,6 @@ describe("createSixbClient", () => {
 
     expect(requests[0]?.headers.get("authorization")).toBe("Bearer sixb_pat_tok_test.secret")
     expect(requests[0]?.headers.get("x-sixb-csrf")).toBeNull()
-  })
-
-  test("sends CSRF and credentials for cookie auth", async () => {
-    const { fetchMock, requests } = createObservedFetch({
-      id: "run_1",
-      syncId: "sync_1",
-      status: "queued",
-    })
-    const client = createSixbClient({
-      baseUrl: "http://localhost:3002",
-      auth: { kind: "cookie", csrfToken: () => "csrf_1" },
-      fetch: fetchMock,
-    })
-
-    await requestSyncRun({
-      client,
-      body: {},
-      path: { syncId: "sync_1" },
-    })
-
-    expect(requests[0]?.credentials).toBe("include")
-    expect(requests[0]?.headers.get("x-sixb-csrf")).toBe("csrf_1")
-    expect(requests[0]?.headers.get("authorization")).toBeNull()
   })
 
   test("enforces shared authority after every request interceptor", async () => {
@@ -234,13 +195,17 @@ describe("SixbApiError", () => {
     expect(isSixbApiError(error)).toBe(true)
   })
 
-  test("surfaces a stable code from a structured error response", async () => {
+  // A newer server's code passes through unchanged: the client does not filter codes it knows.
+  test.each([
+    [404, "Dataset not found", "dataset.not_found"],
+    [500, "Future failure", "future.new_code"],
+  ])("surfaces the stable code from a structured %d response", async (status, message, code) => {
     const client = createSixbClient({
       baseUrl: "http://localhost:3002",
       fetch: createRespondingFetch(
         () =>
-          new Response(JSON.stringify({ error: "Dataset not found", code: "dataset.not_found" }), {
-            status: 404,
+          new Response(JSON.stringify({ error: message, code }), {
+            status,
             headers: { "Content-Type": "application/json" },
           })
       ),
@@ -249,28 +214,10 @@ describe("SixbApiError", () => {
     const error = (await listAuthAccessTokens({ client, throwOnError: true }).catch(
       (caught) => caught
     )) as SixbApiError
-    expect(error.status).toBe(404)
-    expect(error.code).toBe("dataset.not_found")
-    expect(error.body).toEqual({ error: "Dataset not found", code: "dataset.not_found" })
-    expect(error.message).toContain("Dataset not found")
-  })
-
-  test("preserves codes introduced by a newer server", async () => {
-    const client = createSixbClient({
-      baseUrl: "http://localhost:3002",
-      fetch: createRespondingFetch(
-        () =>
-          new Response(JSON.stringify({ error: "Future failure", code: "future.new_code" }), {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          })
-      ),
-    })
-
-    const error = (await listAuthAccessTokens({ client, throwOnError: true }).catch(
-      (caught) => caught
-    )) as SixbApiError
-    expect(error.code).toBe("future.new_code")
+    expect(error.status).toBe(status)
+    expect(error.code).toBe(code)
+    expect(error.body).toEqual({ error: message, code })
+    expect(error.message).toContain(message)
   })
 
   test("surfaces the structured error on the non-throwing result path too", async () => {

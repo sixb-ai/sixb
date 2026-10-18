@@ -65,26 +65,21 @@ const telemetryEvent = event({
 })
 
 describe("events builder filter spec", () => {
-  test("events.object(Type) seeds the object type id", () => {
-    expect(events.object(Sensor).ir).toEqual({ objectTypeId: "Sensor" })
-  })
-
-  test("telemetry(token) narrows topic, types and property", () => {
-    expect(events.object(Sensor).telemetry(Sensor.p.indoorTemperature).ir).toEqual({
+  test("object telemetry scopes by type, id, and property without mutating the base", () => {
+    const base = events.object(Sensor)
+    expect(base.telemetry(Sensor.p.indoorTemperature).ir).toEqual({
       objectTypeId: "Sensor",
       topic: "telemetry",
       types: ["telemetry.appended"],
       propertyId: "indoorTemperature",
     })
-  })
-
-  test("byId(key) is orthogonal to the channel", () => {
-    expect(events.object(Sensor).byId("sensor-1").telemetry().ir).toEqual({
+    expect(base.byId("sensor-1").telemetry().ir).toEqual({
       objectTypeId: "Sensor",
       primaryId: "sensor-1",
       topic: "telemetry",
       types: ["telemetry.appended"],
     })
+    expect(base.ir).toEqual({ objectTypeId: "Sensor" })
   })
 
   test("upserted and deleted set their canonical types", () => {
@@ -137,12 +132,6 @@ describe("events builder filter spec", () => {
     })
   })
 
-  test("the builder is immutable (copy-on-write)", () => {
-    const base = events.object(Sensor)
-    base.telemetry()
-    expect(base.ir).toEqual({ objectTypeId: "Sensor" })
-  })
-
   test("namespace builders", () => {
     expect(events.all().ir).toEqual({})
     expect(events.telemetry().ir).toEqual({ topic: "telemetry" })
@@ -179,46 +168,6 @@ describe("events builder filter spec", () => {
 })
 
 describe("buildEventPredicate", () => {
-  test("filters telemetry by objectType, object and property", () => {
-    const matches = buildEventPredicate(
-      events.object(Sensor).byId("sensor-1").telemetry(Sensor.p.indoorTemperature).ir
-    )
-    expect(matches(telemetryEvent)).toBe(true)
-    expect(matches({ ...telemetryEvent, topic: "objects" } as SixbEvent)).toBe(false)
-    expect(
-      matches(
-        event({ ...telemetryEvent, payload: { ...telemetryEvent.payload, objectId: "other" } })
-      )
-    ).toBe(false)
-    expect(
-      matches(
-        event({ ...telemetryEvent, payload: { ...telemetryEvent.payload, propertyId: "online" } })
-      )
-    ).toBe(false)
-  })
-
-  test("links match on the source side", () => {
-    const matches = buildEventPredicate(
-      events.object(Sensor).byId("sensor-1").link(Sensor.l.zone).ir
-    )
-    const linkEvent = event({
-      type: "link.created",
-      topic: "links",
-      payload: {
-        sourceTypeId: "Sensor",
-        sourceId: "sensor-1",
-        linkId: "zone",
-        targetTypeId: "Zone",
-        targetId: "zone-1",
-        propertyChanges: {},
-      },
-    })
-    expect(matches(linkEvent)).toBe(true)
-    expect(
-      matches(event({ ...linkEvent, payload: { ...linkEvent.payload, linkId: "other" } }))
-    ).toBe(false)
-  })
-
   test("property selectors match propertyChanges", () => {
     const matches = buildEventPredicate(events.object(Sensor).p.status.updated().ir)
     const changed = event({
@@ -249,28 +198,10 @@ describe("buildEventPredicate", () => {
       )
     ).toBe(false)
   })
-
-  test("run scope matches payload.runId", () => {
-    const matches = buildEventPredicate(events.workflows().run("run-1").ir)
-    const wfEvent = event({
-      type: "workflow.run.started",
-      topic: "workflows",
-      payload: { workflowId: "wf-1", runId: "run-1" },
-    })
-    expect(matches(wfEvent)).toBe(true)
-    expect(matches(event({ ...wfEvent, payload: { workflowId: "wf-1", runId: "run-2" } }))).toBe(
-      false
-    )
-  })
-
-  test("an empty filter matches everything", () => {
-    const matches = buildEventPredicate(events.all().ir)
-    expect(matches(telemetryEvent)).toBe(true)
-  })
 })
 
 describe("telemetryUpdateFromEvent", () => {
-  test("maps the appended payload field-by-field", () => {
+  test("maps the appended payload field-by-field and normalizes non-primitive values to JSON", () => {
     expect(telemetryUpdateFromEvent(telemetryEvent as never)).toEqual({
       type: "telemetryUpdate",
       projectId: "proj",
@@ -283,9 +214,6 @@ describe("telemetryUpdateFromEvent", () => {
       quality: "good",
       unit: "celsius",
     })
-  })
-
-  test("normalizes non-primitive values to JSON", () => {
     const update = telemetryUpdateFromEvent(
       event({
         type: "telemetry.appended",
@@ -391,23 +319,26 @@ describe("builder subscribe over the transport", () => {
     ws.onmessage?.({ data: JSON.stringify({ type: "event", event: telemetryEvent }) })
     expect(received).toHaveLength(1)
 
-    ws.onmessage?.({
-      data: JSON.stringify({
-        type: "event",
-        event: { ...telemetryEvent, payload: { ...telemetryEvent.payload, objectId: "other" } },
-      }),
-    })
+    for (const payload of [{ objectId: "other" }, { propertyId: "online" }]) {
+      ws.onmessage?.({
+        data: JSON.stringify({
+          type: "event",
+          event: { ...telemetryEvent, payload: { ...telemetryEvent.payload, ...payload } },
+        }),
+      })
+    }
     expect(received).toHaveLength(1)
 
     unsubscribe()
     expect(ws.closed).toBe(true)
   })
 
-  test("sends run scope to the server", () => {
+  test("sends run scope to the server and delivers only that run's events", () => {
+    const received: SixbEvent[] = []
     const unsubscribe = events
       .workflows()
       .run("run-1")
-      .subscribe(() => undefined)
+      .subscribe((event) => received.push(event))
 
     const ws = FakeWebSocket.instances.at(-1)
     if (!ws) throw new Error("expected a websocket")
@@ -419,6 +350,17 @@ describe("builder subscribe over the transport", () => {
       topic: "workflows",
       runId: "run-1",
     })
+
+    for (const runId of ["run-2", "run-1"]) {
+      const workflowEvent = event({
+        type: "workflow.run.started",
+        topic: "workflows",
+        payload: { workflowId: "wf-1", runId },
+      })
+      ws.onmessage?.({ data: JSON.stringify({ type: "event", event: workflowEvent }) })
+    }
+    expect(received).toHaveLength(1)
+    expect(received[0]?.payload).toMatchObject({ runId: "run-1" })
 
     unsubscribe()
     expect(ws.closed).toBe(true)

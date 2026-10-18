@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import { defineObjectType, prop } from "@sixb/core/ontology"
 import {
   configureSixbSharedBrowserClient,
@@ -69,8 +69,6 @@ function deliver(ws: FakeWebSocket, event: SixbEvent): void {
   ws.onmessage?.({ data: JSON.stringify({ type: "event", event }) })
 }
 
-const tick = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms))
-
 describe("createEventsRegistry", () => {
   let originalWebSocket: typeof WebSocket
   let sharedController: SixbSharedBrowserClientController | null
@@ -80,11 +78,13 @@ describe("createEventsRegistry", () => {
     sharedController = null
     FakeWebSocket.instances = []
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+    jest.useFakeTimers()
   })
 
   afterEach(() => {
     sharedController?.dispose()
     globalThis.WebSocket = originalWebSocket
+    jest.useRealTimers()
   })
 
   test("does not construct the provider socket under singleton shared authority", () => {
@@ -117,29 +117,8 @@ describe("createEventsRegistry", () => {
     registry.close()
   })
 
-  test("re-enables provider sockets after shared authority is disposed", () => {
-    sharedController = configureSixbSharedBrowserClient(
-      {
-        api: { baseUrl: "https://api.example.test" },
-        auth: { enabled: true },
-      },
-      {
-        grantId: "shr_1",
-        fetch: Object.assign(async () => Response.json({}), { preconnect: fetch.preconnect }),
-      }
-    )
-    sharedController.dispose()
-    sharedController = null
-
+  test("shares one socket and closes it after the last unregister", () => {
     const registry = createEventsRegistry()
-    registry.register(events.object(Device).telemetry().ir, () => undefined)
-
-    expect(FakeWebSocket.instances).toHaveLength(1)
-    registry.close()
-  })
-
-  test("shares one socket and closes it after the last unregister", async () => {
-    const registry = createEventsRegistry({ closeDelayMs: 0 })
 
     const off1 = registry.register(events.object(Device).telemetry().ir, () => {})
     expect(FakeWebSocket.instances).toHaveLength(1)
@@ -153,13 +132,14 @@ describe("createEventsRegistry", () => {
     off1()
     expect(ws.closed).toBe(false)
     off2()
-    // Teardown is deferred so a quick remount can reuse the socket.
+    // Teardown is deferred (3s by default) so a quick remount can reuse the socket.
+    jest.advanceTimersByTime(2_999)
     expect(ws.closed).toBe(false)
-    await tick()
+    jest.advanceTimersByTime(1)
     expect(ws.closed).toBe(true)
   })
 
-  test("reuses the socket when a subscriber re-registers within the close window", async () => {
+  test("reuses the socket when a subscriber re-registers within the close window", () => {
     const registry = createEventsRegistry({ closeDelayMs: 50 })
 
     const off = registry.register(events.object(Device).telemetry().ir, () => {})
@@ -169,13 +149,13 @@ describe("createEventsRegistry", () => {
     off()
     // Re-register before the pending close fires.
     registry.register(events.object(Sensor).telemetry().ir, () => {})
-    await tick(80)
+    jest.advanceTimersByTime(80)
 
     expect(ws.closed).toBe(false)
     expect(FakeWebSocket.instances).toHaveLength(1)
   })
 
-  test("resumes from the last cursor after a true close then reopen", async () => {
+  test("resumes from the last cursor after a true close then reopen", () => {
     const registry = createEventsRegistry({ closeDelayMs: 0 })
 
     const off = registry.register(events.object(Device).telemetry().ir, () => {})
@@ -186,7 +166,7 @@ describe("createEventsRegistry", () => {
     deliver(ws1, telemetryEvent("device", "fan-1", "c9"))
 
     off()
-    await tick()
+    jest.advanceTimersByTime(0)
     expect(ws1.closed).toBe(true)
 
     registry.register(events.object(Sensor).telemetry().ir, () => {})

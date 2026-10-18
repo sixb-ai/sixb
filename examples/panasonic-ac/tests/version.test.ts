@@ -42,8 +42,10 @@ describe("resolvePanasonicAppVersion", () => {
   })
 
   test("rejects an invalid explicit override", async () => {
-    expect(resolvePanasonicAppVersion({ override: "latest" })).rejects.toThrow(
-      "PANASONIC_APP_VERSION must use the x.y.z format"
+    const error = await resolvePanasonicAppVersion({ override: "latest" }).catch(
+      (caught: unknown) => caught
     )
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain("PANASONIC_APP_VERSION must use the x.y.z format")
   })
 })

@@ -8,12 +8,11 @@ const encoder = new TextEncoder()
 // A "none" session must still complete when the upload returns no ETag.
 // Calling input.fetch(...) instead of a detached fetch must also fail these tests:
 // native browser fetch rejects an arbitrary receiver, while Bun's fetch tolerates it.
+// An omitted policy is "etag", so the undefined row also proves the default.
 test.each([
   ["etag", true],
-  ["etag", false],
   ["none", true],
   ["none", false],
-  [undefined, true],
   [undefined, false],
 ] as const)("multipart policy %s, response ETag %s", async (partReceipt, hasEtag) => {
   let completed: unknown

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import {
   createSixbClient,
   getAuthSession,
@@ -49,7 +49,8 @@ function fakeApi(options: {
     if (path === "/api/auth/refresh") {
       if (options.ended) return Response.json({ error: "Invalid refresh token" }, { status: 401 })
       generation += 1
-      await Bun.sleep(5)
+      // Yield a macrotask so concurrent callers reach the store before the rotation is saved.
+      await Bun.sleep(0)
       return Response.json({
         accessToken: `access-${generation}`,
         refreshToken: `refresh-${generation}`,
@@ -65,7 +66,12 @@ function fakeApi(options: {
 }
 
 describe("native sessions", () => {
-  test("signs a device in by polling until the user approves", async () => {
+  afterEach(() => jest.useRealTimers())
+
+  // Reproduce: drop the one-second floor from `intervalMs` in session.ts and the second poll goes
+  // out before 999ms have passed.
+  test("signs a device in by polling once a second until the user approves", async () => {
+    jest.useFakeTimers()
     let polls = 0
     const fetch = (async (input: RequestInfo | URL) => {
       const path = new URL(String(input)).pathname
@@ -94,10 +100,17 @@ describe("native sessions", () => {
 
     const login = await startSixbDeviceLogin({ baseUrl, clientName: "Acme CLI", fetch })
     expect(login.userCode).toBe("BCDF-HJKM")
-    await expect(login.complete()).resolves.toMatchObject({
-      accessToken: "access-1",
-      refreshToken: "refresh-1",
-    })
+    const completion = login.complete()
+    await untilTimerPending()
+    expect(polls).toBe(1)
+
+    // A server interval below one second is raised to the one-second floor.
+    jest.advanceTimersByTime(999)
+    await Promise.resolve()
+    expect(polls).toBe(1)
+    jest.advanceTimersByTime(1)
+
+    expect(await completion).toMatchObject({ accessToken: "access-1", refreshToken: "refresh-1" })
     expect(polls).toBe(2)
   })
 
@@ -219,23 +232,18 @@ describe("native sessions", () => {
     )
   })
 
-  test("treats a session the server already ended as signed out", async () => {
-    const { store, current } = memoryStore(tokens(1, 10 * 60_000))
-    const api = fakeApi({ acceptedAccessToken: () => "revoked" })
-
-    await signOutSixbSession({ baseUrl, store, fetch: api.fetch })
-
-    expect(current()).toBeNull()
-  })
-
-  test("signs out on the server, then clears the store", async () => {
-    const { store, current } = memoryStore(tokens(1, 10 * 60_000))
+  test("signs out on the server, then clears the store, even when the session already ended", async () => {
+    const signedIn = memoryStore(tokens(1, 10 * 60_000))
     const api = fakeApi({ acceptedAccessToken: () => "access-1" })
-
-    await signOutSixbSession({ baseUrl, store, fetch: api.fetch })
-
+    await signOutSixbSession({ baseUrl, store: signedIn.store, fetch: api.fetch })
     expect(api.calls).toEqual(["POST /api/auth/sign-out Bearer access-1"])
-    expect(current()).toBeNull()
+    expect(signedIn.current()).toBeNull()
+
+    // The server answers 401 for a session it already ended, which is what signing out wanted.
+    const ended = memoryStore(tokens(1, 10 * 60_000))
+    const revoked = fakeApi({ acceptedAccessToken: () => "revoked" })
+    await signOutSixbSession({ baseUrl, store: ended.store, fetch: revoked.fetch })
+    expect(ended.current()).toBeNull()
   })
 })
 
@@ -337,7 +345,6 @@ describe("native sessions over WebSockets", () => {
       onStateChange: (state) => states.push(state),
     })
     await waitFor(() => states.some((state) => state.error !== null))
-    await Bun.sleep(10)
     socket.close()
 
     expect(HeaderRecordingWebSocket.instances).toHaveLength(0)
@@ -367,7 +374,6 @@ describe("native sessions over WebSockets", () => {
       onStateChange: (state) => states.push(state),
     })
     await waitFor(() => states.some((state) => state.error !== null))
-    await Bun.sleep(10)
     socket.close()
 
     expect(HeaderRecordingWebSocket.instances).toHaveLength(0)
@@ -380,6 +386,12 @@ describe("native sessions over WebSockets", () => {
     expect(ended).toBe(1)
   })
 })
+
+/** Flush microtasks until the code under test schedules its next timer. */
+async function untilTimerPending(): Promise<void> {
+  for (let turn = 0; turn < 100 && jest.getTimerCount() === 0; turn++) await Promise.resolve()
+  if (jest.getTimerCount() === 0) throw new Error("Expected a pending timer.")
+}
 
 async function waitFor(condition: () => boolean, timeoutMs = 1_000): Promise<void> {
   const deadline = Date.now() + timeoutMs

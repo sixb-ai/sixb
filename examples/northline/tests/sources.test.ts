@@ -22,10 +22,10 @@ describe("AtomicJsonStore", () => {
     const store = new AtomicJsonStore<Document>(join(root, "state.json"), documentSchema)
     await store.write({ schemaVersion: 1, values: [] })
 
+    // Reproduce: drop `await previous` from update() and concurrent mutations overwrite each other.
     await Promise.all(
       [1, 2, 3, 4].map((value) =>
-        store.update(async (document) => {
-          await Bun.sleep(2)
+        store.update((document) => {
           document.values.push(value)
         })
       )
@@ -51,14 +51,12 @@ describe("orderedChangesSince", () => {
     { kind: "delete" as const, key: { id: "quote-2" } },
   ]
 
-  test("returns ordered changes after the checkpoint with the next cursors", () => {
+  test("returns cloned changes after the checkpoint and reports a source-log gap", () => {
     expect(orderedChangesSince(changes, "1")).toEqual([
       { kind: "delete", key: { id: "quote-2" }, cursor: "2" },
     ])
     expect(orderedChangesSince(changes, "2")).toEqual([])
-  })
 
-  test("defensively clones changes and reports a source-log gap", () => {
     const [first] = orderedChangesSince(changes)
     expect(first?.cursor).toBe("1")
     if (first?.kind === "upsert") first.row.status = "changed"
