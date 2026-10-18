@@ -1,4 +1,5 @@
 import { getArtifactQueryKey } from "@sixb/client/hooks"
+import { isMobileViewport } from "@sixb/ui/hooks"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 import { useArtifactPanel } from "../artifact-panel"
@@ -37,7 +38,8 @@ export function useLivePublishes(live: LiveRunState): void {
     const first = published[0]
     if (!first || !panel || !live.runId || openedRuns.has(live.runId)) return
     openedRuns.add(live.runId)
-    if (panel.presentation === "dialog") return
+    // On a phone's first render the panel has not learned the width yet, so the width is asked.
+    if (panel.presentation === "dialog" || isMobileViewport()) return
     panel.open({ type: "artifact", artifactId: first.artifactId })
   }, [live.parts, live.runId, panel, queryClient])
 }

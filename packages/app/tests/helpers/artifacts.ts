@@ -2,6 +2,7 @@ import type { GetArtifactVersionResponse } from "@sixb/client"
 import { getArtifactVersionQueryKey } from "@sixb/client/hooks"
 import type { QueryClient } from "@tanstack/react-query"
 import { artifactFileSource } from "../../src/artifacts/file-source"
+import { fileTextQueryKey } from "../../src/artifacts/queries"
 
 type VersionFiles = GetArtifactVersionResponse["files"]
 
@@ -79,5 +80,5 @@ function fileTextKey(version: GetArtifactVersionResponse, path: string): readonl
     path,
     fileRef: file.file,
   })
-  return [...source.queryKey, "text"]
+  return fileTextQueryKey(source)
 }

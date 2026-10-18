@@ -7,6 +7,11 @@ import { type FileLoadError, fileLoadError, MAX_TEXT_PREVIEW_BYTES } from "./fil
 
 export type ArtifactVersion = GetArtifactVersionResponse
 
+/** Where a file's text is cached; a test seeds it there to render without a network. */
+export function fileTextQueryKey(source: FileSource | null): readonly unknown[] {
+  return [...(source?.queryKey ?? ["no-file"]), "text"]
+}
+
 /** A file's text, read whole when it is at most `maxBytes`: by default, what a preview reads. */
 export function useFileText(
   source: FileSource | null,
@@ -19,7 +24,7 @@ export function useFileText(
 } {
   const tooLarge = source !== null && source.fileRef.sizeBytes > maxBytes
   const query = useQuery({
-    queryKey: [...(source?.queryKey ?? ["no-file"]), "text"],
+    queryKey: fileTextQueryKey(source),
     enabled: source !== null && !tooLarge,
     // A version never changes, and a message file is stored once.
     staleTime: Number.POSITIVE_INFINITY,

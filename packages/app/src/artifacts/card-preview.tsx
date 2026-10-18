@@ -1,11 +1,4 @@
-import {
-  type CsvTable,
-  parseCsv,
-  parseWorkbook,
-  sheetFilePath,
-  WORKBOOK_FILE,
-  type WorkbookChart,
-} from "@sixb/core/artifacts"
+import { type CsvTable, parseCsv, type WorkbookChart } from "@sixb/core/artifacts"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { AreaChart as AreaIcon, ChartColumn, ChartLine, ChartPie } from "lucide-react"
@@ -20,7 +13,8 @@ import { type ArtifactVersion, useArtifactTheme, useFileText, versionFileSource 
 import { chartData } from "./renderers/sheet/chart-data"
 import { previewFormatter } from "./renderers/sheet/format"
 import { MiniChart } from "./renderers/sheet/mini-chart"
-import { fileSheetModel, type SheetModel, sheetModel } from "./renderers/sheet/model"
+import { fileSheetModel, type SheetModel } from "./renderers/sheet/model"
+import { useSheetModel, useWorkbook } from "./renderers/sheet/workbook"
 import { artifactThemeAttributes } from "./theme"
 
 /**
@@ -165,7 +159,7 @@ function VersionPreview({
 }
 
 function DocumentPreview({ version }: { readonly version: ArtifactVersion }) {
-  const { text, loading } = useFileText(versionFileSource(version, "document.md"))
+  const { text, loading } = useFileText(versionFileSource(version, version.entry))
   const opening = useMemo(() => (text === undefined ? null : documentOpening(text)), [text])
   if (loading) return <Skeleton pulse />
   const sections =
@@ -254,29 +248,18 @@ export function SlideFace({ version }: { readonly version: ArtifactVersion }) {
  */
 function WorkbookPreview({ version }: { readonly version: ArtifactVersion }) {
   const locale = useLocale()
-  const workbookFile = useFileText(versionFileSource(version, WORKBOOK_FILE))
-  const workbook = useMemo(() => {
-    if (workbookFile.text === undefined) return undefined
-    const parsed = parseWorkbook(workbookFile.text)
-    return "workbook" in parsed ? parsed.workbook : null
-  }, [workbookFile.text])
+  const { workbook, loading: reading } = useWorkbook(version)
   const chart = workbook?.charts[0]
-  const sheet = workbook?.sheets.find((entry) => entry.name === chart?.sheet) ?? workbook?.sheets[0]
-  const sheetFile = useFileText(
-    sheet ? versionFileSource(version, sheetFilePath(sheet.name)) : null
-  )
-  const csv = sheetFile.text
-  const model = useMemo(() => {
-    if (!sheet || csv === undefined) return null
-    // A chart draws every row, and its latest value is the last row's; a table shows the first.
-    const table = chart ? parseTable(csv, "csv") : tableStart(csv, "csv")
-    return table ? sheetModel(sheet, table) : null
-  }, [sheet, chart, csv])
+  const sheets = workbook?.sheets
+  const sheet = sheets?.find((entry) => entry.name === chart?.sheet) ?? sheets?.[0]
+  // The whole sheet, as the viewer reads it: a chart draws every row, and its latest value is the
+  // last row's.
+  const { model, loading } = useSheetModel(version, sheet)
   const latest = useMemo(
     () => (chart && model ? latestValue(chart, model, locale) : undefined),
     [chart, model, locale]
   )
-  if (!workbook || !model) return <Skeleton pulse={workbookFile.loading || sheetFile.loading} />
+  if (!workbook || !model) return <Skeleton pulse={reading || loading} />
 
   const tabs = [
     ...workbook.sheets.map((entry) => ({

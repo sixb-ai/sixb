@@ -8,7 +8,7 @@ import type { NormalizedPart } from "../src/agent/parts"
 import { useLivePublishes } from "../src/agent/publish-artifact/use-live-publishes"
 import { installDom } from "./helpers/dom"
 
-installDom([
+const browser = installDom([
   "document",
   "navigator",
   "Node",
@@ -48,7 +48,7 @@ function Conversation({ live }: { readonly live: LiveRunState }) {
 }
 
 /** A conversation whose run publishes its first artifact once it is on screen. */
-async function publishInto(compact: boolean, runId: string) {
+async function publishInto(compact: boolean, runId: string, mounted = true) {
   const cache = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
   const ui = (parts: readonly NormalizedPart[]) => (
     <QueryClientProvider client={cache}>
@@ -59,6 +59,14 @@ async function publishInto(compact: boolean, runId: string) {
       </MemoryRouter>
     </QueryClientProvider>
   )
+  if (!mounted) {
+    // The run published before the conversation mounted, as when a phone opens it mid-run.
+    let view: ReturnType<typeof render> | undefined
+    await act(async () => {
+      view = render(ui([published]))
+    })
+    return view?.getByTestId("open").textContent
+  }
   const view = render(ui([]))
   expect(view.getByTestId("open").textContent).toBe("none")
   await act(async () => {
@@ -77,5 +85,16 @@ describe("a run's first publish", () => {
     // with no room beside it opens the panel as one, as a phone does. Reproduce by dropping the
     // presentation check from useLivePublishes: the artifact opens.
     expect(await publishInto(true, "run_docked")).toBe("none")
+  })
+
+  test("leaves it to its card on a phone that opens the conversation mid-run", async () => {
+    // The panel learns the width after its first render. Reproduce by dropping the viewport check
+    // from useLivePublishes: the artifact opens, as a dialog.
+    browser.happyDOM.setViewport({ width: 390, height: 844 })
+    try {
+      expect(await publishInto(false, "run_phone", false)).toBe("none")
+    } finally {
+      browser.happyDOM.setViewport({ width: 1024, height: 768 })
+    }
   })
 })
