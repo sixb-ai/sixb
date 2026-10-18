@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { resolve } from "node:path"
 import { assertCliSucceeded, runCliToCompletion } from "./shared/cli-process"
 import { signedInProfile } from "./shared/signed-in-profile"
@@ -8,7 +8,8 @@ const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
 const servers: Bun.Server<undefined>[] = []
 const cleanups: (() => Promise<void>)[] = []
 
-afterEach(async () => {
+// The tests run at once, each against its own server: clean up after all of them.
+afterAll(async () => {
   while (servers.length > 0) {
     servers.pop()?.stop(true)
   }
@@ -16,7 +17,7 @@ afterEach(async () => {
 })
 
 describe("sixb service-account command", () => {
-  test("creates service accounts with SIXB_API_URL and SIXB_API_TOKEN", async () => {
+  test.concurrent("creates service accounts with SIXB_API_URL and SIXB_API_TOKEN", async () => {
     let authorizationHeader = null as string | null
     let requestedPath = ""
     let requestBody: unknown
@@ -82,7 +83,7 @@ describe("sixb service-account command", () => {
     expect(result.stderr).toBe("")
   }, 15_000)
 
-  test("creates service-account tokens under one service account", async () => {
+  test.concurrent("creates service-account tokens under one service account", async () => {
     let authorizationHeader = null as string | null
     let requestedPath = ""
     let requestBody: unknown
@@ -153,7 +154,7 @@ describe("sixb service-account command", () => {
 
   // Reproduce: drop `assertSignedIn` from createServiceAccountToken; the CLI then sends the
   // request with the access token, and this permissive server mints it.
-  test("refuses to create a service-account token with an access token", async () => {
+  test.concurrent("refuses to create a service-account token with an access token", async () => {
     let requests = 0
     const server = Bun.serve({
       hostname: "127.0.0.1",

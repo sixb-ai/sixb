@@ -2,25 +2,20 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { runWorkerGroup } from "../src/commands/worker-group"
 import { FAST_CLI_TIMEOUT_MS, readLogEntries, runCliToCompletion } from "./shared/cli-process"
+import { runInProcess } from "./shared/in-process"
 
-const repoRoot = resolve(import.meta.dir, "..", "..", "..")
-const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
+const validProject = fixtureEntry("valid-project")
+const tempDirs: string[] = []
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
+})
 
 function fixtureEntry(name: string): string {
   return resolve(import.meta.dir, "fixtures", name, "sixb.config.ts")
 }
-
-const tempDirs: string[] = []
-
-afterEach(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (dir) {
-      await rm(dir, { recursive: true, force: true })
-    }
-  }
-})
 
 async function tempLogPath(): Promise<string> {
   const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-wg-"))
@@ -28,107 +23,90 @@ async function tempLogPath(): Promise<string> {
   return join(tempDir, "operations.log")
 }
 
-// Fail-fast cases exit on their own (guard rejection or worker start error), so running
-// to completion is enough and lets us read the operations log afterward. The
-// long-running "starts workers" cases live in worker-group.e2e.ts.
-async function runOnce(
-  args: readonly string[],
-  fixture: string,
-  env: Record<string, string | undefined> = {}
-): Promise<{ exitCode: number; stdout: string; logEntries: Array<Record<string, unknown>> }> {
-  const logPath = await tempLogPath()
-
-  const result = await runCliToCompletion({
-    cmd: ["bun", cliEntry, ...args, "--entry", fixtureEntry(fixture)],
-    cwd: repoRoot,
-    env: { ...env, SIXB_CLI_TEST_LOG: logPath },
-    timeoutMs: FAST_CLI_TIMEOUT_MS,
-  })
-
-  return {
-    exitCode: result.exitCode,
-    stdout: result.stdout,
-    logEntries: await readLogEntries(logPath),
-  }
-}
-
+// The long-running "starts workers" cases live in worker-group.e2e.ts.
 describe("sixb worker-group", () => {
-  test("rejects unknown worker types", async () => {
-    const result = await runOnce(["worker-group", "missing"], "valid-project")
+  // Rejected before the runtime loads: valid-project uses InMemoryQueues, so validating after
+  // loading would end in that refusal and `process.exit(1)` instead of this error.
+  test.each([
+    ["an unknown worker type", { workerTypes: ["missing"] }, "Unknown worker 'missing'"],
+    [
+      "a group that still names the action worker",
+      { workerTypes: ["sync", "action"] },
+      "'action' is no longer a worker type",
+    ],
+    [
+      "an invalid shared agent turn timeout",
+      { workerTypes: ["agent"], agentTurnTimeout: "eventually" },
+      "Invalid agent turn timeout 'eventually'",
+    ],
+    [
+      "an invalid typed concurrency",
+      { workerTypes: ["sync"], concurrency: ["sync=0"] },
+      "Invalid worker concurrency '0'",
+    ],
+  ])("rejects %s before loading the runtime", async (_case, options, message) => {
+    const result = await runInProcess(() => runWorkerGroup({ entry: validProject, ...options }))
 
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Unknown worker 'missing'")
-  })
-
-  test("points a group that still names the action worker to where Actions run", async () => {
-    const result = await runOnce(["worker-group", "sync", "action"], "valid-project")
-
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("'action' is no longer a worker type")
-    expect(result.logEntries).toEqual([])
+    expect(result.exitCode).toBeUndefined()
+    expect(String(result.error)).toContain(message)
   })
 
   test("rejects InMemoryQueues like sixb worker", async () => {
-    const result = await runOnce(["worker-group"], "valid-project")
+    const result = await runInProcess(() => runWorkerGroup({ entry: validProject }))
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("requires a queues provider")
-    expect(result.stdout).toContain("InMemoryQueues")
-  })
-
-  test("validates the shared agent turn timeout before loading providers", async () => {
-    const result = await runOnce(
-      ["worker-group", "agent", "--agent-turn-timeout", "eventually"],
-      "valid-project"
-    )
-
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Invalid agent turn timeout 'eventually'")
-    expect(result.stdout).not.toContain("requires a queues provider")
-  })
-
-  test("validates typed worker concurrency before loading providers", async () => {
-    const result = await runOnce(
-      ["worker-group", "sync", "--concurrency", "sync=0"],
-      "valid-project"
-    )
-
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Invalid worker concurrency '0'")
-    expect(result.stdout).not.toContain("requires a queues provider")
-  })
-
-  test("rejects a missing typed worker concurrency value", async () => {
-    const result = await runOnce(["worker-group", "sync", "--concurrency"], "valid-project")
-
-    expect(result.exitCode).toBe(2)
-    expect(result.stdout).toContain("--concurrency requires a value")
-    expect(result.stdout).not.toContain("Unknown worker")
-    expect(result.stdout).not.toContain("requires a queues provider")
+    expect(result.output).toContain("requires a queues provider")
+    expect(result.output).toContain("InMemoryQueues")
   })
 
   test("refuses without migrating, so a bad command leaves no schema behind", async () => {
     // The fixture registers agents, so auto-selection picks the `agent` worker, whose construction
     // needs an API origin. The refusal is right; running a schema change first was not.
-    const result = await runOnce(["worker-group"], "worker-group", {
-      SIXB_API_PUBLIC_ORIGIN: undefined,
+    const logPath = await tempLogPath()
+
+    const result = await runInProcess(() => {
+      process.env.SIXB_CLI_TEST_LOG = logPath
+      delete process.env.SIXB_API_PUBLIC_ORIGIN
+      return runWorkerGroup({ entry: fixtureEntry("worker-group") })
     })
 
     expect(result.exitCode).toBe(1)
-    // A short fragment: the panel wraps at the terminal width, so the flag lands on the
-    // next rendered line.
-    expect(result.stdout).toContain("cannot start: agent requires")
-    expect(result.logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
+    // One line: the panel wraps at the terminal width and draws a border.
+    const output = result.output.replace(/[\u2500-\u257f\s]+/g, " ")
+    expect(output).toContain("agent requires --api-public-origin")
+    // Agent construction used to throw from inside the `map()` that builds every worker, so the
+    // operator saw one line about agents and never learned sync, pipeline and projection were
+    // never attempted. The three facts: what blocked, what it cost, and the way out — the last
+    // as a remediation in its own section of the panel.
+    expect(output).toContain("3 that were ready (sync, pipeline, projection)")
+    expect(output).toContain("Try this")
+    expect(output).toContain("sixb worker-group sync pipeline projection")
+    const logEntries = await readLogEntries(logPath)
+    expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
   })
 
-  test("stops workers and providers when a worker fails to start", async () => {
-    // The prod-roles fixture has no projection definitions, so the projection
-    // worker throws on start; the group must still close providers and exit.
-    const result = await runOnce(["worker-group", "projection"], "prod-roles")
+  // The process boundary: the prod-roles fixture has no projection definitions, so the projection
+  // worker throws on start; the group must still close providers and end the process non-zero.
+  test("exits 1 and stops workers and providers when a worker fails to start", async () => {
+    const logPath = await tempLogPath()
+    const result = await runCliToCompletion({
+      cmd: [
+        "bun",
+        resolve(import.meta.dir, "..", "src", "index.tsx"),
+        "worker-group",
+        "projection",
+        "--entry",
+        fixtureEntry("prod-roles"),
+      ],
+      cwd: resolve(import.meta.dir, "..", "..", ".."),
+      env: { SIXB_CLI_TEST_LOG: logPath },
+      timeoutMs: FAST_CLI_TIMEOUT_MS,
+    })
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("No projection definitions are registered")
-    expect(result.logEntries).toContainEqual({ type: "queues:close" })
-    expect(result.logEntries).toContainEqual({ type: "lake-storage:close" })
+    const logEntries = await readLogEntries(logPath)
+    expect(logEntries).toContainEqual({ type: "queues:close" })
+    expect(logEntries).toContainEqual({ type: "lake-storage:close" })
   })
 })

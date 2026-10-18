@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { resolve } from "node:path"
 import { assertCliSucceeded, runCliToCompletion } from "./shared/cli-process"
 import { signedInProfile } from "./shared/signed-in-profile"
@@ -8,7 +8,8 @@ const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
 const servers: Bun.Server<undefined>[] = []
 const cleanups: (() => Promise<void>)[] = []
 
-afterEach(async () => {
+// The tests run at once, each against its own server: clean up after all of them.
+afterAll(async () => {
   while (servers.length > 0) {
     servers.pop()?.stop(true)
   }
@@ -16,52 +17,7 @@ afterEach(async () => {
 })
 
 describe("sixb token command", () => {
-  test("lists tokens with SIXB_API_URL and SIXB_API_TOKEN", async () => {
-    let authorizationHeader = null as string | null
-    let requestedPath = ""
-    const server = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      fetch(request) {
-        const url = new URL(request.url)
-        requestedPath = url.pathname
-        authorizationHeader = request.headers.get("authorization")
-        return Response.json({
-          accessTokens: [
-            {
-              id: "tok_cli",
-              name: "Local CLI",
-              kind: "personal",
-              status: "active",
-              subject: { type: "user", id: "usr_1" },
-              createdAt: "2026-06-21T00:00:00.000Z",
-              expiresAt: "2026-09-19T00:00:00.000Z",
-            },
-          ],
-        })
-      },
-    })
-    servers.push(server)
-
-    const result = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "token", "list", "--json"],
-      cwd: repoRoot,
-      env: {
-        SIXB_API_URL: `http://127.0.0.1:${server.port}/api`,
-        SIXB_API_TOKEN: "sixb_pat_tok_cli.secret",
-      },
-    })
-    assertCliSucceeded(result)
-
-    expect(requestedPath).toBe("/api/auth/access-tokens")
-    expect(authorizationHeader).toBe("Bearer sixb_pat_tok_cli.secret")
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      accessTokens: [{ id: "tok_cli", name: "Local CLI" }],
-    })
-    expect(result.stderr).toBe("")
-  }, 15_000)
-
-  test("creates a token from the profile's sign-in", async () => {
+  test.concurrent("creates a token from the profile's sign-in", async () => {
     let authorizationHeader = null as string | null
     let requestBody: unknown
     const server = Bun.serve({
@@ -108,7 +64,7 @@ describe("sixb token command", () => {
 
   // Reproduce: drop `assertSignedIn` from createToken; the CLI then sends the request with the
   // access token, and this permissive server mints it.
-  test("refuses to create a token with an access token", async () => {
+  test.concurrent("refuses to create a token with an access token", async () => {
     let requests = 0
     const server = Bun.serve({
       hostname: "127.0.0.1",

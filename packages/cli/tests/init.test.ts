@@ -2,22 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import {
-  type CompletedCliProcess,
-  FAST_CLI_TIMEOUT_MS,
-  runCliToCompletion,
-} from "./shared/cli-process"
-
-function runInit(targetDir: string): Promise<CompletedCliProcess> {
-  const repoRoot = resolve(import.meta.dir, "..", "..", "..")
-  const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
-
-  return runCliToCompletion({
-    cmd: ["bun", cliEntry, "init", targetDir],
-    cwd: repoRoot,
-    timeoutMs: FAST_CLI_TIMEOUT_MS,
-  })
-}
+import { runInit } from "../src/commands/init"
+import { runInProcess } from "./shared/in-process"
 
 describe("sixb init", () => {
   const tempDirs: string[] = []
@@ -36,10 +22,10 @@ describe("sixb init", () => {
     tempDirs.push(tempDir)
 
     const targetDir = join(tempDir, "starter")
-    const result = await runInit(targetDir)
+    const result = await runInProcess(() => runInit(targetDir))
 
-    expect(result.exitCode).toBe(0)
-    expect(result.stderr).toBe("")
+    expect(result.error).toBeUndefined()
+    expect(result.output).toContain("Sixb initialized")
 
     await stat(join(targetDir, "sixb.config.ts"))
     await stat(join(targetDir, "app", "layout.tsx"))

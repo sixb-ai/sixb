@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { afterEach, expect, jest, test } from "bun:test"
 import {
   defineWorkflow,
   defineWorkflowStep,
@@ -15,6 +15,39 @@ import type { DecisionModel } from "@sixb/core/models"
 import type { Storage } from "@sixb/core/storage"
 import { startSixbRuntime, stopSixbProviders } from "../src/lib/runtime"
 import { createWorkerForType, resolveRegisteredWorkerTypes } from "../src/lib/worker-registry"
+
+afterEach(() => {
+  jest.useRealTimers()
+})
+
+/**
+ * Settles a call that waits on timers, firing each timer as soon as nothing else is left to run.
+ * The direct accounting write retries on its 50/200/600ms backoff before scheduling recovery.
+ * The clock stays where it was: the recovery job becomes claimable at the time it is enqueued,
+ * and the workers that claim it run on the real clock.
+ */
+async function settleOnFakeTimers<T>(promise: Promise<T>): Promise<T> {
+  const now = Date.now()
+  let settled = false
+  promise.then(
+    () => {
+      settled = true
+    },
+    () => {
+      settled = true
+    }
+  )
+  for (let step = 0; !settled; step++) {
+    if (step === 100) throw new Error("The call did not settle after 100 timers.")
+    // setImmediate is not faked: it lets the storage work queued so far run first.
+    await new Promise((resolve) => setImmediate(resolve))
+    if (!settled) {
+      jest.advanceTimersToNextTimer()
+      jest.setSystemTime(now)
+    }
+  }
+  return promise
+}
 
 for (const mode of ["cohost", "worker-group"] as const) {
   // Removal proof: gate either CLI startup path on the model catalog again.
@@ -79,13 +112,16 @@ for (const mode of ["cohost", "worker-group"] as const) {
     const identity = { projectId: host.id, executionId: sixb.execution.id }
     let stop = () => stopSixbProviders(host)
     try {
-      await expect(
+      jest.useFakeTimers()
+      const failure = await settleOnFakeTimers(
         sixb.models.decision.evaluate({
           model,
           input: "Urgent repair",
           questions: { urgent: question.probability("Urgent?") },
         })
-      ).rejects.toMatchObject({ name: "ModelUsageRecordingError", recoveryScheduled: true })
+      ).catch((error: unknown) => error)
+      jest.useRealTimers()
+      expect(failure).toMatchObject({ name: "ModelUsageRecordingError", recoveryScheduled: true })
       expect((await storage.aiUsage.summarizeExecution(identity)).modelCallCount).toBe(0)
       available = true
 

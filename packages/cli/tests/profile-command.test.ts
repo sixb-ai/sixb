@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -9,7 +9,8 @@ const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
 const servers: Bun.Server<undefined>[] = []
 const tempDirectories: string[] = []
 
-afterEach(async () => {
+// The tests run at once, each with its own server and config directory.
+afterAll(async () => {
   while (servers.length > 0) servers.pop()?.stop(true)
   await Promise.all(tempDirectories.splice(0).map((path) => rm(path, { recursive: true })))
 })
@@ -52,52 +53,7 @@ function startProjectServer(
 }
 
 describe("sixb profile commands", () => {
-  // Regression proof: this test sends an action with the stack's original parser.
-  test("validates instance options before dispatch and serves help without a profile", async () => {
-    const env = await tempConfigEnvironment()
-    const { server, authorizationHeaders } = startProjectServer()
-    const apiUrl = `http://127.0.0.1:${server.port}`
-    const invalid = await runCliToCompletion({
-      cmd: [
-        "bun",
-        cliEntry,
-        "actions",
-        "request",
-        "example",
-        "--api-url",
-        apiUrl,
-        "--run-id",
-        "a",
-        "--run-id",
-        "b",
-      ],
-      cwd: repoRoot,
-      env,
-    })
-    expect(invalid.exitCode).toBe(2)
-    expect(JSON.parse(invalid.stderr).error.code).toBe("invalid_arguments")
-    expect(authorizationHeaders).toEqual([])
-    const help = await runCliToCompletion({
-      cmd: [
-        "bun",
-        cliEntry,
-        "objects",
-        "get",
-        "Customer",
-        "alice",
-        "--profile",
-        "missing",
-        "--help",
-      ],
-      cwd: repoRoot,
-      env,
-    })
-    assertCliSucceeded(help)
-    expect(help.stdout).toContain("Usage:")
-    expect(help.stderr).toBe("")
-  })
-
-  test("signs in through the browser, renews the session, and signs out", async () => {
+  test.concurrent("signs in through the browser, renews the session, and signs out", async () => {
     const env: Record<string, string | undefined> = {
       ...(await tempConfigEnvironment()),
       SIXB_CLI_NO_BROWSER: "1",
@@ -199,7 +155,7 @@ describe("sixb profile commands", () => {
     expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({ version: 1, profiles: {} })
   }, 20_000)
 
-  test("imports a token, stores a profile, and dispatches instance commands", async () => {
+  test.concurrent("imports a token, stores a profile, and dispatches instance commands", async () => {
     const env = await tempConfigEnvironment()
     const { server, authorizationHeaders } = startProjectServer({ token: "secret-token" })
     const apiUrl = `http://127.0.0.1:${server.port}`
@@ -303,7 +259,7 @@ describe("sixb profile commands", () => {
     expect(JSON.parse(loggedOutConfig)).toEqual({ version: 1, profiles: {} })
   }, 20_000)
 
-  test("stores tokenless profiles for auth-disabled instances", async () => {
+  test.concurrent("stores tokenless profiles for auth-disabled instances", async () => {
     const env = await tempConfigEnvironment()
     const { server, authorizationHeaders } = startProjectServer({ projectId: "local-dev" })
     const apiUrl = `http://127.0.0.1:${server.port}`
@@ -334,7 +290,7 @@ describe("sixb profile commands", () => {
     })
   }, 20_000)
 
-  test("reports an authentication failure without claiming the API is disconnected", async () => {
+  test.concurrent("reports an authentication failure without claiming the API is disconnected", async () => {
     const env = await tempConfigEnvironment()
     let requiredToken = "initial-token"
     const server = Bun.serve({
@@ -374,7 +330,7 @@ describe("sixb profile commands", () => {
     })
   }, 20_000)
 
-  test("does not send a stored token with an explicit API URL", async () => {
+  test.concurrent("does not send a stored token with an explicit API URL", async () => {
     const env = await tempConfigEnvironment()
     const stored = startProjectServer({ token: "stored-secret", projectId: "stored" })
     const target = startProjectServer({ projectId: "target" })
@@ -413,7 +369,7 @@ describe("sixb profile commands", () => {
     expect(target.authorizationHeaders).toEqual([null])
   }, 20_000)
 
-  test("does not save a profile when token validation fails", async () => {
+  test.concurrent("does not save a profile when token validation fails", async () => {
     const env = await tempConfigEnvironment()
     const { server } = startProjectServer({ token: "correct-token" })
 

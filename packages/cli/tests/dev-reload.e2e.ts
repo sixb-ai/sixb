@@ -20,7 +20,7 @@ async function waitFor(check: () => boolean | Promise<boolean>, details: () => s
   const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
     if (await check()) return
-    await Bun.sleep(50)
+    await Bun.sleep(20)
   }
   throw new Error(`Timed out: ${details()}`)
 }
@@ -45,9 +45,12 @@ function freePortBlock() {
   throw new Error("No free dev port block")
 }
 
+// The three scenarios each own their processes and fixture, and two of them spend most of their
+// time waiting out a 10s shutdown deadline, so they run together.
+
 // Guard check: return immediately from the watchDevSource callback in lib/dev-supervisor.ts.
 // This test then fails waiting for the first helper edit to restart the running app.
-test("dev reloads backend modules, rediscovers files, recovers, and keeps frontend HMR", async () => {
+test.concurrent("dev reloads backend modules, rediscovers files, recovers, and keeps frontend HMR", async () => {
   const fixture = await createDevFixture()
   const port = freePortBlock()
   const app = `http://127.0.0.1:${port}`
@@ -237,16 +240,20 @@ test("dev reloads backend modules, rediscovers files, recovers, and keeps fronte
     expect(await (await request(app)).text()).toContain("/__sixb/dev-reload.js")
     const stableGeneration = await generation()
     count = readyCount()
+    const quietStart = output.length
     await fixture.write("app/page.tsx", pageSource("Frontend edited"))
     await fixture.write(".sixb/generated/ignored.ts", "export const ignored = true")
     await fixture.write("data.db", "storage data")
     await fixture.write("blob-without-extension", "storage data")
-    // A negative assertion needs a window longer than the debounce and normal restart.
-    await Bun.sleep(1500)
+    // A negative assertion needs a window. A watched save prints "Source changed" once the
+    // watcher (100ms) and restart (150ms) debounces pass, well before the restart is Ready.
+    await Bun.sleep(750)
+    expect(output.slice(quietStart)).not.toContain("Source changed")
     expect(readyCount()).toBe(count)
     expect(await generation()).toBe(stableGeneration)
 
-    // Saves during a slow startup must still land on the latest transitive import.
+    // Saves during a slow startup must still land on the latest transitive import. The startup
+    // sleep is the window this save has to land in, after the test sees the start.
     const configPath = join(fixture.root, "sixb.config.ts")
     const config = await readFile(configPath, "utf8")
     const beforeStarts = (await events()).filter((e) => e.type === "start").length
@@ -302,8 +309,9 @@ test("dev reloads backend modules, rediscovers files, recovers, and keeps fronte
 // On macOS/Linux the descendant survives and this test fails the final liveness assertion.
 // Also remove the child-side disconnect deadline in commands/dev.tsx: SIGKILL of
 // the supervisor then leaves the stuck child and its descendant alive.
+// Each case waits out a 10s shutdown deadline: the supervisor's own, or the orphaned child's.
 for (const signal of ["SIGTERM", "SIGKILL"] as const)
-  test.skipIf(process.platform === "win32")(
+  test.concurrent.skipIf(process.platform === "win32")(
     `dev reaps a stuck startup and descendants after supervisor ${signal}`,
     async () => {
       const fixture = await createDevFixture()
@@ -379,43 +387,50 @@ await new Promise(() => {})
   )
 
 // Guard: remove scheduleFallback() from dev-watch.ts. Native events are deliberately
-// absent in this isolated subprocess, so the backend edit is then never reported.
-test("source reconciliation recovers missing native events and closes its timers", async () => {
+// absent in this isolated subprocess, so the backend edit is then never reported. The probe runs
+// under `bun test` because only the test runner applies a module mock to a builtin: under
+// `bun -e` the real `watch` stays in place and native events report the edit by themselves.
+test.concurrent("source reconciliation recovers missing native events and closes its timers", async () => {
   const fixture = await createDevFixture()
   await fixture.write("app/page.tsx", pageSource("Initial"))
-  const code = `
-import { mock } from "bun:test"
+  // Under `.sixb`, which the watcher ignores, so the probe is not a source change itself.
+  await fixture.write(
+    ".sixb/reconcile-probe.ts",
+    `
+import { expect, mock, test } from "bun:test"
 import { EventEmitter } from "node:events"
 import { writeFile } from "node:fs/promises"
 mock.module("node:fs", () => ({ watch: () => Object.assign(new EventEmitter(), { close() {} }) }))
-const { watchDevSource } = await import(${JSON.stringify(resolve(import.meta.dir, "../src/lib/dev-watch.ts"))})
-const changes = []
-const errors = []
-const watcher = watchDevSource(${JSON.stringify(fixture.root)}, () => true, (path) => changes.push(path), (error) => errors.push(String(error)))
-await watcher.ready
-await writeFile(${JSON.stringify(join(fixture.root, "app/page.tsx"))}, "export default () => null")
-await writeFile(${JSON.stringify(join(fixture.root, "lib/value.ts"))}, 'export const value = "changed"')
-const deadline = Date.now() + 7000
-while (changes.length === 0 && Date.now() < deadline) await Bun.sleep(20)
-await watcher.close()
-console.log(JSON.stringify({ changes, errors }))
+test("reports the backend edit through the fallback scan", async () => {
+  const { watchDevSource } = await import(${JSON.stringify(resolve(import.meta.dir, "../src/lib/dev-watch.ts"))})
+  const changes: string[] = []
+  const errors: string[] = []
+  const watcher = watchDevSource(${JSON.stringify(fixture.root)}, () => true, (path) => changes.push(path), (error) => errors.push(String(error)))
+  await watcher.ready
+  await writeFile(${JSON.stringify(join(fixture.root, "app/page.tsx"))}, "export default () => null")
+  await writeFile(${JSON.stringify(join(fixture.root, "lib/value.ts"))}, 'export const value = "changed"')
+  // The fallback scan runs every 5s.
+  const deadline = Date.now() + 7000
+  while (changes.length === 0 && Date.now() < deadline) await Bun.sleep(20)
+  await watcher.close()
+  expect({ changes, errors }).toEqual({ changes: ["lib/value.ts"], errors: [] })
+}, 9000)
 `
-  const proc = Bun.spawn([process.execPath, "-e", code], {
+  )
+  const proc = Bun.spawn([process.execPath, "test", "./.sixb/reconcile-probe.ts"], {
     cwd: fixture.root,
     stdout: "pipe",
     stderr: "pipe",
   })
-  const stdout = new Response(proc.stdout).text()
-  const stderr = new Response(proc.stderr).text()
-  const deadline = setTimeout(() => proc.kill("SIGKILL"), 10_000)
+  const output = Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
+  const deadline = setTimeout(() => proc.kill("SIGKILL"), 15_000)
   try {
-    expect(await proc.exited).toBe(0)
-    expect(await stderr).toBe("")
-    expect(JSON.parse(await stdout)).toEqual({ changes: ["lib/value.ts"], errors: [] })
+    const exitCode = await proc.exited
+    expect(exitCode, (await output).join("\n")).toBe(0)
   } finally {
     clearTimeout(deadline)
     if (proc.exitCode === null) proc.kill("SIGKILL")
     await proc.exited
     await rm(fixture.root, { recursive: true, force: true })
   }
-}, 15_000)
+}, 20_000)
