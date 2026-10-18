@@ -304,11 +304,12 @@ describe("the viewer", () => {
     expect(html).toContain('role="tablist"')
     expect(html).toMatch(/role="tab"[^>]*aria-selected="true"[^>]*>Summary</)
     expect(html).toMatch(/role="tab"[^>]*aria-selected="false"[^>]*>Regions</)
-    expect(html).toContain('aria-label="Download Summary as CSV"')
+    // The sheet downloads from a menu: as its CSV, or the workbook as an .xlsx.
+    expect(html).toMatch(/aria-haspopup="menu"[^>]*aria-label="Download"/)
     expect(html).toContain("$5,560,000")
     expect(html).toContain("35.1%")
     expect(html).toContain("Summary · 2 rows · Row 1 frozen")
-    // The workbook's entry is not a file a reader wants; each sheet downloads as CSV instead.
+    // The workbook's entry is not a file a reader wants; the sheet's own downloads replace it.
     expect(html).not.toContain("workbook.json")
   })
 

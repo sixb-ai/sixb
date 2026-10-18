@@ -7,9 +7,10 @@ import {
   type Workbook,
   type WorkbookSheet,
 } from "@sixb/core/artifacts"
+import type { QueryClient } from "@tanstack/react-query"
 import { useMemo } from "react"
 import type { FileSource } from "../../file-source"
-import { type ArtifactVersion, useFileText, versionFileSource } from "../../queries"
+import { type ArtifactVersion, fetchFileText, useFileText, versionFileSource } from "../../queries"
 import { type SheetModel, sheetModel } from "./model"
 
 /**
@@ -54,4 +55,22 @@ export function useSheetModel(
     }
   }, [sheet, csv.text])
   return { model, source, loading: csv.loading, tooLarge: csv.tooLarge }
+}
+
+/**
+ * Every sheet of a workbook, read and laid out, in its order: for a download of the whole
+ * workbook. Sheets the reader opened come from the cache.
+ */
+export async function readWorkbookModels(
+  client: QueryClient,
+  version: ArtifactVersion,
+  workbook: Workbook
+): Promise<SheetModel[]> {
+  return Promise.all(
+    workbook.sheets.map(async (sheet) => {
+      const source = versionFileSource(version, sheetFilePath(sheet.name))
+      if (!source) throw new Error(`[SixbApp] Sheet '${sheet.name}' has no file.`)
+      return sheetModel(sheet, parseCsv(await fetchFileText(client, source)))
+    })
+  )
 }
