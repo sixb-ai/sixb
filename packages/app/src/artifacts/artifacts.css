@@ -196,6 +196,16 @@
     0 20px 44px -28px rgb(0 0 0 / 0.35);
 }
 
+/* An embed on a canvas is the surface's: its own frame gives way, and its link to the row above. */
+.sixb-canvas-embed .sixb-embed-filled {
+  border: 0;
+  border-radius: 0;
+}
+
+.sixb-canvas-embed[data-named] .sixb-embed-filled > a {
+  display: none;
+}
+
 /* A board takes focus from the keyboard, to open it; the ring shows where focus is. */
 .sixb-artboard .react-flow__node:focus-visible {
   outline: 2px solid var(--ring);
