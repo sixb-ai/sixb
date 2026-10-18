@@ -933,7 +933,8 @@ describe("requestAction", () => {
   // Guard proofs: drop the catch that calls `failRequest` in `ActionRunExecutor.execute`
   // (`actions/run/executor.ts`), and the request rejects uncoded, a 400 over HTTP, with nothing
   // reported. Throw the storage error from `recordRun` (`actions/run/run-action.ts`) instead of an
-  // `UnrecordedActionRunError`, and the report loses the phase the run failed in.
+  // `UnrecordedActionRunError`, and the report loses the phase the run failed in. Give the record
+  // that error carries another phase, and the run that succeeded reports that phase instead.
   test("fails the request as internal.unexpected when a run's outcome cannot be recorded", async () => {
     const runtimeDeps = createTestRuntimeDeps()
     const leaky = defineAction("leaky")
@@ -941,11 +942,14 @@ describe("requestAction", () => {
       .writeback(() => {
         throw new Error("secret-token-123 rejected by upstream")
       })
+    const complete = defineAction("complete")
+      .params({})
+      .writeback(() => ({ ok: true }))
     const reports: SixbErrorContext[] = []
     const sixb = createTestSixb({
       id: "action-unrecorded-test",
       ontology: [Room],
-      actions: [actionDefinition(leaky)],
+      actions: [actionDefinition(leaky), actionDefinition(complete)],
       onError: (_error, context) => {
         reports.push(context)
       },
@@ -960,11 +964,18 @@ describe("requestAction", () => {
     )
 
     let failure: unknown
+    let succeededFailure: unknown
     try {
       failure = await sixb.actions.request({ actionId: "leaky", runId: "act_unrecorded" }).then(
         () => undefined,
         (error: unknown) => error
       )
+      succeededFailure = await sixb.actions
+        .request({ actionId: "complete", runId: "act_unrecorded_success" })
+        .then(
+          () => undefined,
+          (error: unknown) => error
+        )
     } finally {
       restore()
     }
@@ -983,12 +994,19 @@ describe("requestAction", () => {
         id: "act_unrecorded",
       })
     ).toBeNull()
+    expect(succeededFailure).toMatchObject({ code: "internal.unexpected" })
     await flushSixbErrors(sixb)
-    expect(reports).toHaveLength(1)
+    expect(reports).toHaveLength(2)
     expect(reports[0]).toMatchObject({
       type: "run.failed",
       run: { actionId: "leaky", runId: "act_unrecorded" },
       failure: { code: "action.phase_failed", details: { phase: "writeback" } },
+    })
+    // The run succeeded, so the report names the phase it succeeded in, not the one it started in.
+    expect(reports[1]).toMatchObject({
+      type: "run.failed",
+      run: { actionId: "complete", runId: "act_unrecorded_success" },
+      failure: { code: "internal.unexpected", details: { phase: "writeback" } },
     })
   })
 

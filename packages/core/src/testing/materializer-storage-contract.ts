@@ -862,6 +862,20 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
           expectedLinks: [],
         })
       ).rejects.toMatchObject({ kind: "expectation" })
+      // Same version, different commit: the object was deleted and recreated since it was read.
+      const current = await storage.objects.getByPrimaryId({
+        projectId: "materializer-storage-contract",
+        ...device,
+      })
+      if (!current) throw new Error("Expected the setup commit to create the device.")
+      await expect(
+        commitExpecting("recreated-object", {
+          expectedObjects: [
+            { ref: device, exists: true, version: current.version, lastCommitId: "stale-commit" },
+          ],
+          expectedLinks: [],
+        })
+      ).rejects.toMatchObject({ kind: "expectation" })
       await expect(
         commitExpecting("stale-link", {
           expectedObjects: [],

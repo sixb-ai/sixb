@@ -149,8 +149,12 @@ describe("SharedSessionProtocol", () => {
   test("fails closed for mismatched, revoked, and expired session or grant state", async () => {
     const host = hostWith([BroadShare])
     await seedGrant(host)
-    const now = new Date(start)
-    const protocol = new SharedSessionProtocol({ host, now: () => now })
+    let now = new Date(start)
+    const protocol = new SharedSessionProtocol({
+      host,
+      inactivityTtlMs: 10 * 60_000,
+      now: () => now,
+    })
     const credential = (await protocol.exchange("shr_one", linkSecret))!
     const [, secret] = credential.cookieValue.split(".")
 
@@ -162,6 +166,13 @@ describe("SharedSessionProtocol", () => {
 
     await protocol.revoke(credential.context)
     await expect(protocol.resolve("shr_one", credential.cookieValue)).resolves.toBeNull()
+
+    // A session left idle past its inactivity TTL expires while its grant is still active.
+    const idle = (await protocol.exchange("shr_one", linkSecret))!
+    now = new Date(start.getTime() + 10 * 60_000 - 1)
+    expect(await protocol.resolve("shr_one", idle.cookieValue)).not.toBeNull()
+    now = new Date(start.getTime() + 10 * 60_000)
+    await expect(protocol.resolve("shr_one", idle.cookieValue)).resolves.toBeNull()
 
     const replacement = (await protocol.exchange("shr_one", linkSecret))!
     await host.storage.shareGrants!.revoke({

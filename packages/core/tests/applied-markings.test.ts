@@ -110,6 +110,10 @@ async function setup(
         release()
       }
     },
+    /** Let the next storage reads through, while those already held stay held. */
+    admitStorage() {
+      storageGate = undefined
+    },
     /** Hold the next lake reads; `reached` settles once a read is waiting on the hold. */
     holdLake(): { readonly reached: Promise<void>; release(): void } {
       const reached = Promise.withResolvers<void>()
@@ -477,6 +481,7 @@ describe("applied markings", () => {
   })
 
   // Reproduce: drop the deadline from refresh in createAppliedMarkings; the read never settles.
+  // Drop the latestRun check from read, and the abandoned refresh publishes its Day 1 markings.
   test("a refresh that hangs fails reads at its deadline, and a late answer is discarded", async () => {
     const app = await setup({ maxAgeMs: 40 })
     app.apply(await app.normalized(titleFromAmount))
@@ -500,10 +505,14 @@ describe("applied markings", () => {
       "[Sixb] Cannot read the dataset versions projections applied, so markings cannot be enforced: [Sixb] Reading the dataset versions projections applied took longer than 0.04s."
     )
 
+    // The next refresh publishes while the abandoned one still waits on storage.
     app.apply(await app.normalized())
-    release()
+    app.admitStorage()
+    expect(await app.applied.current()).toBe(NO_APPLIED_MARKINGS)
 
-    // The abandoned refresh listed the Day 1 version: only the next one publishes.
+    // The abandoned refresh listed the Day 1 version and answers last: it is discarded.
+    release()
+    await drain()
     expect(await app.applied.current()).toBe(NO_APPLIED_MARKINGS)
   })
 
