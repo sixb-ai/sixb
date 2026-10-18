@@ -190,7 +190,7 @@ export interface ArtifactStorage {
   listVersions(input: ListArtifactVersionsInput): Promise<ListArtifactVersionsResult>
   /**
    * The latest version of each artifact whose latest version has an address to this artifact, so
-   * a new version can tell which artifacts it breaks.
+   * a new version can tell which artifacts it breaks. Ordered by artifact id.
    */
   listReferencingVersions(input: ListReferencingVersionsInput): Promise<ArtifactVersionRecord[]>
   /** Stores a frame grant. Throws `artifact_not_found` when its artifact does not exist. */

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { Principal } from "../auth"
 import type { FileRef } from "../blob-storage"
 import {
+  type ArtifactFrameGrantRecord,
   type ArtifactStorage,
   ArtifactStorageError,
   type ArtifactStorageErrorCode,
@@ -165,9 +166,9 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
             })
           )
         await create("art_numbers", [])
-        await create("art_chart", ["artifact:art_numbers#chart=revenue"])
-        await create("art_pinned", ["artifact:art_numbers@1/figures/a.svg"])
         await create("art_whole", ["artifact:art_numbers"])
+        await create("art_pinned", ["artifact:art_numbers@1/figures/a.svg"])
+        await create("art_chart", ["artifact:art_numbers#chart=revenue"])
         // A longer id that starts with the same letters is another artifact.
         await create("art_longer", ["artifact:art_numbersx#chart=revenue"])
         await create("art_elsewhere", ["artifact:art_numbers"], otherProjectId)
@@ -179,7 +180,9 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
           projectId,
           artifactId: "art_numbers",
         })
-        expect(referencing.map((version) => version.artifactId).sort()).toEqual([
+        // In artifact id order, whatever order they were published in. To see this fail, drop the
+        // sort in `InMemoryArtifactStorage.listReferencingVersions`.
+        expect(referencing.map((version) => version.artifactId)).toEqual([
           "art_chart",
           "art_pinned",
           "art_whole",
@@ -193,21 +196,8 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
     test("stores frame grants by token hash, expires them in batches, and drops them with the artifact", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput())
-        const grant = (seed: string, expiresInMinutes: number) => ({
-          projectId,
-          tokenHash: seed.repeat(64).slice(0, 64),
-          artifactId: "art_report",
-          version: 1,
-          targets: [
-            {
-              address: "artifact:art_other/figures/revenue.svg",
-              artifactId: "art_other",
-              version: 3,
-            },
-          ],
-          createdAt: t0,
-          expiresAt: at(expiresInMinutes),
-        })
+        const grant = (seed: string, expiresInMinutes: number) =>
+          frameGrant(seed, { expiresAt: at(expiresInMinutes) })
         await artifacts.createFrameGrant(grant("a", 60))
         await artifacts.createFrameGrant(grant("b", 5))
         await artifacts.createFrameGrant(grant("c", 10))
@@ -383,6 +373,8 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
             version: versionInput({ origin: { threadId: "thr_1", runId: "run_9" } }),
           })
         )
+        await artifacts.createFrameGrant(frameGrant("a"))
+        await artifacts.createFrameGrant(frameGrant("b", { artifactId: "art_new_in_run" }))
 
         expect(
           await artifacts.deleteVersionsByOrigin({ projectId: otherProjectId, runId: "run_1" })
@@ -399,6 +391,12 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         ).toBeNull()
         expect(await artifacts.get({ projectId, id: "art_new_in_run" })).toBeNull()
         expect(await artifacts.get({ projectId, id: "art_other_run" })).not.toBeNull()
+        // A deleted artifact's frame grants go with it; a kept one's stay. To see this fail, delete
+        // the artifact from the map alone in `InMemoryArtifactStorage.deleteVersionsByOrigin`.
+        expect(await artifacts.findFrameGrant({ projectId, tokenHash: "b".repeat(64) })).toBeNull()
+        expect(
+          await artifacts.findFrameGrant({ projectId, tokenHash: "a".repeat(64) })
+        ).not.toBeNull()
 
         // Version 3 belonged to the retried run; the next one is 4, so an address pinned to @3
         // can never land on different content.
@@ -418,6 +416,7 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
             if (!tx.artifacts) throw new Error("Expected artifact storage in the transaction.")
             await tx.artifacts.publish(publishInput({ createdAt: at(1) }))
             await tx.artifacts.create(createInput({ id: "art_rolled_back" }))
+            await tx.artifacts.createFrameGrant(frameGrant("a"))
             expect((await tx.artifacts.get({ projectId, id: "art_report" }))?.latestVersion).toBe(2)
             throw rollback
           })
@@ -425,6 +424,8 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
 
         expect((await artifacts.get({ projectId, id: "art_report" }))?.latestVersion).toBe(1)
         expect(await artifacts.get({ projectId, id: "art_rolled_back" })).toBeNull()
+        // To see this fail, leave frame grants out of `InMemoryArtifactStorage.restore`.
+        expect(await artifacts.findFrameGrant({ projectId, tokenHash: "a".repeat(64) })).toBeNull()
         expect((await artifacts.publish(publishInput({ createdAt: at(2) }))).version.version).toBe(
           2
         )
@@ -480,6 +481,24 @@ function versionInput(overrides: Partial<ArtifactVersionInput> = {}): ArtifactVe
   if (input.origin) return input
   const { origin: _origin, ...withoutOrigin } = input
   return withoutOrigin
+}
+
+function frameGrant(
+  seed: string,
+  overrides: Partial<ArtifactFrameGrantRecord> = {}
+): ArtifactFrameGrantRecord {
+  return {
+    projectId,
+    tokenHash: seed.repeat(64).slice(0, 64),
+    artifactId: "art_report",
+    version: 1,
+    targets: [
+      { address: "artifact:art_other/figures/revenue.svg", artifactId: "art_other", version: 3 },
+    ],
+    createdAt: t0,
+    expiresAt: at(60),
+    ...overrides,
+  }
 }
 
 function fileRef(seed: string, mediaType: string): FileRef {
