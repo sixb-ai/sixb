@@ -81,7 +81,7 @@ describe("SharedSessionProtocol", () => {
   test("exchanges each valid link secret for a new hashed short-lived credential", async () => {
     const host = hostWith([BroadShare])
     await seedGrant(host)
-    let now = new Date(start)
+    const now = new Date(start)
     const protocol = new SharedSessionProtocol({
       host,
       inactivityTtlMs: 10 * 60_000,
@@ -114,7 +114,6 @@ describe("SharedSessionProtocol", () => {
       sha256(first!.cookieValue.slice(first!.cookieValue.indexOf(".") + 1))
     )
     expect(JSON.stringify(session)).not.toContain(first!.cookieValue)
-    now = new Date(now.getTime() + 1)
   })
 
   test("renews only foreground activity and never crosses the grant deadline", async () => {
@@ -150,7 +149,7 @@ describe("SharedSessionProtocol", () => {
   test("fails closed for mismatched, revoked, and expired session or grant state", async () => {
     const host = hostWith([BroadShare])
     await seedGrant(host)
-    let now = new Date(start)
+    const now = new Date(start)
     const protocol = new SharedSessionProtocol({ host, now: () => now })
     const credential = (await protocol.exchange("shr_one", linkSecret))!
     const [, secret] = credential.cookieValue.split(".")
@@ -172,8 +171,6 @@ describe("SharedSessionProtocol", () => {
       revokedBy: { type: "user", id: "manager" },
     })
     await expect(protocol.resolve("shr_one", replacement.cookieValue)).resolves.toBeNull()
-
-    now = new Date(start.getTime() + 2)
   })
 
   test("intersects with the definition registered now and treats a missing definition as empty", async () => {

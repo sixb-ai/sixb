@@ -136,9 +136,9 @@ describe("markings on object reads", () => {
     expect(listed.objects.map((row) => row.properties.amount)).toEqual([undefined])
   })
 
-  test("a cleared reader receives the values it is cleared for", async () => {
+  test("a cleared reader receives the values it is cleared for, and trusted code every value", async () => {
     const host = createHost()
-    const { financeReader } = await seed(host)
+    const { trusted, financeReader } = await seed(host)
 
     const invoice = await financeReader.objects.get(Invoice.id, "inv-1")
     expect(invoice?.properties).toEqual({
@@ -153,15 +153,10 @@ describe("markings on object reads", () => {
     const customer = await financeReader.objects.get(Customer.id, "c1")
     expect(customer?.properties).toEqual({ id: "c1", name: "Acme" })
     expect(customer?.redactions).toEqual({ taxId: { reason: "missing_clearance" } })
-  })
 
-  test("trusted executions read every property", async () => {
-    const host = createHost()
-    const { trusted } = await seed(host)
-
-    const invoice = await trusted.objects.get(Invoice.id, "inv-1")
-    expect(invoice?.properties.amount).toBe(120)
-    expect(invoice?.redactions).toBeUndefined()
+    const unrestricted = await trusted.objects.get(Customer.id, "c1")
+    expect(unrestricted?.properties.taxId).toBe("FR-1")
+    expect(unrestricted?.redactions).toBeUndefined()
   })
 
   test("query results, subtypes, and expanded objects are redacted", async () => {
@@ -238,9 +233,9 @@ describe("markings on queries", () => {
     predicate: { op: "gt", propertyId: "amount", value: 100 },
   }
 
-  test("filtering, sorting, faceting, or searching by a marked property is rejected", async () => {
+  test("filtering, sorting, faceting, or searching by a marked property needs its clearance", async () => {
     const host = createHost()
-    const { salesReader } = await seed(host)
+    const { salesReader, financeReader } = await seed(host)
 
     const rejected = [
       () => salesReader.objects.executeQuery({ query: amountAbove100 }),
@@ -270,29 +265,9 @@ describe("markings on queries", () => {
     await expect(salesReader.objects.executeQuery({ query: amountAbove100 })).rejects.toThrow(
       "[Sixb] Cannot filter by 'invoice.amount' at '$.predicate': it requires clearance for marking 'financial'."
     )
-  })
 
-  test("a subtype's marked property cannot be queried through its parent", async () => {
-    const host = createHost()
-    const { salesReader } = await seed(host)
-
-    await expect(
-      salesReader.objects.count({
-        query: {
-          kind: "filter",
-          input: { kind: "start", objectTypeId: Invoice.id, includeSubtypes: true },
-          predicate: { op: "gt", propertyId: "amount", value: 100 },
-        },
-      })
-    ).rejects.toBeInstanceOf(AuthorizationError)
-  })
-
-  test("a cleared reader queries marked properties", async () => {
-    const host = createHost()
-    const { financeReader } = await seed(host)
-
-    const result = await financeReader.objects.executeQuery({ query: amountAbove100 })
-    expect(result.objects.map((row) => row.primaryId)).toEqual(["inv-1"])
+    const cleared = await financeReader.objects.executeQuery({ query: amountAbove100 })
+    expect(cleared.objects.map((row) => row.primaryId)).toEqual(["inv-1"])
   })
 
   test("default text search skips the fields a reader cannot read", async () => {

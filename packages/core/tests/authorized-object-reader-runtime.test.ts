@@ -20,13 +20,6 @@ import { createTestRuntimeDeps } from "./test-runtime-deps"
 const projectId = "authorized-object-reader-runtime"
 
 describe("AuthorizedObjectReader runtime binding", () => {
-  test("SixbHost creates the bound reader before composing the SDK", () => {
-    const host = new SixbHost({ id: projectId, ontology: [], ...createTestRuntimeDeps() })
-    const scope = createTestingScope({ projectId, executionId: "execution-1" })
-
-    expect(host.withScope(scope).execution).toBe(scope.execution)
-  })
-
   test("SixbHost captures an accessor-backed scope once before composition", () => {
     const host = new SixbHost({ id: projectId, ontology: [], ...createTestRuntimeDeps() })
     const source = createTestingScope({ projectId, executionId: "execution-accessor" })

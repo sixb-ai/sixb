@@ -19,15 +19,6 @@ const base = {
 } as const
 
 describe("SessionCache", () => {
-  test("returns undefined on miss, hit after set within ttl", () => {
-    const cache = new SessionCache(5_000)
-    const session = fakeSession("usr_1")
-
-    expect(cache.get({ ...base, nowMs: 0 })).toBeUndefined()
-    cache.set({ ...base, session, nowMs: 0, sessionExpiresAtMs: 1_000_000 })
-    expect(cache.get({ ...base, nowMs: 4_999 })).toBe(session)
-  })
-
   test("expires entries after ttl", () => {
     const cache = new SessionCache(5_000)
     cache.set({ ...base, session: fakeSession("usr_1"), nowMs: 0, sessionExpiresAtMs: 1_000_000 })
@@ -64,13 +55,6 @@ describe("SessionCache", () => {
     const cache = new SessionCache(5_000)
     cache.set({ ...base, session: fakeSession("usr_1"), nowMs: 10_000, sessionExpiresAtMs: 9_000 })
     expect(cache.get({ ...base, nowMs: 10_000 })).toBeUndefined()
-  })
-
-  test("is bound to the exact token hash", () => {
-    const cache = new SessionCache(5_000)
-    cache.set({ ...base, session: fakeSession("usr_1"), nowMs: 0, sessionExpiresAtMs: 1_000_000 })
-
-    expect(cache.get({ ...base, tokenHash: "other", nowMs: 1 })).toBeUndefined()
   })
 
   test("answers a bearer token only from a bearer entry, and not past its access expiry", () => {

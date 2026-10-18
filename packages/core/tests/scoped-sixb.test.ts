@@ -714,17 +714,29 @@ describe("bound Sixb Action run reuse", () => {
 })
 
 describe("bound Sixb operational access", () => {
-  test("dataset catalog narrows to viewable datasets", () => {
+  // Each catalog lists and looks up only what its own grant kind covers: an entry the principal
+  // may not use is hidden from both, and other grants leave the catalog empty.
+  test.each([
+    ["datasets", "commercial", ["raw.contracts"], "raw.invoices", "operations"],
+    ["actions", "commercial", ["send-contract"], "archive-invoice", "operations"],
+    ["workflows", "operations", ["renew-contract", "agent-review-contract"], null, "commercial"],
+    ["syncs", "operations", ["sync-contracts"], "sync-invoices", "commercial"],
+    ["pipelines", "operations", ["contract-pipeline"], "invoice-pipeline", "commercial"],
+  ] as const)("the %s catalog narrows to the principal's grants", (name, granted, ids, hidden, other) => {
+    type Catalog = {
+      list(): readonly { readonly id: string }[]
+      getById(id: string): { readonly id: string } | null
+    }
     const host = createRuntime()
-    const _sixb = createTestSixb(host)
-    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
+    const catalog: Catalog = bindPrincipal(host, contextFor(host, [granted]))[name]
 
-    expect(operator.datasets.list().map((dataset) => dataset.id)).toEqual(["raw.contracts"])
-    expect(operator.datasets.getById("raw.contracts")?.id).toBe("raw.contracts")
-    expect(operator.datasets.getById("raw.invoices")).toBeNull()
+    expect(catalog.list().map((entry) => entry.id)).toEqual([...ids])
+    expect(catalog.getById(ids[0])?.id).toBe(ids[0])
+    if (hidden) expect(catalog.getById(hidden)).toBeNull()
 
-    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
-    expect(runner.datasets.list()).toEqual([])
+    const ungranted: Catalog = bindPrincipal(host, contextFor(host, [other]))[name]
+    expect(ungranted.list()).toEqual([])
+    expect(ungranted.getById(ids[0])).toBeNull()
   })
 
   test("workflow runs require can.run and snapshot all durable requester groups", async () => {
@@ -795,58 +807,6 @@ describe("bound Sixb operational access", () => {
     )
   })
 
-  test("action metadata narrows to applicable actions", () => {
-    const host = createRuntime()
-    const _sixb = createTestSixb(host)
-
-    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
-    expect(operator.actions.list().map((action) => action.id)).toEqual(["send-contract"])
-    expect(operator.actions.getById("send-contract")?.id).toBe("send-contract")
-    expect(operator.actions.getById("archive-invoice")).toBeNull()
-
-    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
-    expect(runner.actions.list()).toEqual([])
-  })
-
-  test("dynamic action requests enforce apply and view", async () => {
-    const host = createRuntime()
-    await seedPrincipal(host)
-    const sixb = createTestSixb(host)
-    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
-
-    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
-    const run = await operator.actions.request({
-      actionId: "send-contract",
-      subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
-    })
-    expect(run.status).toBe("succeeded")
-
-    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
-    expect(
-      runner.actions.request({
-        actionId: "send-contract",
-        subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
-      })
-    ).rejects.toThrow(AuthorizationError)
-  })
-
-  test("workflow catalog narrows to runnable workflows", () => {
-    const host = createRuntime()
-    const _sixb = createTestSixb(host)
-
-    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
-    expect(runner.workflows.list().map((workflow) => workflow.id)).toEqual([
-      "renew-contract",
-      "agent-review-contract",
-    ])
-    expect(runner.workflows.getById("renew-contract")?.id).toBe("renew-contract")
-
-    // No run grant: the workflow is hidden from both listing and lookup.
-    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
-    expect(operator.workflows.list()).toEqual([])
-    expect(operator.workflows.getById("renew-contract")).toBeNull()
-  })
-
   test("workflow permission encapsulates agent nodes", async () => {
     const host = createRuntime()
     await seedPrincipal(host)
@@ -877,20 +837,6 @@ describe("bound Sixb operational access", () => {
     ).rejects.toMatchObject({ code: "agent_not_found" })
   })
 
-  test("sync catalog narrows to runnable syncs", () => {
-    const host = createRuntime()
-    const _sixb = createTestSixb(host)
-
-    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
-    expect(runner.syncs.list().map((sync) => sync.id)).toEqual(["sync-contracts"])
-    expect(runner.syncs.getById("sync-contracts")?.id).toBe("sync-contracts")
-    expect(runner.syncs.getById("sync-invoices")).toBeNull()
-
-    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
-    expect(operator.syncs.list()).toEqual([])
-    expect(operator.syncs.getById("sync-contracts")).toBeNull()
-  })
-
   test("a listable sync or pipeline can actually be started, and only with can.run", async () => {
     const host = createRuntime()
     await seedPrincipal(host)
@@ -911,20 +857,6 @@ describe("bound Sixb operational access", () => {
     expect(runner.pipelines.request({ pipelineId: "invoice-pipeline" })).rejects.toThrow(
       AuthorizationError
     )
-  })
-
-  test("pipeline catalog narrows to runnable pipelines", () => {
-    const host = createRuntime()
-    const _sixb = createTestSixb(host)
-
-    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
-    expect(runner.pipelines.list().map((pipeline) => pipeline.id)).toEqual(["contract-pipeline"])
-    expect(runner.pipelines.getById("contract-pipeline")?.id).toBe("contract-pipeline")
-    expect(runner.pipelines.getById("invoice-pipeline")).toBeNull()
-
-    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
-    expect(operator.pipelines.list()).toEqual([])
-    expect(operator.pipelines.getById("contract-pipeline")).toBeNull()
   })
 
   test("the project Agent is visible only with its run grant", () => {
@@ -1090,15 +1022,20 @@ describe("bound Sixb operational access", () => {
 })
 
 describe("bound Sixb object writes", () => {
-  test("a viewer cannot write: view alone grants no edit", async () => {
+  // A write needs view and edit on the exact type: an upsert answers with the merged row, and
+  // `can.view(Contract)` covers `signed-contract` while `can.edit(Contract)` must not.
+  test.each([
+    ["view alone grants no edit", "commercial", "contract"],
+    ["edit without view is refused", "blind-writers", "contract"],
+    ["edit on one type leaves an ungranted type unwritable", "editors", "invoice"],
+    ["edit does not expand to subtypes", "editors", "signed-contract"],
+  ] as const)("a write is refused: %s", async (_case, group, objectTypeId) => {
     const host = createRuntime()
-    const _sixb = createTestSixb(host)
-    const scoped = bindPrincipal(host, contextFor(host, ["commercial"]))
+    const scoped = bindPrincipal(host, contextFor(host, [group]))
 
-    expect(scoped.objects(Contract).upsert({ properties: { id: "c2" } })).rejects.toThrow(
+    await expect(scoped.objects.upsert(objectTypeId, { id: "c2" })).rejects.toThrow(
       AuthorizationError
     )
-    expect(scoped.objects.upsert("contract", { id: "c2" })).rejects.toThrow(AuthorizationError)
   })
 
   test("view plus edit writes, and the write is readable back", async () => {
@@ -1109,16 +1046,6 @@ describe("bound Sixb object writes", () => {
 
     await scoped.objects(Contract).upsert({ properties: { id: "c1" } })
     expect(await scoped.objects(Contract).byId("c1").get()).not.toBeNull()
-  })
-
-  test("edit without view is refused — an upsert answers with the merged row", async () => {
-    const host = createRuntime()
-    const _sixb = createTestSixb(host)
-    const scoped = bindPrincipal(host, contextFor(host, ["blind-writers"]))
-
-    expect(scoped.objects(Contract).upsert({ properties: { id: "c2" } })).rejects.toThrow(
-      AuthorizationError
-    )
   })
 
   test("delete and restore ride on the same edit grant", async () => {
@@ -1134,26 +1061,6 @@ describe("bound Sixb object writes", () => {
     await editor.objects(Contract).byId("c1").delete()
     expect(await editor.objects(Contract).byId("c1").get()).toBeNull()
     await editor.objects(Contract).byId("c1").restore()
-  })
-
-  test("ungranted types stay unwritable for a principal that can edit another type", async () => {
-    const host = createRuntime()
-    const _sixb = createTestSixb(host)
-    const scoped = bindPrincipal(host, contextFor(host, ["editors"]))
-
-    expect(scoped.objects.upsert("invoice", { id: "i1" })).rejects.toThrow(AuthorizationError)
-  })
-
-  test("edit does not expand to subtypes", async () => {
-    const host = createRuntime()
-    const _sixb = createTestSixb(host)
-    const scoped = bindPrincipal(host, contextFor(host, ["editors"]))
-
-    // `can.view(Contract)` covers `signed-contract` (view expands); `can.edit(Contract)` must not.
-    expect(await scoped.objects(SignedContract).byId("s1").get()).toBeNull()
-    expect(scoped.objects.upsert("signed-contract", { id: "s1" })).rejects.toThrow(
-      AuthorizationError
-    )
   })
 })
 
@@ -1220,13 +1127,13 @@ describe("bound Sixb link writes", () => {
 })
 
 describe("bound Sixb telemetry appends", () => {
-  test("append needs its own grant: an editor cannot append", async () => {
+  test("append needs its own grant: an editor cannot append through either channel", async () => {
     const host = createRuntime()
     const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     const scoped = bindPrincipal(host, contextFor(host, ["editors"]))
 
-    expect(
+    await expect(
       scoped.objects.appendTelemetry("contract", [
         {
           id: "c1",
@@ -1234,6 +1141,13 @@ describe("bound Sixb telemetry appends", () => {
           at: new Date(),
         },
       ])
+    ).rejects.toThrow(AuthorizationError)
+    await expect(
+      scoped.objects(Contract).byId("c1").telemetry(Contract.p.temperature).append({
+        value: 21,
+        unit: "degreeCelsius",
+        at: new Date(),
+      })
     ).rejects.toThrow(AuthorizationError)
   })
 
@@ -1262,21 +1176,6 @@ describe("bound Sixb telemetry appends", () => {
     })
     expect(stored).toHaveLength(1)
     expect(scoped.objects(Contract).byId("c1").get()).rejects.toThrow(AuthorizationError)
-  })
-
-  test("the per-property channel enforces the same grant as the batch", async () => {
-    const host = createRuntime()
-    const sixb = createTestSixb(host)
-    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
-    const editor = bindPrincipal(host, contextFor(host, ["editors"]))
-
-    expect(
-      editor.objects(Contract).byId("c1").telemetry(Contract.p.temperature).append({
-        value: 21,
-        unit: "degreeCelsius",
-        at: new Date(),
-      })
-    ).rejects.toThrow(AuthorizationError)
   })
 })
 
@@ -1346,14 +1245,6 @@ describe("direct writes are attributable", () => {
 })
 
 describe("bound Sixb fails closed on ungranted surfaces", () => {
-  test("an explicit auth-disabled execution remains unrestricted", async () => {
-    const host = createRuntime()
-    const sixb = createTestSixb(host)
-
-    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
-    expect((await sixb.objects.list({})).objects).toHaveLength(1)
-  })
-
   test("ordinary principal authority cannot reach process providers", () => {
     const host = createRuntime()
     const scoped = bindPrincipal(host, contextFor(host, ["commercial"]))

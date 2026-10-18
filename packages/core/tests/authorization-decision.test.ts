@@ -101,95 +101,71 @@ const delegatedRuntime = {
 }
 
 describe("evaluate", () => {
-  test("requires the explicit project log observation capability", () => {
-    expect(evaluate(context({ logs: true }), { kind: "logs.observe" })).toEqual({
+  // Each request kind requires one grant and reports it whether or not it is held. A grant of
+  // another kind does not count: a viewer holds no edit, and an editor holds no append. The pairing
+  // the write leaves require lives in `assertCanEdit`, not in the atom.
+  test.each([
+    ["logs.observe", { kind: "logs.observe" }, { logs: true }, {}, "observe:logs"],
+    [
+      "activity.observe",
+      { kind: "activity.observe" },
+      { activity: true },
+      { logs: true },
+      "observe:activity",
+    ],
+    [
+      "object.view",
+      { kind: "object.view", objectTypeId: "quote" },
+      { view: ["quote"] },
+      {},
+      "view:object:quote",
+    ],
+    [
+      "dataset.view",
+      { kind: "dataset.view", datasetId: "raw.orders" },
+      { datasets: ["raw.orders"] },
+      {},
+      "view:dataset:raw.orders",
+    ],
+    [
+      "object.edit",
+      { kind: "object.edit", objectTypeId: "quote" },
+      { edit: ["quote"] },
+      { view: ["quote"] },
+      "edit:object:quote",
+    ],
+    [
+      "telemetry.append",
+      { kind: "telemetry.append", objectTypeId: "sensor" },
+      { append: ["sensor"] },
+      { view: ["sensor"], edit: ["sensor"] },
+      "append:telemetry:sensor",
+    ],
+    [
+      "sync.run",
+      { kind: "sync.run", syncId: "sync-orders" },
+      { syncs: ["sync-orders"] },
+      {},
+      "run:sync:sync-orders",
+    ],
+    [
+      "pipeline.run",
+      { kind: "pipeline.run", pipelineId: "pipeline-orders" },
+      { pipelines: ["pipeline-orders"] },
+      {},
+      "run:pipeline:pipeline-orders",
+    ],
+    ["agent.run", { kind: "agent.run" }, { agent: true }, {}, "run:agent"],
+  ] as const)("%s requires its grant and reports the requirement", (_kind, request, held, other, requirement) => {
+    expect(evaluate(context(held), request)).toEqual({
       allowed: true,
-      requirements: ["observe:logs"],
+      requirements: [requirement],
       missing: [],
     })
-    expect(evaluate(context({}), { kind: "logs.observe" })).toEqual({
+    expect(evaluate(context(other), request)).toEqual({
       allowed: false,
-      requirements: ["observe:logs"],
-      missing: ["observe:logs"],
-    })
-  })
-
-  test("requires the explicit project activity observation capability", () => {
-    expect(evaluate(context({ activity: true }), { kind: "activity.observe" })).toEqual({
-      allowed: true,
-      requirements: ["observe:activity"],
-      missing: [],
-    })
-    expect(evaluate(context({ logs: true }), { kind: "activity.observe" })).toEqual({
-      allowed: false,
-      requirements: ["observe:activity"],
-      missing: ["observe:activity"],
-    })
-  })
-
-  test("reports the requirement and allows when the grant is held", () => {
-    expect(
-      evaluate(context({ view: ["quote"] }), { kind: "object.view", objectTypeId: "quote" })
-    ).toEqual({ allowed: true, requirements: ["view:object:quote"], missing: [] })
-  })
-
-  test("reports the missing requirement when the grant is absent", () => {
-    expect(evaluate(context({}), { kind: "object.view", objectTypeId: "quote" })).toEqual({
-      allowed: false,
-      requirements: ["view:object:quote"],
-      missing: ["view:object:quote"],
-    })
-  })
-
-  test("dataset.view checks dataset grants", () => {
-    expect(
-      evaluate(context({ datasets: ["raw.orders"] }), {
-        kind: "dataset.view",
-        datasetId: "raw.orders",
-      })
-    ).toEqual({ allowed: true, requirements: ["view:dataset:raw.orders"], missing: [] })
-
-    expect(evaluate(context({}), { kind: "dataset.view", datasetId: "raw.orders" })).toEqual({
-      allowed: false,
-      requirements: ["view:dataset:raw.orders"],
-      missing: ["view:dataset:raw.orders"],
-    })
-  })
-
-  test("object.edit checks edit grants, independently of view", () => {
-    expect(
-      evaluate(context({ edit: ["quote"] }), { kind: "object.edit", objectTypeId: "quote" })
-    ).toEqual({ allowed: true, requirements: ["edit:object:quote"], missing: [] })
-
-    // A viewer holds no edit grant, and an editor's `object.edit` atom does not consult view. The
-    // pairing the write leaves require lives in `assertCanEdit`, not in the atom.
-    expect(
-      evaluate(context({ view: ["quote"] }), { kind: "object.edit", objectTypeId: "quote" })
-    ).toEqual({
-      allowed: false,
-      requirements: ["edit:object:quote"],
-      missing: ["edit:object:quote"],
-    })
-  })
-
-  test("telemetry.append checks append grants and nothing else", () => {
-    expect(
-      evaluate(context({ append: ["sensor"] }), {
-        kind: "telemetry.append",
-        objectTypeId: "sensor",
-      })
-    ).toEqual({ allowed: true, requirements: ["append:telemetry:sensor"], missing: [] })
-
-    // Editing a type does not carry the right to push points at it.
-    expect(
-      evaluate(context({ view: ["sensor"], edit: ["sensor"] }), {
-        kind: "telemetry.append",
-        objectTypeId: "sensor",
-      })
-    ).toEqual({
-      allowed: false,
-      requirements: ["append:telemetry:sensor"],
-      missing: ["append:telemetry:sensor"],
+      requirements: [requirement],
+      missing: [requirement],
     })
   })
 
@@ -202,47 +178,6 @@ describe("evaluate", () => {
     expect(decision.allowed).toBe(false)
     expect(decision.requirements).toEqual(["view:object:quote", "view:object:contact"])
     expect(decision.missing).toEqual(["view:object:contact"])
-  })
-
-  test("sync.run checks sync grants", () => {
-    expect(
-      evaluate(context({ syncs: ["sync-orders"] }), { kind: "sync.run", syncId: "sync-orders" })
-    ).toEqual({ allowed: true, requirements: ["run:sync:sync-orders"], missing: [] })
-
-    expect(evaluate(context({}), { kind: "sync.run", syncId: "sync-orders" })).toEqual({
-      allowed: false,
-      requirements: ["run:sync:sync-orders"],
-      missing: ["run:sync:sync-orders"],
-    })
-  })
-
-  test("pipeline.run checks pipeline grants", () => {
-    expect(
-      evaluate(context({ pipelines: ["pipeline-orders"] }), {
-        kind: "pipeline.run",
-        pipelineId: "pipeline-orders",
-      })
-    ).toEqual({ allowed: true, requirements: ["run:pipeline:pipeline-orders"], missing: [] })
-
-    expect(evaluate(context({}), { kind: "pipeline.run", pipelineId: "pipeline-orders" })).toEqual({
-      allowed: false,
-      requirements: ["run:pipeline:pipeline-orders"],
-      missing: ["run:pipeline:pipeline-orders"],
-    })
-  })
-
-  test("agent.run checks the project Agent grant", () => {
-    expect(evaluate(context({ agent: true }), { kind: "agent.run" })).toEqual({
-      allowed: true,
-      requirements: ["run:agent"],
-      missing: [],
-    })
-
-    expect(evaluate(context({}), { kind: "agent.run" })).toEqual({
-      allowed: false,
-      requirements: ["run:agent"],
-      missing: ["run:agent"],
-    })
   })
 
   test("a missing authorization context (privileged caller) allows everything", () => {
@@ -425,11 +360,19 @@ const scheduleEvent: StoredScheduleTriggeredEvent = {
 }
 
 describe("canViewEvent", () => {
-  test("object and telemetry events require viewing the subject type", () => {
-    expect(canViewEvent(context({ view: ["note"] }), objectEvent)).toBe(true)
-    expect(canViewEvent(context({}), objectEvent)).toBe(false)
-    expect(canViewEvent(context({ view: ["note"] }), telemetryEvent)).toBe(true)
-    expect(canViewEvent(context({}), telemetryEvent)).toBe(false)
+  // Visible with the grant that governs the subject, hidden without it: an event must not leak a
+  // hidden object's existence or id.
+  test.each([
+    ["object", objectEvent, { view: ["note"] }],
+    ["telemetry", telemetryEvent, { view: ["note"] }],
+    ["rule", ruleEvent, { view: ["note"] }],
+    ["workflow", workflowEvent, { run: ["review"] }],
+    ["sync", syncEvent, { syncs: ["sync-orders"] }],
+    ["pipeline", pipelineEvent, { pipelines: ["pipeline-orders"] }],
+    ["dataset", datasetEvent, { datasets: ["raw.orders"] }],
+  ] as const)("%s events require the grant that governs their subject", (_kind, event, grants) => {
+    expect(canViewEvent(context(grants), event)).toBe(true)
+    expect(canViewEvent(context({}), event)).toBe(false)
   })
 
   test("link events require viewing BOTH the source and the target type", () => {
@@ -437,26 +380,6 @@ describe("canViewEvent", () => {
     // Seeing the source but not the target must not leak the link (or the target id).
     expect(canViewEvent(context({ view: ["note"] }), linkEvent)).toBe(false)
     expect(canViewEvent(context({ view: ["user"] }), linkEvent)).toBe(false)
-  })
-
-  test("workflow events require running the workflow", () => {
-    expect(canViewEvent(context({ run: ["review"] }), workflowEvent)).toBe(true)
-    expect(canViewEvent(context({}), workflowEvent)).toBe(false)
-  })
-
-  test("sync events require running the sync", () => {
-    expect(canViewEvent(context({ syncs: ["sync-orders"] }), syncEvent)).toBe(true)
-    expect(canViewEvent(context({}), syncEvent)).toBe(false)
-  })
-
-  test("pipeline events require running the pipeline", () => {
-    expect(canViewEvent(context({ pipelines: ["pipeline-orders"] }), pipelineEvent)).toBe(true)
-    expect(canViewEvent(context({}), pipelineEvent)).toBe(false)
-  })
-
-  test("dataset events require viewing the dataset", () => {
-    expect(canViewEvent(context({ datasets: ["raw.orders"] }), datasetEvent)).toBe(true)
-    expect(canViewEvent(context({}), datasetEvent)).toBe(false)
   })
 
   test("dataset version provenance is visible to a dataset viewer who cannot run the producer", () => {
@@ -467,12 +390,6 @@ describe("canViewEvent", () => {
     const datasetViewerOnly = context({ datasets: ["raw.orders"] })
     expect(canViewEvent(datasetViewerOnly, datasetEvent)).toBe(true)
     expect(isAllowed(datasetViewerOnly, { kind: "sync.run", syncId: "erp-orders" })).toBe(false)
-  })
-
-  test("rule events require viewing the object the rule fired on", () => {
-    expect(canViewEvent(context({ view: ["note"] }), ruleEvent)).toBe(true)
-    // No view of the subject type must not leak the hidden object's existence/id.
-    expect(canViewEvent(context({}), ruleEvent)).toBe(false)
   })
 
   test("subject-free infra events stay visible to any scoped principal (no grant governs them)", () => {

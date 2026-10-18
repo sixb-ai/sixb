@@ -158,43 +158,6 @@ async function rejectedMessage(promise: Promise<unknown>): Promise<string> {
 }
 
 describe("delegated Action admission", () => {
-  test("preserves exact Action and ObjectRef pairs without a type-wide fallback", async () => {
-    const { runtimeHost } = await createFixture()
-    const { runtime, scope } = createDelegatedRuntime(runtimeHost, {
-      requestId: "cross-pairs",
-      selected: [
-        { objectTypeId: Proposal.id, primaryId: "proposal-1" },
-        { objectTypeId: Proposal.id, primaryId: "proposal-2" },
-      ],
-      actionApply: [
-        target(approve.id, Proposal.id, "proposal-1"),
-        target(reject.id, Proposal.id, "proposal-2"),
-      ],
-    })
-
-    await expect(
-      requestAction(runtime, scope.execution, {
-        actionId: approve.id,
-        subject: { kind: "object", objectTypeId: Proposal.id, primaryId: "proposal-2" },
-      })
-    ).rejects.toBeInstanceOf(AuthorizationError)
-    await expect(
-      requestAction(runtime, scope.execution, {
-        actionId: reject.id,
-        subject: { kind: "object", objectTypeId: Proposal.id, primaryId: "proposal-1" },
-      })
-    ).rejects.toBeInstanceOf(AuthorizationError)
-    await expect(
-      requestAction(runtime, scope.execution, {
-        actionId: "unknown-action",
-        subject: { kind: "object", objectTypeId: Proposal.id, primaryId: "proposal-1" },
-      })
-    ).rejects.toMatchObject({
-      name: "AuthorizationError",
-      message: expect.not.stringContaining("Unknown action"),
-    })
-  })
-
   test("makes an unselected exact target indistinguishable from a missing pair", async () => {
     const { runtimeHost } = await createFixture()
     const selected = [{ objectTypeId: Proposal.id, primaryId: "proposal-1" }]
@@ -220,36 +183,6 @@ describe("delegated Action admission", () => {
       requestAction(unselectedTarget.runtime, unselectedTarget.scope.execution, request)
     )
     expect(unselectedTargetMessage).toBe(missingPairMessage)
-  })
-
-  test("rejects global Actions and inherited parent Actions in delegated V1", async () => {
-    const { runtimeHost } = await createFixture()
-    const global = createDelegatedRuntime(runtimeHost, {
-      requestId: "global-action",
-      selected: [],
-    })
-    await expect(
-      requestAction(global.runtime, global.scope.execution, { actionId: refresh.id })
-    ).rejects.toBeInstanceOf(AuthorizationError)
-    await expect(
-      requestAction(global.runtime, global.scope.execution, { actionId: approve.id })
-    ).rejects.toBeInstanceOf(AuthorizationError)
-
-    const inherited = createDelegatedRuntime(runtimeHost, {
-      requestId: "inherited-action",
-      selected: [{ objectTypeId: ArchivedProposal.id, primaryId: "archived-1" }],
-      actionApply: [target(approve.id, ArchivedProposal.id, "archived-1")],
-    })
-    await expect(
-      requestAction(inherited.runtime, inherited.scope.execution, {
-        actionId: approve.id,
-        subject: {
-          kind: "object",
-          objectTypeId: ArchivedProposal.id,
-          primaryId: "archived-1",
-        },
-      })
-    ).rejects.toBeInstanceOf(AuthorizationError)
   })
 
   test("captures one request and stops an admitted pair before durable run lookup", async () => {

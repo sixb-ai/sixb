@@ -7,30 +7,23 @@ import {
 } from "../src/auth"
 
 describe("access token credentials", () => {
-  test("formats, parses, and hashes personal access tokens", () => {
-    const credential = createAccessTokenCredential("personal", "tok_personal_1")
+  test.each([
+    ["personal", "sixb_pat_tok_1."],
+    ["serviceAccount", "sixb_sat_tok_1."],
+  ] as const)("formats, parses, and hashes %s access tokens", (kind, prefix) => {
+    const credential = createAccessTokenCredential(kind, "tok_1")
 
+    expect(credential.tokenValue).toStartWith(prefix)
     expect(credential.tokenValue).toBe(
       formatAccessTokenValue(credential.kind, credential.tokenId, credential.tokenSecret)
     )
     expect(parseAccessTokenValue(credential.tokenValue)).toEqual({
-      kind: "personal",
+      kind,
       tokenId: credential.tokenId,
       tokenSecret: credential.tokenSecret,
     })
     expect(credential.tokenHash).toBe(hashAccessTokenSecret(credential.tokenSecret))
     expect(credential.tokenHash).toMatch(/^[a-f0-9]{64}$/)
-  })
-
-  test("formats and parses service account access tokens", () => {
-    const credential = createAccessTokenCredential("serviceAccount", "tok_service_1")
-
-    expect(credential.tokenValue).toStartWith("sixb_sat_tok_service_1.")
-    expect(parseAccessTokenValue(credential.tokenValue)).toEqual({
-      kind: "serviceAccount",
-      tokenId: credential.tokenId,
-      tokenSecret: credential.tokenSecret,
-    })
   })
 
   test("rejects malformed access token values without throwing", () => {
