@@ -151,14 +151,12 @@ export async function startRoleUntilReadyThenStop(options: {
   readonly cwd: string
   readonly logPath: string
   readonly timeoutMs?: number
-  readonly graceMs?: number
   /** Runs against the started role before it is stopped, e.g. to request what it serves. */
   readonly whileReady?: () => Promise<void>
 }): Promise<StartRoleResult> {
   // Long-running roles cold-start a full bun runtime; give that generous headroom
   // for slow/contended CI machines before declaring a hang.
   const timeoutMs = options.timeoutMs ?? 25_000
-  const graceMs = options.graceMs ?? 0
 
   const proc = Bun.spawn({
     cmd: [...options.cmd],
@@ -201,11 +199,6 @@ export async function startRoleUntilReadyThenStop(options: {
         `stdout:\n${stdout.slice(-1000)}\n` +
         `stderr:\n${stderr.slice(-1000)}`
     )
-  }
-
-  // Let any post-start polling (e.g. worker claim loops) run before stopping.
-  if (graceMs > 0) {
-    await Bun.sleep(graceMs)
   }
 
   try {

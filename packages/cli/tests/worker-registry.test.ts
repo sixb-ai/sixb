@@ -5,6 +5,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  type ModelCatalogInput,
   SixbHost,
 } from "@sixb/core"
 import { SixbCliError } from "../src/lib/errors"
@@ -141,85 +142,66 @@ function expectFailure(run: () => void): SixbCliError {
   throw new Error("Expected the call to throw a SixbCliError.")
 }
 
-test("embedding-only projects start accounting recovery without an API origin", async () => {
-  // Removal proof: require an origin unconditionally in workerFactories.agent.
-  const host = new SixbHost({
-    id: "embeddings",
-    ontology: [],
-    models: {
-      embedding: [
-        {
+const accountingOnlyModels: Record<string, ModelCatalogInput> = {
+  embedding: {
+    embedding: [
+      {
+        providerId: "test",
+        modelId: "embedding",
+        definition: {
+          kind: "embedding",
           providerId: "test",
           modelId: "embedding",
-          definition: {
-            kind: "embedding",
-            providerId: "test",
-            modelId: "embedding",
-            dimensions: 2,
-          },
-          embed: async () => ({ vectors: [[1, 0]] }),
+          dimensions: 2,
         },
-      ],
-    },
-    storage: new InMemoryStorage(),
-    broker: new InMemoryBroker(),
-    queues: new InMemoryQueues(),
-    blobStorage: new InMemoryBlobStorage(),
-    lakeStorage: new InMemoryLakeStorage(),
-  })
-  expect(resolveRegisteredWorkerTypes(host)).toContain("agent")
-  expect(() =>
-    assertWorkerInputs({
-      agentApiRequired: agentRuntimeRequired(host.definitions),
-      workerTypes: ["agent"],
-      options: {},
-      autoSelected: true,
-    })
-  ).not.toThrow()
-  const worker = createWorkerForType(host, "agent")
-  await worker.start()
-  await worker.stop()
-})
-
-test("decision-only projects start accounting recovery without an API origin", async () => {
-  // Removal proof: require an origin unconditionally in workerFactories.agent.
-  const host = new SixbHost({
-    id: "decisions",
-    ontology: [],
-    models: {
-      decision: [
-        {
+        embed: async () => ({ vectors: [[1, 0]] }),
+      },
+    ],
+  },
+  decision: {
+    decision: [
+      {
+        providerId: "test",
+        modelId: "decision",
+        definition: {
+          kind: "decision",
           providerId: "test",
           modelId: "decision",
-          definition: {
-            kind: "decision",
-            providerId: "test",
-            modelId: "decision",
-            capabilities: { questions: ["probability"] },
-          },
-          evaluate: async () => ({ output: { ok: { probability: 1 } } }),
+          capabilities: { questions: ["probability"] },
         },
-      ],
-    },
-    storage: new InMemoryStorage(),
-    broker: new InMemoryBroker(),
-    queues: new InMemoryQueues(),
-    blobStorage: new InMemoryBlobStorage(),
-    lakeStorage: new InMemoryLakeStorage(),
-  })
-  expect(resolveRegisteredWorkerTypes(host)).toContain("agent")
-  expect(() =>
-    assertWorkerInputs({
-      agentApiRequired: agentRuntimeRequired(host.definitions),
-      workerTypes: ["agent"],
-      options: {},
-      autoSelected: true,
+        evaluate: async () => ({ output: { ok: { probability: 1 } } }),
+      },
+    ],
+  },
+}
+
+for (const [kind, models] of Object.entries(accountingOnlyModels)) {
+  test(`${kind}-only projects start accounting recovery without an API origin`, async () => {
+    // Removal proof: require an origin unconditionally in workerFactories.agent.
+    const host = new SixbHost({
+      id: `${kind}s`,
+      ontology: [],
+      models,
+      storage: new InMemoryStorage(),
+      broker: new InMemoryBroker(),
+      queues: new InMemoryQueues(),
+      blobStorage: new InMemoryBlobStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
     })
-  ).not.toThrow()
-  const worker = createWorkerForType(host, "agent")
-  await worker.start()
-  await worker.stop()
-})
+    expect(resolveRegisteredWorkerTypes(host)).toContain("agent")
+    expect(() =>
+      assertWorkerInputs({
+        agentApiRequired: agentRuntimeRequired(host.definitions),
+        workerTypes: ["agent"],
+        options: {},
+        autoSelected: true,
+      })
+    ).not.toThrow()
+    const worker = createWorkerForType(host, "agent")
+    await worker.start()
+    await worker.stop()
+  })
+}
 
 for (const capability of ["aiUsage", "aiCosts", "aiLimits"] as const) {
   test(`does not select recovery when storage lacks ${capability}`, () => {

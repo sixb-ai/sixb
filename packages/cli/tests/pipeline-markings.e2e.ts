@@ -903,19 +903,19 @@ async function datasetRedactions(host: SixbHost) {
       })
       for (const row of all.rows) expect(Object.keys(row)).toEqual(visible)
 
-      // Each marked column, and an unmarked one, asked for by name.
-      for (const name of [names[0], ...Object.keys(COLUMN_MARKINGS[datasetId])]) {
-        const named = await readRows(host, reader, datasetId, { columns: name })
-        const expected = visible.includes(name) ? [name] : []
+      // Each marked column, and an unmarked one, asked for by name in one read. A marked
+      // column asked for alone is the `columns: "amount"` read in the test above.
+      const requested = [...new Set([names[0], ...Object.keys(COLUMN_MARKINGS[datasetId])])]
+      const named = await readRows(host, reader, datasetId, { columns: requested.join(",") })
+      const expected = visible.filter((name) => requested.includes(name))
 
-        expect({ datasetId, reader, name, columns: named.columns }).toEqual({
-          datasetId,
-          reader,
-          name,
-          columns: expected,
-        })
-        for (const row of named.rows) expect(Object.keys(row)).toEqual(expected)
-      }
+      expect({ datasetId, reader, requested, columns: named.columns }).toEqual({
+        datasetId,
+        reader,
+        requested,
+        columns: expected,
+      })
+      for (const row of named.rows) expect(Object.keys(row)).toEqual(expected)
 
       result[reader][datasetId] = denied
     }

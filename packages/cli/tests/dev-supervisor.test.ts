@@ -7,7 +7,7 @@ const supervisor = resolve(import.meta.dir, "../src/lib/dev-supervisor.ts")
 
 // Guard check: remove process.execArgv from the spawn arguments in dev-supervisor.ts.
 // The child then reports null instead of the global initialized by the preload.
-test.each([
+test.concurrent.each([
   { runtimeArgs: ["--preload", "./preload.ts"] },
   { runtimeArgs: ["--preload=./preload.ts"] },
 ])("dev child preserves runtime options: %j", async ({ runtimeArgs }) => {

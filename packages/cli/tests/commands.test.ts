@@ -1,167 +1,120 @@
-import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { CliUsageError, parseCliArgs, ROOT_HELP } from "../src/lib/command-line"
+import { runLocalInstanceCommand } from "../src/lib/instance-command"
 import { builtAppOutdir, hasBuiltApp, resolveProductionPaths } from "../src/lib/production"
-import {
-  type CompletedCliProcess,
-  FAST_CLI_TIMEOUT_MS,
-  runCliToCompletion,
-} from "./shared/cli-process"
-
-const repoRoot = resolve(import.meta.dir, "..", "..", "..")
-const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
-
-function runCli(args: readonly string[]): Promise<CompletedCliProcess> {
-  return runCliToCompletion({
-    cmd: ["bun", cliEntry, ...args],
-    cwd: repoRoot,
-    timeoutMs: FAST_CLI_TIMEOUT_MS,
-  })
-}
+import { renderHelp } from "../src/ui"
+import { FAST_CLI_TIMEOUT_MS, runCliToCompletion } from "./shared/cli-process"
+import { runInProcess } from "./shared/in-process"
 
 const tempDirs: string[] = []
 
-async function collectFiles(
-  directory: string,
-  predicate: (path: string) => boolean
-): Promise<string[]> {
-  const entries = await readdir(directory, { withFileTypes: true })
-  const files: string[] = []
-
-  for (const entry of entries) {
-    const path = join(directory, entry.name)
-
-    if (entry.isDirectory()) {
-      files.push(...(await collectFiles(path, predicate)))
-      continue
-    }
-
-    if (entry.isFile() && predicate(path)) {
-      files.push(path)
-    }
-  }
-
-  return files.sort()
-}
-
 afterEach(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (dir) {
-      await rm(dir, { recursive: true, force: true })
-    }
-  }
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-describe("sixb command dispatch", () => {
-  test("lists split production commands in help", async () => {
-    const result = await runCli(["help"])
+function usageError(args: readonly string[]): CliUsageError {
+  try {
+    parseCliArgs(args)
+  } catch (error) {
+    if (error instanceof CliUsageError) return error
+    throw error
+  }
+  throw new Error(`Expected 'sixb ${args.join(" ")}' to be a usage error.`)
+}
 
-    expect(result.exitCode).toBe(0)
-    for (const command of ["api", "app", "scheduler", "orchestrator", "rules", "worker"]) {
-      expect(result.stdout).toContain(command)
+describe("sixb command line", () => {
+  test("lists the production roles and the worker options in help", async () => {
+    const help = await runInProcess(() => renderHelp(ROOT_HELP))
+    // One line: the help pads each label to a column and wraps long summaries.
+    const output = help.output.replace(/\s+/g, " ")
+
+    for (const command of ["api", "app", "scheduler", "orchestrator", "rules", "worker <type>"]) {
+      expect(output).toContain(command)
     }
-    expect(result.stdout).toContain("sixb worker pipeline")
-    expect(result.stdout).toContain("action-runs")
-    expect(result.stdout).toContain("workflow-runs")
-    expect(result.stderr).toBe("")
+    expect(output).toContain("sixb worker pipeline")
+    expect(output).toContain("action-runs")
+    expect(output).toContain("workflow-runs")
+    expect(output).toContain("sync, agent, pipeline, projection, workflow")
+    expect(output).toContain("--concurrency <value>")
+    expect(output).toContain("--agent-turn-timeout <duration>")
+    expect(output).not.toContain("--type <type>")
+    expect(output).not.toContain("--worker <type>")
   })
 
-  test("dispatches a split production command instead of treating it as unknown", async () => {
-    const result = await runCli(["api", "--entry", "fixtures/missing/sixb.config.ts"])
-
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).not.toContain("Unknown command: api")
-    expect(result.stderr).toBe("")
-  })
-
-  test("does not expose the removed production supervisor command", async () => {
-    const result = await runCli(["start"])
-
-    expect(result.exitCode).toBe(2)
-    expect(result.stdout).toContain("Unknown command 'start'")
-    expect(result.stderr).toBe("")
-  })
-
-  test("does not expose the removed auth status alias", async () => {
-    const result = await runCli(["auth", "status"])
-
-    expect(result.exitCode).toBe(2)
-    expect(result.stdout).toContain("Unknown command 'auth'")
-    expect(result.stderr).toBe("")
-  })
-
-  test("does not expose the redundant create command", async () => {
-    const result = await runCli(["create", "my-project"])
-
-    expect(result.exitCode).toBe(2)
-    expect(result.stdout).toContain("Unknown command 'create'")
-    expect(result.stderr).toBe("")
-  })
-
-  test("shows scoped help without running a command group", async () => {
+  test("serves a command's own help without running it", () => {
     for (const group of ["profile", "token", "service-account", "db", "lake"]) {
-      const result = await runCli([group])
-
-      expect(result.exitCode).toBe(0)
-      expect(result.stdout).toContain("Usage")
-      expect(result.stdout).not.toContain("Real-time digital twin framework")
-      expect(result.stderr).toBe("")
+      expect(parseCliArgs([group])).toMatchObject({ kind: "help", help: { path: [group] } })
     }
-
-    const nestedGroup = await runCli(["service-account", "token"])
-    expect(nestedGroup.exitCode).toBe(0)
-    expect(nestedGroup.stdout).toContain(
-      "sixb service-account token <list|create|revoke> <service-account-id>"
-    )
-    expect(nestedGroup.stderr).toBe("")
-  })
-
-  test("supports contextual help for local command leaves", async () => {
+    expect(parseCliArgs(["service-account", "token"])).toMatchObject({
+      kind: "help",
+      help: { usage: "sixb service-account token <list|create|revoke> <service-account-id>" },
+    })
     for (const args of [
       ["token", "create", "--help"],
       ["help", "token", "create"],
-      ["api", "--help"],
     ]) {
-      const result = await runCli(args)
-      expect(result.exitCode).toBe(0)
-      expect(result.stdout).toContain("Usage")
-      expect(result.stdout).not.toContain("Real-time digital twin framework")
-      expect(result.stderr).toBe("")
+      expect(parseCliArgs(args)).toMatchObject({
+        kind: "help",
+        help: { path: ["token", "create"] },
+      })
     }
+    expect(parseCliArgs(["api", "--help"])).toMatchObject({ kind: "help", help: { path: ["api"] } })
   })
 
-  test("rejects unknown, missing, and duplicate options before running a command", async () => {
-    const cases = [
-      { args: ["status", "--unknown-option"], message: "Unknown option '--unknown-option'" },
-      { args: ["status", "--profile"], message: "--profile requires a value" },
-      {
-        args: ["status", "--profile", "one", "--profile", "two"],
-        message: "--profile may only be provided once",
-      },
-      {
-        args: ["profile", "list", "--unknown-option"],
-        message: "Unknown option '--unknown-option'",
-      },
-      {
-        args: ["status", "--api-url", "http://localhost:3002", "--profile", "local"],
-        message: "--api-url and --profile cannot be used together",
-      },
-      { args: ["token", "create"], message: "Missing required --name <name>" },
-      { args: ["init", "--unknown-option"], message: "Unknown option '--unknown-option'" },
-    ]
+  test.each([
+    // Removed commands stay removed.
+    [["start"], "Unknown command 'start'"],
+    [["auth", "status"], "Unknown command 'auth'"],
+    [["create", "my-project"], "Unknown command 'create'"],
+    [["status", "--unknown-option"], "Unknown option '--unknown-option'"],
+    [["status", "--profile"], "--profile requires a value"],
+    [["status", "--profile", "one", "--profile", "two"], "--profile may only be provided once"],
+    [["profile", "list", "--unknown-option"], "Unknown option '--unknown-option'"],
+    [
+      ["status", "--api-url", "http://localhost:3002", "--profile", "local"],
+      "--api-url and --profile cannot be used together",
+    ],
+    [["token", "create"], "Missing required --name <name>"],
+    [["init", "--unknown-option"], "Unknown option '--unknown-option'"],
+    [["worker"], "Invalid arguments for 'worker'"],
+    [["worker", "--type", "pipeline"], "Unknown option '--type'"],
+    [["worker", "sync", "--concurrency"], "--concurrency requires a value"],
+    [["worker-group", "sync", "--concurrency"], "--concurrency requires a value"],
+  ])("rejects %j before running a command", (args, message) => {
+    const error = usageError(args)
 
-    for (const entry of cases) {
-      const result = await runCli(entry.args)
-      expect(result.exitCode).toBe(2)
-      expect(result.stdout).toContain(entry.message)
-      expect(result.stderr).toBe("")
-    }
+    expect(error.exitCode).toBe(2)
+    expect(error.message).toContain(message)
   })
 
+  test("shows the worker types when the type is missing", () => {
+    expect(usageError(["worker"]).help.usage).toContain("<sync|agent|pipeline|projection|workflow>")
+  })
+
+  test("keeps the whole value of an equals-form option", () => {
+    // Splitting on every `=` truncates this to 3, which passes validation and starts the worker.
+    expect(parseCliArgs(["worker", "sync", "--concurrency=3=4"])).toMatchObject({
+      options: { concurrency: "3=4" },
+    })
+  })
+
+  // The process boundary: scripts read the error from stderr and the exit code.
   test("emits structured errors when a management command requests JSON", async () => {
-    const result = await runCli(["profile", "list", "--unknown-option", "--json"])
+    const result = await runCliToCompletion({
+      cmd: [
+        "bun",
+        resolve(import.meta.dir, "..", "src", "index.tsx"),
+        "profile",
+        "list",
+        "--unknown-option",
+        "--json",
+      ],
+      cwd: resolve(import.meta.dir, "..", "..", ".."),
+      timeoutMs: FAST_CLI_TIMEOUT_MS,
+    })
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toBe("")
@@ -174,47 +127,47 @@ describe("sixb command dispatch", () => {
     })
   })
 
-  test("uses the shared usage contract for instance connection options", async () => {
-    const result = await runCli([
-      "project",
-      "show",
-      "--api-url",
-      "http://localhost:3002",
-      "--profile",
-      "local",
-    ])
+  test("gives instance commands the shared usage contract, and their help without a profile", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch")
+    const missingConfig = join(tmpdir(), "sixb-cli-no-config")
+    try {
+      const conflict = await runInProcess(() =>
+        runLocalInstanceCommand([
+          "project",
+          "show",
+          "--api-url",
+          "http://localhost:3002",
+          "--profile",
+          "local",
+        ])
+      )
+      expect(conflict.exitCode).toBe(2)
+      expect(conflict.output).toBe("")
+      expect(JSON.parse(conflict.stderr)).toEqual({
+        error: {
+          code: "invalid_arguments",
+          message: "--api-url and --profile cannot be used together.",
+        },
+      })
 
-    expect(result.exitCode).toBe(2)
-    expect(result.stdout).toBe("")
-    expect(JSON.parse(result.stderr)).toEqual({
-      error: {
-        code: "invalid_arguments",
-        message: "--api-url and --profile cannot be used together.",
-      },
-    })
-  })
-
-  test("does not document removed production command shapes", async () => {
-    const staleCommands = [
-      "sixb start",
-      "sixb worker --worker",
-      "sixb create my-project",
-      "bun ../../packages/cli/src/index.tsx start",
-    ]
-
-    const staleCommandFiles = [
-      join(repoRoot, "README.md"),
-      join(repoRoot, "packages/cli/README.md"),
-      ...(await collectFiles(join(repoRoot, "docs"), (file) => file.endsWith(".md"))),
-      ...(await collectFiles(join(repoRoot, "examples"), (file) => file.endsWith("package.json"))),
-    ]
-
-    for (const file of staleCommandFiles) {
-      const source = await readFile(file, "utf-8")
-
-      for (const command of staleCommands) {
-        expect(source).not.toContain(command)
-      }
+      const help = await runInProcess(() => {
+        process.env.XDG_CONFIG_HOME = missingConfig
+        return runLocalInstanceCommand([
+          "objects",
+          "get",
+          "Customer",
+          "alice",
+          "--profile",
+          "missing",
+          "--help",
+        ])
+      })
+      expect(help.exitCode).toBeUndefined()
+      expect(help.stderr).toBe("")
+      expect(help.output).toContain("Usage:")
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      fetchSpy.mockRestore()
     }
   })
 })

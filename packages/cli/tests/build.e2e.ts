@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -6,12 +6,13 @@ import { assertCliSucceeded, runCliToCompletion } from "./shared/cli-process"
 
 // A cold production build drives the app bundler plus asset precompression. Keep that production
 // work out of the parallel unit suite, and bound its child so a wedged bundler cannot consume the
-// E2E job wall-clock timeout.
+// E2E job wall-clock timeout. Each build runs in its own child over its own directories, so the
+// builds run together.
 
 const BUILD_TIMEOUT_MS = 150_000
 
 function buildTest(name: string, run: () => Promise<void>): void {
-  test(name, run, BUILD_TIMEOUT_MS + 10_000)
+  test.concurrent(name, run, BUILD_TIMEOUT_MS + 10_000)
 }
 
 // Every build bundles the app, which takes React from the project. A project inside this repo
@@ -49,13 +50,8 @@ describe("sixb build", () => {
     "sixb.config.ts"
   )
 
-  afterEach(async () => {
-    while (tempDirs.length > 0) {
-      const dir = tempDirs.pop()
-      if (dir) {
-        await rm(dir, { recursive: true, force: true })
-      }
-    }
+  afterAll(async () => {
+    await Promise.all(tempDirs.map((dir) => rm(dir, { recursive: true, force: true })))
   })
 
   buildTest("builds the custom app from the entry project root", async () => {

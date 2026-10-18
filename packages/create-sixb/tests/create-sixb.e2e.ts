@@ -17,6 +17,9 @@ const cliCorePackageDir = join(repoRoot, "packages", "cli-core")
 // Bound each build in a separate process group so cleanup finishes before the hook expires.
 const PACK_BUDGET_SECONDS = 30
 const SETUP_BUDGET_MS = (3 * PACK_BUDGET_SECONDS + 10) * 1000
+// Each packed command is a cold `bun` start; the bound only stops a wedged one.
+const COMMAND_TIMEOUT_MS = 20_000
+const COMMAND_TEST_TIMEOUT_MS = COMMAND_TIMEOUT_MS + 5_000
 
 let layoutRoot: string
 let runRoot: string
@@ -34,12 +37,12 @@ beforeAll(async () => {
   await mkdir(join(nodeModulesDir, "create-sixb"), { recursive: true })
   await mkdir(runRoot, { recursive: true })
 
-  const createTarball = packPackage(createPackageDir, artifactsDir)
-  const cliTarball = packPackage(cliPackageDir, artifactsDir)
-  const cliCoreTarball = packPackage(cliCorePackageDir, artifactsDir)
-  extractPackage(createTarball, join(nodeModulesDir, "create-sixb"))
-  extractPackage(cliTarball, join(nodeModulesDir, "@sixb", "cli"))
-  extractPackage(cliCoreTarball, join(nodeModulesDir, "@sixb", "cli-core"))
+  const createTarball = await packPackage(createPackageDir, artifactsDir)
+  const cliTarball = await packPackage(cliPackageDir, artifactsDir)
+  const cliCoreTarball = await packPackage(cliCorePackageDir, artifactsDir)
+  await extractPackage(createTarball, join(nodeModulesDir, "create-sixb"))
+  await extractPackage(cliTarball, join(nodeModulesDir, "@sixb", "cli"))
+  await extractPackage(cliCoreTarball, join(nodeModulesDir, "@sixb", "cli-core"))
 
   // Link the packed CLI's eager third-party dependencies while keeping every Sixb package
   // isolated from workspace symlinks.
@@ -72,73 +75,91 @@ describe("create-sixb packed artifacts", () => {
     expect(cliManifest.dependencies?.["@sixb/cli-core"]).toBe(`^${cliCoreSourceManifest.version}`)
   })
 
-  test("shows the bun create usage", () => {
-    const result = runPacked([createEntry, "--help"], runRoot)
+  test.concurrent(
+    "shows the bun create usage",
+    async () => {
+      const result = await runPacked([createEntry, "--help"], runRoot)
 
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("create-sixb")
-    expect(result.stdout).toContain("Create a new Sixb project")
-    expect(result.stdout).toContain("bun create sixb <directory>")
-    expect(result.stderr).toBe("")
-  })
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toContain("create-sixb")
+      expect(result.stdout).toContain("Create a new Sixb project")
+      expect(result.stdout).toContain("bun create sixb <directory>")
+      expect(result.stderr).toBe("")
+    },
+    COMMAND_TEST_TIMEOUT_MS
+  )
 
-  test("creates a project through the zero-dependency launcher", async () => {
-    const cwd = await createRunDirectory("launcher")
-    const result = runPacked([createEntry, "starter"], cwd)
+  test.concurrent(
+    "creates a project through the zero-dependency launcher",
+    async () => {
+      const cwd = await createRunDirectory("launcher")
+      const result = await runPacked([createEntry, "starter"], cwd)
 
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("sixb\n\nSuccess! Created starter")
-    expect(result.stdout).toContain(join(cwd, "starter"))
-    expect(result.stdout).toContain("Next steps\n  cd starter\n  bun install\n  bun run dev")
-    expect(result.stdout).not.toContain("\u001b[")
-    expect(result.stderr).toBe("")
-    await assertScaffold(join(cwd, "starter"), "starter")
-  })
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toContain("sixb\n\nSuccess! Created starter")
+      expect(result.stdout).toContain(join(cwd, "starter"))
+      expect(result.stdout).toContain("Next steps\n  cd starter\n  bun install\n  bun run dev")
+      expect(result.stdout).not.toContain("\u001b[")
+      expect(result.stderr).toBe("")
+      await assertScaffold(join(cwd, "starter"), "starter")
+    },
+    COMMAND_TEST_TIMEOUT_MS
+  )
 
-  test("initializes a project through the packed sixb CLI", async () => {
-    const cwd = await createRunDirectory("cli")
-    const result = runPacked([cliEntry, "init", "starter-cli"], cwd)
+  test.concurrent(
+    "initializes a project through the packed sixb CLI",
+    async () => {
+      const cwd = await createRunDirectory("cli")
+      const result = await runPacked([cliEntry, "init", "starter-cli"], cwd)
 
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Sixb initialized")
-    expect(result.stdout).toContain("starter-cli")
-    expect(result.stdout).toContain("Next steps\n  cd starter-cli\n  bun install\n  bun run dev")
-    expect(result.stdout).toContain("Files")
-    expect(result.stderr).toBe("")
-    await assertScaffold(join(cwd, "starter-cli"), "starter-cli")
-  })
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toContain("Sixb initialized")
+      expect(result.stdout).toContain("starter-cli")
+      expect(result.stdout).toContain("Next steps\n  cd starter-cli\n  bun install\n  bun run dev")
+      expect(result.stdout).toContain("Files")
+      expect(result.stderr).toBe("")
+      await assertScaffold(join(cwd, "starter-cli"), "starter-cli")
+    },
+    COMMAND_TEST_TIMEOUT_MS
+  )
 
-  test("prints a shell-safe path and omits cd when creating in the current directory", async () => {
-    const nestedCwd = await createRunDirectory("launcher-path")
-    const nestedResult = runPacked(
-      [createEntry, join("projects with spaces", "starter")],
-      nestedCwd
-    )
+  test.concurrent(
+    "prints a shell-safe path and omits cd when creating in the current directory",
+    async () => {
+      const nestedCwd = await createRunDirectory("launcher-path")
+      const currentCwd = await createRunDirectory("launcher-current")
+      const [nestedResult, currentResult] = await Promise.all([
+        runPacked([createEntry, join("projects with spaces", "starter")], nestedCwd),
+        runPacked([createEntry, "."], currentCwd),
+      ])
 
-    expect(nestedResult.exitCode).toBe(0)
-    expect(nestedResult.stdout).toContain("cd 'projects with spaces/starter'")
+      expect(nestedResult.exitCode).toBe(0)
+      expect(nestedResult.stdout).toContain("cd 'projects with spaces/starter'")
 
-    const currentCwd = await createRunDirectory("launcher-current")
-    const currentResult = runPacked([createEntry, "."], currentCwd)
+      expect(currentResult.exitCode).toBe(0)
+      expect(currentResult.stdout).not.toContain("\n  cd ")
+      expect(currentResult.stdout).toContain("Next steps\n  bun install\n  bun run dev")
+    },
+    COMMAND_TEST_TIMEOUT_MS
+  )
 
-    expect(currentResult.exitCode).toBe(0)
-    expect(currentResult.stdout).not.toContain("\n  cd ")
-    expect(currentResult.stdout).toContain("Next steps\n  bun install\n  bun run dev")
-  })
+  test.concurrent(
+    "the zero-dependency launcher refuses to merge into a non-empty directory",
+    async () => {
+      const cwd = await createRunDirectory("launcher-non-empty")
+      const target = join(cwd, "existing")
+      await mkdir(target)
+      await writeFile(join(target, "keep.txt"), "keep\n")
 
-  test("the zero-dependency launcher refuses to merge into a non-empty directory", async () => {
-    const cwd = await createRunDirectory("launcher-non-empty")
-    const target = join(cwd, "existing")
-    await mkdir(target)
-    await writeFile(join(target, "keep.txt"), "keep\n")
+      const result = await runPacked([createEntry, "existing"], cwd)
 
-    const result = runPacked([createEntry, "existing"], cwd)
-
-    expect(result.exitCode).toBe(1)
-    expect(`${result.stdout}\n${result.stderr}`).toContain("Target directory is not empty")
-    expect(await readFile(join(target, "keep.txt"), "utf8")).toBe("keep\n")
-    expect(await Bun.file(join(target, "package.json")).exists()).toBe(false)
-  })
+      expect(result.exitCode).toBe(1)
+      expect(`${result.stdout}\n${result.stderr}`).toContain("Target directory is not empty")
+      expect(await readFile(join(target, "keep.txt"), "utf8")).toBe("keep\n")
+      expect(await Bun.file(join(target, "package.json")).exists()).toBe(false)
+    },
+    COMMAND_TEST_TIMEOUT_MS
+  )
 
   test("never overwrites an existing project tsconfig during init", async () => {
     const target = await createRunDirectory("existing-tsconfig")
@@ -158,8 +179,9 @@ async function readPackageManifest(packageDir: string): Promise<{
   return JSON.parse(await readFile(join(packageDir, "package.json"), "utf8"))
 }
 
-function packPackage(packageDir: string, destination: string): string {
-  const result = Bun.spawnSync(
+async function packPackage(packageDir: string, destination: string): Promise<string> {
+  // ci-guard bounds the pack and its prepack build; the kill timer only backs it up.
+  const { exitCode, stdout, stderr } = await run(
     [
       process.execPath,
       join(repoRoot, "scripts", "ci-guard.ts"),
@@ -174,11 +196,10 @@ function packPackage(packageDir: string, destination: string): string {
       destination,
       "--quiet",
     ],
-    { cwd: packageDir, stdout: "pipe", stderr: "pipe" }
+    packageDir,
+    (PACK_BUDGET_SECONDS + 5) * 1000
   )
-  const stdout = result.stdout.toString()
-  const stderr = result.stderr.toString()
-  if (result.exitCode !== 0) {
+  if (exitCode !== 0) {
     throw new Error(`Failed to pack ${packageDir}:\n${stdout}${stderr}`)
   }
 
@@ -191,13 +212,14 @@ function packPackage(packageDir: string, destination: string): string {
   return tarball
 }
 
-function extractPackage(tarball: string, destination: string): void {
-  const result = Bun.spawnSync(
+async function extractPackage(tarball: string, destination: string): Promise<void> {
+  const { exitCode, stderr } = await run(
     ["tar", "-xzf", tarball, "--strip-components=1", "-C", destination],
-    { stdout: "pipe", stderr: "pipe" }
+    destination,
+    COMMAND_TIMEOUT_MS
   )
-  if (result.exitCode !== 0) {
-    throw new Error(`Failed to extract ${tarball}:\n${result.stderr.toString()}`)
+  if (exitCode !== 0) {
+    throw new Error(`Failed to extract ${tarball}:\n${stderr}`)
   }
 }
 
@@ -212,23 +234,37 @@ async function createRunDirectory(name: string): Promise<string> {
   return directory
 }
 
-function runPacked(
-  args: string[],
-  cwd: string
-): {
-  exitCode: number
-  stdout: string
-  stderr: string
-} {
-  const result = Bun.spawnSync(["bun", ...args], {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  return {
-    exitCode: result.exitCode,
-    stdout: result.stdout.toString(),
-    stderr: result.stderr.toString(),
+function runPacked(args: string[], cwd: string) {
+  return run(["bun", ...args], cwd, COMMAND_TIMEOUT_MS)
+}
+
+/**
+ * Runs a command to completion, killing it at `timeoutMs`. Async on purpose: `Bun.spawnSync`
+ * inside a test worker can miss its child's exit and hang the worker.
+ */
+async function run(
+  cmd: string[],
+  cwd: string,
+  timeoutMs: number
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const proc = Bun.spawn(cmd, { cwd, stdout: "pipe", stderr: "pipe" })
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    proc.kill("SIGKILL")
+  }, timeoutMs)
+  try {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    if (timedOut) {
+      throw new Error(`${cmd.join(" ")} timed out after ${timeoutMs}ms:\n${stdout}${stderr}`)
+    }
+    return { exitCode, stdout, stderr }
+  } finally {
+    clearTimeout(timer)
   }
 }
 

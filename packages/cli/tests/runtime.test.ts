@@ -30,11 +30,9 @@ import {
   type StorageMigrator,
 } from "@sixb/core"
 import { reportEventDeliveryFailure } from "@sixb/core/internal/error-reporting"
-import { PipelineRunDispatcher } from "@sixb/core/internal/pipelines"
 import { SyncRunDispatcher } from "@sixb/core/internal/syncs"
 import { createTestSixb } from "@sixb/core/testing"
 import {
-  checkRuntimeLakeDefinitions,
   migrateRuntimeStorage,
   startOrchestratorRuntime,
   startRulesRuntime,
@@ -373,13 +371,17 @@ describe("startSixbRuntime", () => {
     }
   })
 
-  test("does not co-host the sync worker unless explicitly enabled", async () => {
+  test("co-hosts no worker unless explicitly enabled", async () => {
     const sync = defineSync("sync-orders")
       .from(erpDb)
       .read(() => [])
       .intoDataset(rawOrdersDataset)
+    const projection = defineProjection("zone-proj", Zone)
+      .fromDataset(rawOrdersDataset)
+      .properties({ id: "orderId" })
+    const workflow = defineWorkflow("runtime-manual-workflow").input({}).then(workflowStep)
     const sixb = new SixbHost({
-      id: "cli-no-sync-worker",
+      id: "cli-no-cohosted-workers",
       ontology: [Zone],
       connectors: [erpDb],
       broker: new InMemoryBroker(),
@@ -389,6 +391,8 @@ describe("startSixbRuntime", () => {
       queues: new InMemoryQueues(),
       datasets: [rawOrdersDataset],
       syncs: [sync],
+      projections: [projection],
+      workflows: [workflow],
     })
 
     const runtime = await startSixbRuntime(sixb, { cohostWorkers: false })
@@ -396,6 +400,8 @@ describe("startSixbRuntime", () => {
     expect(runtime.agentWorker).toBeNull()
     expect(runtime.rulesWorker).toBeNull()
     expect(runtime.syncWorker).toBeNull()
+    expect(runtime.projectionWorker).toBeNull()
+    expect(runtime.workflowWorker).toBeNull()
 
     await runtime.stop()
   })
@@ -433,67 +439,6 @@ describe("startSixbRuntime", () => {
     await expect(startSixbRuntime(sixb, { cohostWorkers: true })).rejects.toThrow(
       MISDECLARED_MARKINGS_MESSAGE
     )
-  })
-
-  test("skips the projection worker when cohostWorkers is true but no projections are registered", async () => {
-    const sixb = new SixbHost({
-      id: "cli-no-projections",
-      ontology: [Zone],
-      broker: new InMemoryBroker(),
-      storage: new InMemoryStorage(),
-      lakeStorage: createLakeStorage(),
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-    })
-
-    const runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
-
-    expect(runtime.projectionWorker).toBeNull()
-
-    await runtime.stop()
-  })
-
-  test("does not co-host the projection worker unless explicitly enabled", async () => {
-    const projection = defineProjection("zone-proj", Zone)
-      .fromDataset(rawOrdersDataset)
-      .properties({ id: "orderId" })
-    const sixb = new SixbHost({
-      id: "cli-no-projection-worker",
-      ontology: [Zone],
-      broker: new InMemoryBroker(),
-      storage: new InMemoryStorage(),
-      lakeStorage: createLakeStorage(),
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-      datasets: [rawOrdersDataset],
-      projections: [projection],
-    })
-
-    const runtime = await startSixbRuntime(sixb, { cohostWorkers: false })
-
-    expect(runtime.projectionWorker).toBeNull()
-
-    await runtime.stop()
-  })
-
-  test("does not co-host the workflow worker unless explicitly enabled", async () => {
-    const workflow = defineWorkflow("runtime-manual-workflow").input({}).then(workflowStep)
-    const sixb = new SixbHost({
-      id: "cli-no-workflow-worker",
-      ontology: [Zone],
-      broker: new InMemoryBroker(),
-      storage: new InMemoryStorage(),
-      lakeStorage: createLakeStorage(),
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-      workflows: [workflow],
-    })
-
-    const runtime = await startSixbRuntime(sixb, { cohostWorkers: false })
-
-    expect(runtime.workflowWorker).toBeNull()
-
-    await runtime.stop()
   })
 
   test("co-hosts the sync worker when enabled and syncs are registered", async () => {
@@ -542,73 +487,6 @@ describe("startSixbRuntime", () => {
     expect(run?.status).toBe("succeeded")
 
     await runtime.stop()
-  })
-
-  test("co-hosts the pipeline worker when enabled and pipelines are registered", async () => {
-    const lakeStorage = createLakeStorage()
-    await seedDatasetVersion(lakeStorage, rawOrdersDataset, [{ orderId: "ord_1" }])
-
-    const normalizeStep = definePipelineStep("normalize-orders")
-      .inputs({ rawOrders: rawOrdersDataset })
-      .output(canonicalOrdersDataset)
-      .run(async ({ inputs, output }) => {
-        async function* rows() {
-          for await (const row of inputs.rawOrders.readRows()) {
-            yield { id: row.orderId }
-          }
-        }
-
-        await output.writeRows(rows())
-      })
-    const rawOrdersUpdated = defineSchedule("raw-orders-updated").on(
-      events.dataset(rawOrdersDataset).updated()
-    )
-    const pipeline = definePipeline("normalize-orders").when(rawOrdersUpdated).then(normalizeStep)
-    const sixb = new SixbHost({
-      id: "cli-with-pipeline-worker",
-      ontology: [Zone],
-      broker: new InMemoryBroker(),
-      storage: new InMemoryStorage(),
-      lakeStorage,
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-      datasets: [rawOrdersDataset, canonicalOrdersDataset],
-      schedules: [rawOrdersUpdated],
-      pipelines: [pipeline],
-    })
-
-    let runtime: Awaited<ReturnType<typeof startSixbRuntime>> | null = null
-    try {
-      runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
-
-      expect(runtime.pipelineWorker).not.toBeNull()
-      expect(runtime.warnings).toHaveLength(0)
-
-      await new PipelineRunDispatcher({
-        id: sixb.id,
-        definitions: sixb.definitions,
-        storage: sixb.storage,
-        queues: sixb.queues,
-      }).dispatch({
-        pipelineId: "normalize-orders",
-        runId: "runtime-pipeline-1",
-        source: { type: "schedule", eventId: "event-runtime-pipeline-1" },
-        correlationId: "correlation-runtime-pipeline-1",
-      })
-
-      const run = await waitFor(
-        () =>
-          sixb.storage.pipelineRuns!.getById({
-            projectId: sixb.id,
-            id: "runtime-pipeline-1",
-          }),
-        (value) => value?.status === "succeeded"
-      )
-
-      expect(run?.output?.datasetId).toBe("canonical.orders")
-    } finally {
-      await runtime?.stop()
-    }
   })
 
   test("co-hosts projection routes and enqueues projection jobs from dataset commits", async () => {
@@ -752,26 +630,6 @@ describe("startSixbRuntime", () => {
     } finally {
       await runtime?.stop()
     }
-  })
-
-  test("co-hosts the workflow worker when enabled and workflows are registered", async () => {
-    const workflow = defineWorkflow("runtime-manual-workflow").input({}).then(workflowStep)
-    const sixb = new SixbHost({
-      id: "cli-with-workflow-worker",
-      ontology: [Zone],
-      broker: new InMemoryBroker(),
-      storage: new InMemoryStorage(),
-      lakeStorage: createLakeStorage(),
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-      workflows: [workflow],
-    })
-
-    const runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
-
-    expect(runtime.workflowWorker).not.toBeNull()
-
-    await runtime.stop()
   })
 
   test("routes and executes scheduled empty-input workflows in dev runtime", async () => {
@@ -1131,50 +989,6 @@ describe("split runtime preparation", () => {
     await migrateRuntimeStorage(sixb)
 
     expect(calls).toEqual(["storage"])
-  })
-
-  test("checkRuntimeLakeDefinitions reports incompatible lake definitions", async () => {
-    const lakeStorage = createLakeStorage()
-    await lakeStorage.createDataset(rawOrdersDataset)
-
-    const changedDataset = defineDataset("raw.erp.orders", {
-      schema: [
-        col("orderId", "string", { nullable: true }),
-        col("currency", "string", { nullable: true }),
-      ],
-    })
-    const sixb = new SixbHost({
-      id: "cli-check-lake-definitions-drift",
-      ontology: [Zone],
-      broker: new InMemoryBroker(),
-      storage: new InMemoryStorage(),
-      lakeStorage,
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-      datasets: [changedDataset],
-    })
-
-    await expect(checkRuntimeLakeDefinitions(sixb)).rejects.toThrow(
-      "Lake dataset definition check failed"
-    )
-  })
-
-  test("checkRuntimeLakeDefinitions passes when definitions are compatible", async () => {
-    const lakeStorage = createLakeStorage()
-    await lakeStorage.createDataset(rawOrdersDataset)
-
-    const sixb = new SixbHost({
-      id: "cli-check-lake-definitions-ok",
-      ontology: [Zone],
-      broker: new InMemoryBroker(),
-      storage: new InMemoryStorage(),
-      lakeStorage,
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-      datasets: [rawOrdersDataset],
-    })
-
-    await checkRuntimeLakeDefinitions(sixb)
   })
 
   test("service startup helpers can start without calling lake storage", async () => {

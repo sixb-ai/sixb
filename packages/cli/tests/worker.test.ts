@@ -1,24 +1,21 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { resolveWorkerTypeToStart } from "../src/lib/worker-registry"
-import {
-  type CompletedCliProcess,
-  FAST_CLI_TIMEOUT_MS,
-  runCliToCompletion,
-} from "./shared/cli-process"
+import { runWorker } from "../src/commands/worker"
+import { FAST_CLI_TIMEOUT_MS, readLogEntries, runCliToCompletion } from "./shared/cli-process"
+import { runInProcess } from "./shared/in-process"
 
+const validProject = fixtureEntry("valid-project")
 const tempDirs: string[] = []
 
 afterEach(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (dir) {
-      await rm(dir, { recursive: true, force: true })
-    }
-  }
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
+
+function fixtureEntry(name: string): string {
+  return resolve(import.meta.dir, "fixtures", name, "sixb.config.ts")
+}
 
 async function tempLogPath(): Promise<string> {
   const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-worker-"))
@@ -26,199 +23,88 @@ async function tempLogPath(): Promise<string> {
   return join(tempDir, "operations.log")
 }
 
-async function readLogEntries(logPath: string): Promise<Array<Record<string, unknown>>> {
-  const source = await readFile(logPath, "utf-8").catch(() => "")
-  return source
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as Record<string, unknown>)
-}
-
-function runWorkerFixture(
-  fixtureName: string,
-  args: readonly string[] = [],
-  options: { logPath?: string; env?: Record<string, string | undefined> } = {}
-): Promise<CompletedCliProcess> {
-  const repoRoot = resolve(import.meta.dir, "..", "..", "..")
-  const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
-  const fixtureEntry = resolve(import.meta.dir, "fixtures", fixtureName, "sixb.config.ts")
-
-  return runCliToCompletion({
-    cmd: ["bun", cliEntry, "worker", "--entry", fixtureEntry, ...args],
-    cwd: repoRoot,
-    env: options.logPath ? { ...options.env, SIXB_CLI_TEST_LOG: options.logPath } : options.env,
-    timeoutMs: FAST_CLI_TIMEOUT_MS,
-  })
-}
-
-function runHelp(): Promise<CompletedCliProcess> {
-  const repoRoot = resolve(import.meta.dir, "..", "..", "..")
-  const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
-
-  return runCliToCompletion({
-    cmd: ["bun", cliEntry, "help"],
-    cwd: repoRoot,
-    timeoutMs: FAST_CLI_TIMEOUT_MS,
-  })
-}
-
 describe("sixb worker", () => {
-  test("fails fast when the project uses InMemoryQueues", async () => {
-    const result = await runWorkerFixture("valid-project", ["sync"])
+  // Rejected before the runtime loads: valid-project uses InMemoryQueues, so validating after
+  // loading would end in that refusal and `process.exit(1)` instead of this error.
+  test.each([
+    [
+      "an unknown worker type",
+      { workerType: "missing" },
+      "Unknown worker 'missing'. Available: sync, agent, pipeline, projection, workflow",
+    ],
+    [
+      "the action worker",
+      { workerType: "action" },
+      "[SixbWorker] 'action' is no longer a worker type: Actions run in the process that " +
+        "requests them (API, workflows, syncs). Remove it from the command.",
+    ],
+    [
+      "an invalid agent turn timeout",
+      { workerType: "agent", agentTurnTimeout: "eventually" },
+      "Invalid agent turn timeout 'eventually'",
+    ],
+    [
+      "an invalid concurrency",
+      { workerType: "sync", concurrency: "0" },
+      "Invalid worker concurrency '0'",
+    ],
+  ])("rejects %s before loading the runtime", async (_case, options, message) => {
+    const result = await runInProcess(() => runWorker({ entry: validProject, ...options }))
+
+    expect(result.exitCode).toBeUndefined()
+    expect(String(result.error)).toContain(message)
+  })
+
+  test("refuses InMemoryQueues for a known worker type", async () => {
+    const result = await runInProcess(() =>
+      runWorker({ entry: validProject, workerType: "workflow" })
+    )
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("requires a queues provider")
-    expect(result.stdout).toContain("InMemoryQueues")
-    expect(result.stderr).toBe("")
-  })
-
-  test("rejects unknown worker types before checking queue provider", async () => {
-    const result = await runWorkerFixture("valid-project", ["missing"])
-
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Unknown worker 'missing'")
-    expect(result.stdout).toContain("sync, agent, pipeline")
-    expect(result.stdout).toContain("projection, workflow")
-    expect(result.stdout).not.toContain("requires a queues provider")
-    expect(result.stderr).toBe("")
-  })
-
-  test("points `sixb worker action` to where Actions run", async () => {
-    const result = await runWorkerFixture("valid-project", ["action"])
-
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("'action' is no longer a worker type")
-    expect(result.stdout).not.toContain("Unknown worker")
-    expect(result.stderr).toBe("")
-  })
-
-  test("accepts workflow as a known explicit worker type", async () => {
-    const result = await runWorkerFixture("valid-project", ["workflow"])
-
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("requires a queues provider")
-    expect(result.stdout).toContain("InMemoryQueues")
-    expect(result.stdout).not.toContain("Unknown worker")
-    expect(result.stderr).toBe("")
-  })
-
-  test("requires a positional worker type", async () => {
-    const result = await runWorkerFixture("valid-project")
-
-    expect(result.exitCode).toBe(2)
-    expect(result.stdout).toContain("sixb worker")
-    expect(result.stdout).toContain("<sync|agent|pipeline|projection|workflow>")
-    expect(result.stderr).toBe("")
-  })
-
-  test("rejects removed worker selector flags", async () => {
-    const result = await runWorkerFixture("valid-project", ["--type", "pipeline"])
-
-    expect(result.exitCode).toBe(2)
-    expect(result.stdout).toContain("Unknown option '--type'")
-    expect(result.stderr).toBe("")
-  })
-
-  test("validates the agent turn timeout before loading providers", async () => {
-    const result = await runWorkerFixture("valid-project", [
-      "agent",
-      "--agent-turn-timeout",
-      "eventually",
-    ])
-
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Invalid agent turn timeout 'eventually'")
-    expect(result.stdout).not.toContain("requires a queues provider")
-    expect(result.stderr).toBe("")
-  })
-
-  test("validates worker concurrency before loading providers", async () => {
-    const result = await runWorkerFixture("valid-project", ["sync", "--concurrency", "0"])
-
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Invalid worker concurrency '0'")
-    expect(result.stdout).not.toContain("requires a queues provider")
-    expect(result.stderr).toBe("")
-  })
-
-  test("rejects a missing worker concurrency value", async () => {
-    const result = await runWorkerFixture("valid-project", ["sync", "--concurrency"])
-
-    expect(result.exitCode).toBe(2)
-    expect(result.stdout).toContain("--concurrency requires a value")
-    expect(result.stdout).not.toContain("requires a queues provider")
-    expect(result.stderr).toBe("")
-  })
-
-  test("preserves the complete equals-form concurrency value for validation", async () => {
-    // Reverting getFlag() to split("=")[1] truncates this to 3 and lets startup continue.
-    const result = await runWorkerFixture("valid-project", ["sync", "--concurrency=3=4"])
-
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Invalid worker concurrency '3=4'")
-    expect(result.stdout).not.toContain("requires a queues provider")
-    expect(result.stderr).toBe("")
+    expect(result.output).toContain("requires a queues provider")
+    expect(result.output).toContain("InMemoryQueues")
   })
 
   test("refuses without migrating, so a bad command leaves no schema behind", async () => {
     // A project with agent work requires an API origin before migrating. Accounting-only
     // workers can start without one.
     const logPath = await tempLogPath()
-    const result = await runWorkerFixture("worker-group", ["agent"], {
-      logPath,
-      env: { SIXB_API_PUBLIC_ORIGIN: undefined },
+
+    const result = await runInProcess(() => {
+      process.env.SIXB_CLI_TEST_LOG = logPath
+      delete process.env.SIXB_API_PUBLIC_ORIGIN
+      return runWorker({ entry: fixtureEntry("worker-group"), workerType: "agent" })
     })
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("requires --api-public-origin")
-
+    expect(result.output).toContain("requires --api-public-origin")
     const logEntries = await readLogEntries(logPath)
     expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
   })
 
-  test("closes runtime providers when startup fails after loading the runtime", async () => {
+  // The process boundary: a startup failure has to end the process with a non-zero code after
+  // closing what it opened, not leave it running.
+  test("exits 1 and closes runtime providers when startup fails after loading the runtime", async () => {
     const logPath = await tempLogPath()
-    const result = await runWorkerFixture("prod-roles", ["projection"], { logPath })
+    const result = await runCliToCompletion({
+      cmd: [
+        "bun",
+        resolve(import.meta.dir, "..", "src", "index.tsx"),
+        "worker",
+        "projection",
+        "--entry",
+        fixtureEntry("prod-roles"),
+      ],
+      cwd: resolve(import.meta.dir, "..", "..", ".."),
+      env: { SIXB_CLI_TEST_LOG: logPath },
+      timeoutMs: FAST_CLI_TIMEOUT_MS,
+    })
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("No projection definitions are registered")
     expect(result.stderr).toBe("")
-
     const logEntries = await readLogEntries(logPath)
     expect(logEntries).toContainEqual({ type: "queues:close" })
     expect(logEntries).toContainEqual({ type: "lake-storage:close" })
-  })
-
-  test("is listed in the CLI help", async () => {
-    const result = await runHelp()
-
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("worker <type>")
-    expect(result.stdout).toContain("--concurrency <value>")
-    expect(result.stdout).not.toContain("--type <type>")
-    expect(result.stdout).not.toContain("--worker <type>")
-    expect(result.stdout).toContain("sync, agent, pipeline")
-    expect(result.stdout).toContain("projection, workflow")
-    expect(result.stdout).toContain("--agent-turn-timeout <duration>")
-    expect(result.stderr).toBe("")
-  })
-
-  test("resolves the requested worker type directly", () => {
-    expect(resolveWorkerTypeToStart("pipeline")).toBe("pipeline")
-    expect(resolveWorkerTypeToStart("workflow")).toBe("workflow")
-  })
-
-  test("rejects unknown workers with the known worker list", () => {
-    expect(() => resolveWorkerTypeToStart("missing")).toThrow(
-      "Available: sync, agent, pipeline, projection, workflow"
-    )
-  })
-
-  test("says where Actions run when a command still names the action worker", () => {
-    expect(() => resolveWorkerTypeToStart("action")).toThrow(
-      "[SixbWorker] 'action' is no longer a worker type: Actions run in the process that " +
-        "requests them (API, workflows, syncs). Remove it from the command."
-    )
   })
 })

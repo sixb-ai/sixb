@@ -19,14 +19,9 @@ describe("checkRuntimeHealth", () => {
     expect(health.storage).toEqual({ ok: true, message: "ok · InMemoryStorage" })
     expect(health.timeseries).toEqual({ ok: true, message: "ok · InMemoryStorage" })
     expect(health.broker).toEqual({ ok: true, message: "ok · InMemoryBroker" })
-  })
-
-  test("does not claim a current schema when there is no schema to check", async () => {
-    const health = await checkRuntimeHealth(runtime())
-
-    // `InMemoryStorage` exposes no migrators, so nothing was read. Usable, but for want
-    // of a schema rather than by having a verified one.
-    expect(health.storage.message).not.toContain("schema")
+    // `Queues.health()` is the only read-only member of that contract; everything else
+    // enqueues, claims or completes. `InMemoryQueues` implements it, so this row is earned.
+    expect(health.queues).toEqual({ ok: true, message: "ok · InMemoryQueues" })
   })
 
   test("reports a verified schema separately from a merely reachable one", async () => {
@@ -90,14 +85,6 @@ describe("checkRuntimeHealth", () => {
     // An unreachable Postgres waits rather than refusing. Without a bound the command
     // hangs, which in a pipeline is indistinguishable from a slow database.
     expect(health.storage).toEqual({ ok: false, message: "InMemoryStorage · timed out after 25ms" })
-  })
-
-  test("probes the queues provider through its own health check", async () => {
-    const health = await checkRuntimeHealth(runtime())
-
-    // `Queues.health()` is the only read-only member of that contract; everything else
-    // enqueues, claims or completes. `InMemoryQueues` implements it, so this row is earned.
-    expect(health.queues).toEqual({ ok: true, message: "ok · InMemoryQueues" })
   })
 
   test("fails the queues row when its health check throws", async () => {

@@ -1,210 +1,141 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
-import { FAST_CLI_TIMEOUT_MS, runCliToCompletion } from "./shared/cli-process"
+import { resolve } from "node:path"
+import { runLakeCheck } from "../src/commands/lake-check"
+import { runLakeCleanup } from "../src/commands/lake-cleanup"
+import { lakeFixture } from "./fixtures/lake-project/sixb.config"
+import { MISDECLARED_MARKINGS_MESSAGE } from "./fixtures/shared/createMisdeclaredMarkingsSixb"
+import { runInProcess } from "./shared/in-process"
 
-const tempDirs: string[] = []
+const entry = resolve(import.meta.dir, "fixtures", "lake-project", "sixb.config.ts")
+const closed = { type: "lake-storage:close" }
 
-afterEach(async () => {
-  while (tempDirs.length > 0) {
-    const dir = tempDirs.pop()
-    if (dir) {
-      await rm(dir, { recursive: true, force: true })
-    }
-  }
+afterEach(() => {
+  Object.assign(lakeFixture, { drift: false, maintenance: true, appliedVersion: undefined })
+  lakeFixture.events = []
 })
 
-async function runLakeCommand(
-  subcommand: "check" | "cleanup",
-  options: {
-    fixture?: string
-    drift?: boolean
-    noMaintenance?: boolean
-    appliedVersion?: string
-    args?: readonly string[]
-  } = {}
-): Promise<{
-  exitCode: number
-  stdout: string
-  stderr: string
-  logEntries: Array<Record<string, unknown>>
-}> {
-  const repoRoot = resolve(import.meta.dir, "..", "..", "..")
-  const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
-  const fixtureEntry = resolve(
-    import.meta.dir,
-    "fixtures",
-    options.fixture ?? "lake-project",
-    "sixb.config.ts"
-  )
-  const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-lake-"))
-  const logPath = join(tempDir, "operations.log")
-  tempDirs.push(tempDir)
-
-  const result = await runCliToCompletion({
-    cmd: ["bun", cliEntry, "lake", subcommand, "--entry", fixtureEntry, ...(options.args ?? [])],
-    cwd: repoRoot,
-    env: {
-      SIXB_CLI_TEST_LOG: logPath,
-      ...(options.drift ? { SIXB_CLI_TEST_LAKE_DRIFT: "1" } : {}),
-      ...(options.noMaintenance ? { SIXB_CLI_TEST_LAKE_NO_MAINTENANCE: "1" } : {}),
-      ...(options.appliedVersion ? { SIXB_CLI_TEST_APPLIED_VERSION: options.appliedVersion } : {}),
-    },
-    timeoutMs: FAST_CLI_TIMEOUT_MS,
-  })
-
-  const logSource = await readFile(logPath, "utf-8").catch(() => "")
-
-  return {
-    exitCode: result.exitCode,
-    stdout: result.stdout,
-    stderr: result.stderr,
-    logEntries: logSource
-      .trim()
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as Record<string, unknown>),
-  }
+/** The report as one line: Ink pads each label to a column. */
+function flat(output: string): string {
+  return output.replace(/[\s│]+/g, " ")
 }
 
 describe("sixb lake check", () => {
-  test("exits successfully when lake definitions are compatible", async () => {
-    const result = await runLakeCommand("check")
+  test("reports compatible definitions, then closes providers", async () => {
+    const result = await runInProcess(() => runLakeCheck({ entry }))
 
-    expect(result.exitCode).toBe(0)
-    expect(result.stderr).toBe("")
-    expect(result.stdout).toContain("Lake definitions compatible")
-    expect(result.stdout).toContain("cli-lake-project")
+    expect(result.error).toBeUndefined()
+    expect(result.output).toContain("Lake definitions compatible")
+    expect(result.output).toContain("cli-lake-project")
+    expect(lakeFixture.events).toEqual([closed])
   })
 
-  test("closes providers after a successful check", async () => {
-    const result = await runLakeCommand("check")
+  test("fails when lake definitions drift, and still closes providers", async () => {
+    lakeFixture.drift = true
 
-    expect(result.exitCode).toBe(0)
-    expect(result.logEntries).toContainEqual({ type: "lake-storage:close" })
+    const result = await runInProcess(() => runLakeCheck({ entry }))
+
+    expect(String(result.error)).toContain("Lake dataset definition check failed")
+    expect(lakeFixture.events).toEqual([closed])
   })
 
-  test("fails when lake definitions drift", async () => {
-    const result = await runLakeCommand("check", { drift: true })
-
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Lake dataset definition check failed")
-  })
-
-  // Reproduce: remove `checkRuntimePipelineMarkings` from commands/lake-check.tsx; this exits 0.
+  // Reproduce: remove `checkRuntimePipelineMarkings` from commands/lake-check.tsx; this passes.
   test("fails when a SQL step gives a projected column undeclared markings", async () => {
-    const result = await runLakeCommand("check", { fixture: "misdeclared-markings-project" })
-
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout.replace(/[\s│]+/g, " ")).toContain(
-      "property 'Invoice.title' is projected from column 'invoices.title', which carries [financial] from 'raw_invoices.amount' through step 'invoices/normalize-invoices'."
+    const misdeclared = resolve(
+      import.meta.dir,
+      "fixtures",
+      "misdeclared-markings-project",
+      "sixb.config.ts"
     )
-  })
 
-  test("closes providers after a failed check", async () => {
-    const result = await runLakeCommand("check", { drift: true })
+    const result = await runInProcess(() => runLakeCheck({ entry: misdeclared }))
 
-    expect(result.exitCode).toBe(1)
-    expect(result.logEntries).toContainEqual({ type: "lake-storage:close" })
+    expect(String(result.error)).toContain(MISDECLARED_MARKINGS_MESSAGE)
   })
 })
 
 describe("sixb lake cleanup", () => {
-  test("runs dry-run cleanup with default retention and prints the report", async () => {
-    const result = await runLakeCommand("cleanup", { args: ["--dry-run"] })
+  test("runs a dry run with the default retention, prints the report, and closes providers", async () => {
+    const result = await runInProcess(() => runLakeCleanup({ entry, dryRun: true }))
 
-    expect(result.exitCode).toBe(0)
-    expect(result.stderr).toBe("")
-    expect(result.stdout).toContain("Lake cleanup dry run complete")
-    expect(result.stdout).toContain("cli-lake-project")
-    expect(result.stdout).toContain("Snapshots")
-    expect(result.stdout).toContain("2")
-    expect(result.stdout).toContain("Old files")
-    expect(result.stdout).toContain("3")
-    expect(result.stdout).toContain("Orphaned files")
-    expect(result.stdout).toContain("4")
-    expect(result.logEntries).toContainEqual({
-      type: "lake:maintenance",
-      dryRun: true,
-      expireOlderThan: "7 days",
-      deleteOlderThan: "7 days",
-    })
+    expect(result.error).toBeUndefined()
+    expect(result.output).toContain("Lake cleanup dry run complete")
+    expect(result.output).toContain("cli-lake-project")
+    expect(flat(result.output)).toContain(
+      "Snapshots 2 Kept snapshots 5 Old files 3 Orphaned files 4"
+    )
+    expect(lakeFixture.events).toEqual([
+      {
+        type: "lake:maintenance",
+        dryRun: true,
+        expireOlderThan: "7 days",
+        deleteOlderThan: "7 days",
+        protect: [],
+      },
+      closed,
+    ])
+  })
+
+  test("passes the retention flags through, and defaults delete retention to expire retention", async () => {
+    const flags = await runInProcess(() =>
+      runLakeCleanup({ entry, expireOlderThan: "1 hour", deleteOlderThan: "30 minutes" })
+    )
+    const expireOnly = await runInProcess(() =>
+      runLakeCleanup({ entry, dryRun: true, expireOlderThan: "2 days" })
+    )
+
+    expect(flags.output).toContain("Lake cleanup complete")
+    expect(flat(flags.output)).toContain("Expire older than 1 hour Delete older than 30 minutes")
+    expect(expireOnly.error).toBeUndefined()
+    expect(lakeFixture.events).toEqual([
+      {
+        type: "lake:maintenance",
+        dryRun: false,
+        expireOlderThan: "1 hour",
+        deleteOlderThan: "30 minutes",
+        protect: [],
+      },
+      closed,
+      {
+        type: "lake:maintenance",
+        dryRun: true,
+        expireOlderThan: "2 days",
+        deleteOlderThan: "2 days",
+        protect: [],
+      },
+      closed,
+    ])
   })
 
   // Reproduce: drop `protect` from the runMaintenance call in commands/lake-cleanup.tsx.
   test("keeps the dataset versions projections applied", async () => {
-    const result = await runLakeCommand("cleanup", {
-      appliedVersion: "ducklake:42",
-      args: ["--dry-run"],
-    })
+    lakeFixture.appliedVersion = "ducklake:42"
 
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Kept snapshots")
-    expect(result.stdout).toContain("5")
-    expect(result.logEntries).toContainEqual({
-      type: "lake:maintenance:protect",
+    const result = await runInProcess(() => runLakeCleanup({ entry, dryRun: true }))
+
+    expect(result.error).toBeUndefined()
+    expect(lakeFixture.events[0]).toMatchObject({
       protect: [{ datasetId: "raw.things", versionId: "ducklake:42" }],
     })
   })
 
   // Reproduce: fall back to no protected versions when listActive fails in commands/lake-cleanup.tsx.
   test("does not clean the lake when the applied versions cannot be read", async () => {
-    const result = await runLakeCommand("cleanup", { appliedVersion: "unreadable" })
+    lakeFixture.appliedVersion = "unreadable"
 
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("ontology storage is unreachable")
-    expect(result.logEntries.some((entry) => entry.type === "lake:maintenance")).toBe(false)
-    expect(result.logEntries).toContainEqual({ type: "lake-storage:close" })
-  })
+    const result = await runInProcess(() => runLakeCleanup({ entry }))
 
-  test("passes cleanup retention flags through", async () => {
-    const result = await runLakeCommand("cleanup", {
-      args: ["--expire-older-than", "1 hour", "--delete-older-than", "30 minutes"],
-    })
-
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Lake cleanup complete")
-    expect(result.stdout).toContain("1 hour")
-    expect(result.stdout).toContain("30 minutes")
-    expect(result.stdout).not.toContain("DuckLake retention options persist")
-    expect(result.logEntries).toContainEqual({
-      type: "lake:maintenance",
-      dryRun: false,
-      expireOlderThan: "1 hour",
-      deleteOlderThan: "30 minutes",
-    })
-  })
-
-  test("defaults delete retention to expire retention", async () => {
-    const result = await runLakeCommand("cleanup", {
-      args: ["--dry-run", "--expire-older-than", "2 days"],
-    })
-
-    expect(result.exitCode).toBe(0)
-    expect(result.logEntries).toContainEqual({
-      type: "lake:maintenance",
-      dryRun: true,
-      expireOlderThan: "2 days",
-      deleteOlderThan: "2 days",
-    })
-  })
-
-  test("closes providers after successful cleanup", async () => {
-    const result = await runLakeCommand("cleanup", { args: ["--dry-run"] })
-
-    expect(result.exitCode).toBe(0)
-    expect(result.logEntries).toContainEqual({ type: "lake-storage:close" })
+    expect(String(result.error)).toContain("ontology storage is unreachable")
+    expect(lakeFixture.events).toEqual([closed])
   })
 
   test("fails clearly when lake storage does not support cleanup", async () => {
-    const result = await runLakeCommand("cleanup", {
-      noMaintenance: true,
-      args: ["--dry-run"],
-    })
+    lakeFixture.maintenance = false
 
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Configured lake storage does not support maintenance cleanup")
-    expect(result.logEntries).toContainEqual({ type: "lake-storage:close" })
+    const result = await runInProcess(() => runLakeCleanup({ entry, dryRun: true }))
+
+    expect(String(result.error)).toContain(
+      "Configured lake storage does not support maintenance cleanup"
+    )
+    expect(lakeFixture.events).toEqual([closed])
   })
 })

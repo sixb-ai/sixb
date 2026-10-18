@@ -1,16 +1,25 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type { DeployConfig, DeployRelease, DeployTarget } from "@sixb/core/deploy"
 import { ACTION_RUN_DRAIN_TIMEOUT_MS } from "@sixb/core/internal/actions"
+import {
+  runDeploy,
+  runDeployAccess,
+  runDeployCheck,
+  runDeployCi,
+  runDeployControl,
+  runDeployLogs,
+  runDeploySetup,
+  runDeployStatus,
+} from "../src/commands/deploy"
 import { parseCliArgs } from "../src/lib/command-line"
 import { buildDeployRelease, deployPublicOrigins } from "../src/lib/deploy-release"
 import { packSource, resolveBunVersion } from "../src/lib/deploy-source"
 import { type ProductionRole, productionRoleFacts } from "../src/lib/production-roles"
-import { runCliToCompletion } from "./shared/cli-process"
+import { runInProcess } from "./shared/in-process"
 
-const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
 const fixtureProject = resolve(import.meta.dir, "fixtures", "deploy-project")
 
 const ports = { app: 3001, api: 3002 } as const
@@ -56,9 +65,18 @@ function commandLine(built: DeployRelease, name: string): string {
   return [command.program, ...command.args].join(" ")
 }
 
+// Commits name an author without a `git config` call per repository.
+const gitIdentity = {
+  GIT_AUTHOR_NAME: "Dev",
+  GIT_AUTHOR_EMAIL: "dev@example.com",
+  GIT_COMMITTER_NAME: "Dev",
+  GIT_COMMITTER_EMAIL: "dev@example.com",
+}
+
 async function git(cwd: string, ...args: string[]): Promise<string> {
   const child = Bun.spawn(["git", "-c", "protocol.file.allow=always", ...args], {
     cwd,
+    env: { ...process.env, ...gitIdentity },
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -72,11 +90,9 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
 }
 
 /** A repository with its files committed, as a deploy expects. */
-async function repository(files: Record<string, string>): Promise<string> {
-  const root = await tempDir()
+async function repository(files: Record<string, string>, root?: string): Promise<string> {
+  root ??= await tempDir()
   await git(root, "init", "--quiet", "--initial-branch=main")
-  await git(root, "config", "user.email", "dev@example.com")
-  await git(root, "config", "user.name", "Dev")
   for (const [path, content] of Object.entries(files)) {
     await mkdir(join(root, path, ".."), { recursive: true })
     await writeFile(join(root, path), content)
@@ -292,7 +308,7 @@ describe("deploy source", () => {
     expect(await listArchive(submoduleArchive.open())).toEqual(["index.ts"])
   })
 
-  test("knows where a project sits in its repository, and its pinned Bun", async () => {
+  test("knows where a project sits in its repository, and runs the Bun its commit pins", async () => {
     const root = await repository({
       "package.json": JSON.stringify({ packageManager: "bun@1.4.7" }),
       "apps/web/package.json": "{}",
@@ -301,14 +317,9 @@ describe("deploy source", () => {
 
     expect((await packSource(project)).projectPath).toBe("apps/web")
     expect(await resolveBunVersion(project)).toBe("1.4.7")
-  })
 
-  test("runs the Bun the deployed commit pins, not an uncommitted edit", async () => {
-    const root = await repository({
-      "package.json": JSON.stringify({ packageManager: "bun@1.4.7" }),
-    })
+    // An uncommitted edit is not what gets deployed.
     await writeFile(join(root, "package.json"), JSON.stringify({ packageManager: "bun@1.4.9" }))
-
     expect(await resolveBunVersion(root, await packSource(root))).toBe("1.4.7")
     expect(await resolveBunVersion(root)).toBe("1.4.9")
   })
@@ -430,12 +441,32 @@ export default {
     }
   }
 
+  /** A committed project with the recording config, and a fresh file for what its target records. */
   async function project(): Promise<{ root: string; recordPath: string }> {
     const root = await repository({
       "package.json": JSON.stringify({ packageManager: "bun@1.4.2" }),
       "sixb.deploy.ts": recordingConfig,
     })
     return { root, recordPath: join(await tempDir(), "record.jsonl") }
+  }
+
+  // One project for the commands that leave it as it was; `deploy ci` writes to its own.
+  let readOnlyRoot: Promise<string> | undefined
+  afterAll(async () => {
+    if (readOnlyRoot) await rm(await readOnlyRoot, { recursive: true, force: true })
+  })
+
+  async function readOnlyProject(): Promise<{ root: string; recordPath: string }> {
+    readOnlyRoot ??= mkdtemp(join(tmpdir(), "sixb-deploy-project-")).then((root) =>
+      repository(
+        {
+          "package.json": JSON.stringify({ packageManager: "bun@1.4.2" }),
+          "sixb.deploy.ts": recordingConfig,
+        },
+        root
+      )
+    )
+    return { root: await readOnlyRoot, recordPath: join(await tempDir(), "record.jsonl") }
   }
 
   async function records(path: string): Promise<Record<string, unknown>[]> {
@@ -445,17 +476,25 @@ export default {
       .map((line) => JSON.parse(line) as Record<string, unknown>)
   }
 
-  test("hands the target the release and the committed source", async () => {
-    const { root, recordPath } = await project()
-    const result = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "deploy"],
-      cwd: root,
-      env: { DEPLOY_RECORD: recordPath },
+  /**
+   * Runs a deploy command in this process, the way CI sees it: one line per step rather than a
+   * live view. `env` reaches the recording target and the fake `gh`.
+   */
+  function deploy(env: Record<string, string>, command: () => Promise<unknown>) {
+    return runInProcess(() => {
+      Object.assign(process.env, { CI: "1", ...env })
+      return command()
     })
+  }
 
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("✓ Upload source")
-    expect(result.stdout).toContain("northline deployed")
+  test("hands the target the release and the committed source", async () => {
+    const { root, recordPath } = await readOnlyProject()
+    const result = await deploy({ DEPLOY_RECORD: recordPath }, () => runDeploy({ cwd: root }))
+
+    expect(result.error).toBeUndefined()
+    expect(result.exitCode).toBeUndefined()
+    expect(result.output).toContain("✓ Upload source")
+    expect(result.output).toContain("northline deployed")
     const [checked, deployed] = await records(recordPath)
     expect(checked).toEqual({ check: "northline", projectPath: "." })
     expect(deployed).toMatchObject({
@@ -469,79 +508,65 @@ export default {
   })
 
   test("names the step that failed, with its output", async () => {
-    const { root, recordPath } = await project()
-    const result = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "deploy"],
-      cwd: root,
-      env: { DEPLOY_RECORD: recordPath, DEPLOY_FAIL: "1" },
-    })
+    const { root, recordPath } = await readOnlyProject()
+    const result = await deploy({ DEPLOY_RECORD: recordPath, DEPLOY_FAIL: "1" }, () =>
+      runDeploy({ cwd: root })
+    )
 
     expect(result.exitCode).toBe(1)
-    const output = result.stdout + result.stderr
-    expect(output).toContain('Deploy failed at "Build"')
-    expect(output).toContain("compiling the runtime")
-    expect(output).toContain("the build broke")
+    expect(result.output).toContain('Deploy failed at "Build"')
+    expect(result.output).toContain("compiling the runtime")
+    expect(result.output).toContain("the build broke")
   })
 
   test("reports status, logs, and control through the target", async () => {
-    const { root, recordPath } = await project()
-    const run = (...args: string[]) =>
-      runCliToCompletion({
-        cmd: ["bun", cliEntry, "deploy", ...args],
-        cwd: root,
-        env: { DEPLOY_RECORD: recordPath },
-      })
+    const { root, recordPath } = await readOnlyProject()
+    const env = { DEPLOY_RECORD: recordPath }
 
-    const status = await run("status", "--json")
-    expect(JSON.parse(status.stdout).processes[0]).toMatchObject({
+    const status = await deploy(env, () => runDeployStatus({ json: true, cwd: root }))
+    expect(JSON.parse(status.output).processes[0]).toMatchObject({
       service: "api",
       status: "running",
     })
 
-    expect((await run("logs", "api", "--tail", "5")).stdout).toContain(
-      "northline api tail=5 follow=false"
-    )
+    const logs = await deploy(env, () => runDeployLogs({ service: "api", tail: "5", cwd: root }))
+    expect(logs.output).toContain("northline api tail=5 follow=false")
 
-    const restart = await run("restart", "workers")
-    expect(restart.exitCode).toBe(0)
-    expect(restart.stdout).toContain("northline is running")
+    const restart = await deploy(env, () =>
+      runDeployControl({ action: "restart", service: "workers", cwd: root })
+    )
+    expect(restart.error).toBeUndefined()
+    expect(restart.output).toContain("northline is running")
     expect(await records(recordPath)).toEqual([
       { action: "restart", service: "workers", name: "northline" },
     ])
   })
 
   test("checks the target, and stops a deploy the checks say cannot work", async () => {
-    const { root, recordPath } = await project()
-    const run = (...args: string[]) =>
-      runCliToCompletion({
-        cmd: ["bun", cliEntry, "deploy", ...args],
-        cwd: root,
-        env: { DEPLOY_RECORD: recordPath, DEPLOY_BLOCK: "1" },
-      })
+    const { root, recordPath } = await readOnlyProject()
+    const env = { DEPLOY_RECORD: recordPath, DEPLOY_BLOCK: "1" }
 
-    const check = await run("check")
+    const check = await deploy(env, () => runDeployCheck({ cwd: root }))
     expect(check.exitCode).toBe(1)
-    expect(check.stdout).toContain("northline · 1 to fix before deploying")
-    expect(check.stdout).toContain("Create it.")
+    expect(check.output).toContain("northline · 1 to fix before deploying")
+    expect(check.output).toContain("Create it.")
 
-    const deploy = await run()
-    expect(deploy.exitCode).toBe(1)
-    expect(deploy.stdout).toContain(".env does not exist")
+    const blocked = await deploy(env, () => runDeploy({ cwd: root }))
+    expect(blocked.exitCode).toBe(1)
+    expect(blocked.output).toContain(".env does not exist")
     // Only the checks ran: nothing was uploaded.
     expect((await records(recordPath)).every((entry) => "check" in entry)).toBe(true)
   })
 
   test("sets the target up, then shows what is left", async () => {
-    const { root, recordPath } = await project()
-    const result = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "deploy", "setup", "--admin", "ademattos", "--key", "~/.ssh/id.pub"],
-      cwd: root,
-      env: { DEPLOY_RECORD: recordPath },
-    })
+    const { root, recordPath } = await readOnlyProject()
+    const result = await deploy({ DEPLOY_RECORD: recordPath }, () =>
+      runDeploySetup({ admin: "ademattos", key: "~/.ssh/id.pub", cwd: root })
+    )
 
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("setting up the test server")
-    expect(result.stdout).toContain("northline is ready to deploy")
+    expect(result.error).toBeUndefined()
+    expect(result.output).toContain("setting up the test server")
+    expect(result.output).toContain("northline is ready to deploy")
     expect((await records(recordPath))[0]).toEqual({
       setup: "northline",
       admin: "ademattos",
@@ -556,17 +581,14 @@ export default {
       '[submodule "vendor/lib"]\n\tpath = vendor/lib\n\turl = ../lib.git\n'
     )
     const gh = await fakeGh()
-    const result = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "deploy", "ci"],
-      cwd: root,
-      env: { DEPLOY_RECORD: recordPath, PATH: gh.path },
-    })
+    const env = { DEPLOY_RECORD: recordPath, PATH: gh.path }
+    const result = await deploy(env, () => runDeployCi({ cwd: root }))
 
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("northline deploys from GitHub Actions on every push to main")
-    expect(result.stdout).toContain("revoked SHA256:old")
-    expect(result.stdout).toContain("vendor/lib is private")
-    expect(result.stdout).toContain("Contents: read on acme/lib")
+    expect(result.error).toBeUndefined()
+    expect(result.output).toContain("northline deploys from GitHub Actions on every push to main")
+    expect(result.output).toContain("revoked SHA256:old")
+    expect(result.output).toContain("vendor/lib is private")
+    expect(result.output).toContain("Contents: read on acme/lib")
     expect(await gh.calls()).toEqual([
       "repo view --json nameWithOwner,defaultBranchRef <>",
       "api repos/acme/lib --jq .private <>",
@@ -587,46 +609,33 @@ export default {
     expect(workflow).toContain(`SIXB_DEPLOY_SSH_KEY: \${{ secrets.SIXB_DEPLOY_SSH_KEY_NORTHLINE }}`)
     expect(workflow).toContain("          echo installing the key")
     expect(workflow).toContain(`token: \${{ secrets.SIXB_GITHUB_TOKEN }}`)
-  })
 
-  test("rotates the key without undoing edits to the workflow", async () => {
-    const { root, recordPath } = await project()
-    const gh = await fakeGh()
-    const run = () =>
-      runCliToCompletion({
-        cmd: ["bun", cliEntry, "deploy", "ci"],
-        cwd: root,
-        env: { DEPLOY_RECORD: recordPath, PATH: gh.path },
-      })
-    await run()
+    // Running it again rotates the key without undoing edits to the workflow.
     const path = join(root, ".github/workflows/deploy-northline.yml")
-    const edited = `${await readFile(path, "utf8")}# edited\n`
+    const edited = `${workflow}# edited\n`
     await writeFile(path, edited)
-
-    const again = await run()
-    expect(again.exitCode).toBe(0)
-    expect(again.stdout).toContain("(yours, kept")
+    const again = await deploy(env, () => runDeployCi({ cwd: root }))
+    expect(again.error).toBeUndefined()
+    expect(again.output).toContain("(yours, kept")
     expect(await readFile(path, "utf8")).toBe(edited)
   })
 
   test("revokes the new CI key when GitHub does not take it", async () => {
     const { root, recordPath } = await project()
     const gh = await fakeGh()
-    const result = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "deploy", "ci"],
-      cwd: root,
-      env: {
+    const result = await deploy(
+      {
         DEPLOY_RECORD: recordPath,
         PATH: gh.path,
         GH_FAIL_SECRETS: "1",
         GH_ENVIRONMENT_EXISTS: "1",
       },
-    })
+      () => runDeployCi({ cwd: root })
+    )
 
-    expect(result.exitCode).toBe(1)
     // An existing environment is left as it is: a PUT would reset its protection rules.
     expect((await gh.calls()).some((call) => call.includes("--method PUT"))).toBe(false)
-    expect(result.stdout + result.stderr).toContain("Resource not accessible")
+    expect(String(result.error)).toContain("Resource not accessible")
     expect(await records(recordPath)).toEqual([
       { ci: "github:acme/shop", name: "northline" },
       { revoked: "github:acme/shop" },
@@ -634,19 +643,21 @@ export default {
   })
 
   test("lists, adds, and revokes keys", async () => {
-    const { root, recordPath } = await project()
-    const keyFile = join(root, "..", "teammate.pub")
+    const { root, recordPath } = await readOnlyProject()
+    const keyFile = join(await tempDir(), "teammate.pub")
     await writeFile(keyFile, "ssh-ed25519 AAAAteammate quentin@mbp\n")
-    const run = (...args: string[]) =>
-      runCliToCompletion({
-        cmd: ["bun", cliEntry, "deploy", "access", ...args],
-        cwd: root,
-        env: { DEPLOY_RECORD: recordPath },
-      })
+    const env = { DEPLOY_RECORD: recordPath }
 
-    expect((await run("list")).stdout).toContain("dev@laptop")
-    expect((await run("add", keyFile)).stdout).toContain("quentin@mbp")
-    expect((await run("remove", "SHA256:old")).stdout).toContain("old@laptop")
+    const list = await deploy(env, () => runDeployAccess({ action: "list", cwd: root }))
+    expect(list.output).toContain("dev@laptop")
+    const add = await deploy(env, () =>
+      runDeployAccess({ action: "add", value: keyFile, cwd: root })
+    )
+    expect(add.output).toContain("quentin@mbp")
+    const remove = await deploy(env, () =>
+      runDeployAccess({ action: "remove", value: "SHA256:old", cwd: root })
+    )
+    expect(remove.output).toContain("old@laptop")
     expect(await records(recordPath)).toEqual([
       { add: "ssh-ed25519 AAAAteammate quentin@mbp" },
       { remove: "SHA256:old" },
@@ -654,13 +665,12 @@ export default {
   })
 
   test("prints the release as JSON", async () => {
-    const result = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "deploy", "--dry-run", "--json"],
-      cwd: fixtureProject,
-    })
+    const result = await deploy({}, () =>
+      runDeploy({ dryRun: true, json: true, cwd: fixtureProject })
+    )
 
-    expect(result.exitCode).toBe(0)
-    const built = JSON.parse(result.stdout) as DeployRelease
+    expect(result.error).toBeUndefined()
+    const built = JSON.parse(result.output) as DeployRelease
     expect(built.target).toEqual({ kind: "ssh", location: "sixb@203.0.113.10" })
     expect(built.services.map((entry) => entry.name)).toEqual([
       "api",
@@ -674,27 +684,20 @@ export default {
   })
 
   test("prints the release for people", async () => {
-    const result = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "deploy", "--dry-run"],
-      cwd: fixtureProject,
-    })
+    const result = await deploy({}, () => runDeploy({ dryRun: true, cwd: fixtureProject }))
 
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("northline · dry run")
-    expect(result.stdout).toContain("ssh sixb@203.0.113.10 · sixb.deploy.ts")
-    expect(result.stdout).toContain("sixb api --host 127.0.0.1 --port 3012 --no-migrate")
-    expect(result.stdout).toContain("Nothing was deployed")
+    expect(result.error).toBeUndefined()
+    expect(result.output).toContain("northline · dry run")
+    expect(result.output).toContain("ssh sixb@203.0.113.10 · sixb.deploy.ts")
+    expect(result.output).toContain("sixb api --host 127.0.0.1 --port 3012 --no-migrate")
+    expect(result.output).toContain("Nothing was deployed")
   })
 
   test("explains a missing sixb.deploy.ts", async () => {
     const cwd = await tempDir()
-    const result = await runCliToCompletion({
-      cmd: ["bun", cliEntry, "deploy", "--dry-run", "--json"],
-      cwd,
-    })
+    const result = await deploy({}, () => runDeploy({ dryRun: true, json: true, cwd }))
 
-    expect(result.exitCode).toBe(1)
-    expect(JSON.parse(result.stderr).error.message).toContain("No sixb.deploy.ts in")
+    expect(String(result.error)).toContain("No sixb.deploy.ts in")
   })
 })
 

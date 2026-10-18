@@ -1,4 +1,3 @@
-import { appendFileSync } from "node:fs"
 import {
   col,
   type DatasetDefinition,
@@ -24,10 +23,13 @@ const things = defineDataset("raw.things", {
   schema: [col("id", "string", { nullable: true })],
 })
 
-function logFixtureEvent(entry: Record<string, unknown>): void {
-  const logPath = process.env.SIXB_CLI_TEST_LOG
-  if (!logPath) return
-  appendFileSync(logPath, `${JSON.stringify(entry)}\n`, "utf-8")
+/** How the next host is built, and what its providers were asked. lake.test.ts resets it. */
+export const lakeFixture = {
+  drift: false,
+  maintenance: true,
+  /** A dataset version a projection applied, or "unreadable" when reading them fails. */
+  appliedVersion: undefined as string | undefined,
+  events: [] as Record<string, unknown>[],
 }
 
 // Mirrors the real lake drift failure without needing a Postgres-backed catalog:
@@ -36,7 +38,7 @@ class FixtureLakeStorage extends InMemoryLakeStorage {
   override async assertDatasetDefinitionsCompatible(
     definitions: readonly DatasetDefinition[]
   ): Promise<void> {
-    if (process.env.SIXB_CLI_TEST_LAKE_DRIFT === "1") {
+    if (lakeFixture.drift) {
       const datasetId = definitions[0]?.id ?? "unknown"
       throw new LakeStorageError(
         `[SixbLake] Lake dataset definition check failed for 1 dataset(s).\n- ${datasetId}: dataset '${datasetId}' has drifted from the lake catalog`
@@ -46,7 +48,7 @@ class FixtureLakeStorage extends InMemoryLakeStorage {
   }
 
   async close(): Promise<void> {
-    logFixtureEvent({ type: "lake-storage:close" })
+    lakeFixture.events.push({ type: "lake-storage:close" })
   }
 }
 
@@ -57,13 +59,7 @@ class MaintenanceLakeStorage extends FixtureLakeStorage {
     readonly deleteOlderThan?: string
     readonly protect?: readonly { readonly datasetId: string; readonly versionId: string }[]
   }) {
-    logFixtureEvent({
-      type: "lake:maintenance",
-      dryRun: options?.dryRun ?? false,
-      expireOlderThan: options?.expireOlderThan,
-      deleteOlderThan: options?.deleteOlderThan,
-    })
-    logFixtureEvent({ type: "lake:maintenance:protect", protect: options?.protect })
+    lakeFixture.events.push({ type: "lake:maintenance", ...options })
 
     return {
       dryRun: options?.dryRun ?? false,
@@ -77,19 +73,12 @@ class MaintenanceLakeStorage extends FixtureLakeStorage {
   }
 }
 
-function createLakeStorage(): FixtureLakeStorage {
-  if (process.env.SIXB_CLI_TEST_LAKE_NO_MAINTENANCE === "1") {
-    return new FixtureLakeStorage()
-  }
+function createStorage(): InMemoryStorage {
+  const storage = new InMemoryStorage()
+  const versionId = lakeFixture.appliedVersion
+  if (!versionId) return storage
 
-  return new MaintenanceLakeStorage()
-}
-
-const storage = new InMemoryStorage()
-
-// Stands for a projection that applied a dataset version: what cleanup must keep.
-if (process.env.SIXB_CLI_TEST_APPLIED_VERSION) {
-  const versionId = process.env.SIXB_CLI_TEST_APPLIED_VERSION
+  // Stands for a projection that applied a dataset version: what cleanup must keep.
   storage.ontology.sources.listActive = async () => {
     if (versionId === "unreadable") throw new Error("ontology storage is unreachable")
 
@@ -104,15 +93,20 @@ if (process.env.SIXB_CLI_TEST_APPLIED_VERSION) {
       },
     ]
   }
+  return storage
 }
 
-export const sixb = new SixbHost({
-  id: "cli-lake-project",
-  ontology: [Room],
-  broker: new InMemoryBroker(),
-  storage,
-  lakeStorage: createLakeStorage(),
-  blobStorage: new InMemoryBlobStorage(),
-  queues: new InMemoryQueues(),
-  datasets: [things],
-})
+// A factory, so every command lake.test.ts runs in its process loads a host built from the
+// configuration above.
+export function sixb(): SixbHost {
+  return new SixbHost({
+    id: "cli-lake-project",
+    ontology: [Room],
+    broker: new InMemoryBroker(),
+    storage: createStorage(),
+    lakeStorage: lakeFixture.maintenance ? new MaintenanceLakeStorage() : new FixtureLakeStorage(),
+    blobStorage: new InMemoryBlobStorage(),
+    queues: new InMemoryQueues(),
+    datasets: [things],
+  })
+}
