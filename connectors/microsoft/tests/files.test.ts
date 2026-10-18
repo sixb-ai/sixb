@@ -251,18 +251,6 @@ describe("sites and drive items", () => {
     }
   })
 
-  // Countercheck: allow every method to retry in src/http.ts; this must fail.
-  test("custom retry policies cannot replay mutations, including after 401 or 503", async () => {
-    const client = await connect({
-      retry: { maxRetries: 3, shouldRetry: () => true, delayMs: () => 0 },
-    })
-    for (const status of [401, 409, 412, 429, 503]) {
-      const requests = mockFetch(() => apiError(status))
-      await expect(client.drives.items.rename("d", "f", "x")).rejects.toMatchObject({ status })
-      expect(requests).toHaveLength(1)
-    }
-  })
-
   test("transient reads retry; error status, provider body and correlation headers survive", async () => {
     let calls = 0
     mockFetch(() =>

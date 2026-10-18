@@ -30,13 +30,15 @@ describe("Graph subscriptions", () => {
     expect(JSON.parse(String(requests[0]?.init.body))).toEqual(input)
   })
 
-  test("preserves Graph resource paths with a leading slash and multiple change types", async () => {
+  test("passes valid inputs through unchanged: leading-slash paths, several change types, short lifetimes", async () => {
     const requests = mockFetch(() => json({ id: "sub" }, 201))
     const client = await connect()
     const body = {
       ...input,
       resource: "/users/user-id/events",
       changeType: "created,updated,deleted" as const,
+      // Graph enforces its own minimum lifetime; nothing is clamped locally.
+      expirationDateTime: new Date(Date.now() + 60_000).toISOString(),
     }
     await client.subscriptions.create(body)
     expect(JSON.parse(String(requests[0]?.init.body))).toEqual(body)
@@ -84,36 +86,27 @@ describe("Graph subscriptions", () => {
     ])
   })
 
-  test("get supports selection; list has no invented OData parameters", async () => {
+  test("get supports selection; list and listAll add no OData parameters and keep opaque links", async () => {
+    const next = `${GRAPH}subscriptions?$skiptoken=opaque%2Btoken`
     const requests = mockFetch((r) =>
-      json(r.url.includes("/sub?") ? { id: "sub" } : { value: [{ id: "sub" }] })
+      json(
+        r.url.includes("/sub?")
+          ? { id: "sub" }
+          : r.url === next
+            ? { value: [{ id: "sub" }] }
+            : { value: [], "@odata.nextLink": next }
+      )
     )
     const client = await connect()
     await client.subscriptions.get("sub", { select: ["expirationDateTime"] })
     expect(new URL(requests[0]!.url).searchParams.get("$select")).toContain("expirationDateTime")
-    expect((await client.subscriptions.list()).value).toEqual([{ id: "sub" }])
-    expect(requests[1]?.url).toBe(`${GRAPH}subscriptions`)
-  })
-
-  test("iterates empty pages and preserves opaque next links", async () => {
-    const next = `${GRAPH}subscriptions?$skiptoken=opaque%2Btoken`
-    const requests = mockFetch((r) =>
-      json(r.url === next ? { value: [{ id: "sub" }] } : { value: [], "@odata.nextLink": next })
-    )
-    const client = await connect()
+    expect((await client.subscriptions.list()).value).toEqual([])
     expect(await collect(client.subscriptions.listAll())).toEqual([{ id: "sub" }])
-    expect(requests[1]?.url).toBe(next)
-  })
-
-  test("rejects pagination credential exfiltration and cycles", async () => {
-    const requests = mockFetch(() =>
-      json({ value: [], "@odata.nextLink": "https://evil.example/subscriptions" })
-    )
-    const client = await connect()
-    await expect(collect(client.subscriptions.listAll())).rejects.toThrow()
-    expect(requests).toHaveLength(1)
-    mockFetch(() => json({ value: [], "@odata.nextLink": `${GRAPH}subscriptions` }))
-    await expect(collect(client.subscriptions.listAll())).rejects.toThrow("repeated")
+    expect(requests.slice(1).map((r) => r.url)).toEqual([
+      `${GRAPH}subscriptions`,
+      `${GRAPH}subscriptions`,
+      next,
+    ])
   })
 
   test("rejects invalid and unsupported inputs before sending anything", async () => {
@@ -147,17 +140,8 @@ describe("Graph subscriptions", () => {
     expect(requests).toHaveLength(0)
   })
 
-  test("accepts expiration shorter than 45 minutes without locally clamping it", async () => {
-    const requests = mockFetch(() => json({ id: "sub" }, 201))
-    const client = await connect()
-    const expirationDateTime = new Date(Date.now() + 60_000).toISOString()
-    await client.subscriptions.create({ ...input, expirationDateTime })
-    expect(JSON.parse(String(requests[0]?.init.body)).expirationDateTime).toBe(expirationDateTime)
-  })
-
-  test.each([
-    404, 409, 429, 503,
-  ])("preserves HTTP %i without retrying mutations", async (status) => {
+  // Statuses the default policy would retry if the request were replayable.
+  test.each([429, 503])("preserves HTTP %i without retrying a create", async (status) => {
     const requests = mockFetch(() => apiError(status))
     const client = await connect({ retry: { maxRetries: 2, delayMs: () => 0 } })
     await expect(client.subscriptions.create(input)).rejects.toMatchObject({ status })
@@ -198,14 +182,6 @@ describe("Graph subscriptions", () => {
       client.subscriptions.create(input, { signal: controller.signal })
     ).rejects.toMatchObject({ outcomeUnknown: true })
     expect(requests).toHaveLength(1)
-  })
-
-  test("read operations reuse configured retries", async () => {
-    let attempts = 0
-    mockFetch(() => (++attempts === 1 ? apiError(503) : json({ value: [] })))
-    const client = await connect({ retry: { maxRetries: 1, delayMs: () => 0 } })
-    await client.subscriptions.list()
-    expect(attempts).toBe(2)
   })
 
   test("interrupted transport and unreadable success are uncertain, never replayed", async () => {

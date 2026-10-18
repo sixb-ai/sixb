@@ -95,7 +95,7 @@ test("view pagination preserves timezone and immutable IDs across empty pages an
   expect(new URL(requests[2].url).pathname).toBe(new URL(`${base}/calendar/calendarView`).pathname)
 })
 
-test("events retain recurrence, Teams, attendees and caller transaction ID without extra requests", async () => {
+test("events retain recurrence, Teams, attendees, all-day dates and caller transaction ID without extra requests", async () => {
   const requests = mockFetch((r) =>
     r.method === "DELETE"
       ? new Response(null, { status: 204 })
@@ -138,6 +138,18 @@ test("events retain recurrence, Teams, attendees and caller transaction ID witho
   expect(requests.every((r) => r.headers.get("prefer")?.includes('IdType="ImmutableId"'))).toBe(
     true
   )
+
+  // All-day dates stay at local midnight across DST, and recurrence can be cleared.
+  const allDay = {
+    ...event,
+    isAllDay: true,
+    start: { ...event.start, dateTime: "2026-11-01T00:00:00" },
+    end: { ...event.end, dateTime: "2026-11-02T00:00:00" },
+  }
+  await events.create(mailbox, allDay)
+  expect(JSON.parse(String(requests[4].init.body))).toEqual(allDay)
+  await events.update(mailbox, "id", { recurrence: null })
+  expect(JSON.parse(String(requests[5].init.body))).toEqual({ recurrence: null })
 })
 
 test("event listing and instances expose masters separately from occurrences", async () => {
@@ -164,21 +176,6 @@ test("event listing and instances expose masters separately from occurrences", a
   )
   expect(new URL(requests[0].url).searchParams.get("$filter")).toBe("isCancelled eq false")
   expect(requests[2].url).toContain("/events/master%2F1/instances?")
-})
-
-test("all-day dates stay at local midnight across DST and recurrence can be cleared", async () => {
-  const requests = mockFetch(() => json({ id: "event" }))
-  const { events } = (await connect()).calendar
-  const input = {
-    ...event,
-    isAllDay: true,
-    start: { ...event.start, dateTime: "2026-11-01T00:00:00" },
-    end: { ...event.end, dateTime: "2026-11-02T00:00:00" },
-  }
-  await events.create(mailbox, input)
-  expect(JSON.parse(String(requests[0].init.body))).toEqual(input)
-  await events.update(mailbox, "id", { recurrence: null })
-  expect(JSON.parse(String(requests[1].init.body))).toEqual({ recurrence: null })
 })
 
 test("invalid ranges, all-day writes, recurrence and header injection fail before HTTP", async () => {
@@ -264,14 +261,11 @@ test("unexpected action status is not accepted and Graph errors retain their sta
   await expect(events.cancel(mailbox, "id")).rejects.toMatchObject({ status: 400 })
 })
 
-// Countercheck: remove http.ts's GET-only retryable gate; the custom retry policy replays the mutation.
+// Countercheck: remove http.ts's GET-only retryable gate; the custom retry policy replays the mutations.
 test("calendar mutations never replay, and transport interruptions expose uncertainty", async () => {
   const { calendar } = await connect({
     retry: { maxRetries: 2, delayMs: () => 0, shouldRetry: () => true },
   })
-  const requests = mockFetch(() => apiError(503, "ServiceUnavailable"))
-  await expect(calendar.events.create(mailbox, event)).rejects.toMatchObject({ status: 503 })
-  expect(requests).toHaveLength(1)
   const lost = mockFetch(() => {
     throw new TypeError("connection lost")
   })

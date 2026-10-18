@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { createTokenSource } from "../src/auth"
+import { createTokenSource, type GoogleAuthOptions } from "../src/auth"
 import { GoogleAuthError } from "../src/errors"
 import {
   decodeJwtClaims,
@@ -12,27 +12,34 @@ import {
 
 afterEach(restoreFetch)
 
-describe("createTokenSource — resolver mode", () => {
-  test("delegates to the caller's token function", async () => {
-    const source = createTokenSource({ token: () => "caller-token" })
-    expect(await source.get()).toBe("caller-token")
-    expect((await source.getRequestHeaders?.())?.get("authorization")).toBe("Bearer caller-token")
-    // invalidate is a no-op for resolver mode
-    source.invalidate()
-    expect(await source.get()).toBe("caller-token")
-  })
+test.each<[string, GoogleAuthOptions, string | RegExp]>([
+  [
+    "ADC without scopes",
+    { applicationDefault: true, scopes: [] },
+    /non-empty scope is required for application-default/,
+  ],
+  ["ADC with a blank scope", { applicationDefault: true, scopes: ["   "] }, /non-empty scope/],
+  [
+    "a service-account key that is not JSON",
+    { serviceAccountKey: "not json", scopes: ["s"] },
+    /valid JSON/,
+  ],
+  [
+    "a service-account key without client_email",
+    { serviceAccountKey: { client_email: "", private_key: "" }, scopes: ["s"] },
+    /client_email/,
+  ],
+  [
+    "a service account without scopes",
+    { serviceAccountKey: { client_email: "a@b.c", private_key: "pk" }, scopes: [] },
+    /non-empty scope is required for service-account/,
+  ],
+])("createTokenSource rejects %s before any network call", (_name, auth, message) => {
+  expect(() => createTokenSource(auth)).toThrow(GoogleAuthError)
+  expect(() => createTokenSource(auth)).toThrow(message)
 })
 
 describe("createTokenSource — Application Default Credentials mode", () => {
-  test("validates scopes before attempting credential discovery", () => {
-    expect(() => createTokenSource({ applicationDefault: true, scopes: [] })).toThrow(
-      /non-empty scope/
-    )
-    expect(() => createTokenSource({ applicationDefault: true, scopes: ["   "] })).toThrow(
-      /non-empty scope/
-    )
-  })
-
   test("discovers credentials lazily and single-flights concurrent token requests", async () => {
     let loads = 0
     let headerRequests = 0
@@ -195,24 +202,6 @@ describe("createTokenSource — Application Default Credentials mode", () => {
 })
 
 describe("createTokenSource — service-account mode", () => {
-  test("validates the key and scopes early", () => {
-    expect(() => createTokenSource({ serviceAccountKey: "not json", scopes: ["s"] })).toThrow(
-      GoogleAuthError
-    )
-    expect(() =>
-      createTokenSource({
-        serviceAccountKey: { client_email: "", private_key: "" },
-        scopes: ["s"],
-      })
-    ).toThrow(/client_email/)
-    expect(() =>
-      createTokenSource({
-        serviceAccountKey: { client_email: "a@b.c", private_key: "pk" },
-        scopes: [],
-      })
-    ).toThrow(/scope/)
-  })
-
   test("caches within the expiry margin and refreshes past it", async () => {
     let clock = 1_000_000
     let exchanges = 0
@@ -304,8 +293,11 @@ describe("createTokenSource — service-account mode", () => {
 })
 
 describe("createTokenSource — JWT signing (real crypto)", () => {
+  // RSA key generation dominates this file's runtime; one key serves both tests.
+  const generated = generateServiceAccountKey()
+
   test("signs a verifiable JWT-bearer assertion and returns the access token", async () => {
-    const { key, publicKey } = await generateServiceAccountKey()
+    const { key, publicKey } = await generated
     let capturedAssertion = ""
 
     mockFetch(async (_input, init) => {
@@ -337,7 +329,7 @@ describe("createTokenSource — JWT signing (real crypto)", () => {
   })
 
   test("maps invalid_grant to a GoogleAuthError without retrying", async () => {
-    const { key } = await generateServiceAccountKey()
+    const { key } = await generated
     let calls = 0
     mockFetch(async () => {
       calls++

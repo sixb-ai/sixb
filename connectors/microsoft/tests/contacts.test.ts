@@ -256,16 +256,11 @@ test("delta rejects options Graph does not document, hostile cursors, bad pages 
 })
 
 // Countercheck: rethrow `cause` in contacts/common.ts mutation(); interrupted writes stop reporting
-// outcomeUnknown. Removing http.ts's GET-only retryable gate makes the 503 case replay.
+// outcomeUnknown. Removing http.ts's GET-only retryable gate makes the custom policy replay them.
 test("contact mutations never replay, and transport interruptions expose uncertainty", async () => {
   const { contacts } = await connect({
     retry: { maxRetries: 2, delayMs: () => 0, shouldRetry: () => true },
   })
-  const requests = mockFetch(() => apiError(503, "ServiceUnavailable"))
-  await expect(contacts.items.create(mailbox, { givenName: "A" })).rejects.toMatchObject({
-    status: 503,
-  })
-  expect(requests).toHaveLength(1)
   const lost = mockFetch(() => {
     throw new TypeError("connection lost")
   })

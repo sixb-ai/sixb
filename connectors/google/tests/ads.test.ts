@@ -77,29 +77,17 @@ describe("googleAds configuration", () => {
     expect(() =>
       googleAds(options({ apiVersion: "v25.1" as GoogleAdsConnectorOptions["apiVersion"] }))
     ).toThrow("major endpoint")
+    const serviceAccount = (scope: string) =>
+      options({
+        auth: {
+          serviceAccountKey: { client_email: "service@example.com", private_key: "key" },
+          scopes: [scope],
+        },
+      })
     expect(() =>
-      googleAds(
-        options({
-          auth: {
-            serviceAccountKey: { client_email: "service@example.com", private_key: "key" },
-            scopes: ["https://www.googleapis.com/auth/drive.readonly"],
-          },
-        })
-      )
+      googleAds(serviceAccount("https://www.googleapis.com/auth/drive.readonly"))
     ).toThrow(GOOGLE_ADS_SCOPE)
-  })
-
-  test("accepts the required Google Ads scope for service-account auth", () => {
-    expect(() =>
-      googleAds(
-        options({
-          auth: {
-            serviceAccountKey: { client_email: "service@example.com", private_key: "key" },
-            scopes: [GOOGLE_ADS_SCOPE],
-          },
-        })
-      )
-    ).not.toThrow()
+    expect(() => googleAds(serviceAccount(GOOGLE_ADS_SCOPE))).not.toThrow()
   })
 })
 

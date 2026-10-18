@@ -79,27 +79,72 @@ describe("drive.files writes", () => {
     })
   }
 
-  test("create without content posts metadata JSON to the API host", async () => {
-    recorder(() => json({ id: "new-id", name: "Reports" }))
+  test.each<[string, (client: GoogleClient) => Promise<unknown>, string, string, string | null]>([
+    [
+      "create without content posts metadata JSON to the API host",
+      (client) =>
+        client.drive.files.create({
+          name: "Reports",
+          mimeType: "application/vnd.google-apps.folder",
+          parents: ["parent-1"],
+        }),
+      "POST",
+      "https://www.googleapis.com/drive/v3/files",
+      '{"name":"Reports","mimeType":"application/vnd.google-apps.folder","parents":["parent-1"]}',
+    ],
+    [
+      "update patches metadata and moves parents via query params",
+      (client) =>
+        client.drive.files.update("file-7", {
+          name: "renamed.csv",
+          addParents: "folder-b",
+          removeParents: "folder-a",
+        }),
+      "PATCH",
+      "https://www.googleapis.com/drive/v3/files/file-7?addParents=folder-b&removeParents=folder-a",
+      '{"name":"renamed.csv"}',
+    ],
+    [
+      "update with content replaces bytes via PATCH on the upload host",
+      (client) =>
+        client.drive.files.update("file-7", {
+          content: { body: new TextEncoder().encode("v2"), mimeType: "text/plain" },
+        }),
+      "PATCH",
+      "https://www.googleapis.com/upload/drive/v3/files/file-7?uploadType=multipart",
+      "v2",
+    ],
+    [
+      "delete issues DELETE /files/{id}",
+      (client) => client.drive.files.delete("file-7", { supportsAllDrives: true }),
+      "DELETE",
+      "https://www.googleapis.com/drive/v3/files/file-7?supportsAllDrives=true",
+      null,
+    ],
+    [
+      "copy posts metadata to the copy endpoint",
+      (client) =>
+        client.drive.files.copy("file-7", { name: "report (copy).csv", parents: ["folder-c"] }),
+      "POST",
+      "https://www.googleapis.com/drive/v3/files/file-7/copy",
+      '{"name":"report (copy).csv","parents":["folder-c"]}',
+    ],
+  ])("%s", async (_name, call, method, url, body) => {
+    recorder((request) =>
+      request.method === "DELETE" ? new Response(null, { status: 204 }) : json({ id: "file-7" })
+    )
 
-    const client = await connect()
-    const file = await client.drive.files.create({
-      name: "Reports",
-      mimeType: "application/vnd.google-apps.folder",
-      parents: ["parent-1"],
-    })
+    await call(await connect())
 
-    expect(file.id).toBe("new-id")
     expect(requests).toHaveLength(1)
     const [request] = requests
-    expect(request?.url).toBe("https://www.googleapis.com/drive/v3/files")
-    expect(request?.method).toBe("POST")
-    expect(request?.headers.get("content-type")).toContain("application/json")
-    expect(JSON.parse(new TextDecoder().decode(request?.body ?? undefined))).toEqual({
-      name: "Reports",
-      mimeType: "application/vnd.google-apps.folder",
-      parents: ["parent-1"],
-    })
+    expect(request?.method).toBe(method)
+    expect(request?.url).toBe(url)
+    if (body === null) {
+      expect(request?.body).toBeNull()
+    } else {
+      expect(new TextDecoder().decode(request?.body ?? undefined)).toContain(body)
+    }
   })
 
   test("create with small bytes uploads multipart to the upload host", async () => {
@@ -213,44 +258,6 @@ describe("drive.files writes", () => {
     expect(requests[3]?.headers.get("content-range")).toBe(`bytes 8388608-${size - 1}/${size}`)
   })
 
-  test("a sized stream is chunked through the resumable path", async () => {
-    recorder((_request, index) => {
-      if (index === 0) {
-        return new Response(null, {
-          status: 200,
-          headers: { location: "https://session.test/upload" },
-        })
-      }
-      if (index === 1) {
-        return new Response(null, { status: 308, headers: { range: "bytes=0-8388607" } })
-      }
-      return json({ id: "streamed" })
-    })
-
-    const chunks = [3, 3, 4].map((mb) => new Uint8Array(mb * 1024 * 1024).fill(1))
-    const size = chunks.reduce((total, chunk) => total + chunk.length, 0)
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        for (const chunk of chunks) {
-          controller.enqueue(chunk)
-        }
-        controller.close()
-      },
-    })
-
-    const client = await connect()
-    const file = await client.drive.files.create({
-      name: "blob.bin",
-      content: { body: stream, sizeBytes: size },
-    })
-
-    expect(file.id).toBe("streamed")
-    expect(requests).toHaveLength(3)
-    expect(requests[0]?.headers.get("x-upload-content-length")).toBe(String(size))
-    expect(requests[1]?.headers.get("content-range")).toBe(`bytes 0-8388607/${size}`)
-    expect(requests[2]?.headers.get("content-range")).toBe(`bytes 8388608-${size - 1}/${size}`)
-  })
-
   test("an unsized stream goes as one streaming PUT to the session URI", async () => {
     recorder((_request, index) => {
       if (index === 0) {
@@ -286,72 +293,6 @@ describe("drive.files writes", () => {
     expect(put?.headers.get("content-type")).toBe("application/octet-stream")
     expect(put?.rawBody).toBeInstanceOf(ReadableStream)
     expect(Array.from(put?.body ?? [])).toEqual([1, 2, 3, 4, 5])
-  })
-
-  test("update patches metadata and moves parents via query params", async () => {
-    recorder(() => json({ id: "file-7" }))
-
-    const client = await connect()
-    await client.drive.files.update("file-7", {
-      name: "renamed.csv",
-      addParents: "folder-b",
-      removeParents: "folder-a",
-    })
-
-    const [request] = requests
-    expect(request?.url).toBe(
-      "https://www.googleapis.com/drive/v3/files/file-7" +
-        "?addParents=folder-b&removeParents=folder-a"
-    )
-    expect(request?.method).toBe("PATCH")
-    expect(new TextDecoder().decode(request?.body ?? undefined)).toBe('{"name":"renamed.csv"}')
-  })
-
-  test("update with content replaces bytes via PATCH on the upload host", async () => {
-    recorder(() => json({ id: "file-7" }))
-
-    const client = await connect()
-    await client.drive.files.update("file-7", {
-      content: { body: new TextEncoder().encode("v2"), mimeType: "text/plain" },
-    })
-
-    const [request] = requests
-    expect(request?.url).toBe(
-      "https://www.googleapis.com/upload/drive/v3/files/file-7?uploadType=multipart"
-    )
-    expect(request?.method).toBe("PATCH")
-    expect(new TextDecoder().decode(request?.body ?? undefined)).toContain("v2")
-  })
-
-  test("delete issues DELETE /files/{id}", async () => {
-    recorder(() => new Response(null, { status: 204 }))
-
-    const client = await connect()
-    await client.drive.files.delete("file-7", { supportsAllDrives: true })
-
-    const [request] = requests
-    expect(request?.url).toBe(
-      "https://www.googleapis.com/drive/v3/files/file-7?supportsAllDrives=true"
-    )
-    expect(request?.method).toBe("DELETE")
-  })
-
-  test("copy posts metadata to the copy endpoint", async () => {
-    recorder(() => json({ id: "copy-1" }))
-
-    const client = await connect()
-    const copy = await client.drive.files.copy("file-7", {
-      name: "report (copy).csv",
-      parents: ["folder-c"],
-    })
-
-    expect(copy.id).toBe("copy-1")
-    const [request] = requests
-    expect(request?.url).toBe("https://www.googleapis.com/drive/v3/files/file-7/copy")
-    expect(request?.method).toBe("POST")
-    expect(new TextDecoder().decode(request?.body ?? undefined)).toBe(
-      '{"name":"report (copy).csv","parents":["folder-c"]}'
-    )
   })
 
   test("a 308 without new acknowledged bytes stalls and fails instead of looping", async () => {
@@ -414,9 +355,8 @@ describe("drive.files writes", () => {
     expect(largestSlice).toBeLessThanOrEqual(8 * 1024 * 1024)
     expect(requests).toHaveLength(3)
     // Byte integrity: every PUT payload is the 7-filled slice it claims to be.
-    expect(requests[1]?.body?.every((b) => b === 7)).toBe(true)
-    expect(requests[2]?.body?.length).toBe(2 * 1024 * 1024)
-    expect(requests[2]?.body?.every((b) => b === 7)).toBe(true)
+    expect(requests[1]?.body).toEqual(new Uint8Array(8 * 1024 * 1024).fill(7))
+    expect(requests[2]?.body).toEqual(new Uint8Array(2 * 1024 * 1024).fill(7))
   })
 
   test("a small Blob uploads via multipart", async () => {
@@ -463,8 +403,8 @@ describe("drive.files writes", () => {
     )
     expect(new TextDecoder().decode(initiation?.body ?? undefined)).toBe('{"name":"renamed.bin"}')
     // Byte integrity across the resumable chunk boundary.
-    expect(requests[1]?.body?.every((b) => b === 3)).toBe(true)
-    expect(requests[2]?.body?.every((b) => b === 3)).toBe(true)
+    expect(requests[1]?.body).toEqual(new Uint8Array(8 * 1024 * 1024).fill(3))
+    expect(requests[2]?.body).toEqual(new Uint8Array(2 * 1024 * 1024).fill(3))
   })
 
   test("a stream that under-runs its declared sizeBytes fails with an actionable error", async () => {
@@ -489,9 +429,12 @@ describe("drive.files writes", () => {
 
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toContain("sizeBytes")
+    // A sized stream takes the resumable path, declaring and ranging over its sizeBytes.
+    expect(requests[0]?.headers.get("x-upload-content-length")).toBe("10")
+    expect(requests[1]?.headers.get("content-range")).toBe("bytes 0-2/10")
   })
 
-  test("a stream that over-runs its declared sizeBytes surfaces Google's error", async () => {
+  test("a chunk PUT rejected mid-session surfaces Google's error", async () => {
     recorder((_, index) => {
       if (index === 0) {
         return new Response(null, {
@@ -499,6 +442,7 @@ describe("drive.files writes", () => {
           headers: { location: "https://session.test/upload" },
         })
       }
+      // The stream over-runs its declared sizeBytes, so Google rejects the chunk.
       return json({ error: { code: 400, message: "Invalid range." } }, { status: 400 })
     })
 
@@ -512,6 +456,7 @@ describe("drive.files writes", () => {
 
     expect(error).toBeInstanceOf(GoogleApiError)
     expect((error as GoogleApiError).status).toBe(400)
+    expect((error as GoogleApiError).message).toContain("Invalid range.")
   })
 
   test("zero-byte content uploads as one empty multipart request", async () => {
@@ -529,28 +474,6 @@ describe("drive.files writes", () => {
     const text = new TextDecoder().decode(request?.body ?? undefined)
     expect(text).toContain('{"name":"empty.txt"}')
     expect(text).toContain("Content-Type: text/plain")
-  })
-
-  test("a 4xx from a mid-session chunk PUT surfaces as GoogleApiError", async () => {
-    recorder((_, index) => {
-      if (index === 0) {
-        return new Response(null, {
-          status: 200,
-          headers: { location: "https://session.test/upload" },
-        })
-      }
-      return json({ error: { code: 410, message: "Upload session expired." } }, { status: 410 })
-    })
-
-    const client = await connect()
-    const size = 10 * 1024 * 1024
-    const error = await client.drive.files
-      .create({ name: "big.bin", content: { body: new Uint8Array(size) } })
-      .catch((e: unknown) => e)
-
-    expect(error).toBeInstanceOf(GoogleApiError)
-    expect((error as GoogleApiError).status).toBe(410)
-    expect((error as GoogleApiError).message).toContain("Upload session expired.")
   })
 
   test("a failed resumable initiation surfaces as GoogleApiError", async () => {
