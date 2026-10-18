@@ -295,9 +295,9 @@ describe("RulesWorker", () => {
       await seedCurrentObject(storage, "posted")
       await events.publishEnvelopes([objectUpdatedEvent("posted")])
 
-      // The repair is a reconciliation on a backoff timer.
+      // The repair is a reconciliation on a 100ms backoff timer.
       await waitFor(() => jest.getTimerCount() === 1)
-      jest.runOnlyPendingTimers()
+      fireTimerDueIn(100)
       await waitFor(async () => (await ruleEventTypes(events)).length === 2)
     } finally {
       jest.useRealTimers()
@@ -331,9 +331,9 @@ describe("RulesWorker", () => {
       const worker = track(new RulesWorker(createRuntime({ events, storage })))
       await worker.start()
 
-      // The failed startup pass is retried on a backoff timer.
+      // The failed startup pass is retried on a 100ms backoff timer.
       await waitFor(() => failed && jest.getTimerCount() === 1)
-      jest.runOnlyPendingTimers()
+      fireTimerDueIn(100)
       await waitFor(async () => (await ruleEventTypes(events)).length === 1)
     } finally {
       jest.useRealTimers()
@@ -703,6 +703,17 @@ async function waitFor(fn: () => boolean | Promise<boolean>, timeoutMs = 2_000):
     await nextTurn()
   }
   throw new Error("Timed out waiting for condition.")
+}
+
+/**
+ * Fires the one pending fake timer at its delay, and shows it was not due sooner. Asserted here,
+ * not left to the next `waitFor`, which the frozen clock leaves to the test's timeout.
+ */
+function fireTimerDueIn(delayMs: number): void {
+  jest.advanceTimersByTime(delayMs - 1)
+  expect(jest.getTimerCount()).toBe(1)
+  jest.advanceTimersByTime(1)
+  expect(jest.getTimerCount()).toBe(0)
 }
 
 /** Lets queued work run for a few event-loop turns, to show that something did not happen. */

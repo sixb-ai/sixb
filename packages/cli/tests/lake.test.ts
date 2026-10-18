@@ -4,6 +4,7 @@ import { runLakeCheck } from "../src/commands/lake-check"
 import { runLakeCleanup } from "../src/commands/lake-cleanup"
 import { lakeFixture } from "./fixtures/lake-project/sixb.config"
 import { MISDECLARED_MARKINGS_MESSAGE } from "./fixtures/shared/createMisdeclaredMarkingsSixb"
+import { FAST_CLI_TIMEOUT_MS, runCliToCompletion } from "./shared/cli-process"
 import { runInProcess } from "./shared/in-process"
 
 const entry = resolve(import.meta.dir, "fixtures", "lake-project", "sixb.config.ts")
@@ -104,6 +105,33 @@ describe("sixb lake cleanup", () => {
       },
       closed,
     ])
+  })
+
+  // The flags as `sixb` hands them over. The fixture reports the dry run it was asked for.
+  // Reproduce: pass `dryRun: false` to runLakeCleanup in src/index.tsx.
+  test("reaches cleanup with the command line's dry run and retention", async () => {
+    const result = await runCliToCompletion({
+      cmd: [
+        "bun",
+        resolve(import.meta.dir, "..", "src", "index.tsx"),
+        "lake",
+        "cleanup",
+        "--entry",
+        entry,
+        "--dry-run",
+        "--expire-older-than",
+        "2 days",
+      ],
+      cwd: resolve(import.meta.dir, "..", "..", ".."),
+      timeoutMs: FAST_CLI_TIMEOUT_MS,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Lake cleanup dry run complete")
+    expect(flat(result.stdout)).toContain(
+      "Dry run true Expire older than 2 days Delete older than 2 days"
+    )
+    expect(result.stderr).toBe("")
   })
 
   // Reproduce: drop `protect` from the runMaintenance call in commands/lake-cleanup.tsx.

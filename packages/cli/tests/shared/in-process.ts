@@ -25,7 +25,9 @@ export async function runInProcess(command: () => Promise<unknown>): Promise<InP
   const stdout: string[] = []
   const stderr: string[] = []
   const environment = { ...process.env }
-  // Bun ignores `process.exitCode = undefined`, so 0 stands for "not set".
+  // Bun ignores `process.exitCode = undefined` and the property cannot be deleted or redefined, so
+  // 0 stands for "not set". A real process starts at undefined: a command that reads
+  // `process.exitCode ?? 1` (check.tsx when providers do not close) sees 0 here, not 1.
   const exitCode = process.exitCode ?? 0
   process.exitCode = 0
   const collect =
