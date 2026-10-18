@@ -18,12 +18,12 @@ import { createTestSixb } from "@sixb/core/testing"
 import { ProjectionWorker } from "../src"
 
 async function waitFor<T>(read: () => Promise<T>, accept: (value: T) => boolean) {
-  const deadline = Date.now() + 4000
+  const deadline = Date.now() + 2000
   for (;;) {
     const value = await read()
     if (accept(value)) return value
     if (Date.now() > deadline) throw new Error("Timed out")
-    await Bun.sleep(10)
+    await new Promise<void>((resolve) => setImmediate(resolve))
   }
 }
 
@@ -138,4 +138,4 @@ test("projection completion is independent of inference; the same worker maintai
     await worker.stop()
     await host.closeBroker()
   }
-}, 10000)
+})

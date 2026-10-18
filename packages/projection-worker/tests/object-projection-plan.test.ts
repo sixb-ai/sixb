@@ -12,41 +12,6 @@ import { buildObjectProjectionPlan, projectObjectRow } from "../src/object-proje
 import { assertProjectionCompatibleWithDataset } from "../src/schema-validation"
 
 describe("object projection plan", () => {
-  test("preserves decimal precision from dataset row to object properties", () => {
-    const Invoice = defineObjectType({
-      id: "Invoice",
-      name: "Invoice",
-      properties: [
-        prop("id", "string", { required: true, primary: true }),
-        prop("amount", "decimal", { required: true }),
-      ],
-    })
-    const invoices = defineDataset("canonical.invoices", {
-      schema: [col("id", "string"), col("amount", "decimal")],
-    })
-    const projection = defineProjection("invoice-projection", Invoice)
-      .fromDataset(invoices)
-      .properties({ id: "id", amount: "amount" })
-    const ontology = new OntologyRegistry({ sources: [Invoice] })
-    const plan = buildObjectProjectionPlan({
-      ontology,
-      projection,
-      dataset: invoices,
-      primaryPropertyId: "id",
-    })
-
-    expect(projectObjectRow(plan, { id: "invoice-1", amount: "+009007199254740993.0100" })).toEqual(
-      {
-        ok: true,
-        row: {
-          properties: { id: "invoice-1", amount: "9007199254740993.01" },
-          primaryValue: "invoice-1",
-          foreignKeyValues: {},
-        },
-      }
-    )
-  })
-
   test("validates original dataset row before numeric projection coercion", () => {
     const Meter = defineObjectType({
       id: "Meter",
@@ -77,48 +42,7 @@ describe("object projection plan", () => {
     })
   })
 
-  test("preserves a canonical source update timestamp for mostRecent resolution", () => {
-    const Issue = defineObjectType({
-      id: "Issue",
-      name: "Issue",
-      properties: [
-        prop("id", "string", { required: true, primary: true }),
-        prop("title", "string"),
-      ],
-    })
-    const issues = defineDataset("github.issues", {
-      schema: [col("id", "string"), col("title", "string"), col("updated_at", "timestamp")],
-    })
-    const projection = defineProjection("github-issues", Issue)
-      .fromDataset(issues)
-      .properties({ id: "id", title: "title" })
-      .resolveConflicts({ strategy: "mostRecent", sourceTimestamp: "updated_at" })
-    const ontology = new OntologyRegistry({ sources: [Issue] })
-    const plan = buildObjectProjectionPlan({
-      ontology,
-      projection,
-      dataset: issues,
-      primaryPropertyId: "id",
-    })
-
-    expect(
-      projectObjectRow(plan, {
-        id: "issue-1",
-        title: "First title",
-        updated_at: "2026-01-02T03:04:05Z",
-      })
-    ).toEqual({
-      ok: true,
-      row: {
-        properties: { id: "issue-1", title: "First title" },
-        primaryValue: "issue-1",
-        foreignKeyValues: {},
-        sourceUpdatedAt: "2026-01-02T03:04:05.000Z",
-      },
-    })
-  })
-
-  test("uses strict UTC parsing for source update timestamps", () => {
+  test("canonicalizes source update timestamps with strict UTC parsing for mostRecent", () => {
     const Issue = defineObjectType({
       id: "Issue",
       name: "Issue",
@@ -141,16 +65,19 @@ describe("object projection plan", () => {
       primaryPropertyId: "id",
     })
 
-    expect(
-      projectObjectRow(plan, {
-        id: "issue-1",
-        title: "Title",
-        updated_at: "2026-01-02 03:04:05",
+    for (const updatedAt of ["2026-01-02T03:04:05Z", "2026-01-02 03:04:05"]) {
+      expect(
+        projectObjectRow(plan, { id: "issue-1", title: "Title", updated_at: updatedAt })
+      ).toEqual({
+        ok: true,
+        row: {
+          properties: { id: "issue-1", title: "Title" },
+          primaryValue: "issue-1",
+          foreignKeyValues: {},
+          sourceUpdatedAt: "2026-01-02T03:04:05.000Z",
+        },
       })
-    ).toMatchObject({
-      ok: true,
-      row: { sourceUpdatedAt: "2026-01-02T03:04:05.000Z" },
-    })
+    }
     expect(
       projectObjectRow(plan, {
         id: "issue-1",

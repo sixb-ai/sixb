@@ -51,10 +51,21 @@ async function waitFor<T>(
       return value
     }
 
-    await Bun.sleep(20)
+    await new Promise<void>((resolve) => setImmediate(resolve))
   }
 
   throw new Error("Timed out waiting for condition.")
+}
+
+/** Waits for `pipeline.run.finished`, the last thing a run emits, so its events are complete. */
+async function waitForRunFinished(sixb: Pick<SixbHost, "events">, runId: string): Promise<void> {
+  await waitFor(
+    () => sixb.events.read({ types: ["pipeline.run.finished"] }),
+    (events) =>
+      events.some(
+        (event) => event.type === "pipeline.run.finished" && event.payload.runId === runId
+      )
+  )
 }
 
 function createSixbForPipeline(options: {
@@ -193,61 +204,12 @@ describe("PipelineWorker", () => {
     expect(() => new PipelineWorker(withoutPipelineRuns)).toThrow("storage.pipelineRuns")
   })
 
-  test("streams a run-scoped log line to the broker", async () => {
+  test("processes queued JS pipeline jobs and emits lineage events and run-scoped logs", async () => {
     const cleanStep = definePipelineStep("clean-customers")
       .inputs({ rawCustomers: rawCustomersDataset })
       .output(customersDataset)
       .run(async ({ inputs, output, logger }) => {
         logger.info("Cleaning customers", { phase: "clean" })
-        await output.writeRows(inputs.rawCustomers.readRows())
-      })
-    const pipeline = definePipeline("customers").then(cleanStep)
-    const sixb = createSixbForPipeline({
-      pipeline,
-      datasets: [rawCustomersDataset, customersDataset],
-    })
-    await seedDatasetVersion(sixb.lakeStorage as InMemoryLakeStorage, rawCustomersDataset, [
-      { id: "cust_1", name: "Ada" },
-    ])
-
-    const worker = new PipelineWorker(sixb)
-    await enqueuePipelineRun(sixb, { pipelineId: "customers", runId: "run-log" })
-
-    await worker.start()
-    try {
-      await waitFor(
-        () => sixb.storage.pipelineRuns!.getById({ projectId: sixb.id, id: "run-log" }),
-        (value) => value?.status === "succeeded"
-      )
-    } finally {
-      await worker.stop()
-    }
-
-    const { records } = await sixb.broker.read({
-      projectId: sixb.id,
-      streamId: LOGS_STREAM.id,
-      names: ["pipeline.info"],
-    })
-    const line = records.find(
-      (record) => (record.payload as { message?: string }).message === "Cleaning customers"
-    )
-    expect(line?.key).toBe("pipeline:run-log")
-    const payload = line?.payload as {
-      level: string
-      fields?: { phase?: string }
-      context?: { run?: { kind?: string; id?: string }; stepId?: string }
-    }
-    expect(payload.level).toBe("info")
-    expect(payload.fields?.phase).toBe("clean")
-    expect(payload.context?.stepId).toBe("clean-customers")
-    expect(payload.context?.run).toEqual({ kind: "pipeline", id: "run-log" })
-  })
-
-  test("processes queued JS pipeline jobs and emits lineage events", async () => {
-    const cleanStep = definePipelineStep("clean-customers")
-      .inputs({ rawCustomers: rawCustomersDataset })
-      .output(customersDataset)
-      .run(async ({ inputs, output }) => {
         await output.writeRows(inputs.rawCustomers.readRows())
       })
     const pipeline = definePipeline("customers").then(cleanStep)
@@ -266,12 +228,9 @@ describe("PipelineWorker", () => {
     await worker.start()
 
     try {
-      const run = await waitFor(
-        () => sixb.storage.pipelineRuns!.getById({ projectId: sixb.id, id: "run-queued" }),
-        (value) => value?.status === "succeeded"
-      )
-
-      expect(run?.output?.datasetId).toBe("customers")
+      await waitForRunFinished(sixb, "run-queued")
+      const run = await sixb.storage.pipelineRuns!.getById({ projectId: sixb.id, id: "run-queued" })
+      expect(run).toMatchObject({ status: "succeeded", output: { datasetId: "customers" } })
 
       const claimed = await sixb.queues.pipelines.claim({
         projectId: sixb.id,
@@ -351,6 +310,21 @@ describe("PipelineWorker", () => {
       datasetId: "customers",
       versionId: datasetPayload.versionId,
     })
+
+    const { records } = await sixb.broker.read({
+      projectId: sixb.id,
+      streamId: LOGS_STREAM.id,
+      names: ["pipeline.info"],
+    })
+    const line = records.find(
+      (record) => (record.payload as { message?: string }).message === "Cleaning customers"
+    )
+    expect(line?.key).toBe("pipeline:run-queued")
+    expect(line?.payload).toMatchObject({
+      level: "info",
+      fields: { phase: "clean" },
+      context: { stepId: "clean-customers", run: { kind: "pipeline", id: "run-queued" } },
+    })
   })
 
   test("does not emit a dataset event when a step reuses an existing version", async () => {
@@ -376,12 +350,11 @@ describe("PipelineWorker", () => {
     await enqueuePipelineRun(sixb, { pipelineId: pipeline.id, runId: "run-no-op" })
 
     await worker.start()
-    await waitFor(
-      () => sixb.storage.pipelineRuns!.getById({ projectId: sixb.id, id: "run-no-op" }),
-      (run) => run?.status === "succeeded"
-    )
-    await Bun.sleep(50)
-    await worker.stop()
+    try {
+      await waitForRunFinished(sixb, "run-no-op")
+    } finally {
+      await worker.stop()
+    }
 
     const events = await sixb.events.read({
       types: ["pipeline.run.started", "dataset.version.committed", "pipeline.run.finished"],
@@ -437,18 +410,16 @@ describe("PipelineWorker", () => {
     await worker.start()
 
     try {
-      const run = await waitFor(
-        () => sixb.storage.pipelineRuns!.getById({ projectId: sixb.id, id: "run-fails-late" }),
-        (value) => value?.status === "failed"
-      )
-      await waitFor(
-        async () => reports.length,
-        (count) => count === 1
-      )
+      // The queue settles the job last, after the run failed and was reported.
       await waitFor(
         async () => settledFailure,
         (failure) => failure !== undefined
       )
+      const run = await sixb.storage.pipelineRuns!.getById({
+        projectId: sixb.id,
+        id: "run-fails-late",
+      })
+      expect(run?.status).toBe("failed")
       expect(reports).toHaveLength(1)
       expect(reports[0]?.error).toBe(originalError)
       expect(reports[0]?.context).toEqual({
@@ -585,10 +556,7 @@ describe("PipelineWorker", () => {
     await worker.start()
 
     try {
-      await waitFor(
-        () => sixb.storage.pipelineRuns!.getById({ projectId: sixb.id, id: "run-aborts-late" }),
-        (value) => value?.status === "cancelled"
-      )
+      await waitForRunFinished(sixb, "run-aborts-late")
 
       const claimed = await sixb.queues.pipelines.claim({
         projectId: sixb.id,

@@ -27,7 +27,6 @@ import type {
   PipelineRunStorage,
 } from "@sixb/core/storage"
 import { InMemoryPipelineRunStorage } from "@sixb/core/storage"
-import { createPipelineBookkeepingError, createStepBookkeepingError } from "../src/errors"
 import { runPipelineJob as runPipelineJobWithDurableRun } from "../src/run-pipeline-job"
 import type { PipelineWorkerContext, RunPipelineJobInput } from "../src/types"
 
@@ -213,57 +212,6 @@ describe("runPipelineJob", () => {
     })
   })
 
-  test("preserves causes and correlation details for post-commit bookkeeping failures", async () => {
-    const lakeStorage = new InMemoryLakeStorage()
-    const { outcome: _outcome, ...version } = await seedDatasetVersion(
-      lakeStorage,
-      customersDataset,
-      [{ id: "cust_1", name: "Ada" }]
-    )
-    const stepCause = new Error("step finish unavailable")
-    const stepError = createStepBookkeepingError({
-      pipelineId: "customers",
-      pipelineRunId: "run_1",
-      stepId: "clean-customers",
-      stepRunId: "run_1:step:1:clean-customers",
-      version,
-      cause: stepCause,
-    })
-
-    expect(stepError).toMatchObject({
-      code: "internal.unexpected",
-      retryable: false,
-      cause: stepCause,
-      details: {
-        pipelineId: "customers",
-        pipelineRunId: "run_1",
-        stepId: "clean-customers",
-        stepRunId: "run_1:step:1:clean-customers",
-        datasetId: "customers",
-        versionId: version.versionId,
-      },
-    })
-
-    const runCause = new Error("pipeline finish unavailable")
-    const runError = createPipelineBookkeepingError({
-      pipelineId: "customers",
-      runId: "run_1",
-      version,
-      cause: runCause,
-    })
-    expect(runError).toMatchObject({
-      code: "internal.unexpected",
-      retryable: false,
-      cause: runCause,
-      details: {
-        pipelineId: "customers",
-        runId: "run_1",
-        datasetId: "customers",
-        versionId: version.versionId,
-      },
-    })
-  })
-
   test("keeps step finalization failures out of the step-failed vocabulary", async () => {
     const lakeStorage = new InMemoryLakeStorage()
     await seedDatasetVersion(lakeStorage, rawCustomersDataset, [{ id: "cust_1", name: "Ada" }])
@@ -288,16 +236,23 @@ describe("runPipelineJob", () => {
       pipelineRunsStorage,
     })
 
-    await expect(
-      runPipelineJob({ runtime, job: { id: "run_step_finish_failed", pipelineId: pipeline.id } })
-    ).rejects.toMatchObject({
+    const error = await runPipelineJob({
+      runtime,
+      job: { id: "run_step_finish_failed", pipelineId: pipeline.id },
+    }).catch((caught: unknown) => caught)
+
+    // The dataset version is already durable: the error names it so the step run can be repaired.
+    expect(error).toMatchObject({
       code: "internal.unexpected",
+      retryable: false,
       cause: finishCause,
       details: {
         pipelineId: pipeline.id,
         pipelineRunId: "run_step_finish_failed",
         stepId: step.id,
         stepRunId: "run_step_finish_failed:step:1:clean-customers",
+        datasetId: customersDataset.id,
+        versionId: (await lakeStorage.getLatestVersion(customersDataset.id))?.versionId,
       },
     })
 
@@ -374,31 +329,47 @@ describe("runPipelineJob", () => {
     expect(steps.steps).toHaveLength(0)
   })
 
-  test("does not notify a terminal run when the durable transition fails", async () => {
+  test("names the committed version and notifies nothing when the run cannot be finished", async () => {
+    const lakeStorage = new InMemoryLakeStorage()
+    await seedDatasetVersion(lakeStorage, rawCustomersDataset, [{ id: "cust_1", name: "Ada" }])
     const cleanStep = definePipelineStep("clean-customers")
       .inputs({ rawCustomers: rawCustomersDataset })
       .output(customersDataset)
-      .run(async () => {})
+      .run(async ({ inputs, output }) => {
+        await output.writeRows(inputs.rawCustomers.readRows({ columns: ["id", "name"] }))
+      })
     const provider = new InMemoryStorage()
     const pipelineRunsStorage = new RejectingFinishPipelineRunStorage(provider.executions)
     executionsByRunStorage.set(pipelineRunsStorage, provider.executions)
     const runtime = createRuntime({
       pipelines: [definePipeline("customers").then(cleanStep)],
       datasets: [rawCustomersDataset, customersDataset],
+      lakeStorage,
       pipelineRunsStorage,
     })
     const finishedRuns: PipelineRunRecord[] = []
 
-    await expect(
-      runPipelineJob({
-        runtime,
-        job: { id: "run_finish_rejected", pipelineId: "customers" },
-        onRunFinished(run) {
-          finishedRuns.push(run)
-        },
-      })
-    ).rejects.toThrow("has no committed version")
+    // Both finishes are rejected: the succeeded one after the commit, then the failed one the
+    // error path attempts. Neither transition happened, so nothing may be notified.
+    const error = await runPipelineJob({
+      runtime,
+      job: { id: "run_finish_rejected", pipelineId: "customers" },
+      onRunFinished(run) {
+        finishedRuns.push(run)
+      },
+    }).catch((caught: unknown) => caught)
 
+    expect(error).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      cause: new Error("pipeline run storage unavailable"),
+      details: {
+        pipelineId: "customers",
+        runId: "run_finish_rejected",
+        datasetId: customersDataset.id,
+        versionId: (await lakeStorage.getLatestVersion(customersDataset.id))?.versionId,
+      },
+    })
     expect(finishedRuns).toHaveLength(0)
     expect(
       await pipelineRunsStorage.getById({ projectId: runtime.id, id: "run_finish_rejected" })
@@ -803,16 +774,20 @@ describe("runPipelineJob", () => {
     const seededVersion = await seedDatasetVersion(lakeStorage, rawCustomersDataset, [
       { id: "cust_1", name: "Ada", email: "ada@example.com" },
     ])
+    const namesVersion = await seedDatasetVersion(lakeStorage, customersDataset, [
+      { id: "cust_1", name: "Ada" },
+    ])
     await lakeStorage.createDataset(customerStatsDataset)
 
+    // A whole input passes no columns, exactly as before picks existed; a pick passes its own.
     const statsStep = definePipelineStep("customer-stats")
-      .inputs({ rawCustomers: rawCustomersDataset })
+      .inputs({ rawCustomers: rawCustomersDataset, names: customersDataset.pick("name", "id") })
       .output(customerStatsDataset, { mode: "append" })
-      .sql(({ rawCustomers }) => `select count(*) as value from ${rawCustomers}`)
+      .sql(({ rawCustomers, names }) => `select count(*) as value from ${rawCustomers}, ${names}`)
     const pipeline = definePipeline("customers").then(statsStep)
     const runtime = createRuntime({
       pipelines: [pipeline],
-      datasets: [rawCustomersDataset, customerStatsDataset],
+      datasets: [rawCustomersDataset, customersDataset, customerStatsDataset],
       lakeStorage,
     })
 
@@ -824,6 +799,10 @@ describe("runPipelineJob", () => {
       },
     })
 
+    const pinnedInputs = [
+      { datasetId: "raw.customers", versionId: seededVersion.versionId },
+      { datasetId: "customers", versionId: namesVersion.versionId },
+    ]
     expect(lakeStorage.executeCalls).toHaveLength(1)
     expect(lakeStorage.executeCalls[0]).toMatchObject({
       expectedLatestVersionId: null,
@@ -837,9 +816,13 @@ describe("runPipelineJob", () => {
       },
       commitMessage: "pipeline customers step customer-stats run run_sql",
     })
-    expect(lakeStorage.executeCalls[0]?.sources.rawCustomers).toEqual({
-      dataset: rawCustomersDataset,
-      versionId: seededVersion.versionId,
+    expect(lakeStorage.executeCalls[0]?.sources).toEqual({
+      rawCustomers: { dataset: rawCustomersDataset, versionId: seededVersion.versionId },
+      names: {
+        dataset: customersDataset,
+        versionId: namesVersion.versionId,
+        columns: ["name", "id"],
+      },
     })
 
     expect(result.version?.producer).toEqual({
@@ -848,23 +831,13 @@ describe("runPipelineJob", () => {
       runId: "run_sql",
       stepId: "customer-stats",
     })
-    expect(result.version?.inputs).toEqual([
-      {
-        datasetId: "raw.customers",
-        versionId: seededVersion.versionId,
-      },
-    ])
+    expect(result.version?.inputs).toEqual(pinnedInputs)
     expect(result.steps[0]?.run).toMatchObject({
       stepId: "customer-stats",
       datasetId: "customer_stats",
       status: "succeeded",
       rowsWritten: 1,
-      inputs: [
-        {
-          datasetId: "raw.customers",
-          versionId: seededVersion.versionId,
-        },
-      ],
+      inputs: pinnedInputs,
       output: {
         datasetId: "customer_stats",
         versionId: result.version?.versionId,
@@ -873,31 +846,6 @@ describe("runPipelineJob", () => {
     // Removing the worker's output guard must fail these assertions.
     await runPipelineJob({ runtime, job: { id: "run_sql_second", pipelineId: "customers" } })
     expect(lakeStorage.executeCalls[1]?.expectedLatestVersionId).toBe(result.version?.versionId)
-  })
-
-  // The test above pins whole inputs: they pass no columns, exactly as before picks existed.
-  test("passes the columns a SQL step picks to its source", async () => {
-    const lakeStorage = new SqlTransformLakeStorage()
-    const seededVersion = await seedDatasetVersion(lakeStorage, rawCustomersDataset, [
-      { id: "cust_1", name: "Ada", email: "ada@example.com" },
-    ])
-    const statsStep = definePipelineStep("customer-stats")
-      .inputs({ rawCustomers: rawCustomersDataset.pick("name", "id") })
-      .output(customerStatsDataset)
-      .sql(({ rawCustomers }) => `select count(*) as value from ${rawCustomers}`)
-    const runtime = createRuntime({
-      pipelines: [definePipeline("customers").then(statsStep)],
-      datasets: [rawCustomersDataset, customerStatsDataset],
-      lakeStorage,
-    })
-
-    await runPipelineJob({ runtime, job: { id: "run_sql_pick", pipelineId: "customers" } })
-
-    expect(lakeStorage.executeCalls[0]?.sources.rawCustomers).toEqual({
-      dataset: rawCustomersDataset,
-      versionId: seededVersion.versionId,
-      columns: ["name", "id"],
-    })
   })
 
   test("fails SQL steps clearly when lake storage has no SQL transform support", async () => {

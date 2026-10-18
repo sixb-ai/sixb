@@ -169,7 +169,7 @@ async function waitForSettledRun(sixb: Host, runId: string): Promise<ProjectionR
   while (Date.now() - startedAt < 2_000) {
     const run = await sixb.storage.projectionRuns?.getById({ projectId: sixb.id, id: runId })
     if (run?.status === "succeeded" || run?.status === "failed") return run
-    await Bun.sleep(20)
+    await new Promise<void>((resolve) => setImmediate(resolve))
   }
 
   throw new Error(`Projection run '${runId}' did not settle.`)
@@ -204,18 +204,11 @@ describe("projecting a pipeline version", () => {
     expect(await readInvoice(sixb)).toBeNull()
   })
 
-  test("projects a version whose marked values stay in marked properties", async () => {
+  test("projects marked values kept in marked properties, then checks the version it moves to", async () => {
     const sixb = createHost()
-
-    const { run } = await project(sixb, await commitPipelineVersion(sixb, exactCopy))
-
-    expect(run.status).toBe("succeeded")
+    const { run: first } = await project(sixb, await commitPipelineVersion(sixb, exactCopy))
+    expect(first.status).toBe("succeeded")
     expect(await readInvoice(sixb)).toMatchObject({ properties: RAW_INVOICE })
-  })
-
-  test("checks the version an incremental run moves to", async () => {
-    const sixb = createHost()
-    await project(sixb, await commitPipelineVersion(sixb, exactCopy))
     const leaking = await commitPipelineVersion(sixb, amountInTitle)
 
     const { run } = await project(sixb, leaking)
