@@ -36,9 +36,7 @@ async function fileDownloadResponse(
       blobStorage: host.blobStorage,
       fileRef,
       head: options.head,
-      rangeHeader: request.headers.get("range"),
-      ifNoneMatchHeader: request.headers.get("if-none-match"),
-      ifRangeHeader: request.headers.get("if-range"),
+      request,
     }))
   if (!response) {
     set.status = 404

@@ -5,6 +5,8 @@ function request(method: string, path: string): Request {
   return new Request(`http://api.localhost${path}`, { method })
 }
 
+const FRAME_FILE = `/api/artifact-frames/${"t".repeat(43)}/index.html`
+
 // The complete set of paths the API server answers without a session. Anything not
 // here must require authentication — that is the invariant this file exists to hold,
 // because the classifier used to default to "public" and would have handed a new
@@ -20,6 +22,8 @@ const PUBLIC: ReadonlyArray<readonly [string, string, string]> = [
   ["POST", "/api/webhooks/github/events", "third-party callers sign their payloads"],
   ["GET", "/api/files/downloads/payload.signature", "the signed token is the credential"],
   ["HEAD", "/api/files/downloads/payload.signature", "media fetchers probe before reading"],
+  ["GET", FRAME_FILE, "a sandboxed frame holds no session; the link's token is the credential"],
+  ["HEAD", FRAME_FILE, "a sandboxed frame holds no session; the link's token is the credential"],
   ["GET", "/api/auth/session", "answers whether a session exists"],
   ["POST", "/api/auth/sign-out", "must work with an expired session"],
   ["POST", "/api/auth/device-authorizations", "starts a device authorization"],
@@ -79,6 +83,13 @@ describe("classifyRoute", () => {
         classifyRoute(request(method, "/api/files/downloads/payload.signature")).kind,
         `${method} /api/files/downloads/payload.signature`
       ).toBe("api")
+    }
+  })
+
+  test("a frame path is public for reads alone", () => {
+    // Reproduce by dropping the method check from the frame rule in classifyRoute.
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      expect(classifyRoute(request(method, FRAME_FILE)).kind, `${method} ${FRAME_FILE}`).toBe("api")
     }
   })
 

@@ -1,40 +1,88 @@
+const FONTS = {
+  "--font-sans":
+    '"SF Pro Text", "SF Pro Display", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif',
+  "--font-serif": 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+  "--font-mono": '"SF Mono", "Geist Mono", "JetBrains Mono", ui-monospace, monospace',
+} as const
+
+/**
+ * Sixb's default theme, light and dark: the values `@sixb/ui`'s globals.css gives the tokens the
+ * app sends into a frame, which an artifact's theme may set. The kit starts from the light one
+ * until the app's arrive, and the layout check measures a deck in both, since a deck follows the
+ * app's mode and the project's own theme is out of the sandbox's reach.
+ */
+export const FRAME_DEFAULT_THEMES = {
+  light: {
+    dark: false,
+    tokens: {
+      "--background": "#fafafa",
+      "--foreground": "#101010",
+      "--card": "#ffffff",
+      "--card-foreground": "#101010",
+      "--muted": "#f4f4f4",
+      "--muted-foreground": "#5f5f5f",
+      "--primary": "#0a0a0a",
+      "--primary-foreground": "#ffffff",
+      "--accent": "#f0f0f0",
+      "--accent-foreground": "#202020",
+      "--border": "#e2e2e2",
+      "--chart-1": "#101010",
+      "--chart-2": "#404040",
+      "--chart-3": "#737373",
+      "--chart-4": "#a3a3a3",
+      "--chart-5": "#d4d4d4",
+      ...FONTS,
+      "--radius": "0.5rem",
+    },
+  },
+  dark: {
+    dark: true,
+    tokens: {
+      "--background": "#0a0a0a",
+      "--foreground": "#f4f4f4",
+      "--card": "#141414",
+      "--card-foreground": "#f4f4f4",
+      "--muted": "#1c1c1c",
+      "--muted-foreground": "#8a8a8a",
+      "--primary": "#f4f4f4",
+      "--primary-foreground": "#0a0a0a",
+      "--accent": "#1c1c1c",
+      "--accent-foreground": "#f4f4f4",
+      "--border": "#262626",
+      "--chart-1": "#f4f4f4",
+      "--chart-2": "#c4c4c4",
+      "--chart-3": "#8a8a8a",
+      "--chart-4": "#5f5f5f",
+      "--chart-5": "#404040",
+      ...FONTS,
+      // `.dark` keeps the light radius.
+      "--radius": "0.5rem",
+    },
+  },
+} as const
+
+const LIGHT = FRAME_DEFAULT_THEMES.light.tokens
+
 /**
  * The kit the frame injects into a deck: the stage that shows one slide or all of them, the slide
- * type scale, the layouts a slide picks by class, the slide chrome, and a few components. It reads the app's theme
- * tokens, which the app sends into the frame, with defaults until they arrive. Everything sits in
- * cascade layers, so the deck's own CSS, unlayered, always wins.
+ * type scale, the layouts a slide picks by class, the slide chrome, and a few components. It reads
+ * the app's theme tokens, which the app sends into the frame, with the light defaults until they
+ * arrive. Everything sits in cascade layers, so the deck's own CSS, unlayered, always wins.
  */
 export const FRAME_KIT_CSS = `
 @layer sixb-kit, sixb-theme;
 
 @layer sixb-kit {
   :root {
-    --background: #ffffff;
-    --foreground: #111111;
-    --card: #ffffff;
-    --card-foreground: #111111;
-    --muted: #f4f4f4;
-    --muted-foreground: #6b6b6b;
-    --primary: #111111;
-    --primary-foreground: #ffffff;
-    --accent: #f0f0f0;
-    --accent-foreground: #111111;
-    --border: #e2e2e2;
-    --chart-1: #101010;
-    --chart-2: #404040;
-    --chart-3: #737373;
-    --chart-4: #a3a3a3;
-    --chart-5: #d4d4d4;
-    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", serif;
-    --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-    --radius: 10px;
+${Object.entries(LIGHT)
+  .map(([name, value]) => `    ${name}: ${value};`)
+  .join("\n")}
     --sixb-scale: 1;
     --sixb-overview-scale: 0.25;
     --sixb-columns: 4;
-    --sixb-stage: #f4f4f4;
-    --sixb-stage-border: #e2e2e2;
-    --sixb-stage-foreground: #111111;
+    --sixb-stage: ${LIGHT["--muted"]};
+    --sixb-stage-border: ${LIGHT["--border"]};
+    --sixb-stage-foreground: ${LIGHT["--foreground"]};
   }
 
   *, *::before, *::after { box-sizing: border-box; }

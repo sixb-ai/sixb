@@ -4629,9 +4629,9 @@ export const publishArtifactVersionMutation = (
 }
 
 /**
- * Open an artifact version in a frame
+ * Open a deck's version in a frame
  *
- * A short-lived path that serves the version's files to a sandboxed frame, such as a deck. It expires within an hour.
+ * A short-lived path that serves a slides version's files to a sandboxed frame. It expires within an hour. Any other kind is refused with 409 artifact_kind_mismatch.
  */
 export const createArtifactFrameMutation = (
   options?: Partial<Options<CreateArtifactFrameData>>

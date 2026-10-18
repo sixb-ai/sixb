@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import {
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -7,6 +8,7 @@ import {
   InMemoryStorage,
   SixbHost,
 } from "@sixb/core"
+import { BlobStorageError } from "@sixb/core/blob-storage/server"
 import { createArtifactFrame, injectFrameAssets } from "@sixb/core/internal/artifacts/frames"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createSixbApi, SixbServer } from "../src/server"
@@ -46,7 +48,12 @@ function createApp() {
       mediaType,
     }),
   })
-  return { app, storage, put }
+  return { app, storage, blobStorage, put }
+}
+
+function artifactStorage(storage: InMemoryStorage) {
+  if (!storage.artifacts) throw new Error("Expected artifact storage.")
+  return storage.artifacts
 }
 
 async function session(storage: InMemoryStorage, userId: string) {
@@ -78,6 +85,45 @@ async function session(storage: InMemoryStorage, userId: string) {
 
 const url = (path: string) => `http://localhost${path}`
 
+type Fixture = ReturnType<typeof createApp>
+type Session = Awaited<ReturnType<typeof session>>
+
+async function publish(
+  { app }: Fixture,
+  as: Session,
+  kind: string,
+  files: Awaited<ReturnType<Fixture["put"]>>[]
+) {
+  const response = await app.fetch(
+    new Request(url("/api/artifacts"), {
+      method: "POST",
+      headers: as.mutationHeaders,
+      body: JSON.stringify({ kind, title: "Untitled", files }),
+    })
+  )
+  expect(response.status).toBe(201)
+  return await response.json()
+}
+
+async function mint({ app }: Fixture, as: Session, artifactId: string) {
+  return app.fetch(
+    new Request(url(`/api/artifacts/${artifactId}/versions/1/frame`), {
+      method: "POST",
+      headers: as.mutationHeaders,
+    })
+  )
+}
+
+async function remove({ app }: Fixture, as: Session, artifactId: string) {
+  const response = await app.fetch(
+    new Request(url(`/api/artifacts/${artifactId}`), {
+      method: "DELETE",
+      headers: as.mutationHeaders,
+    })
+  )
+  expect(response.status).toBe(200)
+}
+
 /** A published deck, and a frame for its first version opened by its owner. */
 async function deck() {
   const fixture = createApp()
@@ -91,24 +137,18 @@ async function deck() {
       "image/svg+xml"
     ),
   ]
-  const created = await fixture.app.fetch(
-    new Request(url("/api/artifacts"), {
-      method: "POST",
-      headers: alice.mutationHeaders,
-      body: JSON.stringify({ kind: "slides", title: "Q3 review", files }),
-    })
-  )
-  expect(created.status).toBe(201)
-  const published = await created.json()
-  const minted = await fixture.app.fetch(
-    new Request(url(`/api/artifacts/${published.artifact.id}/versions/1/frame`), {
-      method: "POST",
-      headers: alice.mutationHeaders,
-    })
-  )
+  const published = await publish(fixture, alice, "slides", files)
+  const minted = await mint(fixture, alice, published.artifact.id)
   expect(minted.status).toBe(200)
   const frame = (await minted.json()) as { path: string; expiresAt: string }
   return { ...fixture, alice, published, frame }
+}
+
+/** The headers every frame response carries, whatever it answers. */
+function expectFrameHeaders(response: Response, label: string) {
+  expect(response.headers.get("content-security-policy"), label).toContain("sandbox allow-scripts")
+  expect(response.headers.get("access-control-allow-origin"), label).toBe("*")
+  expect(response.headers.get("referrer-policy"), label).toBe("no-referrer")
 }
 
 describe("a deck's frame", () => {
@@ -165,23 +205,22 @@ describe("a deck's frame", () => {
   })
 
   test("is opened only by who may read the deck, and stops at its expiry", async () => {
-    const { app, storage, alice, published, frame } = await deck()
+    const fixture = await deck()
+    const { app, storage, alice, published, frame } = fixture
     const bob = await session(storage, "bob")
-    const denied = await app.fetch(
-      new Request(url(`/api/artifacts/${published.artifact.id}/versions/1/frame`), {
-        method: "POST",
-        headers: bob.mutationHeaders,
-      })
-    )
-    expect(denied.status).toBe(404)
+    expect((await mint(fixture, bob, published.artifact.id)).status).toBe(404)
 
-    const artifacts = storage.artifacts
-    if (!artifacts) throw new Error("Expected artifact storage.")
+    const artifacts = artifactStorage(storage)
+    const version = await artifacts.getVersion({
+      projectId: PROJECT_ID,
+      artifactId: published.artifact.id,
+      version: 1,
+    })
+    if (!version) throw new Error("Expected the deck's version.")
     const expired = await createArtifactFrame({
       projectId: PROJECT_ID,
       storage: artifacts,
-      artifactId: published.artifact.id,
-      version: 1,
+      version,
       now: new Date(Date.now() - 2 * 60 * 60 * 1000),
     })
     expect((await app.fetch(new Request(url(`${expired.path}index.html`)))).status).toBe(404)
@@ -192,48 +231,194 @@ describe("a deck's frame", () => {
     ).toBe(404)
   })
 
+  test("stops serving once its deck is deleted", async () => {
+    // Two guards hold this: deleting an artifact deletes its frame grants, and resolveArtifactFrame
+    // answers null for a deleted version. Reproduce by dropping both (InMemoryArtifactStorage's
+    // delete keeping the grants): the route then fails on the missing version, a 500.
+    const fixture = await deck()
+    await remove(fixture, fixture.alice, fixture.published.artifact.id)
+    for (const path of ["index.html", "deck.css", "__sixb/kit.css"]) {
+      const response = await fixture.app.fetch(new Request(url(`${fixture.frame.path}${path}`)))
+      expect(response.status, path).toBe(404)
+      expectFrameHeaders(response, path)
+    }
+  })
+
   test("takes requests from the frame's opaque origin, and no other route does", async () => {
-    // Reproduce by dropping the frame prefix from rejectDisallowedBrowserOrigin: a deck's module
-    // scripts and fonts, which arrive with `Origin: null`, are refused.
+    // Reproduce by letting isAllowedApiBrowserOrigin throw on `null` again: the CORS plugin then
+    // answers what a deck loads in CORS mode with the error, under none of the frame's headers.
+    // Dropping the frame prefix from rejectDisallowedBrowserOrigin refuses it with a 403.
     const { app, frame } = await deck()
     const fromFrame = await app.fetch(
       new Request(url(`${frame.path}deck.css`), { headers: { origin: "null" } })
     )
     expect(fromFrame.status).toBe(200)
+    expectFrameHeaders(fromFrame, "deck.css")
+    expect(fromFrame.headers.get("content-type")).toBe("text/css")
+    expect(await fromFrame.text()).toBe(".slide { color: red }")
     const elsewhere = await app.fetch(
       new Request(url("/api/artifacts"), { headers: { origin: "null" } })
     )
     expect(elsewhere.status).toBe(403)
   })
+
+  test("takes only reads from the frame's opaque origin", async () => {
+    // Reproduce by dropping the method check from rejectDisallowedBrowserOrigin: these reach the
+    // router, and a preflight is answered for a route that takes no writes.
+    const { app, frame } = await deck()
+    for (const method of ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+      const response = await app.fetch(
+        new Request(url(`${frame.path}deck.css`), { method, headers: { origin: "null" } })
+      )
+      expect(response.status, method).toBe(403)
+    }
+  })
+
+  test("opens only in a frame, never as a page of its own", async () => {
+    // Reproduce by dropping the sec-fetch-dest check from the frame route: the deck opens as a page
+    // on the API's origin, where its sandbox still lets it show dialogs and open windows.
+    const { app, frame } = await deck()
+    const page = await app.fetch(
+      new Request(url(`${frame.path}index.html`), { headers: { "sec-fetch-dest": "document" } })
+    )
+    expect(page.status).toBe(404)
+    expectFrameHeaders(page, "document")
+    const framed = await app.fetch(
+      new Request(url(`${frame.path}index.html`), { headers: { "sec-fetch-dest": "iframe" } })
+    )
+    expect(framed.status).toBe(200)
+  })
+
+  test("serves a file's heads, ranges, and revalidations under the frame's headers", async () => {
+    // Reproduce by returning the file response as createFileContentResponse builds it (each of
+    // these then carries the file routes' policy, not the frame's), or by not handing it the
+    // request (the range is answered in full).
+    const { app, frame } = await deck()
+    const css = url(`${frame.path}deck.css`)
+    const etag = (await app.fetch(new Request(css))).headers.get("etag") ?? ""
+    const answers = {
+      head: await app.fetch(new Request(css, { method: "HEAD" })),
+      range: await app.fetch(new Request(css, { headers: { range: "bytes=0-5" } })),
+      unsatisfiable: await app.fetch(new Request(css, { headers: { range: "bytes=999-" } })),
+      unchanged: await app.fetch(new Request(css, { headers: { "if-none-match": etag } })),
+      entry: await app.fetch(new Request(url(`${frame.path}index.html`), { method: "HEAD" })),
+    }
+    expect(answers.head.status).toBe(200)
+    expect(await answers.head.text()).toBe("")
+    expect(answers.range.status).toBe(206)
+    expect(await answers.range.text()).toBe(".slide")
+    expect(answers.unsatisfiable.status).toBe(416)
+    expect(answers.unchanged.status).toBe(304)
+    expect(answers.entry.status).toBe(200)
+    expect(answers.entry.headers.get("content-type")).toBe("text/html; charset=utf-8")
+    for (const [label, response] of Object.entries(answers)) {
+      expectFrameHeaders(response, label)
+      if (label !== "unsatisfiable") {
+        expect(response.headers.get("cache-control"), label).toBe("private, no-cache")
+      }
+    }
+  })
+
+  test("answers 404, not an error, once a file's blob is gone", async () => {
+    // Reproduce by opening the entry with blobStorage.open() in the frame route again: the missing
+    // blob throws, and the deck's page fails with a 500.
+    const { app, blobStorage, published, frame } = await deck()
+    const gone = new Set<string>(
+      published.version.files.map((file: { file: { blobId: string } }) => file.file.blobId)
+    )
+    const { open, stat } = blobStorage
+    blobStorage.stat = async (blobId) => (gone.has(blobId) ? null : stat.call(blobStorage, blobId))
+    blobStorage.open = async (blobId) => {
+      if (gone.has(blobId)) throw new BlobStorageError(`[BlobStorage] Unknown blob '${blobId}'`)
+      return open.call(blobStorage, blobId)
+    }
+    for (const path of ["index.html", "deck.css"]) {
+      const response = await app.fetch(new Request(url(`${frame.path}${path}`)))
+      expect(response.status, path).toBe(404)
+      expectFrameHeaders(response, path)
+    }
+  })
+})
+
+describe("a frame for anything but a deck", () => {
+  test("is refused when asked for, and served by no link", async () => {
+    // Reproduce by dropping the kind check from createArtifactFrame (the mint answers 200 and the
+    // call resolves) or from resolveArtifactFrame (the link serves document.md as a page, kit and
+    // all).
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const notes = await publish(fixture, alice, "document", [
+      await fixture.put("document.md", "# Notes\n\nNothing to present.\n", "text/markdown"),
+    ])
+    const minted = await mint(fixture, alice, notes.artifact.id)
+    expect(minted.status).toBe(409)
+    expect(await minted.json()).toEqual({
+      error: `[Sixb] Only a deck opens in a frame; '${notes.artifact.id}' is a document. Read its files instead.`,
+      code: "artifact_kind_mismatch",
+    })
+
+    const artifacts = artifactStorage(fixture.storage)
+    const version = await artifacts.getVersion({
+      projectId: PROJECT_ID,
+      artifactId: notes.artifact.id,
+      version: 1,
+    })
+    if (!version) throw new Error("Expected the document's version.")
+    await expect(
+      createArtifactFrame({ projectId: PROJECT_ID, storage: artifacts, version })
+    ).rejects.toMatchObject({ code: "artifact_kind_mismatch" })
+
+    // A link for it all the same, such as one stored before only decks had frames, serves nothing.
+    const token = "a".repeat(43)
+    await artifacts.createFrameGrant({
+      projectId: PROJECT_ID,
+      tokenHash: createHash("sha256").update(token).digest("hex"),
+      artifactId: notes.artifact.id,
+      version: 1,
+      targets: [],
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    })
+    const served = await fixture.app.fetch(
+      new Request(url(`/api/artifact-frames/${token}/document.md`))
+    )
+    expect(served.status).toBe(404)
+  })
 })
 
 describe("a deck's images from other artifacts", () => {
+  const SVG = "<svg xmlns='http://www.w3.org/2000/svg'/>"
+
+  /** Publishes a deck that shows `markup` on its one slide. */
+  async function deckShowing(fixture: Fixture, as: Session, markup: string) {
+    const deck = await publish(fixture, as, "slides", [
+      await fixture.put("index.html", `<section class="slide">${markup}</section>`, "text/html"),
+    ])
+    const minted = await mint(fixture, as, deck.artifact.id)
+    expect(minted.status).toBe(200)
+    return ((await minted.json()) as { path: string }).path
+  }
+
   test("are served under its frame, those it shows and no others, while its reader may read them", async () => {
     // Reproduce by matching a lent file on its artifact and version alone in the frame route: the
     // lender's other files are served too.
-    const { app, put, storage } = createApp()
-    const alice = await session(storage, "alice")
-    const publish = async (files: Awaited<ReturnType<typeof put>>[]) => {
-      const response = await app.fetch(
-        new Request(url("/api/artifacts"), {
-          method: "POST",
-          headers: alice.mutationHeaders,
-          body: JSON.stringify({ kind: "slides", title: "Deck", files }),
-        })
-      )
-      expect(response.status).toBe(201)
-      return (await response.json()).artifact.id as string
-    }
-    const figures = await publish([
-      await put("index.html", '<section class="slide"><h1>Figures</h1></section>', "text/html"),
-      await put("img/flow.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>", "image/svg+xml"),
-      await put("img/other.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>", "image/svg+xml"),
-    ])
-    const appendix = await publish([
-      await put("index.html", '<section class="slide"><h1>Appendix</h1></section>', "text/html"),
-      await put("img/map.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>", "image/svg+xml"),
-    ])
-    const deck = await publish([
+    const fixture = createApp()
+    const { app, put } = fixture
+    const alice = await session(fixture.storage, "alice")
+    const figures = (
+      await publish(fixture, alice, "slides", [
+        await put("index.html", '<section class="slide"><h1>Figures</h1></section>', "text/html"),
+        await put("img/flow.svg", SVG, "image/svg+xml"),
+        await put("img/other.svg", SVG, "image/svg+xml"),
+      ])
+    ).artifact.id
+    const appendix = (
+      await publish(fixture, alice, "slides", [
+        await put("index.html", '<section class="slide"><h1>Appendix</h1></section>', "text/html"),
+        await put("img/map.svg", SVG, "image/svg+xml"),
+      ])
+    ).artifact.id
+    const deck = await publish(fixture, alice, "slides", [
       await put(
         "index.html",
         `<section class="slide"><img src="artifact:${figures}/img/flow.svg" alt=""><img src="artifact:${appendix}/img/map.svg" alt=""></section>`,
@@ -241,19 +426,8 @@ describe("a deck's images from other artifacts", () => {
       ),
     ])
     // The appendix is gone by the time the deck is opened: its reader can no longer see the map.
-    await app.fetch(
-      new Request(url(`/api/artifacts/${appendix}`), {
-        method: "DELETE",
-        headers: alice.mutationHeaders,
-      })
-    )
-    const minted = await app.fetch(
-      new Request(url(`/api/artifacts/${deck}/versions/1/frame`), {
-        method: "POST",
-        headers: alice.mutationHeaders,
-      })
-    )
-    const frame = (await minted.json()) as { path: string }
+    await remove(fixture, alice, appendix)
+    const frame = (await (await mint(fixture, alice, deck.artifact.id)).json()) as { path: string }
 
     const html = await (await app.fetch(new Request(url(`${frame.path}index.html`)))).text()
     expect(html).toContain(
@@ -277,19 +451,82 @@ describe("a deck's images from other artifacts", () => {
       )
     }
   })
+
+  test("stop being served once the artifact lending them is deleted", async () => {
+    // Reproduce by dropping the missing-lender check from the frame route: the route fails on the
+    // deleted version instead of answering 404.
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const figures = await publish(fixture, alice, "file", [
+      await fixture.put("flow.svg", SVG, "image/svg+xml"),
+    ])
+    const frame = await deckShowing(
+      fixture,
+      alice,
+      `<img src="artifact:${figures.artifact.id}/flow.svg" alt="">`
+    )
+    const lent = url(`${frame}__sixb/ref/${figures.artifact.id}@1/flow.svg`)
+    expect((await fixture.app.fetch(new Request(lent))).status).toBe(200)
+
+    await remove(fixture, alice, figures.artifact.id)
+    const response = await fixture.app.fetch(new Request(lent))
+    expect(response.status).toBe(404)
+    expectFrameHeaders(response, "lent")
+  })
+
+  test("are found by the address the browser reads, entities decoded", async () => {
+    // Reproduce by matching the src attribute as written in rewriteFrameReferences: `&amp;` is not
+    // the `&` publishing recorded, and the image is drawn unavailable.
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const figures = await publish(fixture, alice, "file", [
+      await fixture.put("q3&q4.svg", SVG, "image/svg+xml"),
+    ])
+    const id = figures.artifact.id
+    const frame = await deckShowing(
+      fixture,
+      alice,
+      `<img src="artifact:${id}/q3&amp;q4.svg" alt="">`
+    )
+
+    const html = await (await fixture.app.fetch(new Request(url(`${frame}index.html`)))).text()
+    expect(html).toContain(`<img src="__sixb/ref/${id}@1/q3%26q4.svg" alt="" data-sixb-ref="">`)
+    const shown = await fixture.app.fetch(
+      new Request(url(`${frame}__sixb/ref/${id}@1/q3%26q4.svg`))
+    )
+    expect(shown.status).toBe(200)
+  })
 })
 
 describe("injecting the kit and the runtime", () => {
-  test("goes in the head, else the html element, else after the doctype", async () => {
-    const tag = '<link rel="stylesheet" href="__sixb/kit.css">'
-    expect(await injectFrameAssets("<html><head><meta charset=utf-8></head></html>")).toStartWith(
+  const tag = '<link rel="stylesheet" href="__sixb/kit.css">'
+
+  test("goes in the head, else the html element, else after the doctype", () => {
+    expect(injectFrameAssets("<html><head><meta charset=utf-8></head></html>")).toStartWith(
       `<html><head>${tag}`
     )
-    expect(await injectFrameAssets('<html lang="en"><body></body></html>')).toStartWith(
+    expect(injectFrameAssets('<html lang="en"><body></body></html>')).toStartWith(
       `<html lang="en">${tag}`
     )
-    expect(await injectFrameAssets("<!DOCTYPE html>\n<section class=slide></section>")).toStartWith(
+    expect(injectFrameAssets("<!DOCTYPE html>\n<section class=slide></section>")).toStartWith(
       `<!DOCTYPE html>${tag}`
     )
+  })
+
+  test("finds the head and the html element as elements, not as text in a comment or a script", () => {
+    // Reproduce by choosing the element with a regular expression over the text again: it finds
+    // the comment's <head> and the string's <html>, the rewriter finds neither element, and the
+    // deck gets no kit and no runtime.
+    for (const [html, start] of [
+      ['<!-- uses <head> later --><section class="slide"></section>', tag],
+      [
+        '<!doctype html><script>"<html lang=en>"</script><section class="slide"></section>',
+        `<!doctype html>${tag}`,
+      ],
+    ] as const) {
+      const injected = injectFrameAssets(html)
+      expect(injected, html).toStartWith(start)
+      expect(injected.match(/__sixb\/runtime\.js/g), html).toHaveLength(1)
+    }
   })
 })

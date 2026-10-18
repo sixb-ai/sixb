@@ -12249,6 +12249,16 @@ export type CreateArtifactFrameErrors = {
     code?: string
   }
   /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
    * Response for status 501
    */
   501: {
@@ -12267,7 +12277,13 @@ export type CreateArtifactFrameResponses = {
    * Response for status 200
    */
   200: {
+    /**
+     * The frame's base path on this API, ending in /; the deck's entry is served under it
+     */
     path: string
+    /**
+     * When the frame stops serving; ask for a new one before then
+     */
     expiresAt: string
   }
 }
