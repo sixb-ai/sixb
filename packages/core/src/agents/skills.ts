@@ -50,6 +50,12 @@ export function createAgentSkillCatalog(
   const skills = Object.freeze([...(definitions ?? [])])
   const skillsByName = new Map<string, AgentSkillDefinition>()
   for (const skill of skills) {
+    // As discovery refuses them: the worker adds its built-in skills under this prefix.
+    if (skill.name.startsWith("sixb-")) {
+      throw new RuntimeError(
+        `[Sixb] Agent Skill name '${skill.name}' uses the reserved 'sixb-' prefix.`
+      )
+    }
     if (skillsByName.has(skill.name)) {
       throw new RuntimeError(`[Sixb] Duplicate Agent Skill name: ${skill.name}`)
     }
