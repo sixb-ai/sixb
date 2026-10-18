@@ -402,6 +402,16 @@ test("decision admission denies over-budget calls before contacting the provider
   expect(calls).toBe(0)
 })
 
+// Removal proof: give admitDecisionCall a fixed callId; both calls then share one record.
+test("concurrent decisions retain separate accounting identities", async () => {
+  const { sixb, storage, identity } = setup()
+  const results = await Promise.all(
+    [0, 1].map(() => sixb.models.decision.evaluate({ input: "x", questions }))
+  )
+  expect(new Set(results.map((result) => result.callId)).size).toBe(2)
+  expect(await storage.aiUsage.summarizeExecution(identity)).toMatchObject({ modelCallCount: 2 })
+})
+
 test("a choice-only provider needs neither TypeSafe nor accounting metadata", async () => {
   const base = modelWith(async () => ({
     output: { category: { choice: "repair", probabilities: { repair: 0.75, other: 0.25 } } },

@@ -635,6 +635,47 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
       })
     })
 
+    // Removal proof: make adopt() resume an empty candidate at 1; ordinal 0 is never staged.
+    test("resumes an adopted candidate that staged nothing from ordinal zero", async () => {
+      await withStorage(async (storage) => {
+        const identity = replacementIdentity("01")
+        const run = {
+          id: "empty-resumed-run",
+          projectId: "contract-project",
+          identity,
+          target: { objectTypeId: "ContractDevice" },
+        }
+        const claimed = await startTestProjectionRun(storage, run)
+        const source = { projectionId: identity.projectionId }
+        await storage.ontology.sources.beginMaterialization({
+          projectId: "contract-project",
+          source,
+          materializationId: "empty-resumed-candidate",
+          execution: claimed.execution,
+          projectionKind: "object",
+          protocol: "replacement",
+          datasetVersion: identity.datasetVersion,
+          projectionRevision: identity.projectionRevision,
+          ownershipHash: identity.ownershipHash,
+          ontologyRevision: identity.ontologyRevision,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        })
+
+        const reclaimed = await storage.projectionRuns.startOrReclaim(run)
+        expect(
+          await storage.ontology.sources.adopt({
+            projectId: "contract-project",
+            source,
+            execution: reclaimed.execution,
+            adoptedAt: "2026-01-01T00:01:00.000Z",
+          })
+        ).toMatchObject({
+          record: { materializationId: "empty-resumed-candidate", status: "staging" },
+          resumeStagingOrdinal: 0,
+        })
+      })
+    })
+
     test("atomically activates explicit empty candidates and rejects competing stale heads", async () => {
       await withStorage(async (storage) => {
         const first = await createReadyEmptyCandidate(storage, "run-one", "candidate-one", "01")

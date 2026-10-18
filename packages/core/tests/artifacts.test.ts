@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { ArtifactFile, ArtifactRequestErrorCode, FileRef } from "../src"
 import { ArtifactRequestError, SixbHost } from "../src"
+import { createArtifactId } from "../src/artifacts/ids"
 import { createHeadingSlugger } from "../src/artifacts/outline"
 import { parseArtifactTheme } from "../src/artifacts/theme"
 import { emptyGrantIndex } from "../src/authorization/types"
@@ -313,5 +314,12 @@ describe("artifact model helpers", () => {
       "error"
     )
     expect(parseArtifactTheme("{")).toEqual({ error: "theme.json is not valid JSON." })
+  })
+
+  test("makes short ids from an alphabet without easily misread letters", () => {
+    // One id misses re-added i, l, o and u about a third of the time; 200 never do.
+    const ids = new Set(Array.from({ length: 200 }, createArtifactId))
+    expect(ids.size).toBe(200)
+    for (const id of ids) expect(id).toMatch(/^art_[0-9abcdefghjkmnpqrstvwxyz]{10}$/)
   })
 })
