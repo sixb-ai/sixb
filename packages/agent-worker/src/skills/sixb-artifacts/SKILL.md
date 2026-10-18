@@ -32,7 +32,7 @@ with a table of a dozen rows is a document; data the reader works with is a shee
 
    ```text
    publish_artifact({ path: "work/q3-review", kind: "document", title: "Q3 operations review" })
-   → { artifactId: "art_k3m9q2x7tp", version: 1, kind: "document", title: "Q3 operations review", warnings: [] }
+   → Published "Q3 operations review" as artifact art_k3m9q2x7tp, version 1.
    ```
 
 3. If it refuses, nothing was published. Fix what the message names and publish again. If you
@@ -40,13 +40,14 @@ with a table of a dozen rows is a document; data the reader works with is a shee
 4. Fix what each warning names and publish its next version when it matters to the reader. A
    deck also comes back with a screenshot of each slide: look at them (`slides.md`, Check).
 5. In the reply, say in a sentence or two what you published and what stands out. Do not paste
-   its content, its id, or a path: the user sees the artifact.
+   its content, a path, or its id as text: the user sees the artifact. To show a chart or a range
+   of it in place, use its address (`references.md`).
 
 ## Revise
 
 The artifacts this conversation published are listed in `$SIXB_ARTIFACTS`, each with its latest
-version installed under `$SIXB_ARTIFACTS_DIR/<id>/`. To change one, start from that version, not
-from an older working copy:
+version installed under `$SIXB_ARTIFACTS_DIR/<id>/`, including one you published moments ago. To
+change one, start from that version, not from an older working copy:
 
 ```bash
 rm -rf work/q3-review && cp -r "$SIXB_ARTIFACTS_DIR/art_k3m9q2x7tp" work/q3-review
@@ -56,12 +57,14 @@ Edit the copy, then publish it as the artifact's next version:
 
 ```text
 publish_artifact_version({ id: "art_k3m9q2x7tp", path: "work/q3-review", title: "Q3 operations review" })
-→ { artifactId: "art_k3m9q2x7tp", version: 2, ... }
+→ Published "Q3 operations review" as artifact art_k3m9q2x7tp, version 2.
 ```
 
-An artifact you published earlier in this turn is not installed yet: publish its next version from
-your working copy. A new version keeps the earlier ones and the artifact's kind; the title may
-change. Call `publish_artifact` again only for a different deliverable.
+An entry without a `directory` is not installed: the conversation's artifacts were too large to
+install together, or its files could not be read. Rebuild it in a working directory with the paths
+in its `files`, then publish its next version. A new version keeps the earlier ones and the
+artifact's kind; the title may change. Call `publish_artifact` again only for a different
+deliverable.
 
 ## Rules
 

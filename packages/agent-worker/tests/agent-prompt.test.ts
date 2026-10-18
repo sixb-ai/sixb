@@ -171,12 +171,11 @@ describe("agent system prompt", () => {
     expect(prompt).toContain("take precedence over conflicting agent instructions")
     expect(prompt.indexOf("<agent_instructions>")).toBeLessThan(prompt.indexOf("<sixb_mode_rules>"))
     expect(prompt.endsWith("</sixb_mode_rules>")).toBe(true)
-    // A conversation delivers files by publishing them, and revises from what it published.
+    // A conversation delivers files by publishing them; a reply shows the version it describes.
     expect(prompt).toContain("publishing it with publish_artifact")
     expect(prompt).toContain("read the sixb-artifacts skill before the first publish")
-    expect(prompt).toContain("$SIXB_ARTIFACTS lists the artifacts this conversation published")
-    expect(prompt).toContain("publish it with publish_artifact_version")
-    expect(prompt).toContain("If a deliverable could not be published, say so")
+    expect(prompt).toContain("copying the pinned address from $SIXB_ARTIFACTS")
+    expect(prompt).toContain("Never describe a deliverable that was not published as ready")
     expect(prompt).not.toContain("$SIXB_OUTPUT_DIR")
   })
 
