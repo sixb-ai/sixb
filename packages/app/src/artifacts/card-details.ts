@@ -35,7 +35,7 @@ export function versionSummary(
     case "file": {
       // A file reads as its format, which says more than "File".
       const file = version.files.find((candidate) => candidate.path === version.entry)
-      const format = /\.([a-z0-9]{1,5})$/i.exec(version.entry)?.[1]?.toUpperCase()
+      const format = fileExtension(version.entry)?.toUpperCase()
       return [
         format ?? messages.kinds.file,
         ...(file ? [formatFileSize(file.file.sizeBytes, locale, messages.files)] : []),
@@ -43,6 +43,11 @@ export function versionSummary(
     }
   }
   return [messages.kinds[outline.kind], ...details].join(" · ")
+}
+
+/** A file name's extension, lowercased, when it has one short enough to name a format. */
+export function fileExtension(name: string): string | undefined {
+  return /\.([a-z0-9]{1,5})$/i.exec(name)?.[1]?.toLowerCase()
 }
 
 /**

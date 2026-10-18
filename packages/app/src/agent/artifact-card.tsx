@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { ChevronRight } from "lucide-react"
 import type { ReactNode } from "react"
 import { versionChanges } from "../artifacts/card-details"
-import { ArtifactCardFace } from "../artifacts/card-preview"
+import { ArtifactCardFace, ArtifactLabel } from "../artifacts/card-preview"
 import { ArtifactKindIcon } from "../artifacts/kind-icon"
 import { useArtifactMessages } from "../artifacts/messages"
 import { artifactHref } from "../pages/routes"
@@ -84,22 +84,19 @@ function ArtifactRevision({ artifact }: { readonly artifact: PublishedArtifact }
       selected={selected}
       className="flex w-full max-w-md items-center gap-3 rounded-xl py-2 pr-3 pl-2"
     >
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-        <ArtifactKindIcon kind={artifact.kind} className="size-4" />
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span
-          className="truncate text-[13.5px] leading-snug font-medium text-foreground"
-          title={artifact.title}
-        >
-          {artifact.title}
-        </span>
-        <span className="truncate text-[12px] leading-snug text-muted-foreground tabular-nums">
-          {[artifactMessages.viewer.versionLabel(artifact.version), ...changes.slice(0, 2)].join(
-            " · "
-          )}
-        </span>
-      </span>
+      <ArtifactLabel
+        title={artifact.title}
+        detail={[
+          artifactMessages.viewer.versionLabel(artifact.version),
+          ...changes.slice(0, 2),
+        ].join(" · ")}
+        icon={
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+            <ArtifactKindIcon kind={artifact.kind} className="size-4" />
+          </span>
+        }
+        className="flex-1 gap-3"
+      />
       <ChevronRight
         className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-hover:translate-x-0.5"
         aria-hidden="true"

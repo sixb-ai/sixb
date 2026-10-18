@@ -14,7 +14,7 @@ import { versionChanges, versionSummary } from "../src/artifacts/card-details"
 import { documentOpening, previewColumns } from "../src/artifacts/card-preview"
 import { en as artifactsEn } from "../src/artifacts/messages"
 import { fileSheetModel } from "../src/artifacts/renderers/sheet/model"
-import { artifactVersion, seedVersion, textFiles } from "./helpers/artifacts"
+import { artifactVersion, failFileText, seedVersion, textFiles } from "./helpers/artifacts"
 
 function publish(artifactId: string, version: number, title: string): NormalizedPart {
   return {
@@ -162,23 +162,45 @@ describe("what a turn could not publish", () => {
 })
 
 describe("an artifact card's preview", () => {
-  /** A card for version 1 of an artifact whose files the cache already holds. */
-  function card(kind: "document" | "sheet", texts: Record<string, string>): string {
+  /**
+   * A card for version 1 of an artifact whose files the cache already holds: the texts, read, and
+   * the `failed` paths, which could not be.
+   */
+  function card(
+    kind: "document" | "sheet" | "file",
+    texts: Record<string, string>,
+    options: {
+      readonly files?: GetArtifactVersionResponse["files"]
+      readonly failed?: readonly string[]
+    } = {}
+  ): string {
     const artifactId = "art_preview001"
     const queryClient = new QueryClient({
-      defaultOptions: { queries: { enabled: false, staleTime: Number.POSITIVE_INFINITY } },
+      // A failed read stays failed, as it is once the card's own attempt has failed.
+      defaultOptions: {
+        queries: { enabled: false, staleTime: Number.POSITIVE_INFINITY, retryOnMount: false },
+      },
     })
+    const files = options.files ?? textFiles(texts)
     const version = artifactVersion({
       artifactId,
       title: "Q3 numbers",
-      entry: kind === "sheet" ? "workbook.json" : "document.md",
-      files: textFiles(texts),
+      entry:
+        kind === "sheet"
+          ? "workbook.json"
+          : kind === "document"
+            ? "document.md"
+            : (files[0]?.path ?? ""),
+      files,
       outline:
         kind === "sheet"
           ? { kind, sheets: [{ name: "Summary", rows: 2, columns: [] }], charts: [] }
-          : { kind, headings: [] },
+          : kind === "document"
+            ? { kind, headings: [] }
+            : { kind, mediaType: files[0]?.file.mediaType ?? "" },
     })
     seedVersion(queryClient, version, texts)
+    for (const path of options.failed ?? []) failFileText(queryClient, version, path)
     const parts: NormalizedPart[] = [
       {
         kind: "tool",
@@ -212,6 +234,65 @@ describe("an artifact card's preview", () => {
     // taking the first three columns in previewColumns: Notes shows, and Margin does not.
     expect(html).not.toContain(">Renewals<")
     expect(html).toContain(">Sheet · 2 rows<")
+  })
+
+  test("draws a sheet's chart from every row, and gives its last value", () => {
+    // A year of rows runs past what a table preview reads. Reproduce by building the chart's model
+    // from tableStart: the chart stops at row 233, and its latest value reads 1,233.
+    const csv = [
+      "Day,Visits",
+      ...Array.from({ length: 365 }, (_, day) => `${day + 1},${1001 + day}`),
+    ]
+    const html = card("sheet", {
+      "workbook.json": JSON.stringify({
+        sheets: [{ name: "Daily", columns: { Visits: "number" } }],
+        charts: [{ name: "visits", type: "line", sheet: "Daily", x: "Day", y: "Visits" }],
+      }),
+      "sheets/Daily.csv": `${csv.join("\n")}\n`,
+    })
+    expect(html).toContain(">1,365<")
+    const points = /<polyline points="([^"]*)"/.exec(html)?.[1]?.split(" ")
+    expect(points).toHaveLength(365)
+  })
+
+  test("shows a file as its format when its text is too large to preview or did not load", () => {
+    // Reproduce by keying the skeleton's pulse on the text alone, as before: neither file is ever
+    // read, so both cards pulse for good.
+    const tooLarge = card(
+      "file",
+      {},
+      {
+        files: [
+          {
+            path: "export.csv",
+            file: {
+              blobId: "blob-0",
+              digest: `sha256:${"0".repeat(64)}`,
+              sizeBytes: 6 * 1024 * 1024,
+              mediaType: "text/csv",
+            },
+          },
+        ],
+      }
+    )
+    expect(tooLarge).not.toContain("animate-pulse")
+    expect(tooLarge).toContain(">export.csv<")
+    expect(tooLarge).toContain(">6 MB<")
+
+    const failed = card(
+      "file",
+      {},
+      { files: textFiles({ "notes.txt": "Call the depot." }), failed: ["notes.txt"] }
+    )
+    expect(failed).not.toContain("animate-pulse")
+    expect(failed).toContain(">notes.txt<")
+  })
+
+  test("reads a file artifact named theme.json as the file, not as its theme", () => {
+    // Reproduce by applying useArtifactTheme to every kind in VersionPreview: the card turns dark.
+    const html = card("file", { "theme.json": '{ "mode": "dark" }' })
+    expect(html).toContain("mode")
+    expect(html).not.toContain("text-card-foreground dark")
   })
 
   test("sets a document's title and lede", () => {
