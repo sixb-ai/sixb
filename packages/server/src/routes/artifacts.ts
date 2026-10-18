@@ -4,9 +4,10 @@ import {
   ArtifactRequestError,
   type ArtifactVersionRecord,
   isFileRef,
+  type PublishedArtifact,
   type SixbHostView,
 } from "@sixb/core"
-import { createArtifactFrame, frameTargets } from "@sixb/core/internal/artifacts/frames"
+import { createArtifactFrame } from "@sixb/core/internal/artifacts/frames"
 import type { Elysia } from "elysia"
 import { ZodError } from "zod"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
@@ -19,26 +20,25 @@ import {
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   ArtifactErrorResponseSchema,
-  ArtifactFileContentQuerySchema,
   ArtifactFrameResponseSchema,
   ArtifactListQuerySchema,
   ArtifactListResponseSchema,
   ArtifactParamsSchema,
   ArtifactResponseSchema,
-  ArtifactSchema,
   ArtifactVersionParamsSchema,
   ArtifactVersionSchema,
-  ArtifactVersionSummarySchema,
   DeleteArtifactResponseSchema,
   PublishArtifactBodySchema,
   PublishedArtifactResponseSchema,
 } from "../schemas/artifacts"
+import { FileContentQuerySchema } from "../schemas/files"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
 
 type RouteSet = { status?: number | string }
 
-function serializeArtifact(artifact: ArtifactRecord) {
-  return ArtifactSchema.parse({
+// The two below build response bodies; each route parses its whole response once.
+function artifactBody(artifact: ArtifactRecord) {
+  return {
     id: artifact.id,
     projectId: artifact.projectId,
     kind: artifact.kind,
@@ -47,11 +47,11 @@ function serializeArtifact(artifact: ArtifactRecord) {
     latestVersion: artifact.latestVersion,
     createdAt: toIsoString(artifact.createdAt),
     updatedAt: toIsoString(artifact.updatedAt),
-  })
+  }
 }
 
-function serializeVersion(version: ArtifactVersionRecord) {
-  return ArtifactVersionSchema.parse({
+function versionBody(version: ArtifactVersionRecord) {
+  return {
     artifactId: version.artifactId,
     version: version.version,
     title: version.title,
@@ -62,6 +62,14 @@ function serializeVersion(version: ArtifactVersionRecord) {
     author: version.author,
     origin: version.origin,
     createdAt: toIsoString(version.createdAt),
+  }
+}
+
+function serializePublished(published: PublishedArtifact) {
+  return PublishedArtifactResponseSchema.parse({
+    artifact: artifactBody(published.artifact),
+    version: versionBody(published.version),
+    warnings: published.warnings,
   })
 }
 
@@ -143,7 +151,7 @@ async function artifactFileContentResponse(
   options: { readonly head?: boolean } = {}
 ) {
   try {
-    const query = ArtifactFileContentQuerySchema.parse(context.query)
+    const query = FileContentQuerySchema.parse(context.query)
     const version = await requireRequestSixb(context).artifacts.getVersion(
       context.params.artifactId,
       versionParam(context.params.version)
@@ -156,9 +164,7 @@ async function artifactFileContentResponse(
         fileRef: file.file,
         disposition: query.disposition,
         head: options.head,
-        rangeHeader: context.request.headers.get("range"),
-        ifNoneMatchHeader: context.request.headers.get("if-none-match"),
-        ifRangeHeader: context.request.headers.get("if-range"),
+        request: context.request,
       }))
     if (!response) {
       context.set.status = 404
@@ -190,7 +196,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
             ...(offset === undefined ? {} : { offset }),
           })
           return ArtifactListResponseSchema.parse({
-            artifacts: result.artifacts.map(serializeArtifact),
+            artifacts: result.artifacts.map(artifactBody),
             hasMore: result.hasMore,
             total: result.total,
           })
@@ -221,11 +227,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           const body = PublishArtifactBodySchema.parse(context.body)
           const published = await requireRequestSixb(context).artifacts.create(contentInput(body))
           context.set.status = 201
-          return PublishedArtifactResponseSchema.parse({
-            artifact: serializeArtifact(published.artifact),
-            version: serializeVersion(published.version),
-            warnings: published.warnings,
-          })
+          return serializePublished(published)
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
@@ -252,10 +254,8 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           const versions = artifact && (await sixb.artifacts.listVersions(artifact.id))
           if (!artifact || !versions) return notFound(context.set)
           return ArtifactResponseSchema.parse({
-            artifact: serializeArtifact(artifact),
-            versions: versions.versions.map((version) =>
-              ArtifactVersionSummarySchema.parse(serializeVersion(version))
-            ),
+            artifact: artifactBody(artifact),
+            versions: versions.versions.map(versionBody),
           })
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
@@ -315,11 +315,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
             contentInput(body)
           )
           context.set.status = 201
-          return PublishedArtifactResponseSchema.parse({
-            artifact: serializeArtifact(published.artifact),
-            version: serializeVersion(published.version),
-            warnings: published.warnings,
-          })
+          return serializePublished(published)
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
@@ -350,12 +346,12 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
             versionParam(context.params.version)
           )
           if (!version || !storage) return notFound(context.set)
+          // Any kind but a deck is refused as `artifact_kind_mismatch`.
           const frame = await createArtifactFrame({
             projectId: host.id,
             storage,
-            artifactId: version.artifactId,
-            version: version.version,
-            targets: await frameTargets(version, (id, number) => artifacts.getVersion(id, number)),
+            version,
+            read: (id, number) => artifacts.getVersion(id, number),
           })
           return ArtifactFrameResponseSchema.parse({
             path: frame.path,
@@ -370,12 +366,13 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         response: {
           200: ArtifactFrameResponseSchema,
           404: ArtifactErrorResponseSchema,
+          409: ArtifactErrorResponseSchema,
           501: ArtifactErrorResponseSchema,
         },
         detail: {
-          summary: "Open an artifact version in a frame",
+          summary: "Open a deck's version in a frame",
           description:
-            "A short-lived path that serves the version's files to a sandboxed frame, such as a deck. It expires within an hour.",
+            "A short-lived path that serves a slides version's files to a sandboxed frame. It expires within an hour. Any other kind is refused with 409 artifact_kind_mismatch.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "createArtifactFrame",
           security: accessTokenSecurityRequirement("createArtifactFrame"),
@@ -391,7 +388,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
             versionParam(context.params.version)
           )
           if (!version) return notFound(context.set)
-          return serializeVersion(version)
+          return ArtifactVersionSchema.parse(versionBody(version))
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
@@ -417,7 +414,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       async (context) => artifactFileContentResponse(host, context),
       {
         params: ArtifactVersionParamsSchema,
-        query: ArtifactFileContentQuerySchema,
+        query: FileContentQuerySchema,
         detail: {
           summary: "Get a file of an artifact version",
           tags: [OPENAPI_TAGS.artifacts.name],
@@ -432,7 +429,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       async (context) => artifactFileContentResponse(host, context, { head: true }),
       {
         params: ArtifactVersionParamsSchema,
-        query: ArtifactFileContentQuerySchema,
+        query: FileContentQuerySchema,
         detail: {
           summary: "Head a file of an artifact version",
           tags: [OPENAPI_TAGS.artifacts.name],

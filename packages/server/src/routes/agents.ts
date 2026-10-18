@@ -285,7 +285,7 @@ async function agentMessageFileContentResponse(
       fileRef,
       disposition: parsed.disposition,
       head: options.head,
-      rangeHeader: context.request.headers.get("range"),
+      request: context.request,
     })
     if (!response) {
       context.set.status = 404

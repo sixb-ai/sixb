@@ -15,9 +15,8 @@ export interface FileContentResponseInput {
   readonly fileRef: FileRef
   readonly disposition?: FileContentDisposition
   readonly head?: boolean
-  readonly rangeHeader?: string | null
-  readonly ifNoneMatchHeader?: string | null
-  readonly ifRangeHeader?: string | null
+  /** The request being answered: its Range, If-Range, and If-None-Match headers apply. */
+  readonly request?: Request
 }
 
 export interface FileContentQuery {
@@ -161,18 +160,17 @@ export async function createFileContentResponse(
   const canReadRange = supportsRangeRead(input.blobStorage)
   const headers = fileContentHeaders(input.fileRef, stat, input.disposition, canReadRange)
   const etag = headers.get("etag")!
-  if (matchesIfNoneMatch(input.ifNoneMatchHeader, etag)) {
+  const requestHeaders = input.request?.headers
+  if (matchesIfNoneMatch(requestHeaders?.get("if-none-match"), etag)) {
     headers.delete("content-length")
     return new Response(null, { status: 304, headers })
   }
 
   // Date validators are unsupported: only a strong ETag can validate a range.
-  if (
-    canReadRange &&
-    input.rangeHeader &&
-    (input.ifRangeHeader == null || input.ifRangeHeader.trim() === etag)
-  ) {
-    const range = parseSingleByteRange(input.rangeHeader, stat.sizeBytes)
+  const rangeHeader = requestHeaders?.get("range")
+  const ifRangeHeader = requestHeaders?.get("if-range")
+  if (canReadRange && rangeHeader && (ifRangeHeader == null || ifRangeHeader.trim() === etag)) {
+    const range = parseSingleByteRange(rangeHeader, stat.sizeBytes)
     if (!range) {
       return rangeNotSatisfiableResponse(stat.sizeBytes)
     }
@@ -237,9 +235,7 @@ export async function createContextualFileContentResponse<TQuery extends FileCon
       fileRef,
       disposition: parsed.disposition,
       head: input.head,
-      rangeHeader: input.request.headers.get("range"),
-      ifNoneMatchHeader: input.request.headers.get("if-none-match"),
-      ifRangeHeader: input.request.headers.get("if-range"),
+      request: input.request,
     })
     if (!response) {
       return fileContentNotFound(input.set, missingMessage)

@@ -87,12 +87,22 @@ export function resolveApiBrowserAuthContext(
   throw new BrowserOriginError(`[SixbServer] Browser origin '${origin}' is not allowed.`)
 }
 
+/**
+ * Whether the request's Origin may call the API with a session. An Origin that is not an http(s)
+ * origin, such as a sandboxed frame's `null`, is not allowed, never an error: the CORS plugin asks
+ * this of every request, and a throw there replaces the route's response with the error's.
+ */
 export function isAllowedApiBrowserOrigin(
   policy: ResolvedSixbApiBrowserPolicy,
   request: Request
 ): boolean {
-  const origin = normalizeRequestOrigin(request)
-  return origin !== null && isAllowedOrigin(policy, request, origin)
+  try {
+    const origin = normalizeRequestOrigin(request)
+    return origin !== null && isAllowedOrigin(policy, request, origin)
+  } catch (error) {
+    if (error instanceof BrowserOriginError) return false
+    throw error
+  }
 }
 
 export function resolveApiBrowserAuthRedirectContext(

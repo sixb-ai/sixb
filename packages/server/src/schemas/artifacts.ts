@@ -1,11 +1,11 @@
 import { ARTIFACT_KINDS } from "@sixb/core/artifacts"
 import { z } from "zod"
 import { ErrorResponseSchema, PrincipalSchema } from "./common"
-import { FileContentQuerySchema, FileRefSchema } from "./files"
+import { FileRefSchema } from "./files"
 
-export const ArtifactKindSchema = z.enum(ARTIFACT_KINDS)
+const ArtifactKindSchema = z.enum(ARTIFACT_KINDS)
 
-export const ArtifactFileSchema = z.object({
+const ArtifactFileSchema = z.object({
   path: z
     .string()
     .min(1)
@@ -33,27 +33,27 @@ const SlidesOutlineSchema = z.object({
 
 const FileOutlineSchema = z.object({ kind: z.literal("file"), mediaType: z.string() })
 
-export const ArtifactOutlineSchema = z.discriminatedUnion("kind", [
+const ArtifactOutlineSchema = z.discriminatedUnion("kind", [
   DocumentOutlineSchema,
   SheetOutlineSchema,
   SlidesOutlineSchema,
   FileOutlineSchema,
 ])
 
-export const ArtifactReferenceSchema = z.object({
+const ArtifactReferenceSchema = z.object({
   address: z.string(),
   as: z.enum(["embed", "link"]),
   at: z.string(),
   resolvedVersion: z.number().int().positive(),
 })
 
-export const ArtifactWarningSchema = z.object({
+const ArtifactWarningSchema = z.object({
   code: z.string(),
   message: z.string(),
   part: z.string().optional(),
 })
 
-export const ArtifactSchema = z.object({
+const ArtifactSchema = z.object({
   id: z.string(),
   projectId: z.string(),
   kind: ArtifactKindSchema,
@@ -64,7 +64,7 @@ export const ArtifactSchema = z.object({
   updatedAt: z.string(),
 })
 
-export const ArtifactOriginSchema = z.object({ threadId: z.string(), runId: z.string() })
+const ArtifactOriginSchema = z.object({ threadId: z.string(), runId: z.string() })
 
 export const ArtifactVersionSchema = z.object({
   artifactId: z.string(),
@@ -79,7 +79,7 @@ export const ArtifactVersionSchema = z.object({
   createdAt: z.string(),
 })
 
-export const ArtifactVersionSummarySchema = ArtifactVersionSchema.pick({
+const ArtifactVersionSummarySchema = ArtifactVersionSchema.pick({
   version: true,
   title: true,
   author: true,
@@ -139,13 +139,13 @@ export const PublishedArtifactResponseSchema = z.object({
 
 export const DeleteArtifactResponseSchema = z.object({ deleted: z.literal(true) })
 
-export const ArtifactFileContentQuerySchema = FileContentQuerySchema
-
 export const ArtifactFrameResponseSchema = z.object({
-  /** The frame's base path on this API, ending in `/`; the version's entry is served under it. */
-  path: z.string(),
-  /** When the frame stops serving; ask for a new one before then. */
-  expiresAt: z.string(),
+  path: z
+    .string()
+    .describe(
+      "The frame's base path on this API, ending in /; the deck's entry is served under it"
+    ),
+  expiresAt: z.string().describe("When the frame stops serving; ask for a new one before then"),
 })
 
 export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({

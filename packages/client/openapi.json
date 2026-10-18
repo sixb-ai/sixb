@@ -36603,8 +36603,8 @@
     },
     "/api/artifacts/{artifactId}/versions/{version}/frame": {
       "post": {
-        "summary": "Open an artifact version in a frame",
-        "description": "A short-lived path that serves the version's files to a sandboxed frame, such as a deck. It expires within an hour.",
+        "summary": "Open a deck's version in a frame",
+        "description": "A short-lived path that serves a slides version's files to a sandboxed frame. It expires within an hour. Any other kind is refused with 409 artifact_kind_mismatch.",
         "tags": ["Artifacts"],
         "operationId": "createArtifactFrame",
         "security": [
@@ -36648,10 +36648,12 @@
                   "type": "object",
                   "properties": {
                     "path": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "The frame's base path on this API, ending in /; the deck's entry is served under it"
                     },
                     "expiresAt": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "When the frame stops serving; ask for a new one before then"
                     }
                   },
                   "required": ["path", "expiresAt"],
@@ -36662,6 +36664,27 @@
           },
           "404": {
             "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
             "content": {
               "application/json": {
                 "schema": {

@@ -13,7 +13,6 @@ import { zodToJsonSchema } from "zod-to-json-schema"
 import {
   type AuthInvitationRedirectContext,
   type AuthInvitationRedirectInput,
-  BrowserOriginError,
   createApiBrowserAuthContextResolver,
   createApiBrowserAuthRedirectContextResolver,
   isAllowedApiBrowserOrigin,
@@ -454,10 +453,7 @@ export function createSixbApi(server: SixbServer) {
   })
   registerHttpRoutes(app, host, {
     sharedAccess,
-    frameOrigins: {
-      ...(apiBrowserPolicy.publicOrigin ? { publicOrigin: apiBrowserPolicy.publicOrigin } : {}),
-      appOrigins: apiBrowserPolicy.allowedOrigins,
-    },
+    browserPolicy: apiBrowserPolicy,
     connectorConnections: {
       resolveReturnTo: (request, returnTo) =>
         server.resolveAuthRedirectContext(request, { returnTo }).returnTo,
@@ -516,19 +512,17 @@ function rejectDisallowedBrowserOrigin(
   }
 
   // A frame's page has an opaque origin, so what it loads arrives with `Origin: null`. Its token
-  // is the credential and no cookie counts there, so frames are the one place that is allowed.
-  if (new URL(request.url).pathname.startsWith(ARTIFACT_FRAME_ROUTE_PREFIX)) {
+  // is the credential and no cookie counts there, so frames are the one place that is allowed, and
+  // only to read, as `classifyRoute` makes them public.
+  if (
+    (request.method === "GET" || request.method === "HEAD") &&
+    new URL(request.url).pathname.startsWith(ARTIFACT_FRAME_ROUTE_PREFIX)
+  ) {
     return undefined
   }
 
-  try {
-    if (isAllowedApiBrowserOrigin(policy, request)) {
-      return undefined
-    }
-  } catch (error) {
-    if (!(error instanceof BrowserOriginError)) {
-      throw error
-    }
+  if (isAllowedApiBrowserOrigin(policy, request)) {
+    return undefined
   }
 
   return new Response(JSON.stringify({ error: "Browser origin is not allowed" }), {

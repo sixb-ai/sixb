@@ -8,8 +8,10 @@ import {
   resolveArtifactFrame,
   rewriteFrameReferences,
 } from "@sixb/core/internal/artifacts/frames"
+import { openFileRef } from "@sixb/core/internal/blob-storage"
 import type { Elysia } from "elysia"
-import { type FrameOrigins, frameContentSecurityPolicy } from "../artifacts/frame"
+import { frameContentSecurityPolicy } from "../artifacts/frame"
+import type { ResolvedSixbApiBrowserPolicy } from "../auth/browser-origin"
 import { createFileContentResponse } from "../files/content"
 
 interface FrameContext {
@@ -18,36 +20,32 @@ interface FrameContext {
 }
 
 /**
- * Serves a version's files to its sandboxed frame, under the token a frame link carries: the
- * token is the credential, so the route is public. The entry gets the kit and the runtime, and
- * the kit and runtime are served beside the files. Hidden from OpenAPI: clients receive frame
- * links, they never build them.
+ * Serves a deck's files to its sandboxed frame, under the token a frame link carries: the token
+ * is the credential, so the route is public. The entry gets the kit and the runtime, and the kit
+ * and runtime are served beside the files. Hidden from OpenAPI: clients receive frame links, they
+ * never build them.
  */
 export function registerArtifactFrameRoutes(
   app: Elysia,
   host: SixbHostView,
-  origins: FrameOrigins
+  policy: ResolvedSixbApiBrowserPolicy
 ) {
   const path = `${ARTIFACT_FRAME_ROUTE_PREFIX}:token/*`
   return app
-    .get(path, (context) => frameResponse(host, origins, context), { detail: { hide: true } })
-    .head(path, (context) => frameResponse(host, origins, context, { head: true }), {
+    .get(path, (context) => frameResponse(host, policy, context), { detail: { hide: true } })
+    .head(path, (context) => frameResponse(host, policy, context, { head: true }), {
       detail: { hide: true },
     })
 }
 
 async function frameResponse(
   host: SixbHostView,
-  origins: FrameOrigins,
+  policy: ResolvedSixbApiBrowserPolicy,
   { params, request }: FrameContext,
   options: { readonly head?: boolean } = {}
 ): Promise<Response> {
   const headers = new Headers({
-    "content-security-policy": frameContentSecurityPolicy({
-      origins,
-      requestUrl: request.url,
-      token: params.token,
-    }),
+    "content-security-policy": frameContentSecurityPolicy({ policy, request, token: params.token }),
     // The frame's origin is opaque, so its module scripts and fonts arrive with `Origin: null`.
     // Nothing here depends on cookies: the token is the credential.
     "access-control-allow-origin": "*",
@@ -60,9 +58,13 @@ async function frameResponse(
     return new Response(options.head ? null : "Not found", { status: 404, headers })
   }
 
+  // A frame link opens only in a frame. Opened as a page on the API's origin, its sandbox would
+  // still let it show dialogs and open windows that escape the sandbox, under the API's address.
+  if (request.headers.get("sec-fetch-dest") === "document") return notFound()
+
   const storage = host.storage.artifacts
   if (!storage) return notFound()
-  // An unknown or expired token and a deleted version all answer the same 404.
+  // An unknown or expired token, a deleted version, and one that is no deck all answer one 404.
   const frame = await resolveArtifactFrame({
     projectId: host.id,
     storage,
@@ -104,11 +106,13 @@ async function frameResponse(
   if (!file) return notFound()
 
   if (!lent && file.path === version.entry) {
-    const text = await new Response(await host.blobStorage.open(file.file.blobId)).text()
-    const html = await injectFrameAssets(await rewriteFrameReferences(text, frame.targets))
+    const opened = await openFileRef(host.blobStorage, file.file)
+    if (!opened) return notFound()
     headers.set("content-type", "text/html; charset=utf-8")
     headers.set("cache-control", "private, no-cache")
-    return new Response(options.head ? null : html, { headers })
+    if (options.head) return new Response(null, { headers })
+    const text = await new Response(opened.body).text()
+    return new Response(injectFrameAssets(rewriteFrameReferences(text, frame.targets)), { headers })
   }
 
   const response = await createFileContentResponse({
@@ -116,9 +120,7 @@ async function frameResponse(
     fileRef: file.file,
     disposition: "inline",
     head: options.head,
-    rangeHeader: request.headers.get("range"),
-    ifNoneMatchHeader: request.headers.get("if-none-match"),
-    ifRangeHeader: request.headers.get("if-range"),
+    request,
   })
   if (!response) return notFound()
   // A frame loads its files as the page's parts: inline, under the frame's own policy.

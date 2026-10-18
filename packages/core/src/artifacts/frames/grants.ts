@@ -5,6 +5,7 @@ import type {
   ArtifactVersionRecord,
 } from "../../storage/artifacts/types"
 import { parseArtifactAddress } from "../address"
+import { ArtifactRequestError } from "../errors"
 
 /** Path prefix of the route that serves a version's files to its frame. */
 export const ARTIFACT_FRAME_ROUTE_PREFIX = "/api/artifact-frames/"
@@ -20,28 +21,40 @@ export interface ArtifactFrame {
   readonly expiresAt: Date
 }
 
+type ReadArtifactVersion = (
+  artifactId: string,
+  version: number | "latest"
+) => Promise<ArtifactVersionRecord | null>
+
 /**
- * Issues a link that serves one version's files to a sandboxed frame, and the files it embeds from
- * other artifacts that `targets` names. The token in the link is the credential: only its hash is
- * stored. Whoever asks must already have been allowed to read the version.
+ * Issues a link that serves a deck's version to a sandboxed frame, with the files it embeds from
+ * other artifacts that `read` finds. The token in the link is the credential: only its hash is
+ * stored. Whoever asks must already have been allowed to read the version, and `read` reads as
+ * them. Only a deck opens in a frame, since the frame serves its entry as a page.
  */
 export async function createArtifactFrame(input: {
   readonly projectId: string
   readonly storage: ArtifactStorage
-  readonly artifactId: string
-  readonly version: number
-  readonly targets?: readonly ArtifactFrameTarget[]
+  readonly version: ArtifactVersionRecord
+  readonly read?: ReadArtifactVersion
   readonly now?: Date
 }): Promise<ArtifactFrame> {
+  const { version } = input
+  if (version.outline.kind !== "slides") {
+    throw new ArtifactRequestError(
+      "artifact_kind_mismatch",
+      `[Sixb] Only a deck opens in a frame; '${version.artifactId}' is a ${version.outline.kind}. Read its files instead.`
+    )
+  }
   const createdAt = input.now ?? new Date()
   const expiresAt = new Date(createdAt.getTime() + FRAME_LIFETIME_MS)
   const token = randomBytes(32).toString("base64url")
   await input.storage.createFrameGrant({
     projectId: input.projectId,
     tokenHash: hashToken(token),
-    artifactId: input.artifactId,
-    version: input.version,
-    targets: input.targets ?? [],
+    artifactId: version.artifactId,
+    version: version.version,
+    targets: input.read ? await frameTargets(version, input.read) : [],
     createdAt,
     expiresAt,
   })
@@ -54,9 +67,9 @@ export async function createArtifactFrame(input: {
  * address pins or the latest. A chart, range, or section is drawn by the app over the frame, under
  * the reader's own session, and needs nothing here.
  */
-export async function frameTargets(
+async function frameTargets(
   version: ArtifactVersionRecord,
-  read: (artifactId: string, version: number | "latest") => Promise<ArtifactVersionRecord | null>
+  read: ReadArtifactVersion
 ): Promise<ArtifactFrameTarget[]> {
   const targets: ArtifactFrameTarget[] = []
   for (const reference of version.references) {
@@ -80,8 +93,8 @@ export async function frameTargets(
 }
 
 /**
- * What a frame link serves: its version, and what it may show from other artifacts; `null` once
- * the link is unknown, expired, or its version gone.
+ * What a frame link serves: its deck's version, and what it may show from other artifacts; `null`
+ * once the link is unknown, expired, or its version gone, and for a version that is not a deck.
  */
 export async function resolveArtifactFrame(input: {
   readonly projectId: string
@@ -103,7 +116,7 @@ export async function resolveArtifactFrame(input: {
     artifactId: grant.artifactId,
     version: grant.version,
   })
-  return version ? { version, targets: grant.targets } : null
+  return version?.outline.kind === "slides" ? { version, targets: grant.targets } : null
 }
 
 function hashToken(token: string): string {
