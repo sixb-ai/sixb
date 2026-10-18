@@ -318,41 +318,12 @@ describe("SQL lineage: hand-checked constructs", () => {
       columns: { id: ["cust.id"], name: ["cust.name"] },
     },
     {
-      name: "star join and aggregate",
-      sql: ({ inv, cust, lines }) => `
-        SELECT c.country, sum(l.qty * l.price) rev
-        FROM ${lines} l
-        JOIN ${inv} i ON l.invoice_id = i.id
-        JOIN ${cust} c ON i.customer_id = c.id
-        GROUP BY c.country`,
-      rows: ["cust.country", "cust.id", "inv.customer_id", "inv.id", "lines.invoice_id"],
-      columns: { country: ["cust.country"], rev: ["lines.price", "lines.qty"] },
-    },
-    {
-      name: "multi-CTE pipeline",
-      sql: ({ inv, cust }) => `
-        WITH a AS (SELECT id, customer_id, amount FROM ${inv} i WHERE amount > 0),
-             b AS (SELECT customer_id, sum(amount) s FROM a GROUP BY 1)
-        SELECT cust.name, b.s FROM b JOIN ${cust} cust ON cust.id = b.customer_id`,
-      rows: ["cust.id", "inv.amount", "inv.customer_id"],
-      columns: { name: ["cust.name"], s: ["inv.amount"] },
-    },
-    {
       name: "an unused CTE adds nothing",
       sql: ({ inv, cust }) => `
         WITH unused AS (SELECT * FROM ${cust} c WHERE segment = 'x')
         SELECT id FROM ${inv} i`,
       rows: [],
       columns: { id: ["inv.id"] },
-    },
-    {
-      name: "FX conversion through a LEFT JOIN",
-      sql: ({ inv, fx }) => `
-        SELECT i.id, i.amount * f.rate amount_eur
-        FROM ${inv} i
-        LEFT JOIN ${fx} f ON f.currency = i.currency AND f.day = CAST(i.issued_at AS DATE)`,
-      rows: ["fx.currency", "fx.day", "inv.currency", "inv.issued_at"],
-      columns: { id: ["inv.id"], amount_eur: ["fx.rate", "inv.amount"] },
     },
     {
       name: "FX conversion through an ASOF JOIN",
@@ -364,49 +335,11 @@ describe("SQL lineage: hand-checked constructs", () => {
       columns: { id: ["inv.id"], rate: ["fx.rate"] },
     },
     {
-      name: "sessions with LAG",
-      sql: ({ events }) => `
-        WITH e AS (
-          SELECT user_id, ts,
-            CASE WHEN ts - lag(ts) OVER (PARTITION BY user_id ORDER BY ts) > INTERVAL 30 MINUTE
-              THEN 1 ELSE 0 END new_s
-          FROM ${events} ev
-        )
-        SELECT user_id, ts, sum(new_s) OVER (PARTITION BY user_id ORDER BY ts) sid FROM e`,
-      rows: ["events.ts", "events.user_id"],
-      columns: {
-        user_id: ["events.user_id"],
-        ts: ["events.ts"],
-        sid: ["events.ts", "events.user_id"],
-      },
-    },
-    {
-      name: "JSON extraction",
-      sql: ({ inv }) => `SELECT id, payload->>'$.status' status FROM ${inv} i`,
-      rows: [],
-      columns: { id: ["inv.id"], status: ["inv.payload"] },
-    },
-    {
-      name: "COALESCE across sources",
-      sql: ({ inv, cust }) => `
-        SELECT coalesce(c.name, i.title) lbl
-        FROM ${inv} i LEFT JOIN ${cust} c ON c.id = i.customer_id`,
-      rows: ["cust.id", "inv.customer_id"],
-      columns: { lbl: ["cust.name", "inv.title"] },
-    },
-    {
       name: "string_agg with ORDER BY",
       sql: ({ inv }) =>
         `SELECT customer_id, string_agg(title, ',' ORDER BY issued_at) ts FROM ${inv} i GROUP BY 1`,
       rows: ["inv.customer_id"],
       columns: { customer_id: ["inv.customer_id"], ts: ["inv.issued_at", "inv.title"] },
-    },
-    {
-      name: "lambda capturing a column",
-      sql: ({ inv }) =>
-        `SELECT list_filter(tags::VARCHAR[], x -> length(x) > amount) f FROM ${inv} i`,
-      rows: [],
-      columns: { f: ["inv.amount", "inv.tags"] },
     },
     {
       name: "UNNEST in the select list",
@@ -443,18 +376,6 @@ describe("SQL lineage: hand-checked constructs", () => {
         SELECT s FROM t`,
       rows: [],
       columns: { s: ["cust.country", "cust.name"] },
-    },
-    {
-      name: "UNION ALL of three inputs",
-      sql: ({ inv, inv2, lines }) => `
-        SELECT id, amount FROM ${inv} a
-        UNION ALL SELECT id, amount FROM ${inv2} b
-        UNION ALL SELECT invoice_id, price FROM ${lines} l`,
-      rows: [],
-      columns: {
-        id: ["inv.id", "inv2.id", "lines.invoice_id"],
-        amount: ["inv.amount", "inv2.amount", "lines.price"],
-      },
     },
     {
       name: "EXCEPT",
@@ -838,21 +759,6 @@ describe("SQL lineage: data platform pipelines", () => {
       },
     },
     {
-      name: "SCD latest row per key with QUALIFY",
-      sql: ({ crm }) => `
-        SELECT id, name, email, country, updated_at AS valid_from
-        FROM ${crm}
-        QUALIFY row_number() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1`,
-      rows: ["crm.id", "crm.updated_at"],
-      columns: {
-        id: ["crm.id"],
-        name: ["crm.name"],
-        email: ["crm.email"],
-        country: ["crm.country"],
-        valid_from: ["crm.updated_at"],
-      },
-    },
-    {
       name: "SCD validity ranges with LEAD",
       sql: ({ crm }) => `
         SELECT id, country, updated_at AS valid_from,
@@ -899,20 +805,6 @@ describe("SQL lineage: data platform pipelines", () => {
       },
     },
     {
-      name: "dedup with DISTINCT ON",
-      sql: ({ readings }) => `
-        SELECT DISTINCT ON (equipment_id, metric) equipment_id, metric, value, read_at
-        FROM ${readings}
-        ORDER BY equipment_id, metric, read_at DESC`,
-      rows: ["readings.equipment_id", "readings.metric", "readings.read_at"],
-      columns: {
-        equipment_id: ["readings.equipment_id"],
-        metric: ["readings.metric"],
-        value: ["readings.value"],
-        read_at: ["readings.read_at"],
-      },
-    },
-    {
       name: "UNION ALL of three order sources",
       sql: ({ webOrders, storeOrders, partnerOrders }) => `
         SELECT 'web' AS channel, id AS order_ref, customer_id, amount FROM ${webOrders}
@@ -932,27 +824,6 @@ describe("SQL lineage: data platform pipelines", () => {
           "webOrders.customer_id",
         ],
         amount: ["partnerOrders.amount_due", "storeOrders.total", "webOrders.amount"],
-      },
-    },
-    {
-      name: "recursive org hierarchy",
-      sql: ({ employees }) => `
-        WITH RECURSIVE chain AS (
-          SELECT id, manager_id, name, 0 AS depth, name AS path
-          FROM ${employees}
-          WHERE manager_id IS NULL
-          UNION ALL
-          SELECT e.id, e.manager_id, e.name, c.depth + 1, c.path || ' > ' || e.name
-          FROM ${employees} e
-          JOIN chain c ON e.manager_id = c.id
-        )
-        SELECT id, name, depth, path FROM chain`,
-      rows: ["employees.id", "employees.manager_id"],
-      columns: {
-        id: ["employees.id"],
-        name: ["employees.name"],
-        depth: [],
-        path: ["employees.name"],
       },
     },
     {

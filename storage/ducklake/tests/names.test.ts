@@ -7,10 +7,6 @@ import {
 } from "../src/internal/names"
 
 describe("DuckLake dataset table names", () => {
-  test("uses compact names for common lowercase dotted dataset ids", () => {
-    expect(encodeDatasetTableName("raw.erp.orders")).toBe(`${DATASET_TABLE_PREFIX}raw__erp__orders`)
-  })
-
   test("round-trips ids without collisions", () => {
     const ids = [
       "raw.erp.orders",
@@ -37,7 +33,8 @@ describe("DuckLake dataset table names", () => {
     }
   })
 
-  test("filters provider tables to dataset tables", () => {
+  test("names common dotted ids compactly and filters provider tables to dataset tables", () => {
+    expect(encodeDatasetTableName("raw.erp.orders")).toBe(`${DATASET_TABLE_PREFIX}raw__erp__orders`)
     expect(decodeDatasetTableName(`${DATASET_TABLE_PREFIX}raw__erp__orders`)).toBe("raw.erp.orders")
     expect(decodeDatasetTableName("sixb__sys__snapshots")).toBeNull()
     expect(decodeDatasetTableName("orders")).toBeNull()

@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test"
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import { LakeConcurrencyError } from "@sixb/core/lake-storage"
 import {
   CatalogMovedError,
@@ -7,7 +7,14 @@ import {
 
 const moved = () => new CatalogMovedError("[Test] The catalog moved.")
 
+/** `setImmediate` stays real under fake timers: one turn runs every pending continuation. */
+const nextTurn = () => new Promise<void>((resolve) => setImmediate(resolve))
+
 describe("rerunWhenCatalogMoves", () => {
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
   test("reruns until the transaction commits", async () => {
     const random = spyOn(Math, "random").mockReturnValue(0)
     try {
@@ -56,30 +63,42 @@ describe("rerunWhenCatalogMoves", () => {
 
   // Regression proof: wait with a plain timer. The abort then only lands after the wait.
   test("an abort stops the wait before a rerun", async () => {
+    jest.useFakeTimers()
     const random = spyOn(Math, "random").mockReturnValue(0.999)
     const controller = new AbortController()
     try {
       let attempts = 0
-      let abortedAt = 0
-      const failure = await rerunWhenCatalogMoves(
+      let settled = false
+      const failure = rerunWhenCatalogMoves(
         "raw.events",
         async (attempt) => {
           attempts = attempt
-          // The fifth rerun waits 160 ms: abort right after it starts.
-          if (attempt === 5) {
-            setTimeout(() => {
-              abortedAt = performance.now()
-              controller.abort(new Error("[Test] Aborted."))
-            }, 1)
-          }
           throw moved()
         },
         controller.signal
-      ).catch((error: unknown) => error)
+      )
+        .catch((error: unknown) => error)
+        .finally(() => {
+          settled = true
+        })
 
-      expect(String(failure)).toBe("Error: [Test] Aborted.")
+      // Reruns 2 to 4 wait about 20, 40 and 80 ms. Rerun 5 then waits about 160 ms.
+      for (let rerun = 2; rerun <= 4; rerun++) {
+        await nextTurn()
+        jest.advanceTimersToNextTimer()
+      }
+      await nextTurn()
+      expect({ attempts, waits: jest.getTimerCount(), settled }).toEqual({
+        attempts: 5,
+        waits: 1,
+        settled: false,
+      })
+
+      controller.abort(new Error("[Test] Aborted."))
+      await nextTurn()
+      expect(settled).toBe(true)
+      expect(String(await failure)).toBe("Error: [Test] Aborted.")
       expect(attempts).toBe(5)
-      expect(performance.now() - abortedAt).toBeLessThan(100)
     } finally {
       random.mockRestore()
     }

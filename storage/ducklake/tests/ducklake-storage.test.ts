@@ -83,14 +83,26 @@ describe("DuckLakeStorage", () => {
   })
 
   test("runtime close waits for accepted operations and rejects new operations", async () => {
-    const runtime = await createDuckDbRuntime()
-    const running = runtime.query("SELECT sum(sin(i)) AS total FROM range(50000000) AS t(i)")
-    const close = runtime.close()
+    // Without a spill directory, closing does no I/O: one turn settles a close that does not wait.
+    const runtime = await createDuckDbRuntime({ config: { temp_directory: "" } })
+    const release = createDeferred<void>()
+    const accepted = runtime.withExclusive(async (exclusiveRuntime) => {
+      await release.promise
+      return exclusiveRuntime.query("SELECT 42 AS answer")
+    })
+    let closed = false
+    const close = runtime.close().then(() => {
+      closed = true
+    })
 
     await expect(runtime.query("SELECT 1")).rejects.toThrow("closed")
-    await expect(
-      Promise.race([running.then(() => "operation"), close.then(() => "close")])
-    ).resolves.toBe("operation")
+    // Red check: drop the wait for accepted work from the runtime's close. It then closes the
+    // connection under the accepted operation and settles here.
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(closed).toBe(false)
+
+    release.resolve()
+    expect(await accepted).toEqual([{ answer: 42 }])
     await close
     await expect(runtime.query("SELECT 1")).rejects.toThrow("closed")
   })

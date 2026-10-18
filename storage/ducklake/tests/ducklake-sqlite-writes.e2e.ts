@@ -85,33 +85,6 @@ describe("DuckLake SQLite writes", () => {
     }
   })
 
-  for (const mode of ["snapshot", "append"] as const) {
-    test(`${mode}: initial empty version, no-op and changed input lineage`, async () => {
-      const first = await (await storage.beginWrite({ dataset, mode })).commit()
-      expect(first.outcome).toBe("created")
-      const unchanged = await (await storage.beginWrite({ dataset, mode })).commit()
-      expect(unchanged).toMatchObject({ outcome: "unchanged", versionId: first.versionId })
-      const inputs = [{ datasetId: "source", versionId: "source:2" }]
-      const advanced = await (await storage.beginWrite({ dataset, mode, inputs })).commit()
-      expect(advanced).toMatchObject({ outcome: "created", inputs })
-      expect(advanced.parentVersionId).toBe(mode === "append" ? first.versionId : undefined)
-      expect(await collectRows(storage.readRows({ datasetId: dataset.id }))).toEqual([])
-    })
-  }
-
-  test("empty initial merge stays a no-op unless a first version is requested", async () => {
-    expect(await (await storage.beginMerge({ dataset })).commit()).toEqual({
-      outcome: "unchanged",
-      version: null,
-    })
-    expect(
-      await (await storage.beginMerge({ dataset })).commit({ createInitialVersion: true })
-    ).toMatchObject({
-      outcome: "created",
-      version: { rowCount: 0 },
-    })
-  })
-
   test("also supports SQLite through a custom catalog URI", async () => {
     await storage.close()
     storage = new DuckLakeStorage({

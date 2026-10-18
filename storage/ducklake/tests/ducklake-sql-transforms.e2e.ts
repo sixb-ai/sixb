@@ -62,7 +62,13 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     await rm(rootDir, { recursive: true, force: true })
   })
 
-  test("exposes the DuckLake standard and DuckDB SQL capability", () => {
+  // A catalog changes how a version commits and reads back. Preview, validation, analysis and
+  // lineage resolution run the same on every catalog: test them once, on DuckDB's.
+  const once = (name: string, run: () => void | Promise<void>) => {
+    if (catalog === "duckdb") test(name, run)
+  }
+
+  once("exposes the DuckLake standard and DuckDB SQL capability", () => {
     expect(storage.standard).toEqual({ id: "ducklake", version: "1.0" })
     expect(storage.sql.dialect).toBe("duckdb")
     expect(storage.sql.capabilities).toEqual({
@@ -72,7 +78,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     })
   })
 
-  test("previews bounded DuckDB SQL over latest source versions", async () => {
+  once("previews bounded DuckDB SQL over latest source versions", async () => {
     await commitRows(storage, customersDataset, [
       { customerId: "cust_1", name: "Ada" },
       { customerId: "cust_2", name: "Grace" },
@@ -109,7 +115,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     ])
   })
 
-  test("previews decimal expressions without converting through a JavaScript number", async () => {
+  once("previews decimal expressions without converting through a JavaScript number", async () => {
     await commitRows(storage, ordersDataset, [
       { orderId: "ord_1", customerId: "cust_1", amount: 1 },
     ])
@@ -127,7 +133,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     ).resolves.toEqual([{ amount: "9007199254740993.123456789" }])
   })
 
-  test("pins provided source versions and resolves omitted versions to latest", async () => {
+  once("pins provided source versions and resolves omitted versions to latest", async () => {
     const version1 = await commitRows(storage, ordersDataset, [
       { orderId: "ord_1", customerId: "cust_1", amount: 10 },
     ])
@@ -161,7 +167,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     ).resolves.toEqual([{ orderId: "ord_1" }, { orderId: "ord_2" }])
   })
 
-  test("applies provider preview caps", async () => {
+  once("applies provider preview caps", async () => {
     await commitRows(
       storage,
       ordersDataset,
@@ -199,7 +205,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     expect(cappedRows[999]).toEqual({ orderId: "ord_0999" })
   })
 
-  test("rejects unknown or uncommitted source datasets", async () => {
+  once("rejects unknown or uncommitted source datasets", async () => {
     const missingDataset = defineDataset("raw.missing.orders", {
       schema: [col("orderId", "string")],
     })
@@ -281,7 +287,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     ])
   })
 
-  test("normalizes promoted BIGINT sums to the target int64 type", async () => {
+  once("normalizes promoted BIGINT sums to the target int64 type", async () => {
     const totalsDataset = defineDataset("analytics.order_totals", {
       schema: [col("customerId", "string"), col("total", "int64")],
     })
@@ -348,7 +354,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     expect(await storage.listVersions(totalsDataset.id)).toHaveLength(1)
   })
 
-  test("pins SQL execute sources before committing the target snapshot", async () => {
+  once("pins SQL execute sources before committing the target snapshot", async () => {
     const ordersVersion = await commitRows(storage, ordersDataset, [
       { orderId: "ord_1", customerId: "cust_1", amount: 10 },
     ])
@@ -380,7 +386,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     ).resolves.toEqual([{ customerId: "cust_1", orders: "1", revenue: "10" }])
   })
 
-  test("validates pinned SQL execute sources without full version hydration", async () => {
+  once("validates pinned SQL execute sources without full version hydration", async () => {
     const ordersVersion = await commitRows(storage, ordersDataset, [
       { orderId: "ord_1", customerId: "cust_1", amount: 10 },
     ])
@@ -422,7 +428,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     }
   })
 
-  test("rejects snapshot SQL execute when the target dataset is unknown", async () => {
+  once("rejects snapshot SQL execute when the target dataset is unknown", async () => {
     const missingTarget = defineDataset("analytics.missing_target", {
       schema: [col("customerId", "string")],
     })
@@ -437,28 +443,31 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     ).rejects.toThrow("Unknown SQL transform target dataset")
   })
 
-  test("rejects snapshot SQL execute when result columns do not match the target schema", async () => {
-    await commitRows(storage, ordersDataset, [
-      { orderId: "ord_1", customerId: "cust_1", amount: 10 },
-    ])
+  once(
+    "rejects snapshot SQL execute when result columns do not match the target schema",
+    async () => {
+      await commitRows(storage, ordersDataset, [
+        { orderId: "ord_1", customerId: "cust_1", amount: 10 },
+      ])
 
-    await expect(
-      storage.sql.execute({
-        sources: {
-          orders: { dataset: ordersDataset },
-        },
-        target: customerInsightsDataset,
-        mode: "snapshot",
-        sql: ({ orders }) => `
+      await expect(
+        storage.sql.execute({
+          sources: {
+            orders: { dataset: ordersDataset },
+          },
+          target: customerInsightsDataset,
+          mode: "snapshot",
+          sql: ({ orders }) => `
           SELECT
             customerId,
             customerId AS orders,
             amount AS revenue
           FROM ${orders}
         `,
-      })
-    ).rejects.toThrow("SQL transform result schema does not match target dataset")
-  })
+        })
+      ).rejects.toThrow("SQL transform result schema does not match target dataset")
+    }
+  )
 
   test("rejects duplicate keys from snapshot and append SQL transforms", async () => {
     const keyedTarget = defineDataset("analytics.keyed_sql_target", {
@@ -667,7 +676,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
 
     // Regression proof: record the SQL's own lineage without resolving it through the source
     // versions. The output then loses the upstream columns its sources were computed from.
-    test("resolves the lineage through the source versions it reads", async () => {
+    once("resolves the lineage through the source versions it reads", async () => {
       const raw = (column: string) => ({ datasetId: "raw.erp.extract", column })
       const totalsDataset = defineDataset("analytics.customer_totals", {
         schema: [col("customerId", "string"), col("total", "int64")],
@@ -720,7 +729,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
 
     // Regression proof: compare only inputs in the coordinator's no-op branch. The second
     // execute then reuses the first version, which keeps the lineage of SQL that no longer runs.
-    test("creates a new version when only the lineage changes", async () => {
+    once("creates a new version when only the lineage changes", async () => {
       await seedSources()
       const first = await executeInsights(insightsSql)
 
@@ -762,7 +771,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
 
     // Reproduce: return undefined from `analyzeExecutedLineage` for every transform the analysis
     // rejects. The PIVOT then records no lineage, and its version reads as holding any marking.
-    test("records every column a PIVOT reads as deciding each of its values", async () => {
+    once("records every column a PIVOT reads as deciding each of its values", async () => {
       const totalsDataset = totals("analytics.customer_totals")
       const unattributedDataset = totals("analytics.unattributed_totals")
       await storage.createDataset(totalsDataset)
@@ -799,7 +808,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
 
     // Regression proof: record the lineage of every column the sources expose for SQL that also
     // reads elsewhere. What it read elsewhere then follows no lineage.
-    test("records no lineage for SQL that may read beyond its sources", async () => {
+    once("records no lineage for SQL that may read beyond its sources", async () => {
       const totalsDataset = totals("analytics.customer_totals")
       const unattributedDataset = totals("analytics.unattributed_totals")
       await storage.createDataset(totalsDataset)
@@ -831,44 +840,50 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     // Regression proof: build the analysis tables from today's definitions instead of the pinned
     // version's schema. `label` then resolves to the column added after that version rather than
     // to the lateral alias that runs, and `shout` loses its dependency on `name`.
-    test("binds the pinned version's schema, where a later column would capture an alias", async () => {
-      const pinned = await commitRows(storage, customersDataset, [
-        { customerId: "cust_1", name: "Ada" },
-      ])
+    once(
+      "binds the pinned version's schema, where a later column would capture an alias",
+      async () => {
+        const pinned = await commitRows(storage, customersDataset, [
+          { customerId: "cust_1", name: "Ada" },
+        ])
 
-      await storage.createDataset(
-        defineDataset(customersDataset.id, {
-          schema: [...customersDataset.schema.columns, col("label", "string", { nullable: true })],
+        await storage.createDataset(
+          defineDataset(customersDataset.id, {
+            schema: [
+              ...customersDataset.schema.columns,
+              col("label", "string", { nullable: true }),
+            ],
+          })
+        )
+
+        const labelsDataset = defineDataset("analytics.customer_labels", {
+          schema: [col("customerId", "string"), col("label", "string"), col("shout", "string")],
         })
-      )
+        await storage.createDataset(labelsDataset)
 
-      const labelsDataset = defineDataset("analytics.customer_labels", {
-        schema: [col("customerId", "string"), col("label", "string"), col("shout", "string")],
-      })
-      await storage.createDataset(labelsDataset)
-
-      const version = await storage.sql.execute({
-        sources: { customers: { dataset: customersDataset, versionId: pinned.versionId } },
-        target: labelsDataset,
-        mode: "snapshot",
-        producer: { ...pipeline, runId: "run_1" },
-        sql: ({ customers }) => `
+        const version = await storage.sql.execute({
+          sources: { customers: { dataset: customersDataset, versionId: pinned.versionId } },
+          target: labelsDataset,
+          mode: "snapshot",
+          producer: { ...pipeline, runId: "run_1" },
+          sql: ({ customers }) => `
           SELECT customerId, upper(name) AS label, label || '!' AS shout FROM ${customers}
         `,
-      })
+        })
 
-      expect(version.lineage).toEqual({
-        rows: [],
-        columns: {
-          customerId: [customerRef("customerId")],
-          label: [customerRef("name")],
-          shout: [customerRef("name")],
-        },
-      })
-      expect(await collectRows(storage.readRows({ datasetId: labelsDataset.id }))).toEqual([
-        { customerId: "cust_1", label: "ADA", shout: "ADA!" },
-      ])
-    })
+        expect(version.lineage).toEqual({
+          rows: [],
+          columns: {
+            customerId: [customerRef("customerId")],
+            label: [customerRef("name")],
+            shout: [customerRef("name")],
+          },
+        })
+        expect(await collectRows(storage.readRows({ datasetId: labelsDataset.id }))).toEqual([
+          { customerId: "cust_1", label: "ADA", shout: "ADA!" },
+        ])
+      }
+    )
 
     /** Runs with the analysis reading `pinnedSchema(schema)` as each source's version schema. */
     async function withPinnedSchema<T>(
@@ -895,7 +910,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
 
     // Regression proof: drop the check that the analyzed result has the target's columns. The
     // version then records lineage for a column it does not have.
-    test("records no lineage when the analysis tables diverge from what runs", async () => {
+    once("records no lineage when the analysis tables diverge from what runs", async () => {
       await seedSources()
       const copyDataset = defineDataset("analytics.customer_copy", {
         schema: customersDataset.schema.columns,
@@ -922,7 +937,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
 
     // Regression proof: let a failed read of a source's version schema escape. The transform then
     // fails, although only its lineage could not be analyzed.
-    test("executes without lineage when a source's version schema cannot be read", async () => {
+    once("executes without lineage when a source's version schema cannot be read", async () => {
       await seedSources()
       const warn = spyOn(console, "warn").mockImplementation(() => {})
 
@@ -953,7 +968,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
 
     // Regression proof: let the analysis's own pick check throw. A pick that binds on the lake
     // then fails the transform.
-    test("executes without lineage when the analysis cannot build its tables", async () => {
+    once("executes without lineage when the analysis cannot build its tables", async () => {
       const namesDataset = defineDataset("analytics.customer_names", {
         schema: [col("name", "string")],
       })
@@ -988,7 +1003,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
       ])
     })
 
-    test("renders a pick as the only columns the transform can read", async () => {
+    once("renders a pick as the only columns the transform can read", async () => {
       const namesDataset = defineDataset("analytics.customer_names", {
         schema: [col("name", "string")],
       })
@@ -1034,7 +1049,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
       )
     })
 
-    test("maps sources reading the same dataset to one set of dataset column refs", async () => {
+    once("maps sources reading the same dataset to one set of dataset column refs", async () => {
       const previous = await commitRows(storage, ordersDataset, [
         { orderId: "ord_1", customerId: "cust_1", amount: 10 },
       ])
@@ -1070,7 +1085,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
       ])
     })
 
-    test("analyzes a transform on a lake without any version", async () => {
+    once("analyzes a transform on a lake without any version", async () => {
       const unknownDataset = defineDataset("raw.not_created.refunds", {
         schema: [col("orderId", "string"), col("refunded", "decimal")],
       })
@@ -1142,7 +1157,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     ])
   })
 
-  test("rejects stale expected latest versions for SQL execute commits", async () => {
+  once("rejects stale expected latest versions for SQL execute commits", async () => {
     const firstVersion = await storage.sql.execute({
       sources: {},
       target: customerInsightsDataset,
@@ -1167,7 +1182,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     ).rejects.toThrow("Optimistic commit failed")
   })
 
-  test("rejects invalid SQL execute modes before writing", async () => {
+  once("rejects invalid SQL execute modes before writing", async () => {
     await expect(
       storage.sql.execute({
         sources: {},
@@ -1249,7 +1264,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     ).resolves.toEqual([])
   })
 
-  test("consumes an initial empty source version and commits an empty target version", async () => {
+  once("consumes an initial empty source version and commits an empty target version", async () => {
     const sourceWrite = await storage.beginWrite({ dataset: ordersDataset, mode: "snapshot" })
     const sourceVersion = await sourceWrite.commit()
 
@@ -1277,7 +1292,7 @@ describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (cata
     ).resolves.toEqual([])
   })
 
-  test("creates a first version for an empty SQL append", async () => {
+  once("creates a first version for an empty SQL append", async () => {
     const version = await storage.sql.execute({
       sources: {},
       target: customerInsightsDataset,

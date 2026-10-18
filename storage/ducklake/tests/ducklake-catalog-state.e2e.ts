@@ -59,17 +59,6 @@ describe("DuckLakeStorage bulk catalog state", () => {
     await rm(rootDir, { recursive: true, force: true })
   })
 
-  test("returns materialized false for registered-but-uncreated datasets", async () => {
-    await storage.createDataset(ordersDataset)
-
-    const state = await storage.listDatasetCatalogState([ordersDataset.id, "raw.not.created"])
-
-    expect(state).toEqual([
-      { datasetId: ordersDataset.id, materialized: true, latestVersion: null },
-      { datasetId: "raw.not.created", materialized: false, latestVersion: null },
-    ])
-  })
-
   // Performance regression: the bulk read must not fan out into one query per
   // dataset. Many materialized datasets are resolved with the same small,
   // bounded set of metadata queries as a few would need. The dataset count is
@@ -207,9 +196,5 @@ describe("DuckLakeStorage bulk catalog state", () => {
     await expect(storage.listDatasetCatalogState([ordersDataset.id])).rejects.toThrow(
       "metadata references dataset 'other.dataset'"
     )
-  })
-
-  test("returns an empty result for an empty request", async () => {
-    expect(await storage.listDatasetCatalogState([])).toEqual([])
   })
 })

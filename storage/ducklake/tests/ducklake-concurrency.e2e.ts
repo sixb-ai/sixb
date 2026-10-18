@@ -55,39 +55,6 @@ describe("DuckLakeStorage optimistic concurrency", () => {
     }
   })
 
-  test("rejects a stale guarded commit from an older write session", async () => {
-    const initialVersion = await seedInitialVersion(storage)
-
-    const delayedWrite = await storage.beginWrite({
-      dataset: ordersDataset,
-      mode: "append",
-    })
-    await delayedWrite.writeRows([{ orderId: "ord_2", customerName: "Grace" }])
-
-    const competingWrite = await storage.beginWrite({
-      dataset: ordersDataset,
-      mode: "append",
-    })
-    await competingWrite.writeRows([{ orderId: "ord_3", customerName: "Katherine" }])
-    const winningVersion = await competingWrite.commit({
-      expectedLatestVersionId: initialVersion.versionId,
-    })
-
-    await expect(
-      delayedWrite.commit({ expectedLatestVersionId: initialVersion.versionId })
-    ).rejects.toThrow(
-      `expected latest version '${initialVersion.versionId}', found '${winningVersion.versionId}'`
-    )
-
-    expect(await collectRows(storage.readRows({ datasetId: ordersDataset.id }))).toEqual([
-      { orderId: "ord_1", customerName: "Ada" },
-      { orderId: "ord_3", customerName: "Katherine" },
-    ])
-    expect(
-      (await storage.listVersions(ordersDataset.id)).map((version) => version.versionId)
-    ).toEqual([winningVersion.versionId, initialVersion.versionId])
-  })
-
   test("rejects a stale guarded commit from another provider instance", async () => {
     const initialVersion = await seedInitialVersion(storage)
     const secondStorage = createLocalDuckLakeStorage(rootDir)

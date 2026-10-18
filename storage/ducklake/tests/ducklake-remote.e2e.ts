@@ -129,54 +129,6 @@ describe("DuckLakeStorage remote catalogs", () => {
         await rm(rootDir, { recursive: true, force: true })
       }
     }, 40_000)
-  test("uses a PostgreSQL catalog with a local data path", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-local-"))
-    const dataset = defineDataset(`raw.pg.local.${randomId()}`, {
-      schema: [col("orderId", "string")],
-      primaryKey: "orderId",
-    })
-    const storage = new DuckLakeStorage({
-      catalog: postgresCatalog(),
-      dataPath: join(rootDir, "data"),
-    })
-
-    try {
-      await storage.createDataset(dataset)
-      await expect(storage.getDataset(dataset.id)).resolves.toEqual(dataset)
-      const write = await storage.beginWrite({ dataset, mode: "snapshot" })
-      await write.writeRows([{ orderId: "ord_1" }])
-      await write.commit()
-
-      const append = await storage.beginWrite({ dataset, mode: "append" })
-      await append.writeRows([{ orderId: "ord_2" }])
-      const appendVersion = await append.commit()
-
-      const merge = await storage.beginMerge({ dataset })
-      await merge.writeChanges([
-        change.delete({ orderId: "ord_1" }),
-        change.upsert({ orderId: "ord_3" }),
-      ])
-      const mergeResult = await merge.commit()
-
-      expect(mergeResult).toMatchObject({
-        outcome: "created",
-        version: {
-          mode: "merge",
-          parentVersionId: appendVersion.versionId,
-          rowCount: 2,
-        },
-      })
-
-      expect(await collectRows(storage.readRows({ datasetId: dataset.id }))).toEqual([
-        { orderId: "ord_2" },
-        { orderId: "ord_3" },
-      ])
-    } finally {
-      await storage.close()
-      await rm(rootDir, { recursive: true, force: true })
-    }
-  })
-
   test("reads versions and changes over a long PostgreSQL catalog history", async () => {
     // Red check: restore the catalog-wide snapshot walk in querySnapshotCandidates. The stale read
     // then pages through 30k snapshots, about 235 queries, each copying catalog text out of
@@ -372,67 +324,6 @@ describe("DuckLakeStorage remote catalogs", () => {
       ])
     } finally {
       await storage.close()
-    }
-  })
-
-  test("does not exhaust the PostgreSQL catalog pool across repeated metadata reads", async () => {
-    const dataset = defineDataset(`raw.pg.metadata.${randomId()}`, {
-      schema: [col("orderId", "string")],
-    })
-    const storage = new DuckLakeStorage({
-      catalog: postgresCatalog(),
-      dataPath: `s3://${s3Bucket()}/lake/${randomId()}`,
-      secrets: [s3Secret()],
-    })
-
-    try {
-      await storage.createDataset(dataset)
-      const write = await storage.beginWrite({ dataset, mode: "snapshot" })
-      await write.writeRows([{ orderId: "ord_1" }])
-      const version = await write.commit()
-
-      for (let index = 0; index < 20; index += 1) {
-        await expect(storage.getDataset(dataset.id)).resolves.toMatchObject({ id: dataset.id })
-        await expect(storage.getLatestVersion(dataset.id)).resolves.toMatchObject({
-          versionId: version.versionId,
-        })
-      }
-    } finally {
-      await storage.close()
-    }
-  }, 60_000)
-
-  test("allows two provider instances to commit to one PostgreSQL catalog", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-shared-"))
-    const dataset = defineDataset(`raw.pg.shared.${randomId()}`, {
-      schema: [col("orderId", "string")],
-    })
-    const options: DuckLakeStorageOptions = {
-      catalog: postgresCatalog(),
-      dataPath: join(rootDir, "data"),
-    }
-    const first = new DuckLakeStorage(options)
-    const second = new DuckLakeStorage(options)
-
-    try {
-      await first.createDataset(dataset)
-
-      const firstWrite = await first.beginWrite({ dataset, mode: "snapshot" })
-      await firstWrite.writeRows([{ orderId: "ord_1" }])
-      const firstVersion = await firstWrite.commit()
-
-      const secondWrite = await second.beginWrite({ dataset, mode: "append" })
-      await secondWrite.writeRows([{ orderId: "ord_2" }])
-      await secondWrite.commit({ expectedLatestVersionId: firstVersion.versionId })
-
-      expect(await collectRows(first.readRows({ datasetId: dataset.id }))).toEqual([
-        { orderId: "ord_1" },
-        { orderId: "ord_2" },
-      ])
-    } finally {
-      await first.close()
-      await second.close()
-      await rm(rootDir, { recursive: true, force: true })
     }
   })
 

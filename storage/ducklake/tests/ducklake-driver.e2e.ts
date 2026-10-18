@@ -2,8 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createDuckDbRuntime, setupDuckLake } from "../src/internal/duckdb-runtime"
-import { localDuckLakeOptions } from "./test-utils"
+import { createDuckDbRuntime } from "../src/internal/duckdb-runtime"
 
 describe("DuckLake driver e2e", () => {
   test("interrupts native execution without interrupting the main connection", async () => {
@@ -88,22 +87,6 @@ describe("DuckLake driver e2e", () => {
       expect(streamed).toEqual([expected])
     } finally {
       await runtime.close()
-    }
-  })
-
-  test("loads ducklake and attaches a local catalog", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-e2e-"))
-    const runtime = await createDuckDbRuntime()
-
-    try {
-      await setupDuckLake(runtime, localDuckLakeOptions(rootDir))
-
-      await runtime.run("CREATE TABLE sixb_lake.main.sixb__sys__driver_e2e (id INTEGER)")
-      await runtime.run("INSERT INTO sixb_lake.main.sixb__sys__driver_e2e VALUES (1)")
-      expect(true).toBe(true)
-    } finally {
-      await runtime.close()
-      await rm(rootDir, { recursive: true, force: true })
     }
   })
 })
