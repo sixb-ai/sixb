@@ -5,6 +5,12 @@ import {
   latestValue,
   MAX_CHART_POINTS,
 } from "../src/artifacts/renderers/sheet/chart-data"
+import {
+  type ColumnFilter,
+  distinctValues,
+  filteredOrder,
+  readFilterInput,
+} from "../src/artifacts/renderers/sheet/filter"
 import { findMatches, MAX_FIND_MATCHES } from "../src/artifacts/renderers/sheet/find"
 import { fitWidth } from "../src/artifacts/renderers/sheet/fit"
 import { cellFormatter, compactFormatter } from "../src/artifacts/renderers/sheet/format"
@@ -22,6 +28,7 @@ import {
 import {
   hideColumn,
   INITIAL_SHEET_VIEW,
+  setColumnFilter,
   visibleColumn,
 } from "../src/artifacts/renderers/sheet/view"
 import {
@@ -322,6 +329,109 @@ describe("fitting a column", () => {
       return text.length
     })
     expect(measured).toBeLessThanOrEqual(2_001)
+  })
+})
+
+describe("filtering a sheet", () => {
+  const order = model.rows.map((_, index) => index)
+  const quarters = (filters: Record<number, ColumnFilter>, locale = "en-US") =>
+    filteredOrder(model, order, filters, locale).map((index) => model.rows[index]?.[0])
+
+  test("hides the values a values filter names, empty cells among them", () => {
+    expect(quarters({ 0: { kind: "values", excluded: ["Q1 2026", "Q3 2026"] } })).toEqual([
+      "Q4 2025",
+      "Q2 2026",
+    ])
+    // Units is empty in Q1 2026.
+    expect(quarters({ 3: { kind: "values", excluded: [""] } })).toEqual([
+      "Q4 2025",
+      "Q2 2026",
+      "Q3 2026",
+    ])
+  })
+
+  test("compares numbers and percents as the reader types them, in their locale", () => {
+    const revenue = (op: "gt" | "lt", value: string) => ({
+      1: { kind: "condition" as const, op, value },
+    })
+    expect(quarters(revenue("gt", "$4,200,000"))).toEqual(["Q1 2026", "Q3 2026"])
+    expect(quarters(revenue("lt", "0"))).toEqual(["Q2 2026"])
+    expect(quarters(revenue("gt", "4 200 000,25"), "fr-FR")).toEqual(["Q1 2026", "Q3 2026"])
+    // Margin stores 0.281; the reader types 28.1 for 28.1%.
+    expect(quarters({ 2: { kind: "condition", op: "eq", value: "28.1" } })).toEqual(["Q1 2026"])
+    expect(quarters({ 2: { kind: "condition", op: "between", value: "30", to: "27" } })).toEqual([
+      "Q1 2026",
+      "Q2 2026",
+    ])
+  })
+
+  test("compares dates by their day, a date-time's included", () => {
+    expect(
+      quarters({ 4: { kind: "condition", op: "between", value: "2026-03-31", to: "2026-06-30" } })
+    ).toEqual(["Q1 2026", "Q2 2026"])
+    expect(quarters({ 4: { kind: "condition", op: "eq", value: "2026-06-30" } })).toEqual([
+      "Q2 2026",
+    ])
+  })
+
+  test("counts an empty cell as not equal, and as nothing else", () => {
+    expect(quarters({ 3: { kind: "condition", op: "ne", value: "1200" } })).toEqual([
+      "Q1 2026",
+      "Q2 2026",
+      "Q3 2026",
+    ])
+    expect(quarters({ 3: { kind: "condition", op: "lt", value: "99999" } })).toEqual([
+      "Q4 2025",
+      "Q2 2026",
+      "Q3 2026",
+    ])
+    expect(quarters({ 3: { kind: "condition", op: "empty" } })).toEqual(["Q1 2026"])
+  })
+
+  test("keeps rows only every filter keeps, and matches none for a value of the wrong type", () => {
+    expect(
+      quarters({
+        1: { kind: "condition", op: "gt", value: "0" },
+        2: { kind: "condition", op: "lt", value: "30" },
+      })
+    ).toEqual(["Q4 2025", "Q1 2026"])
+    expect(quarters({ 1: { kind: "condition", op: "gt", value: "lots" } })).toEqual([])
+  })
+
+  test("reads typed numbers with the locale's separators", () => {
+    const revenue = model.columns[1]
+    if (!revenue) throw new Error("Expected a column.")
+    expect(readFilterInput(revenue, "en-US")("$4,120,000.5")).toBe(4120000.5)
+    expect(readFilterInput(revenue, "de-DE")("4.120.000,5 €")).toBe(4120000.5)
+    expect(readFilterInput(revenue, "en-US")("")).toBeUndefined()
+  })
+
+  test("lists a column's values, most frequent first, and how many it left out", () => {
+    const repeated = fileSheetModel("Regions", parseCsv('Region\nNorth\nSouth\nNorth\n""\nEast\n'))
+    expect(distinctValues(repeated, 0)).toEqual({
+      values: [
+        { value: "North", count: 2 },
+        { value: "", count: 1 },
+        { value: "East", count: 1 },
+        { value: "South", count: 1 },
+      ],
+      more: 0,
+    })
+    expect(distinctValues(repeated, 0, 2).more).toBe(2)
+  })
+
+  test("takes a filter off the view when it would keep every row", () => {
+    const filtered = setColumnFilter(INITIAL_SHEET_VIEW, 1, {
+      kind: "condition",
+      op: "gt",
+      value: "5",
+    })
+    expect(Object.keys(filtered.filters)).toEqual(["1"])
+    expect(
+      setColumnFilter(filtered, 1, { kind: "condition", op: "gt", value: " " }).filters
+    ).toEqual({})
+    expect(setColumnFilter(filtered, 1, { kind: "values", excluded: [] }).filters).toEqual({})
+    expect(setColumnFilter(filtered, 1, null).filters).toEqual({})
   })
 })
 

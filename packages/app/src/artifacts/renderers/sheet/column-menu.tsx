@@ -10,23 +10,26 @@ import {
   ArrowUp,
   ChevronDown,
   EyeOff,
+  ListFilter,
   MoveHorizontal,
   Pin,
   PinOff,
   X,
 } from "lucide-react"
+import { useRef } from "react"
 import { useArtifactMessages } from "../../messages"
 import type { SortDirection } from "./selection"
 
 /**
- * A column's menu, from its header: sort the sheet by it, fit it to its values, freeze the columns
- * up to it, or hide it. What the reader can't do here is left out: freezing columns wider than
- * most of the grid, or hiding the last column shown.
+ * A column's menu, from its header: sort the sheet by it, filter it, fit it to its values, freeze
+ * the columns up to it, or hide it. What the reader can't do here is left out: freezing columns
+ * wider than most of the grid, or hiding the last column shown.
  */
 export function ColumnMenu({
   name,
   sort,
   onSort,
+  onFilter,
   onFit,
   frozen,
   onFreeze,
@@ -36,6 +39,8 @@ export function ColumnMenu({
   readonly name: string
   readonly sort: SortDirection | null
   readonly onSort: (direction: SortDirection | null) => void
+  /** Opens the column's filter, which takes focus from the menu as it closes. */
+  readonly onFilter: () => void
   readonly onFit: () => void
   /** Whether the column is one of the frozen ones. */
   readonly frozen: boolean
@@ -44,6 +49,7 @@ export function ColumnMenu({
   readonly onHide?: () => void
 }) {
   const messages = useArtifactMessages().sheet
+  const filtering = useRef(false)
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger
@@ -53,7 +59,15 @@ export function ColumnMenu({
       >
         <ChevronDown className="size-3.5" aria-hidden="true" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-52">
+      <DropdownMenuContent
+        align="end"
+        className="min-w-52"
+        onCloseAutoFocus={(event) => {
+          // Focus going back to the menu's button would close the filter it opened.
+          if (filtering.current) event.preventDefault()
+          filtering.current = false
+        }}
+      >
         <DropdownMenuItem disabled={sort === "ascending"} onSelect={() => onSort("ascending")}>
           <ArrowUp aria-hidden="true" />
           {messages.sortAscending}
@@ -68,6 +82,15 @@ export function ColumnMenu({
             {messages.clearSort}
           </DropdownMenuItem>
         ) : null}
+        <DropdownMenuItem
+          onSelect={() => {
+            filtering.current = true
+            onFilter()
+          }}
+        >
+          <ListFilter aria-hidden="true" />
+          {messages.filter}
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={onFit}>
           <MoveHorizontal aria-hidden="true" />

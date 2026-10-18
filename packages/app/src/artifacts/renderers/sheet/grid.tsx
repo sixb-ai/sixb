@@ -1,5 +1,6 @@
+import { Popover, PopoverContent, PopoverTrigger } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { ArrowDown, ArrowUp, CalendarDays, Image, Link2 } from "lucide-react"
+import { ArrowDown, ArrowUp, CalendarDays, Filter, Image, Link2 } from "lucide-react"
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -16,6 +17,8 @@ import {
 import { useArtifactMessages } from "../../messages"
 import { ArtifactAddressLabel, ArtifactLink } from "../../references/references"
 import { ColumnMenu } from "./column-menu"
+import { filteredOrder } from "./filter"
+import { FilterPanel } from "./filter-panel"
 import { findMatches } from "./find"
 import { modulo, type SheetFind, type SheetFindCount } from "./find-bar"
 import { elementTextMeasure, fitWidth, type TextMeasure } from "./fit"
@@ -41,6 +44,7 @@ import {
   INITIAL_SHEET_VIEW,
   type SheetView,
   type SheetViewUpdate,
+  setColumnFilter,
   visibleColumn,
 } from "./view"
 import { prefixOffsets, visibleRowSpan, visibleSpan } from "./virtual"
@@ -61,13 +65,15 @@ export interface SheetGridStatus {
   readonly column: SheetColumn | undefined
   /** The active cell's whole value as it reads: a link's full address, a long text untruncated. */
   readonly value: string
+  /** The data rows shown: every row, or those the filters keep. */
+  readonly rows: number
 }
 
 /**
  * A read-only spreadsheet grid: column letters and row numbers, the header row and any frozen rows
- * and columns kept in view, a menu on each column that sorts, fits, freezes, and hides it, and a
- * selection of cells, rows, or columns by pointer, Shift, and keyboard that copies as TSV and as a
- * table. Only the cells in view are drawn, so a sheet of 100,000 rows scrolls like a short one.
+ * and columns kept in view, a menu on each column that sorts, filters, fits, freezes, and hides it,
+ * and a selection of cells, rows, or columns by pointer, Shift, and keyboard that copies as TSV and
+ * as a table. Only the cells in view are drawn, so a sheet of 100,000 rows scrolls like a short one.
  */
 export function SheetGrid({
   model,
@@ -131,12 +137,18 @@ export function SheetGrid({
   const dragging = useRef<"cells" | "rows" | "columns" | null>(null)
   const measure = useRef<TextMeasure | null>(null)
 
-  const order = useMemo(() => sortedOrder(model, sort, locale), [model, sort, locale])
+  const sorted = useMemo(() => sortedOrder(model, sort, locale), [model, sort, locale])
+  const order = useMemo(
+    () => filteredOrder(model, sorted, view.filters, locale),
+    [model, sorted, view.filters, locale]
+  )
+  /** The column whose filter is open. */
+  const [filtering, setFiltering] = useState<number | null>(null)
   const formatters = useMemo(
     () => model.columns.map((column) => cellFormatter(column, locale)),
     [model, locale]
   )
-  const rowCount = model.rows.length + 1
+  const rowCount = order.length + 1
   const columnCount = model.columns.length
   const range = useMemo(() => cellRange(anchor, focus), [anchor, focus])
 
@@ -225,8 +237,16 @@ export function SheetGrid({
       stats: rangeStats(range, model, order, hidden),
       column: model.columns[focus.column],
       value: cell ? (cell.href ?? cell.reference ?? cell.image ?? cell.text) : raw,
+      rows: order.length,
     })
   }, [onStatusChange, range, model, order, formatters, hidden, focus.row, focus.column])
+
+  // A filter that keeps fewer rows pulls the selection up into the rows still shown.
+  useEffect(() => {
+    const last = rowCount - 1
+    setAnchor((current) => (current.row > last ? { ...current, row: last } : current))
+    setFocus((current) => (current.row > last ? { ...current, row: last } : current))
+  }, [rowCount])
 
   useEffect(() => {
     const stop = () => {
@@ -513,11 +533,46 @@ export function SheetGrid({
             <HeaderContent
               column={model.columns[column]}
               sort={sort?.column === column ? sort.direction : null}
+              filter={
+                <Popover
+                  open={filtering === column}
+                  onOpenChange={(open) => setFiltering(open ? column : null)}
+                >
+                  <PopoverTrigger
+                    aria-label={messages.filterColumn(model.columns[column]?.name ?? "")}
+                    title={messages.filterColumn(model.columns[column]?.name ?? "")}
+                    data-filtered={view.filters[column] ? "" : undefined}
+                    className={cn(
+                      "flex size-5 shrink-0 items-center justify-center rounded outline-none transition-opacity hover:bg-muted focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:opacity-100",
+                      view.filters[column]
+                        ? "text-primary opacity-100"
+                        : "text-muted-foreground opacity-0 hover:text-foreground [[role=columnheader]:hover_&]:opacity-100 [@media(hover:none)]:opacity-100"
+                    )}
+                  >
+                    <Filter
+                      className={cn("size-3", view.filters[column] && "fill-current")}
+                      aria-hidden="true"
+                    />
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-auto p-3">
+                    <FilterPanel
+                      model={model}
+                      column={column}
+                      format={formatters[column] ?? ((value) => ({ text: value }))}
+                      filter={view.filters[column]}
+                      onChange={(filter) =>
+                        updateView((current) => setColumnFilter(current, column, filter))
+                      }
+                    />
+                  </PopoverContent>
+                </Popover>
+              }
               menu={
                 <ColumnMenu
                   name={model.columns[column]?.name ?? ""}
                   sort={sort?.column === column ? sort.direction : null}
                   onSort={(direction) => sortBy(column, direction)}
+                  onFilter={() => setFiltering(column)}
                   onFit={() => setWidth(column, fit(column))}
                   frozen={column < frozenColumns}
                   onFreeze={
@@ -781,10 +836,12 @@ function GridCell({
 function HeaderContent({
   column,
   sort,
+  filter,
   menu,
 }: {
   readonly column: SheetColumn | undefined
   readonly sort: SortDirection | null
+  readonly filter: ReactNode
   readonly menu: ReactNode
 }) {
   const Icon = sort === "ascending" ? ArrowUp : sort === "descending" ? ArrowDown : null
@@ -799,6 +856,7 @@ function HeaderContent({
       <TypeGlyph column={column} />
       {Icon ? <Icon className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" /> : null}
       <span className="flex-1" />
+      {filter}
       {menu}
     </span>
   )
