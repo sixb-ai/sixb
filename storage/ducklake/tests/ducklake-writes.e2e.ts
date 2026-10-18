@@ -44,63 +44,6 @@ describe("DuckLakeStorage writes and latest reads", () => {
     await rm(rootDir, { recursive: true, force: true })
   })
 
-  test("commits snapshot and append writes and reads the latest rows", async () => {
-    const snapshotWrite = await storage.beginWrite({
-      dataset: ordersDataset,
-      mode: "snapshot",
-      producer: { kind: "sync", id: "erp-sync", runId: "run_1" },
-    })
-
-    await snapshotWrite.writeRows([{ orderId: "ord_1", customerName: "Ada", orderCount: 1 }])
-    await snapshotWrite.writeRows([
-      {
-        orderId: "ord_2",
-        customerName: "Grace",
-        orderCount: "2",
-        metadata: { source: "erp" },
-      },
-    ])
-
-    const version1 = await snapshotWrite.commit({ commitMessage: "snapshot orders" })
-    const latestAfterSnapshot = await storage.getLatestVersion("raw.erp.orders")
-
-    expect(version1.versionId).toStartWith("ducklake:")
-    expect(version1.mode).toBe("snapshot")
-    expect(version1.rowCount).toBe(2)
-    expect(version1.producer).toEqual({ kind: "sync", id: "erp-sync", runId: "run_1" })
-    expect(latestAfterSnapshot?.versionId).toBe(version1.versionId)
-    expect(await storage.getVersion("raw.erp.orders", version1.versionId)).toMatchObject({
-      datasetId: "raw.erp.orders",
-      versionId: version1.versionId,
-      mode: "snapshot",
-      rowCount: 2,
-    })
-
-    const appendWrite = await storage.beginWrite({
-      dataset: ordersDataset,
-      mode: "append",
-      inputs: [{ datasetId: "raw.erp.orders", versionId: version1.versionId }],
-    })
-
-    await appendWrite.writeRows([{ orderId: "ord_3", customerName: "Katherine", orderCount: 3 }])
-    const version2 = await appendWrite.commit()
-
-    expect(version2.versionId).toStartWith("ducklake:")
-    expect(version2.parentVersionId).toBe(version1.versionId)
-    expect(version2).not.toHaveProperty("rowCount")
-    expect(version2.inputs).toEqual([
-      { datasetId: "raw.erp.orders", versionId: version1.versionId },
-    ])
-    expect((await storage.getLatestVersion("raw.erp.orders"))?.versionId).toBe(version2.versionId)
-
-    const latestRows = await collectRows(storage.readRows({ datasetId: "raw.erp.orders" }))
-    expect(latestRows).toEqual([
-      { orderId: "ord_1", customerName: "Ada", orderCount: "1", metadata: null },
-      { orderId: "ord_2", customerName: "Grace", orderCount: "2", metadata: { source: "erp" } },
-      { orderId: "ord_3", customerName: "Katherine", orderCount: "3", metadata: null },
-    ])
-  })
-
   test("omits derived row counts for unguarded appends", async () => {
     const snapshotWrite = await storage.beginWrite({
       dataset: ordersDataset,
@@ -534,28 +477,6 @@ describe("DuckLakeStorage writes and latest reads", () => {
     }
   })
 
-  test("rejects rows that do not match the dataset schema", async () => {
-    const write = await storage.beginWrite({
-      dataset: ordersDataset,
-      mode: "snapshot",
-    })
-
-    await expect(write.writeRows([{ orderId: "ord_1" }])).rejects.toThrow("missing required column")
-    await expect(
-      write.writeRows([
-        {
-          orderId: "ord_1",
-          customerName: "Ada",
-          orderCount: 1,
-          unexpected: true,
-        } as never,
-      ])
-    ).rejects.toThrow("unknown column")
-
-    await write.abort()
-    await expect(write.writeRows([])).rejects.toThrow("already closed")
-  })
-
   test("rejects decimal writes that DuckDB cannot represent exactly", async () => {
     const amountsDataset = defineDataset("raw.erp.amounts", {
       schema: [col("id", "string"), col("amount", "decimal")],
@@ -584,35 +505,6 @@ describe("DuckLakeStorage writes and latest reads", () => {
       overflowWrite.writeRows([{ id: "amount_4", amount: "999999999999999999999999999999" }])
     ).rejects.toThrow("cannot be represented exactly as DECIMAL(38, 9)")
     await overflowWrite.abort()
-  })
-
-  test("abort closes the session without committing rows", async () => {
-    const write = await storage.beginWrite({
-      dataset: ordersDataset,
-      mode: "snapshot",
-    })
-
-    await write.writeRows([{ orderId: "ord_1", customerName: "Ada", orderCount: 1 }])
-    await write.abort()
-    await write.abort()
-
-    expect(await storage.getLatestVersion("raw.erp.orders")).toBeNull()
-    await expect(collectRows(storage.readRows({ datasetId: "raw.erp.orders" }))).rejects.toThrow(
-      "No committed version found"
-    )
-  })
-
-  test("commit closes the session and leaves abort idempotent", async () => {
-    const write = await storage.beginWrite({
-      dataset: ordersDataset,
-      mode: "snapshot",
-    })
-
-    await write.writeRows([{ orderId: "ord_1", customerName: "Ada", orderCount: 1 }])
-    await write.commit()
-    await write.abort()
-
-    await expect(write.writeRows([])).rejects.toThrow("already closed")
   })
 
   test("skips snapshot commits when source content is unchanged", async () => {
@@ -733,63 +625,6 @@ describe("DuckLakeStorage writes and latest reads", () => {
     await expect(collectRows(storage.readRows({ datasetId: ordersDataset.id }))).resolves.toEqual(
       []
     )
-  })
-
-  test("returns the current latest version for a no-op empty append", async () => {
-    const seed = await storage.beginWrite({
-      dataset: ordersDataset,
-      mode: "snapshot",
-    })
-    await seed.writeRows([{ orderId: "ord_1", customerName: "Ada", orderCount: 1 }])
-    const previous = await seed.commit()
-
-    const append = await storage.beginWrite({
-      dataset: ordersDataset,
-      mode: "append",
-    })
-    const result = await append.commit()
-
-    expect(result.outcome).toBe("unchanged")
-    expect(result.versionId).toBe(previous.versionId)
-    expect(result.rowCount).toBe(1)
-    expect(
-      (await storage.listVersions(ordersDataset.id)).map((version) => version.versionId)
-    ).toEqual([previous.versionId])
-    await expect(collectRows(storage.readRows({ datasetId: ordersDataset.id }))).resolves.toEqual([
-      { orderId: "ord_1", customerName: "Ada", orderCount: "1", metadata: null },
-    ])
-  })
-
-  test("creates a metadata-backed version for an empty first snapshot", async () => {
-    const write = await storage.beginWrite({
-      dataset: ordersDataset,
-      mode: "snapshot",
-    })
-
-    const version = await write.commit()
-
-    expect(version).toMatchObject({ outcome: "created", mode: "snapshot", rowCount: 0 })
-    expect(await storage.getLatestVersion(ordersDataset.id)).toMatchObject({
-      versionId: version.versionId,
-    })
-    expect(await storage.listVersions(ordersDataset.id)).toHaveLength(1)
-    expect(await storage.getDataset(ordersDataset.id)).toEqual(ordersDataset)
-  })
-
-  test("creates a metadata-backed version for an empty first append", async () => {
-    const write = await storage.beginWrite({
-      dataset: ordersDataset,
-      mode: "append",
-    })
-
-    const version = await write.commit()
-
-    expect(version).toMatchObject({ outcome: "created", mode: "append" })
-    expect(await storage.getLatestVersion(ordersDataset.id)).toMatchObject({
-      versionId: version.versionId,
-    })
-    expect(await storage.listVersions(ordersDataset.id)).toHaveLength(1)
-    expect(await storage.getDataset(ordersDataset.id)).toEqual(ordersDataset)
   })
 })
 

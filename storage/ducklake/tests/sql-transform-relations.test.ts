@@ -94,9 +94,11 @@ describe("DuckLake SQL transform relations", () => {
     expect(sql).not.toContain(placeholder)
   })
 
-  test("does not render source names into SQL relation handles", () => {
-    const sourceName = "customers; drop table target"
-
+  // A source name reaches neither the SQL nor an object prototype.
+  test.each([
+    "customers; drop table target",
+    "__proto__",
+  ])("renders source %p only as its relation", (sourceName) => {
     const sql = renderOnLake({
       sources: {
         [sourceName]: {
@@ -111,24 +113,6 @@ describe("DuckLake SQL transform relations", () => {
       'select * from (SELECT * FROM "sixb_lake".main."sixb__ds__raw__crm__customers" AT (VERSION => 8))'
     )
     expect(sql).not.toContain(sourceName)
-  })
-
-  test("supports relation names that would otherwise touch object prototypes", () => {
-    const sourceName = "__proto__"
-
-    const sql = renderOnLake({
-      sources: {
-        [sourceName]: {
-          datasetId: "raw.crm.customers",
-          versionId: "ducklake:9",
-        },
-      },
-      sql: (relations) => `select * from ${relations[sourceName]}`,
-    })
-
-    expect(sql).toBe(
-      'select * from (SELECT * FROM "sixb_lake".main."sixb__ds__raw__crm__customers" AT (VERSION => 9))'
-    )
   })
 
   test("rejects fake relation placeholders", () => {

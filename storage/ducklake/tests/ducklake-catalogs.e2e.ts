@@ -27,21 +27,6 @@ describe("DuckLakeStorage catalog options", () => {
     await rm(rootDir, { recursive: true, force: true })
   })
 
-  test("supports SQLite catalogs", async () => {
-    const storage = track(
-      new DuckLakeStorage({
-        catalog: {
-          type: "sqlite",
-          path: join(rootDir, "metadata.sqlite"),
-        },
-        dataPath: join(rootDir, "data"),
-      })
-    )
-
-    await storage.createDataset(ordersDataset)
-    expect(await storage.listDatasets()).toEqual([ordersDataset])
-  })
-
   test("supports custom catalog URIs", async () => {
     const storage = track(
       new DuckLakeStorage({

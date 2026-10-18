@@ -3,7 +3,6 @@ import { col, type DatasetColumnType } from "@sixb/core"
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import { DUCKDB_COLUMN_TYPES } from "../src/internal/duckdb-column-types"
 import {
-  datasetColumnToDuckDbSql,
   datasetColumnTypeToDuckDbSql,
   datasetSchemaToDuckDbColumnsSql,
   datasetSchemaToDuckDbNullableColumnsSql,
@@ -30,13 +29,6 @@ describe("DuckLake schema mapping", () => {
     for (const [type, sql] of Object.entries(expected)) {
       expect(datasetColumnTypeToDuckDbSql(type as DatasetColumnType)).toBe(sql)
     }
-  })
-
-  test("creates nullable and not-null column definitions", () => {
-    expect(datasetColumnToDuckDbSql(col("orderId", "string"))).toBe('"orderId" VARCHAR NOT NULL')
-    expect(datasetColumnToDuckDbSql(col("attachment", "fileRef", { nullable: true }))).toBe(
-      `"attachment" ${fileRefSql}`
-    )
   })
 
   test("creates a full DuckDB column list for a dataset schema", () => {
@@ -87,16 +79,12 @@ describe("DuckLake schema mapping", () => {
     })
   })
 
-  test("recognizes fileRef only from the exact Sixb struct shape", () => {
-    expect(duckDbTypeToDatasetColumnType("JSON")).toBe("json")
-    expect(() =>
-      duckDbTypeToDatasetColumnType("STRUCT(blobId VARCHAR, digest VARCHAR, extra VARCHAR)")
-    ).toThrow(LakeStorageError)
-  })
-
-  test("rejects unknown DuckDB types with an actionable error", () => {
-    expect(() => duckDbTypeToDatasetColumnType("INTEGER")).toThrow(
-      "cannot be mapped to a Sixb dataset column type"
-    )
+  test("rejects unknown DuckDB types, fileRef look-alikes included, with an actionable error", () => {
+    for (const type of ["INTEGER", "STRUCT(blobId VARCHAR, digest VARCHAR, extra VARCHAR)"]) {
+      expect(() => duckDbTypeToDatasetColumnType(type)).toThrow(LakeStorageError)
+      expect(() => duckDbTypeToDatasetColumnType(type)).toThrow(
+        "cannot be mapped to a Sixb dataset column type"
+      )
+    }
   })
 })

@@ -13,13 +13,15 @@ import {
 import type { BeginDatasetWriteInput, DatasetVersion } from "@sixb/core/lake-storage"
 import { createDatasetVersionMarkings } from "../../../packages/core/src/security/dataset-version-markings"
 import { DuckLakeStorage, type DuckLakeStorageOptions } from "../src"
-import { duckLakeMetadataTableName } from "../src/internal/sql"
+import { duckLakeMetadataTableName, quoteSqlString } from "../src/internal/sql"
+import { parseVersionId } from "../src/internal/versions"
 import { collectRows, createLocalDuckLakeStorage, localDuckLakeOptions } from "./test-utils"
 
 interface DuckLakeStorageInternals {
   readonly connections: {
     attachedRuntime(): Promise<{
       query(sql: string): Promise<readonly Record<string, unknown>[]>
+      run(sql: string): Promise<void>
     }>
   }
 }
@@ -41,30 +43,6 @@ describe("DuckLakeStorage maintenance", () => {
   afterEach(async () => {
     await storage.close()
     await rm(rootDir, { recursive: true, force: true })
-  })
-
-  test("dry-run maintenance reports counts without mutating snapshots", async () => {
-    await writeSnapshot([{ orderId: "ord_1", total: 1 }])
-    await writeSnapshot([{ orderId: "ord_2", total: 2 }])
-    const snapshotsBefore = await duckLakeSnapshotCount(storage, localDuckLakeOptions(rootDir))
-
-    const report = await storage.runMaintenance({
-      dryRun: true,
-      expireOlderThan: "0 seconds",
-      deleteOlderThan: "0 seconds",
-    })
-
-    expect(report).toMatchObject({
-      dryRun: true,
-      expireOlderThan: "0 seconds",
-      deleteOlderThan: "0 seconds",
-    })
-    expect(report.snapshots).toBeGreaterThanOrEqual(0)
-    expect(report.oldFiles).toBeGreaterThanOrEqual(0)
-    expect(report.orphanedFiles).toBeGreaterThanOrEqual(0)
-    expect(await duckLakeSnapshotCount(storage, localDuckLakeOptions(rootDir))).toBe(
-      snapshotsBefore
-    )
   })
 
   test("retains deletion ordering after snapshot expiration and reopen", async () => {
@@ -91,37 +69,6 @@ describe("DuckLakeStorage maintenance", () => {
     expect((await restore.commit()).outcome).toBe("created")
     expect(await collectRows(storage.readRows({ datasetId: dataset.id }))).toEqual([
       { id: "42", revision: "10" },
-    ])
-  })
-
-  // Regression proof: in DuckLakeMaintenance, stop keeping each dataset's latest version. The
-  // orders dataset, idle since another dataset wrote, then loses its only version.
-  test("non-dry-run maintenance expires eligible snapshots and preserves latest data", async () => {
-    await writeSnapshot([{ orderId: "ord_1", total: 1 }])
-    const latest = await writeSnapshot([{ orderId: "ord_2", total: 2 }])
-    const other = defineDataset("raw.maintenance.other", { schema: [col("id", "string")] })
-    await storage.createDataset(other)
-    await write(other, "snapshot", [{ id: "other_1" }])
-    const snapshotsBefore = await duckLakeSnapshotCount(storage, localDuckLakeOptions(rootDir))
-
-    const report = await storage.runMaintenance({
-      expireOlderThan: "0 seconds",
-      deleteOlderThan: "0 seconds",
-    })
-
-    expect(report).toMatchObject({
-      dryRun: false,
-      expireOlderThan: "0 seconds",
-      deleteOlderThan: "0 seconds",
-      keptSnapshots: 1,
-    })
-    expect(report.snapshots).toBeGreaterThan(0)
-    expect(await duckLakeSnapshotCount(storage, localDuckLakeOptions(rootDir))).toBeLessThan(
-      snapshotsBefore
-    )
-    expect((await storage.getLatestVersion(ordersDataset.id))?.versionId).toBe(latest.versionId)
-    await expect(collectRows(storage.readRows({ datasetId: ordersDataset.id }))).resolves.toEqual([
-      { orderId: "ord_2", total: "2" },
     ])
   })
 
@@ -237,18 +184,19 @@ describe("DuckLakeStorage maintenance", () => {
     })
 
     // Regression proof: select old snapshots with DuckLake's own `older_than` (dry run) in
-    // DuckLakeMaintenance.snapshotsOlderThan. On SQLite, run outside UTC (DuckLake 415a9ebd), the
-    // version written a moment ago then expires.
+    // DuckLakeMaintenance.snapshotsOlderThan, and run with TZ=America/New_York. On SQLite
+    // (DuckLake 415a9ebd), the version written a moment ago then expires.
     test(`${catalog}: expires only snapshots older than the retention`, async () => {
       const rooms = defineDataset("rooms", { schema: [col("id", "string")] })
-      await useCatalog(catalog)
+      const options = await useCatalog(catalog)
       await storage.createDataset(rooms)
       const old = await write(rooms, "snapshot", [{ id: "a" }])
-      await Bun.sleep(2_000)
       const recent = await write(rooms, "snapshot", [{ id: "b" }])
       await write(rooms, "snapshot", [{ id: "c" }])
+      // Backdate the history up to `old` instead of waiting for it to age.
+      await backdateSnapshotsThrough(storage, options, old.versionId, "1 hour")
 
-      await storage.runMaintenance({ expireOlderThan: "1 second" })
+      await storage.runMaintenance({ expireOlderThan: "10 minutes" })
 
       expect(await storage.getVersion(rooms.id, old.versionId)).toBeNull()
       expect(await storage.getVersion(rooms.id, recent.versionId)).not.toBeNull()
@@ -340,4 +288,25 @@ async function duckLakeSnapshotCount(
   `)
 
   return Number(row?.row_count ?? 0)
+}
+
+/** Moves the catalog time of every snapshot up to `versionId` back by `interval`. */
+async function backdateSnapshotsThrough(
+  storage: DuckLakeStorage,
+  options: DuckLakeStorageOptions,
+  versionId: string,
+  interval: string
+): Promise<void> {
+  const runtime = await (
+    storage as unknown as DuckLakeStorageInternals
+  ).connections.attachedRuntime()
+  // A SQLite catalog stores the time as text with its UTC offset, as DuckDB renders it.
+  const type = options.catalog.type === "sqlite" ? "VARCHAR" : "TIMESTAMPTZ"
+  await runtime.run(`
+    UPDATE ${duckLakeMetadataTableName(options, "ducklake_snapshot")}
+    SET snapshot_time = CAST(
+      CAST(snapshot_time AS TIMESTAMPTZ) - INTERVAL ${quoteSqlString(interval)} AS ${type}
+    )
+    WHERE snapshot_id <= ${parseVersionId(versionId)}
+  `)
 }

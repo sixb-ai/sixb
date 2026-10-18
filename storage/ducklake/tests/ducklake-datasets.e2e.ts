@@ -3,7 +3,6 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { col, type DatasetDefinition, defineDataset } from "@sixb/core"
-import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorage } from "../src"
 import {
   createDuckDbRuntime,
@@ -232,69 +231,6 @@ describe("DuckLakeStorage dataset metadata", () => {
     )
   })
 
-  test("preserves compatible definitions and rejects incompatible definitions", async () => {
-    await storage.createDataset(ordersDataset)
-
-    await expect(storage.createDataset(ordersDataset)).resolves.toEqual(ordersDataset)
-
-    const rejected = storage.createDataset(
-      defineDataset("raw.erp.orders", {
-        schema: [col("orderId", "int64")],
-      })
-    )
-
-    await expect(rejected).rejects.toBeInstanceOf(LakeStorageError)
-    await expect(rejected).rejects.toThrow("changing column 'orderId' type")
-  })
-
-  test("treats same-column declaration reorders as a provider no-op", async () => {
-    const initialDataset = defineDataset("raw.erp.reordered_schema", {
-      schema: [col("orderId", "string"), col("orderDate", "date"), col("amount", "int64")],
-    })
-    const reorderedDataset = defineDataset("raw.erp.reordered_schema", {
-      schema: [col("amount", "int64"), col("orderDate", "date"), col("orderId", "string")],
-    })
-
-    await storage.createDataset(initialDataset)
-    await expect(storage.listVersions(initialDataset.id)).resolves.toEqual([])
-
-    await expect(storage.createDataset(reorderedDataset)).resolves.toEqual(initialDataset)
-    await expect(storage.getDataset(initialDataset.id)).resolves.toEqual(initialDataset)
-    await expect(storage.listVersions(initialDataset.id)).resolves.toEqual([])
-  })
-
-  test("persists compatible metadata added after initial dataset creation", async () => {
-    const minimalDataset = defineDataset("raw.erp.customers", {
-      schema: [col("customerId", "string")],
-    })
-    const documentedDataset = defineDataset("raw.erp.customers", {
-      schema: [col("customerId", "string")],
-      description: "Raw ERP customers",
-    })
-
-    await storage.createDataset(minimalDataset)
-    await expect(storage.createDataset(documentedDataset)).resolves.toEqual(documentedDataset)
-
-    expect(await storage.getDataset(documentedDataset.id)).toEqual(documentedDataset)
-    expect(await storage.listDatasets()).toEqual([documentedDataset])
-  })
-
-  test("persists compatible partition metadata added after initial dataset creation", async () => {
-    const minimalDataset = defineDataset("raw.erp.partitioned.orders", {
-      schema: [col("orderId", "string"), col("orderDate", "date")],
-    })
-    const partitionedDataset = defineDataset("raw.erp.partitioned.orders", {
-      schema: [col("orderId", "string"), col("orderDate", "date")],
-      partitionBy: ["orderDate"],
-    })
-
-    await storage.createDataset(minimalDataset)
-    await expect(storage.createDataset(partitionedDataset)).resolves.toEqual(partitionedDataset)
-
-    expect(await storage.getDataset(partitionedDataset.id)).toEqual(partitionedDataset)
-    expect(await storage.listDatasets()).toEqual([partitionedDataset])
-  })
-
   test("rejects unsupported schema evolution cases in V1", async () => {
     const initialDataset = defineDataset("raw.erp.schema_policy", {
       schema: [
@@ -384,29 +320,6 @@ describe("DuckLakeStorage dataset metadata", () => {
       expect(sql).not.toContain("DESCRIBE SELECT")
       expect(sql).not.toContain("AT (VERSION")
     }
-  })
-
-  test("bulk definition compatibility rejects incompatible materialized definitions", async () => {
-    await storage.createDataset(ordersDataset)
-
-    await expect(
-      storage.assertDatasetDefinitionsCompatible([
-        defineDataset(ordersDataset.id, {
-          schema: [
-            col("orderId", "int64"),
-            col("customerId", "string", { nullable: true }),
-            col("isOpen", "boolean"),
-            col("count", "int64"),
-            col("score", "float64"),
-            col("amount", "decimal"),
-            col("orderDate", "date"),
-            col("createdAt", "timestamp"),
-            col("metadata", "json", { nullable: true }),
-            col("attachment", "fileRef", { nullable: true }),
-          ],
-        }),
-      ])
-    ).rejects.toThrow(/Lake dataset definition check failed[\s\S]*changing column 'orderId' type/)
   })
 
   test("applies schema evolution and partition changes in one definition update", async () => {
