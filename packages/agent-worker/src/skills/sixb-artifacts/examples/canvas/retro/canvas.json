@@ -1,0 +1,158 @@
+{
+  "items": [
+    {
+      "id": "heading",
+      "type": "text",
+      "x": 40,
+      "y": -170,
+      "text": "Week 42 retro, Harbor crews",
+      "size": "xl"
+    },
+    {
+      "id": "went-well",
+      "type": "section",
+      "x": 40,
+      "y": 0,
+      "w": 500,
+      "h": 600,
+      "title": "Went well"
+    },
+    {
+      "id": "went-well-1",
+      "type": "note",
+      "x": 40,
+      "y": 80,
+      "w": 240,
+      "h": 240,
+      "text": "Parts were on the van for 9 of 10 jobs",
+      "tone": "positive"
+    },
+    {
+      "id": "went-well-2",
+      "type": "note",
+      "x": 300,
+      "y": 80,
+      "w": 240,
+      "h": 240,
+      "text": "New dispatch board cut morning calls in half",
+      "tone": "positive"
+    },
+    {
+      "id": "went-well-3",
+      "type": "note",
+      "x": 40,
+      "y": 340,
+      "w": 240,
+      "h": 240,
+      "text": "Harbor crew finished the storm backlog by Thursday",
+      "tone": "positive"
+    },
+    {
+      "id": "went-well-4",
+      "type": "note",
+      "x": 300,
+      "y": 340,
+      "w": 240,
+      "h": 240,
+      "text": "Customers liked the arrival text",
+      "tone": "positive"
+    },
+    {
+      "id": "to-improve",
+      "type": "section",
+      "x": 700,
+      "y": 0,
+      "w": 500,
+      "h": 600,
+      "title": "To improve"
+    },
+    {
+      "id": "to-improve-1",
+      "type": "note",
+      "x": 700,
+      "y": 80,
+      "w": 240,
+      "h": 240,
+      "text": "Two crews drove to the same address on Tuesday",
+      "tone": "warning"
+    },
+    {
+      "id": "to-improve-2",
+      "type": "note",
+      "x": 960,
+      "y": 80,
+      "w": 240,
+      "h": 240,
+      "text": "Lead times on compressors still surprise us",
+      "tone": "warning"
+    },
+    {
+      "id": "to-improve-3",
+      "type": "note",
+      "x": 700,
+      "y": 340,
+      "w": 240,
+      "h": 240,
+      "text": "Photos from the field app upload slowly on 4G",
+      "tone": "warning"
+    },
+    {
+      "id": "to-improve-4",
+      "type": "note",
+      "x": 960,
+      "y": 340,
+      "w": 240,
+      "h": 240,
+      "text": "The weekly report lands after Monday standup",
+      "tone": "warning"
+    },
+    {
+      "id": "try-next",
+      "type": "section",
+      "x": 1360,
+      "y": 0,
+      "w": 500,
+      "h": 600,
+      "title": "Try next"
+    },
+    {
+      "id": "try-next-1",
+      "type": "note",
+      "x": 1360,
+      "y": 80,
+      "w": 240,
+      "h": 240,
+      "text": "Auto-assign the waiting queue at 7:00",
+      "tone": "neutral"
+    },
+    {
+      "id": "try-next-2",
+      "type": "note",
+      "x": 1620,
+      "y": 80,
+      "w": 240,
+      "h": 240,
+      "text": "Order compressors when stock falls under 4",
+      "tone": "neutral"
+    },
+    {
+      "id": "try-next-3",
+      "type": "note",
+      "x": 1360,
+      "y": 340,
+      "w": 240,
+      "h": 240,
+      "text": "Upload photos on Wi-Fi at the depot",
+      "tone": "neutral"
+    },
+    {
+      "id": "vote",
+      "type": "text",
+      "x": 40,
+      "y": 640,
+      "w": 1400,
+      "text": "Pick one to try next week; Mina owns the follow-up.",
+      "size": "m"
+    }
+  ]
+}

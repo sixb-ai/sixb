@@ -1,6 +1,23 @@
 /// <reference path="./text-assets.d.ts" />
 import type { AgentSkillDefinition } from "@sixb/core"
+import canvasGuide from "./sixb-artifacts/canvas.md" with { type: "text" }
 import documentGuide from "./sixb-artifacts/document.md" with { type: "text" }
+import onboardingFirstJob from "./sixb-artifacts/examples/canvas/onboarding-flow/boards/first-job.html" with {
+  type: "text",
+}
+import onboardingRegion from "./sixb-artifacts/examples/canvas/onboarding-flow/boards/region.html" with {
+  type: "text",
+}
+import onboardingShared from "./sixb-artifacts/examples/canvas/onboarding-flow/boards/shared.css" with {
+  type: "text",
+}
+import onboardingWelcome from "./sixb-artifacts/examples/canvas/onboarding-flow/boards/welcome.html" with {
+  type: "text",
+}
+import onboardingCanvas from "./sixb-artifacts/examples/canvas/onboarding-flow/canvas.json" with {
+  type: "text",
+}
+import retroCanvas from "./sixb-artifacts/examples/canvas/retro/canvas.json" with { type: "text" }
 import incidentReport from "./sixb-artifacts/examples/document/incident-report/document.md" with {
   type: "text",
 }
@@ -89,6 +106,13 @@ export const BUILT_IN_SKILLS: readonly AgentSkillDefinition[] = Object.freeze([
     "examples/page/service-explorer/data/service.json": text(serviceExplorerData),
     "examples/page/dispatch-board/index.html": text(dispatchBoardPage),
     "examples/page/dispatch-board/data/dispatch.json": text(dispatchBoardData),
+    "canvas.md": canvasGuide,
+    "examples/canvas/onboarding-flow/canvas.json": text(onboardingCanvas),
+    "examples/canvas/onboarding-flow/boards/welcome.html": text(onboardingWelcome),
+    "examples/canvas/onboarding-flow/boards/region.html": text(onboardingRegion),
+    "examples/canvas/onboarding-flow/boards/first-job.html": text(onboardingFirstJob),
+    "examples/canvas/onboarding-flow/boards/shared.css": text(onboardingShared),
+    "examples/canvas/retro/canvas.json": text(retroCanvas),
   }),
 ])
 

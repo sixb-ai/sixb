@@ -281,6 +281,66 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
   )
 
   test(
+    "checks each of a canvas's boards at its own size, naming the board",
+    async () => {
+      // A phone board that reads well, and one whose fixed-width box is wider than the board.
+      // Reproduce by opening every board at 1280px: the narrow board's box fits, and no
+      // warning names it.
+      mkdirSync(join(root, "canvas/boards"), { recursive: true })
+      const board = (body: string) =>
+        `<!doctype html><html><head><link rel="stylesheet" href="shared.css"></head><body><main>${body}</main></body></html>`
+      const fine = board('<h1>Welcome</h1><p class="lede">Every job, one tap away.</p>')
+      const broken = board(
+        '<h1>Regions</h1><div style="width: 560px">North, Harbor, Keystone</div>'
+      )
+      writeFileSync(join(root, "canvas/boards/welcome.html"), fine)
+      writeFileSync(join(root, "canvas/boards/region.html"), broken)
+      writeFileSync(join(root, "canvas/boards/shared.css"), "h1 { letter-spacing: -0.02em }")
+      const result = await checkLayout({
+        layout: "canvas",
+        boards: [
+          {
+            id: "welcome",
+            file: "boards/welcome.html",
+            w: 390,
+            h: 844,
+            html: new TextEncoder().encode(fine),
+          },
+          {
+            id: "region",
+            file: "boards/region.html",
+            w: 390,
+            h: 844,
+            html: new TextEncoder().encode(broken),
+          },
+        ],
+        handle: {
+          sandbox: new LocalBashSandbox(root),
+          env: {
+            SIXB_PLAYWRIGHT: playwright,
+            ...(process.env.SIXB_CHROMIUM ? { SIXB_CHROMIUM: process.env.SIXB_CHROMIUM } : {}),
+          },
+        },
+        directory: join(root, "canvas"),
+        files: ["canvas.json", "boards/welcome.html", "boards/region.html", "boards/shared.css"],
+        name: "canvas",
+        signal: AbortSignal.timeout(90_000),
+      })
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+      expect(result.screenshots).toEqual([
+        ".sixb/agent/checks/canvas/boards/welcome.png",
+        ".sixb/agent/checks/canvas/boards/region.png",
+      ])
+      const wide = result.warnings.filter((warning) => warning.code === "layout_wide")
+      expect(wide.map((warning) => warning.part)).toEqual(["region"])
+      expect(wide[0]?.message).toStartWith("Board 'region': div “North, Harbor, Keystone”")
+      // The boards found the kit and their shared stylesheet: nothing failed to load.
+      expect(result.warnings.filter((warning) => warning.code === "layout_load_error")).toEqual([])
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
     "reports what it found when the deck stops answering, and leaves no browser behind",
     async () => {
       // Reproduce by removing check.cjs's bounds and deadline: the check waits on the frozen

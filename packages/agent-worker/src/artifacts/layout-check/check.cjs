@@ -1,15 +1,17 @@
-// The Agent's layout check, run in the sandbox by publish_artifact: it serves a deck or a page as
-// the API serves its frame, with the kit and the runtime, and opens it in the sandbox's headless
-// Chromium. A deck shows at 1280×720 with each slide filling the page, and every slide is
-// measured in each of its themes with the layout probe and screenshot in the first. A page loads at
-// 1280px and at a phone's 390px, is measured whole in each theme, its top 4000px, and screenshot
-// at each width. It writes one line of JSON:
+// The Agent's layout check, run in the sandbox by publish_artifact: it serves a deck, a page, or a
+// canvas's boards as the API serves its frame, with the kit and the runtime, and opens them in the
+// sandbox's headless Chromium. A deck shows at 1280×720 with each slide filling the page, and every
+// slide is measured in each of its themes with the layout probe and screenshot in the first. A page
+// loads at 1280px and at a phone's 390px, is measured whole in each theme, its top 4000px, and
+// screenshot at each width. A canvas's boards load each at its own size, measured as a page is and
+// screenshot as boards/<id>.png. It writes one line of JSON:
 // { layout, slides, problems, errors, screenshots, stopped? } or { skipped }.
 //
 //   node check.cjs <directory> <output directory> <library directory> <deadline in ms> <layout>
 //
 // The library holds what the worker installs beside this script: deck.css, page.css, runtime.js,
-// probe.js. The output directory holds entry.html, the entry with the kit and runtime; files.json,
+// probe.js. The output directory holds entries.json, each page the check opens by its path, with
+// the kit and runtime in it; boards.json, a canvas's boards and their sizes; files.json,
 // the paths the version publishes: only those are served, since the reader gets only those; and
 // themes.json, the themes the reader sees it in: Sixb's light and dark, or the mode its
 // theme.json pins, with its tokens.
@@ -98,7 +100,8 @@ function loadPlaywright() {
 }
 
 function serve() {
-  const entry = fs.readFileSync(path.join(out, "entry.html"))
+  // Each page the check opens, with the kit and the runtime in it, by its path in the version.
+  const entries = JSON.parse(fs.readFileSync(path.join(out, "entries.json"), "utf8"))
   const published = new Set(JSON.parse(fs.readFileSync(path.join(out, "files.json"), "utf8")))
   const root = path.resolve(deck)
   const server = http.createServer((request, response) => {
@@ -109,7 +112,8 @@ function serve() {
       response.writeHead(204).end()
       return
     }
-    if (pathname === "/" || pathname === "/index.html") body = entry
+    const entry = entries[pathname === "/" ? "index.html" : pathname.slice(1)]
+    if (entry) file = path.join(out, entry)
     else if (FRAME_FILES.has(pathname)) file = path.join(lib, pathname.slice("/__sixb/".length))
     else if (published.has(pathname.slice(1))) file = path.join(root, pathname.slice(1))
     try {
@@ -121,7 +125,7 @@ function serve() {
       response.writeHead(404).end()
       return
     }
-    const type = TYPES[path.extname(file ?? "index.html").toLowerCase()]
+    const type = TYPES[path.extname(file).toLowerCase()]
     response.writeHead(200, type ? { "content-type": type } : {}).end(body)
   })
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)))
@@ -143,7 +147,7 @@ async function main() {
     server.close()
     return { skipped: "no_browser", detail: String(error?.message ?? error).slice(0, 300) }
   }
-  const noun = layout === "page" ? "the page" : "the deck"
+  const noun = { canvas: "the canvas", page: "the page" }[layout] ?? "the deck"
   let step = noun
   let stalled = false
   try {
@@ -197,6 +201,30 @@ async function main() {
           { protocol: PROTOCOL, method, params }
         )
       )
+    if (layout === "canvas") {
+      // Each board at its own size, as the canvas shows it, in each theme.
+      const boards = JSON.parse(fs.readFileSync(path.join(out, "boards.json"), "utf8"))
+      fs.mkdirSync(path.join(out, "boards"), { recursive: true })
+      for (const board of boards) {
+        step = `board '${board.id}'`
+        await page.setViewportSize({ width: board.w, height: Math.min(board.h, PAGE_HEIGHT) })
+        await load(`http://127.0.0.1:${port}/${board.file.split("/").map(encodeURIComponent).join("/")}`)
+        for (const [index, name] of Object.keys(themes).entries()) {
+          step = `board '${board.id}' in ${name} mode`
+          await send("theme", themes[name])
+          await settle()
+          for (const problem of await within(step, page.evaluate(`(${probe})("page")`))) {
+            problems.push({ ...problem, board: board.id, theme: name })
+          }
+          if (index === 0) {
+            const file = path.join(out, "boards", `${board.id}.png`)
+            await page.screenshot({ path: file, timeout: STEP_MS })
+            screenshots.push(file)
+          }
+        }
+      }
+      return findings()
+    }
     if (layout === "page") {
       for (const view of VIEWS) {
         step = `the page at ${view.width}px`

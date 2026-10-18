@@ -203,6 +203,28 @@ describe("publish_artifact", () => {
     })
   })
 
+  test("points the Agent at a canvas's board screenshots", () => {
+    // Reproduce by wording a canvas's check as a deck's: the Agent looks for slide-NN.png.
+    const output = {
+      artifactId: "art_0nb0ard1ng",
+      version: 1,
+      kind: "canvas",
+      title: "Field app onboarding",
+      warnings: [],
+      layoutCheck: {
+        screenshots: [
+          ".sixb/agent/checks/art_0nb0ard1ng-v1/boards/welcome.png",
+          ".sixb/agent/checks/art_0nb0ard1ng-v1/boards/region.png",
+        ],
+      },
+    }
+    expect(tools().create.toModelOutput?.(output, context)).toMatchObject({
+      value: expect.stringContaining(
+        "Layout check: each board as the reader sees it, at its own size, in light mode or the mode its theme.json pins, is .sixb/agent/checks/art_0nb0ard1ng-v1/boards/<id>.png (2 boards)."
+      ),
+    })
+  })
+
   test("publishes one Markdown file as a document and any other file under its name", async () => {
     write("drafts/brief.md", "# Brief\n\nShort.\n")
     write("exports/regions.csv", "region,visits\nNorth,1284\n")
@@ -469,6 +491,8 @@ describe("the sixb-artifacts skill's examples", () => {
       "examples/page/fleet-planner",
       "examples/page/service-explorer",
       "examples/page/dispatch-board",
+      "examples/canvas/onboarding-flow",
+      "examples/canvas/retro",
     ])
     // slides.md says the decks use its layouts and classes alone; a legend's swatch is one.
     const decks = examples.filter(
@@ -479,7 +503,7 @@ describe("the sixb-artifacts skill's examples", () => {
       expect(String(deck.contents)).not.toMatch(/<style|style="(?!--swatch:)/)
     }
     for (const directory of directories) {
-      const kind = directory.split("/")[1] as "document" | "sheet" | "slides" | "page"
+      const kind = directory.split("/")[1] as "document" | "sheet" | "slides" | "page" | "canvas"
       expect(await publish({ path: directory, kind, title: directory })).toMatchObject({
         version: 1,
         kind,

@@ -11,7 +11,7 @@ import {
   type Storage,
 } from "@sixb/core"
 import { ARTIFACT_KINDS, ARTIFACT_THEME_FILE, parseArtifactTheme } from "@sixb/core/artifacts"
-import { frameLayout, HTML_ENTRY } from "@sixb/core/internal/artifacts/frames"
+import { frameLayout } from "@sixb/core/internal/artifacts/frames"
 import {
   ARTIFACT_LIMITS,
   artifactVersionWarnings,
@@ -277,23 +277,38 @@ async function publish(
       error
     )
   }
-  // A published deck or page is laid out in the sandbox's browser, so the Agent sees what the
-  // reader will, and fixes it in its next version.
+  // A published deck, page, or canvas is laid out in the sandbox's browser, so the Agent sees what
+  // the reader will, and fixes it in its next version.
   const layout = frameLayout(kind)
-  const web = layout ? sources.find((source) => source.path === HTML_ENTRY) : undefined
-  const webEntry = contents.find((file) => file.path === HTML_ENTRY)
+  const { outline, entry } = published.version
+  const root = layout ? sources.find((source) => source.path === entry) : undefined
+  const bytesOf = (path: string) => contents.find((file) => file.path === path)?.bytes
   const themeFile = contents.find((file) => file.path === ARTIFACT_THEME_FILE)
   // Publishing has read it already: a version with a theme.json it refused is not here.
   const theme = themeFile ? parseArtifactTheme(new TextDecoder().decode(themeFile.bytes)) : null
+  // What the check opens: a canvas's boards, each at its own size, or the entry.
+  const pages =
+    outline.kind === "canvas"
+      ? {
+          layout: "canvas" as const,
+          boards: outline.items.flatMap((item) => {
+            const html = item.type === "board" ? bytesOf(item.file) : undefined
+            return item.type === "board" && html
+              ? [{ id: item.id, file: item.file, w: item.w, h: item.h, html }]
+              : []
+          }),
+        }
+      : layout && bytesOf(entry)
+        ? { layout, entry: bytesOf(entry) as Uint8Array }
+        : null
   let check: LayoutCheck | undefined
-  if (layout && web && webEntry) {
+  if (root && pages && (pages.layout !== "canvas" || pages.boards.length > 0)) {
     try {
       check = await checkLayout({
         handle,
-        layout,
-        directory: posix.dirname(web.absolutePath),
+        ...pages,
+        directory: posix.dirname(root.absolutePath),
         files: contents.map((file) => file.path),
-        entry: webEntry.bytes,
         name: `${published.artifact.id}-v${published.version.version}`,
         ...(theme && "theme" in theme ? { theme: theme.theme } : {}),
         signal,
@@ -443,17 +458,25 @@ function publishSummary(output: JsonValue, tool: PublishToolName): string {
   const check = output.layoutCheck
   if (typeof check === "object" && check !== null && !Array.isArray(check)) {
     const screenshots = Array.isArray(check.screenshots) ? check.screenshots.map(String) : []
-    const page = output.kind === "page"
+    const kind = output.kind
     if (typeof check.skipped === "string") {
       lines.push(
-        `The layout check did not run: ${check.skipped}. ${page ? "Read index.html and its scripts closely." : "Read index.html slide by slide."}`
+        `The layout check did not run: ${check.skipped}. ${
+          kind === "page"
+            ? "Read index.html and its scripts closely."
+            : kind === "canvas"
+              ? "Read each board's HTML closely."
+              : "Read index.html slide by slide."
+        }`
       )
     } else if (screenshots.length > 0) {
       const directory = posix.dirname(screenshots[0] ?? "")
       lines.push(
-        page
+        kind === "page"
           ? `Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/desktop.png at 1280px and ${directory}/phone.png at 390px, each its top 4000px. Open them with view_file, fix what the warnings name, and publish the next version.`
-          : `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with view_file, fix what the warnings name, and publish the next version.`
+          : kind === "canvas"
+            ? `Layout check: each board as the reader sees it, at its own size, in light mode or the mode its theme.json pins, is ${directory}/<id>.png (${screenshots.length} boards). Open them with view_file, fix what the warnings name, and publish the next version.`
+            : `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with view_file, fix what the warnings name, and publish the next version.`
       )
     }
   }
