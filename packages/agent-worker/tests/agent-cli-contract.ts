@@ -1142,73 +1142,163 @@ async function runCli(
   return implementation.run(args, env)
 }
 
+/** Bounds each child process: a CLI that leaves a timer or handle open never exits by itself. */
+const PROCESS_TIMEOUT_MS = 10_000
+
 /**
  * What the in-process contract cannot show: the runtime's own exit status, stdio, fetch, form
- * upload, and stream pipeline, from a child process of that runtime.
+ * upload, and stream pipeline, from a child process of that runtime, and that each command family
+ * runs on it and exits.
  */
 export function runAgentCliProcessSmoke(runtime: AgentCliProcess): void {
-  test(`keeps exit codes, stdio, requests, uploads, and downloads on ${runtime.runtime}`, async () => {
-    const api = startTestApi((request) => {
-      if (request.url.pathname.endsWith("/files/content")) return new Response("downloaded bytes")
-      switch (`${request.method} ${request.url.pathname}`) {
-        case "GET /api/project":
-          return json({ id: "contract-project" })
-        case "POST /api/objects/query":
-          return json({ objects: [], hasMore: false })
-        case "POST /api/files":
-          return json({ ok: true })
-      }
-    })
-    const tempDir = await mkdtemp(join(tmpdir(), "sixb-agent-cli-process-"))
-    try {
-      const uploadPath = join(tempDir, "upload.txt")
-      const downloadPath = join(tempDir, "download.txt")
-      await writeFile(uploadPath, "upload contents")
-      const run = (...args: string[]) => runCommand([...runtime.command, ...args], apiEnv(api))
-
-      const [version, doctor, invalid, missing, get, upload, download] = await Promise.all([
-        run("--version"),
-        run("doctor"),
-        run("objects", "inspect", "Customer", "customer-1", "--depth", "9"),
-        run("workflows", "get", "missing"),
-        run("objects", "get", "Customer", "customer-1"),
-        run("files", "upload", uploadPath),
-        run(
-          "files",
-          "download",
-          "workflow-run",
-          "run-1",
-          "--path",
-          "/out",
-          "--output",
-          downloadPath
-        ),
-      ])
-
-      expect(version).toEqual({ exitCode: 0, stdout: `${runtime.version}\n`, stderr: "" })
-      expect(doctor).toMatchObject({ exitCode: 0, stderr: "" })
-      expect(JSON.parse(doctor.stdout).javascript.name).toBe(runtime.runtime)
-      expect(invalid).toMatchObject({ exitCode: 2, stdout: "" })
-      expect(JSON.parse(invalid.stderr).error.code).toBe("invalid_arguments")
-      expect(missing).toMatchObject({ exitCode: 3, stdout: "" })
-      expect(JSON.parse(missing.stderr).error).toMatchObject({ code: "http_error", status: 404 })
-      for (const result of [get, upload, download]) {
-        expect(result).toMatchObject({ exitCode: 0, stderr: "" })
-      }
-      const query = api.requests.find((request) => request.url.pathname === "/api/objects/query")
-      expect(query?.body).toEqual({
-        query: { kind: "refs", refs: [{ objectTypeId: "Customer", primaryId: "customer-1" }] },
-        includeTotal: false,
+  test(
+    `keeps exit codes, stdio, requests, uploads, and downloads on ${runtime.runtime}`,
+    async () => {
+      const actionRun = { id: "run-1", actionId: "dispatch-work-order", status: "succeeded" }
+      const workflowRun = { id: "workflow-run-1", workflowId: "review-case", status: "running" }
+      const latest = { at: "2026-01-01T00:00:00.000Z", value: 1200 }
+      const api = startTestApi((request) => {
+        if (request.url.pathname.endsWith("/files/content")) return new Response("downloaded bytes")
+        switch (`${request.method} ${request.url.pathname}`) {
+          case "POST /api/files":
+            return json({ ok: true })
+          case "GET /api/objects/Device/fan-1/telemetry/rpm/latest":
+            return json(latest)
+          case "POST /api/actions/dispatch-work-order":
+            return json(actionRun)
+          case "POST /api/workflows/review-case/runs":
+            return json(workflowRun)
+        }
+        return graphApi(request)
       })
-      const files = api.requests.find((request) => request.url.pathname === "/api/files")
-      expect(String(files?.body)).toContain("upload contents")
-      expect(await readFile(downloadPath, "utf8")).toBe("downloaded bytes")
-      expect((await readdir(tempDir)).sort()).toEqual(["download.txt", "upload.txt"])
-    } finally {
-      api.close()
-      await rm(tempDir, { recursive: true, force: true })
-    }
-  })
+      const tempDir = await mkdtemp(join(tmpdir(), "sixb-agent-cli-process-"))
+      try {
+        const uploadPath = join(tempDir, "upload.txt")
+        const downloadPath = join(tempDir, "download.txt")
+        const queryPath = join(tempDir, "query.json")
+        const dataPath = join(tempDir, "data.json")
+        await Promise.all([
+          writeFile(uploadPath, "upload contents"),
+          writeFile(
+            queryPath,
+            '{"kind":"refs","refs":[{"objectTypeId":"WorkOrder","primaryId":"wo-1040"}]}'
+          ),
+          writeFile(dataPath, '{"value":"sent"}'),
+        ])
+        const run = (...args: string[]) => runCommand([...runtime.command, ...args], apiEnv(api))
+
+        const [
+          version,
+          doctor,
+          invalid,
+          missing,
+          get,
+          upload,
+          download,
+          query,
+          inspect,
+          search,
+          telemetry,
+          action,
+          workflow,
+        ] = await Promise.all([
+          run("--version"),
+          run("doctor"),
+          run("objects", "inspect", "Customer", "customer-1", "--depth", "9"),
+          run("workflows", "get", "missing"),
+          run("objects", "get", "Customer", "customer-1"),
+          run("files", "upload", uploadPath),
+          run(
+            "files",
+            "download",
+            "workflow-run",
+            "run-1",
+            "--path",
+            "/out",
+            "--output",
+            downloadPath
+          ),
+          run("objects", "query", "--file", queryPath),
+          run("objects", "inspect", "Customer", "customer-1"),
+          run("objects", "search", "trail shoes", "--type", "Product", "--limit", "5"),
+          run("telemetry", "latest", "Device", "fan-1", "rpm"),
+          run(
+            "actions",
+            "request",
+            "dispatch-work-order",
+            "--subject-type",
+            "ServiceCase",
+            "--subject-id",
+            "case-1",
+            "--file",
+            dataPath
+          ),
+          run("workflows", "start", "review-case", "--file", dataPath),
+        ])
+
+        expect(version).toEqual({ exitCode: 0, stdout: `${runtime.version}\n`, stderr: "" })
+        expect(doctor).toMatchObject({ exitCode: 0, stderr: "" })
+        expect(JSON.parse(doctor.stdout).javascript.name).toBe(runtime.runtime)
+        expect(invalid).toMatchObject({ exitCode: 2, stdout: "" })
+        expect(JSON.parse(invalid.stderr).error.code).toBe("invalid_arguments")
+        expect(missing).toMatchObject({ exitCode: 3, stdout: "" })
+        expect(JSON.parse(missing.stderr).error).toMatchObject({ code: "http_error", status: 404 })
+        const succeeded = [
+          get,
+          upload,
+          download,
+          query,
+          inspect,
+          search,
+          telemetry,
+          action,
+          workflow,
+        ]
+        for (const result of succeeded) {
+          expect(result).toMatchObject({ exitCode: 0, stderr: "" })
+        }
+        const queries = api.requests
+          .filter((request) => request.url.pathname === "/api/objects/query")
+          .map((request) => request.body)
+        expect(queries).toContainEqual({
+          query: { kind: "refs", refs: [{ objectTypeId: "Customer", primaryId: "customer-1" }] },
+          includeTotal: false,
+        })
+        expect(JSON.parse(query.stdout).objects).toEqual([
+          expect.objectContaining({ objectTypeId: "WorkOrder", primaryId: "wo-1040" }),
+        ])
+        expect(JSON.parse(inspect.stdout).graph).toMatchObject({ objectCount: 4, linkCount: 3 })
+        expect(JSON.parse(search.stdout)).toMatchObject({ objects: [], hasMore: false })
+        expect(queries).toContainEqual(
+          expect.objectContaining({
+            query: expect.objectContaining({ kind: "vector", profile: "content", k: 5 }),
+          })
+        )
+        expect(JSON.parse(telemetry.stdout)).toEqual(latest)
+        expect(JSON.parse(action.stdout)).toEqual(actionRun)
+        expect(JSON.parse(workflow.stdout)).toEqual(workflowRun)
+        const bodyOf = (pathname: string) =>
+          api.requests.find((request) => request.url.pathname === pathname)?.body
+        expect(bodyOf("/api/actions/dispatch-work-order")).toMatchObject({
+          params: { value: "sent" },
+          subject: { kind: "object", objectTypeId: "ServiceCase", primaryId: "case-1" },
+        })
+        expect(bodyOf("/api/workflows/review-case/runs")).toEqual({ input: { value: "sent" } })
+        expect(String(bodyOf("/api/files"))).toContain("upload contents")
+        expect(await readFile(downloadPath, "utf8")).toBe("downloaded bytes")
+        expect((await readdir(tempDir)).sort()).toEqual([
+          "data.json",
+          "download.txt",
+          "query.json",
+          "upload.txt",
+        ])
+      } finally {
+        api.close()
+        await rm(tempDir, { recursive: true, force: true })
+      }
+    },
+    PROCESS_TIMEOUT_MS + 5_000
+  )
 }
 
 async function runCommand(
@@ -1221,78 +1311,92 @@ async function runCommand(
     stdout: "pipe",
     stderr: "pipe",
   })
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ])
-  return { exitCode, stdout, stderr }
+  let timedOut = false
+  const killTimer = setTimeout(() => {
+    timedOut = true
+    child.kill("SIGKILL")
+  }, PROCESS_TIMEOUT_MS)
+  try {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
+    if (timedOut) {
+      throw new Error(
+        `'${command.slice(1).join(" ")}' did not exit within ${PROCESS_TIMEOUT_MS}ms and was killed.`
+      )
+    }
+    return { exitCode, stdout, stderr }
+  } finally {
+    clearTimeout(killTimer)
+  }
 }
 
 function startGraphApi(): TestApi {
-  return startTestApi((request) => {
-    if (request.method === "GET" && request.url.pathname === "/api/project") {
-      return json({ id: "contract-project", name: "Contract project" })
-    }
-    if (request.method === "GET" && request.url.pathname === "/api/object-types") {
-      return json(objectTypes)
-    }
-    if (request.method === "GET" && request.url.pathname.startsWith("/api/object-types/")) {
-      const objectTypeId = decodeURIComponent(
-        request.url.pathname.slice("/api/object-types/".length)
-      )
-      const definition = objectTypes.find((value) => value.id === objectTypeId)
-      return definition ? json(definition) : json({ error: "Object type not found" }, 404)
-    }
-    if (request.method === "POST" && request.url.pathname === "/api/objects/query") {
-      const body = asRecord(request.body)
-      const query = asRecord(body.query)
-      const refs = query.kind === "refs" ? asRecords(query.refs) : []
-      return json({
-        objects: refs.flatMap((ref) => {
-          const row = findObject(String(ref.objectTypeId), String(ref.primaryId))
-          return row ? [row] : []
-        }),
-        hasMore: false,
-        plan: { mode: "pushdown", steps: [] },
-      })
-    }
-    if (request.method === "POST" && request.url.pathname === "/api/objects/query/links") {
-      const body = asRecord(request.body)
-      const query = asRecord(body.query)
-      const refs = query.kind === "refs" ? asRecords(query.refs) : []
-      const selected = new Set(
-        refs.map((ref) => identity(String(ref.objectTypeId), String(ref.primaryId)))
-      )
-      const direction = String(body.direction ?? "both")
-      const linkId = typeof body.linkId === "string" ? body.linkId : undefined
-      const incident = links.filter((link) => {
-        const outgoing = selected.has(identity(link.source.objectTypeId, link.source.primaryId))
-        const incoming = selected.has(identity(link.target.objectTypeId, link.target.primaryId))
-        const matchesDirection =
-          direction === "outgoing"
-            ? outgoing
-            : direction === "incoming"
-              ? incoming
-              : outgoing || incoming
-        return matchesDirection && (linkId === undefined || link.linkId === linkId)
-      })
-      const responseObjects = new Map<string, (typeof objects)[number]>()
-      if (body.includeObjects === true) {
-        for (const ref of refs) {
-          const row = findObject(String(ref.objectTypeId), String(ref.primaryId))
+  return startTestApi(graphApi)
+}
+
+function graphApi(request: RecordedRequest): Response | undefined {
+  if (request.method === "GET" && request.url.pathname === "/api/project") {
+    return json({ id: "contract-project", name: "Contract project" })
+  }
+  if (request.method === "GET" && request.url.pathname === "/api/object-types") {
+    return json(objectTypes)
+  }
+  if (request.method === "GET" && request.url.pathname.startsWith("/api/object-types/")) {
+    const objectTypeId = decodeURIComponent(request.url.pathname.slice("/api/object-types/".length))
+    const definition = objectTypes.find((value) => value.id === objectTypeId)
+    return definition ? json(definition) : json({ error: "Object type not found" }, 404)
+  }
+  if (request.method === "POST" && request.url.pathname === "/api/objects/query") {
+    const body = asRecord(request.body)
+    const query = asRecord(body.query)
+    const refs = query.kind === "refs" ? asRecords(query.refs) : []
+    return json({
+      objects: refs.flatMap((ref) => {
+        const row = findObject(String(ref.objectTypeId), String(ref.primaryId))
+        return row ? [row] : []
+      }),
+      hasMore: false,
+      plan: { mode: "pushdown", steps: [] },
+    })
+  }
+  if (request.method === "POST" && request.url.pathname === "/api/objects/query/links") {
+    const body = asRecord(request.body)
+    const query = asRecord(body.query)
+    const refs = query.kind === "refs" ? asRecords(query.refs) : []
+    const selected = new Set(
+      refs.map((ref) => identity(String(ref.objectTypeId), String(ref.primaryId)))
+    )
+    const direction = String(body.direction ?? "both")
+    const linkId = typeof body.linkId === "string" ? body.linkId : undefined
+    const incident = links.filter((link) => {
+      const outgoing = selected.has(identity(link.source.objectTypeId, link.source.primaryId))
+      const incoming = selected.has(identity(link.target.objectTypeId, link.target.primaryId))
+      const matchesDirection =
+        direction === "outgoing"
+          ? outgoing
+          : direction === "incoming"
+            ? incoming
+            : outgoing || incoming
+      return matchesDirection && (linkId === undefined || link.linkId === linkId)
+    })
+    const responseObjects = new Map<string, (typeof objects)[number]>()
+    if (body.includeObjects === true) {
+      for (const ref of refs) {
+        const row = findObject(String(ref.objectTypeId), String(ref.primaryId))
+        if (row) responseObjects.set(identity(row.objectTypeId, row.primaryId), row)
+      }
+      for (const link of incident) {
+        for (const ref of [link.source, link.target]) {
+          const row = findObject(ref.objectTypeId, ref.primaryId)
           if (row) responseObjects.set(identity(row.objectTypeId, row.primaryId), row)
         }
-        for (const link of incident) {
-          for (const ref of [link.source, link.target]) {
-            const row = findObject(ref.objectTypeId, ref.primaryId)
-            if (row) responseObjects.set(identity(row.objectTypeId, row.primaryId), row)
-          }
-        }
       }
-      return json({ objects: [...responseObjects.values()], links: incident, hasMore: false })
     }
-  })
+    return json({ objects: [...responseObjects.values()], links: incident, hasMore: false })
+  }
 }
 
 function startTestApi(handler: TestApiHandler): TestApi {

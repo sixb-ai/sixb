@@ -173,16 +173,28 @@ describe("workspace auth lifecycle", () => {
   })
 
   test("aborts initialization before credentials expire without a session handle", async () => {
-    // Regression proof: remove the unattached timer guard; this never signals failure.
+    // Regression proof: remove the unattached timer guard; the valid renewal is requested instead
+    // and nothing fails.
     jest.useFakeTimers()
     const token = grant("initial", 61_000)
-    const f = fixture(async () => token.value)
+    const renewed = grant("renewed")
+    let calls = 0
+    let renewing!: () => void
+    const renewal = new Promise<void>((resolve) => {
+      renewing = resolve
+    })
+    const f = fixture(async () => {
+      if (++calls === 1) return token.value
+      renewing()
+      return renewed.value
+    })
     const failed = new Promise<void>((resolve) =>
       f.controller.signal.addEventListener("abort", () => resolve(), { once: true })
     )
     await f.auth.prepare()
     jest.advanceTimersByTime(1_000)
-    await failed
+    await Promise.race([failed, renewal])
+    expect(calls).toBe(1)
     await expect(f.auth.close()).rejects.toThrow("authentication could not be confirmed")
     expect(f.updates).toEqual([])
     expect(token.revocations()).toBe(1)

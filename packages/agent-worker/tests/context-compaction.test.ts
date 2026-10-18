@@ -176,31 +176,38 @@ describe("agent conversation context estimation", () => {
       })
     ).resolves.toBe(fallback)
 
-    // A provider call that reports no output tokens is no anchor, however large its input: the
-    // full request is estimated. Regression proof: drop `outputTokens > 0` from the anchor guard.
-    await storage.aiUsage.recordModelCall({
-      id: "usage_zero",
-      projectId,
-      executionId,
-      attempt: 1,
-      callId: "call_zero",
-      requesterGroupIds: [],
-      providerId: model.providerId,
-      requestedModelId: model.modelId,
-      responseId: "response_zero",
-      usage: { inputTokens: 1_000_000, outputTokens: 0 },
-      occurredAt: new Date("2026-08-27T12:03:00.000Z"),
-    })
-    await expect(
-      estimateAgentConversationInputTokens({
-        context: { id: projectId, storage: requireWorkerStorage(storage) },
-        plan,
-        threadContext: { checkpoint: null, retainedMessages: messages, modelMessages: messages },
-        systemPrompt: "System",
-        tools: [],
+    // A provider call that reports no output or no input tokens is no anchor, however large the
+    // other count: the full request is estimated. Regression proof: drop `outputTokens > 0` or
+    // `inputTokens > 0` from the anchor guard.
+    const empty = [
+      { inputTokens: 1_000_000, outputTokens: 0 },
+      { inputTokens: 0, outputTokens: 1_000_000 },
+    ]
+    for (const [index, usage] of empty.entries()) {
+      await storage.aiUsage.recordModelCall({
+        id: `usage_zero_${index}`,
+        projectId,
+        executionId,
+        attempt: 1,
+        callId: `call_zero_${index}`,
+        requesterGroupIds: [],
+        providerId: model.providerId,
+        requestedModelId: model.modelId,
+        responseId: `response_zero_${index}`,
+        usage,
+        occurredAt: new Date(`2026-08-27T12:0${3 + index}:00.000Z`),
       })
-    ).resolves.toBe(
-      estimateAgentContextRequestTokens({ systemPrompt: "System", tools: [], messages }).tokens
-    )
+      await expect(
+        estimateAgentConversationInputTokens({
+          context: { id: projectId, storage: requireWorkerStorage(storage) },
+          plan,
+          threadContext: { checkpoint: null, retainedMessages: messages, modelMessages: messages },
+          systemPrompt: "System",
+          tools: [],
+        })
+      ).resolves.toBe(
+        estimateAgentContextRequestTokens({ systemPrompt: "System", tools: [], messages }).tokens
+      )
+    }
   })
 })
