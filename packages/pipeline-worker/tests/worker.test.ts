@@ -549,6 +549,18 @@ describe("PipelineWorker", () => {
     await seedDatasetVersion(sixb.lakeStorage as InMemoryLakeStorage, rawCustomersDataset, [
       { id: "cust_1", name: "Ada" },
     ])
+    // A retried job is held for its backoff, so an empty claim cannot tell it from a failed one.
+    const queue = { failed: 0, retried: 0 }
+    const retry = sixb.queues.pipelines.retry.bind(sixb.queues.pipelines)
+    const fail = sixb.queues.pipelines.fail.bind(sixb.queues.pipelines)
+    sixb.queues.pipelines.retry = async (input) => {
+      queue.retried += 1
+      return retry(input)
+    }
+    sixb.queues.pipelines.fail = async (input) => {
+      queue.failed += 1
+      return fail(input)
+    }
 
     const worker = new PipelineWorker(sixb)
     await enqueuePipelineRun(sixb, { pipelineId: "customers", runId: "run-aborts-late" })
@@ -556,13 +568,12 @@ describe("PipelineWorker", () => {
     await worker.start()
 
     try {
-      await waitForRunFinished(sixb, "run-aborts-late")
-
-      const claimed = await sixb.queues.pipelines.claim({
-        projectId: sixb.id,
-        workerId: "observer",
-      })
-      expect(claimed).toHaveLength(0)
+      // The queue settles the job last, after the run finished.
+      await waitFor(
+        async () => queue.failed + queue.retried,
+        (count) => count > 0
+      )
+      expect(queue).toEqual({ failed: 1, retried: 0 })
     } finally {
       await worker.stop()
     }

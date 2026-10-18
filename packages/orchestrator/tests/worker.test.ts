@@ -167,6 +167,17 @@ async function waitFor(fn: () => Promise<boolean> | boolean, timeoutMs = 2_000):
   throw new Error("Timed out waiting for condition.")
 }
 
+/**
+ * Fires the one pending fake timer at its delay, and shows it was not due sooner. Asserted here,
+ * not left to the next `waitFor`: fake timers stop `Date.now()`, so that one never times out.
+ */
+function fireTimerDueIn(delayMs: number): void {
+  jest.advanceTimersByTime(delayMs - 1)
+  expect(jest.getTimerCount()).toBe(1)
+  jest.advanceTimersByTime(1)
+  expect(jest.getTimerCount()).toBe(0)
+}
+
 /** Lets queued work run for a few event-loop turns, to show that something did not happen. */
 async function waitForTurns(turns: number): Promise<void> {
   for (let turn = 0; turn < turns; turn += 1) {
@@ -255,9 +266,9 @@ test("retained event schedules catch up with backpressure and replay a failed en
       await waitForTurns(20)
       expect(deliveries).toBe(1)
       release()
-      // The failed batch waits out a retry backoff before it is dispatched again.
+      // The failed batch waits out a 250ms retry backoff before it is dispatched again.
       await waitFor(() => jest.getTimerCount() === 1)
-      jest.runOnlyPendingTimers()
+      fireTimerDueIn(250)
       await waitFor(() => acknowledged === 150)
     })
     expect(attempts).toBe(151)
@@ -875,9 +886,9 @@ describe("OrchestratorWorker", () => {
       await quietly(async () => {
         await startWorker(eventRuntime, queues, routes)
         await eventRuntime.append({ events: [makeScheduleTriggeredEvent(daily.id)] })
-        // The batch failed on its sync sibling and waits out a retry backoff.
+        // The batch failed on its sync sibling and waits out a 250ms retry backoff.
         await waitFor(() => pipelineDispatches === 1 && jest.getTimerCount() === 1)
-        jest.runOnlyPendingTimers()
+        fireTimerDueIn(250)
         await waitFor(() => pipelineDispatches === 2)
       })
 

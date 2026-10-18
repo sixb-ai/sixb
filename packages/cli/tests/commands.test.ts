@@ -15,6 +15,15 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
+/** Runs `sixb` in its own process, from the repository root. */
+function runCli(args: readonly string[]) {
+  return runCliToCompletion({
+    cmd: ["bun", resolve(import.meta.dir, "..", "src", "index.tsx"), ...args],
+    cwd: resolve(import.meta.dir, "..", "..", ".."),
+    timeoutMs: FAST_CLI_TIMEOUT_MS,
+  })
+}
+
 function usageError(args: readonly string[]): CliUsageError {
   try {
     parseCliArgs(args)
@@ -64,6 +73,19 @@ describe("sixb command line", () => {
     expect(parseCliArgs(["api", "--help"])).toMatchObject({ kind: "help", help: { path: ["api"] } })
   })
 
+  // Reproduce: render the root help whatever the path in `renderHelp` (src/ui/index.tsx).
+  test("renders a command's own help, not the root help", async () => {
+    const parsed = parseCliArgs(["service-account", "token"])
+    if (parsed.kind !== "help") throw new Error("Expected help.")
+
+    const help = await runInProcess(() => renderHelp(parsed.help))
+
+    expect(help.output).toContain(
+      "sixb service-account token <list|create|revoke> <service-account-id>"
+    )
+    expect(help.output).not.toContain("Real-time digital twin framework")
+  })
+
   test.each([
     // Removed commands stay removed.
     [["start"], "Unknown command 'start'"],
@@ -102,19 +124,8 @@ describe("sixb command line", () => {
   })
 
   // The process boundary: scripts read the error from stderr and the exit code.
-  test("emits structured errors when a management command requests JSON", async () => {
-    const result = await runCliToCompletion({
-      cmd: [
-        "bun",
-        resolve(import.meta.dir, "..", "src", "index.tsx"),
-        "profile",
-        "list",
-        "--unknown-option",
-        "--json",
-      ],
-      cwd: resolve(import.meta.dir, "..", "..", ".."),
-      timeoutMs: FAST_CLI_TIMEOUT_MS,
-    })
+  test.concurrent("emits structured errors when a management command requests JSON", async () => {
+    const result = await runCli(["profile", "list", "--unknown-option", "--json"])
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toBe("")
@@ -125,6 +136,27 @@ describe("sixb command line", () => {
         hint: "sixb profile list",
       },
     })
+  })
+
+  // Reproduce: render the help without `error.message` in src/index.tsx's catch.
+  test.concurrent("prints a usage error above the command's help", async () => {
+    const result = await runCli(["status", "--unknown-option"])
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toContain("Unknown option '--unknown-option' for 'status'.")
+    expect(result.stdout).toContain("sixb status")
+    expect(result.stderr).toBe("")
+  })
+
+  // Reproduce: pass `concurrency: undefined` to runWorker in src/index.tsx, or skip
+  // `renderCliError` in its catch.
+  test.concurrent("hands a command its flags, and prints the failure it throws", async () => {
+    const entry = resolve(import.meta.dir, "fixtures", "valid-project", "sixb.config.ts")
+    const result = await runCli(["worker", "sync", "--entry", entry, "--concurrency=3=4"])
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("Invalid worker concurrency '3=4'")
+    expect(result.stderr).toBe("")
   })
 
   test("gives instance commands the shared usage contract, and their help without a profile", async () => {

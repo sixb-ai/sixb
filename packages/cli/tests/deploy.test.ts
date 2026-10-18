@@ -18,6 +18,7 @@ import { parseCliArgs } from "../src/lib/command-line"
 import { buildDeployRelease, deployPublicOrigins } from "../src/lib/deploy-release"
 import { packSource, resolveBunVersion } from "../src/lib/deploy-source"
 import { type ProductionRole, productionRoleFacts } from "../src/lib/production-roles"
+import { FAST_CLI_TIMEOUT_MS, runCliToCompletion } from "./shared/cli-process"
 import { runInProcess } from "./shared/in-process"
 
 const fixtureProject = resolve(import.meta.dir, "fixtures", "deploy-project")
@@ -681,6 +682,31 @@ export default {
     ])
     expect(service(built, "api").http?.port).toBe(3012)
     expect(service(built, "app").http?.publicOrigin).toBe("https://ops.example.com")
+  })
+
+  // The flags as `sixb` hands them over. Reproduce: pass `dryRun: false` to runDeploy in
+  // src/index.tsx, and the target is checked and deployed to.
+  test("plans without deploying when the command line asks for a dry run", async () => {
+    const { root, recordPath } = await readOnlyProject()
+    const result = await runCliToCompletion({
+      cmd: [
+        "bun",
+        resolve(import.meta.dir, "..", "src", "index.tsx"),
+        "deploy",
+        "--dry-run",
+        "--json",
+      ],
+      cwd: root,
+      env: { DEPLOY_RECORD: recordPath },
+      timeoutMs: FAST_CLI_TIMEOUT_MS,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(await readFile(recordPath, "utf8").catch(() => "")).toBe("")
+    expect((JSON.parse(result.stdout) as DeployRelease).target).toEqual({
+      kind: "test",
+      location: "sixb@test-server",
+    })
   })
 
   test("prints the release for people", async () => {
