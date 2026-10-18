@@ -3,23 +3,21 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { builtAppOutdir, hasBuiltApp, resolveProductionPaths } from "../src/lib/production"
+import {
+  type CompletedCliProcess,
+  FAST_CLI_TIMEOUT_MS,
+  runCliToCompletion,
+} from "./shared/cli-process"
 
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
 
-function runCli(args: readonly string[]): { exitCode: number; stdout: string; stderr: string } {
-  const result = Bun.spawnSync({
+function runCli(args: readonly string[]): Promise<CompletedCliProcess> {
+  return runCliToCompletion({
     cmd: ["bun", cliEntry, ...args],
     cwd: repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
+    timeoutMs: FAST_CLI_TIMEOUT_MS,
   })
-
-  return {
-    exitCode: result.exitCode,
-    stdout: Buffer.from(result.stdout).toString("utf-8"),
-    stderr: Buffer.from(result.stderr).toString("utf-8"),
-  }
 }
 
 const tempDirs: string[] = []
@@ -57,8 +55,8 @@ afterEach(async () => {
 })
 
 describe("sixb command dispatch", () => {
-  test("lists split production commands in help", () => {
-    const result = runCli(["help"])
+  test("lists split production commands in help", async () => {
+    const result = await runCli(["help"])
 
     expect(result.exitCode).toBe(0)
     for (const command of ["api", "app", "scheduler", "orchestrator", "rules", "worker"]) {
@@ -70,41 +68,41 @@ describe("sixb command dispatch", () => {
     expect(result.stderr).toBe("")
   })
 
-  test("dispatches a split production command instead of treating it as unknown", () => {
-    const result = runCli(["api", "--entry", "fixtures/missing/sixb.config.ts"])
+  test("dispatches a split production command instead of treating it as unknown", async () => {
+    const result = await runCli(["api", "--entry", "fixtures/missing/sixb.config.ts"])
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).not.toContain("Unknown command: api")
     expect(result.stderr).toBe("")
   })
 
-  test("does not expose the removed production supervisor command", () => {
-    const result = runCli(["start"])
+  test("does not expose the removed production supervisor command", async () => {
+    const result = await runCli(["start"])
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toContain("Unknown command 'start'")
     expect(result.stderr).toBe("")
   })
 
-  test("does not expose the removed auth status alias", () => {
-    const result = runCli(["auth", "status"])
+  test("does not expose the removed auth status alias", async () => {
+    const result = await runCli(["auth", "status"])
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toContain("Unknown command 'auth'")
     expect(result.stderr).toBe("")
   })
 
-  test("does not expose the redundant create command", () => {
-    const result = runCli(["create", "my-project"])
+  test("does not expose the redundant create command", async () => {
+    const result = await runCli(["create", "my-project"])
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toContain("Unknown command 'create'")
     expect(result.stderr).toBe("")
   })
 
-  test("shows scoped help without running a command group", () => {
+  test("shows scoped help without running a command group", async () => {
     for (const group of ["profile", "token", "service-account", "db", "lake"]) {
-      const result = runCli([group])
+      const result = await runCli([group])
 
       expect(result.exitCode).toBe(0)
       expect(result.stdout).toContain("Usage")
@@ -112,7 +110,7 @@ describe("sixb command dispatch", () => {
       expect(result.stderr).toBe("")
     }
 
-    const nestedGroup = runCli(["service-account", "token"])
+    const nestedGroup = await runCli(["service-account", "token"])
     expect(nestedGroup.exitCode).toBe(0)
     expect(nestedGroup.stdout).toContain(
       "sixb service-account token <list|create|revoke> <service-account-id>"
@@ -120,13 +118,13 @@ describe("sixb command dispatch", () => {
     expect(nestedGroup.stderr).toBe("")
   })
 
-  test("supports contextual help for local command leaves", () => {
+  test("supports contextual help for local command leaves", async () => {
     for (const args of [
       ["token", "create", "--help"],
       ["help", "token", "create"],
       ["api", "--help"],
     ]) {
-      const result = runCli(args)
+      const result = await runCli(args)
       expect(result.exitCode).toBe(0)
       expect(result.stdout).toContain("Usage")
       expect(result.stdout).not.toContain("Real-time digital twin framework")
@@ -134,7 +132,7 @@ describe("sixb command dispatch", () => {
     }
   })
 
-  test("rejects unknown, missing, and duplicate options before running a command", () => {
+  test("rejects unknown, missing, and duplicate options before running a command", async () => {
     const cases = [
       { args: ["status", "--unknown-option"], message: "Unknown option '--unknown-option'" },
       { args: ["status", "--profile"], message: "--profile requires a value" },
@@ -155,15 +153,15 @@ describe("sixb command dispatch", () => {
     ]
 
     for (const entry of cases) {
-      const result = runCli(entry.args)
+      const result = await runCli(entry.args)
       expect(result.exitCode).toBe(2)
       expect(result.stdout).toContain(entry.message)
       expect(result.stderr).toBe("")
     }
   })
 
-  test("emits structured errors when a management command requests JSON", () => {
-    const result = runCli(["profile", "list", "--unknown-option", "--json"])
+  test("emits structured errors when a management command requests JSON", async () => {
+    const result = await runCli(["profile", "list", "--unknown-option", "--json"])
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toBe("")
@@ -176,8 +174,8 @@ describe("sixb command dispatch", () => {
     })
   })
 
-  test("uses the shared usage contract for instance connection options", () => {
-    const result = runCli([
+  test("uses the shared usage contract for instance connection options", async () => {
+    const result = await runCli([
       "project",
       "show",
       "--api-url",

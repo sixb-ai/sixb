@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
+import { FAST_CLI_TIMEOUT_MS, runCliToCompletion } from "./shared/cli-process"
 
 const tempDirs: string[] = []
 
@@ -32,23 +33,19 @@ async function runDbCommand(
   const logPath = join(tempDir, "operations.log")
   tempDirs.push(tempDir)
 
-  const result = Bun.spawnSync({
+  const result = await runCliToCompletion({
     cmd: ["bun", cliEntry, "db", subcommand, ...entryArgs],
     cwd: options.cwd ?? repoRoot,
-    env: {
-      ...process.env,
-      SIXB_CLI_TEST_LOG: logPath,
-    },
-    stdout: "pipe",
-    stderr: "pipe",
+    env: { SIXB_CLI_TEST_LOG: logPath },
+    timeoutMs: FAST_CLI_TIMEOUT_MS,
   })
 
   const logSource = await readFile(logPath, "utf-8").catch(() => "")
 
   return {
     exitCode: result.exitCode,
-    stdout: Buffer.from(result.stdout).toString("utf-8"),
-    stderr: Buffer.from(result.stderr).toString("utf-8"),
+    stdout: result.stdout,
+    stderr: result.stderr,
     logEntries: logSource
       .trim()
       .split("\n")

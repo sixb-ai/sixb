@@ -1,27 +1,21 @@
 import { describe, expect, test } from "bun:test"
 import { resolve } from "node:path"
+import {
+  type CompletedCliProcess,
+  FAST_CLI_TIMEOUT_MS,
+  runCliToCompletion,
+} from "./shared/cli-process"
 
-function runCheckFixture(fixtureName: string): {
-  exitCode: number
-  stdout: string
-  stderr: string
-} {
+function runCheckFixture(fixtureName: string): Promise<CompletedCliProcess> {
   const repoRoot = resolve(import.meta.dir, "..", "..", "..")
   const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
   const fixtureEntry = resolve(import.meta.dir, "fixtures", fixtureName, "sixb.config.ts")
 
-  const result = Bun.spawnSync({
+  return runCliToCompletion({
     cmd: ["bun", cliEntry, "check", "--entry", fixtureEntry],
     cwd: repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
+    timeoutMs: FAST_CLI_TIMEOUT_MS,
   })
-
-  return {
-    exitCode: result.exitCode,
-    stdout: Buffer.from(result.stdout).toString("utf-8"),
-    stderr: Buffer.from(result.stderr).toString("utf-8"),
-  }
 }
 
 async function spawnCheckWithTimeout(
@@ -52,8 +46,8 @@ async function spawnCheckWithTimeout(
 }
 
 describe("sixb check", () => {
-  test("passes for a valid project", () => {
-    const result = runCheckFixture("valid-project")
+  test("passes for a valid project", async () => {
+    const result = await runCheckFixture("valid-project")
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("Sixb is healthy")
@@ -63,19 +57,19 @@ describe("sixb check", () => {
     expect(result.stderr).toBe("")
   })
 
-  test("reports an invalid Agent Skill before a deploy", () => {
+  test("reports an invalid Agent Skill before a deploy", async () => {
     // Skills used to be read only when the agent worker started, so `sixb check` passed.
-    const result = runCheckFixture("invalid-skill-project")
+    const result = await runCheckFixture("invalid-skill-project")
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout + result.stderr).toContain("[Sixb] Agent Skill 'skills/acme-style'")
   })
 
-  test("fails the command when a provider probe fails", () => {
+  test("fails the command when a provider probe fails", async () => {
     // The old command exited 0 for everything but an empty ontology, because its four
     // provider rows were one hardcoded `{ ok: true }`. That made it useless as a deploy
     // gate: a missing database passed.
-    const result = runCheckFixture("unreachable-storage")
+    const result = await runCheckFixture("unreachable-storage")
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("Sixb has issues")
@@ -83,8 +77,8 @@ describe("sixb check", () => {
   })
 
   // Reproduce: drop `markings` from the failed checks in commands/check.tsx; this exits 0.
-  test("fails the command when a SQL step gives a projected column undeclared markings", () => {
-    const result = runCheckFixture("misdeclared-markings-project")
+  test("fails the command when a SQL step gives a projected column undeclared markings", async () => {
+    const result = await runCheckFixture("misdeclared-markings-project")
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("Sixb has issues")
