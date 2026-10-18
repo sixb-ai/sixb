@@ -22,6 +22,11 @@ describe("linkedin managed OAuth", () => {
   test("builds the confidential web authorization URL with framework state", () => {
     const connector = linkedin(DEFAULT_OPTIONS)
     expect(connector.authentication.pkce).toBe("disabled")
+    // LinkedIn documents manual grant removal but no OAuth revocation endpoint for this flow.
+    expect(connector.authentication.revoke).toBeUndefined()
+    expect(LINKEDIN_PERMITTED_SERVICES_URL).toBe(
+      "https://www.linkedin.com/psettings/permitted-services"
+    )
     const authorizationUrl = connector.authentication.authorizationUrl(AUTHORIZATION_CONTEXT, {
       state: "attempt.signed-state",
       codeChallenge: "pkce-challenge",
@@ -120,15 +125,5 @@ describe("linkedin managed OAuth", () => {
     ).rejects.toMatchObject({
       kind: "terminal",
     })
-  })
-
-  test("exposes manual grant removal without claiming provider revocation support", () => {
-    const authentication = linkedin(DEFAULT_OPTIONS).authentication
-
-    // LinkedIn documents manual removal but no OAuth revocation endpoint for this flow.
-    expect(authentication.revoke).toBeUndefined()
-    expect(LINKEDIN_PERMITTED_SERVICES_URL).toBe(
-      "https://www.linkedin.com/psettings/permitted-services"
-    )
   })
 })

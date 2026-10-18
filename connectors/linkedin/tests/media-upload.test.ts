@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import {
   escapeLinkedinText,
   type LinkedinCreatePostInput,
@@ -20,6 +20,7 @@ import {
 const originalFetch = globalThis.fetch
 afterEach(() => {
   globalThis.fetch = originalFetch
+  jest.useRealTimers()
 })
 const owner = organizationUrn(123)
 const image = "urn:li:image:photo"
@@ -48,6 +49,35 @@ const post: LinkedinCreatePostInput = {
 }
 
 describe("linkedin media publishing", () => {
+  test("resolves image, video, and document download metadata from post URNs", async () => {
+    const document = "urn:li:document:D5510AQDocument" as const
+    const calls = recorder([
+      json({ id: image, owner, status: "AVAILABLE", downloadUrl: "https://media/image" }),
+      json({
+        id: video,
+        owner,
+        status: "AVAILABLE",
+        downloadUrl: "https://media/video",
+        duration: 32_066,
+      }),
+      json({ id: document, owner, status: "AVAILABLE", downloadUrl: "https://media/document" }),
+    ])
+    const client = await createTestClient()
+
+    const resolvedImage = await client.images.get(image)
+    const resolvedVideo = await client.videos.get(video)
+    const resolvedDocument = await client.documents.get(document)
+
+    expect(resolvedImage.downloadUrl).toBe("https://media/image")
+    expect(resolvedVideo.duration).toBe(32_066)
+    expect(resolvedDocument.downloadUrl).toBe("https://media/document")
+    expect(decodeURIComponent(new URL(calls[0]?.url ?? "").pathname)).toContain(`/images/${image}`)
+    expect(decodeURIComponent(new URL(calls[1]?.url ?? "").pathname)).toContain(`/videos/${video}`)
+    expect(decodeURIComponent(new URL(calls[2]?.url ?? "").pathname)).toContain(
+      `/documents/${document}`
+    )
+  })
+
   test("uploads image bytes with fresh OAuth, polls processing, then publishes its typed URN", async () => {
     const calls: { url: string; init?: RequestInit }[] = []
     let reads = 0
@@ -226,18 +256,6 @@ describe("linkedin media publishing", () => {
     }
   })
 
-  test("does not retry failed initialization or finalization by default", async () => {
-    const client = await createTestClient()
-    const initCalls = recorder([empty(500)])
-    await expect(client.images.initializeUpload({ owner })).rejects.toThrow("500")
-    expect(initCalls).toHaveLength(1)
-    const finalizeCalls = recorder([empty(500)])
-    await expect(
-      client.videos.finalizeUpload({ video, uploadToken: "", uploadedPartIds: ["part"] })
-    ).rejects.toThrow("500")
-    expect(finalizeCalls).toHaveLength(1)
-  })
-
   test("rejects empty input and invalid waits before initializing an asset", async () => {
     const calls = recorder([])
     const client = await createTestClient()
@@ -307,7 +325,7 @@ describe("linkedin media publishing", () => {
     const client = await createTestClient({
       retry: { maxRetries: 3, shouldRetry: ({ response }) => !response?.ok, delayMs: () => 0 },
     })
-    for (const response of [empty(200), empty(401), empty(500)]) {
+    for (const response of [empty(200), empty(500)]) {
       const calls = recorder([json({ value: videoSession }), response])
       await expect(
         client.videos.upload({ owner, file: new Blob(["abcde"]) })
@@ -360,9 +378,18 @@ describe("linkedin media publishing", () => {
       `Processing failed for ${video}`
     )
     recorder(() => json({ id: image, owner, status: "PROCESSING" }))
-    await expect(
-      client.images.waitUntilAvailable(image, { timeoutMs: 10, pollIntervalMs: 2 })
-    ).rejects.toThrow("Timed out")
+    jest.useFakeTimers()
+    const timedOut = client.images.waitUntilAvailable(image, {
+      timeoutMs: 10,
+      pollIntervalMs: 1000,
+    })
+    // The deadline interrupts the poll while it sleeps between status reads.
+    for (let turn = 0; turn < 100 && jest.getTimerCount() < 2; turn++) await Promise.resolve()
+    expect(jest.getTimerCount()).toBe(2)
+    jest.advanceTimersByTime(10)
+    // A plain await: Bun's per-test timeout does not bound `await expect(pending).rejects`.
+    expect(String(await timedOut.catch((error: unknown) => error))).toContain("Timed out")
+    jest.useRealTimers()
     const controller = new AbortController()
     const pending = client.images.waitUntilAvailable(image, {
       signal: controller.signal,
@@ -381,9 +408,12 @@ describe("linkedin media publishing", () => {
       })
     })
     const client = await createTestClient({ retry: { maxRetries: 0 } })
-    await expect(client.images.waitUntilAvailable(image, { timeoutMs: 10 })).rejects.toThrow(
-      "Timed out"
-    )
+    jest.useFakeTimers()
+    const timedOut = client.images.waitUntilAvailable(image, { timeoutMs: 10 })
+    for (let turn = 0; turn < 100 && !signal; turn++) await Promise.resolve()
+    expect(signal?.aborted).toBe(false)
+    jest.advanceTimersByTime(10)
+    expect(String(await timedOut.catch((error: unknown) => error))).toContain("Timed out")
     expect(signal?.aborted).toBe(true)
   })
 

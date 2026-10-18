@@ -2,7 +2,8 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { generateKeyPairSync, verify } from "node:crypto"
 import { githubApp } from "../src/sandbox"
 
-const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 })
+// The key size is not under test; 1024 bits keeps key generation off the clock (2048 takes ~100ms).
+const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 1024 })
 const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString()
 const originalFetch = globalThis.fetch
 afterEach(() => {

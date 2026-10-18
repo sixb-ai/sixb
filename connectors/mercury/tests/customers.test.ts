@@ -64,27 +64,23 @@ test("update uses POST on the customer path", async () => {
   expect(calls[0]?.url).toBe("https://api.mercury.com/api/v1/ar/customers/cus-1")
 })
 
-test("get exposes deletedAt for a soft-deleted customer", async () => {
-  recorder([json({ ...customer("cus-1", "Globex"), deletedAt: "2026-07-20T00:00:00Z" })])
+test("get reads one customer, exposing deletedAt when it is soft-deleted", async () => {
+  const calls = recorder([
+    json({ ...customer("cus-1", "Globex"), deletedAt: "2026-07-20T00:00:00Z" }),
+  ])
   const mc = await createTestClient()
 
   const found = await mc.customers.get("cus-1")
 
+  expect(calls[0]?.url).toBe("https://api.mercury.com/api/v1/ar/customers/cus-1")
   expect(found.deletedAt).toBe("2026-07-20T00:00:00Z")
 })
 
-test("delete issues a DELETE and tolerates a 200 with a body", async () => {
-  const calls = recorder([json({ ok: true }, { status: 200 })])
-  const mc = await createTestClient()
-
-  await mc.customers.delete("cus-1")
-
-  expect(calls[0]?.method).toBe("DELETE")
-})
-
-test("delete also tolerates a bodiless 204", async () => {
-  recorder([empty()])
+test("delete issues a DELETE on the customer path", async () => {
+  const calls = recorder([empty()])
   const mc = await createTestClient()
 
   await expect(mc.customers.delete("cus-1")).resolves.toBeUndefined()
+  expect(calls[0]?.method).toBe("DELETE")
+  expect(calls[0]?.url).toBe("https://api.mercury.com/api/v1/ar/customers/cus-1")
 })

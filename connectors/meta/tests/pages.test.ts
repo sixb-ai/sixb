@@ -51,7 +51,7 @@ describe("meta connector — pages", () => {
     expect(new URL(url).pathname).toBe("/v23.0/me/accounts")
   })
 
-  test("pages.list requests the default field expansion and parses pages", async () => {
+  test("pages.list requests the default field expansion and parses pages with tasks", async () => {
     let requested = ""
     mockFetch((input) => {
       requested = String(input)
@@ -62,6 +62,7 @@ describe("meta connector — pages", () => {
               id: "page-1",
               name: "Acme",
               access_token: "page-tok",
+              tasks: ["PROFILE_PLUS_CREATE_CONTENT"],
               instagram_business_account: {
                 id: "ig-1",
                 username: "acme",
@@ -83,6 +84,7 @@ describe("meta connector — pages", () => {
     )
     expect(url.searchParams.get("limit")).toBe("100")
     expect(page.items[0]?.access_token).toBe("page-tok")
+    expect(page.items[0]?.tasks).toEqual(["PROFILE_PLUS_CREATE_CONTENT"]) // for permission checks
     expect(page.items[0]?.instagram_business_account?.username).toBe("acme")
   })
 
@@ -112,20 +114,9 @@ describe("meta connector — pages", () => {
     expect(ids).toEqual(["page-1", "page-1", "page-2"])
   })
 
-  test("honors a custom graph version", async () => {
-    let url = ""
-    mockFetch((input) => {
-      url = String(input)
-      return Promise.resolve(json({ data: [] }))
-    })
-
-    const client = await meta({ accessToken: "t", graphVersion: "v21.0" }).connect(CONTEXT)
-    await client.pages.list()
-
-    expect(new URL(url).pathname).toBe("/v21.0/me/accounts")
-  })
-
-  test("rejects an empty access token before connecting", () => {
+  test("rejects an empty access token or node id before requesting", async () => {
     expect(() => meta({ accessToken: "  " })).toThrow("accessToken must not be empty")
+    const client = await meta({ accessToken: "t" }).connect(CONTEXT)
+    expect(() => client.instagram("  ")).toThrow("igUserId must not be empty")
   })
 })

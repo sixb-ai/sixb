@@ -27,6 +27,7 @@ function json(data: unknown, status = 200) {
 }
 
 async function client(invalidate = () => {}) {
+  let invalidated = false
   return tiktok({
     api: "organic",
     clientId: "app",
@@ -41,14 +42,20 @@ async function client(invalidate = () => {}) {
     signal: new AbortController().signal,
     tokenSource: {
       async get() {
-        return { accessToken: "creator-token", invalidate }
+        return {
+          accessToken: invalidated ? "refreshed-token" : "creator-token",
+          invalidate() {
+            invalidated = true
+            invalidate()
+          },
+        }
       },
     },
   })
 }
 
 describe("TikTok Business publishing", () => {
-  test("sends video and photo wire contracts with the connected account and token", async () => {
+  test("sends video, photo, and draft wire contracts with the connected account and token", async () => {
     const requests: { url: string; init?: RequestInit }[] = []
     globalThis.fetch = Object.assign(
       async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -58,13 +65,28 @@ describe("TikTok Business publishing", () => {
       { preconnect: originalFetch.preconnect }
     )
     const { publishing } = await client()
-    expect(await publishing.publishVideo(video)).toEqual({ share_id: "task-1" })
+    const videoDraft: TiktokPublishVideoInput = {
+      video_url: video.video_url,
+      post_info: { upload_to_draft: true },
+    }
+    const photosDraft: TiktokPublishPhotosInput = {
+      photo_images: photos.photo_images,
+      post_info: { is_draft: true, title: "Draft", caption: "Editable" },
+    }
+    // An untyped caller must not override the connected account.
+    const untypedVideo = { ...video, business_id: "other" } as TiktokPublishVideoInput
+    expect(await publishing.publishVideo(untypedVideo)).toEqual({ share_id: "task-1" })
     expect(await publishing.publishPhotos(photos)).toEqual({ share_id: "task-1" })
+    await publishing.publishVideo(videoDraft)
+    await publishing.publishPhotos(photosDraft)
     expect(requests.map((r) => new URL(r.url).pathname)).toEqual([
       "/open_api/v1.3/business/video/publish/",
       "/open_api/v1.3/business/photo/publish/",
+      "/open_api/v1.3/business/video/publish/",
+      "/open_api/v1.3/business/photo/publish/",
     ])
-    for (const [index, input] of [video, photos].entries()) {
+    // Draft bodies carry only their own fields: no invented defaults.
+    for (const [index, input] of [video, photos, videoDraft, photosDraft].entries()) {
       const request = requests[index]
       expect(request?.init?.method).toBe("POST")
       expect(new Headers(request?.init?.headers).get("access-token")).toBe("creator-token")
@@ -74,52 +96,6 @@ describe("TikTok Business publishing", () => {
         business_id: "creator-1",
       })
     }
-  })
-
-  test("does not let an untyped caller override the connected account", async () => {
-    let body: unknown
-    globalThis.fetch = Object.assign(
-      async (_input: RequestInfo | URL, init?: RequestInit) => {
-        body = JSON.parse(String(init?.body))
-        return json({ share_id: "task-1" })
-      },
-      { preconnect: originalFetch.preconnect }
-    )
-    const { publishing } = await client()
-    await publishing.publishVideo({ ...video, business_id: "other" } as TiktokPublishVideoInput)
-    expect(body).toEqual({ ...video, business_id: "creator-1" })
-  })
-
-  test("sends the distinct video and photo draft fields without invented defaults", async () => {
-    const bodies: unknown[] = []
-    globalThis.fetch = Object.assign(
-      async (_input: RequestInfo | URL, init?: RequestInit) => {
-        bodies.push(JSON.parse(String(init?.body)))
-        return json({ share_id: "draft-1" })
-      },
-      { preconnect: originalFetch.preconnect }
-    )
-    const { publishing } = await client()
-    await publishing.publishVideo({
-      video_url: video.video_url,
-      post_info: { upload_to_draft: true },
-    })
-    await publishing.publishPhotos({
-      photo_images: photos.photo_images,
-      post_info: { is_draft: true, title: "Draft", caption: "Editable" },
-    })
-    expect(bodies).toEqual([
-      {
-        business_id: "creator-1",
-        video_url: video.video_url,
-        post_info: { upload_to_draft: true },
-      },
-      {
-        business_id: "creator-1",
-        photo_images: photos.photo_images,
-        post_info: { is_draft: true, title: "Draft", caption: "Editable" },
-      },
-    ])
   })
 
   test("reads settings and preserves asynchronous status, failure and string IDs", async () => {
@@ -221,12 +197,14 @@ describe("TikTok Business publishing", () => {
     await expect(publishing.publishPhotos(photos)).rejects.toThrow("share_id")
   })
 
-  test("keeps reads retryable and refreshes a rejected token without data", async () => {
+  test("keeps reads retryable and retries a rejected token once with the refreshed value", async () => {
     let calls = 0
     let invalidations = 0
+    const tokens: (string | null)[] = []
     globalThis.fetch = Object.assign(
-      async () => {
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
         calls++
+        tokens.push(new Headers(init?.headers).get("access-token"))
         if (calls === 1)
           return new Response("Busy", { status: 503, headers: { "retry-after": "0" } })
         if (calls === 2)
@@ -245,6 +223,8 @@ describe("TikTok Business publishing", () => {
     expect(await publishing.getStatus("task-1")).toEqual({ status: "PROCESSING_DOWNLOAD" })
     expect(calls).toBe(3)
     expect(invalidations).toBe(1)
+    // The 503 replay reuses the request; only the token failure fetches a fresh token.
+    expect(tokens).toEqual(["creator-token", "creator-token", "refreshed-token"])
   })
 
   test("validates inputs before any request, including UTF-16 and ignored draft metadata", async () => {

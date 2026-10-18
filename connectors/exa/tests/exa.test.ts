@@ -14,7 +14,7 @@ afterEach(() => {
 })
 
 describe("Exa connector", () => {
-  test("authenticates each search and sends the typed request body", async () => {
+  test("authenticates each search, sends the typed request body, and returns the wire response", async () => {
     let requestUrl = ""
     let requestInit: RequestInit | undefined
     const apiKeys: (string | null)[] = []
@@ -35,13 +35,15 @@ describe("Exa connector", () => {
       baseUrl: "https://exa.example.test/v1",
     })
 
-    await client.search({
-      query: "sixb agents",
-      numResults: 3,
-      includeDomains: ["sixb.ai/docs"],
-      excludeDomains: ["archive.example"],
-      contents: { text: { maxCharacters: 1_500 } },
-    })
+    await expect(
+      client.search({
+        query: "sixb agents",
+        numResults: 3,
+        includeDomains: ["sixb.ai/docs"],
+        excludeDomains: ["archive.example"],
+        contents: { text: { maxCharacters: 1_500 } },
+      })
+    ).resolves.toEqual(searchResponse())
     await client.search({ query: "rotated key" })
 
     expect(requestUrl).toBe("https://exa.example.test/v1/search")
@@ -60,15 +62,6 @@ describe("Exa connector", () => {
       { query: "rotated key" },
     ])
     expect(resolverCalls).toBe(2)
-  })
-
-  test("returns search result, status, request, and cost wire metadata", async () => {
-    const response = searchResponse()
-    mockFetch(() => Promise.resolve(json(response)))
-
-    await expect(
-      (await connect({ apiKey: "test-key" })).search({ query: "sixb" })
-    ).resolves.toEqual(response)
   })
 
   test("authenticates contents requests and returns result, status, and cost wire metadata", async () => {
@@ -103,82 +96,44 @@ describe("Exa connector", () => {
     })
   })
 
-  test("surfaces rate-limit and server failures after one attempt", async () => {
-    for (const status of [429, 503]) {
-      let attempts = 0
-      mockFetch(() => {
-        attempts += 1
-        return Promise.resolve(
-          json(
-            {
-              error: status === 429 ? "Rate limit exceeded" : "Service unavailable",
-              tag: status === 429 ? "RATE_LIMIT" : "INTERNAL_ERROR",
-              requestId: `request-${status}`,
-            },
-            { status }
-          )
-        )
-      })
-      const client = await connect({ apiKey: "test-key" })
-
-      const error = await client.search({ query: "sixb" }).catch((caught) => caught)
-
-      expect(error).toBeInstanceOf(ExaApiError)
-      expect(error).toMatchObject({ status, requestId: `request-${status}` })
-      expect(String(error)).toContain(`HTTP ${status}`)
-      expect(attempts).toBe(1)
-    }
-  })
-
-  test("surfaces network failures after one attempt", async () => {
+  test.each([
+    ["search", "provider"],
+    ["search", "network"],
+    ["contents", "provider"],
+    ["contents", "network"],
+  ] as const)("surfaces %s %s failures after one attempt", async (operation, failure) => {
     let attempts = 0
     mockFetch(() => {
       attempts += 1
-      return Promise.reject(new Error("socket unavailable"))
-    })
-    const client = await connect({ apiKey: "test-key" })
-
-    await expect(client.search({ query: "sixb" })).rejects.toThrow(
-      "[SixbExa] Exa search could not reach the API."
-    )
-    expect(attempts).toBe(1)
-  })
-
-  test("surfaces contents provider and network failures after one attempt", async () => {
-    let attempts = 0
-    mockFetch(() => {
-      attempts += 1
+      if (failure === "network") return Promise.reject(new Error("socket unavailable"))
       return Promise.resolve(
         json(
-          { error: "Rate limit exceeded", tag: "RATE_LIMIT", requestId: "contents-request" },
+          { error: "Rate limit exceeded", tag: "RATE_LIMIT", requestId: `${operation}-request` },
           { status: 429 }
         )
       )
     })
     const client = await connect({ apiKey: "test-key" })
 
-    const providerError = await client
-      .getContents({ urls: ["https://sixb.ai/docs"] })
-      .catch((error) => error)
+    const error = await (operation === "search"
+      ? client.search({ query: "sixb" })
+      : client.getContents({ urls: ["https://sixb.ai/docs"] })
+    ).catch((caught) => caught)
 
-    expect(providerError).toBeInstanceOf(ExaApiError)
-    expect(providerError).toMatchObject({ status: 429, requestId: "contents-request" })
-    expect(providerError.message).toContain("Exa contents failed with HTTP 429")
-    expect(attempts).toBe(1)
-
-    attempts = 0
-    mockFetch(() => {
-      attempts += 1
-      return Promise.reject(new Error("socket unavailable"))
-    })
-
-    await expect(client.getContents({ urls: ["https://sixb.ai/docs"] })).rejects.toThrow(
-      "[SixbExa] Exa contents could not reach the API."
-    )
+    expect(error).toBeInstanceOf(ExaApiError)
+    if (failure === "network") {
+      expect(error.message).toBe(`[SixbExa] Exa ${operation} could not reach the API.`)
+    } else {
+      expect(error).toMatchObject({ status: 429, requestId: `${operation}-request` })
+      expect(error.message).toContain(`Exa ${operation} failed with HTTP 429 (RATE_LIMIT)`)
+    }
     expect(attempts).toBe(1)
   })
 
-  test("passes caller cancellation to the active request", async () => {
+  test.each([
+    "caller",
+    "connector lifecycle",
+  ] as const)("passes %s cancellation to the active request", async (source) => {
     const started = Promise.withResolvers<void>()
     let receivedSignal: AbortSignal | undefined
     mockFetch((_, init) => {
@@ -190,42 +145,19 @@ describe("Exa connector", () => {
         else receivedSignal?.addEventListener("abort", abort, { once: true })
       })
     })
-    const client = await connect({ apiKey: "test-key" })
-    const controller = new AbortController()
-    const cancellation = new Error("caller cancelled")
-    const request = client.search({ query: "sixb" }, { signal: controller.signal })
-    await started.promise
-
-    controller.abort(cancellation)
-
-    await expect(request).rejects.toBe(cancellation)
-    expect(receivedSignal?.aborted).toBe(true)
-  })
-
-  test("passes caller cancellation to an active contents request", async () => {
-    const started = Promise.withResolvers<void>()
-    let receivedSignal: AbortSignal | undefined
-    mockFetch((_, init) => {
-      receivedSignal = init?.signal ?? undefined
-      started.resolve()
-      return new Promise((_, reject) => {
-        const abort = (): void => reject(receivedSignal?.reason)
-        if (receivedSignal?.aborted) abort()
-        else receivedSignal?.addEventListener("abort", abort, { once: true })
-      })
-    })
-    const client = await connect({ apiKey: "test-key" })
-    const controller = new AbortController()
-    const cancellation = new Error("contents cancelled")
-    const request = client.getContents(
-      { urls: ["https://sixb.ai/docs"] },
-      { signal: controller.signal }
+    const caller = new AbortController()
+    const lifecycle = new AbortController()
+    const client = await connect({ apiKey: "test-key" }, lifecycle.signal)
+    const cancellation = new Error(`${source} cancelled`)
+    const request = client.search(
+      { query: "sixb" },
+      source === "caller" ? { signal: caller.signal } : undefined
     )
     await started.promise
 
-    controller.abort(cancellation)
+    ;(source === "caller" ? caller : lifecycle).abort(cancellation)
 
-    await expect(request).rejects.toBe(cancellation)
+    expect(await request.catch((caught) => caught)).toBe(cancellation)
     expect(receivedSignal?.aborted).toBe(true)
   })
 
@@ -250,7 +182,7 @@ describe("Exa connector", () => {
 
     controller.abort(cancellation)
 
-    await expect(request).rejects.toBe(cancellation)
+    expect(await request.catch((caught) => caught)).toBe(cancellation)
     apiKey.resolve("resolved-too-late")
     await Bun.sleep(0)
     expect(fetches).toBe(0)
@@ -280,30 +212,6 @@ describe("Exa connector", () => {
     expect(fetches).toBe(0)
   })
 
-  test("passes connector lifecycle cancellation to the active request", async () => {
-    const started = Promise.withResolvers<void>()
-    let receivedSignal: AbortSignal | undefined
-    mockFetch((_, init) => {
-      receivedSignal = init?.signal ?? undefined
-      started.resolve()
-      return new Promise((_, reject) => {
-        const abort = (): void => reject(receivedSignal?.reason)
-        if (receivedSignal?.aborted) abort()
-        else receivedSignal?.addEventListener("abort", abort, { once: true })
-      })
-    })
-    const lifecycle = new AbortController()
-    const client = await connect({ apiKey: "test-key" }, lifecycle.signal)
-    const cancellation = new Error("connector disconnected")
-    const request = client.search({ query: "sixb" })
-    await started.promise
-
-    lifecycle.abort(cancellation)
-
-    await expect(request).rejects.toBe(cancellation)
-    expect(receivedSignal?.aborted).toBe(true)
-  })
-
   test("handles malformed and non-JSON error responses without returning their bodies", async () => {
     mockFetch(() =>
       Promise.resolve(
@@ -323,39 +231,23 @@ describe("Exa connector", () => {
     expect(malformed.message).toBe("[SixbExa] Exa search failed with HTTP 400.")
   })
 
-  test("redacts API keys from structured provider errors", async () => {
+  test("redacts the canonical wire API key from structured provider errors", async () => {
     const apiKey = "exa-secret-value"
-    mockFetch(() =>
-      Promise.resolve(
-        json(
-          {
-            error: `Invalid credential ${apiKey}`,
-            tag: `INVALID_${apiKey}`,
-            requestId: `request-${apiKey}`,
-          },
-          { status: 401 }
-        )
-      )
-    )
-    const client = await connect({ apiKey })
-
-    const error = await client.search({ query: "sixb" }).catch((caught) => caught)
-
-    expect(error.message).toContain("[REDACTED]")
-    expect(error.message).not.toContain(apiKey)
-    expect(error.tag).toBe("INVALID_[REDACTED]")
-    expect(error.requestId).toBe("request-[REDACTED]")
-  })
-
-  test("uses the canonical wire API key for requests and error redaction", async () => {
-    const apiKey = "exa-padded-secret"
     let receivedApiKey = ""
     mockFetch((_input, init) => {
       receivedApiKey = new Headers(init?.headers).get("x-api-key") ?? ""
       return Promise.resolve(
-        json({ error: `Invalid credential ${receivedApiKey}` }, { status: 401 })
+        json(
+          {
+            error: `Invalid credential ${receivedApiKey}`,
+            tag: `INVALID_${receivedApiKey}`,
+            requestId: `request-${receivedApiKey}`,
+          },
+          { status: 401 }
+        )
       )
     })
+    // Headers trim a padded key on the wire, so redaction must use that trimmed value.
     for (const resolver of [`  ${apiKey}  `, async () => `  ${apiKey}  `]) {
       const client = await connect({ apiKey: resolver })
 
@@ -365,6 +257,8 @@ describe("Exa connector", () => {
       expect(error).toBeInstanceOf(ExaApiError)
       expect(error.message).toContain("[REDACTED]")
       expect(error.message).not.toContain(apiKey)
+      expect(error.tag).toBe("INVALID_[REDACTED]")
+      expect(error.requestId).toBe("request-[REDACTED]")
     }
   })
 

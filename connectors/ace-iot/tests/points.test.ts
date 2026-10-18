@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { captureFetch, collect, createTestClient } from "./helpers"
+import { captureFetch, createTestClient } from "./helpers"
 
 const originalFetch = globalThis.fetch
 
@@ -23,7 +23,7 @@ describe("points", () => {
     )
   })
 
-  test("list walks the global point collection", async () => {
+  test("list reads the global point collection", async () => {
     const { urls } = captureFetch({
       items: [{ id: 1, name: POINT_NAME }],
       page: 1,
@@ -55,8 +55,8 @@ describe("points", () => {
     })
   })
 
-  test("tag overwrite flags map to ACE's parameter names", async () => {
-    const { urls } = captureFetch(undefined)
+  test("update PUTs the named point and maps tag overwrite flags to ACE's parameter names", async () => {
+    const { urls, inits } = captureFetch(undefined)
     const ace = await createTestClient()
 
     await ace.points.update(
@@ -65,18 +65,17 @@ describe("points", () => {
       { overwriteMarkerTags: true, overwriteKvTags: true }
     )
 
+    expect(inits[0].method).toBe("PUT")
+    expect(urls[0].pathname).toBe(
+      "/api/points/acme%2Facme_north_campus%2F10.0.0.10-100%2FanalogInput%2F1"
+    )
     expect(urls[0].searchParams.get("overwrite_m_tags")).toBe("true")
     expect(urls[0].searchParams.get("overwrite_kv_tags")).toBe("true")
-  })
-
-  test("update targets the named point with PUT", async () => {
-    const { urls, inits } = captureFetch(undefined)
-    const ace = await createTestClient()
-
-    await ace.points.update(POINT_NAME, { name: POINT_NAME, collect_enabled: false })
-
-    expect(inits[0].method).toBe("PUT")
-    expect(urls[0].pathname).toContain("/api/points/acme%2F")
+    expect(JSON.parse(String(inits[0].body))).toEqual({
+      name: POINT_NAME,
+      kv_tags: { vav: "VAV2_5" },
+      marker_tags: ["sensor"],
+    })
   })
 
   test("getTimeseries reads one point's window", async () => {
@@ -102,36 +101,5 @@ describe("points", () => {
     expect(JSON.parse(String(inits[0].body))).toEqual({
       points: [{ name: POINT_NAME }, { name: "other/point" }],
     })
-  })
-
-  test("listAll walks pages of the global collection", async () => {
-    let calls = 0
-    const { urls } = captureFetch(null)
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      calls += 1
-      urls.push(new URL(String(input)))
-      return new Response(
-        JSON.stringify({
-          items:
-            calls <= 2
-              ? [
-                  { id: calls, name: `p${calls}` },
-                  { id: calls, name: `q${calls}` },
-                ]
-              : [],
-          page: calls,
-          pages: 3,
-          per_page: 2,
-          total: 6,
-        }),
-        { headers: { "content-type": "application/json" } }
-      )
-    }) as typeof fetch
-
-    const ace = await createTestClient()
-    const points = await collect(ace.points.listAll({ perPage: 2 }))
-
-    expect(points).toHaveLength(4)
-    expect(calls).toBe(3)
   })
 })

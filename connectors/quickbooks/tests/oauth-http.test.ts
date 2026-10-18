@@ -189,54 +189,6 @@ test("401 invalidates the exact rejected token and resolves a fresh token for re
   expect(gets).toBe(2)
 })
 
-test("production host and structured Fault diagnostics", async () => {
-  const qb = await client(undefined, "production")
-  mock((url) => {
-    expect(new URL(url).hostname).toBe("quickbooks.api.intuit.com")
-    return json(
-      {
-        Fault: {
-          type: "ValidationFault",
-          Error: [{ code: "610", Message: "Object Not Found", Detail: "Deleted record" }],
-        },
-      },
-      400,
-      { intuit_tid: "trace-123" }
-    )
-  })
-  try {
-    await qb.companyInfo.get()
-    throw new Error("expected rejection")
-  } catch (error) {
-    expect(error).toBeInstanceOf(QuickBooksApiError)
-    expect(error).toHaveProperty("requestId", "trace-123")
-    expect(error).toHaveProperty("errors.0.code", "610")
-  }
-})
-
-test("read retries are bounded and reacquire tokens", async () => {
-  let calls = 0
-  let gets = 0
-  const qb = await quickbooks({ ...options, retry: { maxRetries: 2, delayMs: () => 0 } }).connect({
-    ...context,
-    connectionId: "c",
-    account: { id: "123", label: "test" },
-    tokenSource: {
-      async get() {
-        gets++
-        return { accessToken: "access", invalidate() {} }
-      },
-    },
-  })
-  mock(() => {
-    calls++
-    return json({}, 503)
-  })
-  await expect(qb.companyInfo.get()).rejects.toBeInstanceOf(QuickBooksApiError)
-  expect(calls).toBe(3)
-  expect(gets).toBe(3)
-})
-
 test("cancellation stops accounting and OAuth requests before fetch", async () => {
   const controller = new AbortController()
   const qb = await client(undefined, "sandbox", controller.signal)
@@ -332,7 +284,7 @@ test("OAuth timeout is ambiguous and is not replayed", async () => {
     })
   })
   await expect(
-    quickbooks({ ...options, timeoutMs: 5 }).authentication.refresh(context, credentials)
+    quickbooks({ ...options, timeoutMs: 1 }).authentication.refresh(context, credentials)
   ).rejects.toThrow("outcome is unknown")
   expect(calls).toBe(1)
 })

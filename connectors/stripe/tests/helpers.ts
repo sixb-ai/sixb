@@ -16,12 +16,6 @@ export interface RecordedRequest {
   readonly body?: string
 }
 
-export function mockFetch(
-  implementation: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
-): void {
-  globalThis.fetch = implementation as typeof fetch
-}
-
 export function json(body: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(body), {
     ...init,
@@ -40,7 +34,7 @@ export function recorder(
   const calls: RecordedRequest[] = []
   let index = 0
 
-  mockFetch(async (input, init) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const call: RecordedRequest = {
       url: String(input),
       method: init?.method ?? "GET",
@@ -54,7 +48,7 @@ export function recorder(
     const response = responses[index++]
     if (!response) throw new Error(`Unexpected request: ${call.method} ${call.url}`)
     return response
-  })
+  }) as typeof fetch
 
   return calls
 }

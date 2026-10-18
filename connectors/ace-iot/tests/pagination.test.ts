@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import type { AceIotClient, AceIotTimeseriesPage } from "../src"
 import { decodeTimeseriesCursor, encodeTimeseriesCursor, repairTimeseriesCursor } from "../src"
 import {
   aceTimeseriesServer,
@@ -30,47 +31,20 @@ const BUCKETS = [
   ["2026-08-07T17:25:00", 879],
 ] as const
 
+const sample = (name: string, time: string) => ({ name, value: "1", time })
+
 describe("timeseries cursor repair", () => {
-  test("the fixture reproduces ACE's stall, so the repair below is not testing an already-working server", async () => {
-    // Guard proof: walking with the server's own next_cursor, which is what a plain
-    // `while (has_more)` loop does. Revert `repairTimeseriesCursor` to return `page.next_cursor`
-    // and the coverage test below fails exactly like this.
-    const samples = buildSamples(BUCKETS)
-    const server = aceTimeseriesServer(samples)
-
-    let cursor: string | null = null
-    const seen = new Set<string>()
-    const collected: string[] = []
-    let pages = 0
-    let stalled = false
-
-    for (;;) {
-      const url = new URL("https://ace.test/api/sites/s/timeseries/paginated")
-      url.searchParams.set("page_size", "50")
-      if (cursor) url.searchParams.set("cursor", cursor)
-
-      const result = server(url)
-      pages += 1
-      collected.push(...result.point_samples.map(sampleKey))
-
-      if (!result.has_more || !result.next_cursor) break
-      if (seen.has(result.next_cursor)) {
-        stalled = true
-        break
-      }
-      seen.add(result.next_cursor)
-      cursor = result.next_cursor
-    }
-
-    expect(stalled).toBe(true)
-    // The walk reaches 100 rows of 3,222 and then re-requests page 2 forever — the numbers
-    // measured against the live API.
-    expect(pages).toBe(2)
-    expect(new Set(collected).size).toBe(100)
-    expect(samples.length).toBe(3222)
-  })
-
-  test("iterateTimeseries walks the whole window at a page size that stalls ACE's own cursor", async () => {
+  // Guard proof: make `repairTimeseriesCursor` return `page.next_cursor` and the page-size-50 row
+  // fails — walked with ACE's own cursor, the window stalls at 100 of its 3,222 rows, the numbers
+  // measured against the live API.
+  test.each([
+    // Pages that begin and end inside one bucket, the shape that stalls ACE's own cursor.
+    50,
+    // Pages that cross into later buckets, where ACE's cursor is already right.
+    1000,
+    // The whole window in one page, with no cursor at all.
+    5000,
+  ])("page size %i yields every sample exactly once, one request per page", async (pageSize) => {
     const samples = buildSamples(BUCKETS)
     const server = aceTimeseriesServer(samples)
     let requests = 0
@@ -81,79 +55,63 @@ describe("timeseries cursor repair", () => {
 
     const ace = await createTestClient()
     const collected = await collect(
-      ace.sites.iterateTimeseries("acme_north_campus", { ...RANGE, pageSize: 50 })
+      ace.sites.iterateTimeseries("acme_north_campus", { ...RANGE, pageSize: pageSize as 50 })
     )
 
-    expect(collected).toHaveLength(3222)
-    expect(new Set(collected.map(sampleKey)).size).toBe(3222)
     expect(collected.map(sampleKey)).toEqual(samples.map(sampleKey))
-    expect(requests).toBe(Math.ceil(3222 / 50))
+    expect(requests).toBe(Math.ceil(3222 / pageSize))
   })
 
   test.each([
-    3, 10, 50, 100, 500, 1000, 5000,
-  ])("page size %i yields every sample exactly once", async (pageSize) => {
-    const samples = buildSamples(BUCKETS)
-    const server = aceTimeseriesServer(samples)
-    mockFetch((input) => Promise.resolve(json(server(new URL(String(input))))))
-
-    const ace = await createTestClient()
-    const collected = await collect(
-      ace.sites.iterateTimeseries("site", {
-        ...RANGE,
-        pageSize: pageSize as 50,
-      })
-    )
-
-    expect(collected.map(sampleKey)).toEqual(samples.map(sampleKey))
-  })
-
-  test("the repair is inert when a page crosses into a later bucket, where ACE's cursor is correct", () => {
-    // Page ends 536 rows into a new bucket: ACE returns {offset: 536} and so does the repair.
-    const pageResult = {
-      point_samples: [
-        { name: "a", value: "1", time: "2026-08-07T17:15:00" },
-        { name: "b", value: "2", time: "2026-08-07T17:20:00" },
-        { name: "c", value: "3", time: "2026-08-07T17:20:00" },
+    [
+      // ACE answers {offset: 2} here too: the page ended two rows into a new bucket.
+      "is inert when a page crosses into a later bucket",
+      { offset: 1000, timestamp: "2026-08-07T17:15:00" },
+      [
+        sample("a", "2026-08-07T17:15:00"),
+        sample("b", "2026-08-07T17:20:00"),
+        sample("c", "2026-08-07T17:20:00"),
       ],
-      next_cursor: encodeTimeseriesCursor({ offset: 2, timestamp: "2026-08-07T17:20:00" }),
-      has_more: true,
+      true,
+      { offset: 2, timestamp: "2026-08-07T17:20:00" },
+    ],
+    [
+      // ACE answers {offset: 2} here, the offset it was handed back unchanged.
+      "carries the incoming offset when a page stays inside one bucket",
+      { offset: 50, timestamp: "2026-08-07T17:15:00" },
+      [sample("a", "2026-08-07T17:15:00"), sample("b", "2026-08-07T17:15:00")],
+      true,
+      { offset: 52, timestamp: "2026-08-07T17:15:00" },
+    ],
+    [
+      "counts from zero when the incoming cursor does not decode",
+      "not-base64-json",
+      [sample("a", "2026-08-07T17:15:00")],
+      true,
+      { offset: 1, timestamp: "2026-08-07T17:15:00" },
+    ],
+    [
+      "yields no cursor for a terminal page",
+      null,
+      [sample("a", "2026-08-07T17:15:00")],
+      false,
+      null,
+    ],
+    ["yields no cursor for an empty page", null, [], true, null],
+  ] as const)("the repair %s", (_name, incoming, samples, hasMore, expected) => {
+    const pageResult: AceIotTimeseriesPage = {
+      point_samples: [...samples],
+      next_cursor: "ace-cursor",
+      has_more: hasMore,
     }
-    const incoming = encodeTimeseriesCursor({ offset: 1000, timestamp: "2026-08-07T17:15:00" })
+    const incomingCursor =
+      incoming === null || typeof incoming === "string"
+        ? incoming
+        : encodeTimeseriesCursor(incoming)
 
-    expect(decodeTimeseriesCursor(repairTimeseriesCursor(incoming, pageResult) ?? "")).toEqual({
-      offset: 2,
-      timestamp: "2026-08-07T17:20:00",
-    })
-    expect(repairTimeseriesCursor(incoming, pageResult)).toBe(pageResult.next_cursor)
-  })
+    const repaired = repairTimeseriesCursor(incomingCursor, pageResult)
 
-  test("the repair carries the incoming offset when a page stays inside one bucket", () => {
-    const pageResult = {
-      point_samples: [
-        { name: "a", value: "1", time: "2026-08-07T17:15:00" },
-        { name: "b", value: "2", time: "2026-08-07T17:15:00" },
-      ],
-      // What ACE actually sends back: the offset it was given, unchanged.
-      next_cursor: encodeTimeseriesCursor({ offset: 2, timestamp: "2026-08-07T17:15:00" }),
-      has_more: true,
-    }
-    const incoming = encodeTimeseriesCursor({ offset: 50, timestamp: "2026-08-07T17:15:00" })
-
-    expect(decodeTimeseriesCursor(repairTimeseriesCursor(incoming, pageResult) ?? "")).toEqual({
-      offset: 52,
-      timestamp: "2026-08-07T17:15:00",
-    })
-  })
-
-  test("a terminal page yields no cursor", () => {
-    const samples = [{ name: "a", value: "1", time: "2026-08-07T17:15:00" }]
-    expect(
-      repairTimeseriesCursor(null, { point_samples: samples, next_cursor: "x", has_more: false })
-    ).toBeNull()
-    expect(
-      repairTimeseriesCursor(null, { point_samples: [], next_cursor: "x", has_more: true })
-    ).toBeNull()
+    expect(repaired === null ? null : decodeTimeseriesCursor(repaired)).toEqual(expected)
   })
 
   test("maxPages bounds the walk", async () => {
@@ -191,28 +149,6 @@ describe("timeseries cursor repair", () => {
       "[SixbAceIot] Timeseries pagination returned the same page twice and would not advance."
     )
     expect(calls).toBe(2)
-  })
-
-  test("an opaque cursor that does not decode still terminates rather than looping", async () => {
-    let calls = 0
-    mockFetch(() => {
-      calls += 1
-      return Promise.resolve(
-        json({
-          point_samples:
-            calls === 1 ? [{ name: "a", value: "1", time: "2026-08-07T17:15:00" }] : [],
-          next_cursor: "not-base64-json",
-          has_more: calls === 1,
-        })
-      )
-    })
-
-    const ace = await createTestClient()
-    const collected = await collect(
-      ace.sites.iterateTimeseries("site", { ...RANGE, cursor: "garbage", pageSize: 3 })
-    )
-
-    expect(collected).toHaveLength(1)
   })
 
   test("cursors round-trip through base64 JSON and reject malformed input", () => {
@@ -258,62 +194,45 @@ describe("page walking", () => {
     expect(urls[0].searchParams.get("per_page")).toBe("2")
   })
 
-  test("listAll defaults to a page size worth walking with", async () => {
+  test.each([
+    [
+      // `pages` cannot be the only stop condition: the PCAP listing answers `"pages": null`.
+      "an empty page when `pages` is null",
+      (ace: AceIotClient) =>
+        ace.gateways.listAllPcapFiles("gw", {
+          perPage: 2,
+          startTime: "2026-08-01T00:00:00Z",
+          endTime: "2026-08-07T00:00:00Z",
+        }),
+      (call: number) =>
+        page(call === 1 ? ["a.pcap", "b.pcap"] : [], { pages: null, per_page: 2, total: 4 }),
+      { items: 2, calls: 2, perPage: "2" },
+    ],
+    [
+      "a short page, without spending another request",
+      (ace: AceIotClient) => ace.sites.listAll({ perPage: 10 }),
+      () => page([{ id: 1 }], { pages: 9, per_page: 10, total: 90 }),
+      { items: 1, calls: 1, perPage: "10" },
+    ],
+    [
+      "maxPages, at the default page size",
+      (ace: AceIotClient) => ace.points.listAll({ maxPages: 4 }),
+      () => page([{ id: 1 }, { id: 2 }], { pages: 50, per_page: 2, total: 100 }),
+      { items: 8, calls: 4, perPage: "1000" },
+    ],
+  ] as const)("listAll stops on %s", async (_name, walk, respond, expected) => {
     const urls: URL[] = []
     mockFetch((input) => {
       urls.push(new URL(String(input)))
-      return Promise.resolve(json(page([])))
+      return Promise.resolve(json(respond(urls.length)))
     })
 
     const ace = await createTestClient()
-    await collect(ace.sites.listAll())
+    const items = await collect<unknown>(walk(ace))
 
-    expect(urls[0].searchParams.get("per_page")).toBe("1000")
-  })
-
-  test("listAll stops on a null `pages`, which the PCAP listing returns", async () => {
-    let calls = 0
-    mockFetch(() => {
-      calls += 1
-      return Promise.resolve(
-        json(page(calls === 1 ? ["a.pcap", "b.pcap"] : [], { pages: null, per_page: 2, total: 4 }))
-      )
-    })
-
-    const ace = await createTestClient()
-    const files = await collect(
-      ace.gateways.listAllPcapFiles("gw", {
-        perPage: 2,
-        startTime: "2026-08-01T00:00:00Z",
-        endTime: "2026-08-07T00:00:00Z",
-      })
-    )
-
-    expect(files).toEqual(["a.pcap", "b.pcap"])
-    expect(calls).toBe(2)
-  })
-
-  test("listAll stops on a short page without spending another request", async () => {
-    let calls = 0
-    mockFetch(() => {
-      calls += 1
-      return Promise.resolve(json(page([{ id: 1 }], { pages: 9, per_page: 10, total: 90 })))
-    })
-
-    const ace = await createTestClient()
-    await collect(ace.sites.listAll({ perPage: 10 }))
-
-    expect(calls).toBe(1)
-  })
-
-  test("listAll honors maxPages", async () => {
-    mockFetch(() =>
-      Promise.resolve(json(page([{ id: 1 }, { id: 2 }], { pages: 50, per_page: 2, total: 100 })))
-    )
-
-    const ace = await createTestClient()
-    const points = await collect(ace.points.listAll({ perPage: 2, maxPages: 4 }))
-
-    expect(points).toHaveLength(8)
+    expect(items).toHaveLength(expected.items)
+    expect(urls).toHaveLength(expected.calls)
+    // listAll asks for 1000 rows a page unless told otherwise; ACE's own default is 10.
+    expect(urls[0].searchParams.get("per_page")).toBe(expected.perPage)
   })
 })

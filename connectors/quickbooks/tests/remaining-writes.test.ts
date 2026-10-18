@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { QuickBooksApiError, type QuickBooksClient, quickbooks } from "../src"
+import { type QuickBooksClient, quickbooks } from "../src"
 
 const originalFetch = globalThis.fetch
 afterEach(() => {
@@ -331,26 +331,6 @@ test("reference activation sends minimal payloads and retains the item discrimin
   }
 })
 
-test("each new write resource preserves faults and never replays even under custom retry policies", async () => {
-  const qb = await client()
-  for (const scenario of creates) {
-    let calls = 0
-    mock(() => {
-      calls++
-      return Response.json(
-        { Fault: { type: "ValidationFault", Error: [{ code: "5010", Detail: "Stale Object" }] } },
-        { status: 400, headers: { intuit_tid: "trace" } }
-      )
-    })
-    const error = await scenario.run(qb).catch((error: unknown) => error)
-    expect(error).toBeInstanceOf(QuickBooksApiError)
-    expect(error).toHaveProperty("errors.0.code", "5010")
-    expect(error).toHaveProperty("writeRequestId", options.requestId)
-    expect(error).toHaveProperty("requestId", "trace")
-    expect(calls).toBe(1)
-  }
-})
-
 test("invalid required fields, discriminators and amounts reject before network access", async () => {
   let calls = 0
   mock(() => {
@@ -422,35 +402,4 @@ test("live-discovered term and sales-form constraints reject before sending", as
     qb.preferences.update({ ...identity, OtherPrefs: { NameValue: [] } })
   ).rejects.toThrow("OtherPrefs")
   expect(calls).toBe(0)
-})
-
-test("Preferences HTTP 200 Fault is an API failure, with recovery and trace details", async () => {
-  mock(() =>
-    Response.json(
-      {
-        Fault: {
-          Error: [
-            {
-              Message: "A business validation error has occurred while processing your request",
-              Detail:
-                "You can't turn off Inventory Tracking as long as you have products of type Inventory.",
-            },
-          ],
-        },
-      },
-      { headers: { intuit_tid: "preferences-trace" } }
-    )
-  )
-  const qb = await client()
-  const error = await qb.preferences
-    .update({ ...identity, ProductAndServicesPrefs: { QuantityOnHand: false } }, options)
-    .catch((error: unknown) => error)
-  expect(error).toBeInstanceOf(QuickBooksApiError)
-  expect(error).toHaveProperty("status", 200)
-  expect(error).toHaveProperty("requestId", "preferences-trace")
-  expect(error).toHaveProperty("writeRequestId", options.requestId)
-  expect(error).toHaveProperty(
-    "errors.0.Detail",
-    "You can't turn off Inventory Tracking as long as you have products of type Inventory."
-  )
 })

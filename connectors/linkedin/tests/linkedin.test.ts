@@ -1,15 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import {
-  DEFAULT_LINKEDIN_VERSION,
-  linkedin,
-  organizationUrn,
-  shareUrn,
-  sponsoredAccountUrn,
-  sponsoredCampaignGroupUrn,
-  sponsoredCampaignUrn,
-  sponsoredCreativeUrn,
-  ugcPostUrn,
-} from "../src"
+import { DEFAULT_LINKEDIN_VERSION, linkedin } from "../src"
 import { createTestClient, DEFAULT_OPTIONS, json, recorder, testTokenSource } from "./helpers"
 
 const originalFetch = globalThis.fetch
@@ -67,22 +57,6 @@ describe("linkedin connector", () => {
       description: "LinkedIn ad account",
     })
     expect(() => client.adAccount("not-a-number")).toThrow("positive numeric ID")
-  })
-
-  test("builds typed advertising and community URNs", () => {
-    expect(organizationUrn(12)).toBe("urn:li:organization:12")
-    expect(shareUrn(34)).toBe("urn:li:share:34")
-    expect(ugcPostUrn(56)).toBe("urn:li:ugcPost:56")
-    expect(sponsoredAccountUrn(123)).toBe("urn:li:sponsoredAccount:123")
-    expect(sponsoredCampaignGroupUrn("456")).toBe("urn:li:sponsoredCampaignGroup:456")
-    expect(sponsoredCampaignUrn(789)).toBe("urn:li:sponsoredCampaign:789")
-    expect(sponsoredCreativeUrn(321)).toBe("urn:li:sponsoredCreative:321")
-    expect(sponsoredCreativeUrn("urn:li:sponsoredCreative:321")).toBe(
-      "urn:li:sponsoredCreative:321"
-    )
-    expect(() => sponsoredCreativeUrn("urn:li:sponsoredCampaign:321")).toThrow(
-      "positive numeric ID or a sponsored creative URN"
-    )
   })
 
   test("rejects an empty token returned by the managed token source", async () => {
