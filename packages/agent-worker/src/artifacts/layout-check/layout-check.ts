@@ -78,14 +78,15 @@ export async function checkDeckLayout(input: {
   const output = posix.join(sandbox.workingDirectory, CHECKS, input.name)
   // The sandbox has no way to the API: what the deck shows from other artifacts is a placeholder.
   const entry = await injectFrameAssets(
-    await rewriteFrameReferences(new TextDecoder().decode(input.entry), [])
+    await rewriteFrameReferences(new TextDecoder().decode(input.entry), []),
+    "deck"
   )
   await sandbox.writeFiles([
     ...(installed.has(sandbox)
       ? []
       : [
           { path: posix.join(library, "check.cjs"), contents: checkScript },
-          { path: posix.join(library, "kit.css"), contents: asset("__sixb/kit.css") },
+          { path: posix.join(library, "deck.css"), contents: asset("__sixb/deck.css") },
           { path: posix.join(library, "runtime.js"), contents: asset("__sixb/runtime.js") },
           { path: posix.join(library, "probe.js"), contents: `(${layoutProbe.toString()})` },
         ]),

@@ -6,7 +6,7 @@
 //
 //   node check.cjs <deck directory> <output directory> <library directory> <deadline in ms>
 //
-// The library holds what the worker installs beside this script: kit.css, runtime.js, probe.js.
+// The library holds what the worker installs beside this script: deck.css, runtime.js, probe.js.
 // The output directory holds entry.html, the deck's entry with the kit and runtime; files.json,
 // the paths the version publishes: only those are served, since the reader gets only those; and
 // themes.json, the themes the reader sees the deck in: Sixb's light and dark, or the mode the
@@ -27,6 +27,8 @@ const DEADLINE_MS = Number(deadline) || 100_000
 /** The most one step waits on the page: its fonts, a slide's measure, a screenshot. */
 const STEP_MS = 10_000
 const PROTOCOL = "sixb-frame/1"
+/** The frame's own files, served from the library as the API serves them beside a version's. */
+const FRAME_FILES = new Set(["/__sixb/deck.css", "/__sixb/runtime.js"])
 const TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -99,8 +101,7 @@ function serve() {
       return
     }
     if (pathname === "/" || pathname === "/index.html") body = entry
-    else if (pathname === "/__sixb/kit.css") file = path.join(lib, "kit.css")
-    else if (pathname === "/__sixb/runtime.js") file = path.join(lib, "runtime.js")
+    else if (FRAME_FILES.has(pathname)) file = path.join(lib, pathname.slice("/__sixb/".length))
     else if (published.has(pathname.slice(1))) file = path.join(root, pathname.slice(1))
     try {
       if (file) body = fs.readFileSync(file)
