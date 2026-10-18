@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { createServer } from "node:net"
 import {
   type ActionDefinition,
   defineAction,
@@ -19,25 +18,13 @@ import { decorateOperationScopedMethodForTesting } from "@sixb/core/internal/sto
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
-import { createTestBrowserPolicy } from "./helpers"
+import { createTestBrowserPolicy, getFreePort } from "./helpers"
 
 const Device = defineObjectType({
   id: "device",
   name: "Device",
   properties: [prop("id", "string", { required: true, primary: true }), prop("status", "string")],
 })
-
-async function freePort(): Promise<number> {
-  const listener = createServer()
-  return new Promise((resolve, reject) => {
-    listener.once("error", reject)
-    listener.listen(0, "127.0.0.1", () => {
-      const address = listener.address()
-      if (!address || typeof address === "string") return reject(new Error("Missing port"))
-      listener.close((error) => (error ? reject(error) : resolve(address.port)))
-    })
-  })
-}
 
 async function withActionServer(
   actions: readonly ActionDefinition[],
@@ -63,7 +50,7 @@ async function withActionServer(
       reports.push(context)
     },
   })
-  const port = await freePort()
+  const port = await getFreePort()
   const baseUrl = `http://127.0.0.1:${port}`
   const server = new SixbServer({
     host,

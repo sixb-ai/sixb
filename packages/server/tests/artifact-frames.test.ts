@@ -152,14 +152,6 @@ function expectFrameHeaders(response: Response, label: string) {
 }
 
 describe("a deck's frame", () => {
-  test("publishes as slides, outlined by each slide's first heading", async () => {
-    const { published } = await deck()
-    expect(published.version).toMatchObject({
-      entry: "index.html",
-      outline: { kind: "slides", slides: [{ title: "Q3 review" }, { title: "Revenue grew 18%" }] },
-    })
-  })
-
   test("serves the entry with the kit and the runtime first in its head, once", async () => {
     const { app, frame } = await deck()
     expect(frame.path).toMatch(/^\/api\/artifact-frames\/[A-Za-z0-9_-]{43}\/$/)

@@ -210,18 +210,29 @@ describe("projection routes", () => {
     expect(body.runs[0]?.error).toEqual(projectionFailure)
   })
 
-  test("serializes superseded runs and the last failure of a retrying one", async () => {
+  test("serializes superseded and retrying runs with only the public run schema", async () => {
     const retryFailure = {
       code: "storage.unavailable",
       message: "Storage is temporarily unavailable.",
       retryable: true,
       at: "2026-05-04T09:02:00.000Z",
     } as const
+    // A provider may return internal fields; the route must not.
+    const retryingRun = {
+      ...makeRun({ run: { id: "run-2", status: "running", error: retryFailure } }),
+      executionToken: "secret-capability",
+      telemetryCheckpoint: {
+        fixedBatchSize: 500,
+        nextBatchOrdinal: 2,
+        nextRowOffset: 1_000,
+        inputExhausted: false,
+      },
+    } as unknown as ProjectionRunRecord
     const sixb = createSixbStub({
       async list() {
         return {
           runs: [
-            makeRun({ run: { id: "run-2", status: "running", error: retryFailure } }),
+            retryingRun,
             makeRun({
               run: { status: "superseded", finishedAt: new Date("2026-05-04T09:03:00.000Z") },
             }),
@@ -237,40 +248,19 @@ describe("projection routes", () => {
     )
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toMatchObject({
+    const body = (await response.json()) as { runs: Record<string, unknown>[] }
+    expect(body).toMatchObject({
       runs: [
-        { id: "run-2", status: "running", error: retryFailure },
+        {
+          id: "run-2",
+          status: "running",
+          error: retryFailure,
+          executionId: "execution-run-1",
+          attempt: 2,
+          queuedAt: "2026-05-04T08:59:00.000Z",
+        },
         { id: "run-1", status: "superseded", finishedAt: "2026-05-04T09:03:00.000Z" },
       ],
-    })
-  })
-
-  test("serializes only the public run schema even if a provider returns internal fields", async () => {
-    const internalRun = {
-      ...makeRun({ run: { status: "running" } }),
-      executionToken: "secret-capability",
-      telemetryCheckpoint: {
-        fixedBatchSize: 500,
-        nextBatchOrdinal: 2,
-        nextRowOffset: 1_000,
-        inputExhausted: false,
-      },
-    } as unknown as ProjectionRunRecord
-    const sixb = createSixbStub({
-      async list() {
-        return { runs: [internalRun], hasMore: false, total: 1 }
-      },
-    })
-
-    const response = await appWithAuthz(sixb, authzViewing("room")).handle(
-      new Request("http://localhost/api/projection-runs")
-    )
-    const body = (await response.json()) as { runs: Record<string, unknown>[] }
-
-    expect(body.runs[0]).toMatchObject({
-      executionId: "execution-run-1",
-      attempt: 2,
-      queuedAt: "2026-05-04T08:59:00.000Z",
     })
     expect(body.runs[0]).not.toHaveProperty("executionToken")
     expect(body.runs[0]).not.toHaveProperty("telemetryCheckpoint")

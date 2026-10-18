@@ -109,7 +109,7 @@ describe("agent API gateway", () => {
     ])
   })
 
-  test("authorizes allowed API calls from the run execution capability", async () => {
+  test("restores the run's inherited user authority from its capability, not caller credentials", async () => {
     const { app, gatewayBaseUrl } = await createGatewayRuntime()
 
     const objectTypes = await app.fetch(
@@ -139,18 +139,6 @@ describe("agent API gateway", () => {
     )
     expect(count.status).toBe(200)
     await expect(count.json()).resolves.toMatchObject({ count: 1 })
-  })
-
-  test("restores the project Agent's inherited user authority", async () => {
-    const { app, gatewayBaseUrl } = await createGatewayRuntime({})
-
-    const response = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
-
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual([
-      expect.objectContaining({ id: "contract" }),
-      expect.objectContaining({ id: "device" }),
-    ])
   })
 
   test("restores child authority without allowing recursive workflows", async () => {
@@ -437,38 +425,79 @@ describe("agent API gateway", () => {
     baseUrl.port = String(listener.port)
 
     try {
-      const project = await runAgentCli(baseUrl.href, ["project", "show"])
+      const cli = (args: readonly string[]) => runAgentCli(baseUrl.href, args)
+      const invalidQueryPath = join(directory, "invalid-query.json")
+      const actionParamsPath = join(directory, "action-params.json")
+      const uploadPath = join(directory, "upload.txt")
+      const downloadPath = join(directory, "download.txt")
+      await Promise.all([
+        writeFile(invalidQueryPath, JSON.stringify({ kind: "start" })),
+        writeFile(actionParamsPath, "{}"),
+        writeFile(uploadPath, "uploaded through the agent CLI"),
+      ])
+
+      // Each process is independent of the others in its round, so a round runs concurrently.
+      const [
+        project,
+        ontology,
+        objects,
+        objectList,
+        graph,
+        invalidQuery,
+        action,
+        upload,
+        download,
+      ] = await Promise.all([
+        cli(["project", "show"]),
+        cli(["ontology", "get", "device"]),
+        cli(["objects", "get", "device", "fan-1"]),
+        cli(["objects", "list", "--type", "device"]),
+        cli(["objects", "inspect", "device", "fan-1", "--depth", "1"]),
+        cli(["objects", "query", "--file", invalidQueryPath]),
+        cli([
+          "actions",
+          "request",
+          "label-device",
+          "--subject-type",
+          "device",
+          "--subject-id",
+          "fan-1",
+          "--file",
+          actionParamsPath,
+        ]),
+        cli(["files", "upload", uploadPath]),
+        cli([
+          "files",
+          "download",
+          "workflow-run",
+          "completed-workflow-run",
+          "--path",
+          "/output/document",
+          "--output",
+          downloadPath,
+        ]),
+      ])
+
       expect(project.exitCode).toBe(0)
       expect(JSON.parse(project.stdout)).toMatchObject({ id: PROJECT_ID })
 
-      const ontology = await runAgentCli(baseUrl.href, ["ontology", "get", "device"])
       expect(ontology.exitCode).toBe(0)
       expect(JSON.parse(ontology.stdout)).toMatchObject({
         id: "device",
         links: [expect.objectContaining({ id: "contract" })],
       })
 
-      const objects = await runAgentCli(baseUrl.href, ["objects", "get", "device", "fan-1"])
       expect(objects.exitCode).toBe(0)
       expect(JSON.parse(objects.stdout)).toMatchObject({
         objects: [expect.objectContaining({ objectTypeId: "device", primaryId: "fan-1" })],
       })
 
-      const objectList = await runAgentCli(baseUrl.href, ["objects", "list", "--type", "device"])
       expect(objectList.exitCode).toBe(0)
       expect(JSON.parse(objectList.stdout)).toMatchObject({
         objects: [expect.objectContaining({ objectTypeId: "device", primaryId: "fan-1" })],
         hasMore: false,
       })
 
-      const graph = await runAgentCli(baseUrl.href, [
-        "objects",
-        "inspect",
-        "device",
-        "fan-1",
-        "--depth",
-        "1",
-      ])
       expect(graph.exitCode).toBe(0)
       expect(JSON.parse(graph.stdout)).toMatchObject({
         object: { objectTypeId: "device", primaryId: "fan-1" },
@@ -486,14 +515,6 @@ describe("agent API gateway", () => {
         ],
       })
 
-      const invalidQueryPath = join(directory, "invalid-query.json")
-      await writeFile(invalidQueryPath, JSON.stringify({ kind: "start" }))
-      const invalidQuery = await runAgentCli(baseUrl.href, [
-        "objects",
-        "query",
-        "--file",
-        invalidQueryPath,
-      ])
       expect(invalidQuery.exitCode).toBe(3)
       expect(JSON.parse(invalidQuery.stderr)).toMatchObject({
         error: {
@@ -509,19 +530,6 @@ describe("agent API gateway", () => {
         },
       })
 
-      const actionParamsPath = join(directory, "action-params.json")
-      await writeFile(actionParamsPath, "{}")
-      const action = await runAgentCli(baseUrl.href, [
-        "actions",
-        "request",
-        "label-device",
-        "--subject-type",
-        "device",
-        "--subject-id",
-        "fan-1",
-        "--file",
-        actionParamsPath,
-      ])
       expect(action.exitCode).toBe(0)
       const actionResult = JSON.parse(action.stdout) as { id: string }
       expect(actionResult).toMatchObject({
@@ -530,21 +538,6 @@ describe("agent API gateway", () => {
         status: "succeeded",
       })
 
-      const actionRuns = await runAgentCli(baseUrl.href, [
-        "action-runs",
-        "list",
-        "--action",
-        "label-device",
-      ])
-      expect(actionRuns.exitCode).toBe(0)
-      expect(JSON.parse(actionRuns.stdout)).toMatchObject({
-        runs: [expect.objectContaining({ id: actionResult.id, actionId: "label-device" })],
-        hasMore: false,
-      })
-
-      const uploadPath = join(directory, "upload.txt")
-      await writeFile(uploadPath, "uploaded through the agent CLI")
-      const upload = await runAgentCli(baseUrl.href, ["files", "upload", uploadPath])
       expect(upload.exitCode).toBe(0)
       const uploadedFile = JSON.parse(upload.stdout)
       expect(uploadedFile).toMatchObject({
@@ -552,35 +545,28 @@ describe("agent API gateway", () => {
         sizeBytes: 30,
       })
 
+      expect(download.exitCode).toBe(0)
+      expect(JSON.parse(download.stdout)).toEqual({ downloaded: true, output: downloadPath })
+      expect(await readFile(downloadPath, "utf8")).toBe("workflow result")
+
       const workflowInputPath = join(directory, "workflow-input.json")
       await writeFile(workflowInputPath, JSON.stringify({ document: uploadedFile }))
-      const workflow = await runAgentCli(baseUrl.href, [
-        "workflows",
-        "start",
-        "inspect-devices",
-        "--file",
-        workflowInputPath,
+      const [actionRuns, workflow] = await Promise.all([
+        cli(["action-runs", "list", "--action", "label-device"]),
+        cli(["workflows", "start", "inspect-devices", "--file", workflowInputPath]),
       ])
+
+      expect(actionRuns.exitCode).toBe(0)
+      expect(JSON.parse(actionRuns.stdout)).toMatchObject({
+        runs: [expect.objectContaining({ id: actionResult.id, actionId: "label-device" })],
+        hasMore: false,
+      })
+
       expect(workflow.exitCode).toBe(0)
       expect(JSON.parse(workflow.stdout)).toMatchObject({
         runId: expect.any(String),
         workflowId: "inspect-devices",
       })
-
-      const downloadPath = join(directory, "download.txt")
-      const download = await runAgentCli(baseUrl.href, [
-        "files",
-        "download",
-        "workflow-run",
-        "completed-workflow-run",
-        "--path",
-        "/output/document",
-        "--output",
-        downloadPath,
-      ])
-      expect(download.exitCode).toBe(0)
-      expect(JSON.parse(download.stdout)).toEqual({ downloaded: true, output: downloadPath })
-      expect(await readFile(downloadPath, "utf8")).toBe("workflow result")
     } finally {
       listener.stop(true)
       await rm(directory, { recursive: true, force: true })
@@ -599,12 +585,18 @@ async function runAgentCli(
     stdout: "pipe",
     stderr: "pipe",
   })
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ])
-  return { exitCode, stdout, stderr }
+  // Bound each process so a wedged CLI fails this test instead of stalling the suite.
+  const killer = setTimeout(() => child.kill(), 10_000)
+  try {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
+    return { exitCode, stdout, stderr }
+  } finally {
+    clearTimeout(killer)
+  }
 }
 
 async function createGatewayRuntime(

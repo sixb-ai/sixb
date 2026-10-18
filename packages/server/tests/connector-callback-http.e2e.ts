@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test"
 import { Agent, request } from "node:http"
-import { createServer } from "node:net"
 import {
   can,
   defineConnector,
@@ -15,26 +14,15 @@ import {
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import { SixbServer } from "../src/server"
-import { createTestBrowserPolicy } from "./helpers"
-
-async function freePort(): Promise<number> {
-  const listener = createServer()
-  return new Promise((resolve, reject) => {
-    listener.once("error", reject)
-    listener.listen(0, "127.0.0.1", () => {
-      const address = listener.address()
-      if (!address || typeof address === "string") return reject(new Error("Missing port"))
-      listener.close((error) => (error ? reject(error) : resolve(address.port)))
-    })
-  })
-}
+import { createTestBrowserPolicy, getFreePort } from "./helpers"
 
 // Bun 1.4.2: remove server?.timeout(request, 0) in the connector callback handler and run
 // bun test ./packages/server/tests/connector-callback-http.e2e.ts
 // The socket closes before the 12-second exchange finishes. node:http deliberately does not
 // retry the GET: automatic retries would obscure the original lost redirect behind state reuse.
+// The exchange must outlast Bun's fixed 10-second idle timeout, so the two cases share that wait.
 for (const reused of [false, true]) {
-  test(`delayed OAuth callback completes on a ${reused ? "reused" : "fresh"} HTTP connection`, async () => {
+  test.concurrent(`delayed OAuth callback completes on a ${reused ? "reused" : "fresh"} HTTP connection`, async () => {
     let exchanges = 0
     const connector = defineConnector("slow-crm", {
       type: "slow-oauth",
@@ -106,7 +94,7 @@ for (const reused of [false, true]) {
       createdAt: new Date(),
       expiresAt: new Date(Date.now() + 60_000),
     })
-    const port = await freePort()
+    const port = await getFreePort()
     const base = `http://127.0.0.1:${port}`
     const server = new SixbServer({
       host,

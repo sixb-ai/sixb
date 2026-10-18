@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { beforeAll, describe, expect, test } from "bun:test"
 import {
   defineObjectType,
   InMemoryBlobStorage,
@@ -85,10 +85,13 @@ async function fetchDocsJsonWithoutWarnings(app: ReturnType<typeof createDocsApi
 }
 
 describe("OpenAPI docs", () => {
-  test("documents CSRF auth for protected mutating API routes", async () => {
-    const app = createDocsApi()
-    const spec = await fetchDocsJsonWithoutWarnings(app)
+  // The document is generated once per server; every test reads the same one.
+  let spec: OpenApiDocument
+  beforeAll(async () => {
+    spec = await fetchDocsJsonWithoutWarnings(createDocsApi())
+  })
 
+  test("documents CSRF auth for protected mutating API routes", () => {
     expect(spec.components?.securitySchemes?.sixbCsrf).toEqual({
       type: "apiKey",
       in: "header",
@@ -213,8 +216,7 @@ describe("OpenAPI docs", () => {
 
   // Reproduce: drop the global `security` default in createSixbApi, or a public route's
   // `security: []`; the protected or public operation then documents the wrong credentials.
-  test("documents a session on every protected operation and nothing on public ones", async () => {
-    const spec = await fetchDocsJsonWithoutWarnings(createDocsApi())
+  test("documents a session on every protected operation and nothing on public ones", () => {
     for (const [path, operations] of Object.entries(spec.paths ?? {})) {
       for (const [method, operation] of Object.entries(operations)) {
         if (!["get", "post", "put", "patch", "delete", "head"].includes(method)) continue
@@ -234,9 +236,7 @@ describe("OpenAPI docs", () => {
     }
   })
 
-  test("documents contextual file content responses", async () => {
-    const app = createDocsApi()
-    const spec = await fetchDocsJsonWithoutWarnings(app)
+  test("documents contextual file content responses", () => {
     const paths = [
       "/api/objects/{objectTypeId}/{objectId}/files/content",
       "/api/action-runs/{runId}/files/content",

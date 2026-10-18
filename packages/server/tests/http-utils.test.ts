@@ -16,18 +16,15 @@ describe("handleRouteError", () => {
     ).toThrow()
   })
 
-  test("derives coded error statuses from identity instead of message wording", () => {
+  test.each([
+    ["dataset.not_found", "No dataset matches this request", 404],
+    // An uncategorized coded exception is an internal failure.
+    ["internal.unexpected", "Commit failed", 500],
+  ] as const)("derives the status of %s from its code, not its wording", (code, message, status) => {
     const set: { status?: number | string } = {}
-    const response = handleRouteError(
-      createSixbError("dataset.not_found", "No dataset matches this request"),
-      set
-    )
 
-    expect(set.status).toBe(404)
-    expect(response).toEqual({
-      error: "No dataset matches this request",
-      code: "dataset.not_found",
-    })
+    expect(handleRouteError(createSixbError(code, message), set)).toEqual({ error: message, code })
+    expect(set.status).toBe(status)
   })
 
   test("exposes structured details only for declared AI limit errors", () => {
@@ -57,15 +54,5 @@ describe("handleRouteError", () => {
       expect(handleRouteError(new Error(message), set)).toEqual({ error: message })
       expect(set.status).toBe(400)
     }
-  })
-
-  test("treats uncategorized coded exceptions as internal failures", () => {
-    const set: { status?: number | string } = {}
-
-    expect(handleRouteError(createSixbError("internal.unexpected", "Commit failed"), set)).toEqual({
-      error: "Commit failed",
-      code: "internal.unexpected",
-    })
-    expect(set.status).toBe(500)
   })
 })

@@ -54,51 +54,24 @@ function createApp(models?: ModelCatalogInput) {
 }
 
 describe("GET /api/models", () => {
-  // Removal proof: derive publisher only from entry.provider; these hosted models lose
-  // their author/logo identity. Custom provider IDs must not change the displayed host.
-  test("uses resolved publisher metadata independently of routing identity", async () => {
-    const model = testModel("company-foundry", "production")
-    const response = await createApp({
-      language: [
-        {
-          ...model,
-          resolve: async () => ({
-            ...model,
-            definition: defineLanguageModel({
-              ...model.definition,
-              publisher: { id: "zai", name: "Z.ai" },
-              via: "Azure AI Foundry",
-            }),
-          }),
-        },
-      ],
-    }).fetch(new Request("http://localhost/api/models"))
-    expect(response.status).toBe(200)
-    expect(await response.json()).toMatchObject({
-      language: [
-        {
-          provider: "company-foundry",
-          modelId: "production",
-          publisher: { id: "zai", name: "Z.ai" },
-          via: "Azure AI Foundry",
-        },
-      ],
-    })
-  })
-  test("resolves provider metadata and keeps configured identities and order", async () => {
-    // Removal proof: return only entry.model.definition in the route; the resolved metadata is lost.
-    const model = testModel("vercel-ai-gateway", "openai/example")
+  test("serializes resolved metadata, publishers, reasoning, and defaults in configured order", async () => {
+    // Removal proofs: return only entry.model.definition in the route (the resolved metadata is
+    // lost); derive publisher only from entry.provider (the hosted model loses its author, and a
+    // custom provider ID must not change the displayed host); drop "max" from the reasoning-level
+    // serialization; drop `defaultReasoning` from serializeLanguageModel.
+    const gateway = testModel("vercel-ai-gateway", "openai/example")
+    const hosted = testModel("company-foundry", "production")
     let resolutions = 0
     const app = createApp({
       language: [
         {
-          ...model,
+          ...gateway,
           resolve: async () => {
             resolutions += 1
             return {
-              ...model,
+              ...gateway,
               definition: defineLanguageModel({
-                ...model.definition,
+                ...gateway.definition,
                 name: "Example",
                 description: "Provider-owned description",
                 contextWindow: 200_000,
@@ -106,13 +79,27 @@ describe("GET /api/models", () => {
                   inputMediaTypes: ["image/png", "application/pdf"],
                   localTools: true,
                   nativeStructuredOutput: true,
-                  reasoning: { canDisable: true, efforts: ["low", "high", "max"] },
+                  reasoning: {
+                    canDisable: true,
+                    efforts: ["low", "medium", "high", "xhigh", "max"],
+                  },
                 },
               }),
             }
           },
         },
-        testModel("private", "specialist"),
+        { ...testModel("private", "specialist"), defaultReasoning: "low" },
+        {
+          ...hosted,
+          resolve: async () => ({
+            ...hosted,
+            definition: defineLanguageModel({
+              ...hosted.definition,
+              publisher: { id: "zai", name: "Z.ai" },
+              via: "Azure AI Foundry",
+            }),
+          }),
+        },
       ],
     })
     const response = await app.fetch(new Request("http://localhost/api/models"))
@@ -137,14 +124,25 @@ describe("GET /api/models", () => {
             reasoning: true,
             contextWindowTokens: 200_000,
           },
-          reasoningLevels: ["provider-default", "none", "low", "high", "max"],
+          reasoningLevels: ["provider-default", "none", "low", "medium", "high", "xhigh", "max"],
         },
         {
           provider: "private",
           modelId: "specialist",
           isDefault: false,
+          defaultReasoning: "low",
           name: "specialist",
           publisher: { id: "private", name: "private" },
+          capabilities: { input: ["text"], output: ["text"] },
+          reasoningLevels: [],
+        },
+        {
+          provider: "company-foundry",
+          modelId: "production",
+          isDefault: false,
+          name: "production",
+          publisher: { id: "zai", name: "Z.ai" },
+          via: "Azure AI Foundry",
           capabilities: { input: ["text"], output: ["text"] },
           reasoningLevels: [],
         },
@@ -152,20 +150,7 @@ describe("GET /api/models", () => {
     })
   })
 
-  test("exposes the reasoning applied when a request omits it", async () => {
-    // Removal proof: drop `defaultReasoning` from serializeLanguageModel.
-    const response = await createApp({
-      language: [
-        { ...testModel("private", "fast"), defaultReasoning: "low" },
-        testModel("private", "slow"),
-      ],
-    }).fetch(new Request("http://localhost/api/models"))
-    const { language } = (await response.json()) as { language: Record<string, unknown>[] }
-    expect(language[0]).toMatchObject({ modelId: "fast", defaultReasoning: "low" })
-    expect(language[1]).not.toHaveProperty("defaultReasoning")
-  })
-
-  test("returns an empty catalog without resolving providers", async () => {
+  test("returns an empty catalog when no models are configured", async () => {
     const response = await createApp().fetch(new Request("http://localhost/api/models"))
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ language: [] })
@@ -214,32 +199,9 @@ describe("GET /api/models", () => {
     expect(response.status).toBe(500)
   })
 
-  // Regression proof: drop "max" from the native reasoning-level serialization.
-  test("exposes Max for a configured model that supports it", async () => {
-    const model = testModel("vercel-ai-gateway", "openai/gpt-5.6-luna")
-    const app = createApp({
-      language: [
-        {
-          ...model,
-          definition: defineLanguageModel({
-            ...model.definition,
-            capabilities: {
-              reasoning: { canDisable: true, efforts: ["low", "medium", "high", "xhigh", "max"] },
-            },
-          }),
-        },
-      ],
-    })
-    const response = await app.fetch(new Request("http://localhost/api/models"))
-    expect(await response.json()).toMatchObject({
-      language: [
-        { reasoningLevels: ["provider-default", "none", "low", "medium", "high", "xhigh", "max"] },
-      ],
-    })
-  })
-
   // Regression proof: remove "max" from the native reasoning schema; admission returns 422.
-  test.each(["high", "max"])("accepts %s reasoning for an Agent turn", async (reasoning) => {
+  test("accepts max reasoning for an Agent turn", async () => {
+    const reasoning = "max"
     const app = createApp({
       language: [
         testModel("gateway", "openai/gpt-5.4"),

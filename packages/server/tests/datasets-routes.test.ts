@@ -110,7 +110,7 @@ const states: DatasetCatalogState[] = definitions.map((definition, index) => ({
 }))
 
 describe("dataset catalog routes", () => {
-  test("list route reads bulk catalog state once, never per-dataset reads", async () => {
+  test("list and single routes read bulk catalog state once, never per-dataset reads", async () => {
     const { storage, calls } = createCatalogOnlyStorage(states)
     const app = createTestApp(storage, definitions)
 
@@ -134,31 +134,19 @@ describe("dataset catalog routes", () => {
       expect(item.latestVersion?.rowCount).toBe(2)
       expect(item.latestVersion?.versionId).toMatch(/^ducklake:\d+$/)
     }
-
     expect(calls()).toBe(1)
-  })
 
-  test("single route reads catalog state without per-dataset reads", async () => {
-    const { storage, calls } = createCatalogOnlyStorage(states)
-    const app = createTestApp(storage, definitions)
-
-    const response = await app.handle(
+    const single = await app.handle(
       new Request(`http://localhost/api/datasets/${definitions[0].id}`)
     )
-    expect(response.status).toBe(200)
-
-    const item = (await response.json()) as {
-      primaryKey?: string | string[]
-      sequenceBy?: string
-      materialized: boolean
-      latestVersion: { mode: string } | null
-    }
-    expect(item.materialized).toBe(true)
-    expect(item.primaryKey).toEqual(["source", "id"])
-    expect(item.sequenceBy).toBe("revision")
-    expect(item.latestVersion?.mode).toBe("snapshot")
-
-    expect(calls()).toBe(1)
+    expect(single.status).toBe(200)
+    expect(await single.json()).toMatchObject({
+      materialized: true,
+      primaryKey: ["source", "id"],
+      sequenceBy: "revision",
+      latestVersion: { mode: "snapshot" },
+    })
+    expect(calls()).toBe(2)
   })
 })
 

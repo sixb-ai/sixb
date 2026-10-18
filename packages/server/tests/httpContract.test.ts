@@ -1,8 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-import { createServer } from "node:net"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import {
   col,
   type DomainEventLog,
@@ -44,7 +40,7 @@ import {
 } from "@sixb/core/testing"
 import { SqliteStorage } from "@sixb/sqlite"
 import { SixbServer } from "../src/server"
-import { createTestBrowserPolicy } from "./helpers"
+import { createTestBrowserPolicy, getFreePort } from "./helpers"
 
 function createSixbInstance(options: SixbHostOptions): SixbHost {
   return new SixbHost(options)
@@ -191,29 +187,6 @@ const highRpmRule = defineRule("device.high-rpm")
   .on(Device)
   .where((device) => device.p.rpm.gt(1000))
 
-async function getFreePort(): Promise<number> {
-  return await new Promise<number>((resolvePromise, reject) => {
-    const server = createServer() as ReturnType<typeof createServer> & {
-      on(event: string, listener: (error: Error) => void): void
-    }
-
-    server.on("error", reject)
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address()
-      if (!address || typeof address === "string") {
-        reject(new Error("Could not resolve an open port"))
-        return
-      }
-
-      const { port } = address
-      server.close((error) => {
-        if (error) reject(error)
-        else resolvePromise(port)
-      })
-    })
-  })
-}
-
 async function seedPendingReviewIntervention(sixb: SixbHost, suffix: string) {
   const workflowRuns = sixb.storage.workflowRuns
   const workflowInterventions = sixb.storage.workflowInterventions
@@ -307,8 +280,6 @@ describe("SixbServer HTTP contract", () => {
   async function withHttpContractServer(
     run: (context: { baseUrl: string; events: DomainEventLog; sixb: SixbHost }) => Promise<void>
   ): Promise<void> {
-    const tempRoot = await mkdtemp(join(tmpdir(), "sixb-http-contract-"))
-
     const lakeStorage = new InMemoryLakeStorage()
     const storage: Storage = new SqliteStorage()
     const sixb = createSixbInstance({
@@ -568,7 +539,6 @@ describe("SixbServer HTTP contract", () => {
       await run({ baseUrl, events: sixb.events, sixb })
     } finally {
       await server.stop()
-      await rm(tempRoot, { recursive: true, force: true })
     }
   }
 
