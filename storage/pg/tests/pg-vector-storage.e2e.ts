@@ -20,7 +20,6 @@ import {
 } from "@sixb/core/internal/materialization"
 import { ProjectionRegistry } from "@sixb/core/internal/materializer"
 import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
-import { defineMigrations } from "@sixb/core/storage"
 import {
   createMaterializerTestFixture,
   createTestSixb,
@@ -29,9 +28,8 @@ import {
 import { assertVectorBatchInvalidation } from "../../tests/vector-invalidation-contract"
 import { assertVectorBatchPublication } from "../../tests/vector-write-batch-contract"
 import { PostgresStorage } from "../src"
-import { createPostgresMigrator, postgresStorageMigrations, quoteIdent } from "../src/migrations"
 import { createPgClient } from "../src/pg-client"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage, type TestStorageOptions } from "./helpers"
 
 const model: EmbeddingModel = {
   providerId: "test",
@@ -62,8 +60,11 @@ const Product = defineObjectType({
 const ref = { objectTypeId: Product.id, primaryId: "a" }
 const projectId = "vector-test"
 
+/** Hosts whose background dispatch has to stop before their storage closes. */
+const hosts: SixbHost[] = []
+
 function runtime(storage: PostgresStorage, embedding = model, id = projectId) {
-  return createTestSixb({
+  const host = new SixbHost({
     id,
     ontology: [Product],
     models: { embedding: [embedding] },
@@ -73,10 +74,11 @@ function runtime(storage: PostgresStorage, embedding = model, id = projectId) {
     lakeStorage: new InMemoryLakeStorage(),
     queues: new InMemoryQueues(),
   })
+  hosts.push(host)
+  return createTestSixb(host)
 }
-async function fixture(migrate = true) {
-  const { storage, schemaName } = await createTestStorage({ migrate })
-  const connectionString = process.env.DATABASE_URL!
+async function fixture(options: TestStorageOptions = {}) {
+  const { storage, schemaName, connectionString } = await createTestStorage(options)
   const sql = createPgClient({ connectionString, schemaName, max: 2 })
   const embed = mock(model.embed)
   const sixb = runtime(storage, { ...model, embed })
@@ -96,14 +98,15 @@ async function fixture(migrate = true) {
         properties: { id: "a", title: "Title", description: "Description", context: "Context" },
       }),
     async close() {
-      await sql.unsafe(`DROP SCHEMA IF EXISTS ${quoteIdent(schemaName)} CASCADE`)
+      // A commit's outbox drain and vector dispatch run after it returns; let them finish.
+      await Promise.all(hosts.splice(0).map((host) => host.closeBroker()))
       await sql.end()
-      await storage.close()
+      await disposeTestStorage(storage)
     },
   }
 }
 
-// Each test owns its schema; the package's setup supplies an ordinary PostgreSQL server.
+// Each test owns its database; the package's setup supplies an ordinary PostgreSQL server.
 describe("PostgreSQL vector storage", () => {
   test("persists float32 values and metadata across connections without pgvector", async () => {
     const f = await fixture()
@@ -301,16 +304,9 @@ describe("PostgreSQL vector storage", () => {
   })
 
   test("upgrades an existing schema without changing objects or promoting raw arrays", async () => {
-    const f = await fixture(false)
+    // A schema from before vector storage (042).
+    const f = await fixture({ migrateThrough: 40 })
     try {
-      await createPostgresMigrator({
-        sql: f.sql,
-        schemaName: f.schemaName,
-        migrations: defineMigrations({
-          adapterId: postgresStorageMigrations.adapterId,
-          steps: postgresStorageMigrations.steps.filter((step) => step.version < 41),
-        }),
-      }).migrate()
       // Seed an actual pre-migration row; the old schema has no vector capability/table.
       await f.sql`INSERT INTO objects (project_id, object_type_id, primary_id, properties, version, last_commit_id, created_at, updated_at)
           VALUES (${projectId}, ${Product.id}, 'a', '{"id":"a","title":"Title","embedding":[1,0,0]}', 1, 'legacy', '2026-01-01', '2026-01-01')`
@@ -406,6 +402,7 @@ describe("PostgreSQL vector storage", () => {
         lakeStorage: new InMemoryLakeStorage(),
         queues: new InMemoryQueues(),
       })
+      hosts.push(host)
       const objects = createTestSixb(host).objects(Product)
       const resolved = projections.resolveSource(projection.id)
       async function replace(version: number, title: string) {

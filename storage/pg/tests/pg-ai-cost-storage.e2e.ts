@@ -8,14 +8,11 @@ import {
 } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import type { PgStoreClient } from "../src/transactions"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 runAiModelCallGroupsContractSuite("PostgreSQL model-call groups", {
   createStorage: async () => (await createTestStorage()).storage,
-  cleanup: async (storage) => {
-    await storage.dropSchema()
-    await storage.close()
-  },
+  cleanup: disposeTestStorage,
 })
 
 const bundles = new Map<AiCostStorage, PostgresStorage>()
@@ -47,69 +44,11 @@ test("PgAiCostStorage deserializes only the requested model-call page", async ()
       items: [{ usage: { id: "usage_1" } }],
     })
   } finally {
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   }
 })
 
-test("PgAiCostStorage returns direct agent attribution with each model-call page", async () => {
-  const { storage } = await createTestStorage()
-  try {
-    await storage.agents.threads.create({
-      id: "thread_1",
-      projectId: "project_1",
-      ownerPrincipal: { type: "user", id: "user_1" },
-    })
-    const executionId = await createTestAgentExecution(
-      { auth: storage.auth, executions: storage.executions },
-      { projectId: "project_1", runId: "run_1", authority: "inherited" }
-    )
-    await storage.agents.runs.create({
-      id: "run_1",
-      projectId: "project_1",
-      executionId,
-      threadId: "thread_1",
-      triggerMessageId: "message_1",
-      spec: { model: { provider: "test", modelId: "test-model" } },
-    })
-    await storage.aiUsage.recordModelCall({
-      id: "usage_1",
-      projectId: "project_1",
-      executionId,
-      attempt: 1,
-      callId: "call_1",
-      requesterGroupIds: [],
-      providerId: "anthropic.messages",
-      requestedModelId: "claude-opus-4-8",
-      responseId: "response_1",
-      usage: { inputTokens: 10, outputTokens: 5 },
-      occurredAt: new Date("2026-09-01T12:00:00.000Z"),
-    })
-
-    await expect(
-      storage.aiCosts.listModelCalls({
-        projectId: "project_1",
-        from: new Date("2026-09-01T00:00:00.000Z"),
-        to: new Date("2026-09-02T00:00:00.000Z"),
-      })
-    ).resolves.toMatchObject({
-      items: [
-        {
-          attribution: {
-            kind: "agent",
-            agentRunId: "run_1",
-            threadId: "thread_1",
-          },
-        },
-      ],
-    })
-  } finally {
-    await storage.dropSchema()
-    await storage.close()
-  }
-})
-
-test("PgAiCostStorage returns child-agent attribution with each model-call page", async () => {
+test("PgAiCostStorage returns direct and child-agent attribution with each model-call page", async () => {
   const { storage } = await createTestStorage()
   try {
     const parentRunId = "parent_run_1"
@@ -163,40 +102,43 @@ test("PgAiCostStorage returns child-agent attribution with each model-call page"
       },
       maxActiveChildren: 4,
     })
-    await storage.aiUsage.recordModelCall({
-      id: "usage_child_agent_1",
-      projectId: "project_1",
-      executionId: childExecutionId,
-      attempt: 1,
-      callId: "call_1",
-      requesterGroupIds: ["users"],
-      providerId: "anthropic.messages",
-      requestedModelId: "claude-opus-4-8",
-      responseId: "response_1",
-      usage: { inputTokens: 10, outputTokens: 5 },
-      occurredAt: new Date("2026-09-01T12:00:00.000Z"),
-    })
-
-    await expect(
-      storage.aiCosts.listModelCalls({
+    for (const [id, executionId] of [
+      ["usage_agent_1", parentExecutionId],
+      ["usage_child_agent_1", childExecutionId],
+    ] as const) {
+      await storage.aiUsage.recordModelCall({
+        id,
         projectId: "project_1",
-        from: new Date("2026-09-01T00:00:00.000Z"),
-        to: new Date("2026-09-02T00:00:00.000Z"),
+        executionId,
+        attempt: 1,
+        callId: id,
+        requesterGroupIds: ["users"],
+        providerId: "anthropic.messages",
+        requestedModelId: "claude-opus-4-8",
+        responseId: id,
+        usage: { inputTokens: 10, outputTokens: 5 },
+        occurredAt: new Date("2026-09-01T12:00:00.000Z"),
       })
-    ).resolves.toMatchObject({
-      items: [
-        {
-          attribution: {
-            kind: "subagent",
-            subagentRunId: childRunId,
-            parentRunId,
-          },
-        },
-      ],
+    }
+
+    const page = await storage.aiCosts.listModelCalls({
+      projectId: "project_1",
+      from: new Date("2026-09-01T00:00:00.000Z"),
+      to: new Date("2026-09-02T00:00:00.000Z"),
+    })
+    const attribution = (id: string) => page.items.find((item) => item.usage.id === id)?.attribution
+    expect(attribution("usage_agent_1")).toMatchObject({
+      kind: "agent",
+      agentRunId: parentRunId,
+      threadId: "thread_1",
+    })
+    expect(attribution("usage_child_agent_1")).toMatchObject({
+      kind: "subagent",
+      subagentRunId: childRunId,
+      parentRunId,
     })
   } finally {
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   }
 })
 
@@ -215,8 +157,7 @@ runAiCostStorageContractSuite("PgAiCostStorage", {
     const storage = bundles.get(costs)
     if (!storage) return
     bundles.delete(costs)
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   },
 })
 
@@ -288,7 +229,6 @@ test("round-trips audio duration, valuation and analytics without treating missi
       storage.aiCosts.recordModelCallCost({ ...cost, usageRecordId: "audio-unknown" })
     ).rejects.toThrow()
   } finally {
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   }
 })

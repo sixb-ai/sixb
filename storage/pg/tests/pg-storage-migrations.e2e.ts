@@ -10,6 +10,7 @@ import {
 } from "@sixb/core/internal/materialization"
 import {
   defineMigrations,
+  type MigrationReport,
   ONTOLOGY_OUTBOX_FAILURE_CODES,
   SYNC_RUN_FAILURE_CODES,
 } from "@sixb/core/storage"
@@ -20,20 +21,94 @@ import {
   startTestSyncRun,
   startTestWebhookRun,
 } from "@sixb/core/testing"
-import { SQL } from "bun"
-import { PostgresStorage, type PostgresStorage as PostgresStorageType } from "../src"
+import { PostgresStorage } from "../src"
 import {
   createPostgresMigrator,
   POSTGRES_STORAGE_ADAPTER_ID,
+  type PostgresMigrationContext,
   postgresStorageMigrations,
   quoteIdent,
 } from "../src/migrations"
+import { jsonParameter } from "../src/ontology-storage/shared"
+import { createPgClient, type SQL } from "../src/pg-client"
+import { createTestStorage, disposeTestStorage, type TestStorageOptions } from "./helpers"
 
 const LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES = ["webhook.delivery_failed"] as const
 
-import { jsonParameter } from "../src/ontology-storage/shared"
-import { createPgClient } from "../src/pg-client"
-import { createTestStorage } from "./helpers"
+/** Every shipped migration, in order: renaming or reordering one breaks deployed databases. */
+const SHIPPED_MIGRATIONS = [
+  "001-initial-schema",
+  "002-workflow-run-output",
+  "003-merge-sync-runs",
+  "004-executions",
+  "005-workflow-executions",
+  "006-narrow-ontology-source-root-index",
+  "007-split-overrides",
+  "008-action-executions",
+  "009-agent-executions",
+  "010-ai-usage-accounting-foundation",
+  "011-sync-failure-record",
+  "012-pipeline-failure-record",
+  "013-workflow-failure-record",
+  "014-agent-failure-record",
+  "015-projection-failure-record",
+  "016-webhook-run-failure-record",
+  "017-action-failure-record",
+  "018-ontology-outbox-failure-record",
+  "019-webhook-delivery-failure-record",
+  "020-drop-run-usage-projections",
+  "021-sync-pipeline-executions",
+  "022-projection-executions",
+  "023-webhook-executions",
+  "024-ontology-commit-executions",
+  "025-connector-connections",
+  "026-ai-cost-accounting",
+  "027-agent-context-checkpoints",
+  "028-object-override-edit-times",
+  "029-model-accounting",
+  "030-ai-usage-limits",
+  "031-subagent-runs",
+  "032-conversation-run-spec",
+  "033-retire-agent-definitions",
+  "034-device-authorizations",
+  "035-share-grants",
+  "036-share-sessions",
+  "037-execution-requester-groups",
+  "038-outbox-publication-order",
+  "039-projection-source-roots",
+  "040-connector-optional-pkce",
+  "041-agent-thread-workspaces",
+  "042-vector-profiles",
+  "043-vector-indexing",
+  "044-vector-batching",
+  "045-agent-thread-sandbox-state",
+  "046-workflow-intervention-principals",
+  "047-ontology-commit-attribution",
+  "048-file-upload-sessions",
+  "049-native-sessions",
+  "050-directory-group-memberships",
+  "051-projection-run-supersession",
+  "052-compact-source-storage",
+  "053-replacement-plans",
+  "054-slim-ontology-outbox",
+  "055-object-query-preparation",
+  "056-commit-touches",
+  "057-audio-transcription",
+  "058-reranking-model-kind",
+  "059-file-download-grants",
+  "060-drained-source-versions",
+  "061-terminal-action-runs",
+  "062-drop-auth-audience",
+  "063-artifacts",
+  "064-drop-output-diagnostics",
+  "065-plan-work-payload-statistics",
+  "066-activity",
+  "067-activity-timeline",
+  "068-activity-interactions",
+  "069-artifact-kinds",
+]
+
+const steps = postgresStorageMigrations.steps
 
 const Room = defineObjectType({
   id: "Room",
@@ -49,1234 +124,508 @@ const ontology = new OntologyRegistry({ sources: [Room] })
 describe("Postgres storage migrations", () => {
   test("moves historical snapshots to executions and preserves empty child snapshots", async () => {
     // Removal proof: omit 037's recursive backfill; the snapshots below become empty.
-    await withStorage(false, async (_storage, schemaName) => {
-      const connectionString = process.env.DATABASE_URL
-      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
-      const sql = createPgClient({ connectionString, schemaName, max: 1 })
-      try {
-        await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(schemaName)}`)
-        await sql.unsafe(`
-          CREATE TABLE executions (project_id TEXT, id TEXT, parent_execution_id TEXT);
-          CREATE TABLE workflow_runs (project_id TEXT, execution_id TEXT, requester_group_ids JSONB);
-          CREATE TABLE agent_runs (project_id TEXT, execution_id TEXT, requester_group_ids JSONB);
-          INSERT INTO executions VALUES ('p', 'root', NULL), ('p', 'workflow', 'root'),
-            ('p', 'task', 'workflow'), ('p', 'agent', 'root'), ('p', 'child', 'agent'),
-            ('p', 'empty', 'agent'), ('other', 'workflow', NULL);
-          INSERT INTO workflow_runs VALUES ('p', 'workflow', '["finance"]');
-          INSERT INTO agent_runs VALUES ('p', 'agent', '["support"]'), ('p', 'empty', '[]');
-        `)
-        const migration = postgresStorageMigrations.steps.find(
-          (step) => step.id === "037-execution-requester-groups"
-        )!
-        await migration.up({
-          exec: async (text) => {
-            await sql.unsafe(text)
-          },
-        })
-        const rows =
-          await sql`SELECT project_id, id, requester_group_ids FROM executions ORDER BY project_id, id`
-        expect([...rows]).toEqual([
-          { project_id: "other", id: "workflow", requester_group_ids: [] },
-          { project_id: "p", id: "agent", requester_group_ids: ["support"] },
-          { project_id: "p", id: "child", requester_group_ids: ["support"] },
-          { project_id: "p", id: "empty", requester_group_ids: [] },
-          { project_id: "p", id: "root", requester_group_ids: [] },
-          { project_id: "p", id: "task", requester_group_ids: ["finance"] },
-          { project_id: "p", id: "workflow", requester_group_ids: ["finance"] },
-        ])
-      } finally {
-        await sql.end()
-      }
+    await withDatabase({ migrate: false }, async ({ sql, schemaName, context }) => {
+      await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(schemaName)}`)
+      await sql.unsafe(`
+        CREATE TABLE executions (project_id TEXT, id TEXT, parent_execution_id TEXT);
+        CREATE TABLE workflow_runs (project_id TEXT, execution_id TEXT, requester_group_ids JSONB);
+        CREATE TABLE agent_runs (project_id TEXT, execution_id TEXT, requester_group_ids JSONB);
+        INSERT INTO executions VALUES ('p', 'root', NULL), ('p', 'workflow', 'root'),
+          ('p', 'task', 'workflow'), ('p', 'agent', 'root'), ('p', 'child', 'agent'),
+          ('p', 'empty', 'agent'), ('other', 'workflow', NULL);
+        INSERT INTO workflow_runs VALUES ('p', 'workflow', '["finance"]');
+        INSERT INTO agent_runs VALUES ('p', 'agent', '["support"]'), ('p', 'empty', '[]');
+      `)
+      await steps[indexOf("037-execution-requester-groups")]!.up(context)
+      const rows =
+        await sql`SELECT project_id, id, requester_group_ids FROM executions ORDER BY project_id, id`
+      expect([...rows]).toEqual([
+        { project_id: "other", id: "workflow", requester_group_ids: [] },
+        { project_id: "p", id: "agent", requester_group_ids: ["support"] },
+        { project_id: "p", id: "child", requester_group_ids: ["support"] },
+        { project_id: "p", id: "empty", requester_group_ids: [] },
+        { project_id: "p", id: "root", requester_group_ids: [] },
+        { project_id: "p", id: "task", requester_group_ids: ["finance"] },
+        { project_id: "p", id: "workflow", requester_group_ids: ["finance"] },
+      ])
     })
   })
 
   test("attributes existing commits and pending events from their executions", async () => {
     // Removal proof: drop 047's commit UPDATE; `SET NOT NULL` on executor then fails.
-    await withStorage(false, async (_storage, schemaName) => {
-      const connectionString = process.env.DATABASE_URL
-      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
-      const sql = createPgClient({ connectionString, schemaName, max: 1 })
-      try {
-        await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(schemaName)}`)
-        await sql.unsafe(`
-          CREATE TABLE executions (
-            project_id TEXT, id TEXT, executor_kind TEXT, executor_id TEXT,
-            requested_by_user_id TEXT, requested_by_service_account_id TEXT,
-            authority_primitive_id TEXT, authority_kernel_operation TEXT
-          );
-          CREATE TABLE ontology_commits (
-            project_id TEXT, id TEXT, execution_id TEXT, actor JSONB
-          );
-          CREATE TABLE ontology_outbox (project_id TEXT, commit_id TEXT, envelope JSONB NOT NULL);
-          INSERT INTO executions VALUES
-            ('p', 'request', 'request', 'req-1', 'alice', NULL, NULL, NULL),
-            ('p', 'service', 'request', 'req-2', NULL, 'svc-import', NULL, NULL),
-            ('p', 'action', 'action', 'run-1', 'alice', NULL, 'approve', NULL),
-            ('p', 'agent', 'agent', 'agent-run', 'alice', NULL, NULL, NULL),
-            ('p', 'scheduled', 'workflow', 'wf-run', NULL, NULL, 'nightly', NULL),
-            ('p', 'recover', 'kernel', 'recovery-1', NULL, NULL, NULL, 'ontology.recover'),
-            ('p', 'index', 'kernel', 'indexing-1', NULL, NULL, NULL, 'ontology.indexVectors');
-          INSERT INTO ontology_commits
-            SELECT project_id, 'c-' || id, id,
-              CASE WHEN id = 'request' THEN '{"id":"alice","type":"user"}'::jsonb END
-            FROM executions;
-          INSERT INTO ontology_outbox VALUES
-            ('p', 'c-request', '{"id":"e1","actor":{"id":"alice","type":"user"}}'),
-            ('p', 'c-scheduled', '{"id":"e2"}');
-        `)
-        const migration = postgresStorageMigrations.steps.find(
-          (step) => step.id === "047-ontology-commit-attribution"
-        )!
-        await migration.up({
-          exec: async (text) => {
-            await sql.unsafe(text)
-          },
-        })
+    await withDatabase({ migrate: false }, async ({ sql, schemaName, context }) => {
+      await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(schemaName)}`)
+      await sql.unsafe(`
+        CREATE TABLE executions (
+          project_id TEXT, id TEXT, executor_kind TEXT, executor_id TEXT,
+          requested_by_user_id TEXT, requested_by_service_account_id TEXT,
+          authority_primitive_id TEXT, authority_kernel_operation TEXT
+        );
+        CREATE TABLE ontology_commits (
+          project_id TEXT, id TEXT, execution_id TEXT, actor JSONB
+        );
+        CREATE TABLE ontology_outbox (project_id TEXT, commit_id TEXT, envelope JSONB NOT NULL);
+        INSERT INTO executions VALUES
+          ('p', 'request', 'request', 'req-1', 'alice', NULL, NULL, NULL),
+          ('p', 'service', 'request', 'req-2', NULL, 'svc-import', NULL, NULL),
+          ('p', 'action', 'action', 'run-1', 'alice', NULL, 'approve', NULL),
+          ('p', 'agent', 'agent', 'agent-run', 'alice', NULL, NULL, NULL),
+          ('p', 'scheduled', 'workflow', 'wf-run', NULL, NULL, 'nightly', NULL),
+          ('p', 'recover', 'kernel', 'recovery-1', NULL, NULL, NULL, 'ontology.recover'),
+          ('p', 'index', 'kernel', 'indexing-1', NULL, NULL, NULL, 'ontology.indexVectors');
+        INSERT INTO ontology_commits
+          SELECT project_id, 'c-' || id, id,
+            CASE WHEN id = 'request' THEN '{"id":"alice","type":"user"}'::jsonb END
+          FROM executions;
+        INSERT INTO ontology_outbox VALUES
+          ('p', 'c-request', '{"id":"e1","actor":{"id":"alice","type":"user"}}'),
+          ('p', 'c-scheduled', '{"id":"e2"}');
+      `)
+      await steps[indexOf("047-ontology-commit-attribution")]!.up(context)
 
-        expect(await readTableColumns(schemaName, "ontology_commits")).not.toContain("actor")
-        expect(await readColumnNullable(schemaName, "ontology_commits", "executor")).toBe("NO")
-        const commits =
-          await sql`SELECT id, requested_by, executor FROM ontology_commits ORDER BY id`
-        expect([...commits]).toEqual([
-          {
-            id: "c-action",
-            requested_by: { type: "user", id: "alice" },
-            executor: { type: "primitive", kind: "action", id: "approve", runId: "run-1" },
+      expect(await readTableColumns(sql, "ontology_commits")).not.toContain("actor")
+      expect(await readColumnNullable(sql, "ontology_commits", "executor")).toBe("NO")
+      const commits = await sql`SELECT id, requested_by, executor FROM ontology_commits ORDER BY id`
+      expect([...commits]).toEqual([
+        {
+          id: "c-action",
+          requested_by: { type: "user", id: "alice" },
+          executor: { type: "primitive", kind: "action", id: "approve", runId: "run-1" },
+        },
+        {
+          id: "c-agent",
+          requested_by: { type: "user", id: "alice" },
+          executor: { type: "agent", runId: "agent-run" },
+        },
+        {
+          id: "c-index",
+          requested_by: null,
+          executor: {
+            type: "kernel",
+            operation: { type: "ontology.indexVectors", indexingId: "indexing-1" },
           },
-          {
-            id: "c-agent",
-            requested_by: { type: "user", id: "alice" },
-            executor: { type: "agent", runId: "agent-run" },
+        },
+        {
+          id: "c-recover",
+          requested_by: null,
+          executor: {
+            type: "kernel",
+            operation: { type: "ontology.recover", recoveryId: "recovery-1" },
           },
-          {
-            id: "c-index",
-            requested_by: null,
-            executor: {
-              type: "kernel",
-              operation: { type: "ontology.indexVectors", indexingId: "indexing-1" },
-            },
-          },
-          {
-            id: "c-recover",
-            requested_by: null,
-            executor: {
-              type: "kernel",
-              operation: { type: "ontology.recover", recoveryId: "recovery-1" },
-            },
-          },
-          {
-            id: "c-request",
-            requested_by: { type: "user", id: "alice" },
-            executor: { type: "request", requestId: "req-1" },
-          },
-          {
-            id: "c-scheduled",
-            requested_by: null,
-            executor: { type: "primitive", kind: "workflow", id: "nightly", runId: "wf-run" },
-          },
-          {
-            id: "c-service",
-            requested_by: { type: "serviceAccount", id: "svc-import" },
-            executor: { type: "request", requestId: "req-2" },
-          },
-        ])
+        },
+        {
+          id: "c-request",
+          requested_by: { type: "user", id: "alice" },
+          executor: { type: "request", requestId: "req-1" },
+        },
+        {
+          id: "c-scheduled",
+          requested_by: null,
+          executor: { type: "primitive", kind: "workflow", id: "nightly", runId: "wf-run" },
+        },
+        {
+          id: "c-service",
+          requested_by: { type: "serviceAccount", id: "svc-import" },
+          executor: { type: "request", requestId: "req-2" },
+        },
+      ])
 
-        const envelopes = await sql`SELECT envelope FROM ontology_outbox ORDER BY commit_id`
-        expect([...envelopes].map((row) => row.envelope)).toEqual([
-          {
-            id: "e1",
-            requestedBy: { type: "user", id: "alice" },
-            executor: { type: "request", requestId: "req-1" },
-          },
-          {
-            id: "e2",
-            executor: { type: "primitive", kind: "workflow", id: "nightly", runId: "wf-run" },
-          },
-        ])
-      } finally {
-        await sql.end()
-      }
+      const envelopes = await sql`SELECT envelope FROM ontology_outbox ORDER BY commit_id`
+      expect([...envelopes].map((row) => row.envelope)).toEqual([
+        {
+          id: "e1",
+          requestedBy: { type: "user", id: "alice" },
+          executor: { type: "request", requestId: "req-1" },
+        },
+        {
+          id: "e2",
+          executor: { type: "primitive", kind: "workflow", id: "nightly", runId: "wf-run" },
+        },
+      ])
     })
   })
 
   test("upgrades model accounting in one step without losing historical evidence or constraints", async () => {
     // Regression proof: omit 029's reason conversion or native ID columns, or change shipped 026.
-    await withStorage(false, async (_storage, schemaName) => {
-      const connectionString = process.env.DATABASE_URL
-      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
-      const sql = createPgClient({ connectionString, schemaName, max: 1 })
-      try {
-        await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(schemaName)}`)
-        await sql.unsafe(`CREATE TABLE ai_model_call_usage (
-          project_id TEXT, id TEXT, provider_id TEXT, requested_model_id TEXT, occurred_at TEXT,
-          PRIMARY KEY (project_id, id)
-        )`)
-        await sql.unsafe(
-          "INSERT INTO ai_model_call_usage VALUES ('project', 'usage', 'mock', 'model', '2026-08-01')"
-        )
-        const context = {
-          exec: async (text: string) => {
-            await sql.unsafe(text)
+    await withDatabase({ migrate: false }, async ({ sql, schemaName, context }) => {
+      await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(schemaName)}`)
+      await sql.unsafe(`CREATE TABLE ai_model_call_usage (
+        project_id TEXT, id TEXT, provider_id TEXT, requested_model_id TEXT, occurred_at TEXT,
+        PRIMARY KEY (project_id, id)
+      )`)
+      await sql.unsafe(
+        "INSERT INTO ai_model_call_usage VALUES ('project', 'usage', 'mock', 'model', '2026-08-01')"
+      )
+      await steps[indexOf("026-ai-cost-accounting")]!.up(context)
+      await sql.unsafe(`INSERT INTO ai_model_call_valuations (
+        project_id, usage_record_id, status, provider_id, model_id, reason, details, rated_at
+      ) VALUES ('project', 'usage', 'unpriceable', 'mock', 'model', 'missingCatalogEntry',
+        '{"pricingContext":{}}', '2026-08-01')`)
+      for (const sourceId of ["provider-reported", "model-rate-card", "unknown-old-source"]) {
+        await sql`INSERT INTO ai_model_call_usage VALUES ('project', ${sourceId}, 'mock', 'model', '2026-08-01')`
+        const details = JSON.stringify({
+          pricingContext: {},
+          priceSource: {
+            sourceId,
+            sourceEntryId: "model",
+            sourceVersion: "v1",
+            observedAt: "2026-08-01T00:00:00.000Z",
           },
-        }
-        await postgresStorageMigrations.steps
-          .find((step) => step.id === "026-ai-cost-accounting")
-          ?.up(context)
-        await sql.unsafe(`INSERT INTO ai_model_call_valuations (
-          project_id, usage_record_id, status, provider_id, model_id, reason, details, rated_at
-        ) VALUES ('project', 'usage', 'unpriceable', 'mock', 'model', 'missingCatalogEntry',
-          '{"pricingContext":{}}', '2026-08-01')`)
-        for (const sourceId of ["provider-reported", "model-rate-card", "unknown-old-source"]) {
-          await sql`INSERT INTO ai_model_call_usage VALUES ('project', ${sourceId}, 'mock', 'model', '2026-08-01')`
-          const details = JSON.stringify({
-            pricingContext: {},
-            priceSource: {
-              sourceId,
-              sourceEntryId: "model",
-              sourceVersion: "v1",
-              observedAt: "2026-08-01T00:00:00.000Z",
+          components: [
+            {
+              meter: "tokens.input.total",
+              quantity: "10",
+              rateAmountNanosPerMillion: "1000000000",
+              chargeAmountNanos: "10000",
             },
-            components: [
-              {
-                meter: "tokens.input.total",
-                quantity: "10",
-                rateAmountNanosPerMillion: "1000000000",
-                chargeAmountNanos: "10000",
-              },
-            ],
-          })
-          await sql`INSERT INTO ai_model_call_valuations (project_id, usage_record_id, status,
-            provider_id, model_id, currency, amount_nanos, details, rated_at)
-            VALUES ('project', ${sourceId}, 'rated', 'mock', 'model', 'USD', 10000, ${details}::text::jsonb, '2026-08-01')`
-        }
-        await sql.unsafe(
-          `UPDATE ai_model_call_valuations SET details = '{"pricingContext":{},"priceSource":{"sourceId":"provider-reported","sourceEntryId":"missing-report","sourceVersion":"v1","observedAt":"2026-08-01T00:00:00.000Z"}}' WHERE usage_record_id = 'usage'`
-        )
-        const before =
-          await sql`SELECT usage_record_id, details FROM ai_model_call_valuations ORDER BY usage_record_id`
-        await postgresStorageMigrations.steps
-          .find((step) => step.id === "029-model-accounting")!
-          .up(context)
-        const [converted] =
-          await sql`SELECT reason FROM ai_model_call_valuations WHERE usage_record_id = 'usage'`
-        expect(converted?.reason).toBe("missingRateCard")
-        const after =
-          await sql`SELECT usage_record_id, details FROM ai_model_call_valuations ORDER BY usage_record_id`
-        expect([...after]).toEqual([...before])
-        // Bun 1.3.14's rejects matcher hangs on postgres.js's lazy PendingQuery thenable.
-        // Regression proof: remove Promise.resolve here and this test times out instead of finishing.
-        await expect(
-          Promise.resolve(
-            sql.unsafe(
-              "UPDATE ai_model_call_valuations SET reason = 'missingCatalogEntry' WHERE usage_record_id = 'usage'"
-            )
-          )
-        ).rejects.toThrow()
-        await expect(
-          Promise.resolve(sql.unsafe("DELETE FROM ai_model_call_usage"))
-        ).rejects.toThrow()
-        const [reasoning] =
-          await sql`SELECT COUNT(*)::int AS count FROM ai_model_call_usage WHERE requested_reasoning IS NULL`
-        expect(reasoning?.count).toBe(4)
-        const [nativeIds] =
-          await sql`SELECT COUNT(*)::int AS count FROM ai_model_call_usage WHERE provider_ids IS NULL`
-        expect(nativeIds?.count).toBe(4)
-      } finally {
-        await sql.end()
-      }
-    })
-  })
-  test("migrateStorage writes schema-level migration history", async () => {
-    await withStorage(false, async (storage, schemaName) => {
-      const result = await migrateStorage(storage)
-
-      expect(result.status).toBe("migrated")
-      expect(result.reports).toMatchObject([
-        {
-          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-          status: "migrated",
-          applied: [
-            "001-initial-schema",
-            "002-workflow-run-output",
-            "003-merge-sync-runs",
-            "004-executions",
-            "005-workflow-executions",
-            "006-narrow-ontology-source-root-index",
-            "007-split-overrides",
-            "008-action-executions",
-            "009-agent-executions",
-            "010-ai-usage-accounting-foundation",
-            "011-sync-failure-record",
-            "012-pipeline-failure-record",
-            "013-workflow-failure-record",
-            "014-agent-failure-record",
-            "015-projection-failure-record",
-            "016-webhook-run-failure-record",
-            "017-action-failure-record",
-            "018-ontology-outbox-failure-record",
-            "019-webhook-delivery-failure-record",
-            "020-drop-run-usage-projections",
-            "021-sync-pipeline-executions",
-            "022-projection-executions",
-            "023-webhook-executions",
-            "024-ontology-commit-executions",
-            "025-connector-connections",
-            "026-ai-cost-accounting",
-            "027-agent-context-checkpoints",
-            "028-object-override-edit-times",
-            "029-model-accounting",
-            "030-ai-usage-limits",
-            "031-subagent-runs",
-            "032-conversation-run-spec",
-            "033-retire-agent-definitions",
-            "034-device-authorizations",
-            "035-share-grants",
-            "036-share-sessions",
-            "037-execution-requester-groups",
-            "038-outbox-publication-order",
-            "039-projection-source-roots",
-            "040-connector-optional-pkce",
-            "041-agent-thread-workspaces",
-            "042-vector-profiles",
-            "043-vector-indexing",
-            "044-vector-batching",
-            "045-agent-thread-sandbox-state",
-            "046-workflow-intervention-principals",
-            "047-ontology-commit-attribution",
-            "048-file-upload-sessions",
-            "049-native-sessions",
-            "050-directory-group-memberships",
-            "051-projection-run-supersession",
-            "052-compact-source-storage",
-            "053-replacement-plans",
-            "054-slim-ontology-outbox",
-            "055-object-query-preparation",
-            "056-commit-touches",
-            "057-audio-transcription",
-            "058-reranking-model-kind",
-            "059-file-download-grants",
-            "060-drained-source-versions",
-            "061-terminal-action-runs",
-            "062-drop-auth-audience",
-            "063-artifacts",
-            "064-drop-output-diagnostics",
-            "065-plan-work-payload-statistics",
-            "066-activity",
-            "067-activity-timeline",
-            "068-activity-interactions",
-            "069-artifact-kinds",
           ],
-        },
-      ])
-      expect(await readMigrationRows(schemaName)).toEqual([
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "001-initial-schema",
-          status: "applied",
-          version: 1,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "002-workflow-run-output",
-          status: "applied",
-          version: 2,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "003-merge-sync-runs",
-          status: "applied",
-          version: 3,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "004-executions",
-          status: "applied",
-          version: 4,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "005-workflow-executions",
-          status: "applied",
-          version: 5,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "006-narrow-ontology-source-root-index",
-          status: "applied",
-          version: 6,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "007-split-overrides",
-          status: "applied",
-          version: 7,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "008-action-executions",
-          status: "applied",
-          version: 8,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "009-agent-executions",
-          status: "applied",
-          version: 9,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "010-ai-usage-accounting-foundation",
-          status: "applied",
-          version: 10,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "011-sync-failure-record",
-          status: "applied",
-          version: 11,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "012-pipeline-failure-record",
-          status: "applied",
-          version: 12,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "013-workflow-failure-record",
-          status: "applied",
-          version: 13,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "014-agent-failure-record",
-          status: "applied",
-          version: 14,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "015-projection-failure-record",
-          status: "applied",
-          version: 15,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "016-webhook-run-failure-record",
-          status: "applied",
-          version: 16,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "017-action-failure-record",
-          status: "applied",
-          version: 17,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "018-ontology-outbox-failure-record",
-          status: "applied",
-          version: 18,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "019-webhook-delivery-failure-record",
-          status: "applied",
-          version: 19,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "020-drop-run-usage-projections",
-          status: "applied",
-          version: 20,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "021-sync-pipeline-executions",
-          status: "applied",
-          version: 21,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "022-projection-executions",
-          status: "applied",
-          version: 22,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "023-webhook-executions",
-          status: "applied",
-          version: 23,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "024-ontology-commit-executions",
-          status: "applied",
-          version: 24,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "025-connector-connections",
-          status: "applied",
-          version: 25,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "026-ai-cost-accounting",
-          status: "applied",
-          version: 26,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "027-agent-context-checkpoints",
-          status: "applied",
-          version: 27,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "028-object-override-edit-times",
-          status: "applied",
-          version: 28,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "029-model-accounting",
-          status: "applied",
-          version: 29,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "030-ai-usage-limits",
-          status: "applied",
-          version: 30,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "031-subagent-runs",
-          status: "applied",
-          version: 31,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "032-conversation-run-spec",
-          status: "applied",
-          version: 32,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "033-retire-agent-definitions",
-          status: "applied",
-          version: 33,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "034-device-authorizations",
-          status: "applied",
-          version: 34,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "035-share-grants",
-          status: "applied",
-          version: 35,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "036-share-sessions",
-          status: "applied",
-          version: 36,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "037-execution-requester-groups",
-          status: "applied",
-          version: 37,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "038-outbox-publication-order",
-          status: "applied",
-          version: 38,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "039-projection-source-roots",
-          status: "applied",
-          version: 39,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "040-connector-optional-pkce",
-          status: "applied",
-          version: 40,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "041-agent-thread-workspaces",
-          status: "applied",
-          version: 41,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "042-vector-profiles",
-          status: "applied",
-          version: 42,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "043-vector-indexing",
-          status: "applied",
-          version: 43,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "044-vector-batching",
-          status: "applied",
-          version: 44,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "045-agent-thread-sandbox-state",
-          status: "applied",
-          version: 45,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "046-workflow-intervention-principals",
-          status: "applied",
-          version: 46,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "047-ontology-commit-attribution",
-          status: "applied",
-          version: 47,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "048-file-upload-sessions",
-          status: "applied",
-          version: 48,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "049-native-sessions",
-          status: "applied",
-          version: 49,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "050-directory-group-memberships",
-          status: "applied",
-          version: 50,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "051-projection-run-supersession",
-          status: "applied",
-          version: 51,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "052-compact-source-storage",
-          status: "applied",
-          version: 52,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "053-replacement-plans",
-          status: "applied",
-          version: 53,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "054-slim-ontology-outbox",
-          status: "applied",
-          version: 54,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "055-object-query-preparation",
-          status: "applied",
-          version: 55,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "056-commit-touches",
-          status: "applied",
-          version: 56,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "057-audio-transcription",
-          status: "applied",
-          version: 57,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "058-reranking-model-kind",
-          status: "applied",
-          version: 58,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "059-file-download-grants",
-          status: "applied",
-          version: 59,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "060-drained-source-versions",
-          status: "applied",
-          version: 60,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "061-terminal-action-runs",
-          status: "applied",
-          version: 61,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "062-drop-auth-audience",
-          status: "applied",
-          version: 62,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "063-artifacts",
-          status: "applied",
-          version: 63,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "064-drop-output-diagnostics",
-          status: "applied",
-          version: 64,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "065-plan-work-payload-statistics",
-          status: "applied",
-          version: 65,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "066-activity",
-          status: "applied",
-          version: 66,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "067-activity-timeline",
-          status: "applied",
-          version: 67,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "068-activity-interactions",
-          status: "applied",
-          version: 68,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "069-artifact-kinds",
-          status: "applied",
-          version: 69,
-        },
-      ])
-    })
-  })
-
-  test("repeated migration planning is idempotent", async () => {
-    await withStorage(false, async (storage) => {
-      await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
-      await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "current" })
+        })
+        await sql`INSERT INTO ai_model_call_valuations (project_id, usage_record_id, status,
+          provider_id, model_id, currency, amount_nanos, details, rated_at)
+          VALUES ('project', ${sourceId}, 'rated', 'mock', 'model', 'USD', 10000, ${details}::text::jsonb, '2026-08-01')`
+      }
+      await sql.unsafe(
+        `UPDATE ai_model_call_valuations SET details = '{"pricingContext":{},"priceSource":{"sourceId":"provider-reported","sourceEntryId":"missing-report","sourceVersion":"v1","observedAt":"2026-08-01T00:00:00.000Z"}}' WHERE usage_record_id = 'usage'`
+      )
+      const before =
+        await sql`SELECT usage_record_id, details FROM ai_model_call_valuations ORDER BY usage_record_id`
+      await steps[indexOf("029-model-accounting")]!.up(context)
+      const [converted] =
+        await sql`SELECT reason FROM ai_model_call_valuations WHERE usage_record_id = 'usage'`
+      expect(converted?.reason).toBe("missingRateCard")
+      const after =
+        await sql`SELECT usage_record_id, details FROM ai_model_call_valuations ORDER BY usage_record_id`
+      expect([...after]).toEqual([...before])
+      // Bun 1.3.14's rejects matcher hangs on postgres.js's lazy PendingQuery thenable.
+      // Regression proof: remove Promise.resolve here and this test times out instead of finishing.
+      await expect(
+        Promise.resolve(
+          sql.unsafe(
+            "UPDATE ai_model_call_valuations SET reason = 'missingCatalogEntry' WHERE usage_record_id = 'usage'"
+          )
+        )
+      ).rejects.toThrow()
+      await expect(Promise.resolve(sql.unsafe("DELETE FROM ai_model_call_usage"))).rejects.toThrow()
+      const [reasoning] =
+        await sql`SELECT COUNT(*)::int AS count FROM ai_model_call_usage WHERE requested_reasoning IS NULL`
+      expect(reasoning?.count).toBe(4)
+      const [nativeIds] =
+        await sql`SELECT COUNT(*)::int AS count FROM ai_model_call_usage WHERE provider_ids IS NULL`
+      expect(nativeIds?.count).toBe(4)
     })
   })
 
   test("delegated execution migration preserves ancestry and rejects a missing kind", async () => {
-    await withStorage(false, async (_storage, schemaName) => {
-      const connectionString = process.env.DATABASE_URL
-      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
-      const migrationSql = createPgClient({ connectionString, schemaName, max: 1 })
-      const context = {
-        exec: (sqlText: string) => migrationSql.unsafe(sqlText).then(() => undefined),
+    await withDatabase({ migrate: false }, async ({ sql, schemaName, context }) => {
+      await sql.unsafe(`CREATE SCHEMA ${quoteIdent(schemaName)}`)
+      // Keep the execution/share schema current, including 031's inherited Agent authority,
+      // without replaying unrelated migrations in this focused upgrade fixture.
+      for (const id of [
+        "001-initial-schema",
+        "004-executions",
+        "022-projection-executions",
+        "031-subagent-runs",
+        "035-share-grants",
+      ]) {
+        await steps[indexOf(id)]!.up(context)
       }
-      try {
-        const migration = postgresStorageMigrations.steps.find(
-          (candidate) => candidate.id === "036-share-sessions"
-        )
-        if (!migration) {
-          throw new Error("PostgreSQL delegated-executions migration is missing.")
-        }
 
-        await migrationSql.unsafe(`CREATE SCHEMA ${quoteIdent(schemaName)}`)
-        // Keep the execution/share schema current, including 031's inherited Agent authority,
-        // without replaying unrelated migrations in this focused upgrade fixture.
-        const preDelegationTableMigrations = postgresStorageMigrations.steps.filter((candidate) =>
-          [
-            "001-initial-schema",
-            "004-executions",
-            "022-projection-executions",
-            "031-subagent-runs",
-            "035-share-grants",
-          ].includes(candidate.id)
-        )
-        expect(preDelegationTableMigrations).toHaveLength(5)
-        for (const previous of preDelegationTableMigrations) {
-          await previous.up(context)
-        }
-
-        await migrationSql.unsafe(`
-          INSERT INTO executions (
-            project_id, id, executor_kind, executor_id, source_kind, source_id,
-            correlation_id, parent_execution_id, authority_kind, authority_primitive_kind,
-            authority_primitive_id, created_at
-          ) VALUES
-            (
-              'project-a', 'legacy-parent', 'request', 'request-1', 'http', 'request-1',
-              'correlation-1', NULL, 'disabled', NULL, NULL, '2026-08-20T12:00:00.000Z'
-            ),
-            (
-              'project-a', 'legacy-child', 'action', 'action-run-1', 'execution',
-              'legacy-parent', 'correlation-1', 'legacy-parent', 'trustedPrimitive', 'action',
-              'send-email', '2026-08-20T12:00:01.000Z'
-            ),
-            (
-              'project-a', 'legacy-agent', 'agent', 'agent-run-1', 'execution',
-              'legacy-parent', 'correlation-1', 'legacy-parent', 'disabled', NULL,
-              NULL, '2026-08-20T12:00:02.000Z'
-            );
-
-          INSERT INTO share_grants (
-            project_id, id, definition_id, target_object_type_id, target_primary_id,
-            issued_by_type, issued_by_id, authority_version, authority_snapshot,
-            authority_digest, token_hash, destination_path, created_at, expires_at
-          ) VALUES (
-            'project-a', 'grant-1', 'share-definition', 'Report', 'report-1',
-            'user', 'user-1', 1, '{"version":1,"access":{"grants":[]}}'::jsonb,
-            repeat('a', 64), repeat('b', 64), '/reports/report-1',
-            '2026-08-20T12:00:00.000Z', '2026-08-20T13:00:00.000Z'
+      await sql.unsafe(`
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id,
+          correlation_id, parent_execution_id, authority_kind, authority_primitive_kind,
+          authority_primitive_id, created_at
+        ) VALUES
+          (
+            'project-a', 'legacy-parent', 'request', 'request-1', 'http', 'request-1',
+            'correlation-1', NULL, 'disabled', NULL, NULL, '2026-08-20T12:00:00.000Z'
+          ),
+          (
+            'project-a', 'legacy-child', 'action', 'action-run-1', 'execution',
+            'legacy-parent', 'correlation-1', 'legacy-parent', 'trustedPrimitive', 'action',
+            'send-email', '2026-08-20T12:00:01.000Z'
+          ),
+          (
+            'project-a', 'legacy-agent', 'agent', 'agent-run-1', 'execution',
+            'legacy-parent', 'correlation-1', 'legacy-parent', 'disabled', NULL,
+            NULL, '2026-08-20T12:00:02.000Z'
           );
 
-        `)
+        INSERT INTO share_grants (
+          project_id, id, definition_id, target_object_type_id, target_primary_id,
+          issued_by_type, issued_by_id, authority_version, authority_snapshot,
+          authority_digest, token_hash, destination_path, created_at, expires_at
+        ) VALUES (
+          'project-a', 'grant-1', 'share-definition', 'Report', 'report-1',
+          'user', 'user-1', 1, '{"version":1,"access":{"grants":[]}}'::jsonb,
+          repeat('a', 64), repeat('b', 64), '/reports/report-1',
+          '2026-08-20T12:00:00.000Z', '2026-08-20T13:00:00.000Z'
+        );
+      `)
 
-        await migration.up(context)
+      await steps[indexOf("036-share-sessions")]!.up(context)
 
-        await migrationSql.unsafe(`
-          INSERT INTO share_sessions (
-            project_id, id, grant_id, token_hash, created_at, expires_at, absolute_expires_at
-          ) VALUES (
-            'project-a', 'session-1', 'grant-1', repeat('c', 64),
-            '2026-08-20T12:00:00.000Z', '2026-08-20T12:10:00.000Z',
-            '2026-08-20T13:00:00.000Z'
-          );
-        `)
-      } finally {
-        await migrationSql.end()
-      }
+      await sql.unsafe(`
+        INSERT INTO share_sessions (
+          project_id, id, grant_id, token_hash, created_at, expires_at, absolute_expires_at
+        ) VALUES (
+          'project-a', 'session-1', 'grant-1', repeat('c', 64),
+          '2026-08-20T12:00:00.000Z', '2026-08-20T12:10:00.000Z',
+          '2026-08-20T13:00:00.000Z'
+        );
+      `)
 
-      const sql = createPgClient({ connectionString, schemaName, max: 1 })
-      try {
-        const preserved = await sql.unsafe<
-          {
-            readonly authority_delegation_kind: string | null
-            readonly authority_kind: string
-            readonly id: string
-            readonly parent_execution_id: string | null
-            readonly source_id: string
-          }[]
-        >(`
-          SELECT id, source_id, parent_execution_id, authority_kind, authority_delegation_kind
-          FROM executions
-          ORDER BY id
-        `)
-        expect([...preserved]).toEqual([
-          {
-            authority_delegation_kind: null,
-            authority_kind: "disabled",
-            id: "legacy-agent",
-            parent_execution_id: "legacy-parent",
-            source_id: "legacy-parent",
-          },
-          {
-            authority_delegation_kind: null,
-            authority_kind: "trustedPrimitive",
-            id: "legacy-child",
-            parent_execution_id: "legacy-parent",
-            source_id: "legacy-parent",
-          },
-          {
-            authority_delegation_kind: null,
-            authority_kind: "disabled",
-            id: "legacy-parent",
-            parent_execution_id: null,
-            source_id: "request-1",
-          },
-        ])
+      const preserved = await sql.unsafe<
+        {
+          readonly authority_delegation_kind: string | null
+          readonly authority_kind: string
+          readonly id: string
+          readonly parent_execution_id: string | null
+          readonly source_id: string
+        }[]
+      >(`
+        SELECT id, source_id, parent_execution_id, authority_kind, authority_delegation_kind
+        FROM executions
+        ORDER BY id
+      `)
+      expect([...preserved]).toEqual([
+        {
+          authority_delegation_kind: null,
+          authority_kind: "disabled",
+          id: "legacy-agent",
+          parent_execution_id: "legacy-parent",
+          source_id: "legacy-parent",
+        },
+        {
+          authority_delegation_kind: null,
+          authority_kind: "trustedPrimitive",
+          id: "legacy-child",
+          parent_execution_id: "legacy-parent",
+          source_id: "legacy-parent",
+        },
+        {
+          authority_delegation_kind: null,
+          authority_kind: "disabled",
+          id: "legacy-parent",
+          parent_execution_id: null,
+          source_id: "request-1",
+        },
+      ])
 
-        // Regression proof: without the explicit NOT NULL term PostgreSQL treats the delegated
-        // shape CHECK as unknown, which satisfies a CHECK and lets this malformed row through.
-        // postgres.js queries are lazy Promise subclasses. Bun 1.3.14's rejects matcher does not
-        // assimilate them, so normalize the query to a native Promise to ensure it is dispatched.
-        await expect(
-          Promise.resolve(
-            sql.unsafe(`
-              INSERT INTO executions (
-                project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
-                authority_kind, authority_delegation_kind, authority_delegation_id,
-                authority_delegation_session_id, created_at
-              ) VALUES (
-                'project-a', 'invalid-delegated', 'request', 'request-2', 'http', 'request-2',
-                'correlation-2', 'delegated', NULL, 'grant-1', 'session-1',
-                '2026-08-20T12:01:00.000Z'
-              )
-            `)
-          )
-        ).rejects.toMatchObject({ code: "23514" })
-      } finally {
-        await sql.end()
-      }
+      // Regression proof: without the explicit NOT NULL term PostgreSQL treats the delegated
+      // shape CHECK as unknown, which satisfies a CHECK and lets this malformed row through.
+      // postgres.js queries are lazy Promise subclasses. Bun 1.3.14's rejects matcher does not
+      // assimilate them, so normalize the query to a native Promise to ensure it is dispatched.
+      await expect(
+        Promise.resolve(
+          sql.unsafe(`
+            INSERT INTO executions (
+              project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+              authority_kind, authority_delegation_kind, authority_delegation_id,
+              authority_delegation_session_id, created_at
+            ) VALUES (
+              'project-a', 'invalid-delegated', 'request', 'request-2', 'http', 'request-2',
+              'correlation-2', 'delegated', NULL, 'grant-1', 'session-1',
+              '2026-08-20T12:01:00.000Z'
+            )
+          `)
+        )
+      ).rejects.toMatchObject({ code: "23514" })
     })
   })
 
   test("merge sync migration preserves existing runs and admits merge mode", async () => {
-    await withStorage(false, async (_storage, schemaName) => {
-      const migrationsBeforeMerge = postgresStorageMigrations.steps.slice(0, 2)
-      if (migrationsBeforeMerge.length !== 2) {
-        throw new Error("PostgreSQL migrations before merge sync support are missing.")
-      }
-      const connectionString = process.env.DATABASE_URL
-      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+    // This fixture intentionally predates durable execution links. Exercise migration 003
+    // without crossing migration 020, which must reject legacy runs with unknown authority.
+    const merge = indexOf("003-merge-sync-runs")
+    await withDatabase({ migrateThrough: merge }, async ({ sql, migrateThrough }) => {
+      await sql.unsafe(
+        `
+          INSERT INTO sync_runs (
+            project_id, id, sync_id, dataset_id, mode, status, started_at
+          ) VALUES ($1, $2, $3, $4, 'append', 'succeeded', $5)
+        `,
+        ["project-a", "run-append", "sync-orders", "raw.orders", "2026-08-07T12:00:00.000Z"]
+      )
+      await migrateThrough(merge + 1)
+      await sql.unsafe(
+        `
+          INSERT INTO sync_runs (
+            project_id, id, sync_id, dataset_id, mode, status, started_at
+          ) VALUES ($1, $2, $3, $4, 'merge', 'running', $5)
+        `,
+        ["project-a", "run-merge", "sync-invoices", "raw.invoices", "2026-08-07T12:01:00.000Z"]
+      )
 
-      // Keep the upgrade and its verification on postgres.js. Replacing the verification with
-      // two sequential Bun SQL queries at max: 1 reproduces a five-second test timeout, then
-      // leaves the test process alive because the second query is never dispatched.
-      const sql = createPgClient({ connectionString, schemaName, max: 1 })
-      try {
-        const beforeMerge = defineMigrations({
-          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-          steps: migrationsBeforeMerge,
-        })
-        await createPostgresMigrator({
-          sql,
-          schemaName,
-          migrations: beforeMerge,
-        }).migrate()
-        await sql.unsafe(
-          `
-            INSERT INTO ${quoteIdent(schemaName)}.sync_runs (
-              project_id, id, sync_id, dataset_id, mode, status, started_at
-            ) VALUES ($1, $2, $3, $4, 'append', 'succeeded', $5)
-          `,
-          ["project-a", "run-append", "sync-orders", "raw.orders", "2026-08-07T12:00:00.000Z"]
-        )
-
-        // This fixture intentionally predates durable execution links. Exercise migration 003
-        // without crossing migration 020, which must reject legacy runs with unknown authority.
-        const throughMerge = defineMigrations({
-          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-          steps: postgresStorageMigrations.steps.slice(0, 3),
-        })
-        await createPostgresMigrator({
-          sql,
-          schemaName,
-          migrations: throughMerge,
-        }).migrate()
-        await sql.unsafe(
-          `
-            INSERT INTO ${quoteIdent(schemaName)}.sync_runs (
-              project_id, id, sync_id, dataset_id, mode, status, started_at
-            ) VALUES ($1, $2, $3, $4, 'merge', 'running', $5)
-          `,
-          ["project-a", "run-merge", "sync-invoices", "raw.invoices", "2026-08-07T12:01:00.000Z"]
-        )
-
-        const rows = await sql.unsafe<{ id: string; mode: string }[]>(
-          `SELECT id, mode FROM ${quoteIdent(schemaName)}.sync_runs ORDER BY id`
-        )
-        expect([...rows]).toEqual([
-          { id: "run-append", mode: "append" },
-          { id: "run-merge", mode: "merge" },
-        ])
-      } finally {
-        await sql.end()
-      }
+      const rows = await sql.unsafe<{ id: string; mode: string }[]>(
+        "SELECT id, mode FROM sync_runs ORDER BY id"
+      )
+      expect([...rows]).toEqual([
+        { id: "run-append", mode: "append" },
+        { id: "run-merge", mode: "merge" },
+      ])
     })
   })
 
   test("splits legacy overrides and derives unambiguous link slot authority", async () => {
-    await withStorage(false, async (storage, schemaName) => {
-      const connectionString = process.env.DATABASE_URL
-      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
-      const sql = createPgClient({ connectionString, schemaName, max: 1 })
-      try {
-        const splitOverridesIndex = postgresStorageMigrations.steps.findIndex(
-          (migration) => migration.id === "007-split-overrides"
-        )
-        const splitOverridesMigration = postgresStorageMigrations.steps[splitOverridesIndex]
-        if (!splitOverridesMigration) {
-          throw new Error("PostgreSQL split-overrides migration is missing.")
-        }
-        const beforeScopeAuthority = defineMigrations({
-          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-          steps: postgresStorageMigrations.steps.slice(0, splitOverridesIndex),
-        })
-        await createPostgresMigrator({
-          sql,
-          schemaName,
-          migrations: beforeScopeAuthority,
-        }).migrate()
-        const insertLegacyLinkOverride = async (input: {
-          readonly sourceId: string
-          readonly targetId: string
-          readonly value: unknown
-          readonly updatedAt: string
-        }) => {
-          const entityKey = JSON.stringify([
-            "Device",
-            input.sourceId,
-            "parent",
-            "Device",
-            input.targetId,
-          ])
-          await sql.unsafe(
-            `INSERT INTO ${quoteIdent(schemaName)}.ontology_overrides (
-               project_id, entity_kind, entity_key, entity_sort_key,
-               source_type_id, source_primary_id, link_id, target_type_id, target_primary_id,
-               value, last_commit_id, updated_at
-             ) VALUES (
-               'project', 'link', $1::jsonb, $1::text,
-               'Device', $2, 'parent', 'Device', $3,
-               $4::jsonb, $5, $6::timestamptz
-             )`,
-            [
-              entityKey,
-              input.sourceId,
-              input.targetId,
-              jsonParameter(sql, input.value),
-              `commit:${input.sourceId}:${input.targetId}`,
-              input.updatedAt,
-            ]
-          )
-        }
-        await insertLegacyLinkOverride({
-          sourceId: "document",
-          targetId: "rockland",
-          value: { kind: "upsert", properties: { rank: 1 } },
-          updatedAt: "2026-01-02T00:00:00.000Z",
-        })
-        await insertLegacyLinkOverride({
-          sourceId: "document",
-          targetId: "haverstraw",
-          value: { kind: "delete" },
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        })
-        await insertLegacyLinkOverride({
-          sourceId: "ambiguous",
-          targetId: "first",
-          value: { kind: "upsert" },
-          updatedAt: "2026-01-01T00:00:00.000Z",
-        })
-        await insertLegacyLinkOverride({
-          sourceId: "ambiguous",
-          targetId: "second",
-          value: { kind: "upsert" },
-          updatedAt: "2026-01-02T00:00:00.000Z",
-        })
-
-        const migration = await migrateStorage(storage)
-        expect(migration).toMatchObject({ status: "migrated" })
-        const rows = await sql.unsafe<{ source_primary_id: string; value: unknown }[]>(
-          `SELECT source_primary_id, value
-           FROM ${quoteIdent(schemaName)}.ontology_link_overrides
-           WHERE identity_kind = 'slot'
-           ORDER BY source_primary_id`
-        )
-        expect([...rows]).toEqual([
-          { source_primary_id: "ambiguous", value: { kind: "legacy-conflict" } },
-          {
-            source_primary_id: "document",
-            value: {
-              kind: "set",
-              target: { objectTypeId: "Device", primaryId: "rockland" },
-              properties: { rank: 1 },
-            },
-          },
+    const split = indexOf("007-split-overrides")
+    await withDatabase({ migrateThrough: split }, async ({ storage, sql }) => {
+      const insertLegacyLinkOverride = async (input: {
+        readonly sourceId: string
+        readonly targetId: string
+        readonly value: unknown
+        readonly updatedAt: string
+      }) => {
+        const entityKey = JSON.stringify([
+          "Device",
+          input.sourceId,
+          "parent",
+          "Device",
+          input.targetId,
         ])
-      } finally {
-        await sql.end()
+        await sql.unsafe(
+          `INSERT INTO ontology_overrides (
+             project_id, entity_kind, entity_key, entity_sort_key,
+             source_type_id, source_primary_id, link_id, target_type_id, target_primary_id,
+             value, last_commit_id, updated_at
+           ) VALUES (
+             'project', 'link', $1::jsonb, $1::text,
+             'Device', $2, 'parent', 'Device', $3,
+             $4::jsonb, $5, $6::timestamptz
+           )`,
+          [
+            entityKey,
+            input.sourceId,
+            input.targetId,
+            jsonParameter(sql, input.value),
+            `commit:${input.sourceId}:${input.targetId}`,
+            input.updatedAt,
+          ]
+        )
       }
+      await insertLegacyLinkOverride({
+        sourceId: "document",
+        targetId: "rockland",
+        value: { kind: "upsert", properties: { rank: 1 } },
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      })
+      await insertLegacyLinkOverride({
+        sourceId: "document",
+        targetId: "haverstraw",
+        value: { kind: "delete" },
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      })
+      await insertLegacyLinkOverride({
+        sourceId: "ambiguous",
+        targetId: "first",
+        value: { kind: "upsert" },
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      })
+      await insertLegacyLinkOverride({
+        sourceId: "ambiguous",
+        targetId: "second",
+        value: { kind: "upsert" },
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      })
+
+      await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+      const rows = await sql.unsafe<{ source_primary_id: string; value: unknown }[]>(
+        `SELECT source_primary_id, value
+         FROM ontology_link_overrides
+         WHERE identity_kind = 'slot'
+         ORDER BY source_primary_id`
+      )
+      expect([...rows]).toEqual([
+        { source_primary_id: "ambiguous", value: { kind: "legacy-conflict" } },
+        {
+          source_primary_id: "document",
+          value: {
+            kind: "set",
+            target: { objectTypeId: "Device", primaryId: "rockland" },
+            properties: { rank: 1 },
+          },
+        },
+      ])
     })
   })
 
   test("keeps projection runs and admits superseded runs and retrying failures", async () => {
     // Removal proof: drop 051's DO block; the old status checks, still in place, reject both the
     // superseded run and the running run's error below.
-    await withStorage(false, async (_storage, schemaName) => {
-      const connectionString = process.env.DATABASE_URL
-      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
-      const index = postgresStorageMigrations.steps.findIndex(
-        (step) => step.id === "051-projection-run-supersession"
-      )
-      const sql = createPgClient({ connectionString, schemaName, max: 1 })
-      const migrateThrough = (count: number) =>
-        createPostgresMigrator({
-          sql,
-          schemaName,
-          migrations: defineMigrations({
-            adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-            steps: postgresStorageMigrations.steps.slice(0, count),
-          }),
-        }).migrate()
-      try {
-        await migrateThrough(index)
-        const schema = quoteIdent(schemaName)
-        const failure = JSON.stringify({
-          code: "projection.execution_failed",
-          message: "Projection execution failed.",
-          retryable: false,
-          at: "2026-09-01T12:00:00.000Z",
-        })
-        const insertRun = async (
-          id: string,
-          status: string,
-          versionId: string,
-          error: string | null
-        ) => {
-          await sql.unsafe(
-            `
-              INSERT INTO ${schema}.executions (
-                project_id, id, executor_kind, executor_id, source_kind, source_id,
-                correlation_id, authority_kind, authority_primitive_kind, authority_primitive_id,
-                created_at
-              ) VALUES (
-                'project-a', $1, 'projection', 'rooms', 'datasetVersion', $2, $1,
-                'trustedPrimitive', 'projection', 'rooms', '2026-09-01T12:00:00.000Z'
-              )
-            `,
-            [`execution-${id}`, versionId]
-          )
-          await sql.unsafe(
-            `
-              INSERT INTO ${schema}.projection_runs (
-                project_id, id, execution_id, projection_id, projection_kind,
-                materialization_protocol, dataset_id, dataset_version_id,
-                dataset_version_created_at, ontology_revision, projection_revision,
-                ownership_hash, object_type_id, status, queued_at, started_at, finished_at,
-                attempt, execution_token, error
-              ) VALUES (
-                'project-a', $2, $1, 'rooms', 'object', 'replacement', 'rooms', $3,
-                '2026-09-01T12:00:00.000Z', 'ontology', 'projection', 'ownership', 'Room', $4,
-                '2026-09-01T12:00:00.000Z', '2026-09-01T12:00:00.000Z', $5, 1, $6,
-                $7::text::jsonb
-              )
-            `,
-            [
-              `execution-${id}`,
-              id,
-              versionId,
-              status,
-              status === "running" ? null : "2026-09-01T12:01:00.000Z",
-              status === "running" ? "token" : null,
-              error,
-            ]
-          )
-        }
-        await insertRun("failed-run", "failed", "version-1", failure)
-        await insertRun("running-run", "running", "version-2", null)
-
-        await migrateThrough(index + 1)
-        await insertRun("superseded-run", "superseded", "version-3", null)
+    const index = indexOf("051-projection-run-supersession")
+    await withDatabase({ migrateThrough: index }, async ({ sql, migrateThrough }) => {
+      const failure = JSON.stringify({
+        code: "projection.execution_failed",
+        message: "Projection execution failed.",
+        retryable: false,
+        at: "2026-09-01T12:00:00.000Z",
+      })
+      const insertRun = async (
+        id: string,
+        status: string,
+        versionId: string,
+        error: string | null
+      ) => {
         await sql.unsafe(
-          `UPDATE ${schema}.projection_runs SET error = $1::text::jsonb WHERE id = 'running-run'`,
-          [failure]
+          `
+            INSERT INTO executions (
+              project_id, id, executor_kind, executor_id, source_kind, source_id,
+              correlation_id, authority_kind, authority_primitive_kind, authority_primitive_id,
+              created_at
+            ) VALUES (
+              'project-a', $1, 'projection', 'rooms', 'datasetVersion', $2, $1,
+              'trustedPrimitive', 'projection', 'rooms', '2026-09-01T12:00:00.000Z'
+            )
+          `,
+          [`execution-${id}`, versionId]
         )
-
-        const rows = await sql.unsafe<{ id: string; status: string; error_code: string | null }[]>(
-          `SELECT id, status, error->>'code' AS error_code
-          FROM ${schema}.projection_runs ORDER BY id`
+        await sql.unsafe(
+          `
+            INSERT INTO projection_runs (
+              project_id, id, execution_id, projection_id, projection_kind,
+              materialization_protocol, dataset_id, dataset_version_id,
+              dataset_version_created_at, ontology_revision, projection_revision,
+              ownership_hash, object_type_id, status, queued_at, started_at, finished_at,
+              attempt, execution_token, error
+            ) VALUES (
+              'project-a', $2, $1, 'rooms', 'object', 'replacement', 'rooms', $3,
+              '2026-09-01T12:00:00.000Z', 'ontology', 'projection', 'ownership', 'Room', $4,
+              '2026-09-01T12:00:00.000Z', '2026-09-01T12:00:00.000Z', $5, 1, $6,
+              $7::text::jsonb
+            )
+          `,
+          [
+            `execution-${id}`,
+            id,
+            versionId,
+            status,
+            status === "running" ? null : "2026-09-01T12:01:00.000Z",
+            status === "running" ? "token" : null,
+            error,
+          ]
         )
-        expect([...rows]).toEqual([
-          { id: "failed-run", status: "failed", error_code: "projection.execution_failed" },
-          { id: "running-run", status: "running", error_code: "projection.execution_failed" },
-          { id: "superseded-run", status: "superseded", error_code: null },
-        ])
-        await expect(
-          insertRun("superseded-with-error", "superseded", "version-4", failure)
-        ).rejects.toThrow("projection_runs_superseded_check")
-      } finally {
-        await sql.end()
       }
+      await insertRun("failed-run", "failed", "version-1", failure)
+      await insertRun("running-run", "running", "version-2", null)
+
+      await migrateThrough(index + 1)
+      await insertRun("superseded-run", "superseded", "version-3", null)
+      await sql.unsafe(
+        `UPDATE projection_runs SET error = $1::text::jsonb WHERE id = 'running-run'`,
+        [failure]
+      )
+
+      const rows = await sql.unsafe<{ id: string; status: string; error_code: string | null }[]>(
+        `SELECT id, status, error->>'code' AS error_code FROM projection_runs ORDER BY id`
+      )
+      expect([...rows]).toEqual([
+        { id: "failed-run", status: "failed", error_code: "projection.execution_failed" },
+        { id: "running-run", status: "running", error_code: "projection.execution_failed" },
+        { id: "superseded-run", status: "superseded", error_code: null },
+      ])
+      await expect(
+        insertRun("superseded-with-error", "superseded", "version-4", failure)
+      ).rejects.toThrow("projection_runs_superseded_check")
     })
   })
 
@@ -1284,23 +633,8 @@ describe("Postgres storage migrations", () => {
     // Removal proofs: drop the `jsonb_set` on `{details,phase}` from 061, and the enqueue failure
     // below keeps phase 'enqueue', which `parseActionRunFailure` rejects. Drop the UPDATE that
     // joins `ontology_commits`, and the runs whose edits committed are recorded as failed.
-    await withStorage(false, async (storage, schemaName) => {
-      const connectionString = process.env.DATABASE_URL
-      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
-      const index = postgresStorageMigrations.steps.findIndex(
-        (step) => step.id === "061-terminal-action-runs"
-      )
-      const sql = createPgClient({ connectionString, schemaName, max: 1 })
-      const migrateThrough = (count: number) =>
-        createPostgresMigrator({
-          sql,
-          schemaName,
-          migrations: defineMigrations({
-            adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-            steps: postgresStorageMigrations.steps.slice(0, count),
-          }),
-        }).migrate()
-      const schema = quoteIdent(schemaName)
+    const index = indexOf("061-terminal-action-runs")
+    await withDatabase({ migrateThrough: index }, async ({ storage, sql, migrateThrough }) => {
       const failure = (code: string, retryable: boolean, phase: string) =>
         JSON.stringify({
           code,
@@ -1319,7 +653,7 @@ describe("Postgres storage migrations", () => {
       ) => {
         await sql.unsafe(
           `
-            INSERT INTO ${schema}.executions (
+            INSERT INTO executions (
               project_id, id, executor_kind, executor_id, source_kind, source_id,
               correlation_id, authority_kind, authority_primitive_kind, authority_primitive_id,
               created_at
@@ -1332,7 +666,7 @@ describe("Postgres storage migrations", () => {
         )
         await sql.unsafe(
           `
-            INSERT INTO ${schema}.action_runs (
+            INSERT INTO action_runs (
               project_id, id, execution_id, action_id, subject_kind, status, phase, queued_at,
               started_at, finished_at, params, idempotency_key, error
             ) VALUES (
@@ -1346,352 +680,276 @@ describe("Postgres storage migrations", () => {
       const started = "2026-01-01T00:00:01.000Z"
       const finished = "2026-01-01T00:00:02.000Z"
       const committedAt = "2026-01-01T00:00:03.000Z"
-      try {
-        await migrateThrough(index)
-        await insertRun("queued", "queued", "request", null, null, null)
-        await insertRun("running", "running", "edits", started, null, null)
-        await insertRun(
-          "cancelled",
-          "cancelled",
-          "cancelled",
-          started,
-          finished,
-          failure("runtime.cancelled", false, "cancelled")
+      await insertRun("queued", "queued", "request", null, null, null)
+      await insertRun("running", "running", "edits", started, null, null)
+      await insertRun(
+        "cancelled",
+        "cancelled",
+        "cancelled",
+        started,
+        finished,
+        failure("runtime.cancelled", false, "cancelled")
+      )
+      await insertRun(
+        "enqueue-failed",
+        "failed",
+        "enqueue",
+        null,
+        finished,
+        failure("queue.enqueue_failed", true, "enqueue")
+      )
+      await insertRun("unexplained", "failed", "commit", started, finished, null)
+      await insertRun("succeeded", "succeeded", "commit", started, finished, null)
+      // Runs a crash left running after their edits committed.
+      for (const [id, phase] of [
+        ["committed", "commit"],
+        ["committed-in-effects", "effects"],
+      ] as const) {
+        await insertRun(id, "running", phase, started, null, null)
+        await sql.unsafe(
+          `
+            INSERT INTO ontology_commits (
+              project_id, id, idempotency_key, request_hash, execution_id, origin_kind,
+              origin_run_id, origin, ontology_revision, intent, result, committed_at
+            ) VALUES (
+              'p', $1, $2, 'hash', $3, 'action', $4, '{}', 'revision', '{}', '{}', $5
+            )
+          `,
+          [`commit-${id}`, `action:${id}:edits`, `execution-${id}`, id, committedAt]
         )
-        await insertRun(
-          "enqueue-failed",
-          "failed",
-          "enqueue",
-          null,
-          finished,
-          failure("queue.enqueue_failed", true, "enqueue")
-        )
-        await insertRun("unexplained", "failed", "commit", started, finished, null)
-        await insertRun("succeeded", "succeeded", "commit", started, finished, null)
-        // Runs a crash left running after their edits committed.
-        for (const [id, phase] of [
-          ["committed", "commit"],
-          ["committed-in-effects", "effects"],
-        ] as const) {
-          await insertRun(id, "running", phase, started, null, null)
-          await sql.unsafe(
-            `
-              INSERT INTO ${schema}.ontology_commits (
-                project_id, id, idempotency_key, request_hash, execution_id, origin_kind,
-                origin_run_id, origin, ontology_revision, intent, result, committed_at
-              ) VALUES (
-                'p', $1, $2, 'hash', $3, 'action', $4, '{}', 'revision', '{}', '{}', $5
-              )
-            `,
-            [`commit-${id}`, `action:${id}:edits`, `execution-${id}`, id, committedAt]
-          )
-        }
-
-        await migrateThrough(index + 1)
-        const listed = await storage.actionRuns.list({ projectId: "p", limit: 10 })
-        const runs = new Map(listed.runs.map((run) => [run.id, run]))
-
-        expect(runs.get("queued")).toMatchObject({
-          status: "failed",
-          phase: "validation",
-          startedAt: new Date("2026-01-01T00:00:00.000Z"),
-          error: {
-            code: "internal.unexpected",
-            message: "Abandoned: Actions now run synchronously; this run never finished.",
-            details: { actionId: "send-quote", runId: "queued", phase: "validation" },
-          },
-        })
-        expect(runs.get("running")).toMatchObject({
-          status: "failed",
-          phase: "edits",
-          startedAt: new Date(started),
-          error: { code: "internal.unexpected", details: { phase: "edits" } },
-        })
-        expect(runs.get("running")?.finishedAt.getTime()).toBeGreaterThan(Date.parse(started))
-        expect(runs.get("cancelled")).toMatchObject({
-          status: "failed",
-          phase: "validation",
-          finishedAt: new Date(finished),
-          error: { code: "runtime.cancelled", details: { phase: "validation" } },
-        })
-        expect(runs.get("enqueue-failed")).toMatchObject({
-          status: "failed",
-          phase: "validation",
-          startedAt: new Date("2026-01-01T00:00:00.000Z"),
-          error: { code: "internal.unexpected", retryable: false, message: "Stored failure." },
-        })
-        expect(runs.get("unexplained")).toMatchObject({
-          status: "failed",
-          phase: "commit",
-          error: {
-            code: "internal.unexpected",
-            message: "This run failed before Sixb recorded why.",
-            at: finished,
-            details: { phase: "commit" },
-          },
-        })
-        expect(runs.get("succeeded")).toMatchObject({ status: "succeeded", phase: "commit" })
-        expect(runs.get("committed")).toMatchObject({
-          status: "succeeded",
-          phase: "commit",
-          finishedAt: new Date(committedAt),
-        })
-        expect(runs.get("committed")?.error).toBeUndefined()
-        expect(runs.get("committed")?.effects).toBeUndefined()
-        expect(runs.get("committed-in-effects")).toMatchObject({
-          status: "succeeded",
-          phase: "effects",
-          finishedAt: new Date(committedAt),
-          effects: {
-            status: "failed",
-            error: {
-              code: "internal.unexpected",
-              message: "Abandoned: Actions now run synchronously; these effects never finished.",
-              details: { actionId: "send-quote", runId: "committed-in-effects", phase: "effects" },
-            },
-          },
-        })
-        expect(await readTableColumns(schemaName, "action_runs")).not.toContain("queued_at")
-        const refusal = await sql
-          .unsafe(
-            `INSERT INTO ${schema}.action_runs (
-              project_id, id, execution_id, action_id, subject_kind, status, phase, started_at,
-              finished_at, params, idempotency_key
-            ) VALUES ('p', 'late', 'execution-queued', 'send-quote', 'none', 'queued',
-              'validation', now(), now(), '{}', 'late')`
-          )
-          .then(
-            () => "inserted",
-            (error: unknown) => (error instanceof Error ? error.message : String(error))
-          )
-        expect(refusal).toContain("action_runs_status_check")
-      } finally {
-        await sql.end()
       }
+
+      await migrateThrough(index + 1)
+      const listed = await storage.actionRuns.list({ projectId: "p", limit: 10 })
+      const runs = new Map(listed.runs.map((run) => [run.id, run]))
+
+      expect(runs.get("queued")).toMatchObject({
+        status: "failed",
+        phase: "validation",
+        startedAt: new Date("2026-01-01T00:00:00.000Z"),
+        error: {
+          code: "internal.unexpected",
+          message: "Abandoned: Actions now run synchronously; this run never finished.",
+          details: { actionId: "send-quote", runId: "queued", phase: "validation" },
+        },
+      })
+      expect(runs.get("running")).toMatchObject({
+        status: "failed",
+        phase: "edits",
+        startedAt: new Date(started),
+        error: { code: "internal.unexpected", details: { phase: "edits" } },
+      })
+      expect(runs.get("running")?.finishedAt.getTime()).toBeGreaterThan(Date.parse(started))
+      expect(runs.get("cancelled")).toMatchObject({
+        status: "failed",
+        phase: "validation",
+        finishedAt: new Date(finished),
+        error: { code: "runtime.cancelled", details: { phase: "validation" } },
+      })
+      expect(runs.get("enqueue-failed")).toMatchObject({
+        status: "failed",
+        phase: "validation",
+        startedAt: new Date("2026-01-01T00:00:00.000Z"),
+        error: { code: "internal.unexpected", retryable: false, message: "Stored failure." },
+      })
+      expect(runs.get("unexplained")).toMatchObject({
+        status: "failed",
+        phase: "commit",
+        error: {
+          code: "internal.unexpected",
+          message: "This run failed before Sixb recorded why.",
+          at: finished,
+          details: { phase: "commit" },
+        },
+      })
+      expect(runs.get("succeeded")).toMatchObject({ status: "succeeded", phase: "commit" })
+      expect(runs.get("committed")).toMatchObject({
+        status: "succeeded",
+        phase: "commit",
+        finishedAt: new Date(committedAt),
+      })
+      expect(runs.get("committed")?.error).toBeUndefined()
+      expect(runs.get("committed")?.effects).toBeUndefined()
+      expect(runs.get("committed-in-effects")).toMatchObject({
+        status: "succeeded",
+        phase: "effects",
+        finishedAt: new Date(committedAt),
+        effects: {
+          status: "failed",
+          error: {
+            code: "internal.unexpected",
+            message: "Abandoned: Actions now run synchronously; these effects never finished.",
+            details: { actionId: "send-quote", runId: "committed-in-effects", phase: "effects" },
+          },
+        },
+      })
+      expect(await readTableColumns(sql, "action_runs")).not.toContain("queued_at")
+      const refusal = await sql
+        .unsafe(
+          `INSERT INTO action_runs (
+            project_id, id, execution_id, action_id, subject_kind, status, phase, started_at,
+            finished_at, params, idempotency_key
+          ) VALUES ('p', 'late', 'execution-queued', 'send-quote', 'none', 'queued',
+            'validation', now(), now(), '{}', 'late')`
+        )
+        .then(
+          () => "inserted",
+          (error: unknown) => (error instanceof Error ? error.message : String(error))
+        )
+      expect(refusal).toContain("action_runs_status_check")
     })
   })
 
   // Removal proof: drop the UPDATE from 062 and the Atlas browser session stays active, listed
   // among the person's sessions though no cookie can reach it.
   test("ends Atlas's browser sessions and keeps the app's and native ones", async () => {
-    await withStorage(false, async (_storage, schemaName) => {
-      const connectionString = process.env.DATABASE_URL
-      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
-      const index = postgresStorageMigrations.steps.findIndex(
-        (step) => step.id === "062-drop-auth-audience"
+    const index = indexOf("062-drop-auth-audience")
+    await withDatabase({ migrateThrough: index }, async ({ sql, migrateThrough }) => {
+      await sql.unsafe(
+        `INSERT INTO auth_users (project_id, id, email, status, created_at, updated_at)
+        VALUES ('p', 'usr_1', 'ava@acme.com', 'active', now(), now())`
       )
-      const sql = createPgClient({ connectionString, schemaName, max: 1 })
-      const migrateThrough = (count: number) =>
-        createPostgresMigrator({
-          sql,
-          schemaName,
-          migrations: defineMigrations({
-            adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-            steps: postgresStorageMigrations.steps.slice(0, count),
-          }),
-        }).migrate()
-      const schema = quoteIdent(schemaName)
-      try {
-        await migrateThrough(index)
+      // A native (CLI) session has a refresh token, a client name and a short access expiry;
+      // the bearer-state constraint requires all three together.
+      for (const [id, audience, refreshTokenHash, clientName] of [
+        ["atlas", "atlas", null, null],
+        ["app", "app", null, null],
+        ["native", "atlas", "refresh-hash", "Sixb CLI"],
+      ] as const) {
         await sql.unsafe(
-          `INSERT INTO ${schema}.auth_users (project_id, id, email, status, created_at, updated_at)
-          VALUES ('p', 'usr_1', 'ava@acme.com', 'active', now(), now())`
+          `INSERT INTO auth_sessions (
+            project_id, id, user_id, strategy_id, audience, token_hash, created_at, expires_at,
+            refresh_token_hash, client_name, access_expires_at
+          ) VALUES (
+            'p', $1, 'usr_1', 'magic-link', $2, $3, now(), now() + interval '1 day', $4, $5,
+            CASE WHEN $4::text IS NULL THEN NULL ELSE now() + interval '1 hour' END
+          )`,
+          [id, audience, `hash-${id}`, refreshTokenHash, clientName]
         )
-        // A native (CLI) session has a refresh token, a client name and a short access expiry;
-        // the bearer-state constraint requires all three together.
-        for (const [id, audience, refreshTokenHash, clientName] of [
-          ["atlas", "atlas", null, null],
-          ["app", "app", null, null],
-          ["native", "atlas", "refresh-hash", "Sixb CLI"],
-        ] as const) {
-          await sql.unsafe(
-            `INSERT INTO ${schema}.auth_sessions (
-              project_id, id, user_id, strategy_id, audience, token_hash, created_at, expires_at,
-              refresh_token_hash, client_name, access_expires_at
-            ) VALUES (
-              'p', $1, 'usr_1', 'magic-link', $2, $3, now(), now() + interval '1 day', $4, $5,
-              CASE WHEN $4::text IS NULL THEN NULL ELSE now() + interval '1 hour' END
-            )`,
-            [id, audience, `hash-${id}`, refreshTokenHash, clientName]
-          )
-        }
-
-        await migrateThrough(index + 1)
-
-        const rows = await sql.unsafe<{ id: string; revoked: boolean }[]>(
-          `SELECT id, revoked_at IS NOT NULL AS revoked FROM ${schema}.auth_sessions ORDER BY id`
-        )
-        expect(rows.map((row) => [row.id, row.revoked])).toEqual([
-          ["app", false],
-          ["atlas", true],
-          ["native", false],
-        ])
-        expect(await readTableColumns(schemaName, "auth_sessions")).not.toContain("audience")
-      } finally {
-        await sql.end()
       }
+
+      await migrateThrough(index + 1)
+
+      const rows = await sql.unsafe<{ id: string; revoked: boolean }[]>(
+        "SELECT id, revoked_at IS NOT NULL AS revoked FROM auth_sessions ORDER BY id"
+      )
+      expect(rows.map((row) => [row.id, row.revoked])).toEqual([
+        ["app", false],
+        ["atlas", true],
+        ["native", false],
+      ])
+      expect(await readTableColumns(sql, "auth_sessions")).not.toContain("audience")
     })
   })
 
   test("migrates failed run records from the version 10 main schema", async () => {
-    await withStorage(false, async (_storage, schemaName) => {
-      const connectionString = process.env.DATABASE_URL
-      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+    await withDatabase({ migrateThrough: 10 }, async ({ sql, migrateThrough }) => {
+      await sql.unsafe(`
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+          authority_kind, authority_primitive_kind, authority_primitive_id, created_at
+        ) VALUES (
+          'project-a', 'execution-action-legacy', 'action', 'action-legacy', 'event',
+          'event-action-legacy', 'correlation-action-legacy', 'trustedPrimitive', 'action',
+          'approve', '2026-08-10T12:00:00.000Z'
+        );
 
-      const sql = createPgClient({ connectionString, schemaName, max: 1 })
-      try {
-        const versionTen = defineMigrations({
-          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-          steps: postgresStorageMigrations.steps.slice(0, 10),
-        })
-        await createPostgresMigrator({ sql, schemaName, migrations: versionTen }).migrate()
-        const schema = quoteIdent(schemaName)
-        await sql.unsafe(`
-          INSERT INTO ${schema}.executions (
-            project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
-            authority_kind, authority_primitive_kind, authority_primitive_id, created_at
-          ) VALUES (
-            'project-a', 'execution-action-legacy', 'action', 'action-legacy', 'event',
-            'event-action-legacy', 'correlation-action-legacy', 'trustedPrimitive', 'action',
-            'approve', '2026-08-10T12:00:00.000Z'
-          );
+        INSERT INTO sync_runs (
+          project_id, id, sync_id, dataset_id, mode, status, started_at, finished_at,
+          error_name, error_message
+        ) VALUES (
+          'project-a', 'sync-legacy', 'sync.orders', 'orders', 'snapshot', 'failed',
+          '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z',
+          'ProviderError', 'secret sync diagnostic'
+        );
 
-          INSERT INTO ${schema}.sync_runs (
-            project_id, id, sync_id, dataset_id, mode, status, started_at, finished_at,
-            error_name, error_message
-          ) VALUES (
-            'project-a', 'sync-legacy', 'sync.orders', 'orders', 'snapshot', 'failed',
-            '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z',
-            'ProviderError', 'secret sync diagnostic'
-          );
+        INSERT INTO action_runs (
+          project_id, id, execution_id, action_id, subject_kind, status, phase, queued_at,
+          finished_at, params, idempotency_key, error_name, error_message, error_phase
+        ) VALUES (
+          'project-a', 'action-legacy', 'execution-action-legacy', 'approve', 'none', 'failed',
+          'enqueue',
+          '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z', '{}'::jsonb,
+          'action-legacy', 'QueueError', 'secret queue diagnostic', 'enqueue'
+        );
+      `)
 
-          INSERT INTO ${schema}.action_runs (
-            project_id, id, execution_id, action_id, subject_kind, status, phase, queued_at,
-            finished_at, params, idempotency_key, error_name, error_message, error_phase
-          ) VALUES (
-            'project-a', 'action-legacy', 'execution-action-legacy', 'approve', 'none', 'failed',
-            'enqueue',
-            '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z', '{}'::jsonb,
-            'action-legacy', 'QueueError', 'secret queue diagnostic', 'enqueue'
-          );
-        `)
+      // Up to the execution links of 021, which reject legacy runs.
+      await expect(migrateThrough(indexOf("021-sync-pipeline-executions"))).resolves.toMatchObject({
+        status: "migrated",
+      })
 
-        const executionMigrationIndex = postgresStorageMigrations.steps.findIndex(
-          (migration) => migration.id === "021-sync-pipeline-executions"
-        )
-        if (executionMigrationIndex < 0) {
-          throw new Error("PostgreSQL sync-pipeline-executions migration is missing.")
-        }
-        const failureMigrations = defineMigrations({
-          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-          steps: postgresStorageMigrations.steps.slice(0, executionMigrationIndex),
-        })
-        await expect(
-          createPostgresMigrator({ sql, schemaName, migrations: failureMigrations }).migrate()
-        ).resolves.toMatchObject({ status: "migrated" })
-
-        const [sync] = await sql.unsafe<Array<{ readonly error: unknown }>>(
-          `SELECT error FROM ${schema}.sync_runs WHERE id = 'sync-legacy'`
-        )
-        const [action] = await sql.unsafe<Array<{ readonly error: unknown }>>(
-          `SELECT error FROM ${schema}.action_runs WHERE id = 'action-legacy'`
-        )
-        expect(parseSixbFailure(sync?.error, SYNC_RUN_FAILURE_CODES)).toMatchObject({
-          code: "internal.unexpected",
-          message: "An unexpected internal error occurred.",
-          details: { syncId: "sync.orders", runId: "sync-legacy" },
-        })
-        // 061 later rewrites this failure: enqueue failures and phases are gone.
-        expect(parseSixbFailure(action?.error)).toMatchObject({
-          code: "queue.enqueue_failed",
-          retryable: true,
-          details: { actionId: "approve", runId: "action-legacy", phase: "enqueue" },
-        })
-        expect(JSON.stringify(sync)).not.toContain("secret")
-        expect(await readTableColumns(schemaName, "sync_runs")).not.toContain("error_message")
-        expect(await readTableColumns(schemaName, "action_runs")).not.toContain("error_phase")
-      } finally {
-        await sql.end()
-      }
+      const [sync] = await sql.unsafe<Array<{ readonly error: unknown }>>(
+        "SELECT error FROM sync_runs WHERE id = 'sync-legacy'"
+      )
+      const [action] = await sql.unsafe<Array<{ readonly error: unknown }>>(
+        "SELECT error FROM action_runs WHERE id = 'action-legacy'"
+      )
+      expect(parseSixbFailure(sync?.error, SYNC_RUN_FAILURE_CODES)).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: { syncId: "sync.orders", runId: "sync-legacy" },
+      })
+      // 061 later rewrites this failure: enqueue failures and phases are gone.
+      expect(parseSixbFailure(action?.error)).toMatchObject({
+        code: "queue.enqueue_failed",
+        retryable: true,
+        details: { actionId: "approve", runId: "action-legacy", phase: "enqueue" },
+      })
+      expect(JSON.stringify(sync)).not.toContain("secret")
+      expect(await readTableColumns(sql, "sync_runs")).not.toContain("error_message")
+      expect(await readTableColumns(sql, "action_runs")).not.toContain("error_phase")
     })
   })
 
   test("ontology outbox failure migration replaces legacy diagnostics with a safe failure", async () => {
-    await withStorage(false, async (_storage, schemaName) => {
-      const failureMigrationIndex = postgresStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "018-ontology-outbox-failure-record"
-      )
-      if (failureMigrationIndex !== 17) {
-        throw new Error("PostgreSQL ontology outbox failure migration is missing.")
-      }
-      const connectionString = process.env.DATABASE_URL
-      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+    const index = indexOf("018-ontology-outbox-failure-record")
+    await withDatabase({ migrateThrough: index }, async ({ sql, migrateThrough }) => {
+      await sql.unsafe(`
+        INSERT INTO ontology_outbox (
+          project_id, id, commit_id, commit_ordinal, envelope, available_at,
+          attempts, published_at, last_error, created_at
+        ) VALUES
+          (
+            'project-a', 'event-failed', 'commit-failed', 0,
+            '{"type":"object.created"}'::jsonb, '2026-08-10T12:01:00.000Z',
+            2, NULL, 'Error: broker unavailable', '2026-08-10T12:00:00.000Z'
+          ),
+          (
+            'project-a', 'event-stopped', 'commit-stopped', 0,
+            '{"type":"object.updated"}'::jsonb, '2026-08-10T12:02:00.000Z',
+            1, NULL, 'Outbox dispatcher stopped before publication completed.',
+            '2026-08-10T12:00:00.000Z'
+          )
+      `)
 
-      const sql = createPgClient({ connectionString, schemaName, max: 1 })
-      try {
-        const beforeFailureRecord = defineMigrations({
-          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-          steps: postgresStorageMigrations.steps.slice(0, failureMigrationIndex),
-        })
-        await createPostgresMigrator({
-          sql,
-          schemaName,
-          migrations: beforeFailureRecord,
-        }).migrate()
-        await sql.unsafe(`
-          INSERT INTO ${quoteIdent(schemaName)}.ontology_outbox (
-            project_id, id, commit_id, commit_ordinal, envelope, available_at,
-            attempts, published_at, last_error, created_at
-          ) VALUES
-            (
-              'project-a', 'event-failed', 'commit-failed', 0,
-              '{"type":"object.created"}'::jsonb, '2026-08-10T12:01:00.000Z',
-              2, NULL, 'Error: broker unavailable', '2026-08-10T12:00:00.000Z'
-            ),
-            (
-              'project-a', 'event-stopped', 'commit-stopped', 0,
-              '{"type":"object.updated"}'::jsonb, '2026-08-10T12:02:00.000Z',
-              1, NULL, 'Outbox dispatcher stopped before publication completed.',
-              '2026-08-10T12:00:00.000Z'
-            )
-        `)
+      // Only through 018: its rows have no commit, so 054 would rightly refuse them.
+      await migrateThrough(index + 1)
 
-        // Only through 018: its rows have no commit, so 054 would rightly refuse them.
-        await createPostgresMigrator({
-          sql,
-          schemaName,
-          migrations: defineMigrations({
-            adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-            steps: postgresStorageMigrations.steps.slice(0, failureMigrationIndex + 1),
-          }),
-        }).migrate()
-
-        const rows = await sql.unsafe<
-          Array<{ readonly id: string; readonly last_failure: unknown | null }>
-        >(`SELECT id, last_failure FROM ${quoteIdent(schemaName)}.ontology_outbox ORDER BY id`)
-        expect(parseSixbFailure(rows[0]?.last_failure, ONTOLOGY_OUTBOX_FAILURE_CODES)).toEqual({
-          code: "event.delivery_failed",
-          message: "Event delivery failed.",
-          retryable: true,
-          at: "2026-08-10T12:01:00.000Z",
-          details: {
-            attempts: 2,
-            eventIds: ["event-failed"],
-            eventTypes: ["object.created"],
-            migratedFromLegacyLastError: true,
-            timestampSource: "availableAt",
-          },
-        })
-        expect(rows[1]).toEqual({ id: "event-stopped", last_failure: null })
-        expect(await readTableColumns(schemaName, "ontology_outbox")).toContain("last_failure")
-        expect(await readTableColumns(schemaName, "ontology_outbox")).not.toContain("last_error")
-      } finally {
-        await sql.end()
-      }
+      const rows = await sql.unsafe<
+        Array<{ readonly id: string; readonly last_failure: unknown | null }>
+      >("SELECT id, last_failure FROM ontology_outbox ORDER BY id")
+      expect(parseSixbFailure(rows[0]?.last_failure, ONTOLOGY_OUTBOX_FAILURE_CODES)).toEqual({
+        code: "event.delivery_failed",
+        message: "Event delivery failed.",
+        retryable: true,
+        at: "2026-08-10T12:01:00.000Z",
+        details: {
+          attempts: 2,
+          eventIds: ["event-failed"],
+          eventTypes: ["object.created"],
+          migratedFromLegacyLastError: true,
+          timestampSource: "availableAt",
+        },
+      })
+      expect(rows[1]).toEqual({ id: "event-stopped", last_failure: null })
+      expect(await readTableColumns(sql, "ontology_outbox")).toContain("last_failure")
+      expect(await readTableColumns(sql, "ontology_outbox")).not.toContain("last_error")
     })
   })
 
   describe("054 slim ontology outbox", () => {
+    const index = indexOf("054-slim-ontology-outbox")
     const commit: OntologyMaterializationEventCommit = {
       projectId: "p",
       id: "c-1",
@@ -1741,23 +999,8 @@ describe("Postgres storage migrations", () => {
       )
     )
 
-    /** Migrates `schemaName` to 053 and stores `commit` and its events as 053 stored them. */
-    async function seedAt053(
-      sql: ReturnType<typeof createPgClient>,
-      schemaName: string,
-      stored: readonly OntologyMaterializationEvent[]
-    ): Promise<void> {
-      const index = postgresStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "054-slim-ontology-outbox"
-      )
-      await createPostgresMigrator({
-        sql,
-        schemaName,
-        migrations: defineMigrations({
-          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-          steps: postgresStorageMigrations.steps.slice(0, index),
-        }),
-      }).migrate()
+    /** Stores `commit` and its events as 053 stored them. */
+    async function seedAt053(sql: SQL, stored: readonly OntologyMaterializationEvent[]) {
       await sql`
         INSERT INTO executions (
           project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
@@ -1792,170 +1035,116 @@ describe("Postgres storage migrations", () => {
     // Removal proof: keep `propertyChanges` in a created draft, or drop a context field from the
     // rebuild; the claimed events no longer equal what 053 stored.
     test("keeps every pending event exactly as consumers would have received it", async () => {
-      await withStorage(false, async (storage, schemaName) => {
-        const sql = createPgClient({ connectionString: databaseUrl(), schemaName, max: 1 })
-        try {
-          await seedAt053(sql, schemaName, envelopes)
-          await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+      await withDatabase({ migrateThrough: index }, async ({ storage, sql }) => {
+        await seedAt053(sql, envelopes)
+        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
 
-          expect(await readTableColumns(schemaName, "ontology_outbox")).not.toContain("envelope")
-          const commitColumns = await readTableColumns(schemaName, "ontology_commits")
-          expect(commitColumns).not.toContain("requested_by")
-          expect(commitColumns).not.toContain("executor")
-          expect([
-            ...(await sql`SELECT event FROM ontology_outbox ORDER BY commit_ordinal`),
-          ]).toEqual(drafts.map((event) => ({ event })))
-          const claimed = await storage.ontology.outbox.claim({
-            projectId: "p",
-            now: "2026-10-01T09:00:00.000Z",
-            limit: 10,
-            leaseId: "lease",
-            leaseExpiresAt: "2026-10-01T09:01:00.000Z",
-          })
-          expect(claimed.map((row) => row.envelope)).toStrictEqual(envelopes)
-        } finally {
-          await sql.end()
-        }
+        expect(await readTableColumns(sql, "ontology_outbox")).not.toContain("envelope")
+        const commitColumns = await readTableColumns(sql, "ontology_commits")
+        expect(commitColumns).not.toContain("requested_by")
+        expect(commitColumns).not.toContain("executor")
+        expect([...(await sql`SELECT event FROM ontology_outbox ORDER BY commit_ordinal`)]).toEqual(
+          drafts.map((event) => ({ event }))
+        )
+        const claimed = await storage.ontology.outbox.claim({
+          projectId: "p",
+          now: "2026-10-01T09:00:00.000Z",
+          limit: 10,
+          leaseId: "lease",
+          leaseExpiresAt: "2026-10-01T09:01:00.000Z",
+        })
+        expect(claimed.map((row) => row.envelope)).toStrictEqual(envelopes)
       })
     })
 
     // Removal proof: drop the DO block from 054; the tampered event is converted and would reach
     // consumers with its execution's correlation id instead of its own.
     test("refuses to convert an event that would not rebuild from its commit", async () => {
-      await withStorage(false, async (storage, schemaName) => {
-        const sql = createPgClient({ connectionString: databaseUrl(), schemaName, max: 1 })
-        try {
-          const [first, ...rest] = envelopes
-          await seedAt053(sql, schemaName, [{ ...first!, correlationId: "elsewhere" }, ...rest])
-          await expect(migrateStorage(storage)).rejects.toThrow(
-            "1 outbox events would not rebuild from their commit"
-          )
-          expect(await readTableColumns(schemaName, "ontology_outbox")).toContain("envelope")
-        } finally {
-          await sql.end()
-        }
+      await withDatabase({ migrateThrough: index }, async ({ storage, sql }) => {
+        const [first, ...rest] = envelopes
+        await seedAt053(sql, [{ ...first!, correlationId: "elsewhere" }, ...rest])
+        await expect(migrateStorage(storage)).rejects.toThrow(
+          "1 outbox events would not rebuild from their commit"
+        )
+        expect(await readTableColumns(sql, "ontology_outbox")).toContain("envelope")
       })
     })
   })
 
   test("webhook delivery failure migration replaces legacy diagnostics with a safe failure", async () => {
-    await withStorage(false, async (_storage, schemaName) => {
-      const failureMigrationIndex = postgresStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "019-webhook-delivery-failure-record"
-      )
-      if (failureMigrationIndex !== 18) {
-        throw new Error("PostgreSQL migrations before webhook delivery failures are missing.")
-      }
-      const connectionString = process.env.DATABASE_URL
-      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+    const index = indexOf("019-webhook-delivery-failure-record")
+    await withDatabase({ migrateThrough: index }, async ({ sql, migrateThrough }) => {
+      await sql.unsafe(`
+        INSERT INTO webhook_deliveries (
+          project_id, connector_id, webhook_id, idempotency_key, status,
+          received_at, completed_at, failed_at, error
+        ) VALUES
+          (
+            'project-a', 'github', 'events', 'delivery-failed-at', 'failed',
+            '2026-08-10T12:00:00.000Z', NULL, '2026-08-10T12:01:00.000Z',
+            'Error: handler unavailable'
+          ),
+          (
+            'project-a', 'stripe', 'payments', 'delivery-received-at', 'failed',
+            '2026-08-10T12:02:00.000Z', NULL, NULL,
+            'Error: legacy row without failure time'
+          )
+      `)
 
-      const sql = createPgClient({ connectionString, schemaName, max: 1 })
-      try {
-        const beforeFailureRecord = defineMigrations({
-          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-          steps: postgresStorageMigrations.steps.slice(0, failureMigrationIndex),
-        })
-        await createPostgresMigrator({
-          sql,
-          schemaName,
-          migrations: beforeFailureRecord,
-        }).migrate()
-        await sql.unsafe(`
-          INSERT INTO ${quoteIdent(schemaName)}.webhook_deliveries (
-            project_id, connector_id, webhook_id, idempotency_key, status,
-            received_at, completed_at, failed_at, error
-          ) VALUES
-            (
-              'project-a', 'github', 'events', 'delivery-failed-at', 'failed',
-              '2026-08-10T12:00:00.000Z', NULL, '2026-08-10T12:01:00.000Z',
-              'Error: handler unavailable'
-            ),
-            (
-              'project-a', 'stripe', 'payments', 'delivery-received-at', 'failed',
-              '2026-08-10T12:02:00.000Z', NULL, NULL,
-              'Error: legacy row without failure time'
-            )
-        `)
+      // Stop at 019: later authority migrations deliberately reject these legacy deliveries.
+      await expect(migrateThrough(index + 1)).resolves.toMatchObject({ status: "migrated" })
 
-        // Stop at 019: later authority migrations deliberately reject these legacy deliveries.
-        const throughFailureRecord = defineMigrations({
-          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-          steps: postgresStorageMigrations.steps.slice(0, failureMigrationIndex + 1),
-        })
-        await expect(
-          createPostgresMigrator({
-            sql,
-            schemaName,
-            migrations: throughFailureRecord,
-          }).migrate()
-        ).resolves.toMatchObject({ status: "migrated" })
-
-        const rows = await sql.unsafe<
-          Array<{ readonly idempotency_key: string; readonly failure: unknown | null }>
-        >(`
-          SELECT idempotency_key, failure
-          FROM ${quoteIdent(schemaName)}.webhook_deliveries
-          ORDER BY idempotency_key
-        `)
-        expect(rows[0]?.idempotency_key).toBe("delivery-failed-at")
-        expect(parseSixbFailure(rows[0]?.failure, LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
-          code: "webhook.delivery_failed",
-          message: "Webhook delivery failed.",
-          retryable: true,
-          at: "2026-08-10T12:01:00.000Z",
-          details: {
-            connectorId: "github",
-            webhookId: "events",
-            idempotencyKey: "delivery-failed-at",
-            migratedFromLegacyError: true,
-            timestampSource: "failedAt",
-          },
-        })
-        expect(parseSixbFailure(rows[1]?.failure, LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
-          code: "webhook.delivery_failed",
-          message: "Webhook delivery failed.",
-          retryable: true,
-          at: "2026-08-10T12:02:00.000Z",
-          details: {
-            connectorId: "stripe",
-            webhookId: "payments",
-            idempotencyKey: "delivery-received-at",
-            migratedFromLegacyError: true,
-            timestampSource: "receivedAt",
-          },
-        })
-        expect(await readTableColumns(schemaName, "webhook_deliveries")).toContain("failure")
-        expect(await readTableColumns(schemaName, "webhook_deliveries")).not.toContain("error")
-      } finally {
-        await sql.end()
-      }
+      const rows = await sql.unsafe<
+        Array<{ readonly idempotency_key: string; readonly failure: unknown | null }>
+      >("SELECT idempotency_key, failure FROM webhook_deliveries ORDER BY idempotency_key")
+      expect(rows[0]?.idempotency_key).toBe("delivery-failed-at")
+      expect(parseSixbFailure(rows[0]?.failure, LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+        code: "webhook.delivery_failed",
+        message: "Webhook delivery failed.",
+        retryable: true,
+        at: "2026-08-10T12:01:00.000Z",
+        details: {
+          connectorId: "github",
+          webhookId: "events",
+          idempotencyKey: "delivery-failed-at",
+          migratedFromLegacyError: true,
+          timestampSource: "failedAt",
+        },
+      })
+      expect(parseSixbFailure(rows[1]?.failure, LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+        code: "webhook.delivery_failed",
+        message: "Webhook delivery failed.",
+        retryable: true,
+        at: "2026-08-10T12:02:00.000Z",
+        details: {
+          connectorId: "stripe",
+          webhookId: "payments",
+          idempotencyKey: "delivery-received-at",
+          migratedFromLegacyError: true,
+          timestampSource: "receivedAt",
+        },
+      })
+      expect(await readTableColumns(sql, "webhook_deliveries")).toContain("failure")
+      expect(await readTableColumns(sql, "webhook_deliveries")).not.toContain("error")
     })
   })
 
   test("recorded old checksums are rejected before schema mutation", async () => {
-    await withStorage(false, async (storage, schemaName) => {
-      await migrateStorage(storage)
-      await withSql((sql) =>
-        sql.unsafe(
-          `UPDATE ${quoteIdent(schemaName)}.sixb_migrations
-           SET checksum = 'old-checksum'
-           WHERE adapter_id = $1 AND version = 1`,
-          [POSTGRES_STORAGE_ADAPTER_ID]
-        )
+    await withDatabase({}, async ({ storage, sql }) => {
+      await sql.unsafe(
+        "UPDATE sixb_migrations SET checksum = 'old-checksum' WHERE adapter_id = $1 AND version = 1",
+        [POSTGRES_STORAGE_ADAPTER_ID]
       )
 
       await expect(migrateStorage(storage)).rejects.toThrow("checksum")
-      expect((await readMigrationRows(schemaName))[0]?.checksum_length).toBe("old-checksum".length)
-      expect(await readTableNames(schemaName)).toContain("ontology_outbox")
+      expect((await readMigrationRows(sql))[0]?.checksum_length).toBe("old-checksum".length)
+      expect(await readTableNames(sql)).toContain("ontology_outbox")
     })
   })
 
-  test("fresh schema installs the exact ontology table set and provenance columns", async () => {
-    await withStorage(false, async (storage, schemaName) => {
-      await migrateStorage(storage)
-      expect(
-        (await readTableNames(schemaName)).filter((name) => name.startsWith("ontology_"))
-      ).toEqual([
+  test("fresh schema installs the exact ontology table set, provenance columns, and no retired column", async () => {
+    await withDatabase({}, async ({ sql }) => {
+      expect((await readTableNames(sql)).filter((name) => name.startsWith("ontology_"))).toEqual([
         "ontology_commit_touch_horizons",
         "ontology_commit_touches",
         "ontology_commits",
@@ -1970,27 +1159,23 @@ describe("Postgres storage migrations", () => {
         "ontology_sources",
       ])
       // A commit references its execution; who asked and what wrote live only there.
-      const commitColumns = await readTableColumns(schemaName, "ontology_commits")
+      const commitColumns = await readTableColumns(sql, "ontology_commits")
       for (const copy of ["actor", "requested_by", "executor", "correlation_id"]) {
         expect(commitColumns).not.toContain(copy)
       }
-      expect(await readTableColumns(schemaName, "objects")).toContain("last_commit_id")
-      expect(await readTableColumns(schemaName, "links")).toContain("last_commit_id")
-      expect(await readTableColumns(schemaName, "timeseries")).toContain("last_commit_id")
-      expect(await readTableColumns(schemaName, "ontology_commits")).toContain("execution_id")
-      expect(await readTableColumns(schemaName, "objects")).not.toContain("source_event_id")
-      expect(await readTableColumns(schemaName, "links")).not.toContain("source_event_id")
-      expect(await readTableColumns(schemaName, "timeseries")).not.toContain("source_event_id")
-      expect(await readTableNames(schemaName)).not.toContain("applied_events_objects")
-      await expect(readColumnNullable(schemaName, "objects", "last_commit_id")).resolves.toBe("NO")
-      await expect(readColumnNullable(schemaName, "links", "last_commit_id")).resolves.toBe("NO")
-      await expect(readColumnNullable(schemaName, "timeseries", "last_commit_id")).resolves.toBe(
-        "NO"
-      )
-      await expect(
-        readColumnNullable(schemaName, "ontology_commits", "execution_id")
-      ).resolves.toBe("NO")
-      expect(await readTableColumns(schemaName, "timeseries_latest")).toEqual(
+      expect(await readTableColumns(sql, "objects")).toContain("last_commit_id")
+      expect(await readTableColumns(sql, "links")).toContain("last_commit_id")
+      expect(await readTableColumns(sql, "timeseries")).toContain("last_commit_id")
+      expect(await readTableColumns(sql, "ontology_commits")).toContain("execution_id")
+      expect(await readTableColumns(sql, "objects")).not.toContain("source_event_id")
+      expect(await readTableColumns(sql, "links")).not.toContain("source_event_id")
+      expect(await readTableColumns(sql, "timeseries")).not.toContain("source_event_id")
+      expect(await readTableNames(sql)).not.toContain("applied_events_objects")
+      expect(await readColumnNullable(sql, "objects", "last_commit_id")).toBe("NO")
+      expect(await readColumnNullable(sql, "links", "last_commit_id")).toBe("NO")
+      expect(await readColumnNullable(sql, "timeseries", "last_commit_id")).toBe("NO")
+      expect(await readColumnNullable(sql, "ontology_commits", "execution_id")).toBe("NO")
+      expect(await readTableColumns(sql, "timeseries_latest")).toEqual(
         expect.arrayContaining([
           "object_type_id",
           "object_id",
@@ -1999,7 +1184,7 @@ describe("Postgres storage migrations", () => {
           "last_commit_id",
         ])
       )
-      expect(await readTableColumns(schemaName, "projection_runs")).toEqual(
+      expect(await readTableColumns(sql, "projection_runs")).toEqual(
         expect.arrayContaining([
           "attempt",
           "execution_id",
@@ -2014,478 +1199,275 @@ describe("Postgres storage migrations", () => {
           "error",
         ])
       )
-      await expect(readColumnNullable(schemaName, "projection_runs", "execution_id")).resolves.toBe(
-        "NO"
-      )
-      await expect(readColumnNullable(schemaName, "projection_runs", "queued_at")).resolves.toBe(
-        "NO"
-      )
-      await expect(readColumnNullable(schemaName, "projection_runs", "started_at")).resolves.toBe(
-        "YES"
-      )
-      expect(await readTableColumns(schemaName, "workflow_runs")).toEqual(
+      expect(await readColumnNullable(sql, "projection_runs", "execution_id")).toBe("NO")
+      expect(await readColumnNullable(sql, "projection_runs", "queued_at")).toBe("NO")
+      expect(await readColumnNullable(sql, "projection_runs", "started_at")).toBe("YES")
+      expect(await readTableColumns(sql, "workflow_runs")).toEqual(
         expect.arrayContaining(["execution_id"])
       )
-      expect(await readTableColumns(schemaName, "workflow_runs")).not.toEqual(
+      expect(await readTableColumns(sql, "workflow_runs")).not.toEqual(
         expect.arrayContaining([
           "source",
           "requested_by_principal_type",
           "requested_by_principal_id",
         ])
       )
-      await expect(readColumnNullable(schemaName, "workflow_runs", "execution_id")).resolves.toBe(
-        "NO"
-      )
-      expect(await readTableColumns(schemaName, "action_runs")).toContain("execution_id")
-      await expect(readColumnNullable(schemaName, "action_runs", "execution_id")).resolves.toBe(
-        "NO"
-      )
+      expect(await readColumnNullable(sql, "workflow_runs", "execution_id")).toBe("NO")
+      expect(await readTableColumns(sql, "action_runs")).toContain("execution_id")
+      expect(await readColumnNullable(sql, "action_runs", "execution_id")).toBe("NO")
       for (const table of ["sync_runs", "pipeline_runs"] as const) {
-        await expect(readColumnNullable(schemaName, table, "execution_id")).resolves.toBe("NO")
-        await expect(readColumnNullable(schemaName, table, "queued_at")).resolves.toBe("NO")
-        await expect(readColumnNullable(schemaName, table, "started_at")).resolves.toBe("YES")
+        expect(await readColumnNullable(sql, table, "execution_id")).toBe("NO")
+        expect(await readColumnNullable(sql, table, "queued_at")).toBe("NO")
+        expect(await readColumnNullable(sql, table, "started_at")).toBe("YES")
       }
-      expect(await readTableNames(schemaName)).not.toContain("webhook_deliveries")
-      expect(await readTableColumns(schemaName, "webhook_runs")).not.toContain(
-        "delivery_claim_result"
-      )
-      await expect(readColumnNullable(schemaName, "webhook_runs", "execution_id")).resolves.toBe(
-        "NO"
-      )
-      await expect(
-        readColumnNullable(schemaName, "webhook_runs", "request_body_bytes")
-      ).resolves.toBe("NO")
-      await expect(
-        readColumnNullable(schemaName, "webhook_runs", "request_body_sha256")
-      ).resolves.toBe("NO")
-      expect(await readUniqueConstraints(schemaName, "webhook_runs")).toEqual(
+      expect(await readTableNames(sql)).not.toContain("webhook_deliveries")
+      expect(await readTableColumns(sql, "webhook_runs")).not.toContain("delivery_claim_result")
+      expect(await readColumnNullable(sql, "webhook_runs", "execution_id")).toBe("NO")
+      expect(await readColumnNullable(sql, "webhook_runs", "request_body_bytes")).toBe("NO")
+      expect(await readColumnNullable(sql, "webhook_runs", "request_body_sha256")).toBe("NO")
+      expect(await readUniqueConstraints(sql, "webhook_runs")).toEqual(
         expect.arrayContaining([
           ["project_id", "execution_id"],
           ["project_id", "connector_id", "webhook_id", "idempotency_key"],
         ])
       )
+
+      // Model-call usage belongs to an execution, which cannot be deleted from under it.
+      expect(await readTableForeignKeys(sql, "ai_model_call_usage")).toContainEqual({
+        column_name: "execution_id",
+        delete_action: "r",
+        foreign_column_name: "id",
+        foreign_table_name: "executions",
+      })
+      expect(await readTableColumns(sql, "workflow_agent_node_runs")).toContain("actor_id")
+      for (const [table, retired] of [
+        ["auth_sessions", ["audience"]],
+        ["ai_model_call_usage", ["execution_kind", "requester_principal_id"]],
+        [
+          "agent_runs",
+          [
+            "agent_id",
+            "requester_group_ids",
+            "usage_input_tokens",
+            "usage_output_tokens",
+            "usage_total_tokens",
+            "usage_reasoning_tokens",
+            "usage_cached_input_tokens",
+          ],
+        ],
+        ["agent_threads", ["agent_id"]],
+        ["workflow_agent_node_runs", ["agent_id", "usage"]],
+        ["workflow_runs", ["requester_group_ids"]],
+      ] as const) {
+        const columns = await readTableColumns(sql, table)
+        for (const column of retired) expect(columns).not.toContain(column)
+      }
     })
   })
 
   test("backfills canonical workflow outputs by node index", async () => {
-    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    await withSql(async (sql) => {
-      const schema = quoteIdent(schemaName)
-      const context = {
-        exec: async (sqlText: string) => {
-          await sql.unsafe(sqlText)
-        },
-      }
+    await withDatabase({ migrate: false }, async ({ sql, schemaName, context }) => {
+      await sql.unsafe(`CREATE SCHEMA ${quoteIdent(schemaName)}`)
+      await steps[0]!.up(context)
+      await sql.unsafe(`
+        INSERT INTO workflow_runs (
+          project_id, id, workflow_id, status, input, started_at
+        ) VALUES
+          ('project-a', 'data-run', 'data-workflow', 'succeeded', '{"seed":true}', '2026-01-01T00:00:00.000Z'),
+          ('project-a', 'action-run', 'action-workflow', 'succeeded', '{"seed":"kept"}', '2026-01-01T00:00:00.000Z'),
+          ('project-a', 'failed-run', 'data-workflow', 'failed', '{"seed":false}', '2026-01-01T00:00:00.000Z');
 
-      try {
-        await sql.unsafe(`CREATE SCHEMA ${schema}`)
-        await sql.unsafe(`SET search_path TO ${schema}`)
-        await postgresStorageMigrations.steps[0]?.up(context)
-        await sql.unsafe(`
-          INSERT INTO workflow_runs (
-            project_id, id, workflow_id, status, input, started_at
-          ) VALUES
-            ('project-a', 'data-run', 'data-workflow', 'succeeded', '{"seed":true}', '2026-01-01T00:00:00.000Z'),
-            ('project-a', 'action-run', 'action-workflow', 'succeeded', '{"seed":"kept"}', '2026-01-01T00:00:00.000Z'),
-            ('project-a', 'failed-run', 'data-workflow', 'failed', '{"seed":false}', '2026-01-01T00:00:00.000Z');
+        INSERT INTO workflow_node_runs (
+          project_id, id, workflow_run_id, workflow_id, node_index, node_type,
+          node_id, node_key, status, input, started_at, output
+        ) VALUES
+          ('project-a', 'data-run:node:2', 'data-run', 'data-workflow', 2, 'step',
+           'early', 'early', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"winner":2}'),
+          ('project-a', 'data-run:node:10', 'data-run', 'data-workflow', 10, 'step',
+           'final-data', 'finalData', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"winner":10}'),
+          ('project-a', 'data-run:node:11', 'data-run', 'data-workflow', 11, 'action',
+           'notify', 'notify', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"actionRunId":"act-1"}'),
+          ('project-a', 'action-run:node:0', 'action-run', 'action-workflow', 0, 'action',
+           'notify', 'notify', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"actionRunId":"act-2"}');
+      `)
 
-          INSERT INTO workflow_node_runs (
-            project_id, id, workflow_run_id, workflow_id, node_index, node_type,
-            node_id, node_key, status, input, started_at, output
-          ) VALUES
-            ('project-a', 'data-run:node:2', 'data-run', 'data-workflow', 2, 'step',
-             'early', 'early', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"winner":2}'),
-            ('project-a', 'data-run:node:10', 'data-run', 'data-workflow', 10, 'step',
-             'final-data', 'finalData', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"winner":10}'),
-            ('project-a', 'data-run:node:11', 'data-run', 'data-workflow', 11, 'action',
-             'notify', 'notify', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"actionRunId":"act-1"}'),
-            ('project-a', 'action-run:node:0', 'action-run', 'action-workflow', 0, 'action',
-             'notify', 'notify', 'succeeded', '{}', '2026-01-01T00:00:00.000Z', '{"actionRunId":"act-2"}');
-        `)
+      await steps[1]!.up(context)
 
-        await postgresStorageMigrations.steps[1]?.up(context)
-
-        const rows = await sql.unsafe<{ id: string; output: unknown }[]>(
-          "SELECT id, output FROM workflow_runs ORDER BY id"
-        )
-        expect(rows).toEqual([
-          { id: "action-run", output: { seed: "kept" } },
-          { id: "data-run", output: { winner: 10 } },
-          { id: "failed-run", output: null },
-        ])
-      } finally {
-        await sql.unsafe("RESET search_path")
-        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
-      }
+      const rows = await sql.unsafe<{ id: string; output: unknown }[]>(
+        "SELECT id, output FROM workflow_runs ORDER BY id"
+      )
+      expect([...rows]).toEqual([
+        { id: "action-run", output: { seed: "kept" } },
+        { id: "data-run", output: { winner: 10 } },
+        { id: "failed-run", output: null },
+      ])
     })
   })
 
   test("rewrites legacy intervention actors to the canonical principal shape", async () => {
     // Regression proof: remove 046; the legacy { principalType, principalId } values survive.
-    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    await withSql(async (sql) => {
-      const schema = quoteIdent(schemaName)
-      const context = {
-        exec: async (sqlText: string) => {
-          await sql.unsafe(sqlText)
-        },
-      }
-      const principalsIndex = postgresStorageMigrations.steps.findIndex(
-        (step) => step.id === "046-workflow-intervention-principals"
+    const index = indexOf("046-workflow-intervention-principals")
+    await withDatabase({ migrateThrough: index }, async ({ sql, context }) => {
+      await sql.unsafe(`
+        INSERT INTO workflow_interventions (
+          project_id, id, workflow_id, workflow_run_id, node_run_id, node_index, node_id,
+          node_key, intervention_id, input, default_response, status, requested_at,
+          submitted_by, cancelled_by
+        ) VALUES
+          ('project-a', 'submitted', 'wf', 'run', 'node-run', 0, 'node', 'node', 'review',
+           '{}', '{}', 'submitted', '2026-01-01T00:00:00.000Z',
+           '{"principalType":"user","principalId":"usr_1"}', NULL),
+          ('project-a', 'cancelled', 'wf', 'run', 'node-run', 0, 'node', 'node', 'review',
+           '{}', '{}', 'cancelled', '2026-01-01T00:00:00.000Z',
+           NULL, '{"principalType":"system","principalId":"workflow-timeout"}'),
+          ('project-a', 'current', 'wf', 'run', 'node-run', 0, 'node', 'node', 'review',
+           '{}', '{}', 'submitted', '2026-01-01T00:00:00.000Z',
+           '{"type":"serviceAccount","id":"sa_1"}', NULL),
+          ('project-a', 'pending', 'wf', 'run', 'node-run', 0, 'node', 'node', 'review',
+           '{}', '{}', 'pending', '2026-01-01T00:00:00.000Z', NULL, NULL);
+      `)
+
+      await steps[index]!.up(context)
+
+      const rows = await sql.unsafe<{ id: string; submitted_by: unknown; cancelled_by: unknown }[]>(
+        "SELECT id, submitted_by, cancelled_by FROM workflow_interventions ORDER BY id"
       )
-
-      try {
-        await sql.unsafe(`CREATE SCHEMA ${schema}`)
-        await sql.unsafe(`SET search_path TO ${schema}`)
-        for (const migration of postgresStorageMigrations.steps.slice(0, principalsIndex)) {
-          await migration.up(context)
-        }
-        await sql.unsafe(`
-          INSERT INTO workflow_interventions (
-            project_id, id, workflow_id, workflow_run_id, node_run_id, node_index, node_id,
-            node_key, intervention_id, input, default_response, status, requested_at,
-            submitted_by, cancelled_by
-          ) VALUES
-            ('project-a', 'submitted', 'wf', 'run', 'node-run', 0, 'node', 'node', 'review',
-             '{}', '{}', 'submitted', '2026-01-01T00:00:00.000Z',
-             '{"principalType":"user","principalId":"usr_1"}', NULL),
-            ('project-a', 'cancelled', 'wf', 'run', 'node-run', 0, 'node', 'node', 'review',
-             '{}', '{}', 'cancelled', '2026-01-01T00:00:00.000Z',
-             NULL, '{"principalType":"system","principalId":"workflow-timeout"}'),
-            ('project-a', 'current', 'wf', 'run', 'node-run', 0, 'node', 'node', 'review',
-             '{}', '{}', 'submitted', '2026-01-01T00:00:00.000Z',
-             '{"type":"serviceAccount","id":"sa_1"}', NULL),
-            ('project-a', 'pending', 'wf', 'run', 'node-run', 0, 'node', 'node', 'review',
-             '{}', '{}', 'pending', '2026-01-01T00:00:00.000Z', NULL, NULL);
-        `)
-
-        await postgresStorageMigrations.steps[principalsIndex]!.up(context)
-
-        const rows = await sql.unsafe<
-          { id: string; submitted_by: unknown; cancelled_by: unknown }[]
-        >("SELECT id, submitted_by, cancelled_by FROM workflow_interventions ORDER BY id")
-        expect(rows).toEqual([
-          {
-            id: "cancelled",
-            submitted_by: null,
-            cancelled_by: { type: "system", id: "workflow-timeout" },
-          },
-          {
-            id: "current",
-            submitted_by: { type: "serviceAccount", id: "sa_1" },
-            cancelled_by: null,
-          },
-          { id: "pending", submitted_by: null, cancelled_by: null },
-          { id: "submitted", submitted_by: { type: "user", id: "usr_1" }, cancelled_by: null },
-        ])
-      } finally {
-        await sql.unsafe("RESET search_path")
-        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
-      }
+      expect([...rows]).toEqual([
+        {
+          id: "cancelled",
+          submitted_by: null,
+          cancelled_by: { type: "system", id: "workflow-timeout" },
+        },
+        {
+          id: "current",
+          submitted_by: { type: "serviceAccount", id: "sa_1" },
+          cancelled_by: null,
+        },
+        { id: "pending", submitted_by: null, cancelled_by: null },
+        { id: "submitted", submitted_by: { type: "user", id: "usr_1" }, cancelled_by: null },
+      ])
     })
   })
 
-  test("requires explicit project handling for legacy workflow runs", async () => {
-    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    await withSql(async (sql) => {
-      const schema = quoteIdent(schemaName)
-      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
+  // Each migration links existing rows to a durable execution, which a legacy row cannot honestly
+  // have: it must fail, and leave every table it touches as it was.
+  test.each([
+    [
+      "workflow run",
+      "005-workflow-executions",
+      `INSERT INTO workflow_runs (project_id, id, workflow_id, status, input, started_at)
+       VALUES ('project-a', 'legacy-run', 'legacy-workflow', 'queued', '{}',
+         '2026-01-01T00:00:00.000Z')`,
+      ["workflow_runs"],
+    ],
+    [
+      "Action run",
+      "008-action-executions",
+      `INSERT INTO action_runs (
+         project_id, id, action_id, subject_kind, status, phase, queued_at, params, idempotency_key
+       ) VALUES (
+         'project-a', 'legacy-action-run', 'legacy-action', 'none', 'queued', 'request',
+         '2026-01-01T00:00:00.000Z', '{}', 'action:project-a:legacy-action-run'
+       )`,
+      ["action_runs"],
+    ],
+    [
+      "Agent run",
+      "009-agent-executions",
+      `INSERT INTO agent_runs (
+         project_id, id, thread_id, agent_id, trigger_message_id, status, created_at
+       ) VALUES (
+         'project-a', 'legacy-agent-run', 'legacy-thread', 'legacy-agent',
+         'legacy-message', 'queued', '2026-01-01T00:00:00.000Z'
+       )`,
+      ["agent_runs"],
+    ],
+    [
+      "Sync run",
+      "021-sync-pipeline-executions",
+      `INSERT INTO sync_runs (project_id, id, sync_id, dataset_id, mode, status, started_at)
+       VALUES ('project-a', 'legacy-sync-run', 'sync-orders', 'raw.orders', 'snapshot',
+         'running', '2026-01-01T00:00:00.000Z')`,
+      ["sync_runs", "pipeline_runs"],
+    ],
+    [
+      "Pipeline run",
+      "021-sync-pipeline-executions",
+      `INSERT INTO pipeline_runs (project_id, id, pipeline_id, status, started_at)
+       VALUES ('project-a', 'legacy-pipeline-run', 'pipeline-orders', 'running',
+         '2026-01-01T00:00:00.000Z')`,
+      ["sync_runs", "pipeline_runs"],
+    ],
+    [
+      "Projection run",
+      "022-projection-executions",
+      `INSERT INTO projection_runs (
+         project_id, id, projection_id, projection_kind, materialization_protocol,
+         dataset_id, dataset_version_id, dataset_version_created_at, ontology_revision,
+         projection_revision, ownership_hash, object_type_id, status, started_at, attempt,
+         execution_token
+       ) VALUES (
+         'project-a', 'legacy-projection-run', 'project-devices', 'object', 'replacement',
+         'raw.devices', 'version-1', '2026-01-01T00:00:00.000Z', 'ontology-1',
+         'projection-1', 'ownership-1', 'Device', 'running',
+         '2026-01-01T00:00:00.000Z', 1, 'legacy-token'
+       )`,
+      ["projection_runs"],
+    ],
+    [
+      "Webhook run",
+      "023-webhook-executions",
+      `INSERT INTO webhook_runs (
+         project_id, id, connector_id, webhook_id, status, method, route, started_at
+       ) VALUES (
+         'project-a', 'legacy-webhook-run', 'github', 'events', 'running', 'POST',
+         '/api/webhooks/github/events', '2026-01-01T00:00:00.000Z'
+       )`,
+      ["webhook_runs", "webhook_deliveries"],
+    ],
+    [
+      "Webhook delivery",
+      "023-webhook-executions",
+      `INSERT INTO webhook_deliveries (
+         project_id, connector_id, webhook_id, idempotency_key, status, received_at
+       ) VALUES (
+         'project-a', 'github', 'events', 'delivery-1', 'in_progress', '2026-01-01T00:00:00.000Z'
+       )`,
+      ["webhook_runs", "webhook_deliveries"],
+    ],
+    [
+      "ontology commit",
+      "024-ontology-commit-executions",
+      `INSERT INTO ontology_commits (
+         project_id, id, idempotency_key, request_hash, origin_kind, origin,
+         ontology_revision, intent, result, committed_at
+       ) VALUES (
+         'project-a', 'legacy-commit', 'runtime:legacy-commit', 'legacy-hash', 'runtime',
+         '{"kind":"runtime","requestId":"legacy-request"}', 'ontology-1',
+         '{"kind":"edit","mode":"atomic","operationCount":0}',
+         '{"kind":"edit","commitId":"legacy-commit","created":true,"eventCount":0,"committedAt":"2026-01-01T00:00:00.000Z","outcomes":[],"changes":{"objects":[],"links":[]}}',
+         '2026-01-01T00:00:00.000Z'
+       )`,
+      ["ontology_commits"],
+    ],
+  ] as const)("rejects a legacy %s instead of inventing its execution authority (%s)", async (_record, migration, legacy, unchanged) => {
+    const index = indexOf(migration)
+    await withDatabase({ migrateThrough: index }, async ({ sql, context }) => {
+      await sql.unsafe(legacy)
 
-      try {
-        await sql.unsafe(`CREATE SCHEMA ${schema}`)
-        await sql.unsafe(`SET search_path TO ${schema}`)
-        for (const migration of postgresStorageMigrations.steps.slice(0, 4)) {
-          await migration.up(context)
-        }
-        await sql.unsafe(`
-          INSERT INTO workflow_runs (
-            project_id, id, workflow_id, status, input, started_at
-          ) VALUES (
-            'project-a', 'legacy-run', 'legacy-workflow', 'queued', '{}',
-            '2026-01-01T00:00:00.000Z'
-          )
-        `)
-
-        await expect(postgresStorageMigrations.steps[4]?.up(context)).rejects.toThrow()
-        expect(await readTableColumns(schemaName, "workflow_runs")).not.toContain("execution_id")
-      } finally {
-        await sql.unsafe("RESET search_path")
-        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
-      }
-    })
-  })
-
-  test("rejects legacy Action runs instead of inventing their execution authority", async () => {
-    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    await withSql(async (sql) => {
-      const schema = quoteIdent(schemaName)
-      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
-
-      try {
-        await sql.unsafe(`CREATE SCHEMA ${schema}`)
-        await sql.unsafe(`SET search_path TO ${schema}`)
-        for (const migration of postgresStorageMigrations.steps.slice(0, 6)) {
-          await migration.up(context)
-        }
-        await sql.unsafe(`
-          INSERT INTO action_runs (
-            project_id, id, action_id, subject_kind, status, phase, queued_at, params,
-            idempotency_key
-          ) VALUES (
-            'project-a', 'legacy-action-run', 'legacy-action', 'none', 'queued', 'request',
-            '2026-01-01T00:00:00.000Z', '{}', 'action:project-a:legacy-action-run'
-          )
-        `)
-
-        const actionExecutionsMigration = postgresStorageMigrations.steps.find(
-          (migration) => migration.id === "008-action-executions"
-        )
-        if (!actionExecutionsMigration) {
-          throw new Error("PostgreSQL action-executions migration is missing.")
-        }
-        await expect(actionExecutionsMigration.up(context)).rejects.toThrow()
-        expect(await readTableColumns(schemaName, "action_runs")).not.toContain("execution_id")
-      } finally {
-        await sql.unsafe("RESET search_path")
-        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
-      }
-    })
-  })
-
-  test("rejects legacy Agent runs instead of inventing their execution authority", async () => {
-    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    await withSql(async (sql) => {
-      const schema = quoteIdent(schemaName)
-      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
-
-      try {
-        await sql.unsafe(`CREATE SCHEMA ${schema}`)
-        await sql.unsafe(`SET search_path TO ${schema}`)
-        const agentExecutionsIndex = postgresStorageMigrations.steps.findIndex(
-          (migration) => migration.id === "009-agent-executions"
-        )
-        const agentExecutionsMigration = postgresStorageMigrations.steps[agentExecutionsIndex]
-        if (!agentExecutionsMigration) {
-          throw new Error("PostgreSQL agent-executions migration is missing.")
-        }
-        for (const migration of postgresStorageMigrations.steps.slice(0, agentExecutionsIndex)) {
-          await migration.up(context)
-        }
-        await sql.unsafe(`
-          INSERT INTO agent_runs (
-            project_id, id, thread_id, agent_id, trigger_message_id, status, created_at
-          ) VALUES (
-            'project-a', 'legacy-agent-run', 'legacy-thread', 'legacy-agent',
-            'legacy-message', 'queued', '2026-01-01T00:00:00.000Z'
-          )
-        `)
-
-        await expect(agentExecutionsMigration.up(context)).rejects.toThrow()
-        expect(await readTableColumns(schemaName, "agent_runs")).not.toContain("execution_id")
-      } finally {
-        await sql.unsafe("RESET search_path")
-        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
-      }
-    })
-  })
-
-  test("rejects legacy Sync and Pipeline runs instead of inventing execution authority", async () => {
-    for (const kind of ["sync", "pipeline"] as const) {
-      const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-      await withSql(async (sql) => {
-        const schema = quoteIdent(schemaName)
-        const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
-
-        try {
-          await sql.unsafe(`CREATE SCHEMA ${schema}`)
-          await sql.unsafe(`SET search_path TO ${schema}`)
-          const executionMigrationIndex = postgresStorageMigrations.steps.findIndex(
-            (migration) => migration.id === "021-sync-pipeline-executions"
-          )
-          const executionMigration = postgresStorageMigrations.steps[executionMigrationIndex]
-          if (!executionMigration) {
-            throw new Error("PostgreSQL sync-pipeline-executions migration is missing.")
-          }
-          for (const migration of postgresStorageMigrations.steps.slice(
-            0,
-            executionMigrationIndex
-          )) {
-            await migration.up(context)
-          }
-          if (kind === "sync") {
-            await sql.unsafe(`
-              INSERT INTO sync_runs (
-                project_id, id, sync_id, dataset_id, mode, status, started_at
-              ) VALUES (
-                'project-a', 'legacy-sync-run', 'sync-orders', 'raw.orders', 'snapshot',
-                'running', '2026-01-01T00:00:00.000Z'
-              )
-            `)
-          } else {
-            await sql.unsafe(`
-              INSERT INTO pipeline_runs (
-                project_id, id, pipeline_id, status, started_at
-              ) VALUES (
-                'project-a', 'legacy-pipeline-run', 'pipeline-orders', 'running',
-                '2026-01-01T00:00:00.000Z'
-              )
-            `)
-          }
-
-          await expect(executionMigration.up(context)).rejects.toThrow()
-          expect(await readTableColumns(schemaName, "sync_runs")).not.toContain("execution_id")
-          expect(await readTableColumns(schemaName, "pipeline_runs")).not.toContain("execution_id")
-        } finally {
-          await sql.unsafe("RESET search_path")
-          await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
-        }
-      })
-    }
-  })
-
-  test("rejects legacy Projection runs instead of inventing execution authority", async () => {
-    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    await withSql(async (sql) => {
-      const schema = quoteIdent(schemaName)
-      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
-
-      try {
-        await sql.unsafe(`CREATE SCHEMA ${schema}`)
-        await sql.unsafe(`SET search_path TO ${schema}`)
-        const executionMigrationIndex = postgresStorageMigrations.steps.findIndex(
-          (migration) => migration.id === "022-projection-executions"
-        )
-        const executionMigration = postgresStorageMigrations.steps[executionMigrationIndex]
-        if (!executionMigration) {
-          throw new Error("PostgreSQL projection-executions migration is missing.")
-        }
-        for (const migration of postgresStorageMigrations.steps.slice(0, executionMigrationIndex)) {
-          await migration.up(context)
-        }
-        await sql.unsafe(`
-          INSERT INTO projection_runs (
-            project_id, id, projection_id, projection_kind, materialization_protocol,
-            dataset_id, dataset_version_id, dataset_version_created_at, ontology_revision,
-            projection_revision, ownership_hash, object_type_id, status, started_at, attempt,
-            execution_token
-          ) VALUES (
-            'project-a', 'legacy-projection-run', 'project-devices', 'object', 'replacement',
-            'raw.devices', 'version-1', '2026-01-01T00:00:00.000Z', 'ontology-1',
-            'projection-1', 'ownership-1', 'Device', 'running',
-            '2026-01-01T00:00:00.000Z', 1, 'legacy-token'
-          )
-        `)
-
-        await expect(executionMigration.up(context)).rejects.toThrow()
-        expect(await readTableColumns(schemaName, "projection_runs")).not.toContain("execution_id")
-      } finally {
-        await sql.unsafe("RESET search_path")
-        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
-      }
-    })
-  })
-
-  test("rejects legacy Webhook runs and deliveries instead of inventing authority", async () => {
-    for (const legacyRecord of ["run", "delivery"] as const) {
-      const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-      await withSql(async (sql) => {
-        const schema = quoteIdent(schemaName)
-        const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
-
-        try {
-          await sql.unsafe(`CREATE SCHEMA ${schema}`)
-          await sql.unsafe(`SET search_path TO ${schema}`)
-          const executionMigrationIndex = postgresStorageMigrations.steps.findIndex(
-            (migration) => migration.id === "023-webhook-executions"
-          )
-          const executionMigration = postgresStorageMigrations.steps[executionMigrationIndex]
-          if (!executionMigration) {
-            throw new Error("PostgreSQL webhook-executions migration is missing.")
-          }
-          for (const migration of postgresStorageMigrations.steps.slice(
-            0,
-            executionMigrationIndex
-          )) {
-            await migration.up(context)
-          }
-
-          if (legacyRecord === "run") {
-            await sql.unsafe(`
-              INSERT INTO webhook_runs (
-                project_id, id, connector_id, webhook_id, status, method, route, started_at
-              ) VALUES (
-                'project-a', 'legacy-webhook-run', 'github', 'events', 'running', 'POST',
-                '/api/webhooks/github/events', '2026-01-01T00:00:00.000Z'
-              )
-            `)
-          } else {
-            await sql.unsafe(`
-              INSERT INTO webhook_deliveries (
-                project_id, connector_id, webhook_id, idempotency_key, status, received_at
-              ) VALUES (
-                'project-a', 'github', 'events', 'delivery-1', 'in_progress',
-                '2026-01-01T00:00:00.000Z'
-              )
-            `)
-          }
-
-          await expect(executionMigration.up(context)).rejects.toThrow()
-          expect(await readTableColumns(schemaName, "webhook_runs")).not.toContain("execution_id")
-          expect(await readTableNames(schemaName)).toContain("webhook_deliveries")
-        } finally {
-          await sql.unsafe("RESET search_path")
-          await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
-        }
-      })
-    }
-  })
-
-  test("rejects legacy ontology commits instead of inventing execution authority", async () => {
-    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    await withSql(async (sql) => {
-      const schema = quoteIdent(schemaName)
-      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
-
-      try {
-        await sql.unsafe(`CREATE SCHEMA ${schema}`)
-        await sql.unsafe(`SET search_path TO ${schema}`)
-        const migrationIndex = postgresStorageMigrations.steps.findIndex(
-          (migration) => migration.id === "024-ontology-commit-executions"
-        )
-        const migration = postgresStorageMigrations.steps[migrationIndex]
-        if (!migration) {
-          throw new Error("PostgreSQL ontology-commit execution migration is missing.")
-        }
-        for (const previous of postgresStorageMigrations.steps.slice(0, migrationIndex)) {
-          await previous.up(context)
-        }
-        await sql.unsafe(`
-          INSERT INTO ontology_commits (
-            project_id, id, idempotency_key, request_hash, origin_kind, origin,
-            ontology_revision, intent, result, committed_at
-          ) VALUES (
-            'project-a', 'legacy-commit', 'runtime:legacy-commit', 'legacy-hash', 'runtime',
-            '{"kind":"runtime","requestId":"legacy-request"}', 'ontology-1',
-            '{"kind":"edit","mode":"atomic","operationCount":0}',
-            '{"kind":"edit","commitId":"legacy-commit","created":true,"eventCount":0,"committedAt":"2026-01-01T00:00:00.000Z","outcomes":[],"changes":{"objects":[],"links":[]}}',
-            '2026-01-01T00:00:00.000Z'
-          )
-        `)
-
-        await expect(migration.up(context)).rejects.toThrow()
-        expect(await readTableColumns(schemaName, "ontology_commits")).not.toContain("execution_id")
-      } finally {
-        await sql.unsafe("RESET search_path")
-        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+      await expect(steps[index]!.up(context)).rejects.toThrow()
+      for (const table of unchanged) {
+        const columns = await readTableColumns(sql, table)
+        expect(columns.length).toBeGreaterThan(0)
+        expect(columns).not.toContain("execution_id")
       }
     })
   })
 
   test("untracked existing schema collides and rolls back without conversion", async () => {
-    await withStorage(false, async (storage, schemaName) => {
-      await migrateStorage(storage)
+    await withDatabase({}, async ({ storage, sql }) => {
       await seedExistingStoreRows(storage)
-      await dropMigrationHistory(schemaName)
+      await sql.unsafe("DROP TABLE sixb_migrations")
 
       await expect(migrateStorage(storage)).rejects.toThrow("already exists")
       expect(
@@ -2495,144 +1477,31 @@ describe("Postgres storage migrations", () => {
           primaryId: "room:101",
         })
       ).toMatchObject({ properties: { name: "Legacy Room" } })
-      expect(await readMigrationRows(schemaName)).toEqual([])
-    })
-  })
-
-  test("migrations install auth storage tables", async () => {
-    await withStorage(false, async (storage, schemaName) => {
-      await migrateStorage(storage)
-
-      await storage.auth.users.create({
-        id: "usr_1",
-        projectId: "project-a",
-        email: "ava@acme.com",
-      })
-
-      const user = await storage.auth.users.getByEmail({
-        projectId: "project-a",
-        email: "ava@acme.com",
-      })
-      const tableNames = await readTableNames(schemaName)
-      const sessionColumns = await readTableColumns(schemaName, "auth_sessions")
-
-      expect(user).toMatchObject({
-        id: "usr_1",
-        email: "ava@acme.com",
-      })
-      expect(tableNames).toEqual(
-        expect.arrayContaining([
-          "auth_users",
-          "auth_user_identities",
-          "auth_service_accounts",
-          "auth_service_account_group_memberships",
-          "auth_sessions",
-          "auth_access_tokens",
-          "auth_invitations",
-          "auth_invitation_groups",
-          "auth_group_memberships",
-          "auth_magic_links",
-          "auth_oidc_authorization_attempts",
-          "auth_device_authorizations",
-        ])
-      )
-      expect(sessionColumns).not.toContain("audience")
-      expect(sessionColumns).toContain("absolute_expires_at")
-      expect(sessionColumns).toContain("user_agent")
-      expect(sessionColumns).toContain("ip_address")
-    })
-  })
-
-  test("migrations install agent attribution and AI usage storage tables", async () => {
-    await withStorage(false, async (storage, schemaName) => {
-      await migrateStorage(storage)
-
-      await storage.agents.threads.create({
-        id: "thr_1",
-        projectId: "project-a",
-        ownerPrincipal: { type: "user", id: "usr_1" },
-        createdAt: new Date("2026-06-23T10:00:00.000Z"),
-      })
-
-      const thread = await storage.agents.threads.getById({ projectId: "project-a", id: "thr_1" })
-      const tableNames = await readTableNames(schemaName)
-
-      expect(thread).toMatchObject({ id: "thr_1", messageCount: 0 })
-      expect(tableNames).toEqual(
-        expect.arrayContaining([
-          "agent_threads",
-          "agent_runs",
-          "agent_messages",
-          "ai_model_call_usage",
-          "ai_model_call_usage_groups",
-          "ai_model_call_valuations",
-        ])
-      )
-      expect(await readTableColumns(schemaName, "ai_model_call_usage")).toContain("execution_id")
-      expect(await readTableColumns(schemaName, "ai_model_call_usage")).not.toContain(
-        "execution_kind"
-      )
-      expect(await readTableColumns(schemaName, "ai_model_call_usage")).not.toContain(
-        "requester_principal_id"
-      )
-      expect(await readTableForeignKeys(schemaName, "ai_model_call_usage")).toContainEqual({
-        column_name: "execution_id",
-        delete_action: "r",
-        foreign_column_name: "id",
-        foreign_table_name: "executions",
-      })
-      const agentRunColumns = await readTableColumns(schemaName, "agent_runs")
-      const agentThreadColumns = await readTableColumns(schemaName, "agent_threads")
-      const workflowAgentNodeColumns = await readTableColumns(
-        schemaName,
-        "workflow_agent_node_runs"
-      )
-      expect(workflowAgentNodeColumns).toContain("actor_id")
-      expect(workflowAgentNodeColumns).not.toContain("agent_id")
-      expect(agentRunColumns).not.toContain("requester_group_ids")
-      expect(agentRunColumns).toEqual(
-        expect.arrayContaining(["kind", "parent_run_id", "spawn_key", "spec", "result"])
-      )
-      expect(agentRunColumns).not.toContain("agent_id")
-      expect(agentThreadColumns).not.toContain("agent_id")
-      expect(agentRunColumns).not.toContain("usage_input_tokens")
-      expect(agentRunColumns).not.toContain("usage_output_tokens")
-      expect(agentRunColumns).not.toContain("usage_total_tokens")
-      expect(agentRunColumns).not.toContain("usage_reasoning_tokens")
-      expect(agentRunColumns).not.toContain("usage_cached_input_tokens")
-      expect(workflowAgentNodeColumns).not.toContain("usage")
-      expect(await readTableColumns(schemaName, "workflow_runs")).not.toContain(
-        "requester_group_ids"
-      )
-      expect(await readTableColumns(schemaName, "executions")).toContain("requester_group_ids")
+      expect(await readMigrationRows(sql)).toEqual([])
     })
   })
 
   test("stores a headless connector attempt as the run's single protocol child", async () => {
-    await withStorage(false, async (storage, schemaName) => {
-      await migrateStorage(storage)
-
-      expect(await readTableColumns(schemaName, "connector_connection_runs")).not.toContain(
+    await withDatabase({}, async ({ sql }) => {
+      expect(await readTableColumns(sql, "connector_connection_runs")).not.toContain(
         "authorization_attempt_id"
       )
-      expect(await readTableColumns(schemaName, "connector_authorization_attempts")).not.toContain(
+      expect(await readTableColumns(sql, "connector_authorization_attempts")).not.toContain(
         "owner_type"
       )
-      expect(await readTableColumns(schemaName, "connector_connections")).not.toContain(
-        "owner_type"
-      )
-      expect(
-        await readUniqueConstraints(schemaName, "connector_authorization_attempts")
-      ).toContainEqual(["project_id", "connector_id", "connection_run_id"])
-      expect(
-        await readTableForeignKeys(schemaName, "connector_authorization_attempts")
-      ).toContainEqual({
+      expect(await readTableColumns(sql, "connector_connections")).not.toContain("owner_type")
+      expect(await readUniqueConstraints(sql, "connector_authorization_attempts")).toContainEqual([
+        "project_id",
+        "connector_id",
+        "connection_run_id",
+      ])
+      expect(await readTableForeignKeys(sql, "connector_authorization_attempts")).toContainEqual({
         column_name: "connection_run_id",
         delete_action: "r",
         foreign_column_name: "id",
         foreign_table_name: "connector_connection_runs",
       })
-      expect(await readUniqueConstraints(schemaName, "connector_connections")).toContainEqual([
+      expect(await readUniqueConstraints(sql, "connector_connections")).toContainEqual([
         "project_id",
         "connector_id",
         "slot",
@@ -2641,216 +1510,183 @@ describe("Postgres storage migrations", () => {
   })
 
   test("AI cost accounting migration preserves existing Phase 1 usage rows", async () => {
-    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    await withSql(async (sql) => {
-      const schema = quoteIdent(schemaName)
-      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
-      const costIndex = postgresStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "026-ai-cost-accounting"
+    const index = indexOf("026-ai-cost-accounting")
+    await withDatabase({ migrateThrough: index }, async ({ sql, context }) => {
+      await sql.unsafe(`
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+          authority_kind, authority_primitive_kind, authority_primitive_id, created_at
+        ) VALUES (
+          'project-a', 'execution-1', 'workflow', 'workflow-1', 'event', 'event-1',
+          'correlation-1', 'trustedPrimitive', 'workflow', 'workflow-1',
+          '2026-08-01T11:59:00.000Z'
+        );
+
+        INSERT INTO ai_model_call_usage (
+          project_id, id, execution_id, attempt, call_id, provider_id, requested_model_id,
+          response_id, input_tokens, output_tokens, total_tokens, reporting_status, raw_usage,
+          occurred_at, recorded_at
+        ) VALUES (
+          'project-a', 'usage-1', 'execution-1', 1, 'call-1', 'gateway', 'openai/gpt-5',
+          'response-1', 12, 8, 20, 'complete', '{"inputTokens":12,"outputTokens":8}',
+          '2026-08-01T12:00:00.000Z', '2026-08-01T12:00:01.000Z'
+        );
+      `)
+      const before = [
+        ...(await sql.unsafe<Record<string, unknown>[]>("SELECT * FROM ai_model_call_usage")),
+      ]
+
+      await steps[index]!.up(context)
+
+      expect([
+        ...(await sql.unsafe<Record<string, unknown>[]>("SELECT * FROM ai_model_call_usage")),
+      ]).toEqual(before)
+      expect(await readTableColumns(sql, "ai_model_call_valuations")).toEqual(
+        expect.arrayContaining(["usage_record_id", "status", "details", "amount_nanos", "rated_at"])
       )
-      const costMigration = postgresStorageMigrations.steps[costIndex]
-      if (!costMigration) throw new Error("PostgreSQL AI cost accounting migration is missing.")
-
-      try {
-        await sql.unsafe(`CREATE SCHEMA ${schema}`)
-        await sql.unsafe(`SET search_path TO ${schema}`)
-        for (const migration of postgresStorageMigrations.steps.slice(0, costIndex)) {
-          await migration.up(context)
-        }
-        await sql.unsafe(`
-          INSERT INTO executions (
-            project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
-            authority_kind, authority_primitive_kind, authority_primitive_id, created_at
-          ) VALUES (
-            'project-a', 'execution-1', 'workflow', 'workflow-1', 'event', 'event-1',
-            'correlation-1', 'trustedPrimitive', 'workflow', 'workflow-1',
-            '2026-08-01T11:59:00.000Z'
-          );
-
-          INSERT INTO ai_model_call_usage (
-            project_id, id, execution_id, attempt, call_id, provider_id, requested_model_id,
-            response_id, input_tokens, output_tokens, total_tokens, reporting_status, raw_usage,
-            occurred_at, recorded_at
-          ) VALUES (
-            'project-a', 'usage-1', 'execution-1', 1, 'call-1', 'gateway', 'openai/gpt-5',
-            'response-1', 12, 8, 20, 'complete', '{"inputTokens":12,"outputTokens":8}',
-            '2026-08-01T12:00:00.000Z', '2026-08-01T12:00:01.000Z'
-          );
-        `)
-        const before = await sql.unsafe("SELECT * FROM ai_model_call_usage")
-
-        await costMigration.up(context)
-
-        expect(await sql.unsafe("SELECT * FROM ai_model_call_usage")).toEqual(before)
-        expect(await readTableColumns(schemaName, "ai_model_call_valuations")).toEqual(
-          expect.arrayContaining([
-            "usage_record_id",
-            "status",
-            "details",
-            "amount_nanos",
-            "rated_at",
-          ])
+      expect(await readTableColumns(sql, "ai_price_schedules")).toEqual([])
+      await sql.unsafe(`
+        INSERT INTO ai_model_call_valuations (
+          project_id, usage_record_id, status, provider_id, model_id, currency, amount_nanos,
+          reason, details, rated_at
+        ) VALUES (
+          'project-a', 'usage-1', 'rated', 'vercel', 'openai/gpt-5', 'USD', 20,
+          NULL, '{"pricingContext":{},"historical":"preserve"}', '2026-08-01T12:00:01.000Z'
         )
-        expect(await readTableColumns(schemaName, "ai_price_schedules")).toEqual([])
-        await sql.unsafe(`
-          INSERT INTO ai_model_call_valuations (
-            project_id, usage_record_id, status, provider_id, model_id, currency, amount_nanos,
-            reason, details, rated_at
-          ) VALUES (
-            'project-a', 'usage-1', 'rated', 'vercel', 'openai/gpt-5', 'USD', 20,
-            NULL, '{"pricingContext":{},"historical":"preserve"}', '2026-08-01T12:00:01.000Z'
-          )
-        `)
-        const oldCost = await sql.unsafe("SELECT * FROM ai_model_call_valuations")
-        await expect(
-          context.exec("UPDATE ai_model_call_valuations SET status = 'reported'")
-        ).rejects.toThrow()
-        for (const migration of postgresStorageMigrations.steps.slice(costIndex + 1)) {
-          await migration.up(context)
-        }
-        // Later agent migrations must preserve the native accounting rows and constraints.
-        expect(await sql.unsafe("SELECT * FROM ai_model_call_valuations")).toEqual(oldCost)
-        expect(await sql.unsafe("SELECT * FROM ai_model_call_usage")).toEqual(
-          before.map((row: Record<string, unknown>) => ({
-            ...row,
-            requested_reasoning: null,
-            provider_ids: null,
-            audio_duration_ms: null,
-            model_kind: null,
-          }))
-        )
-        await expect(
-          context.exec("UPDATE ai_model_call_valuations SET status = 'reported'")
-        ).rejects.toThrow()
-        await expect(
-          context.exec("UPDATE ai_model_call_valuations SET amount_nanos = NULL")
-        ).rejects.toThrow()
-      } finally {
-        await sql.unsafe("RESET search_path")
-        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+      `)
+      const oldCost = [...(await sql.unsafe("SELECT * FROM ai_model_call_valuations"))]
+      await expect(
+        context.exec("UPDATE ai_model_call_valuations SET status = 'reported'")
+      ).rejects.toThrow()
+      for (const migration of steps.slice(index + 1)) {
+        await migration.up(context)
       }
+      // Later agent migrations must preserve the native accounting rows and constraints.
+      expect([...(await sql.unsafe("SELECT * FROM ai_model_call_valuations"))]).toEqual(oldCost)
+      expect([
+        ...(await sql.unsafe<Record<string, unknown>[]>("SELECT * FROM ai_model_call_usage")),
+      ]).toEqual(
+        before.map((row) => ({
+          ...row,
+          requested_reasoning: null,
+          provider_ids: null,
+          audio_duration_ms: null,
+          model_kind: null,
+        }))
+      )
+      await expect(
+        context.exec("UPDATE ai_model_call_valuations SET status = 'reported'")
+      ).rejects.toThrow()
+      await expect(
+        context.exec("UPDATE ai_model_call_valuations SET amount_nanos = NULL")
+      ).rejects.toThrow()
     })
   })
 
   test("drops only obsolete run usage projections from an existing schema", async () => {
     // Regression guard: remove migration 020 (or any one DROP COLUMN) and this leaves the old
     // projection column behind; deleting the run rows instead breaks the preservation assertions.
-    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    await withSql(async (sql) => {
-      const schema = quoteIdent(schemaName)
-      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
-      const cleanupIndex = postgresStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "020-drop-run-usage-projections"
-      )
-      const cleanup = postgresStorageMigrations.steps[cleanupIndex]
-      if (!cleanup) throw new Error("PostgreSQL run usage cleanup migration is missing.")
+    const index = indexOf("020-drop-run-usage-projections")
+    await withDatabase({ migrateThrough: index }, async ({ sql, context }) => {
+      await sql.unsafe(`
+        INSERT INTO auth_service_accounts (
+          project_id, id, name, status, created_by_system_id, created_at, updated_at
+        ) VALUES (
+          'project-a', 'agent:sales', 'Sales Agent', 'active', 'test',
+          '2026-07-01T11:55:00.000Z', '2026-07-01T11:55:00.000Z'
+        );
 
-      try {
-        await sql.unsafe(`CREATE SCHEMA ${schema}`)
-        await sql.unsafe(`SET search_path TO ${schema}`)
-        for (const migration of postgresStorageMigrations.steps.slice(0, cleanupIndex)) {
-          await migration.up(context)
-        }
-        await sql.unsafe(`
-          INSERT INTO auth_service_accounts (
-            project_id, id, name, status, created_by_system_id, created_at, updated_at
-          ) VALUES (
-            'project-a', 'agent:sales', 'Sales Agent', 'active', 'test',
-            '2026-07-01T11:55:00.000Z', '2026-07-01T11:55:00.000Z'
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id,
+          correlation_id, authority_kind, authority_primitive_kind, authority_primitive_id,
+          created_at
+        ) VALUES
+          (
+            'project-a', 'request-execution-1', 'request', 'request-1', 'http', 'request-1',
+            'correlation-1', 'disabled', NULL, NULL, '2026-07-01T11:56:00.000Z'
+          ),
+          (
+            'project-a', 'workflow-execution-1', 'workflow', 'workflow-run-1', 'event',
+            'event-1', 'correlation-2', 'trustedPrimitive', 'workflow', 'resolve-transaction',
+            '2026-07-01T11:56:00.000Z'
           );
 
-          INSERT INTO executions (
-            project_id, id, executor_kind, executor_id, source_kind, source_id,
-            correlation_id, authority_kind, authority_primitive_kind, authority_primitive_id,
-            created_at
-          ) VALUES
-            (
-              'project-a', 'request-execution-1', 'request', 'request-1', 'http', 'request-1',
-              'correlation-1', 'disabled', NULL, NULL, '2026-07-01T11:56:00.000Z'
-            ),
-            (
-              'project-a', 'workflow-execution-1', 'workflow', 'workflow-run-1', 'event',
-              'event-1', 'correlation-2', 'trustedPrimitive', 'workflow', 'resolve-transaction',
-              '2026-07-01T11:56:00.000Z'
-            );
-
-          INSERT INTO executions (
-            project_id, id, executor_kind, executor_id, source_kind, source_id,
-            correlation_id, parent_execution_id, authority_kind,
-            authority_service_account_id, created_at
-          ) VALUES
-            (
-              'project-a', 'agent-execution-1', 'agent', 'run-1', 'execution',
-              'request-execution-1', 'correlation-1', 'request-execution-1', 'principal',
-              'agent:sales', '2026-07-01T11:57:00.000Z'
-            ),
-            (
-              'project-a', 'node-execution-1', 'agent', 'node-1', 'execution',
-              'workflow-execution-1', 'correlation-2', 'workflow-execution-1', 'principal',
-              'agent:sales', '2026-07-01T11:57:00.000Z'
-            );
-
-          INSERT INTO agent_runs (
-            project_id, id, execution_id, thread_id, agent_id, trigger_message_id, status,
-            usage_input_tokens, usage_output_tokens, usage_total_tokens, created_at
-          ) VALUES (
-            'project-a', 'run-1', 'agent-execution-1', 'thread-1', 'sales', 'message-1',
-            'succeeded', 12, 8, 20, '2026-07-01T12:00:00.000Z'
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id,
+          correlation_id, parent_execution_id, authority_kind,
+          authority_service_account_id, created_at
+        ) VALUES
+          (
+            'project-a', 'agent-execution-1', 'agent', 'run-1', 'execution',
+            'request-execution-1', 'correlation-1', 'request-execution-1', 'principal',
+            'agent:sales', '2026-07-01T11:57:00.000Z'
+          ),
+          (
+            'project-a', 'node-execution-1', 'agent', 'node-1', 'execution',
+            'workflow-execution-1', 'correlation-2', 'workflow-execution-1', 'principal',
+            'agent:sales', '2026-07-01T11:57:00.000Z'
           );
 
-          INSERT INTO workflow_runs (
-            project_id, id, execution_id, workflow_id, status, input, started_at
-          ) VALUES (
-            'project-a', 'workflow-run-1', 'workflow-execution-1', 'resolve-transaction',
-            'succeeded', '{}', '2026-07-01T12:00:00.000Z'
-          );
-          INSERT INTO workflow_node_runs (
-            project_id, id, workflow_run_id, workflow_id, node_index, node_type, node_id,
-            node_key, status, input, started_at
-          ) VALUES (
-            'project-a', 'node-1', 'workflow-run-1', 'resolve-transaction', 0, 'agent',
-            'resolve-agent', 'resolveAgent', 'succeeded', '{}', '2026-07-01T12:00:00.000Z'
-          );
-          INSERT INTO workflow_agent_node_runs (
-            project_id, node_run_id, execution_id, agent_id, status, prompt, usage, created_at
-          ) VALUES (
-            'project-a', 'node-1', 'node-execution-1', 'sales', 'succeeded', 'Resolve it',
-            '{"inputTokens":12,"outputTokens":8}', '2026-07-01T12:00:00.000Z'
-          );
-        `)
+        INSERT INTO agent_runs (
+          project_id, id, execution_id, thread_id, agent_id, trigger_message_id, status,
+          usage_input_tokens, usage_output_tokens, usage_total_tokens, created_at
+        ) VALUES (
+          'project-a', 'run-1', 'agent-execution-1', 'thread-1', 'sales', 'message-1',
+          'succeeded', 12, 8, 20, '2026-07-01T12:00:00.000Z'
+        );
 
-        await cleanup.up(context)
+        INSERT INTO workflow_runs (
+          project_id, id, execution_id, workflow_id, status, input, started_at
+        ) VALUES (
+          'project-a', 'workflow-run-1', 'workflow-execution-1', 'resolve-transaction',
+          'succeeded', '{}', '2026-07-01T12:00:00.000Z'
+        );
+        INSERT INTO workflow_node_runs (
+          project_id, id, workflow_run_id, workflow_id, node_index, node_type, node_id,
+          node_key, status, input, started_at
+        ) VALUES (
+          'project-a', 'node-1', 'workflow-run-1', 'resolve-transaction', 0, 'agent',
+          'resolve-agent', 'resolveAgent', 'succeeded', '{}', '2026-07-01T12:00:00.000Z'
+        );
+        INSERT INTO workflow_agent_node_runs (
+          project_id, node_run_id, execution_id, agent_id, status, prompt, usage, created_at
+        ) VALUES (
+          'project-a', 'node-1', 'node-execution-1', 'sales', 'succeeded', 'Resolve it',
+          '{"inputTokens":12,"outputTokens":8}', '2026-07-01T12:00:00.000Z'
+        );
+      `)
 
-        const agentColumns = await readTableColumns(schemaName, "agent_runs")
-        const workflowColumns = await readTableColumns(schemaName, "workflow_agent_node_runs")
-        expect(agentColumns.some((column) => column.startsWith("usage_"))).toBe(false)
-        expect(workflowColumns).not.toContain("usage")
-        expect(
-          await sql.unsafe<Array<{ id: string; execution_id: string; status: string }>>(
-            "SELECT id, execution_id, status FROM agent_runs WHERE id = 'run-1'"
-          )
-        ).toEqual([{ id: "run-1", execution_id: "agent-execution-1", status: "succeeded" }])
-        expect(
-          await sql.unsafe<Array<{ node_run_id: string; execution_id: string; status: string }>>(
-            "SELECT node_run_id, execution_id, status FROM workflow_agent_node_runs WHERE node_run_id = 'node-1'"
-          )
-        ).toEqual([
-          { node_run_id: "node-1", execution_id: "node-execution-1", status: "succeeded" },
-        ])
-      } finally {
-        await sql.unsafe("RESET search_path")
-        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
-      }
+      await steps[index]!.up(context)
+
+      const agentColumns = await readTableColumns(sql, "agent_runs")
+      const workflowColumns = await readTableColumns(sql, "workflow_agent_node_runs")
+      expect(agentColumns.some((column) => column.startsWith("usage_"))).toBe(false)
+      expect(workflowColumns).not.toContain("usage")
+      expect([
+        ...(await sql`SELECT id, execution_id, status FROM agent_runs WHERE id = 'run-1'`),
+      ]).toEqual([{ id: "run-1", execution_id: "agent-execution-1", status: "succeeded" }])
+      expect([
+        ...(await sql`
+          SELECT node_run_id, execution_id, status FROM workflow_agent_node_runs
+          WHERE node_run_id = 'node-1'
+        `),
+      ]).toEqual([{ node_run_id: "node-1", execution_id: "node-execution-1", status: "succeeded" }])
     })
   })
 
   test("dirty migration history blocks storage migrations", async () => {
-    await withStorage(false, async (storage, schemaName) => {
-      // Migrate first, then plant a started row above the applied ones: a dirty history
-      // has to block a schema that is otherwise current, which is the case an operator
-      // actually meets after a migration was interrupted.
-      await migrateStorage(storage)
-      await writeStartedMigration(schemaName)
+    // A started row above the applied ones: a dirty history has to block a schema that is
+    // otherwise current, which is the case an operator actually meets after a migration was
+    // interrupted.
+    await withDatabase({}, async ({ storage, sql }) => {
+      await sql.unsafe(
+        `
+          INSERT INTO sixb_migrations (
+            adapter_id, version, id, checksum, status, started_at, finished_at
+          ) VALUES ($1, 9999, '9999-interrupted', NULL, 'started', $2, NULL)
+        `,
+        [POSTGRES_STORAGE_ADAPTER_ID, "2026-04-19T00:00:00.000Z"]
+      )
 
       await expect(migrateStorage(storage)).rejects.toThrow("started and never finished")
     })
@@ -2863,7 +1699,7 @@ describe("Postgres storage migrations", () => {
   // replicas no longer serialize on their first probe — not asserted here because the
   // lock key is private, and a test that guesses it could not fail.)
   test("status() reports an unmigrated schema without creating it", async () => {
-    await withStorage(false, async (storage, schemaName) => {
+    await withDatabase({ migrate: false }, async ({ storage, schemaName, sql }) => {
       const [migrator] = storage.migrators
       const status = await migrator?.status()
 
@@ -2874,12 +1710,15 @@ describe("Postgres storage migrations", () => {
       })
       expect(status?.reason).toBeTruthy()
       // No DDL ran: the schema itself never came into existence.
-      expect(await schemaExists(schemaName)).toBe(false)
+      const [schema] = await sql<
+        { oid: string | null }[]
+      >`SELECT to_regnamespace(${schemaName}) AS oid`
+      expect(schema?.oid).toBeNull()
     })
   })
 
   test("status() reports current after a migration", async () => {
-    await withStorage(true, async (storage) => {
+    await withDatabase({}, async ({ storage }) => {
       const [migrator] = storage.migrators
       const expectedVersion = postgresStorageMigrations.latestVersion
 
@@ -2892,533 +1731,95 @@ describe("Postgres storage migrations", () => {
     })
   })
 
-  test("serializes concurrent storage migrations for the same schema", async () => {
-    const connectionString = process.env.DATABASE_URL
-    if (!connectionString) {
-      throw new Error("[SixbPg] DATABASE_URL is required for Postgres migration tests.")
-    }
+  test("serializes concurrent migrations, records each shipped migration once, then is current", async () => {
+    await withDatabase(
+      { migrate: false },
+      async ({ storage, schemaName, sql, connectionString }) => {
+        const peers = Array.from(
+          { length: 3 },
+          () => new PostgresStorage({ connectionString, schemaName, max: 2 })
+        )
+        try {
+          const results = await Promise.all(
+            [storage, ...peers].map((candidate) => migrateStorage(candidate))
+          )
 
-    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    const storages = Array.from(
-      { length: 4 },
-      () => new PostgresStorage({ connectionString, schemaName, max: 2 })
+          expect(results.map((result) => result.status).sort()).toEqual([
+            "current",
+            "current",
+            "current",
+            "migrated",
+          ])
+          const [report] = results.find((result) => result.status === "migrated")?.reports ?? []
+          expect(report).toMatchObject({
+            adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+            status: "migrated",
+          })
+          expect(report?.applied).toEqual(SHIPPED_MIGRATIONS)
+          expect(await readMigrationRows(sql)).toEqual(
+            SHIPPED_MIGRATIONS.map((id, index) => ({
+              adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+              checksum_length: 64,
+              id,
+              status: "applied",
+              version: index + 1,
+            }))
+          )
+          await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "current" })
+        } finally {
+          await Promise.all(peers.map((peer) => peer.close()))
+        }
+      }
     )
-
-    try {
-      const results = await Promise.all(storages.map((storage) => migrateStorage(storage)))
-      const statuses = results.map((result) => result.status).sort()
-
-      expect(statuses).toEqual(["current", "current", "current", "migrated"])
-      expect(await readMigrationRows(schemaName)).toEqual([
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "001-initial-schema",
-          status: "applied",
-          version: 1,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "002-workflow-run-output",
-          status: "applied",
-          version: 2,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "003-merge-sync-runs",
-          status: "applied",
-          version: 3,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "004-executions",
-          status: "applied",
-          version: 4,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "005-workflow-executions",
-          status: "applied",
-          version: 5,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "006-narrow-ontology-source-root-index",
-          status: "applied",
-          version: 6,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "007-split-overrides",
-          status: "applied",
-          version: 7,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "008-action-executions",
-          status: "applied",
-          version: 8,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "009-agent-executions",
-          status: "applied",
-          version: 9,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "010-ai-usage-accounting-foundation",
-          status: "applied",
-          version: 10,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "011-sync-failure-record",
-          status: "applied",
-          version: 11,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "012-pipeline-failure-record",
-          status: "applied",
-          version: 12,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "013-workflow-failure-record",
-          status: "applied",
-          version: 13,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "014-agent-failure-record",
-          status: "applied",
-          version: 14,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "015-projection-failure-record",
-          status: "applied",
-          version: 15,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "016-webhook-run-failure-record",
-          status: "applied",
-          version: 16,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "017-action-failure-record",
-          status: "applied",
-          version: 17,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "018-ontology-outbox-failure-record",
-          status: "applied",
-          version: 18,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "019-webhook-delivery-failure-record",
-          status: "applied",
-          version: 19,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "020-drop-run-usage-projections",
-          status: "applied",
-          version: 20,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "021-sync-pipeline-executions",
-          status: "applied",
-          version: 21,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "022-projection-executions",
-          status: "applied",
-          version: 22,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "023-webhook-executions",
-          status: "applied",
-          version: 23,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "024-ontology-commit-executions",
-          status: "applied",
-          version: 24,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "025-connector-connections",
-          status: "applied",
-          version: 25,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "026-ai-cost-accounting",
-          status: "applied",
-          version: 26,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "027-agent-context-checkpoints",
-          status: "applied",
-          version: 27,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "028-object-override-edit-times",
-          status: "applied",
-          version: 28,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "029-model-accounting",
-          status: "applied",
-          version: 29,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "030-ai-usage-limits",
-          status: "applied",
-          version: 30,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "031-subagent-runs",
-          status: "applied",
-          version: 31,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "032-conversation-run-spec",
-          status: "applied",
-          version: 32,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "033-retire-agent-definitions",
-          status: "applied",
-          version: 33,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "034-device-authorizations",
-          status: "applied",
-          version: 34,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "035-share-grants",
-          status: "applied",
-          version: 35,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "036-share-sessions",
-          status: "applied",
-          version: 36,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "037-execution-requester-groups",
-          status: "applied",
-          version: 37,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "038-outbox-publication-order",
-          status: "applied",
-          version: 38,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "039-projection-source-roots",
-          status: "applied",
-          version: 39,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "040-connector-optional-pkce",
-          status: "applied",
-          version: 40,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "041-agent-thread-workspaces",
-          status: "applied",
-          version: 41,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "042-vector-profiles",
-          status: "applied",
-          version: 42,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "043-vector-indexing",
-          status: "applied",
-          version: 43,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "044-vector-batching",
-          status: "applied",
-          version: 44,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "045-agent-thread-sandbox-state",
-          status: "applied",
-          version: 45,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "046-workflow-intervention-principals",
-          status: "applied",
-          version: 46,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "047-ontology-commit-attribution",
-          status: "applied",
-          version: 47,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "048-file-upload-sessions",
-          status: "applied",
-          version: 48,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "049-native-sessions",
-          status: "applied",
-          version: 49,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "050-directory-group-memberships",
-          status: "applied",
-          version: 50,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "051-projection-run-supersession",
-          status: "applied",
-          version: 51,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "052-compact-source-storage",
-          status: "applied",
-          version: 52,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "053-replacement-plans",
-          status: "applied",
-          version: 53,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "054-slim-ontology-outbox",
-          status: "applied",
-          version: 54,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "055-object-query-preparation",
-          status: "applied",
-          version: 55,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "056-commit-touches",
-          status: "applied",
-          version: 56,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "057-audio-transcription",
-          status: "applied",
-          version: 57,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "058-reranking-model-kind",
-          status: "applied",
-          version: 58,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "059-file-download-grants",
-          status: "applied",
-          version: 59,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "060-drained-source-versions",
-          status: "applied",
-          version: 60,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "061-terminal-action-runs",
-          status: "applied",
-          version: 61,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "062-drop-auth-audience",
-          status: "applied",
-          version: 62,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "063-artifacts",
-          status: "applied",
-          version: 63,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "064-drop-output-diagnostics",
-          status: "applied",
-          version: 64,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "065-plan-work-payload-statistics",
-          status: "applied",
-          version: 65,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "066-activity",
-          status: "applied",
-          version: 66,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "067-activity-timeline",
-          status: "applied",
-          version: 67,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "068-activity-interactions",
-          status: "applied",
-          version: 68,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "069-artifact-kinds",
-          status: "applied",
-          version: 69,
-        },
-      ])
-    } finally {
-      await storages[0]?.dropSchema()
-      await Promise.all(storages.map((storage) => storage.close()))
-    }
   })
 })
 
-function databaseUrl(): string {
-  const connectionString = process.env.DATABASE_URL
-  if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
-  return connectionString
+interface MigrationFixture {
+  readonly storage: PostgresStorage
+  readonly schemaName: string
+  readonly connectionString: string
+  /** A client on the fixture's schema. */
+  readonly sql: SQL
+  /** Runs one migration's SQL directly, outside the runner and its history. */
+  readonly context: PostgresMigrationContext
+  /** Runs the shipped migrations through the first `count`, as an upgrade would. */
+  migrateThrough(count: number): Promise<MigrationReport>
 }
 
-async function withStorage(
-  migrate: boolean,
-  run: (storage: PostgresStorageType, schemaName: string) => Promise<void>
+/** A database of its own, migrated as `options` asks (see `createTestStorage`). */
+async function withDatabase(
+  options: TestStorageOptions,
+  run: (fixture: MigrationFixture) => Promise<void>
 ): Promise<void> {
-  const { storage, schemaName } = await createTestStorage({ migrate })
-
+  const { storage, schemaName, connectionString } = await createTestStorage(options)
+  const sql = createPgClient({ connectionString, schemaName, max: 1 })
   try {
-    await run(storage, schemaName)
+    await run({
+      storage,
+      schemaName,
+      connectionString,
+      sql,
+      context: { exec: (text) => sql.unsafe(text).then(() => undefined) },
+      migrateThrough: (count) =>
+        createPostgresMigrator({
+          sql,
+          schemaName,
+          migrations: defineMigrations({
+            adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+            steps: steps.slice(0, count),
+          }),
+        }).migrate(),
+    })
   } finally {
-    await storage.dropSchema()
-    await storage.close()
+    await sql.end()
+    await disposeTestStorage(storage)
   }
+}
+
+function indexOf(id: string): number {
+  const index = steps.findIndex((step) => step.id === id)
+  if (index < 0) throw new Error(`[SixbPg] Migration ${id} is missing.`)
+  return index
 }
 
 async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
@@ -3537,7 +1938,7 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
   })
 }
 
-async function readMigrationRows(schemaName: string): Promise<
+async function readMigrationRows(sql: SQL): Promise<
   Array<{
     adapter_id: string
     checksum_length: number
@@ -3546,61 +1947,41 @@ async function readMigrationRows(schemaName: string): Promise<
     version: number
   }>
 > {
-  return withSql(async (sql) => {
-    const rows = (await sql.unsafe(`
-      SELECT adapter_id, version, id, status, length(checksum) AS checksum_length
-      FROM ${quoteIdent(schemaName)}.sixb_migrations
-      ORDER BY adapter_id, version
-    `)) as Array<{
+  const rows = await sql<
+    {
       adapter_id: string
       checksum_length: number | string
       id: string
       status: string
       version: number
-    }>
-
-    return rows.map((row) => ({
-      ...row,
-      checksum_length: Number(row.checksum_length),
-    }))
-  })
+    }[]
+  >`
+    SELECT adapter_id, version, id, status, length(checksum) AS checksum_length
+    FROM sixb_migrations
+    ORDER BY adapter_id, version
+  `
+  return rows.map((row) => ({ ...row, checksum_length: Number(row.checksum_length) }))
 }
 
-async function readTableNames(schemaName: string): Promise<readonly string[]> {
-  return withSql(async (sql) => {
-    const rows = (await sql.unsafe(
-      `
-        SELECT tablename
-        FROM pg_tables
-        WHERE schemaname = $1
-        ORDER BY tablename
-      `,
-      [schemaName]
-    )) as Array<{ tablename: string }>
-
-    return rows.map((row) => row.tablename)
-  })
+async function readTableNames(sql: SQL): Promise<readonly string[]> {
+  const rows = await sql<{ tablename: string }[]>`
+    SELECT tablename FROM pg_tables WHERE schemaname = current_schema() ORDER BY tablename
+  `
+  return rows.map((row) => row.tablename)
 }
 
-async function readTableColumns(schemaName: string, tableName: string): Promise<readonly string[]> {
-  return withSql(async (sql) => {
-    const rows = (await sql.unsafe(
-      `
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_schema = $1
-          AND table_name = $2
-        ORDER BY ordinal_position
-      `,
-      [schemaName, tableName]
-    )) as Array<{ column_name: string }>
-
-    return rows.map((row) => row.column_name)
-  })
+async function readTableColumns(sql: SQL, tableName: string): Promise<readonly string[]> {
+  const rows = await sql<{ column_name: string }[]>`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = ${tableName}
+    ORDER BY ordinal_position
+  `
+  return rows.map((row) => row.column_name)
 }
 
 async function readTableForeignKeys(
-  schemaName: string,
+  sql: SQL,
   tableName: string
 ): Promise<
   readonly {
@@ -3610,130 +1991,76 @@ async function readTableForeignKeys(
     readonly foreign_table_name: string
   }[]
 > {
-  return withSql(async (sql) => {
-    return (await sql.unsafe(
-      `
-        SELECT
-          source_column.attname AS column_name,
-          target_table.relname AS foreign_table_name,
-          target_column.attname AS foreign_column_name,
-          c.confdeltype::text AS delete_action
-        FROM pg_constraint AS c
-        JOIN pg_class AS source_table ON source_table.oid = c.conrelid
-        JOIN pg_namespace AS source_schema ON source_schema.oid = source_table.relnamespace
-        JOIN pg_class AS target_table ON target_table.oid = c.confrelid
-        JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS source_key(attnum, position)
-          ON TRUE
-        JOIN LATERAL unnest(c.confkey) WITH ORDINALITY AS target_key(attnum, position)
-          ON target_key.position = source_key.position
-        JOIN pg_attribute AS source_column
-          ON source_column.attrelid = source_table.oid
-          AND source_column.attnum = source_key.attnum
-        JOIN pg_attribute AS target_column
-          ON target_column.attrelid = target_table.oid
-          AND target_column.attnum = target_key.attnum
-        WHERE c.contype = 'f'
-          AND source_schema.nspname = $1
-          AND source_table.relname = $2
-        ORDER BY c.conname, source_key.position
-      `,
-      [schemaName, tableName]
-    )) as Array<{
+  return sql<
+    {
       readonly column_name: string
       readonly delete_action: string
       readonly foreign_column_name: string
       readonly foreign_table_name: string
-    }>
-  })
+    }[]
+  >`
+    SELECT
+      source_column.attname AS column_name,
+      target_table.relname AS foreign_table_name,
+      target_column.attname AS foreign_column_name,
+      c.confdeltype::text AS delete_action
+    FROM pg_constraint AS c
+    JOIN pg_class AS source_table ON source_table.oid = c.conrelid
+    JOIN pg_namespace AS source_schema ON source_schema.oid = source_table.relnamespace
+    JOIN pg_class AS target_table ON target_table.oid = c.confrelid
+    JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS source_key(attnum, position)
+      ON TRUE
+    JOIN LATERAL unnest(c.confkey) WITH ORDINALITY AS target_key(attnum, position)
+      ON target_key.position = source_key.position
+    JOIN pg_attribute AS source_column
+      ON source_column.attrelid = source_table.oid
+      AND source_column.attnum = source_key.attnum
+    JOIN pg_attribute AS target_column
+      ON target_column.attrelid = target_table.oid
+      AND target_column.attnum = target_key.attnum
+    WHERE c.contype = 'f'
+      AND source_schema.nspname = current_schema()
+      AND source_table.relname = ${tableName}
+    ORDER BY c.conname, source_key.position
+  `
 }
 
 async function readColumnNullable(
-  schemaName: string,
+  sql: SQL,
   tableName: string,
   columnName: string
 ): Promise<"YES" | "NO"> {
-  return withSql(async (sql) => {
-    const [row] = (await sql.unsafe(
-      `
-        SELECT is_nullable
-        FROM information_schema.columns
-        WHERE table_schema = $1
-          AND table_name = $2
-          AND column_name = $3
-      `,
-      [schemaName, tableName, columnName]
-    )) as Array<{ is_nullable: "YES" | "NO" }>
-    if (!row) throw new Error(`Column ${tableName}.${columnName} was not found.`)
-    return row.is_nullable
-  })
+  const [row] = await sql<{ is_nullable: "YES" | "NO" }[]>`
+    SELECT is_nullable
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = ${tableName}
+      AND column_name = ${columnName}
+  `
+  if (!row) throw new Error(`Column ${tableName}.${columnName} was not found.`)
+  return row.is_nullable
 }
 
 async function readUniqueConstraints(
-  schemaName: string,
+  sql: SQL,
   tableName: string
 ): Promise<readonly (readonly string[])[]> {
-  return withSql(async (sql) => {
-    const rows = (await sql.unsafe(
-      `
-        SELECT tc.constraint_name, kcu.column_name
-        FROM information_schema.table_constraints tc
-        JOIN information_schema.key_column_usage kcu
-          ON kcu.constraint_schema = tc.constraint_schema
-          AND kcu.constraint_name = tc.constraint_name
-        WHERE tc.table_schema = $1
-          AND tc.table_name = $2
-          AND tc.constraint_type = 'UNIQUE'
-        ORDER BY tc.constraint_name, kcu.ordinal_position
-      `,
-      [schemaName, tableName]
-    )) as Array<{ readonly constraint_name: string; readonly column_name: string }>
-
-    const constraints = new Map<string, string[]>()
-    for (const row of rows) {
-      const columns = constraints.get(row.constraint_name) ?? []
-      columns.push(row.column_name)
-      constraints.set(row.constraint_name, columns)
-    }
-    return [...constraints.values()]
-  })
-}
-
-async function dropMigrationHistory(schemaName: string): Promise<void> {
-  await withSql((sql) =>
-    sql.unsafe(`DROP TABLE IF EXISTS ${quoteIdent(schemaName)}.sixb_migrations`)
-  )
-}
-
-async function writeStartedMigration(schemaName: string): Promise<void> {
-  await withSql((sql) =>
-    sql.unsafe(
-      `
-        INSERT INTO ${quoteIdent(schemaName)}.sixb_migrations (
-          adapter_id, version, id, checksum, status, started_at, finished_at
-        ) VALUES ($1, 9999, '9999-interrupted', NULL, 'started', $2, NULL)
-      `,
-      [POSTGRES_STORAGE_ADAPTER_ID, "2026-04-19T00:00:00.000Z"]
-    )
-  )
-}
-
-async function withSql<T>(run: (sql: SQL) => Promise<T>): Promise<T> {
-  const connectionString = process.env.DATABASE_URL
-  if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
-
-  const sql = new SQL({ url: connectionString, max: 1 })
-  try {
-    return await run(sql)
-  } finally {
-    await sql.close()
+  const rows = await sql<{ readonly constraint_name: string; readonly column_name: string }[]>`
+    SELECT tc.constraint_name, kcu.column_name
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON kcu.constraint_schema = tc.constraint_schema
+      AND kcu.constraint_name = tc.constraint_name
+    WHERE tc.table_schema = current_schema()
+      AND tc.table_name = ${tableName}
+      AND tc.constraint_type = 'UNIQUE'
+    ORDER BY tc.constraint_name, kcu.ordinal_position
+  `
+  const constraints = new Map<string, string[]>()
+  for (const row of rows) {
+    const columns = constraints.get(row.constraint_name) ?? []
+    columns.push(row.column_name)
+    constraints.set(row.constraint_name, columns)
   }
-}
-
-async function schemaExists(schemaName: string): Promise<boolean> {
-  return withSql(async (sql) => {
-    const rows = (await sql.unsafe(`SELECT to_regnamespace($1) AS oid`, [schemaName])) as Array<{
-      oid: string | null
-    }>
-    return Boolean(rows[0]?.oid)
-  })
+  return [...constraints.values()]
 }

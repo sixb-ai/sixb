@@ -7,7 +7,7 @@ import type {
 } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
 import { createPgClient, type SQL } from "../src/pg-client"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 const projectId = "writer"
 const committedAt = "2026-03-01T00:00:00.000Z"
@@ -19,12 +19,16 @@ const link = (sourceId: string, targetId: string) => ({
 })
 
 let storage: PostgresStorage
-let schemaName: string
 let sql: SQL
 
 beforeAll(async () => {
-  ;({ storage, schemaName } = await createTestStorage())
-  sql = createPgClient({ connectionString: process.env.DATABASE_URL!, schemaName, max: 1 })
+  const created = await createTestStorage()
+  storage = created.storage
+  sql = createPgClient({
+    connectionString: created.connectionString,
+    schemaName: created.schemaName,
+    max: 1,
+  })
   await sql`
     INSERT INTO objects (
       project_id, object_type_id, primary_id, properties, created_at, updated_at, version,
@@ -70,8 +74,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await sql.end()
-  await storage.dropSchema()
-  await storage.close()
+  await disposeTestStorage(storage)
 })
 
 function header(id: string): MaterializationPlanHeader {

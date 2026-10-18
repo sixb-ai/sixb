@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { AgentStorageError } from "@sixb/core/storage"
 import { createTestAgentExecution, runAgentStorageContractSuite } from "@sixb/core/testing"
 import { PgAgentStorage } from "../src/agents"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage, waitForLockWait } from "./helpers"
 
 type TestStorage = Awaited<ReturnType<typeof createTestStorage>>["storage"]
 
@@ -106,10 +106,7 @@ runAgentStorageContractSuite("PgAgentStorage", {
     const { storage } = await createTestStorage()
     return storage
   },
-  teardown: async (storage) => {
-    await storage.dropSchema()
-    await storage.close()
-  },
+  teardown: disposeTestStorage,
 })
 
 describe("PostgresStorage agents", () => {
@@ -163,13 +160,12 @@ describe("PostgresStorage agents", () => {
         storage.agents.threads.getById({ projectId: "p", id: "thr_1" })
       ).resolves.toMatchObject({ activeRunId: null, messageCount: 0 })
     } finally {
-      await storage.dropSchema()
-      await storage.close()
+      await disposeTestStorage(storage)
     }
   })
 
   test("uses one run-then-thread lock order for finalization and checkpoint creation", async () => {
-    const { storage } = await createTestStorage()
+    const { storage, connectionString } = await createTestStorage()
 
     try {
       await prepareCheckpointCandidate(storage)
@@ -239,7 +235,7 @@ describe("PostgresStorage agents", () => {
 
       // Let the competing checkpoint reach its first row lock. With the old thread-then-run
       // append order, finalization and checkpoint creation now formed a deterministic deadlock.
-      await Bun.sleep(100)
+      await waitForLockWait(connectionString, checkpoint)
       allowFinish()
 
       const [finalizationResult, checkpointResult] = await settleWithin(
@@ -255,8 +251,7 @@ describe("PostgresStorage agents", () => {
       expect(checkpointResult.reason).toBeInstanceOf(AgentStorageError)
       expect(checkpointResult.reason).toMatchObject({ code: "invalid_state" })
     } finally {
-      await storage.dropSchema()
-      await storage.close()
+      await disposeTestStorage(storage)
     }
   }, 10_000)
 })

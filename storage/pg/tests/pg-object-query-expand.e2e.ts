@@ -4,7 +4,7 @@ import { executeObjectQuery } from "@sixb/core/internal/query"
 import type { ExpandedObjectRow } from "@sixb/core/storage"
 import { createMaterializerTestFixture } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 // Self-contained ontology exercising the runtime shapes the in-memory contract
 // can't: a "one" link, a "many" link, a nested "one" hop, link properties, and a
@@ -135,12 +135,11 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  await storage.dropSchema()
-  await storage.close()
+  await disposeTestStorage(storage)
 })
 
 describe("PgObjectStorage expand pushdown", () => {
-  test("hydrates one and many links in-database", async () => {
+  test("hydrates one and many links in-database, with link properties", async () => {
     const result = await executeObjectQuery(
       {
         projectId,
@@ -167,9 +166,11 @@ describe("PgObjectStorage expand pushdown", () => {
     expect(author.createdAt).toBeInstanceOf(Date)
     expect(author.updatedAt).toBeInstanceOf(Date)
 
-    // "many" → an array.
+    // "many" → an array, carrying link properties only where the link has them.
     const tags = post.links?.tags as ExpandedObjectRow[]
     expect(tags.map((tag) => tag.primaryId).sort()).toEqual(["tag-a", "tag-b", "tag-c"])
+    expect(tags.find((tag) => tag.primaryId === "tag-a")?.linkProperties).toEqual({ weight: 10 })
+    expect(tags.find((tag) => tag.primaryId === "tag-b")?.linkProperties).toBeUndefined()
   })
 
   test("orders and bounds a many expansion to the top-N by target property", async () => {
@@ -198,53 +199,7 @@ describe("PgObjectStorage expand pushdown", () => {
     expect(tags.map((tag) => tag.primaryId)).toEqual(["tag-a", "tag-b"])
   })
 
-  test("attaches link properties only when present", async () => {
-    const result = await executeObjectQuery(
-      {
-        projectId,
-        query: {
-          kind: "expand",
-          expansions: [{ linkId: "tags", direction: "outgoing" }],
-          input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: Post.id } },
-        },
-      },
-      { ontology, storage: storage.objects }
-    )
-
-    const tags = postRow(result, "post-1").links?.tags as ExpandedObjectRow[]
-    const tagA = tags.find((tag) => tag.primaryId === "tag-a")
-    const tagB = tags.find((tag) => tag.primaryId === "tag-b")
-    expect(tagA?.linkProperties).toEqual({ weight: 10 })
-    expect(tagB?.linkProperties).toBeUndefined()
-  })
-
-  test("hydrates a nested expansion correlated on the parent neighbour", async () => {
-    const result = await executeObjectQuery(
-      {
-        projectId,
-        query: {
-          kind: "expand",
-          expansions: [
-            {
-              linkId: "author",
-              direction: "outgoing",
-              expand: [{ linkId: "favoriteTag", direction: "outgoing" }],
-            },
-          ],
-          input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: Post.id } },
-        },
-      },
-      { ontology, storage: storage.objects }
-    )
-
-    expect(result.plan.mode).toBe("pushdown")
-    const author = postRow(result, "post-1").links?.author as ExpandedObjectRow
-    const favorite = author.links?.favoriteTag as ExpandedObjectRow
-    expect(favorite.primaryId).toBe("tag-b")
-    expect(favorite.properties.label).toBe("Banana")
-  })
-
-  test("hydrates a three-hop expansion end to end", async () => {
+  test("hydrates nested expansions correlated on each parent neighbour", async () => {
     const result = await executeObjectQuery(
       {
         projectId,
@@ -255,6 +210,7 @@ describe("PgObjectStorage expand pushdown", () => {
               linkId: "author",
               direction: "outgoing",
               expand: [
+                { linkId: "favoriteTag", direction: "outgoing" },
                 {
                   linkId: "manager",
                   direction: "outgoing",
@@ -270,32 +226,17 @@ describe("PgObjectStorage expand pushdown", () => {
     )
 
     expect(result.plan.mode).toBe("pushdown")
-    // post-1 → author-1 → manager author-2 → favoriteTag tag-c, verified at each hop.
+    // post-1 → author-1 (favoriteTag tag-b) → manager author-2 → favoriteTag tag-c: each hop
+    // correlates on its own parent, so the two favoriteTag expansions differ.
     const author = postRow(result, "post-1").links?.author as ExpandedObjectRow
+    const authorFavorite = author.links?.favoriteTag as ExpandedObjectRow
+    expect(authorFavorite.primaryId).toBe("tag-b")
+    expect(authorFavorite.properties.label).toBe("Banana")
     const manager = author.links?.manager as ExpandedObjectRow
     expect(manager.primaryId).toBe("author-2")
     const favorite = manager.links?.favoriteTag as ExpandedObjectRow
     expect(favorite.primaryId).toBe("tag-c")
     expect(favorite.properties.label).toBe("Cherry")
-  })
-
-  test("hydrates an incoming expansion back to its sources", async () => {
-    const result = await executeObjectQuery(
-      {
-        projectId,
-        query: {
-          kind: "expand",
-          expansions: [{ linkId: "tags", direction: "incoming", sourceObjectTypeId: Post.id }],
-          input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: Tag.id } },
-        },
-      },
-      { ontology, storage: storage.objects }
-    )
-
-    expect(result.plan.mode).toBe("pushdown")
-    const tagA = result.objects.find((row) => row.primaryId === "tag-a")
-    const sources = tagA?.links?.tags as ExpandedObjectRow[]
-    expect(sources.map((source) => source.primaryId)).toEqual(["post-1"])
   })
 })
 

@@ -13,7 +13,7 @@ import type {
 import { PgOntologyMaterializationStorage } from "../src/ontology-storage/materializations"
 import { jsonParameter } from "../src/ontology-storage/shared"
 import { createPgClient, type SQL, type SQLClient } from "../src/pg-client"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 interface PlanNode {
   readonly "Relation Name"?: string
@@ -135,9 +135,9 @@ async function withFixture(
     ) => Promise<void>
   }) => Promise<void>
 ): Promise<void> {
-  const { storage, schemaName } = await createTestStorage()
+  const { storage, schemaName, connectionString } = await createTestStorage()
   const sql = createPgClient({
-    connectionString: process.env.DATABASE_URL!,
+    connectionString,
     schemaName,
     max: 1,
     statementTimeoutMillis: 15000,
@@ -190,8 +190,7 @@ async function withFixture(
     })
   } finally {
     await sql.end({ timeout: 2 })
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   }
 }
 

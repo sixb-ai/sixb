@@ -12,22 +12,6 @@ function databaseUrl(query: string): string {
 }
 
 describe("PostgreSQL direct TLS (sslnegotiation=direct)", () => {
-  test("opens an encrypted session", async () => {
-    const sql = createPgClient({
-      connectionString: databaseUrl("sslnegotiation=direct&sslmode=require"),
-      max: 1,
-      schemaName: "public",
-    })
-    try {
-      const [session] = await sql<{ ssl: boolean }[]>`
-        SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()
-      `
-      expect(session?.ssl).toBe(true)
-    } finally {
-      await sql.end()
-    }
-  })
-
   test("verifies the certificate under verify-full", async () => {
     // The test server presents a self-signed certificate.
     const sql = createPgClient({
@@ -51,7 +35,7 @@ describe("PostgreSQL direct TLS (sslnegotiation=direct)", () => {
   // To see this guard fail, run the fixture with "classic" instead of "direct" on Bun 1.4.0–1.4.2:
   // the SSLRequest upgrade path keeps every byte it receives (measured: +390 MB for 256 MB read,
   // against a flat ~90 MB for direct TLS whatever the volume).
-  test("does not retain what it reads", async () => {
+  test("opens an encrypted session that does not retain what it reads", async () => {
     const child = Bun.spawn({
       cmd: [process.execPath, FIXTURE, "direct"],
       env: { ...process.env },

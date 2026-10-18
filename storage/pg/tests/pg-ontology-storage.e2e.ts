@@ -6,30 +6,28 @@ import {
 import postgres from "postgres"
 import type { PostgresStorage } from "../src"
 import { quoteIdent } from "../src/migrations"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage, type TestStorage } from "./helpers"
 
 runOntologyStorageContractSuite("PostgreSQL ontology storage contract", {
   createStorage: async () => (await createTestStorage()).storage,
-  cleanup: cleanupStorage,
+  cleanup: disposeTestStorage,
 })
 
-interface SchemaStorage extends PostgresStorage {
-  readonly testSchemaName: string
-}
+const created = new WeakMap<PostgresStorage, TestStorage>()
 
-async function createSchemaStorage(): Promise<SchemaStorage> {
-  const { storage, schemaName } = await createTestStorage()
-  Object.defineProperty(storage, "testSchemaName", { value: schemaName })
-  return storage as SchemaStorage
+async function createSchemaStorage(): Promise<PostgresStorage> {
+  const test = await createTestStorage()
+  created.set(test.storage, test)
+  return test.storage
 }
 
 runMaterializerStorageContractSuite("PostgreSQL materializer storage contract", {
   createStorage: createSchemaStorage,
-  cleanup: cleanupStorage,
+  cleanup: disposeTestStorage,
   concurrentTransactions: true,
   restoreFromClusterAhead(storage) {
     // A billion transactions ahead of this cluster, for commits and plans alike.
-    return withDatabase(storage.testSchemaName, async (sql, schema) => {
+    return withDatabase(storage, async (sql, schema) => {
       await sql.unsafe(`
         UPDATE ${schema}.ontology_commits
         SET xact_id = (xact_id::text::numeric + 1000000000)::text::xid8;
@@ -42,7 +40,7 @@ runMaterializerStorageContractSuite("PostgreSQL materializer storage contract", 
     })
   },
   countCommitTouches(storage) {
-    return withDatabase(storage.testSchemaName, async (sql, schema) => {
+    return withDatabase(storage, async (sql, schema) => {
       const [row] = await sql.unsafe(
         `SELECT COUNT(*)::int AS count FROM ${schema}.ontology_commit_touches`
       )
@@ -51,7 +49,7 @@ runMaterializerStorageContractSuite("PostgreSQL materializer storage contract", 
   },
   losePlanTouchesToPurge(storage) {
     // A purge that does not see the plan yet takes every touch up to its own snapshot.
-    return withDatabase(storage.testSchemaName, async (sql, schema) => {
+    return withDatabase(storage, async (sql, schema) => {
       await sql.unsafe(`
         INSERT INTO ${schema}.ontology_commit_touch_horizons (project_id, xact_id)
         SELECT DISTINCT project_id, pg_snapshot_xmin(pg_current_snapshot())
@@ -65,9 +63,9 @@ runMaterializerStorageContractSuite("PostgreSQL materializer storage contract", 
 
 runMaterializationFailureContractSuite("PostgreSQL materialization failure contract", {
   createStorage: createSchemaStorage,
-  cleanup: cleanupStorage,
+  cleanup: disposeTestStorage,
   captureState(storage) {
-    return withDatabase(storage.testSchemaName, async (sql, schema) => ({
+    return withDatabase(storage, async (sql, schema) => ({
       objects: await sql.unsafe(
         `SELECT * FROM ${schema}.objects ORDER BY project_id, object_type_id, primary_id`
       ),
@@ -82,7 +80,7 @@ runMaterializationFailureContractSuite("PostgreSQL materialization failure contr
         : boundary === "outbox.insert"
           ? "ontology_outbox"
           : "ontology_commits"
-    return withDatabase(storage.testSchemaName, async (sql, schema) => {
+    return withDatabase(storage, async (sql, schema) => {
       await sql.unsafe(`
         CREATE FUNCTION ${schema}.ontology_contract_failure() RETURNS trigger AS $failure$
         BEGIN
@@ -96,7 +94,7 @@ runMaterializationFailureContractSuite("PostgreSQL materialization failure contr
     })
   },
   clearFailure(storage) {
-    return withDatabase(storage.testSchemaName, async (sql, schema) => {
+    return withDatabase(storage, async (sql, schema) => {
       for (const table of ["objects", "ontology_outbox", "ontology_commits"]) {
         await sql.unsafe(`DROP TRIGGER IF EXISTS ontology_contract_failure ON ${schema}.${table}`)
       }
@@ -105,20 +103,15 @@ runMaterializationFailureContractSuite("PostgreSQL materialization failure contr
   },
 })
 
-async function cleanupStorage(storage: PostgresStorage): Promise<void> {
-  await storage.dropSchema()
-  await storage.close()
-}
-
 async function withDatabase<T>(
-  schemaName: string,
+  storage: PostgresStorage,
   run: (sql: postgres.Sql, schema: string) => Promise<T>
 ): Promise<T> {
-  const connectionString = process.env.DATABASE_URL
-  if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required for ontology tests.")
-  const sql = postgres(connectionString, { max: 1, onnotice: () => undefined })
+  const test = created.get(storage)
+  if (!test) throw new Error("[SixbPg] Expected a storage from createSchemaStorage.")
+  const sql = postgres(test.connectionString, { max: 1, onnotice: () => undefined })
   try {
-    return await run(sql, quoteIdent(schemaName))
+    return await run(sql, quoteIdent(test.schemaName))
   } finally {
     await sql.end()
   }

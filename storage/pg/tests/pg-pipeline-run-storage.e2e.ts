@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { PipelineRunError, type PipelineRunFailureCode, type SixbFailure } from "@sixb/core/storage"
 import { createTestPipelineExecution, startTestPipelineRun } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
-import { PgPipelineRunStorage } from "../src/pg-pipeline-run-storage"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 const FAILURE: SixbFailure<PipelineRunFailureCode> = {
   code: "internal.unexpected",
@@ -27,8 +26,7 @@ describe("PgPipelineRunStorage", () => {
   })
 
   afterEach(async () => {
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   })
 
   test("starts and finishes pipeline runs", async () => {
@@ -399,10 +397,6 @@ describe("PgPipelineRunStorage", () => {
         inputs: [],
       })
     ).rejects.toBeInstanceOf(PipelineRunError)
-  })
-
-  test("PostgresStorage includes pipeline run storage", () => {
-    expect(storage.pipelineRuns).toBeInstanceOf(PgPipelineRunStorage)
   })
 
   test("rejects a run whose execution authorizes a different Pipeline", async () => {

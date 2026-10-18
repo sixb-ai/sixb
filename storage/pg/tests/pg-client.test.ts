@@ -9,15 +9,13 @@ function client(connectionString: string, ssl?: "require" | "prefer") {
 
 describe("createPgClient direct TLS", () => {
   test.each([
-    "postgres://db.example:5432/app?sslnegotiation=direct&sslmode=require",
-    "postgres://db.example:5432/app?sslnegotiation=direct&sslmode=verify-full",
-    "postgres://db.example:5432/app?sslnegotiation=direct&sslrootcert=system",
-  ])("accepts %s", async (connectionString) => {
-    await client(connectionString).end()
-  })
-
-  test("accepts the ssl option as the sslmode", async () => {
-    await client("postgres://db.example:5432/app?sslnegotiation=direct", "require").end()
+    ["postgres://db.example:5432/app?sslnegotiation=direct&sslmode=require", undefined],
+    ["postgres://db.example:5432/app?sslnegotiation=direct&sslmode=verify-full", undefined],
+    ["postgres://db.example:5432/app?sslnegotiation=direct&sslrootcert=system", undefined],
+    // The ssl option stands in for the sslmode.
+    ["postgres://db.example:5432/app?sslnegotiation=direct", "require"],
+  ] as const)("accepts %s with ssl %p", async (connectionString, ssl) => {
+    await client(connectionString, ssl).end()
   })
 
   test.each([

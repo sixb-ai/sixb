@@ -1,29 +1,27 @@
 import { expect, test } from "bun:test"
 import { legacySourceFixture } from "../../tests/legacy-source-fixture"
-import { postgresStorageMigrations, quoteIdent } from "../src/migrations"
+import { postgresStorageMigrations } from "../src/migrations"
 import { createPgClient } from "../src/pg-client"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 // Red proof: remove the INSERT ... SELECT backfill from migration 039.
 test("source-root upgrade preserves active, terminal and unfinished snapshots", async () => {
-  const schema = `roots_upgrade_${crypto.randomUUID().replaceAll("-", "")}`
+  const steps = postgresStorageMigrations.steps
+  const migrationIndex = steps.findIndex((step) => step.id === "039-projection-source-roots")
+  expect(migrationIndex).toBeGreaterThan(-1)
+  const created = await createTestStorage({ migrateThrough: migrationIndex })
   const sql = createPgClient({
-    connectionString: process.env.DATABASE_URL!,
-    schemaName: schema,
+    connectionString: created.connectionString,
+    schemaName: created.schemaName,
     max: 1,
   })
   try {
-    await sql.unsafe(`CREATE SCHEMA ${quoteIdent(schema)}`)
-    const context = {
+    await sql.unsafe(legacySourceFixture())
+    await steps[migrationIndex]!.up({
       exec: async (text: string) => {
         await sql.unsafe(text)
       },
-    }
-    const steps = postgresStorageMigrations.steps
-    const migrationIndex = steps.findIndex((step) => step.id === "039-projection-source-roots")
-    expect(migrationIndex).toBeGreaterThan(-1)
-    for (const step of steps.slice(0, migrationIndex)) await step.up(context)
-    await sql.unsafe(legacySourceFixture())
-    await steps[migrationIndex]!.up(context)
+    })
     const rows = await sql`SELECT materialization_id,active,retired_at IS NOT NULL AS retired
       FROM ontology_source_roots ORDER BY materialization_id`
     expect([...rows]).toEqual([
@@ -46,7 +44,7 @@ test("source-root upgrade preserves active, terminal and unfinished snapshots", 
       Promise.resolve(sql`UPDATE ontology_sources SET base_commit_id='partial'`)
     ).rejects.toThrow("check constraint")
   } finally {
-    await sql.unsafe(`DROP SCHEMA IF EXISTS ${quoteIdent(schema)} CASCADE`)
     await sql.end()
+    await disposeTestStorage(created.storage)
   }
 })

@@ -5,7 +5,7 @@ import {
   runShareGrantStorageContractSuite,
 } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 const storages = new Map<ShareGrantStorage, PostgresStorage>()
 
@@ -19,8 +19,7 @@ runShareGrantStorageContractSuite("PgShareGrantStorage", {
     const storage = storages.get(shareGrants)
     if (!storage) return
     storages.delete(shareGrants)
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   },
 })
 
@@ -53,8 +52,7 @@ describe("Postgres Share grant storage integration", () => {
         })
       ).resolves.toBeNull()
     } finally {
-      await storage.dropSchema()
-      await storage.close()
+      await disposeTestStorage(storage)
     }
   })
 })

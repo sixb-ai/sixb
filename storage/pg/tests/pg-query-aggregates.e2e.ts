@@ -10,7 +10,7 @@ import type { PostgresStorage } from "../src"
 import { PgObjectStorage } from "../src/objects/storage"
 import { createPgClient, type SQL } from "../src/pg-client"
 import { runPgTransaction } from "../src/transactions"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 let storage: PostgresStorage
 let sql: SQL
@@ -20,7 +20,7 @@ beforeAll(async () => {
   const fixture = await createTestStorage()
   storage = fixture.storage
   sql = createPgClient({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: fixture.connectionString,
     schemaName: fixture.schemaName,
     max: 5,
   })
@@ -45,8 +45,7 @@ beforeAll(async () => {
 })
 afterAll(async () => {
   await sql?.end()
-  await storage?.dropSchema()
-  await storage?.close()
+  if (storage) await disposeTestStorage(storage)
 })
 
 // Guard removal: restore the old migration tables/triggers or cache results without invalidation.

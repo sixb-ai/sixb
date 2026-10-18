@@ -8,7 +8,7 @@ import {
 } from "@sixb/core"
 import { PostgresStorage } from "../src"
 import { createPgClient } from "../src/pg-client"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 const Item = defineObjectType({
   id: "Item",
@@ -28,7 +28,7 @@ const ontology = new OntologyRegistry({ sources: [Item] })
 test("simultaneous migrations prepare once, even with one connection per instance", async () => {
   const created = await createTestStorage({ migrate: false })
   const options = {
-    connectionString: process.env.DATABASE_URL,
+    connectionString: created.connectionString,
     schemaName: created.schemaName,
     max: 1,
   }
@@ -56,18 +56,17 @@ test("simultaneous migrations prepare once, even with one connection per instanc
     }
   } finally {
     await Promise.all(peers.map((storage) => storage.close()))
-    await created.storage.dropSchema()
-    await created.storage.close()
+    await disposeTestStorage(created.storage)
   }
 }, 30_000)
 
 // Guard removal: bypass both completion returns; repeated startup will touch the locked
 // objects table and hit statement_timeout. Merely recreating existing indexes is not a no-op.
 test("unchanged preparation is read-only and never waits for an object table lock", async () => {
-  const { storage, schemaName } = await createTestStorage()
-  const sql = createPgClient({ connectionString: process.env.DATABASE_URL, schemaName, max: 1 })
+  const { storage, schemaName, connectionString } = await createTestStorage()
+  const sql = createPgClient({ connectionString, schemaName, max: 1 })
   const reader = new PostgresStorage({
-    connectionString: process.env.DATABASE_URL,
+    connectionString,
     schemaName,
     max: 1,
     statementTimeoutMillis: 500,
@@ -95,16 +94,15 @@ test("unchanged preparation is read-only and never waits for an object table loc
   } finally {
     await reader.close()
     await sql.end()
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   }
 }, 30_000)
 
 // Guard removal: drop indexes absent from a new preparation plan; an older release would
 // remove the newer release's ordered access path.
 test("ontology changes prepare automatically and older releases retain newer indexes", async () => {
-  const { storage, schemaName } = await createTestStorage()
-  const sql = createPgClient({ connectionString: process.env.DATABASE_URL, schemaName, max: 1 })
+  const { storage, schemaName, connectionString } = await createTestStorage()
+  const sql = createPgClient({ connectionString, schemaName, max: 1 })
   const newer = new OntologyRegistry({
     sources: [
       defineObjectType({
@@ -140,18 +138,17 @@ test("ontology changes prepare automatically and older releases retain newer ind
     expect(Number(state!.count)).toBe(1)
   } finally {
     await sql.end()
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   }
 }, 30_000)
 
 // Guard removal: persist completion before physical preparation. The retry would incorrectly
 // report current after the blocked CREATE INDEX fails.
 test("failed preparation does not record success and can resume on a later startup", async () => {
-  const { storage, schemaName } = await createTestStorage()
-  const sql = createPgClient({ connectionString: process.env.DATABASE_URL, schemaName, max: 1 })
+  const { storage, schemaName, connectionString } = await createTestStorage()
+  const sql = createPgClient({ connectionString, schemaName, max: 1 })
   const impatient = new PostgresStorage({
-    connectionString: process.env.DATABASE_URL,
+    connectionString,
     schemaName,
     max: 1,
     statementTimeoutMillis: 250,
@@ -172,7 +169,6 @@ test("failed preparation does not record success and can resume on a later start
   } finally {
     await impatient.close()
     await sql.end()
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   }
 }, 30_000)

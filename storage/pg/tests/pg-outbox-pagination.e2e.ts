@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { PgOntologyOutboxStorage } from "../src/ontology-storage/outbox"
 import { createPgClient, type SQLClient } from "../src/pg-client"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 interface PlanNode {
   readonly "Relation Name"?: string
@@ -28,8 +28,8 @@ function candidateVisits(node: PlanNode): number {
 // Drop idx_ontology_outbox_publication_order after migration: claiming one batch then
 // scans and sorts the entire ready backlog. Row visits avoid machine-dependent timing limits.
 test("outbox selects a bounded candidate page from a large ready backlog", async () => {
-  const { storage, schemaName } = await createTestStorage()
-  const sql = createPgClient({ connectionString: process.env.DATABASE_URL!, schemaName, max: 1 })
+  const { storage, schemaName, connectionString } = await createTestStorage()
+  const sql = createPgClient({ connectionString, schemaName, max: 1 })
   const rollback = new Error("rollback synthetic claims")
   try {
     await sql.unsafe(`INSERT INTO executions
@@ -93,7 +93,6 @@ test("outbox selects a bounded candidate page from a large ready backlog", async
       })
   } finally {
     await sql.end()
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   }
 }, 30000)

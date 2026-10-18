@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { createPgClient } from "../src/pg-client"
 import { PgRulesStorage } from "../src/pg-rules-storage"
 import type { PgStoreClient } from "../src/transactions"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 interface PlanNode {
   readonly "Shared Hit Blocks": number
@@ -13,8 +13,8 @@ interface PlanNode {
 // at the cursor's rule rather than at the cursor, and every page re-reads the rule's earlier
 // states. Buffer counts avoid machine-dependent timing limits.
 test("rule state reconciliation pages start at their cursor", async () => {
-  const { storage, schemaName } = await createTestStorage()
-  const sql = createPgClient({ connectionString: process.env.DATABASE_URL!, schemaName, max: 1 })
+  const { storage, schemaName, connectionString } = await createTestStorage()
+  const sql = createPgClient({ connectionString, schemaName, max: 1 })
   try {
     await sql.unsafe(`INSERT INTO rule_states
       SELECT 'test', 'rule', 'object', 'Device', lpad(i::text, 6, '0'), '2026-10-07'
@@ -49,7 +49,6 @@ test("rule state reconciliation pages start at their cursor", async () => {
     expect(blocks).toBeLessThan(50)
   } finally {
     await sql.end()
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   }
 }, 30000)

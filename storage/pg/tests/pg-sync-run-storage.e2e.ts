@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { type SixbFailure, SyncRunError, type SyncRunFailureCode } from "@sixb/core/storage"
 import { createTestSyncExecution, startTestSyncRun } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 const FAILURE: SixbFailure<SyncRunFailureCode> = {
   code: "internal.unexpected",
@@ -22,8 +22,7 @@ describe("PgSyncRunStorage", () => {
   })
 
   afterEach(async () => {
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   })
 
   test("starts and finishes runs with checkpoints", async () => {

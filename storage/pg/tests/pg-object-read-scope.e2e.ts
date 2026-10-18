@@ -1,5 +1,5 @@
 import { runObjectReadScopeContractSuite } from "@sixb/core/testing"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 runObjectReadScopeContractSuite("PostgresStorage selected object-read scope contract", {
   createHarness: async () => {
@@ -10,7 +10,6 @@ runObjectReadScopeContractSuite("PostgresStorage selected object-read scope cont
     }
   },
   teardown: async ({ storage }) => {
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   },
 })

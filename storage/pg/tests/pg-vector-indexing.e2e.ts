@@ -12,13 +12,10 @@ import {
 import { getVectorIndexingRuntime } from "@sixb/core/internal/runtime"
 import { createTestSixb } from "@sixb/core/testing"
 import { assertVectorBatchTransitions, seedVectorBatch } from "../../tests/vector-batching-contract"
-import { quoteIdent } from "../src/migrations"
-import { createPgClient } from "../src/pg-client"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 test("PostgreSQL persists coalesced indexing and project-accounted vector commits", async () => {
-  const { storage, schemaName } = await createTestStorage()
-  const sql = createPgClient({ connectionString: process.env.DATABASE_URL!, schemaName, max: 2 })
+  const { storage } = await createTestStorage()
   let calls = 0
   const model: EmbeddingModel = {
     providerId: "test",
@@ -126,22 +123,17 @@ test("PostgreSQL persists coalesced indexing and project-accounted vector commit
     ).toHaveLength(0)
   } finally {
     await host.closeBroker()
-    await sql.unsafe(`DROP SCHEMA IF EXISTS ${quoteIdent(schemaName)} CASCADE`)
-    await sql.end()
-    await storage.close()
+    await disposeTestStorage(storage)
   }
 })
 
 test("PostgreSQL batch admission is atomic across competing claims", async () => {
-  const { storage, schemaName } = await createTestStorage()
-  const sql = createPgClient({ connectionString: process.env.DATABASE_URL!, schemaName, max: 2 })
+  const { storage } = await createTestStorage()
   try {
     await seedVectorBatch(storage)
     await seedVectorBatch(storage, "isolated-project")
     await assertVectorBatchTransitions(storage)
   } finally {
-    await sql.unsafe(`DROP SCHEMA IF EXISTS ${quoteIdent(schemaName)} CASCADE`)
-    await sql.end()
-    await storage.close()
+    await disposeTestStorage(storage)
   }
 })

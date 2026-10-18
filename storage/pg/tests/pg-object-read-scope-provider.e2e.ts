@@ -11,7 +11,7 @@ import type { PostgresStorage } from "../src"
 import { PgObjectStorage } from "../src/objects"
 import type { SQL, SQLClient, SqlParameter } from "../src/pg-client"
 import type { PgStoreClient } from "../src/transactions"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 const projectId = "pg-selected-reader"
 const otherProjectId = `${projectId}-other`
@@ -137,8 +137,7 @@ describe("PgObjectStorage selected reader invariants", () => {
         limit: 2,
       })
     } finally {
-      await storage.dropSchema()
-      await storage.close()
+      await disposeTestStorage(storage)
     }
   })
 
@@ -213,8 +212,7 @@ describe("PgObjectStorage selected reader invariants", () => {
         links: [{ targetId: targetIds[2] }],
       })
     } finally {
-      await storage.dropSchema()
-      await storage.close()
+      await disposeTestStorage(storage)
     }
   }, 30_000)
 
@@ -266,34 +264,22 @@ describe("PgObjectStorage selected reader invariants", () => {
         limit: 1,
       })
     } finally {
-      await storage.dropSchema()
-      await storage.close()
+      await disposeTestStorage(storage)
     }
   })
 
-  test("rejects a transaction client whose isolation was not opened by the provider", async () => {
-    const { storage } = await createTestStorage()
-    try {
-      const sql = sqlOf(storage)
-      await insertObject(sql, RootType, "root-1", { id: "root-1" })
-      await sql.begin(async (tx) => {
-        const reader = createReader(new PgObjectStorage(tx), rootOnlyScope())
-        await expect(reader.list({ projectId })).rejects.toThrow(
-          "cannot join an unverified PostgreSQL transaction"
-        )
-      })
-    } finally {
-      await storage.dropSchema()
-      await storage.close()
-    }
-  })
-
-  test("reuses a serializable PostgresStorage transaction end to end", async () => {
+  test("reuses a serializable PostgresStorage transaction and refuses any other", async () => {
     const { storage } = await createTestStorage()
     let escapedReader: ObjectReadStorage | undefined
     let escapedList: ObjectReadStorage["list"] | undefined
     try {
       await insertObject(sqlOf(storage), RootType, "root-1", { id: "root-1", hidden: "secret" })
+      await sqlOf(storage).begin(async (tx) => {
+        const reader = createReader(new PgObjectStorage(tx), rootOnlyScope())
+        await expect(reader.list({ projectId })).rejects.toThrow(
+          "cannot join an unverified PostgreSQL transaction"
+        )
+      })
 
       const row = await storage.transaction(
         async (tx) => {
@@ -332,8 +318,7 @@ describe("PgObjectStorage selected reader invariants", () => {
         })
       ).rejects.toThrow('{ isolation: "serializable" }')
     } finally {
-      await storage.dropSchema()
-      await storage.close()
+      await disposeTestStorage(storage)
     }
   })
 })

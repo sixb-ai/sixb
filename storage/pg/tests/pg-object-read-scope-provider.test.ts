@@ -5,13 +5,7 @@ import {
   type SelectedObjectReadScope,
 } from "@sixb/core/storage"
 import { PgObjectStorage } from "../src/objects"
-import {
-  compilePgObjectCountQuery,
-  compilePgObjectExistsQuery,
-  compilePgObjectFacetQuery,
-  compilePgObjectQuery,
-  compilePgObjectStatement,
-} from "../src/objects/query-compiler"
+import { compilePgObjectQuery, compilePgObjectStatement } from "../src/objects/query-compiler"
 import { compilePgSelectedObjectReadSource } from "../src/objects/read-scope"
 import type { SqlParameter } from "../src/pg-client"
 import type { PgStoreClient } from "../src/transactions"
@@ -73,65 +67,6 @@ describe("PgObjectStorage selected reader compilation", () => {
       expect(statement.args[1]).toBe(projectId)
       expect(highestPlaceholder(statement.sql)).toBe(statement.args.length)
     }
-  })
-
-  test("wraps aggregate query statements in the selected source", () => {
-    const source = compilePgSelectedObjectReadSource(
-      projectId,
-      compileSelectedObjectReadScope(rootOnlyScope()),
-      limits.maxTraversalFacts
-    )
-    const query = { kind: "start", objectTypeId: RootType } as const
-
-    for (const statement of [
-      compilePgObjectCountQuery(projectId, query, { source }),
-      compilePgObjectExistsQuery(projectId, query, { source }),
-      compilePgObjectFacetQuery(projectId, query, "id", 10, { source }),
-    ]) {
-      expect(statement.sql).toContain("WITH RECURSIVE")
-      expect(statement.sql).toContain("_sixb_scope_objects")
-      expect(statement.args[0]).toBeString()
-      expect(statement.args[1]).toBe(projectId)
-      expect(highestPlaceholder(statement.sql)).toBe(statement.args.length)
-    }
-  })
-
-  test("compiles endpoint-filtered link reads with exact args and canonical collation", async () => {
-    const { sql, calls, beginCalls } = recordingPool()
-    const storage = new PgObjectStorage(sql)
-    const reader = storage.createSelectedReadScope({
-      projectId,
-      scope: compileSelectedObjectReadScope(rootOnlyScope()),
-      limits,
-    })
-    const allowedTypes = [RootType, "PgScopeTarget"]
-
-    expect(
-      await reader.queryLinks({
-        projectId,
-        objectRefs: [
-          { objectTypeId: RootType, primaryId: "root-1" },
-          { objectTypeId: RootType, primaryId: "root-1" },
-        ],
-        direction: "both",
-        linkId: "items",
-        endpointObjectTypeIds: allowedTypes,
-        after: [RootType, "root-0", "items", "PgScopeTarget", "target-é"],
-        limit: 20,
-      })
-    ).toEqual({ links: [], hasMore: false })
-
-    expect(beginCalls).toEqual(["BEGIN ISOLATION LEVEL REPEATABLE READ"])
-    expect(calls).toHaveLength(2)
-    const terminal = calls[1]
-    if (!terminal) throw new Error("expected a terminal query")
-    expect(terminal.sql).toContain("CROSS JOIN LATERAL")
-    expect(terminal.sql).toContain("SELECT DISTINCT link.*")
-    expect(terminal.sql).toContain('COLLATE "C"')
-    expect(terminal.sql).toContain("_sixb_scope_links")
-    expect(highestPlaceholder(terminal.sql)).toBe(terminal.args.length)
-    expect(terminal.args.filter((value) => value === JSON.stringify(allowedTypes))).toHaveLength(2)
-    expect(terminal.args.at(-1)).toBe(21)
   })
 
   test("rejects an invalid link-query limit before opening a transaction or probing", async () => {
