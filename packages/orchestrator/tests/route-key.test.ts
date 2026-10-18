@@ -1,92 +1,67 @@
-import { describe, expect, test } from "bun:test"
+import { expect, test } from "bun:test"
 import type { StoredDomainEvent } from "@sixb/core/internal/events"
-import { routeKeyForEvent, routeKeysForEvent } from "../src/route-key"
+import { routeKeysForEvent } from "../src/route-key"
+import type { OrchestratorRouteKey } from "../src/types"
 
-function makeScheduleTriggeredEvent(scheduleId: string): StoredDomainEvent {
-  return {
-    id: "evt-1",
-    schemaVersion: 1,
-    projectId: "test-project",
-    occurredAt: "2026-04-18T02:00:00.000Z",
-    ...materializationCorrelation("evt-2"),
-    type: "schedule.triggered",
-    topic: "schedules",
-    partitionKey: scheduleId,
-    payload: {
-      scheduleId,
-      occurrenceAt: "2026-04-18T02:00:00.000Z",
-      triggeredAt: "2026-04-18T02:00:00.000Z",
-      occurrenceKey: `${scheduleId}:2026-04-18T02:00:00.000Z`,
+const base = {
+  schemaVersion: 1,
+  projectId: "test-project",
+  occurredAt: "2026-04-18T02:00:00.000Z",
+  cursor: "1",
+} as const
+
+const materialization = {
+  correlationId: "correlation-1",
+  origin: { kind: "runtime", requestId: "request-1" },
+  executor: { type: "request", requestId: "request-1" },
+  commitId: "commit-1",
+  commitOrdinal: 0,
+} as const
+
+const cases: readonly [string, StoredDomainEvent, readonly OrchestratorRouteKey[]][] = [
+  [
+    "schedule.triggered routes by schedule id only",
+    {
+      ...base,
+      id: "evt-schedule",
+      type: "schedule.triggered",
+      topic: "schedules",
+      partitionKey: "nightly-orders",
+      payload: {
+        scheduleId: "nightly-orders",
+        occurrenceAt: base.occurredAt,
+        triggeredAt: base.occurredAt,
+        occurrenceKey: `nightly-orders:${base.occurredAt}`,
+      },
     },
-    cursor: "1",
-  }
-}
-
-function makeObjectCreatedEvent(): StoredDomainEvent {
-  return {
-    id: "evt-2",
-    schemaVersion: 1,
-    projectId: "test-project",
-    occurredAt: "2026-04-18T02:00:00.000Z",
-    ...materializationCorrelation("evt-2"),
-    type: "object.created",
-    topic: "objects",
-    partitionKey: "obj-1",
-    payload: {
-      objectTypeId: "Room",
-      primaryId: "room-1",
-      properties: { name: "Room A" },
-      propertyChanges: { name: { operation: "created", after: "Room A" } },
-    },
-    cursor: "2",
-  }
-}
-
-describe("routeKeyForEvent", () => {
-  test("schedule.triggered returns schedule.triggered:<scheduleId>", () => {
-    const event = makeScheduleTriggeredEvent("nightly-orders")
-    expect(routeKeyForEvent(event)).toBe("schedule.triggered:nightly-orders")
-  })
-
-  test("other event types return null", () => {
-    const event = makeObjectCreatedEvent()
-    expect(routeKeyForEvent(event)).toBeNull()
-  })
-
-  test("schedule.triggered with different scheduleId returns correct key", () => {
-    const event = makeScheduleTriggeredEvent("hourly-sync")
-    expect(routeKeyForEvent(event)).toBe("schedule.triggered:hourly-sync")
-  })
-
-  test("dataset.version.committed returns dataset.version.committed:<datasetId>", () => {
-    const event: StoredDomainEvent = {
-      id: "evt-5",
-      schemaVersion: 1,
-      projectId: "test-project",
-      occurredAt: "2026-04-18T02:00:00.000Z",
+    ["schedule.triggered:nightly-orders"],
+  ],
+  [
+    "dataset.version.committed routes by dataset id, directly and to event schedules",
+    {
+      ...base,
+      id: "evt-dataset",
       type: "dataset.version.committed",
       topic: "datasets",
       partitionKey: "raw.erp.orders",
       payload: {
         datasetId: "raw.erp.orders",
         versionId: "v-1",
-        createdAt: "2026-04-18T02:00:00.000Z",
+        createdAt: base.occurredAt,
         producer: { kind: "sync", id: "sync-orders", runId: "run-1" },
       },
-      cursor: "5",
-    }
-    expect(routeKeyForEvent(event)).toBe("dataset.version.committed:raw.erp.orders")
-  })
-})
-
-describe("routeKeysForEvent", () => {
-  test("adds an object-type scoped event schedule key", () => {
-    const event: StoredDomainEvent = {
+    },
+    [
+      "dataset.version.committed:raw.erp.orders",
+      "event-schedule:dataset.version.committed:raw.erp.orders",
+    ],
+  ],
+  [
+    "object events route to event schedules by object type",
+    {
+      ...base,
+      ...materialization,
       id: "evt-object",
-      schemaVersion: 1,
-      projectId: "test-project",
-      occurredAt: "2026-04-18T02:00:00.000Z",
-      ...materializationCorrelation("evt-object"),
       type: "object.updated",
       topic: "objects",
       partitionKey: "Invoice:inv-1",
@@ -94,26 +69,17 @@ describe("routeKeysForEvent", () => {
         objectTypeId: "Invoice",
         primaryId: "inv-1",
         properties: { amount: 700 },
-        propertyChanges: {
-          amount: { operation: "updated", before: 400, after: 700 },
-        },
+        propertyChanges: { amount: { operation: "updated", before: 400, after: 700 } },
       },
-      cursor: "6",
-    }
-
-    expect(routeKeysForEvent(event)).toEqual(["event-schedule:object.updated:Invoice"])
-  })
-
-  test("adds link and rule scoped event schedule keys", () => {
-    const base = {
-      schemaVersion: 1 as const,
-      projectId: "test-project",
-      occurredAt: "2026-04-18T02:00:00.000Z",
-    }
-    const linkEvent: StoredDomainEvent = {
+    },
+    ["event-schedule:object.updated:Invoice"],
+  ],
+  [
+    "link events route to event schedules by source type and link",
+    {
       ...base,
+      ...materialization,
       id: "evt-link",
-      ...materializationCorrelation("evt-link"),
       type: "link.created",
       topic: "links",
       partitionKey: "Invoice:inv-1:payments",
@@ -126,9 +92,12 @@ describe("routeKeysForEvent", () => {
         properties: {},
         propertyChanges: {},
       },
-      cursor: "7",
-    }
-    const ruleEvent: StoredDomainEvent = {
+    },
+    ["event-schedule:link.created:Invoice:payments"],
+  ],
+  [
+    "rule events route to event schedules by rule id",
+    {
       ...base,
       id: "evt-rule",
       type: "rule.triggered",
@@ -139,20 +108,11 @@ describe("routeKeysForEvent", () => {
         subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv-1" },
         triggeredAt: base.occurredAt,
       },
-      cursor: "8",
-    }
+    },
+    ["event-schedule:rule.triggered:invoice.at-risk"],
+  ],
+]
 
-    expect(routeKeysForEvent(linkEvent)).toEqual(["event-schedule:link.created:Invoice:payments"])
-    expect(routeKeysForEvent(ruleEvent)).toEqual(["event-schedule:rule.triggered:invoice.at-risk"])
-  })
+test.each(cases)("routeKeysForEvent: %s", (_name, event, expected) => {
+  expect(routeKeysForEvent(event)).toEqual([...expected])
 })
-
-function materializationCorrelation(id: string) {
-  return {
-    correlationId: `correlation-${id}`,
-    origin: { kind: "runtime" as const, requestId: `request-${id}` },
-    executor: { type: "request" as const, requestId: `request-${id}` },
-    commitId: `commit-${id}`,
-    commitOrdinal: 0,
-  }
-}

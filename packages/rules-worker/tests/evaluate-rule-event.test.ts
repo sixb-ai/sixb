@@ -20,7 +20,6 @@ import {
   evaluateRuleEvents,
   evaluateRuleForSubject,
   matchRuleEvent,
-  matchRuleEvents,
 } from "../src/evaluate-rule-event"
 
 const postedRule = rule("transaction.posted", {
@@ -87,197 +86,91 @@ const ontology = new OntologyRegistry({ sources: [Transaction, Document] })
 const fixturesByStorage = new WeakMap<Storage, MaterializerTestFixture>()
 
 describe("rule event matching", () => {
-  test("buildRuleDependencyIndex indexes object and link dependencies", () => {
-    const index = buildRuleDependencyIndex([postedRule, requiresDocumentRule])
+  const index = buildRuleDependencyIndex([postedRule, requiresDocumentRule, requiresReceiptRule])
 
-    expect(index.objectMutations.get("transaction")?.map((candidate) => candidate.id)).toEqual([
-      "transaction.posted",
-      "transaction.requires-document",
-    ])
-    expect(
-      index.linkMutations.get("transaction:document")?.map((candidate) => candidate.id)
-    ).toEqual(["transaction.requires-document"])
-    expect(index.linkDeletes.get("transaction:document")?.map((candidate) => candidate.id)).toEqual(
-      ["transaction.requires-document"]
-    )
-  })
-
-  test("object update matches subject-object rules", () => {
-    const index = buildRuleDependencyIndex([postedRule])
-    const [candidate] = matchRuleEvent({
-      index,
+  test.each([
+    {
+      name: "an object update wakes every rule on its type",
       event: objectUpdatedEvent("transaction", "tx-1"),
-    })
-
-    expect(candidate?.rule.id).toBe("transaction.posted")
-    expect(candidate?.subject).toEqual({
-      kind: "object",
-      objectTypeId: "transaction",
-      primaryId: "tx-1",
-    })
-  })
-
-  test("link create matches rules that reference that subject link", () => {
-    const index = buildRuleDependencyIndex([requiresDocumentRule, requiresReceiptRule])
-    const candidates = matchRuleEvent({
-      index,
+      ruleIds: [postedRule.id, requiresDocumentRule.id, requiresReceiptRule.id],
+    },
+    {
+      name: "a link create wakes the rules that reference that link",
       event: linkCreatedEvent("transaction", "tx-1", "document"),
-    })
-
-    expect(candidates.map((candidate) => candidate.rule.id)).toEqual([
-      "transaction.requires-document",
-    ])
-    expect(candidates[0]?.subject).toEqual({
-      kind: "object",
-      objectTypeId: "transaction",
-      primaryId: "tx-1",
-    })
-  })
-
-  test("link deleted matches rules that reference that subject link", () => {
-    const index = buildRuleDependencyIndex([requiresDocumentRule, requiresReceiptRule])
-    const candidates = matchRuleEvent({
-      index,
+      ruleIds: [requiresDocumentRule.id],
+    },
+    {
+      name: "a link delete wakes the rules that reference that link",
       event: linkDeletedEvent("transaction", "tx-1", "document"),
-    })
+      ruleIds: [requiresDocumentRule.id],
+    },
+    {
+      name: "an object update of another type wakes nothing",
+      event: objectUpdatedEvent("document", "doc-1"),
+      ruleIds: [],
+    },
+    {
+      name: "a create of an unreferenced link wakes nothing",
+      event: linkCreatedEvent("transaction", "tx-1", "attachment"),
+      ruleIds: [],
+    },
+    {
+      name: "a delete of another type's link wakes nothing",
+      event: linkDeletedEvent("document", "doc-1", "transaction"),
+      ruleIds: [],
+    },
+  ])("$name", ({ event, ruleIds }) => {
+    const candidates = matchRuleEvent({ index, event })
 
-    expect(candidates.map((candidate) => candidate.rule.id)).toEqual([
-      "transaction.requires-document",
-    ])
-    expect(candidates[0]?.subject).toEqual({
-      kind: "object",
-      objectTypeId: "transaction",
-      primaryId: "tx-1",
-    })
-  })
-
-  test("unmatched object and link events do not evaluate rules", () => {
-    const index = buildRuleDependencyIndex([requiresDocumentRule])
-
-    expect(
-      matchRuleEvent({
-        index,
-        event: objectUpdatedEvent("document", "doc-1"),
-      })
-    ).toEqual([])
-    expect(
-      matchRuleEvent({
-        index,
-        event: linkCreatedEvent("transaction", "tx-1", "receipt"),
-      })
-    ).toEqual([])
-    expect(
-      matchRuleEvent({
-        index,
-        event: linkDeletedEvent("document", "doc-1", "transaction"),
-      })
-    ).toEqual([])
-  })
-
-  test("duplicate rule and subject pairs in one event batch are evaluated once", () => {
-    const index = buildRuleDependencyIndex([requiresDocumentRule])
-    const candidates = matchRuleEvents({
-      index,
-      events: [
-        objectUpdatedEvent("transaction", "tx-1", "1"),
-        linkCreatedEvent("transaction", "tx-1", "document", "2"),
-        linkDeletedEvent("transaction", "tx-1", "document", "3"),
-      ],
-    })
-
-    expect(candidates).toHaveLength(1)
-    expect(candidates[0]?.rule.id).toBe("transaction.requires-document")
-    expect(candidates[0]?.subject).toEqual({
-      kind: "object",
-      objectTypeId: "transaction",
-      primaryId: "tx-1",
-    })
+    expect(candidates.map((candidate) => candidate.rule.id)).toEqual([...ruleIds])
+    for (const candidate of candidates) expect(candidate.subject).toEqual(subject("tx-1"))
   })
 })
 
 describe("rule subject evaluation", () => {
-  test("new matching object emits rule.triggered", async () => {
+  test("emits a transition only when the subject's match changes", async () => {
     const runtime = createRuntime()
-    await seedObject(runtime, "tx-1", { status: "posted" })
-
-    const result = await evaluateRuleForSubject({
-      runtime,
-      rule: postedRule,
-      subject: subject("tx-1"),
-      evaluatedAt,
-    })
-
-    expect(result).toEqual({
-      ruleId: "transaction.posted",
-      subject: subject("tx-1"),
-      matched: true,
-      emitted: "triggered",
-    })
-    expect(await ruleEventTypes(runtime)).toEqual(["rule.triggered"])
-    await expect(
+    const active = () =>
       runtime.storage.rules!.getActive({
         projectId: runtime.projectId,
-        ruleId: "transaction.posted",
+        ruleId: postedRule.id,
         subject: subject("tx-1"),
       })
-    ).resolves.toMatchObject({ triggeredAt: evaluatedAt })
-  })
+    const steps = [
+      { status: "posted", matched: true, emitted: "triggered" },
+      { status: "posted", matched: true, emitted: null },
+      { status: "draft", matched: false, emitted: "resolved" },
+      { status: "posted", matched: true, emitted: "triggered" },
+    ] as const
+    let triggeredAt: string | undefined
 
-  test("still-matching active object emits no duplicate event", async () => {
-    const runtime = createRuntime()
-    await seedObject(runtime, "tx-1", { status: "posted" })
+    for (const [index, step] of steps.entries()) {
+      const at = `2026-05-07T10:3${index}:00.000Z`
+      await seedObject(runtime, "tx-1", { status: step.status })
 
-    await evaluateRuleForSubject({
-      runtime,
-      rule: postedRule,
-      subject: subject("tx-1"),
-      evaluatedAt,
-    })
-
-    await seedObject(runtime, "tx-1", { status: "posted" })
-    const result = await evaluateRuleForSubject({
-      runtime,
-      rule: postedRule,
-      subject: subject("tx-1"),
-      evaluatedAt: "2026-05-07T10:31:00.000Z",
-    })
-
-    expect(result.emitted).toBeNull()
-    expect(await ruleEventTypes(runtime)).toEqual(["rule.triggered"])
-  })
-
-  test("previously active object that no longer matches emits rule.resolved", async () => {
-    const runtime = createRuntime()
-    await seedObject(runtime, "tx-1", { status: "posted" })
-    await evaluateRuleForSubject({
-      runtime,
-      rule: postedRule,
-      subject: subject("tx-1"),
-      evaluatedAt,
-    })
-
-    await seedObject(runtime, "tx-1", { status: "draft" })
-    const result = await evaluateRuleForSubject({
-      runtime,
-      rule: postedRule,
-      subject: subject("tx-1"),
-      evaluatedAt: "2026-05-07T10:32:00.000Z",
-    })
-
-    expect(result).toEqual({
-      ruleId: "transaction.posted",
-      subject: subject("tx-1"),
-      matched: false,
-      emitted: "resolved",
-    })
-    expect(await ruleEventTypes(runtime)).toEqual(["rule.triggered", "rule.resolved"])
-    await expect(
-      runtime.storage.rules!.getActive({
-        projectId: runtime.projectId,
-        ruleId: "transaction.posted",
+      expect(
+        await evaluateRuleForSubject({
+          runtime,
+          rule: postedRule,
+          subject: subject("tx-1"),
+          evaluatedAt: at,
+        })
+      ).toEqual({
+        ruleId: postedRule.id,
         subject: subject("tx-1"),
+        matched: step.matched,
+        emitted: step.emitted,
       })
-    ).resolves.toBeNull()
+      if (step.emitted === "triggered") triggeredAt = at
+      if (step.matched) expect(await active()).toMatchObject({ triggeredAt })
+      else expect(await active()).toBeNull()
+    }
+
+    expect(await ruleEventTypes(runtime)).toEqual([
+      "rule.triggered",
+      "rule.resolved",
+      "rule.triggered",
+    ])
   })
 
   test("previously active deleted object emits rule.resolved", async () => {
@@ -310,84 +203,29 @@ describe("rule subject evaluation", () => {
     expect(await ruleEventTypes(runtime)).toEqual(["rule.triggered", "rule.resolved"])
   })
 
-  test("violating again after resolution emits rule.triggered again", async () => {
+  test("delayed events evaluate the latest committed state, not the event", async () => {
     const runtime = createRuntime()
-    await seedObject(runtime, "tx-1", { status: "posted" })
-    await evaluateRuleForSubject({
+    await seedObject(runtime, "tx-1", { status: "draft" })
+    await seedObject(runtime, "tx-2")
+    await seedLink(runtime, "tx-2", "document")
+    const rules = [postedRule, hasDocumentRule]
+
+    const result = await evaluateRuleEvents({
       runtime,
-      rule: postedRule,
-      subject: subject("tx-1"),
+      rules,
+      index: buildRuleDependencyIndex(rules),
+      events: [
+        objectUpdatedEvent("transaction", "tx-1", "1", { status: "posted" }),
+        linkDeletedEvent("transaction", "tx-2", "document", "2"),
+      ],
       evaluatedAt,
     })
 
-    await seedObject(runtime, "tx-1", { status: "draft" })
-    await evaluateRuleForSubject({
-      runtime,
-      rule: postedRule,
-      subject: subject("tx-1"),
-      evaluatedAt: "2026-05-07T10:31:00.000Z",
-    })
-
-    await seedObject(runtime, "tx-1", { status: "posted" })
-    const result = await evaluateRuleForSubject({
-      runtime,
-      rule: postedRule,
-      subject: subject("tx-1"),
-      evaluatedAt: "2026-05-07T10:32:00.000Z",
-    })
-
-    expect(result.emitted).toBe("triggered")
-    expect(await ruleEventTypes(runtime)).toEqual([
-      "rule.triggered",
-      "rule.resolved",
-      "rule.triggered",
+    expect(result.evaluations).toEqual([
+      { ruleId: postedRule.id, subject: subject("tx-1"), matched: false, emitted: null },
+      { ruleId: hasDocumentRule.id, subject: subject("tx-1"), matched: false, emitted: null },
+      { ruleId: hasDocumentRule.id, subject: subject("tx-2"), matched: true, emitted: "triggered" },
     ])
-  })
-
-  test("a delayed object event evaluates the latest committed object state", async () => {
-    const runtime = createRuntime()
-    await seedObject(runtime, "tx-1", { status: "draft" })
-
-    const result = await evaluateRuleForSubject({
-      runtime,
-      rule: postedRule,
-      subject: subject("tx-1"),
-      evaluatedAt,
-    })
-
-    expect(result.matched).toBe(false)
-    expect(result.emitted).toBeNull()
-  })
-
-  test("a delayed link-delete event evaluates the latest committed link state", async () => {
-    const runtime = createRuntime()
-    await seedObject(runtime, "tx-1")
-    await seedLink(runtime, "tx-1", "document")
-
-    const result = await evaluateRuleForSubject({
-      runtime,
-      rule: hasDocumentRule,
-      subject: subject("tx-1"),
-      evaluatedAt,
-    })
-
-    expect(result.matched).toBe(true)
-    expect(result.emitted).toBe("triggered")
-  })
-
-  test("link-missing rule works for transaction without a document", async () => {
-    const runtime = createRuntime()
-    await seedObject(runtime, "tx-1")
-
-    const result = await evaluateRuleForSubject({
-      runtime,
-      rule: requiresDocumentRule,
-      subject: subject("tx-1"),
-      evaluatedAt,
-    })
-
-    expect(result.matched).toBe(true)
-    expect(result.emitted).toBe("triggered")
   })
 
   test("event batches dedupe wake-ups while evaluating current composite state", async () => {
@@ -414,26 +252,6 @@ describe("rule subject evaluation", () => {
       matched: true,
       emitted: "triggered",
     })
-    expect(await ruleEventTypes(runtime)).toEqual(["rule.triggered"])
-  })
-
-  test("evaluateRuleEvents dedupes and evaluates one rule subject once per batch", async () => {
-    const runtime = createRuntime()
-    await seedObject(runtime, "tx-1")
-    const index = buildRuleDependencyIndex([requiresDocumentRule])
-    const result = await evaluateRuleEvents({
-      runtime,
-      rules: [requiresDocumentRule],
-      index,
-      events: [
-        objectUpdatedEvent("transaction", "tx-1", "1"),
-        linkDeletedEvent("transaction", "tx-1", "document", "2"),
-      ],
-      evaluatedAt,
-    })
-
-    expect(result.evaluations).toHaveLength(1)
-    expect(result.evaluations[0]?.emitted).toBe("triggered")
     expect(await ruleEventTypes(runtime)).toEqual(["rule.triggered"])
   })
 })

@@ -1,5 +1,10 @@
-import { describe, expect, test } from "bun:test"
-import { decimal, type RulePredicate } from "@sixb/core"
+import { expect, test } from "bun:test"
+import {
+  decimal,
+  type PredicateValue,
+  type PropertyPredicateOperator,
+  type RulePredicate,
+} from "@sixb/core"
 import type { ObjectLinkRow, ObjectRow } from "@sixb/core/storage"
 import { evaluateRulePredicate } from "../src/evaluate-predicate"
 import type { RuleLinkMap } from "../src/types"
@@ -19,224 +24,205 @@ function objectRow(properties: Record<string, unknown>): ObjectRow {
   }
 }
 
-function linkRow(linkId: string, targetId = "doc-1"): ObjectLinkRow {
+function linkRow(linkId: string): ObjectLinkRow {
   return {
     projectId: "project-a",
     sourceTypeId: "transaction",
     sourceId: "tx-1",
     linkId,
     targetTypeId: "document",
-    targetId,
+    targetId: "doc-1",
     createdAt: now,
     updatedAt: now,
     lastCommitId: "commit-1",
   }
 }
 
-function evaluate(input: {
-  predicate: RulePredicate
-  properties?: Record<string, unknown>
-  links?: RuleLinkMap
-}): boolean {
-  return evaluateRulePredicate({
-    predicate: input.predicate,
-    object: objectRow(input.properties ?? {}),
-    links: input.links ?? new Map(),
-  })
+const withDocument: RuleLinkMap = new Map([["document", [linkRow("document")]]])
+
+function property(
+  propertyId: string,
+  op: PropertyPredicateOperator,
+  value?: PredicateValue
+): RulePredicate {
+  return { kind: "property", propertyId, op, ...(value === undefined ? {} : { value }) }
 }
 
-describe("evaluateRulePredicate", () => {
-  test("evaluates property equality and inequality", () => {
-    expect(
-      evaluate({
-        predicate: { kind: "property", propertyId: "status", op: "eq", value: "posted" },
-        properties: { status: "posted" },
-      })
-    ).toBe(true)
-    expect(
-      evaluate({
-        predicate: { kind: "property", propertyId: "status", op: "eq", value: "posted" },
-        properties: { status: "draft" },
-      })
-    ).toBe(false)
-    expect(
-      evaluate({
-        predicate: { kind: "property", propertyId: "status", op: "notEq", value: "void" },
-        properties: { status: "posted" },
-      })
-    ).toBe(true)
-    expect(
-      evaluate({
-        predicate: { kind: "property", propertyId: "status", op: "notEq", value: "posted" },
-        properties: { status: "posted" },
-      })
-    ).toBe(false)
-  })
-
-  test("evaluates numeric comparisons only for numbers", () => {
-    expect(
-      evaluate({
-        predicate: { kind: "property", propertyId: "amount", op: "gt", value: 10 },
-        properties: { amount: 11 },
-      })
-    ).toBe(true)
-    expect(
-      evaluate({
-        predicate: { kind: "property", propertyId: "amount", op: "gte", value: 10 },
-        properties: { amount: 10 },
-      })
-    ).toBe(true)
-    expect(
-      evaluate({
-        predicate: { kind: "property", propertyId: "amount", op: "lt", value: 10 },
-        properties: { amount: 9 },
-      })
-    ).toBe(true)
-    expect(
-      evaluate({
-        predicate: { kind: "property", propertyId: "amount", op: "lte", value: 10 },
-        properties: { amount: 10 },
-      })
-    ).toBe(true)
-    expect(
-      evaluate({
-        predicate: { kind: "property", propertyId: "amount", op: "gt", value: 10 },
-        properties: { amount: "11" },
-      })
-    ).toBe(false)
-    expect(
-      evaluate({
-        predicate: { kind: "property", propertyId: "amount", op: "gt", value: "10" },
-        properties: { amount: 11 },
-      })
-    ).toBe(false)
-  })
-
-  test("evaluates decimal comparisons without JS number coercion", () => {
-    expect(
-      evaluate({
-        predicate: {
-          kind: "property",
-          propertyId: "amount",
-          op: "gt",
-          value: decimal("9007199254740992"),
-        },
-        properties: { amount: decimal("9007199254740993") },
-      })
-    ).toBe(true)
-    expect(
-      evaluate({
-        predicate: {
-          kind: "property",
-          propertyId: "amount",
-          op: "lt",
-          value: decimal("0.0000000000000000001"),
-        },
-        properties: { amount: decimal("0.00000000000000000002") },
-      })
-    ).toBe(true)
-  })
-
-  test("evaluates property presence and missingness", () => {
-    expect(
-      evaluate({
-        predicate: { kind: "property", propertyId: "amount", op: "isPresent" },
-        properties: { amount: 0 },
-      })
-    ).toBe(true)
-    expect(
-      evaluate({
-        predicate: { kind: "property", propertyId: "description", op: "isPresent" },
-        properties: { description: "" },
-      })
-    ).toBe(true)
-    expect(
-      evaluate({
-        predicate: { kind: "property", propertyId: "amount", op: "isPresent" },
-        properties: { amount: null },
-      })
-    ).toBe(false)
-    expect(
-      evaluate({
-        predicate: { kind: "property", propertyId: "amount", op: "isMissing" },
-        properties: { amount: null },
-      })
-    ).toBe(true)
-    expect(
-      evaluate({
-        predicate: { kind: "property", propertyId: "amount", op: "isMissing" },
-        properties: {},
-      })
-    ).toBe(true)
-  })
-
-  test("evaluates link existence and missingness", () => {
-    const links = new Map([["document", [linkRow("document")]]])
-
-    expect(
-      evaluate({
-        predicate: { kind: "link", linkId: "document", op: "exists" },
-        links,
-      })
-    ).toBe(true)
-    expect(
-      evaluate({
-        predicate: { kind: "link", linkId: "receipt", op: "exists" },
-        links,
-      })
-    ).toBe(false)
-    expect(
-      evaluate({
-        predicate: { kind: "link", linkId: "document", op: "isMissing" },
-        links,
-      })
-    ).toBe(false)
-    expect(
-      evaluate({
-        predicate: { kind: "link", linkId: "receipt", op: "isMissing" },
-        links,
-      })
-    ).toBe(true)
-  })
-
-  test("evaluates nested all, any, and not predicates", () => {
-    const predicate: RulePredicate = {
-      kind: "all",
+const reviewPredicate: RulePredicate = {
+  kind: "all",
+  predicates: [
+    property("status", "eq", "posted"),
+    {
+      kind: "any",
       predicates: [
-        { kind: "property", propertyId: "status", op: "eq", value: "posted" },
-        {
-          kind: "any",
-          predicates: [
-            { kind: "property", propertyId: "amount", op: "gt", value: 0 },
-            { kind: "not", predicate: { kind: "link", linkId: "document", op: "exists" } },
-          ],
-        },
-        {
-          kind: "not",
-          predicate: { kind: "property", propertyId: "status", op: "eq", value: "void" },
-        },
+        property("amount", "gt", 0),
+        { kind: "not", predicate: { kind: "link", linkId: "document", op: "exists" } },
       ],
-    }
+    },
+    { kind: "not", predicate: property("status", "eq", "void") },
+  ],
+}
 
-    expect(
-      evaluate({
-        predicate,
-        properties: { status: "posted", amount: 100 },
-        links: new Map([["document", [linkRow("document")]]]),
-      })
-    ).toBe(true)
-    expect(
-      evaluate({
-        predicate,
-        properties: { status: "posted", amount: -1 },
-        links: new Map(),
-      })
-    ).toBe(true)
-    expect(
-      evaluate({
-        predicate,
-        properties: { status: "void", amount: 100 },
-      })
-    ).toBe(false)
-  })
+const cases: {
+  readonly name: string
+  readonly predicate: RulePredicate
+  readonly properties?: Record<string, unknown>
+  readonly links?: RuleLinkMap
+  readonly expected: boolean
+}[] = [
+  {
+    name: "eq matches",
+    predicate: property("status", "eq", "posted"),
+    properties: { status: "posted" },
+    expected: true,
+  },
+  {
+    name: "eq rejects",
+    predicate: property("status", "eq", "posted"),
+    properties: { status: "draft" },
+    expected: false,
+  },
+  {
+    name: "notEq matches",
+    predicate: property("status", "notEq", "void"),
+    properties: { status: "posted" },
+    expected: true,
+  },
+  {
+    name: "notEq rejects",
+    predicate: property("status", "notEq", "posted"),
+    properties: { status: "posted" },
+    expected: false,
+  },
+  {
+    name: "gt",
+    predicate: property("amount", "gt", 10),
+    properties: { amount: 11 },
+    expected: true,
+  },
+  {
+    name: "gte at the bound",
+    predicate: property("amount", "gte", 10),
+    properties: { amount: 10 },
+    expected: true,
+  },
+  {
+    name: "lt",
+    predicate: property("amount", "lt", 10),
+    properties: { amount: 9 },
+    expected: true,
+  },
+  {
+    name: "lte at the bound",
+    predicate: property("amount", "lte", 10),
+    properties: { amount: 10 },
+    expected: true,
+  },
+  {
+    name: "a numeric comparison does not coerce a string value",
+    predicate: property("amount", "gt", 10),
+    properties: { amount: "11" },
+    expected: false,
+  },
+  {
+    name: "a numeric comparison does not coerce a string operand",
+    predicate: property("amount", "gt", "10"),
+    properties: { amount: 11 },
+    expected: false,
+  },
+  {
+    name: "decimal gt beyond JS number precision",
+    predicate: property("amount", "gt", decimal("9007199254740992")),
+    properties: { amount: decimal("9007199254740993") },
+    expected: true,
+  },
+  {
+    name: "decimal lt below JS number precision",
+    predicate: property("amount", "lt", decimal("0.0000000000000000001")),
+    properties: { amount: decimal("0.00000000000000000002") },
+    expected: true,
+  },
+  {
+    name: "isPresent accepts zero",
+    predicate: property("amount", "isPresent"),
+    properties: { amount: 0 },
+    expected: true,
+  },
+  {
+    name: "isPresent accepts an empty string",
+    predicate: property("description", "isPresent"),
+    properties: { description: "" },
+    expected: true,
+  },
+  {
+    name: "isPresent rejects null",
+    predicate: property("amount", "isPresent"),
+    properties: { amount: null },
+    expected: false,
+  },
+  {
+    name: "isMissing accepts null",
+    predicate: property("amount", "isMissing"),
+    properties: { amount: null },
+    expected: true,
+  },
+  {
+    name: "isMissing accepts an absent property",
+    predicate: property("amount", "isMissing"),
+    properties: {},
+    expected: true,
+  },
+  {
+    name: "link exists",
+    predicate: { kind: "link", linkId: "document", op: "exists" },
+    links: withDocument,
+    expected: true,
+  },
+  {
+    name: "an unloaded link does not exist",
+    predicate: { kind: "link", linkId: "receipt", op: "exists" },
+    links: withDocument,
+    expected: false,
+  },
+  {
+    name: "link isMissing rejects a present link",
+    predicate: { kind: "link", linkId: "document", op: "isMissing" },
+    links: withDocument,
+    expected: false,
+  },
+  {
+    name: "an unloaded link is missing",
+    predicate: { kind: "link", linkId: "receipt", op: "isMissing" },
+    links: withDocument,
+    expected: true,
+  },
+  {
+    name: "nested all/any/not through the first any branch",
+    predicate: reviewPredicate,
+    properties: { status: "posted", amount: 100 },
+    links: withDocument,
+    expected: true,
+  },
+  {
+    name: "nested all/any/not through the negated link branch",
+    predicate: reviewPredicate,
+    properties: { status: "posted", amount: -1 },
+    expected: true,
+  },
+  {
+    name: "nested all/any/not rejected by its negated clause",
+    predicate: reviewPredicate,
+    properties: { status: "void", amount: 100 },
+    expected: false,
+  },
+]
+
+test.each(cases)("evaluateRulePredicate: $name", ({ predicate, properties, links, expected }) => {
+  expect(
+    evaluateRulePredicate({
+      predicate,
+      object: objectRow(properties ?? {}),
+      links: links ?? new Map(),
+    })
+  ).toBe(expected)
 })

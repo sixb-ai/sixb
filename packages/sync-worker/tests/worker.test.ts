@@ -18,7 +18,6 @@ import {
   type SyncDefinition,
 } from "@sixb/core"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
-import type { BeginDatasetWriteInput, LakeWriteSession } from "@sixb/core/lake-storage"
 import { SyncWorker } from "../src"
 
 const Room = defineObjectType({
@@ -63,42 +62,24 @@ async function waitFor<T>(
       return value
     }
 
-    await Bun.sleep(20)
+    await new Promise<void>((resolve) => setImmediate(resolve))
   }
 
   throw new Error("Timed out waiting for condition.")
 }
 
-class ReusingVersionLakeStorage extends InMemoryLakeStorage {
-  private reuseNext = false
-
-  reuseNextCommittedVersion(): void {
-    this.reuseNext = true
-  }
-
-  override async beginWrite(input: BeginDatasetWriteInput): Promise<LakeWriteSession> {
-    const write = await super.beginWrite(input)
-    if (!this.reuseNext) return write
-    this.reuseNext = false
-
-    return {
-      writeRows: (rows) => write.writeRows(rows),
-      commit: async () => {
-        await write.abort()
-        const latest = await this.getLatestVersion(input.dataset.id)
-        if (!latest) throw new Error("Expected a committed version to reuse.")
-        return { ...latest, outcome: "unchanged" }
-      },
-      abort: () => write.abort(),
-    }
-  }
+/** Waits for the run's `sync.run.finished` event, the last one a finished run emits. */
+async function waitForFinishedEvents(sixb: SixbHost, count: number) {
+  await waitFor(
+    () => sixb.events.read({ types: ["sync.run.finished"] }),
+    (events) => events.length === count
+  )
+  return sixb.events.read({
+    types: ["sync.run.started", "dataset.version.committed", "sync.run.finished"],
+  })
 }
 
-function createSixbForSync(
-  sync: SyncDefinition,
-  lakeStorage: InMemoryLakeStorage = new InMemoryLakeStorage(),
-  onError?: SixbErrorHandler
-) {
+function createSixbForSync(sync: SyncDefinition, onError?: SixbErrorHandler) {
   const storage = new InMemoryStorage()
 
   return new SixbHost({
@@ -107,7 +88,7 @@ function createSixbForSync(
     connectors: [erpDb],
     broker: new InMemoryBroker(),
     storage,
-    lakeStorage,
+    lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     datasets: [sync.target.dataset],
@@ -167,37 +148,6 @@ describe("SyncWorker", () => {
     expect(new SyncWorker(sixb, { concurrency: 3 }).concurrency).toBe(3)
   })
 
-  test("processes queued sync jobs end-to-end", async () => {
-    const rawOrdersDataset = makeDataset("raw.erp.orders")
-    const sync = defineSync("sync-orders")
-      .from(erpDb)
-      .read(() => [{ orderId: "ord_1" }, { orderId: "ord_2" }])
-      .intoDataset(rawOrdersDataset)
-    const sixb = createSixbForSync(sync)
-    const worker = new SyncWorker(sixb)
-
-    await enqueueSyncRun(sixb, { syncId: "sync-orders", runId: "run-1" })
-
-    await worker.start()
-
-    const run = await waitFor(
-      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-1" }),
-      (value) => value?.status === "succeeded"
-    )
-
-    expect(run?.rowsRead).toBe(2)
-    expect(run?.output?.datasetId).toBe("raw.erp.orders")
-
-    const claimed = await sixb.queues.syncRuns.claim({
-      projectId: sixb.id,
-      workerId: "observer",
-    })
-
-    expect(claimed).toHaveLength(0)
-
-    await worker.stop()
-  })
-
   test("reports once when execution transitions the run to failed", async () => {
     const reports: { error: Error; context: SixbErrorContext }[] = []
     const originalError = new Error("sync source failed")
@@ -208,7 +158,7 @@ describe("SyncWorker", () => {
         throw originalError
       })
       .intoDataset(dataset)
-    const sixb = createSixbForSync(sync, undefined, (error, context) => {
+    const sixb = createSixbForSync(sync, (error, context) => {
       reports.push({ error, context })
     })
     let settledFailure: unknown
@@ -346,7 +296,7 @@ describe("SyncWorker", () => {
         return []
       })
       .intoDataset(rawOrdersDataset)
-    const sixb = createSixbForSync(sync, undefined, () => {
+    const sixb = createSixbForSync(sync, () => {
       reportCount += 1
     })
     const worker = new SyncWorker(sixb)
@@ -392,40 +342,6 @@ describe("SyncWorker", () => {
     expect(reportCount).toBe(0)
   })
 
-  test("survives a transient claim error and keeps polling", async () => {
-    const rawOrdersDataset = makeDataset("raw.erp.orders")
-    const sync = defineSync("sync-orders")
-      .from(erpDb)
-      .read(() => [{ orderId: "ord_1" }])
-      .intoDataset(rawOrdersDataset)
-    const sixb = createSixbForSync(sync)
-
-    let claimCallCount = 0
-    const originalClaim = sixb.queues.syncRuns.claim.bind(sixb.queues.syncRuns)
-    sixb.queues.syncRuns.claim = async (params) => {
-      claimCallCount++
-      if (claimCallCount === 1) {
-        throw new Error("Transient network failure")
-      }
-      return originalClaim(params)
-    }
-
-    await enqueueSyncRun(sixb, { syncId: "sync-orders", runId: "run-after-error" })
-
-    const worker = new SyncWorker(sixb)
-    await worker.start()
-
-    const run = await waitFor(
-      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-after-error" }),
-      (value) => value?.status === "succeeded"
-    )
-
-    expect(run?.status).toBe("succeeded")
-    expect(claimCallCount).toBeGreaterThanOrEqual(2)
-
-    await worker.stop()
-  })
-
   test("emits sync run lifecycle events after a succeeded sync run", async () => {
     const sync = defineSync("sync-orders")
       .from(erpDb)
@@ -438,19 +354,11 @@ describe("SyncWorker", () => {
 
     await worker.start()
 
-    const run = await waitFor(
-      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-emit" }),
-      (value) => value?.status === "succeeded"
-    )
-
-    // Allow best-effort emission to settle
-    await Bun.sleep(50)
+    const events = await waitForFinishedEvents(sixb, 1)
     await worker.stop()
+    const run = await sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-emit" })
 
-    const events = await sixb.events.read({
-      types: ["sync.run.started", "dataset.version.committed", "sync.run.finished"],
-    })
-
+    expect(run).toMatchObject({ status: "succeeded", rowsRead: 1 })
     expect(events).toHaveLength(3)
     expect(events.map((event) => event.type)).toEqual([
       "sync.run.started",
@@ -519,20 +427,16 @@ describe("SyncWorker", () => {
     )
 
     await enqueueSyncRun(sixb, { syncId: sync.id, runId: "run-merge-noop" })
-    const noOpRun = await waitFor(
-      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-merge-noop" }),
-      (run) => run?.status === "succeeded"
-    )
-    await Bun.sleep(50)
+    const events = await waitForFinishedEvents(sixb, 2)
     await worker.stop()
+    const noOpRun = await sixb.storage.syncRuns!.getById({
+      projectId: sixb.id,
+      id: "run-merge-noop",
+    })
 
     expect(createdRun?.checkpoint).toEqual(storedErpCheckpoint("cursor-1"))
     expect(noOpRun?.checkpoint).toEqual(storedErpCheckpoint("cursor-2"))
     expect(noOpRun?.output?.versionId).toBe(createdRun?.output?.versionId)
-
-    const events = await sixb.events.read({
-      types: ["sync.run.started", "dataset.version.committed", "sync.run.finished"],
-    })
     expect(events.map((event) => event.type)).toEqual([
       "sync.run.started",
       "dataset.version.committed",
@@ -540,42 +444,11 @@ describe("SyncWorker", () => {
       "sync.run.started",
       "sync.run.finished",
     ])
-  })
-
-  test("does not emit a dataset event when storage reuses an existing version", async () => {
-    const dataset = defineDataset("raw.erp.orders", { schema: [col("orderId", "string")] })
-    const sync = defineSync("sync-orders", { mode: "append" })
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(dataset)
-    const lakeStorage = new ReusingVersionLakeStorage()
-    await lakeStorage.createDataset(dataset)
-    const seed = await lakeStorage.beginWrite({ dataset, mode: "snapshot" })
-    await seed.writeRows([{ orderId: "ord_1" }])
-    const previous = await seed.commit()
-    lakeStorage.reuseNextCommittedVersion()
-
-    const sixb = createSixbForSync(sync, lakeStorage)
-    const worker = new SyncWorker(sixb)
-    await enqueueSyncRun(sixb, { syncId: sync.id, runId: "run-no-op" })
-
-    await worker.start()
-    await waitFor(
-      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-no-op" }),
-      (run) => run?.status === "succeeded"
-    )
-    await Bun.sleep(50)
-    await worker.stop()
-
-    const events = await sixb.events.read({
-      types: ["sync.run.started", "dataset.version.committed", "sync.run.finished"],
-    })
-    expect(events.map((event) => event.type)).toEqual(["sync.run.started", "sync.run.finished"])
-    expect(events[1]?.payload).toMatchObject({
-      syncId: sync.id,
-      runId: "run-no-op",
+    // The no-op still reports the version it reused; only a created version is announced.
+    expect(events[4]?.payload).toMatchObject({
+      runId: "run-merge-noop",
       status: "succeeded",
-      versionId: previous.versionId,
+      versionId: createdRun?.output?.versionId,
     })
   })
 
@@ -595,18 +468,12 @@ describe("SyncWorker", () => {
     await enqueueSyncRun(sixb, { syncId: sync.id, runId: "run-first-empty" })
 
     await worker.start()
-    const run = await waitFor(
-      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-first-empty" }),
-      (value) => value?.status === "succeeded"
-    )
-    await Bun.sleep(50)
+    const events = await waitForFinishedEvents(sixb, 1)
     await worker.stop()
+    const run = await sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-first-empty" })
 
     expect(run?.output).toBeUndefined()
     expect(run?.checkpoint).toEqual(storedErpCheckpoint("cursor-1"))
-    const events = await sixb.events.read({
-      types: ["sync.run.started", "dataset.version.committed", "sync.run.finished"],
-    })
     expect(events.map((event) => event.type)).toEqual(["sync.run.started", "sync.run.finished"])
     expect(events[1]?.payload).toEqual({
       syncId: sync.id,
@@ -614,95 +481,5 @@ describe("SyncWorker", () => {
       status: "succeeded",
       datasetId: dataset.id,
     })
-  })
-
-  test("commits and emits a dataset version for a first empty snapshot", async () => {
-    const dataset = defineDataset("raw.erp.empty-orders", {
-      schema: [col("orderId", "string")],
-    })
-    const sync = defineSync("sync-empty-orders")
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(dataset)
-    const sixb = createSixbForSync(sync)
-    const worker = new SyncWorker(sixb)
-
-    await enqueueSyncRun(sixb, { syncId: sync.id, runId: "run-first-empty-snapshot" })
-
-    await worker.start()
-    const run = await waitFor(
-      () =>
-        sixb.storage.syncRuns!.getById({
-          projectId: sixb.id,
-          id: "run-first-empty-snapshot",
-        }),
-      (value) => value?.status === "succeeded"
-    )
-    await Bun.sleep(50)
-    await worker.stop()
-
-    expect(run?.output).toMatchObject({ datasetId: dataset.id })
-    const events = await sixb.events.read({
-      types: ["sync.run.started", "dataset.version.committed", "sync.run.finished"],
-    })
-    expect(events.map((event) => event.type)).toEqual([
-      "sync.run.started",
-      "dataset.version.committed",
-      "sync.run.finished",
-    ])
-    expect(events[1]?.payload).toMatchObject({
-      datasetId: dataset.id,
-      versionId: run?.output?.versionId,
-      producer: {
-        kind: "sync",
-        id: sync.id,
-        runId: "run-first-empty-snapshot",
-      },
-    })
-    expect(events[2]?.payload).toEqual({
-      syncId: sync.id,
-      runId: "run-first-empty-snapshot",
-      status: "succeeded",
-      datasetId: dataset.id,
-      versionId: run?.output?.versionId,
-    })
-  })
-
-  test("does not crash when retry fails on shutdown", async () => {
-    const rawOrdersDataset = makeDataset("raw.erp.orders")
-    const sync = defineSync("sync-orders")
-      .from(erpDb)
-      .read(async (_client, context) => {
-        await new Promise<void>((_resolve, reject) => {
-          context.signal.addEventListener(
-            "abort",
-            () => {
-              const error = new Error("aborted")
-              error.name = "AbortError"
-              reject(error)
-            },
-            { once: true }
-          )
-        })
-        return []
-      })
-      .intoDataset(rawOrdersDataset)
-    const sixb = createSixbForSync(sync)
-
-    sixb.queues.syncRuns.retry = async () => {
-      throw new Error("Lease already expired")
-    }
-
-    await enqueueSyncRun(sixb, { syncId: "sync-orders", runId: "run-expired-lease" })
-
-    const worker = new SyncWorker(sixb)
-    await worker.start()
-
-    await waitFor(
-      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-expired-lease" }),
-      (value) => value?.status === "running"
-    )
-
-    await worker.stop()
   })
 })

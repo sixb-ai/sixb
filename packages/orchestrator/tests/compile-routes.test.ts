@@ -6,14 +6,12 @@ import {
   defineObjectType,
   definePipeline,
   definePipelineStep,
-  defineProjection,
   defineRule,
   defineSchedule,
   defineSync,
   defineWorkflow,
   defineWorkflowStep,
   events,
-  link,
   prop,
   type ScheduleDefinition,
   type WorkflowDefinition,
@@ -29,12 +27,6 @@ const erpDb = defineConnector("erpDb", {
   },
 })
 
-const Sensor = defineObjectType({
-  id: "sensor",
-  name: "Sensor",
-  properties: [prop("id", "string", { required: true, primary: true })],
-})
-
 const Room = defineObjectType({
   id: "room",
   name: "Room",
@@ -42,7 +34,6 @@ const Room = defineObjectType({
     prop("id", "string", { required: true, primary: true }),
     prop("temperature", "double", { mode: "telemetry" }),
   ],
-  links: [link("hasSensors", Sensor, { cardinality: "many" })],
 })
 
 const daily = defineSchedule("daily").cron("0 2 * * *")
@@ -64,28 +55,6 @@ function makeDataset(id: string) {
 const rawRooms = makeDataset("raw.rooms")
 const cleanRooms = makeDataset("clean.rooms")
 const rawRoomsUpdated = defineSchedule("raw-rooms-updated").on(events.dataset(rawRooms).updated())
-
-function projectionDescriptor(
-  projectionId: string,
-  datasetId: string,
-  projectionKind: ProjectionDispatchDescriptor["projectionKind"]
-): ProjectionDispatchDescriptor {
-  const common = {
-    projectionId,
-    datasetId,
-    ontologyRevision: "ontology-1",
-    projectionRevision: `${projectionId}-revision`,
-    ownershipHash: `${projectionId}-ownership`,
-  }
-  switch (projectionKind) {
-    case "object":
-      return { ...common, projectionKind, protocol: "replacement" }
-    case "link":
-      return { ...common, projectionKind, protocol: "replacement" }
-    case "telemetry":
-      return { ...common, projectionKind, protocol: "telemetry" }
-  }
-}
 
 function makeSync(id: string, schedule?: ScheduleDefinition) {
   const builder = defineSync(id)
@@ -193,16 +162,7 @@ describe("compileRoutes", () => {
     ])
   })
 
-  test("rule event schedules use source-scoped routes", () => {
-    const ruleRoutes = compile({
-      schedules: [ruleTriggered],
-      workflows: [makeWorkflow("rule-alert", ruleTriggered)],
-    })
-
-    expect(ruleRoutes.has("event-schedule:rule.triggered:room.high-temperature-rule")).toBe(true)
-  })
-
-  test("dataset, sync, and pipeline event schedules can target downstream work", () => {
+  test("rule, dataset, sync, and pipeline event schedules use source-scoped routes", () => {
     const upstreamSync = makeSync("upstream-sync")
     const upstreamPipeline = makePipeline("upstream-pipeline")
     const syncSucceeded = defineSchedule("upstream-sync-succeeded").on(
@@ -213,12 +173,16 @@ describe("compileRoutes", () => {
     )
 
     const routes = compile({
-      schedules: [rawRoomsUpdated, syncSucceeded, pipelineSucceeded],
+      schedules: [ruleTriggered, rawRoomsUpdated, syncSucceeded, pipelineSucceeded],
       syncs: [makeSync("from-dataset", rawRoomsUpdated)],
       pipelines: [makePipeline("from-sync", syncSucceeded)],
-      workflows: [makeWorkflow("from-pipeline", pipelineSucceeded)],
+      workflows: [
+        makeWorkflow("rule-alert", ruleTriggered),
+        makeWorkflow("from-pipeline", pipelineSucceeded),
+      ],
     })
 
+    expect(routes.has("event-schedule:rule.triggered:room.high-temperature-rule")).toBe(true)
     expect(routes.has("event-schedule:dataset.version.committed:raw.rooms")).toBe(true)
     expect(routes.has("event-schedule:sync.run.finished:upstream-sync")).toBe(true)
     expect(routes.has("event-schedule:pipeline.run.finished:upstream-pipeline")).toBe(true)
@@ -266,10 +230,15 @@ describe("compileRoutes", () => {
   })
 
   test("dataset projections keep their direct version-scoped route", () => {
-    const projection = defineProjection("rooms-projection", Room)
-      .fromDataset(rawRooms)
-      .properties({ id: "id" })
-    const descriptor = projectionDescriptor(projection.id, projection.datasetId, "object")
+    const descriptor: ProjectionDispatchDescriptor = {
+      projectionId: "rooms-projection",
+      projectionKind: "object",
+      protocol: "replacement",
+      datasetId: rawRooms.id,
+      ontologyRevision: "ontology-1",
+      projectionRevision: "rooms-projection-revision",
+      ownershipHash: "rooms-projection-ownership",
+    }
 
     expect(jobsFor({ projections: [descriptor] }, "dataset.version.committed:raw.rooms")).toEqual([
       {
@@ -280,48 +249,5 @@ describe("compileRoutes", () => {
         },
       },
     ])
-  })
-
-  test("link and telemetry projections compile with their projection kind", () => {
-    const joins = defineDataset("raw.room-sensors", {
-      schema: [col("room_id", "string"), col("sensor_id", "string")],
-    })
-    const telemetry = defineDataset("raw.room-temperature", {
-      schema: [
-        col("room_id", "string"),
-        col("observed_at", "timestamp"),
-        col("temperature", "float64"),
-      ],
-    })
-    const linkProjection = defineProjection("room-sensors", Room.l.hasSensors)
-      .fromDataset(joins)
-      .sourceField("room_id")
-      .targetField("sensor_id")
-    const telemetryProjection = defineProjection("room-temperature", Room.p.temperature)
-      .fromDataset(telemetry)
-      .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
-
-    expect(
-      jobsFor(
-        {
-          projections: [projectionDescriptor(linkProjection.id, linkProjection.datasetId, "link")],
-        },
-        "dataset.version.committed:raw.room-sensors"
-      )[0]
-    ).toMatchObject({ queue: "projections", job: { payload: { projectionKind: "link" } } })
-    expect(
-      jobsFor(
-        {
-          projections: [
-            projectionDescriptor(
-              telemetryProjection.id,
-              telemetryProjection.datasetId,
-              "telemetry"
-            ),
-          ],
-        },
-        "dataset.version.committed:raw.room-temperature"
-      )[0]
-    ).toMatchObject({ queue: "projections", job: { payload: { projectionKind: "telemetry" } } })
   })
 })

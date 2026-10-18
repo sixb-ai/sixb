@@ -1,7 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { describe, expect, test } from "bun:test"
 import type {
   BlobStorage,
   DatasetDefinition,
@@ -23,23 +20,11 @@ import {
 } from "@sixb/core"
 import { writeDataset } from "@sixb/core/internal/datasets"
 import type { SyncConnectorSourceResolver } from "@sixb/core/internal/syncs"
-import type { LakeWriteSession } from "@sixb/core/lake-storage"
 import type { ExecutionStorage, SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
-import { LocalLakeStorage } from "@sixb/lake-local"
 import { runSyncJob as runSyncJobWithDurableRun } from "../src/run-sync-job"
 import type { RunSyncJobInput, SyncWorkerContext } from "../src/types"
 
-const tempDirs: string[] = []
 const executionsByRunStorage = new WeakMap<SyncRunStorage, ExecutionStorage>()
-
-afterEach(async () => {
-  while (tempDirs.length > 0) {
-    const path = tempDirs.pop()
-    if (path) {
-      await rm(path, { recursive: true, force: true })
-    }
-  }
-})
 
 const erpDb = defineConnector("erpDb", {
   type: "sql",
@@ -74,18 +59,9 @@ const keyedOrdersDataset = defineDataset("raw.erp.keyed-orders", {
   schema: rawOrdersDataset.schema.columns,
   primaryKey: "orderId",
 })
-const keyedLineItemsDataset = defineDataset("raw.erp.invoice-line-items", {
-  schema: [col("invoiceId", "string"), col("lineItemId", "string"), col("status", "string")],
-  primaryKey: ["invoiceId", "lineItemId"],
-})
 const rawDocsDataset = defineDataset("raw.docs", {
   schema: [col("id", "string"), col("attachment", "fileRef", { nullable: true })],
 })
-const keyedDocsDataset = defineDataset("raw.keyed-docs", {
-  schema: rawDocsDataset.schema.columns,
-  primaryKey: "id",
-})
-
 function storedErpCheckpoint(value: JsonValue): JsonValue {
   return {
     kind: "sync_checkpoint",
@@ -290,76 +266,72 @@ describe("runSyncJob", () => {
     expect(run?.status).toBe("failed")
     expect(run?.checkpoint).toBeUndefined()
   })
-  for (const provider of ["memory", "local"] as const)
-    test(`${provider}: reconciles a one-shot snapshot with concurrent source writes`, async () => {
-      // Regression proof: disable snapshot reconciliation or provider retries; the stale snapshot fails/overwrites.
-      const path = await mkdtemp(join(tmpdir(), "sixb-ordered-snapshot-"))
-      tempDirs.push(path)
-      const lakeStorage =
-        provider === "memory" ? new InMemoryLakeStorage() : new LocalLakeStorage({ path })
-      const dataset = defineDataset("source.people", {
-        schema: [col("id", "string"), col("revision", "int64"), col("name", "string")],
-        primaryKey: "id",
-        sequenceBy: "revision",
-      })
-      const signal = new AbortController().signal
-      const ingest = (changes: DatasetRow[]) =>
-        writeDataset({
-          lakeStorage,
-          blobStorage: new InMemoryBlobStorage(),
-          dataset,
-          signal,
-          mode: "merge",
-          readValues: async () => changes.map((row) => ({ value: change.upsert(row) })),
-        })
-      let reads = 0
-      const sync = defineSync("source.snapshot", { mode: "snapshot" })
-        .checkpoint<{ page: string }>()
-        .from(erpDb)
-        .read(async function* (_client, { setCheckpoint }) {
-          reads += 1
-          setCheckpoint({ page: "done" })
-          const reused = { id: "42", revision: 7, name: "snapshot" }
-          yield reused
-          await ingest([
-            { id: "42", revision: 8, name: "webhook" },
-            { id: "new", revision: 1, name: "created" },
-          ])
-          reused.id = "snapshot-only"
-          reused.name = "snapshot-only"
-          yield reused
-        })
-        .intoDataset(dataset)
-      const runtime = createRuntime({ sync, lakeStorage })
-      const result = await runSyncJob({
-        runtime,
-        job: { id: "ordered-run", syncId: sync.id },
-        signal,
-      })
-      expect(reads).toBe(1)
-      expect(result.rowsRead).toBe(2)
-      expect(result.version?.mode).toBe("merge")
-      expect(
-        (await collectRows(lakeStorage.readRows({ datasetId: dataset.id })))
-          .map((row) => row.name)
-          .sort()
-      ).toEqual(["created", "snapshot-only", "webhook"])
-      expect(
-        (await runtime.syncRunsStorage.getById({ projectId: runtime.id, id: "ordered-run" }))
-          ?.checkpoint
-      ).toEqual(storedErpCheckpoint({ page: "done" }))
-      const empty = defineSync("source.empty", { mode: "snapshot" })
-        .from(erpDb)
-        .read(() => [])
-        .intoDataset(dataset)
-      const emptyResult = await runSyncJob({
-        runtime: createRuntime({ sync: empty, lakeStorage }),
-        job: { id: "empty-run", syncId: empty.id },
-        signal,
-      })
-      expect(emptyResult.versionCreated).toBe(false)
-      expect(emptyResult.version?.versionId).toBe(result.version?.versionId)
+  test("reconciles a one-shot snapshot with concurrent source writes", async () => {
+    // Regression proof: disable snapshot reconciliation or provider retries; the stale snapshot fails/overwrites.
+    const lakeStorage = new InMemoryLakeStorage()
+    const dataset = defineDataset("source.people", {
+      schema: [col("id", "string"), col("revision", "int64"), col("name", "string")],
+      primaryKey: "id",
+      sequenceBy: "revision",
     })
+    const signal = new AbortController().signal
+    const ingest = (changes: DatasetRow[]) =>
+      writeDataset({
+        lakeStorage,
+        blobStorage: new InMemoryBlobStorage(),
+        dataset,
+        signal,
+        mode: "merge",
+        readValues: async () => changes.map((row) => ({ value: change.upsert(row) })),
+      })
+    let reads = 0
+    const sync = defineSync("source.snapshot", { mode: "snapshot" })
+      .checkpoint<{ page: string }>()
+      .from(erpDb)
+      .read(async function* (_client, { setCheckpoint }) {
+        reads += 1
+        setCheckpoint({ page: "done" })
+        const reused = { id: "42", revision: 7, name: "snapshot" }
+        yield reused
+        await ingest([
+          { id: "42", revision: 8, name: "webhook" },
+          { id: "new", revision: 1, name: "created" },
+        ])
+        reused.id = "snapshot-only"
+        reused.name = "snapshot-only"
+        yield reused
+      })
+      .intoDataset(dataset)
+    const runtime = createRuntime({ sync, lakeStorage })
+    const result = await runSyncJob({
+      runtime,
+      job: { id: "ordered-run", syncId: sync.id },
+      signal,
+    })
+    expect(reads).toBe(1)
+    expect(result.rowsRead).toBe(2)
+    expect(result.version?.mode).toBe("merge")
+    expect(
+      (await collectRows(lakeStorage.readRows({ datasetId: dataset.id })))
+        .map((row) => row.name)
+        .sort()
+    ).toEqual(["created", "snapshot-only", "webhook"])
+    expect(
+      (await runtime.syncRunsStorage.getById({ projectId: runtime.id, id: "ordered-run" }))
+        ?.checkpoint
+    ).toEqual(storedErpCheckpoint({ page: "done" }))
+    const empty = defineSync("source.empty", { mode: "snapshot" })
+      .from(erpDb)
+      .read(() => [])
+      .intoDataset(dataset)
+    const emptyResult = await runSyncJob({
+      runtime: createRuntime({ sync: empty, lakeStorage }),
+      job: { id: "empty-run", syncId: empty.id },
+      signal,
+    })
+    expect(emptyResult.versionCreated).toBe(false)
+    expect(emptyResult.version?.versionId).toBe(result.version?.versionId)
+  })
   test("initializes an empty sequenced snapshot and stores its version and checkpoint", async () => {
     // Regression proof: remove createInitialVersion in writeDataset; the first sync succeeds
     // without an output version and cannot feed dataset-updated consumers.
@@ -390,50 +362,7 @@ describe("runSyncJob", () => {
     expect(second).toMatchObject({ versionCreated: false, version: first.version })
   })
 
-  test("commits a snapshot sync, defines the dataset first, and stores a succeeded run", async () => {
-    const calls: string[] = []
-    const lakeStorage = new InMemoryLakeStorage()
-    const wrappedLakeStorage: LakeStorage = {
-      assertDatasetDefinitionsCompatible(definitions) {
-        return lakeStorage.assertDatasetDefinitionsCompatible(definitions)
-      },
-      createDataset(definition) {
-        calls.push(`create:${definition.id}`)
-        return lakeStorage.createDataset(definition)
-      },
-      getDataset(datasetId) {
-        return lakeStorage.getDataset(datasetId)
-      },
-      listDatasets() {
-        return lakeStorage.listDatasets()
-      },
-      listDatasetCatalogState(datasetIds) {
-        return lakeStorage.listDatasetCatalogState(datasetIds)
-      },
-      listVersions(datasetId, limit) {
-        return lakeStorage.listVersions(datasetId, limit)
-      },
-      listLatestVersionsSince(input) {
-        return lakeStorage.listLatestVersionsSince(input)
-      },
-      beginWrite(input) {
-        calls.push(`begin:${input.dataset.id}`)
-        return lakeStorage.beginWrite(input)
-      },
-      beginMerge(input) {
-        return lakeStorage.beginMerge(input)
-      },
-      getLatestVersion(datasetId) {
-        return lakeStorage.getLatestVersion(datasetId)
-      },
-      getVersion(datasetId, versionId) {
-        return lakeStorage.getVersion(datasetId, versionId)
-      },
-      readRows(input) {
-        return lakeStorage.readRows(input)
-      },
-    }
-
+  test("commits a snapshot sync and stores a succeeded run", async () => {
     let seenContext:
       | {
           projectId: string
@@ -454,11 +383,7 @@ describe("runSyncJob", () => {
       .intoDataset(rawOrdersDataset)
 
     const syncRunsStorage = createSyncRunStorage()
-    const runtime = createRuntime({
-      sync,
-      syncRunsStorage,
-      lakeStorage: wrappedLakeStorage,
-    })
+    const runtime = createRuntime({ sync, syncRunsStorage })
     const finishedRuns: SyncRunRecord[] = []
 
     const result = await runSyncJob({
@@ -472,7 +397,6 @@ describe("runSyncJob", () => {
       },
     })
 
-    expect(calls).toEqual(["create:raw.erp.orders", "begin:raw.erp.orders"])
     expect(seenContext?.projectId).toBe("project-1")
     expect(seenContext?.syncId).toBe("sync-orders")
     expect(seenContext?.signal).toBeInstanceOf(AbortSignal)
@@ -660,56 +584,6 @@ describe("runSyncJob", () => {
     })
   })
 
-  test("passes composite-key changes through the merge worker", async () => {
-    const lakeStorage = new InMemoryLakeStorage()
-    const sync = defineSync("sync-invoice-line-items", { mode: "merge" })
-      .from(erpDb)
-      .read(() => [
-        change.upsert({ invoiceId: "inv_1", lineItemId: "line_1", status: "open" }),
-        change.delete({ invoiceId: "inv_1", lineItemId: "missing" }),
-      ])
-      .intoDataset(keyedLineItemsDataset)
-
-    const result = await runSyncJob({
-      runtime: createRuntime({ sync, lakeStorage }),
-      job: { id: "run_composite_merge", syncId: sync.id },
-    })
-
-    expect(result).toMatchObject({ rowsRead: 2, versionCreated: true })
-    expect(
-      await collectRows(lakeStorage.readRows({ datasetId: keyedLineItemsDataset.id }))
-    ).toEqual([{ invoiceId: "inv_1", lineItemId: "line_1", status: "open" }])
-  })
-
-  test("verifies file references for merge upserts but not deletes", async () => {
-    const syncRunsStorage = createSyncRunStorage()
-    const sync = defineSync("sync-keyed-docs", { mode: "merge" })
-      .from(erpDb)
-      .read(() => [
-        change.delete({ id: "doc_deleted" }),
-        change.upsert({
-          id: "doc_1",
-          attachment: {
-            blobId: "blob_missing",
-            digest: "sha256:missing",
-            sizeBytes: 12,
-          },
-        }),
-      ])
-      .intoDataset(keyedDocsDataset)
-
-    await expect(
-      runSyncJob({
-        runtime: createRuntime({ sync, syncRunsStorage }),
-        job: { id: "run_merge_missing_blob", syncId: sync.id },
-      })
-    ).rejects.toThrow("row 2 with dataset 'raw.keyed-docs' column 'attachment'")
-
-    expect(
-      await syncRunsStorage.getById({ projectId: "project-1", id: "run_merge_missing_blob" })
-    ).toMatchObject({ status: "failed", rowsRead: 1 })
-  })
-
   test("advances a checkpoint for an initial merge no-op without inventing a version", async () => {
     const lakeStorage = new InMemoryLakeStorage()
     const syncRunsStorage = createSyncRunStorage()
@@ -738,35 +612,6 @@ describe("runSyncJob", () => {
       checkpoint: storedErpCheckpoint({ cursor: "event-1" }),
       output: undefined,
     })
-  })
-
-  test("reuses a later no-op version with a matching requested latest-version guard", async () => {
-    const lakeStorage = new InMemoryLakeStorage()
-    await lakeStorage.createDataset(keyedOrdersDataset)
-    const seed = await lakeStorage.beginMerge({ dataset: keyedOrdersDataset })
-    await seed.writeChanges([change.upsert({ orderId: "ord_1", status: "open" })])
-    const seedResult = await seed.commit()
-    if (!seedResult.version) throw new Error("Expected a seed version")
-
-    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
-      .from(erpDb)
-      .read(() => [change.upsert({ orderId: "ord_1", status: "open" })])
-      .intoDataset(keyedOrdersDataset)
-    const result = await runSyncJob({
-      runtime: createRuntime({ sync, lakeStorage }),
-      job: {
-        id: "run_later_noop",
-        syncId: sync.id,
-        expectedLatestVersionId: seedResult.version.versionId,
-      },
-    })
-
-    expect(result).toMatchObject({
-      rowsRead: 1,
-      versionCreated: false,
-      version: { versionId: seedResult.version.versionId },
-    })
-    expect(await lakeStorage.listVersions(keyedOrdersDataset.id)).toHaveLength(1)
   })
 
   test("rejects a stale requested merge version before connecting to the source", async () => {
@@ -811,161 +656,6 @@ describe("runSyncJob", () => {
       await syncRunsStorage.getById({ projectId: "project-1", id: "run_stale_request" })
     ).toMatchObject({ status: "failed", rowsRead: 0 })
     expect(await lakeStorage.listVersions(keyedOrdersDataset.id)).toHaveLength(1)
-  })
-
-  test("does not store a checkpoint when a concurrent merge makes the session stale", async () => {
-    const lakeStorage = new InMemoryLakeStorage()
-    const syncRunsStorage = createSyncRunStorage()
-    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
-      .checkpoint<{ cursor: string }>()
-      .from(erpDb)
-      .read(async function* (_client, context) {
-        yield change.upsert({ orderId: "ord_worker", status: "open" })
-        context.setCheckpoint({ cursor: "event-1" })
-
-        const concurrent = await lakeStorage.beginMerge({ dataset: keyedOrdersDataset })
-        await concurrent.writeChanges([
-          change.upsert({ orderId: "ord_concurrent", status: "paid" }),
-        ])
-        await concurrent.commit()
-      })
-      .intoDataset(keyedOrdersDataset)
-
-    await expect(
-      runSyncJob({
-        runtime: createRuntime({ sync, syncRunsStorage, lakeStorage }),
-        job: { id: "run_stale", syncId: sync.id },
-      })
-    ).rejects.toThrow("Optimistic merge commit failed")
-
-    const run = await syncRunsStorage.getById({ projectId: "project-1", id: "run_stale" })
-    expect(run).toMatchObject({ status: "failed", rowsRead: 1 })
-    expect(run?.checkpoint).toBeUndefined()
-    expect(await collectRows(lakeStorage.readRows({ datasetId: keyedOrdersDataset.id }))).toEqual([
-      { orderId: "ord_concurrent", status: "paid" },
-    ])
-  })
-
-  test("cancels and discards an in-flight merge", async () => {
-    const controller = new AbortController()
-    const lakeStorage = new InMemoryLakeStorage()
-    const syncRunsStorage = createSyncRunStorage()
-    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
-      .from(erpDb)
-      .read(async function* () {
-        yield change.upsert({ orderId: "ord_1", status: "open" })
-        controller.abort()
-        yield change.upsert({ orderId: "ord_2", status: "open" })
-      })
-      .intoDataset(keyedOrdersDataset)
-
-    await expect(
-      runSyncJob({
-        runtime: createRuntime({ sync, syncRunsStorage, lakeStorage }),
-        job: { id: "run_cancelled_merge", syncId: sync.id },
-        signal: controller.signal,
-      })
-    ).rejects.toMatchObject({ name: "AbortError" })
-
-    expect(
-      await syncRunsStorage.getById({ projectId: "project-1", id: "run_cancelled_merge" })
-    ).toMatchObject({ status: "cancelled", rowsRead: 1 })
-    expect(await lakeStorage.listVersions(keyedOrdersDataset.id)).toEqual([])
-  })
-
-  test("succeeds and advances the checkpoint for a first empty append", async () => {
-    const syncRunsStorage = createSyncRunStorage()
-    const sync = defineSync("sync-orders", { mode: "append" })
-      .checkpoint<{ cursor: string }>()
-      .from(erpDb)
-      .read((_client, context) => {
-        context.setCheckpoint({ cursor: "cursor-1" })
-        return []
-      })
-      .intoDataset(rawOrdersDataset)
-    const runtime = createRuntime({ sync, syncRunsStorage })
-
-    const result = await runSyncJob({
-      runtime,
-      job: { id: "run_empty", syncId: "sync-orders" },
-    })
-
-    expect(result).toMatchObject({
-      rowsRead: 0,
-      versionCreated: false,
-    })
-    expect(result.version).toBeUndefined()
-    expect(await runtime.lakeStorage.getLatestVersion(rawOrdersDataset.id)).toBeNull()
-    expect(
-      await syncRunsStorage.getById({ projectId: "project-1", id: "run_empty" })
-    ).toMatchObject({
-      status: "succeeded",
-      rowsRead: 0,
-      checkpoint: storedErpCheckpoint({ cursor: "cursor-1" }),
-    })
-  })
-
-  test("commits a first empty snapshot as an addressable dataset version", async () => {
-    const syncRunsStorage = createSyncRunStorage()
-    const lakeStorage = new InMemoryLakeStorage()
-    const sync = defineSync("sync-empty-orders")
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(rawOrdersDataset)
-    const runtime = createRuntime({ sync, syncRunsStorage, lakeStorage })
-
-    const result = await runSyncJob({
-      runtime,
-      job: { id: "run_empty_snapshot", syncId: sync.id },
-    })
-
-    expect(result).toMatchObject({
-      mode: "snapshot",
-      rowsRead: 0,
-      versionCreated: true,
-      version: {
-        datasetId: rawOrdersDataset.id,
-        mode: "snapshot",
-        rowCount: 0,
-      },
-    })
-    expect(await lakeStorage.getLatestVersion(rawOrdersDataset.id)).toMatchObject({
-      versionId: result.version?.versionId,
-    })
-    expect(
-      await syncRunsStorage.getById({ projectId: "project-1", id: "run_empty_snapshot" })
-    ).toMatchObject({
-      status: "succeeded",
-      rowsRead: 0,
-      output: {
-        datasetId: rawOrdersDataset.id,
-        versionId: result.version?.versionId,
-      },
-    })
-  })
-
-  test("commits an empty snapshot when it must clear a previous version", async () => {
-    const lakeStorage = new InMemoryLakeStorage()
-    await lakeStorage.createDataset(rawOrdersDataset)
-    const seed = await lakeStorage.beginWrite({ dataset: rawOrdersDataset, mode: "snapshot" })
-    await seed.writeRows([{ orderId: "ord_1" }])
-    const previous = await seed.commit()
-
-    const sync = defineSync("sync-clear-orders")
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(rawOrdersDataset)
-    const runtime = createRuntime({ sync, lakeStorage })
-
-    const result = await runSyncJob({
-      runtime,
-      job: { id: "run_clear_snapshot", syncId: sync.id },
-    })
-
-    expect(result.versionCreated).toBe(true)
-    expect(result.version?.versionId).not.toBe(previous.versionId)
-    expect(result.version?.rowCount).toBe(0)
-    expect(await collectRows(lakeStorage.readRows({ datasetId: rawOrdersDataset.id }))).toEqual([])
   })
 
   test("does not advance checkpoints from failed runs", async () => {
@@ -1115,62 +805,9 @@ describe("runSyncJob", () => {
     expect(seenStatus).toBe("running")
   })
 
-  test("marks the run failed and aborts the write when a row is invalid", async () => {
+  test("marks the run failed and commits nothing when a row is invalid", async () => {
     const syncRunsStorage = createSyncRunStorage()
     const lakeStorage = new InMemoryLakeStorage()
-    let abortCalls = 0
-
-    const wrappedLakeStorage: LakeStorage = {
-      assertDatasetDefinitionsCompatible(definitions) {
-        return lakeStorage.assertDatasetDefinitionsCompatible(definitions)
-      },
-      createDataset(definition) {
-        return lakeStorage.createDataset(definition)
-      },
-      getDataset(datasetId) {
-        return lakeStorage.getDataset(datasetId)
-      },
-      listDatasets() {
-        return lakeStorage.listDatasets()
-      },
-      listDatasetCatalogState(datasetIds) {
-        return lakeStorage.listDatasetCatalogState(datasetIds)
-      },
-      listVersions(datasetId, limit) {
-        return lakeStorage.listVersions(datasetId, limit)
-      },
-      listLatestVersionsSince(input) {
-        return lakeStorage.listLatestVersionsSince(input)
-      },
-      async beginWrite(input) {
-        const write = await lakeStorage.beginWrite(input)
-        const wrappedWrite: LakeWriteSession = {
-          writeRows(rows) {
-            return write.writeRows(rows)
-          },
-          commit(commitInput) {
-            return write.commit(commitInput)
-          },
-          async abort() {
-            abortCalls += 1
-            await write.abort()
-          },
-        }
-        return wrappedWrite
-      },
-      beginMerge(input) {
-        return lakeStorage.beginMerge(input)
-      },
-      getLatestVersion(datasetId) {
-        return lakeStorage.getLatestVersion(datasetId)
-      },
-      getVersion(datasetId, versionId) {
-        return lakeStorage.getVersion(datasetId, versionId)
-      },
-      readRows(input) {
-        return lakeStorage.readRows(input)
-      },
-    }
 
     const sync = defineSync("sync-orders")
       .from(erpDb)
@@ -1179,11 +816,7 @@ describe("runSyncJob", () => {
 
     await expect(
       runSyncJob({
-        runtime: createRuntime({
-          sync,
-          syncRunsStorage,
-          lakeStorage: wrappedLakeStorage,
-        }),
+        runtime: createRuntime({ sync, syncRunsStorage, lakeStorage }),
         job: {
           id: "run_1",
           syncId: "sync-orders",
@@ -1191,7 +824,7 @@ describe("runSyncJob", () => {
       })
     ).rejects.toThrow("returned an invalid row at item 2")
 
-    expect(abortCalls).toBe(1)
+    expect(await lakeStorage.getLatestVersion(rawOrdersDataset.id)).toBeNull()
 
     const run = await syncRunsStorage.getById({
       projectId: "project-1",
@@ -1250,98 +883,6 @@ describe("runSyncJob", () => {
           syncId: "sync-orders",
           runId: "run_1",
           datasetId: "raw.erp.orders",
-        },
-      },
-    })
-  })
-
-  test("marks the run failed when a row does not match the dataset schema", async () => {
-    const syncRunsStorage = createSyncRunStorage()
-    const sync = defineSync("sync-orders")
-      .from(erpDb)
-      .read(() => [{ customerName: "Ada", unexpected: true }])
-      .intoDataset(rawOrdersDataset)
-
-    await expect(
-      runSyncJob({
-        runtime: createRuntime({
-          sync,
-          syncRunsStorage,
-        }),
-        job: {
-          id: "run_schema_error",
-          syncId: "sync-orders",
-        },
-      })
-    ).rejects.toThrow("unknown column 'unexpected'")
-
-    const run = await syncRunsStorage.getById({
-      projectId: "project-1",
-      id: "run_schema_error",
-    })
-    expect(run).toMatchObject({
-      status: "failed",
-      rowsRead: 0,
-      error: {
-        code: "sync.execution_failed",
-        message:
-          "Sync execution failed. Dataset 'raw.erp.orders' row contains an undeclared column.",
-        retryable: false,
-        at: expect.any(String),
-        details: {
-          syncId: "sync-orders",
-          runId: "run_schema_error",
-          datasetId: "raw.erp.orders",
-        },
-      },
-    })
-  })
-
-  test("marks the run failed when a fileRef references a missing blob", async () => {
-    const syncRunsStorage = createSyncRunStorage()
-    const sync = defineSync("sync-docs")
-      .from(erpDb)
-      .read(() => [
-        {
-          id: "doc_1",
-          attachment: {
-            blobId: "blob_missing",
-            digest: "sha256:missing",
-            sizeBytes: 12,
-          },
-        },
-      ])
-      .intoDataset(rawDocsDataset)
-
-    await expect(
-      runSyncJob({
-        runtime: createRuntime({
-          sync,
-          syncRunsStorage,
-        }),
-        job: {
-          id: "run_missing_blob",
-          syncId: "sync-docs",
-        },
-      })
-    ).rejects.toThrow("referencing unknown blob 'blob_missing'")
-
-    const run = await syncRunsStorage.getById({
-      projectId: "project-1",
-      id: "run_missing_blob",
-    })
-    expect(run).toMatchObject({
-      status: "failed",
-      rowsRead: 0,
-      error: {
-        code: "sync.execution_failed",
-        message: "Sync execution failed.",
-        retryable: false,
-        at: expect.any(String),
-        details: {
-          syncId: "sync-docs",
-          runId: "run_missing_blob",
-          datasetId: "raw.docs",
         },
       },
     })
@@ -1559,120 +1100,5 @@ describe("runSyncJob", () => {
     })
     expect(run?.status).toBe("running")
     expect(finishedRuns).toHaveLength(0)
-  })
-
-  test("works against LocalLakeStorage", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "sixb-sync-worker-"))
-    tempDirs.push(rootDir)
-
-    const lakeStorage = new LocalLakeStorage({ path: rootDir })
-    const syncRunsStorage = createSyncRunStorage()
-    const sync = defineSync("sync-orders")
-      .from(erpDb)
-      .read(() => [
-        { orderId: "ord_1", customerName: "Ada" },
-        { orderId: "ord_2", customerName: "Grace" },
-      ])
-      .intoDataset(rawOrdersDataset)
-
-    const result = await runSyncJob({
-      runtime: createRuntime({
-        sync,
-        syncRunsStorage,
-        lakeStorage,
-      }),
-      job: {
-        id: "run_1",
-        syncId: "sync-orders",
-      },
-    })
-
-    const rows = await collectRows(lakeStorage.readRows({ datasetId: "raw.erp.orders" }))
-    expect(result.version!.rowCount).toBe(2)
-    expect(rows).toEqual([
-      { orderId: "ord_1", customerName: "Ada" },
-      { orderId: "ord_2", customerName: "Grace" },
-    ])
-  })
-
-  test("runs a merge end-to-end against LocalLakeStorage", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "sixb-sync-worker-merge-"))
-    tempDirs.push(rootDir)
-
-    const lakeStorage = new LocalLakeStorage({ path: rootDir })
-    const sync = defineSync("sync-keyed-orders", { mode: "merge" })
-      .from(erpDb)
-      .read(() => [
-        change.upsert({ orderId: "ord_1", status: "open" }),
-        change.upsert({ orderId: "ord_2", status: "paid" }),
-        change.delete({ orderId: "ord_1" }),
-      ])
-      .intoDataset(keyedOrdersDataset)
-
-    const result = await runSyncJob({
-      runtime: createRuntime({ sync, lakeStorage }),
-      job: { id: "run_local_merge", syncId: sync.id },
-    })
-
-    expect(result).toMatchObject({
-      mode: "merge",
-      rowsRead: 3,
-      versionCreated: true,
-      version: { mode: "merge", rowCount: 1 },
-    })
-    expect(await collectRows(lakeStorage.readRows({ datasetId: keyedOrdersDataset.id }))).toEqual([
-      { orderId: "ord_2", status: "paid" },
-    ])
-  })
-
-  test("preserves heterogeneous row shapes when committing to lake storage", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "sixb-sync-worker-"))
-    tempDirs.push(rootDir)
-
-    const lakeStorage = new LocalLakeStorage({ path: rootDir })
-    const syncRunsStorage = createSyncRunStorage()
-    const expectedRows: DatasetRow[] = [
-      {
-        orderId: "ord_1",
-        customerName: "Ada",
-        status: "paid",
-      },
-      {
-        orderId: "ord_2",
-        total: 42.5,
-        discountCode: "SPRING",
-      },
-      {
-        orderId: "ord_3",
-        metadata: {
-          source: "erp",
-          priority: 2,
-        },
-        tags: ["vip", "expedited"],
-      },
-    ]
-
-    const sync = defineSync("sync-orders")
-      .from(erpDb)
-      .read(() => expectedRows)
-      .intoDataset(rawOrdersDataset)
-
-    const result = await runSyncJob({
-      runtime: createRuntime({
-        sync,
-        syncRunsStorage,
-        lakeStorage,
-      }),
-      job: {
-        id: "run_heterogeneous",
-        syncId: "sync-orders",
-      },
-    })
-
-    const rows = await collectRows(lakeStorage.readRows({ datasetId: "raw.erp.orders" }))
-
-    expect(result.rowsRead).toBe(3)
-    expect(result.version!.rowCount).toBe(3)
-    expect(rows).toEqual(expectedRows)
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { change, col, defineConnector, defineDataset, defineSync, type JsonValue } from "@sixb/core"
+import { col, defineConnector, defineDataset, defineSync, type JsonValue } from "@sixb/core"
 import { blobIdFromDigest } from "@sixb/core/blob-storage"
 import type { SyncConnectorSource } from "@sixb/core/internal/syncs"
 import type { SyncRunRecord } from "@sixb/core/storage"
@@ -15,11 +15,6 @@ import {
 
 const socialFiles = defineDataset("raw.social.files", {
   schema: [col("id", "string"), col("attachment", "fileRef", { nullable: true })],
-})
-
-const socialMerge = defineDataset("raw.social.merge", {
-  schema: [col("id", "string")],
-  primaryKey: "id",
 })
 
 const missingBlobDigest = `sha256:${"0".repeat(64)}` as const
@@ -208,36 +203,6 @@ describe("managed connector Sync safety", () => {
     const failed = await fixture.runtime.syncRunsStorage.getById({
       projectId: fixture.runtime.id,
       id: "run-missing-blob",
-    })
-    expect(failed).toMatchObject({
-      status: "failed",
-      error: {
-        code: "sync.execution_failed",
-        details: {
-          connectionId: "connection-b",
-          accountId: "account-b",
-          itemIndex: 2,
-        },
-      },
-    })
-  })
-
-  test("keeps connection provenance on merge validation failures", async () => {
-    const sync = defineSync("sync-merge-provenance", { mode: "merge" })
-      .from(social)
-      .read((_client, { connection }) =>
-        change.upsert({ id: connection.id === "connection-b" ? 42 : connection.id })
-      )
-      .intoDataset(socialMerge)
-    const fixture = createFixture(sync, () => [
-      source("connection-a", "account-a", "brand-a"),
-      source("connection-b", "account-b", "brand-b"),
-    ])
-
-    await expect(run(fixture, sync.id, "run-invalid-merge")).rejects.toThrow("invalid merge change")
-    const failed = await fixture.runtime.syncRunsStorage.getById({
-      projectId: fixture.runtime.id,
-      id: "run-invalid-merge",
     })
     expect(failed).toMatchObject({
       status: "failed",

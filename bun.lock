@@ -883,7 +883,6 @@
       "version": "0.1.21",
       "devDependencies": {
         "@sixb/core": "workspace:*",
-        "@sixb/lake-local": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
       },

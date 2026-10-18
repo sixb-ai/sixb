@@ -13,9 +13,6 @@
   "references": [
     {
       "path": "../core/tsconfig.build.json"
-    },
-    {
-      "path": "../../storage/lake-local/tsconfig.build.json"
     }
   ]
 }
