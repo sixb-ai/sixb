@@ -7,7 +7,7 @@ import {
   type FrameStart,
   frameStartHash,
   parseFrameEvent,
-} from "@sixb/core/internal/artifacts/frame-protocol"
+} from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import {

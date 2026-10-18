@@ -1,14 +1,10 @@
 import { describe, expect, jest, test } from "bun:test"
 import type { GetArtifactVersionResponse } from "@sixb/client"
-import {
-  DECK_KEYS,
-  type DeckMode,
-  FRAME_PROTOCOL,
-  type FrameEvent,
-} from "@sixb/core/internal/artifacts/frame-protocol"
+import { type DeckMode, FRAME_PROTOCOL, type FrameEvent } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
 import { createRef } from "react"
+import { DECK_KEYS } from "../../core/src/artifacts/frames/protocol"
 import { leaveEscapeToDeck } from "../src/agent/artifact-panel"
 import { artifactFileSource } from "../src/artifacts/file-source"
 import { ArtifactFrame, type ArtifactFrameHandle } from "../src/artifacts/frame"
