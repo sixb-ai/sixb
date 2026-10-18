@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
+import { afterEach, beforeEach, expect, jest, test } from "bun:test"
 import { defineObjectType, defineSchedule, prop, SixbHost } from "../src"
 import type { StoredScheduleTriggeredEvent } from "../src/events"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -11,129 +11,32 @@ const Stub = defineObjectType({
 
 const MINUTE = 60_000
 
-describe("Scheduler integration with SixbHost", () => {
-  beforeEach(() => {
-    jest.useFakeTimers()
+beforeEach(() => {
+  jest.useFakeTimers()
+})
+
+afterEach(() => {
+  jest.useRealTimers()
+})
+
+// The host wiring only: SchedulerRuntime's own timing, idempotence and shutdown semantics are
+// proven in scheduler-runtime.test.ts.
+test("SixbHost.scheduler emits its schedules to the host's events until stopped", async () => {
+  const sixb = new SixbHost({
+    ontology: [Stub],
+    schedules: [defineSchedule("hourly").cron("0 * * * *")],
+    ...createTestRuntimeDeps(),
   })
 
-  afterEach(() => {
-    jest.useRealTimers()
-  })
+  await sixb.scheduler.start()
+  jest.advanceTimersByTime(60 * MINUTE)
 
-  test("scheduler.start() emits events", async () => {
-    const deps = createTestRuntimeDeps()
-    const schedule = defineSchedule("hourly").cron("0 * * * *")
+  const fired = await sixb.events.read({ types: ["schedule.triggered"] })
+  expect(fired).toHaveLength(1)
+  expect((fired[0] as StoredScheduleTriggeredEvent).payload.scheduleId).toBe("hourly")
 
-    const sixb = new SixbHost({
-      ontology: [Stub],
-      schedules: [schedule],
-      ...deps,
-    })
+  await sixb.scheduler.stop()
+  jest.advanceTimersByTime(120 * MINUTE)
 
-    await sixb.scheduler.start()
-
-    // Advance past the next hour mark
-    jest.advanceTimersByTime(60 * MINUTE)
-
-    const events = await sixb.events.read({
-      types: ["schedule.triggered"],
-    })
-    expect(events.length).toBeGreaterThanOrEqual(1)
-    expect((events[0] as StoredScheduleTriggeredEvent).payload.scheduleId).toBe("hourly")
-
-    await sixb.scheduler.stop()
-  })
-
-  test("scheduler.stop() stops emission", async () => {
-    const deps = createTestRuntimeDeps()
-    const schedule = defineSchedule("s1").cron("0 * * * *")
-
-    const sixb = new SixbHost({
-      ontology: [Stub],
-      schedules: [schedule],
-      ...deps,
-    })
-
-    await sixb.scheduler.start()
-    await sixb.scheduler.stop()
-
-    jest.advanceTimersByTime(120 * MINUTE)
-
-    const events = await sixb.events.read({
-      types: ["schedule.triggered"],
-    })
-    expect(events).toHaveLength(0)
-  })
-
-  test("no schedules is a silent no-op", async () => {
-    const deps = createTestRuntimeDeps()
-
-    const sixb = new SixbHost({
-      ontology: [Stub],
-      ...deps,
-    })
-
-    await sixb.scheduler.start()
-    await sixb.scheduler.stop()
-    // No errors
-  })
-
-  test("scheduler.start() is idempotent", async () => {
-    const deps = createTestRuntimeDeps()
-    const schedule = defineSchedule("s1").cron("0 * * * *")
-
-    const sixb = new SixbHost({
-      ontology: [Stub],
-      schedules: [schedule],
-      ...deps,
-    })
-
-    await sixb.scheduler.start()
-    await sixb.scheduler.start() // second call is no-op
-
-    jest.advanceTimersByTime(60 * MINUTE)
-
-    const events = await sixb.events.read({
-      types: ["schedule.triggered"],
-    })
-    // Should not have duplicated timers
-    expect(events.length).toBeGreaterThanOrEqual(1)
-
-    await sixb.scheduler.stop()
-  })
-
-  test("full lifecycle", async () => {
-    const deps = createTestRuntimeDeps()
-    const schedule = defineSchedule("every-hour").cron("0 * * * *")
-
-    const sixb = new SixbHost({
-      ontology: [Stub],
-      schedules: [schedule],
-      ...deps,
-    })
-
-    // Start
-    await sixb.scheduler.start()
-
-    // Fire
-    jest.advanceTimersByTime(60 * MINUTE)
-
-    let events = await sixb.events.read({
-      types: ["schedule.triggered"],
-    })
-    expect(events.length).toBeGreaterThanOrEqual(1)
-
-    // Stop
-    await sixb.scheduler.stop()
-
-    const countBefore = events.length
-
-    jest.advanceTimersByTime(120 * MINUTE)
-
-    events = await sixb.events.read({
-      types: ["schedule.triggered"],
-    })
-    // No new events after stop
-    expect(events).toHaveLength(countBefore)
-  })
+  expect(await sixb.events.read({ types: ["schedule.triggered"] })).toHaveLength(1)
 })

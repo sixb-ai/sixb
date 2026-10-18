@@ -7,106 +7,62 @@ import {
 } from "../src/schedules"
 
 describe("defineSchedule", () => {
-  test("rejects empty ids", () => {
-    expect(() => defineSchedule("")).toThrow(ScheduleValidationError)
-    expect(() => defineSchedule("")).toThrow("Schedule id must not be empty")
+  test.each([
+    [
+      "an empty id",
+      () => defineSchedule(""),
+      ScheduleValidationError,
+      "Schedule id must not be empty",
+    ],
+    [
+      "a whitespace-only id",
+      () => defineSchedule("   "),
+      ScheduleValidationError,
+      "Schedule id must not be empty",
+    ],
+    [
+      "an empty cron expression",
+      () => defineSchedule("s1").cron(""),
+      ScheduleValidationError,
+      "Schedule cron expression must not be empty",
+    ],
+    [
+      "an invalid cron expression",
+      () => defineSchedule("s1").cron("not-a-cron"),
+      CronValidationError,
+      "Invalid cron expression",
+    ],
+    [
+      "an invalid timezone",
+      () => defineSchedule("s1").cron("0 * * * *", { timezone: "Invalid/TZ" }),
+      ScheduleValidationError,
+      "Invalid timezone 'Invalid/TZ'",
+    ],
+  ] as const)("rejects %s", (_name, define, ErrorClass, message) => {
+    expect(define).toThrow(ErrorClass)
+    expect(define).toThrow(message)
   })
 
-  test("rejects whitespace-only ids", () => {
-    expect(() => defineSchedule("   ")).toThrow(ScheduleValidationError)
-    expect(() => defineSchedule("   ")).toThrow("Schedule id must not be empty")
-  })
-
-  test("rejects empty cron expressions", () => {
-    expect(() => defineSchedule("s1").cron("")).toThrow(ScheduleValidationError)
-    expect(() => defineSchedule("s1").cron("")).toThrow(
-      "Schedule cron expression must not be empty"
-    )
-  })
-
-  test("rejects invalid cron expressions", () => {
-    expect(() => defineSchedule("s1").cron("not-a-cron")).toThrow(CronValidationError)
-    expect(() => defineSchedule("s1").cron("not-a-cron")).toThrow("Invalid cron expression")
-  })
-
-  test("rejects invalid timezones", () => {
-    expect(() => defineSchedule("s1").cron("0 * * * *", { timezone: "Invalid/TZ" })).toThrow(
-      ScheduleValidationError
-    )
-    expect(() => defineSchedule("s1").cron("0 * * * *", { timezone: "Invalid/TZ" })).toThrow(
-      "Invalid timezone 'Invalid/TZ'"
-    )
-  })
-
-  test("builds a cron schedule definition", () => {
+  test("builds a cron schedule definition, keeping a timezone only when given", () => {
     const schedule = defineSchedule("nightly-sync").cron("0 0 * * *")
 
     expect(schedule.kind).toBe("schedule")
     expect(schedule.id).toBe("nightly-sync")
-    expect(schedule.trigger).toEqual({
-      type: "cron",
-      expression: "0 0 * * *",
-    })
-  })
-
-  test("preserves timezone when provided", () => {
-    const schedule = defineSchedule("paris-sync").cron("0 0 * * *", {
-      timezone: "Europe/Paris",
-    })
-
-    expect(schedule.trigger).toEqual({
-      type: "cron",
-      expression: "0 0 * * *",
-      timezone: "Europe/Paris",
-    })
-  })
-
-  test("omits timezone when not provided", () => {
-    const schedule = defineSchedule("simple").cron("*/5 * * * *")
-
-    expect(schedule.trigger).toEqual({
-      type: "cron",
-      expression: "*/5 * * * *",
-    })
+    expect(schedule.trigger).toEqual({ type: "cron", expression: "0 0 * * *" })
     expect("timezone" in schedule.trigger).toBe(false)
+
+    expect(
+      defineSchedule("paris-sync").cron("0 0 * * *", { timezone: "Europe/Paris" }).trigger
+    ).toEqual({ type: "cron", expression: "0 0 * * *", timezone: "Europe/Paris" })
   })
 })
 
-describe("isScheduleDefinition", () => {
-  test("returns true for valid schedule", () => {
-    const schedule = defineSchedule("s1").cron("0 * * * *")
-    expect(isScheduleDefinition(schedule)).toBe(true)
-  })
-
-  test("returns false for null", () => {
-    expect(isScheduleDefinition(null)).toBe(false)
-  })
-
-  test("returns false for wrong kind", () => {
-    expect(
-      isScheduleDefinition({
-        kind: "sync",
-        id: "s1",
-        trigger: { type: "cron" },
-      })
-    ).toBe(false)
-  })
-
-  test("returns false for missing trigger", () => {
-    expect(
-      isScheduleDefinition({
-        kind: "schedule",
-        id: "s1",
-      })
-    ).toBe(false)
-  })
-
-  test("returns false for missing id", () => {
-    expect(
-      isScheduleDefinition({
-        kind: "schedule",
-        trigger: { type: "cron" },
-      })
-    ).toBe(false)
-  })
+test.each([
+  ["a defined schedule", defineSchedule("s1").cron("0 * * * *"), true],
+  ["null", null, false],
+  ["a wrong kind", { kind: "sync", id: "s1", trigger: { type: "cron" } }, false],
+  ["a missing trigger", { kind: "schedule", id: "s1" }, false],
+  ["a missing id", { kind: "schedule", trigger: { type: "cron" } }, false],
+] as const)("isScheduleDefinition recognizes %s", (_name, value, expected) => {
+  expect(isScheduleDefinition(value)).toBe(expected)
 })

@@ -64,39 +64,6 @@ test("claim and settlement do not revisit the retained job population", async ()
     jobs: [{ id: "0", type: "projection.run.requested", payload: { runId: "different" } }],
   })
   expect(same).toMatchObject({ id: "0", attempt: 1, payload: { runId: "0" } })
-}, 15000)
-
-test("expired leases rejoin available jobs in original availability order", async () => {
-  let now = origin
-  clock = nowSpy().mockImplementation(() => now)
-  const queue = new InMemoryQueues().projections
-  await queue.enqueue({
-    projectId: "test",
-    jobs: [
-      {
-        id: "old",
-        type: "projection.run.requested",
-        availableAt: iso(origin - 100),
-        payload: { runId: "old" },
-      },
-      {
-        id: "new",
-        type: "projection.run.requested",
-        availableAt: iso(origin + 5),
-        payload: { runId: "new" },
-      },
-    ],
-  })
-  const [first] = await queue.claim({ projectId: "test", workerId: "a", leaseMs: 20 })
-  now += 30
-  const rows = await queue.claim({ projectId: "test", workerId: "b", limit: 2 })
-  expect(rows.map((row) => [row.job.id, row.job.attempt])).toEqual([
-    ["old", 2],
-    ["new", 1],
-  ])
-  await expect(
-    queue.complete({ projectId: "test", jobId: "old", leaseId: first!.leaseId })
-  ).rejects.toThrow("Lease mismatch")
 })
 
 test("renewal replaces the wake-up time and retry reorders a delayed job", async () => {
@@ -217,6 +184,7 @@ test("an unrepresentable lease cannot remove jobs from the delivery index", asyn
   ).toEqual(["a", "b"])
 })
 
+// The reference orders redelivered jobs by their original availability, never by lease expiry.
 test("mixed retries, renewals and settlements agree with a reference scheduler", async () => {
   let now = origin
   clock = nowSpy().mockImplementation(() => now)

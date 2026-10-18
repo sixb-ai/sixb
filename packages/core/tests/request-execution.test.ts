@@ -50,7 +50,7 @@ describe("request execution boundary", () => {
     expect(() => sixb.logs.read()).toThrow(AuthorizationError)
   })
 
-  test("models auth-disabled requests explicitly and defaults correlation to request id", () => {
+  test("models auth-disabled requests explicitly; correlation defaults to the request id", () => {
     const host = createRuntime()
     const sixb = bindRequestExecution(host, {
       request: new Request("http://localhost/api/events", {
@@ -67,18 +67,14 @@ describe("request execution boundary", () => {
     })
     expect(sixb.execution.id).toStartWith("exec_")
     expect(sixb.objects.listTypes()).toEqual([])
-  })
 
-  test("generates a non-empty request id when the ingress does not provide one", () => {
-    const sixb = bindRequestExecution(createRuntime(), {
+    // Without an ingress request id, one is generated and still doubles as the correlation id.
+    const generated = bindRequestExecution(host, {
       request: new Request("http://localhost/api/events"),
       authorization: { type: "disabled" },
-    })
-
-    expect(sixb.execution.id).toStartWith("exec_")
-    expect(sixb.execution.executor).toMatchObject({ type: "request" })
-    if (sixb.execution.executor.type !== "request") throw new Error("Expected request executor")
-    expect(sixb.execution.executor.requestId).toStartWith("req_")
-    expect(sixb.execution.correlationId).toBe(sixb.execution.executor.requestId)
+    }).execution
+    if (generated.executor.type !== "request") throw new Error("Expected request executor")
+    expect(generated.executor.requestId).toStartWith("req_")
+    expect(generated.correlationId).toBe(generated.executor.requestId)
   })
 })

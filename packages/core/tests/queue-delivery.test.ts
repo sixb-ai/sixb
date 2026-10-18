@@ -1,9 +1,27 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import { InMemoryQueues } from "../src"
 import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "../src/queues"
 import { createQueueDelivery } from "../src/workers/queue-delivery"
 
 const PROJECT_ID = "queue-delivery-tests"
+
+// Leases and renewals run on fake time: a renewal fires every third of `leaseMs`.
+beforeEach(() => {
+  jest.useFakeTimers()
+})
+afterEach(() => {
+  jest.useRealTimers()
+})
+
+/** `setImmediate` stays real under Bun's fake timers, so this drains every pending microtask. */
+function flush(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
+async function advance(ms: number): Promise<void> {
+  jest.advanceTimersByTime(ms)
+  await flush()
+}
 
 async function claimOne(
   queues: InMemoryQueues,
@@ -46,14 +64,16 @@ describe("QueueDelivery", () => {
       confirmedExpirations.push(renewed.leaseExpiresAt)
     })
     try {
-      await Bun.sleep(150)
+      for (let third = 0; third < 3; third++) await advance(leaseMs / 3)
+      expect(renewals).toBe(3)
+      expect(confirmedExpirations).toHaveLength(3)
+      // The last renewal outlives the original lease by the time that has passed.
+      expect(Date.parse(confirmedExpirations.at(-1) ?? "")).toBe(
+        Date.parse(claimed.leaseExpiresAt) + leaseMs
+      )
+      expect(delivery.leaseExpiresAt).toBe(confirmedExpirations.at(-1)!)
       expect(await delivery.complete()).toBe("settled")
       expect(delivery.state).toBe("settled")
-      expect(renewals).toBeGreaterThanOrEqual(2)
-      expect(confirmedExpirations.length).toBeGreaterThanOrEqual(2)
-      expect(Date.parse(confirmedExpirations.at(-1) ?? "")).toBeGreaterThan(
-        Date.parse(claimed.leaseExpiresAt)
-      )
     } finally {
       stopObserving()
       await delivery.close()
@@ -83,7 +103,7 @@ describe("QueueDelivery", () => {
       signal: new AbortController().signal,
     })
     try {
-      await Bun.sleep(25)
+      await advance(leaseMs / 3)
       expect(delivery.state).toBe("lost")
       expect(delivery.signal.aborted).toBe(true)
       expect(await delivery.complete()).toBe("lost")
@@ -117,10 +137,13 @@ describe("QueueDelivery", () => {
       },
     })
     try {
-      await Bun.sleep(75)
-      expect(delivery.state).toBe("active")
-      expect(attempts).toBeGreaterThanOrEqual(2)
+      await advance(leaseMs / 3)
+      expect(attempts).toBe(1)
       expect(reportedErrors).toBe(1)
+      expect(delivery.state).toBe("active")
+      await advance(leaseMs / 3)
+      expect(attempts).toBe(2)
+      expect(delivery.leaseExpiresAt).not.toBe(claimed.leaseExpiresAt)
       expect(await delivery.complete()).toBe("settled")
       expect(delivery.state).toBe("settled")
     } finally {
@@ -141,7 +164,11 @@ describe("QueueDelivery", () => {
       signal: new AbortController().signal,
     })
     try {
-      await Bun.sleep(60)
+      // The renewal starts at the first third and is still pending one tick before expiry.
+      await advance(leaseMs / 3)
+      await advance((leaseMs * 2) / 3 - 1)
+      expect(delivery.state).toBe("active")
+      await advance(1)
       expect(delivery.state).toBe("lost")
       expect(delivery.signal.aborted).toBe(true)
     } finally {

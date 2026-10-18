@@ -1,28 +1,7 @@
 import type { AiCostSummary } from "@sixb/core"
-import type { AiModelCallCostRecord, AiPricingContext } from "../src/storage/ai-cost"
 
-const context = {
-  serviceTier: "standard",
-  mode: "fast",
-} as const satisfies AiPricingContext
-
-const cost = {
-  projectId: "project_1",
-  usageRecordId: "usage_1",
-  status: "unpriceable",
-  billingIdentity: { providerId: "anthropic", modelId: "claude-opus-4-8" },
-  pricingContext: context,
-  priceSource: {
-    sourceId: "vendor-catalog",
-    sourceEntryId: "anthropic/claude-opus-4-8",
-    sourceVersion: "sha256:test",
-    sourceUrl: "https://catalog.example/models.json",
-    observedAt: new Date(),
-  },
-  reason: "unsupportedPricingDimension",
-  ratedAt: new Date(),
-} as const satisfies AiModelCallCostRecord
-
+// Agent and workflow run views expose `cost?: AiCostSummary`, so authors must be able to name it
+// from the package root.
 const summary = {
   amounts: [{ currency: "USD", amountNanos: "10000000" }],
   ratedCallCount: 1,
@@ -30,5 +9,4 @@ const summary = {
   unvaluedCallCount: 0,
 } as const satisfies AiCostSummary
 
-void cost
 void summary

@@ -55,8 +55,6 @@ export abstract class QueueWorker<
   TFailureCodes extends QueueWorkerFailureCodes,
 > extends Worker {
   protected readonly config: Required<QueueWorkerConfig<TJob, TFailureCodes>>
-  /** Pause after a failed claim. Overridable so tests do not wait out real backoffs. */
-  protected readonly claimFailureDelayMs: number = CLAIM_FAILURE_DELAY_MS
   private consecutiveClaimFailures = 0
 
   constructor(config: QueueWorkerConfig<TJob, TFailureCodes>) {
@@ -168,7 +166,7 @@ export abstract class QueueWorker<
           { cause: error }
         )
       }
-      await sleep(this.claimFailureDelayMs, signal).catch(() => {})
+      await sleep(CLAIM_FAILURE_DELAY_MS, signal).catch(() => {})
       return []
     }
   }

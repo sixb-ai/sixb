@@ -28,10 +28,12 @@ test("retained replay is bounded and publishers do not wait for subscribers", as
     release = resolve
   })
   let received = 0
+  const caughtUp = Promise.withResolvers<void>()
   const unsubscribe = await broker.subscribe(
     { projectId: "test", streamId: "test", from: "earliest" },
     async (records) => {
       received += records.length
+      if (received === 1001) caughtUp.resolve()
       await gate
     }
   )
@@ -40,8 +42,7 @@ test("retained replay is bounded and publishers do not wait for subscribers", as
     expect(received).toBeGreaterThan(0)
     expect(received).toBeLessThanOrEqual(100)
     release()
-    for (let i = 0; i < 100 && received !== 1001; i++) await Bun.sleep(1)
-    expect(received).toBe(1001)
+    await caughtUp.promise
   } finally {
     release()
     unsubscribe()
@@ -55,8 +56,10 @@ test("domain event handlers apply backpressure through the event wrapper", async
     release = resolve
   })
   let calls = 0
+  const secondDelivered = Promise.withResolvers<void>()
   const unsubscribe = await service.subscribe({}, async () => {
     calls += 1
+    if (calls === 2) secondDelivered.resolve()
     await gate
   })
   const append = () =>
@@ -78,8 +81,7 @@ test("domain event handlers apply backpressure through the event wrapper", async
     await append()
     expect(calls).toBe(1)
     release()
-    for (let i = 0; i < 100 && calls !== 2; i++) await Bun.sleep(1)
-    expect(calls).toBe(2)
+    await secondDelivered.promise
   } finally {
     release()
     unsubscribe()

@@ -198,7 +198,7 @@ async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 1_000): Pr
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     if (await predicate()) return
-    await Bun.sleep(5)
+    await Bun.sleep(0)
   }
   throw new Error("Timed out waiting for readiness condition.")
 }

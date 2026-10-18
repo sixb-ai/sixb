@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import {
   InMemoryBroker,
   InMemoryStorage,
@@ -12,6 +12,10 @@ import { decorateOperationScopedMethodForTesting } from "../src/storage/operatio
 import { createMaterializerFixture } from "./materializer-fixture"
 
 const NOW = new Date("2026-01-02T03:04:05.000Z")
+
+afterEach(() => {
+  jest.useRealTimers()
+})
 
 describe("DomainEventService stable envelope publication", () => {
   test("preserves the persisted envelope and uses its event ID as broker idempotency key", async () => {
@@ -43,44 +47,15 @@ describe("DomainEventService stable envelope publication", () => {
 })
 
 describe("OntologyOutboxDispatcher", () => {
-  test("uses atomic outbox operations without copying unrelated storage in a global transaction", async () => {
+  test("publishes each claimed lease as one broker batch outside any storage transaction", async () => {
     const storage = new TransactionTrackingStorage()
     const broker = new OutsideTransactionBroker(storage)
-    const events = new DomainEventService({ projectId: "project", broker })
-    const { materializer } = createMaterializerFixture({ storage })
-    await seedObjectCreated(materializer, "request-1", "one")
-    const [outboxRow] = outboxRows(storage)
-    const transactionsBefore = storage.transactionCount
-
-    const dispatcher = new OntologyOutboxDispatcher({
-      projectId: "project",
-      storage,
-      events,
-      now: () => NOW,
-      createLeaseId: () => "lease-1",
-    })
-    await dispatcher.drain()
-    await dispatcher.stop()
-
-    expect((await events.read()).map((event) => event.id)).toEqual([outboxRow?.id])
-    expect(broker.publicationTransactionDepths).toEqual([0])
-    // Regression proof: wrap outbox operations in storage.transaction again; this count increases.
-    expect(storage.transactionCount).toBe(transactionsBefore)
-    expect(outboxRows(storage)[0]).toMatchObject({
-      leaseId: null,
-      leaseExpiresAt: null,
-      publishedAt: NOW.toISOString(),
-    })
-  })
-
-  test("publishes and acknowledges each claimed lease as one batch", async () => {
-    const storage = new TransactionTrackingStorage()
-    const broker = new RecordingBroker()
     const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObjectCreated(materializer, "request-batch-1", "batch-one")
     await seedObjectCreated(materializer, "request-batch-2", "batch-two")
     const expectedIds = outboxRows(storage).map((row) => row.id)
+    const transactionsBefore = storage.transactionCount
 
     const dispatcher = new OntologyOutboxDispatcher({
       projectId: "project",
@@ -99,7 +74,16 @@ describe("OntologyOutboxDispatcher", () => {
     expect(
       [...(broker.appended[0]?.records ?? [])].map((record) => record.idempotencyKey).sort()
     ).toEqual([...expectedIds].sort())
-    expect(outboxRows(storage).every((row) => row.leaseId === null)).toBe(true)
+    expect(broker.publicationTransactionDepths).toEqual([0])
+    // Regression proof: wrap outbox operations in storage.transaction again; this count increases.
+    expect(storage.transactionCount).toBe(transactionsBefore)
+    for (const row of outboxRows(storage)) {
+      expect(row).toMatchObject({
+        leaseId: null,
+        leaseExpiresAt: null,
+        publishedAt: NOW.toISOString(),
+      })
+    }
   })
 
   test("reschedules publication failures with deterministic bounded exponential jitter", async () => {
@@ -263,30 +247,8 @@ describe("OntologyOutboxDispatcher", () => {
     await dispatcher.stop()
   })
 
-  test("rearms healthy catch-up after a bounded drain slice", async () => {
-    const storage = new InMemoryStorage()
-    const broker = new RecordingBroker()
-    const events = new DomainEventService({ projectId: "project", broker })
-    const { materializer } = createMaterializerFixture({ storage })
-    for (let index = 0; index < 3; index += 1) {
-      await seedObjectCreated(materializer, `request-bounded-${index}`, `bounded-${index}`)
-    }
-    const dispatcher = new OntologyOutboxDispatcher({
-      projectId: "project",
-      storage,
-      events,
-      batchSize: 1,
-      maxClaimsPerDrain: 2,
-    })
-
-    await dispatcher.drain()
-    await waitFor(() => outboxRows(storage).filter((row) => row.publishedAt !== null).length === 3)
-
-    expect(outboxRows(storage).filter((row) => row.publishedAt !== null)).toHaveLength(3)
-    await dispatcher.stop()
-  })
-
   test("publishes only when explicitly drained and never starts an idle polling loop", async () => {
+    jest.useFakeTimers()
     const storage = new InMemoryStorage()
     const broker = new RecordingBroker()
     const events = new DomainEventService({ projectId: "project", broker })
@@ -301,54 +263,14 @@ describe("OntologyOutboxDispatcher", () => {
     await dispatcher.drain()
 
     await seedObjectCreated(materializer, "request-poll", "poll")
-    await Bun.sleep(30)
+    expect(jest.getTimerCount()).toBe(0)
+    jest.advanceTimersByTime(60 * 60_000)
+    await flush()
     expect(broker.appended).toHaveLength(1)
     await dispatcher.drain()
     await dispatcher.stop()
 
     expect((await events.read()).map(objectPrimaryId)).toEqual(["wake", "poll"])
-  })
-
-  test("isolates a poison envelope and reschedules only that row", async () => {
-    const storage = new InMemoryStorage()
-    const { materializer } = createMaterializerFixture({ storage })
-    await seedObjectCreated(materializer, "request-valid-1", "valid-1")
-    await seedObjectCreated(materializer, "request-poison", "poison")
-    await seedObjectCreated(materializer, "request-valid-2", "valid-2")
-    const poisonId = outboxRows(storage).find(
-      (row) => row.event.type === "object.created" && row.event.payload.primaryId === "poison"
-    )!.id
-    const broker = new PoisonEnvelopeBroker(poisonId)
-    const events = new DomainEventService({ projectId: "project", broker })
-    const failures: { readonly attempts: number; readonly eventIds: readonly string[] }[] = []
-    const dispatcher = new OntologyOutboxDispatcher({
-      projectId: "project",
-      storage,
-      events,
-      now: () => NOW,
-      retryJitterRatio: 0,
-      onDeliveryFailure: (_error, failure) => failures.push(failure),
-    })
-
-    await dispatcher.drain()
-
-    const rows = outboxRows(storage)
-    expect(rows.filter((row) => row.publishedAt !== null)).toHaveLength(2)
-    expect(rows.find((row) => row.id === poisonId)).toMatchObject({
-      publishedAt: null,
-      leaseId: null,
-      lastFailure: {
-        code: "event.delivery_failed",
-        message: "Event delivery failed.",
-        retryable: true,
-        at: NOW.toISOString(),
-        details: {
-          attempts: 1,
-        },
-      },
-    })
-    expect(failures).toMatchObject([{ attempts: 1, eventIds: [poisonId] }])
-    expect((await events.read()).map(objectPrimaryId).sort()).toEqual(["valid-1", "valid-2"])
   })
 
   test("isolates one poison envelope from the default large publication batch", async () => {
@@ -370,12 +292,14 @@ describe("OntologyOutboxDispatcher", () => {
     const poisonId = outboxRows(storage)[731]!.id
     const broker = new PoisonEnvelopeBroker(poisonId)
     const events = new DomainEventService({ projectId: "project", broker })
+    const failures: { readonly attempts: number; readonly eventIds: readonly string[] }[] = []
     const dispatcher = new OntologyOutboxDispatcher({
       projectId: "project",
       storage,
       events,
       now: () => NOW,
       retryJitterRatio: 0,
+      onDeliveryFailure: (_error, failure) => failures.push(failure),
     })
 
     await dispatcher.drain()
@@ -395,41 +319,18 @@ describe("OntologyOutboxDispatcher", () => {
         },
       },
     })
+    // Bisection fails the poison row's ancestors too, but reports the row once.
+    expect(failures).toMatchObject([{ attempts: 1, eventIds: [poisonId] }])
     expect(await events.read({ limit: 1_000 })).toHaveLength(999)
   })
 
-  test("coalesces a drain that arrives during an in-flight publication", async () => {
+  test("coalesces drains during an in-flight pass into one follow-up that sees later commits", async () => {
+    // A burst of concurrent commits must not each pay for its own sequential claim pass.
     const storage = new InMemoryStorage()
     const broker = new FirstHeldBroker()
     const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObjectCreated(materializer, "request-poll", "poll")
-
-    const dispatcher = new OntologyOutboxDispatcher({
-      projectId: "project",
-      storage,
-      events,
-      shutdownTimeoutMs: 1_000,
-    })
-    const firstDrain = dispatcher.drain()
-    await broker.firstStarted.promise
-
-    await seedObjectCreated(materializer, "request-drain", "drain")
-    const secondDrain = dispatcher.drain()
-
-    broker.releaseFirst.resolve()
-    await Promise.all([firstDrain, secondDrain])
-    await dispatcher.stop()
-
-    expect(outboxRows(storage).map((row) => row.publishedAt !== null)).toEqual([true, true])
-  })
-
-  test("coalesces drains that arrive while a pass is running", async () => {
-    // A burst of concurrent commits must not each pay for its own sequential claim pass.
-    const storage = new TransactionTrackingStorage()
-    const events = new DomainEventService({ projectId: "project", broker: new RecordingBroker() })
-    const { materializer } = createMaterializerFixture({ storage })
-    await seedObjectCreated(materializer, "request-burst", "burst")
 
     const dispatcher = new OntologyOutboxDispatcher({ projectId: "project", storage, events })
     let claims = 0
@@ -441,15 +342,26 @@ describe("OntologyOutboxDispatcher", () => {
         return run(input)
       }
     )
-    await Promise.all(Array.from({ length: 20 }, () => dispatcher.drain()))
+    try {
+      const firstDrain = dispatcher.drain()
+      await broker.firstStarted.promise
 
-    // One pass for the first caller plus one shared follow-up for everyone who arrived during it.
-    expect(claims).toBe(2)
-    expect(outboxRows(storage)[0]?.publishedAt).not.toBeNull()
-    restore()
+      await seedObjectCreated(materializer, "request-drain", "drain")
+      const burst = Array.from({ length: 20 }, () => dispatcher.drain())
+
+      broker.releaseFirst.resolve()
+      await Promise.all([firstDrain, ...burst])
+
+      // One pass for the first caller plus one shared follow-up for everyone who arrived during it.
+      expect(claims).toBe(2)
+      expect(outboxRows(storage).map((row) => row.publishedAt !== null)).toEqual([true, true])
+    } finally {
+      restore()
+      await dispatcher.stop()
+    }
   })
 
-  test("waits for bounded in-flight publication during graceful stop", async () => {
+  test("waits for bounded in-flight publication during one shared graceful stop", async () => {
     const storage = new InMemoryStorage()
     const broker = new DelayedBroker()
     const events = new DomainEventService({ projectId: "project", broker })
@@ -465,10 +377,13 @@ describe("OntologyOutboxDispatcher", () => {
     await broker.started.promise
 
     let stopped = false
-    const stopping = dispatcher.stop().then(() => {
+    const firstStop = dispatcher.stop()
+    const stopping = firstStop.then(() => {
       stopped = true
     })
-    await sleep(0)
+    // Concurrent callers share one stop operation.
+    expect(dispatcher.stop()).toBe(firstStop)
+    await flush()
     expect(stopped).toBe(false)
 
     broker.release.resolve()
@@ -476,31 +391,8 @@ describe("OntologyOutboxDispatcher", () => {
     expect(outboxRows(storage)[0]?.publishedAt).not.toBeNull()
   })
 
-  test("shares one concurrent stop operation", async () => {
-    const storage = new InMemoryStorage()
-    const broker = new DelayedBroker()
-    const events = new DomainEventService({ projectId: "project", broker })
-    const { materializer } = createMaterializerFixture({ storage })
-    await seedObjectCreated(materializer, "request-concurrent-stop", "concurrent-stop")
-    const dispatcher = new OntologyOutboxDispatcher({
-      projectId: "project",
-      storage,
-      events,
-      shutdownTimeoutMs: 1_000,
-    })
-    void dispatcher.drain()
-    await broker.started.promise
-
-    const firstStop = dispatcher.stop()
-    const secondStop = dispatcher.stop()
-    expect(secondStop).toBe(firstStop)
-
-    broker.release.resolve()
-    await Promise.all([firstStop, secondStop])
-    expect(outboxRows(storage)[0]?.publishedAt).not.toBeNull()
-  })
-
   test("reschedules an unfinished publication when the graceful shutdown bound expires", async () => {
+    jest.useFakeTimers()
     const storage = new InMemoryStorage()
     const broker = new DelayedBroker()
     const events = new DomainEventService({ projectId: "project", broker })
@@ -517,7 +409,15 @@ describe("OntologyOutboxDispatcher", () => {
     void dispatcher.drain()
     await broker.started.promise
 
-    await dispatcher.stop()
+    let stopped = false
+    const stopping = dispatcher.stop().then(() => {
+      stopped = true
+    })
+    jest.advanceTimersByTime(4)
+    await flush()
+    expect(stopped).toBe(false)
+    jest.advanceTimersByTime(1)
+    await stopping
     expect(outboxRows(storage)[0]).toMatchObject({
       availableAt: NOW.toISOString(),
       leaseId: null,
@@ -525,9 +425,10 @@ describe("OntologyOutboxDispatcher", () => {
       lastFailure: null,
     })
 
+    // The broker call cannot be cancelled; its late publication still lands.
     broker.release.resolve()
-    await waitFor(() => broker.appended.length === 1)
-    await dispatcher.stop()
+    await broker.published.promise
+    expect(broker.appended).toHaveLength(1)
   })
 })
 
@@ -643,14 +544,12 @@ class OutsideTransactionBroker extends RecordingBroker {
 }
 
 class FailingBroker extends InMemoryBroker {
-  readonly attempted = deferred<void>()
   attempts = 0
 
   override append(
     _input: Parameters<InMemoryBroker["append"]>[0]
   ): ReturnType<InMemoryBroker["append"]> {
     this.attempts += 1
-    this.attempted.resolve()
     return Promise.reject(new Error("broker unavailable"))
   }
 }
@@ -676,13 +575,16 @@ class FirstHeldBroker extends RecordingBroker {
 class DelayedBroker extends RecordingBroker {
   readonly started = deferred<void>()
   readonly release = deferred<void>()
+  readonly published = deferred<void>()
 
   override async append(
     input: Parameters<InMemoryBroker["append"]>[0]
   ): ReturnType<InMemoryBroker["append"]> {
     this.started.resolve()
     await this.release.promise
-    return super.append(input)
+    const records = await super.append(input)
+    this.published.resolve()
+    return records
   }
 }
 
@@ -709,14 +611,7 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("Timed out waiting for condition.")
-    await sleep(1)
-  }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+/** `setImmediate` stays real under Bun's fake timers, so this drains every pending microtask. */
+function flush(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
 }

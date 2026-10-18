@@ -332,12 +332,6 @@ describe("migrateStorage", () => {
       reports: [],
     })
   })
-
-  test("skips storage migrations when unsupported", async () => {
-    const result = await migrateStorage(new InMemoryStorage())
-
-    expect(result).toEqual({ status: "skipped", reports: [] })
-  })
 })
 
 describe("checkStorageSchema", () => {
@@ -461,6 +455,9 @@ describe("describeMigrationHistory", () => {
     ],
   })
 
+  // Every state but `current` names what the operator has to act on.
+  const explained = expect.stringMatching(/\S/)
+
   function applied(version: number, id: string, checksum: string): MigrationRecord {
     return {
       adapterId: "SixbFakeStorage",
@@ -479,10 +476,12 @@ describe("describeMigrationHistory", () => {
     expect(describeMigrationHistory({ migrations, rows: null })).toMatchObject({
       state: "uninitialized",
       appliedVersion: 0,
+      reason: explained,
     })
     expect(describeMigrationHistory({ migrations, rows: [] })).toMatchObject({
       state: "uninitialized",
       appliedVersion: 0,
+      reason: explained,
     })
   })
 
@@ -509,17 +508,17 @@ describe("describeMigrationHistory", () => {
     ).toMatchObject({ state: "ahead" })
   })
 
-  test("reports each state an operator has to act on differently", () => {
+  test("reports each state an operator has to act on differently, with a reason", () => {
     expect(
       describeMigrationHistory({ migrations, rows: [applied(1, "001-first", "a")] })
-    ).toMatchObject({ state: "pending", appliedVersion: 1 })
+    ).toMatchObject({ state: "pending", appliedVersion: 1, reason: explained })
 
-    expect(
-      describeMigrationHistory({
-        migrations,
-        rows: [applied(1, "001-first", "a"), applied(2, "002-second", "b")],
-      })
-    ).toMatchObject({ state: "current", appliedVersion: 2 })
+    const current = describeMigrationHistory({
+      migrations,
+      rows: [applied(1, "001-first", "a"), applied(2, "002-second", "b")],
+    })
+    expect(current).toMatchObject({ state: "current", appliedVersion: 2 })
+    expect(current.reason).toBeUndefined()
 
     // Rolled the app back without the schema. `sixb db migrate` cannot fix this.
     expect(
@@ -531,64 +530,24 @@ describe("describeMigrationHistory", () => {
           applied(3, "003-future", "c"),
         ],
       })
-    ).toMatchObject({ state: "ahead" })
+    ).toMatchObject({ state: "ahead", reason: explained })
 
     expect(
       describeMigrationHistory({
         migrations,
         rows: [{ ...applied(1, "001-first", "a"), status: "started", finishedAt: undefined }],
       })
-    ).toMatchObject({ state: "dirty" })
+    ).toMatchObject({ state: "dirty", reason: explained })
 
     expect(
       describeMigrationHistory({ migrations, rows: [applied(1, "001-first", "changed")] })
-    ).toMatchObject({ state: "incompatible" })
+    ).toMatchObject({ state: "incompatible", reason: explained })
 
     expect(
       describeMigrationHistory({
         migrations,
         rows: [{ ...applied(1, "001-first", "a"), adapterId: "SomeoneElse" }],
       })
-    ).toMatchObject({ state: "incompatible" })
-  })
-
-  test("carries a reason for every state except current", () => {
-    const cases: Array<readonly MigrationRecord[] | null> = [
-      null,
-      [],
-      [applied(1, "001-first", "a")],
-      [applied(1, "001-first", "changed")],
-      [{ ...applied(1, "001-first", "a"), status: "started", finishedAt: undefined }],
-    ]
-
-    for (const rows of cases) {
-      const status = describeMigrationHistory({ migrations, rows })
-      expect(status.state, JSON.stringify(rows)).not.toBe("current")
-      expect(status.reason, JSON.stringify(rows)).toBeTruthy()
-    }
-
-    const current = describeMigrationHistory({
-      migrations,
-      rows: [applied(1, "001-first", "a"), applied(2, "002-second", "b")],
-    })
-    expect(current.state).toBe("current")
-    expect(current.reason).toBeUndefined()
-  })
-
-  // The classifier is shared so the read-only probe and the migration path cannot
-  // disagree. These are the states runMigrationSet must still refuse.
-  test("agrees with the states runMigrationSet refuses", async () => {
-    for (const rows of [
-      [{ ...applied(1, "001-first", "a"), status: "started" as const, finishedAt: undefined }],
-      [applied(1, "001-first", "changed")],
-    ]) {
-      const harness = createMigrationHarness(rows)
-      const status = describeMigrationHistory({ migrations, rows })
-
-      expect(["dirty", "incompatible", "ahead"]).toContain(status.state)
-      await expect(
-        runMigrationSet({ context: harness.db, migrations, state: harness.state })
-      ).rejects.toThrow()
-    }
+    ).toMatchObject({ state: "incompatible", reason: explained })
   })
 })

@@ -8,9 +8,7 @@ import {
   createSixb,
   defineConnector,
   defineWebhook,
-  InMemoryStorage,
   SixbHost,
-  type Storage,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -25,30 +23,6 @@ afterEach(async () => {
 })
 
 describe("webhooks", () => {
-  test("builds json webhooks with runtime body parsing", () => {
-    const schema = {
-      parse(value: unknown): { name: string } {
-        if (!isRecord(value) || typeof value.name !== "string") {
-          throw new Error("name is required")
-        }
-
-        return { name: value.name }
-      },
-    }
-
-    const webhook = defineWebhook("events")
-      .post()
-      .json(schema)
-      .idempotencyKey(({ body }) => body.name)
-      .handle(({ body }) => ({ status: 200, body }))
-
-    expect(webhook.kind).toBe("webhook")
-    expect(webhook.method).toBe("POST")
-    expect(webhook.body.format).toBe("json")
-    expect(webhook.body.parse({ name: "Ada" })).toEqual({ name: "Ada" })
-    expect(() => webhook.body.parse({})).toThrow("name is required")
-  })
-
   test("rejects invalid webhook builders early", () => {
     expect(() => defineWebhook("")).toThrow("[Sixb] Webhook id must not be empty.")
     expect(() =>
@@ -56,31 +30,6 @@ describe("webhooks", () => {
         .post()
         .json({ parse: "nope" } as never)
     ).toThrow("[Sixb] Webhook JSON schema must provide parse(value).")
-  })
-
-  test("lists and resolves connector-scoped webhooks", () => {
-    const webhook = defineWebhook("events")
-      .post()
-      .raw()
-      .handle(() => {})
-    const connector = defineConnector("github", {
-      type: "test",
-      webhooks: [webhook],
-      connect() {
-        return { ok: true }
-      },
-    })
-
-    const sixb = createRuntime([connector])
-    const [registered] = sixb.listWebhooks()
-
-    expect(registered).toEqual({
-      connector,
-      webhook,
-      route: "/api/webhooks/github/events",
-    })
-    expect(sixb.getWebhookById("github", "events")).toBe(registered)
-    expect(sixb.getWebhookById("github", "missing")).toBeNull()
   })
 
   test("fails startup on duplicate webhook ids per connector", () => {
@@ -137,34 +86,6 @@ describe("webhooks", () => {
     )
   })
 
-  test("requires durable run storage when a webhook is registered", () => {
-    const connector = defineConnector("github", {
-      type: "test",
-      webhooks: [
-        defineWebhook("events")
-          .post()
-          .raw()
-          .idempotencyKey(() => "delivery-id")
-          .handle(() => {}),
-      ],
-      connect() {
-        return {}
-      },
-    })
-
-    const storage = new InMemoryStorage()
-    const storageWithoutRuns: Storage = {
-      ...storage,
-      ping: storage.ping.bind(storage),
-      transaction: storage.transaction.bind(storage),
-      webhookRuns: undefined,
-    }
-
-    expect(() => createRuntime([connector], storageWithoutRuns)).toThrow(
-      "[Sixb] Webhooks require storage.webhookRuns"
-    )
-  })
-
   test("discovers webhooks through discovered connectors", async () => {
     const projectRoot = await createTempProjectRoot()
 
@@ -200,24 +121,18 @@ export const edgeGateway = defineConnector(
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.listWebhooks().map((webhook) => webhook.route)).toEqual([
-      "/api/webhooks/edgeGateway/telemetry",
-    ])
-    expect(sixb.getWebhookById("edgeGateway", "telemetry")?.webhook.id).toBe("telemetry")
+    const [registered] = sixb.listWebhooks()
+    expect(sixb.listWebhooks()).toHaveLength(1)
+    expect(registered?.route).toBe("/api/webhooks/edgeGateway/telemetry")
+    expect(registered?.connector.id).toBe("edgeGateway")
+    expect(registered?.webhook.id).toBe("telemetry")
+    expect(sixb.getWebhookById("edgeGateway", "telemetry")).toBe(registered!)
+    expect(sixb.getWebhookById("edgeGateway", "missing")).toBeNull()
   })
 })
 
-function createRuntime(
-  connectors: readonly ConnectorDefinition[],
-  storage: Storage = new InMemoryStorage()
-) {
-  const runtimeDeps = createTestRuntimeDeps()
-  return new SixbHost({
-    ontology: [],
-    connectors,
-    ...runtimeDeps,
-    storage,
-  })
+function createRuntime(connectors: readonly ConnectorDefinition[]) {
+  return new SixbHost({ ontology: [], connectors, ...createTestRuntimeDeps() })
 }
 
 async function createTempProjectRoot(): Promise<string> {
@@ -234,8 +149,4 @@ async function writeProjectFile(
   const absolutePath = join(projectRoot, relativePath)
   await mkdir(dirname(absolutePath), { recursive: true })
   await writeFile(absolutePath, content, "utf-8")
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

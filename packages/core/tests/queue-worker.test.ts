@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test"
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import { InMemoryQueues } from "../src"
 import { createSixbError } from "../src/errors/internal"
 import type {
@@ -12,13 +12,48 @@ import { QueueWorker, type QueueWorkerFailureDecision } from "../src/workers"
 
 const PROJECT_ID = "queue-worker-tests"
 
-async function waitFor(fn: () => Promise<boolean> | boolean, timeoutMs = 1_000): Promise<void> {
-  const startedAt = Date.now()
-  while (Date.now() - startedAt < timeoutMs) {
-    if (await fn()) return
-    await Bun.sleep(10)
+afterEach(() => {
+  jest.useRealTimers()
+})
+
+/** `setImmediate` stays real under Bun's fake timers, so this drains every pending microtask. */
+function flush(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
+/** Fires fake timers one at a time, letting the worker's real promise chains settle in between. */
+async function runTimersUntil(done: () => boolean): Promise<void> {
+  for (let step = 0; step < 1_000 && !done(); step++) {
+    await flush()
+    jest.advanceTimersToNextTimer()
   }
-  throw new Error("Timed out waiting for condition.")
+}
+
+function workerConfig(queues: InMemoryQueues) {
+  return {
+    projectId: PROJECT_ID,
+    queue: queues.syncRuns,
+    failureCodes: SYNC_RUN_FAILURE_CODES,
+    workerId: "w",
+  }
+}
+
+function enqueue(queues: InMemoryQueues, runId = "s") {
+  return queues.syncRuns.enqueue({
+    projectId: PROJECT_ID,
+    jobs: [{ type: "sync.run.requested", payload: { runId } }],
+  })
+}
+
+/** Records the failure each settlement persists and signals the first one. */
+function recordFailures(queues: InMemoryQueues) {
+  const settled = Promise.withResolvers<QueueJobFailure<SyncQueueJobFailureCode>>()
+  const originalFail = queues.syncRuns.fail.bind(queues.syncRuns)
+  queues.syncRuns.fail = async (params) => {
+    await originalFail(params)
+    settled.resolve(params.failure)
+  }
+  return settled.promise
 }
 
 describe("QueueWorker", () => {
@@ -31,12 +66,7 @@ describe("QueueWorker", () => {
       protected async execute(): Promise<void> {}
     }
 
-    const defaults = {
-      projectId: PROJECT_ID,
-      queue: queues.syncRuns,
-      failureCodes: SYNC_RUN_FAILURE_CODES,
-      workerId: "w",
-    }
+    const defaults = workerConfig(queues)
     expect(new InspectableWorker(defaults).concurrency).toBe(1)
     expect(new InspectableWorker({ ...defaults, claimLimit: 3 }).concurrency).toBe(3)
 
@@ -50,27 +80,20 @@ describe("QueueWorker", () => {
   test("processes claimed jobs and completes them", async () => {
     const queues = new InMemoryQueues()
     const processed: string[] = []
+    const executed = Promise.withResolvers<void>()
 
     class TestWorker extends QueueWorker<SyncRunRequestedQueueJob, typeof SYNC_RUN_FAILURE_CODES> {
       protected async execute(claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>): Promise<void> {
         processed.push(claimed.job.id)
+        executed.resolve()
       }
     }
 
-    const worker = new TestWorker({
-      projectId: PROJECT_ID,
-      queue: queues.syncRuns,
-      failureCodes: SYNC_RUN_FAILURE_CODES,
-      workerId: "w",
-    })
-
-    const [queued] = await queues.syncRuns.enqueue({
-      projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { runId: "s" } }],
-    })
+    const worker = new TestWorker(workerConfig(queues))
+    const [queued] = await enqueue(queues)
 
     await worker.start()
-    await waitFor(() => processed.length === 1)
+    await executed.promise
     await worker.stop()
 
     expect(processed).toEqual([queued!.id])
@@ -79,8 +102,9 @@ describe("QueueWorker", () => {
   })
 
   // To see this fail, sleep 1s after an empty claim in `QueueWorker.claim` instead of passing the
-  // signal: the job then waits out the sleep.
+  // signal: the job then waits out a sleep that fake time never advances.
   test("picks up a job enqueued while idle without waiting out a poll interval", async () => {
+    jest.useFakeTimers()
     const queues = new InMemoryQueues()
     let processed = false
     class TestWorker extends QueueWorker<SyncRunRequestedQueueJob, typeof SYNC_RUN_FAILURE_CODES> {
@@ -88,26 +112,21 @@ describe("QueueWorker", () => {
         processed = true
       }
     }
-    const worker = new TestWorker({
-      projectId: PROJECT_ID,
-      queue: queues.syncRuns,
-      failureCodes: SYNC_RUN_FAILURE_CODES,
-      workerId: "w",
-    })
+    const worker = new TestWorker(workerConfig(queues))
 
     await worker.start()
-    await Bun.sleep(20)
-    await queues.syncRuns.enqueue({
-      projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { runId: "s" } }],
-    })
-    await waitFor(() => processed, 250)
+    await flush()
+    await enqueue(queues)
+    await flush()
+
+    expect(processed).toBe(true)
     await worker.stop()
   })
 
   // To see this fail, remove the empty-claim check in `QueueWorker.claim`: the worker then claims
-  // in a tight loop until the race below gives up, and never reports anything.
+  // in a loop until `runTimersUntil` gives up, and never reports anything.
   test("fails loudly instead of spinning when a queue ignores the claim signal", async () => {
+    jest.useFakeTimers()
     const queues = new InMemoryQueues()
     let claimCalls = 0
     // Answers at once whatever the signal, like a plain non-blocking claim.
@@ -117,26 +136,18 @@ describe("QueueWorker", () => {
       return []
     }
     class TestWorker extends QueueWorker<SyncRunRequestedQueueJob, typeof SYNC_RUN_FAILURE_CODES> {
-      protected override readonly restartBackoffMs = 0
-      protected override readonly claimFailureDelayMs = 1
       protected async execute(): Promise<void> {}
     }
-    const worker = new TestWorker({
-      projectId: PROJECT_ID,
-      queue: queues.syncRuns,
-      failureCodes: SYNC_RUN_FAILURE_CODES,
-      workerId: "w",
-    })
+    const worker = new TestWorker(workerConfig(queues))
 
     await worker.start()
-    const failure = await Promise.race([
-      worker.wait().then(
-        () => undefined,
-        (error: unknown) => error
-      ),
-      Bun.sleep(1_000),
-    ])
+    let failure: unknown
+    const exit = worker.wait().catch((error: unknown) => {
+      failure = error
+    })
+    await runTimersUntil(() => failure !== undefined)
     await worker.stop()
+    await exit
 
     const messages: string[] = []
     for (let error = failure; error instanceof Error; error = error.cause) {
@@ -147,6 +158,7 @@ describe("QueueWorker", () => {
   })
 
   test("restarts the loop after repeated queue claim failures", async () => {
+    jest.useFakeTimers()
     const queues = new InMemoryQueues()
     const originalClaim = queues.syncRuns.claim.bind(queues.syncRuns)
     let claimCalls = 0
@@ -156,40 +168,34 @@ describe("QueueWorker", () => {
       return originalClaim(params)
     }
 
-    let processed = false
+    let runs = 0
+    let claimedOnCall: number | undefined
     class TestWorker extends QueueWorker<SyncRunRequestedQueueJob, typeof SYNC_RUN_FAILURE_CODES> {
-      protected override readonly claimFailureDelayMs = 1
+      protected override run(signal: AbortSignal): Promise<void> {
+        runs += 1
+        return super.run(signal)
+      }
+
       protected async execute(): Promise<void> {
-        processed = true
+        claimedOnCall = claimCalls
       }
     }
 
-    const worker = new TestWorker({
-      projectId: PROJECT_ID,
-      queue: queues.syncRuns,
-      failureCodes: SYNC_RUN_FAILURE_CODES,
-      workerId: "w",
-    })
-    await queues.syncRuns.enqueue({
-      projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { runId: "s" } }],
-    })
+    const worker = new TestWorker(workerConfig(queues))
+    await enqueue(queues)
 
     await worker.start()
-    await waitFor(() => processed, 2_000)
+    await runTimersUntil(() => claimedOnCall !== undefined)
     await worker.stop()
 
-    expect(claimCalls).toBeGreaterThan(5)
+    // Five failures exhaust the loop; the supervisor restarts it and the next claim succeeds.
+    expect(claimedOnCall).toBe(6)
+    expect(runs).toBe(2)
   })
 
   test("default policy fails jobs on execution errors", async () => {
     const queues = new InMemoryQueues()
-    let settledFailure: QueueJobFailure<SyncQueueJobFailureCode> | undefined
-    const originalFail = queues.syncRuns.fail.bind(queues.syncRuns)
-    queues.syncRuns.fail = async (params) => {
-      settledFailure = params.failure
-      await originalFail(params)
-    }
+    const settled = recordFailures(queues)
 
     class FailingWorker extends QueueWorker<
       SyncRunRequestedQueueJob,
@@ -203,25 +209,11 @@ describe("QueueWorker", () => {
       }
     }
 
-    const worker = new FailingWorker({
-      projectId: PROJECT_ID,
-      queue: queues.syncRuns,
-      failureCodes: SYNC_RUN_FAILURE_CODES,
-      workerId: "w",
-    })
-
-    await queues.syncRuns.enqueue({
-      projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { runId: "s" } }],
-    })
+    const worker = new FailingWorker(workerConfig(queues))
+    await enqueue(queues)
 
     await worker.start()
-
-    await waitFor(async () => {
-      const claimed = await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "observer" })
-      return claimed.length === 0
-    })
-
+    const settledFailure = await settled
     await worker.stop()
 
     expect(settledFailure).toMatchObject({
@@ -230,7 +222,7 @@ describe("QueueWorker", () => {
       message: "An unexpected internal error occurred.",
       details: { syncId: "s" },
     })
-    expect(Date.parse(settledFailure!.at)).not.toBeNaN()
+    expect(Date.parse(settledFailure.at)).not.toBeNaN()
   })
 
   test("settles with the exact durable failure supplied by a worker", async () => {
@@ -242,12 +234,7 @@ describe("QueueWorker", () => {
       at: "2026-08-21T12:00:00.000Z",
       details: { syncId: "s", runId: "run-s" },
     }
-    let settledFailure: QueueJobFailure<SyncQueueJobFailureCode> | undefined
-    const originalFail = queues.syncRuns.fail.bind(queues.syncRuns)
-    queues.syncRuns.fail = async (params) => {
-      settledFailure = params.failure
-      await originalFail(params)
-    }
+    const settled = recordFailures(queues)
 
     class DurableFailingWorker extends QueueWorker<
       SyncRunRequestedQueueJob,
@@ -262,27 +249,18 @@ describe("QueueWorker", () => {
       }
     }
 
-    const worker = new DurableFailingWorker({
-      projectId: PROJECT_ID,
-      queue: queues.syncRuns,
-      failureCodes: SYNC_RUN_FAILURE_CODES,
-      workerId: "w",
-    })
-    await queues.syncRuns.enqueue({
-      projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { runId: "run-s" } }],
-    })
+    const worker = new DurableFailingWorker(workerConfig(queues))
+    await enqueue(queues, "run-s")
 
     await worker.start()
-    await waitFor(() => settledFailure !== undefined)
+    expect(await settled).toEqual(failure)
     await worker.stop()
-
-    expect(settledFailure).toEqual(failure)
   })
 
   test("custom onExecutionError can request retry with availableAt", async () => {
     const queues = new InMemoryQueues()
     let executeCalls = 0
+    const retried = Promise.withResolvers<void>()
 
     class RetryingWorker extends QueueWorker<
       SyncRunRequestedQueueJob,
@@ -293,6 +271,7 @@ describe("QueueWorker", () => {
         if (executeCalls === 1) {
           throw new Error("retry please")
         }
+        retried.resolve()
       }
 
       protected onExecutionError(
@@ -305,33 +284,19 @@ describe("QueueWorker", () => {
       }
     }
 
-    const worker = new RetryingWorker({
-      projectId: PROJECT_ID,
-      queue: queues.syncRuns,
-      failureCodes: SYNC_RUN_FAILURE_CODES,
-      workerId: "w",
-    })
-
-    await queues.syncRuns.enqueue({
-      projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { runId: "s" } }],
-    })
+    const worker = new RetryingWorker(workerConfig(queues))
+    await enqueue(queues)
 
     await worker.start()
-    await waitFor(() => executeCalls >= 2)
+    await retried.promise
     await worker.stop()
 
-    expect(executeCalls).toBeGreaterThanOrEqual(2)
+    expect(executeCalls).toBe(2)
   })
 
   test("custom onAbortError can fail abort errors", async () => {
     const queues = new InMemoryQueues()
-    let settledFailure: QueueJobFailure<SyncQueueJobFailureCode> | undefined
-    const originalFail = queues.syncRuns.fail.bind(queues.syncRuns)
-    queues.syncRuns.fail = async (params) => {
-      settledFailure = params.failure
-      await originalFail(params)
-    }
+    const settled = recordFailures(queues)
 
     class AbortFailingWorker extends QueueWorker<
       SyncRunRequestedQueueJob,
@@ -348,26 +313,13 @@ describe("QueueWorker", () => {
       }
     }
 
-    const worker = new AbortFailingWorker({
-      projectId: PROJECT_ID,
-      queue: queues.syncRuns,
-      failureCodes: SYNC_RUN_FAILURE_CODES,
-      workerId: "w",
-    })
-
-    await queues.syncRuns.enqueue({
-      projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { runId: "s" } }],
-    })
+    const worker = new AbortFailingWorker(workerConfig(queues))
+    await enqueue(queues)
 
     await worker.start()
-
-    await waitFor(async () => {
-      const claimed = await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "observer" })
-      return claimed.length === 0
-    })
-
+    const settledFailure = await settled
     await worker.stop()
+
     expect(settledFailure).toMatchObject({
       code: "runtime.cancelled",
       retryable: false,
@@ -376,6 +328,7 @@ describe("QueueWorker", () => {
   })
 
   test("renews leases while jobs remain in flight", async () => {
+    jest.useFakeTimers()
     const queues = new InMemoryQueues()
     const originalRenew = queues.syncRuns.renewLease?.bind(queues.syncRuns)
     if (!originalRenew) throw new Error("Expected in-memory queue lease renewal support.")
@@ -386,36 +339,37 @@ describe("QueueWorker", () => {
     }
 
     const originalComplete = queues.syncRuns.complete.bind(queues.syncRuns)
-    let completed = false
+    const completed = Promise.withResolvers<void>()
     queues.syncRuns.complete = async (params) => {
       await originalComplete(params)
-      completed = true
+      completed.resolve()
     }
 
+    const executing = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
     class SlowWorker extends QueueWorker<SyncRunRequestedQueueJob, typeof SYNC_RUN_FAILURE_CODES> {
       protected async execute(): Promise<void> {
-        await Bun.sleep(240)
+        executing.resolve()
+        await release.promise
       }
     }
 
-    const worker = new SlowWorker({
-      projectId: PROJECT_ID,
-      queue: queues.syncRuns,
-      failureCodes: SYNC_RUN_FAILURE_CODES,
-      workerId: "w",
-      leaseMs: 90,
-    })
-
-    await queues.syncRuns.enqueue({
-      projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { runId: "slow" } }],
-    })
+    const worker = new SlowWorker({ ...workerConfig(queues), leaseMs: 90 })
+    await enqueue(queues, "slow")
 
     await worker.start()
     try {
-      await waitFor(() => completed)
-      expect(renewals).toBeGreaterThanOrEqual(2)
+      await executing.promise
+      // Three lease thirds outlive the original 90ms lease; each renewal keeps ownership.
+      for (let third = 0; third < 3; third++) {
+        jest.advanceTimersByTime(30)
+        await flush()
+      }
+      expect(renewals).toBe(3)
+      release.resolve()
+      await completed.promise
     } finally {
+      release.resolve()
       await worker.stop()
     }
   })
@@ -423,46 +377,37 @@ describe("QueueWorker", () => {
   test("continues processing after a completion acknowledgement error", async () => {
     const queues = new InMemoryQueues()
     const originalComplete = queues.syncRuns.complete.bind(queues.syncRuns)
+    const firstCompletion = Promise.withResolvers<void>()
     let completionCalls = 0
     queues.syncRuns.complete = async (params) => {
       await originalComplete(params)
       completionCalls += 1
       if (completionCalls === 1) {
+        firstCompletion.resolve()
         throw new Error("connection dropped after acknowledgement")
       }
     }
 
-    const processed: string[] = []
+    const secondProcessed = Promise.withResolvers<void>()
     class ResilientWorker extends QueueWorker<
       SyncRunRequestedQueueJob,
       typeof SYNC_RUN_FAILURE_CODES
     > {
       protected async execute(claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>): Promise<void> {
-        processed.push(claimed.job.payload.runId)
+        if (claimed.job.payload.runId === "second") secondProcessed.resolve()
       }
     }
 
-    const worker = new ResilientWorker({
-      projectId: PROJECT_ID,
-      queue: queues.syncRuns,
-      failureCodes: SYNC_RUN_FAILURE_CODES,
-      workerId: "w",
-    })
+    const worker = new ResilientWorker(workerConfig(queues))
     const consoleError = spyOn(console, "error").mockImplementation(() => {})
 
-    await queues.syncRuns.enqueue({
-      projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { runId: "first" } }],
-    })
+    await enqueue(queues, "first")
 
     await worker.start()
     try {
-      await waitFor(() => processed.includes("first") && completionCalls === 1)
-      await queues.syncRuns.enqueue({
-        projectId: PROJECT_ID,
-        jobs: [{ type: "sync.run.requested", payload: { runId: "second" } }],
-      })
-      await waitFor(() => processed.includes("second"))
+      await firstCompletion.promise
+      await enqueue(queues, "second")
+      await secondProcessed.promise
       expect(consoleError).toHaveBeenCalled()
     } finally {
       await worker.stop()
@@ -482,35 +427,28 @@ describe("QueueWorker", () => {
 
     const processed: string[] = []
     const completed: string[] = []
-    let release: () => void = () => {}
-    const releasePromise = new Promise<void>((resolve) => {
-      release = resolve
-    })
+    const firstStarted = Promise.withResolvers<void>()
+    const allStarted = Promise.withResolvers<void>()
+    const allCompleted = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
 
     class BatchWorker extends QueueWorker<SyncRunRequestedQueueJob, typeof SYNC_RUN_FAILURE_CODES> {
       protected async execute(claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>): Promise<void> {
         processed.push(claimed.job.id)
-        await releasePromise
+        if (processed.length === 1) firstStarted.resolve()
+        if (processed.length === 3) allStarted.resolve()
+        await release.promise
         completed.push(claimed.job.id)
+        if (completed.length === 3) allCompleted.resolve()
       }
     }
 
-    const worker = new BatchWorker({
-      projectId: PROJECT_ID,
-      queue: queues.syncRuns,
-      failureCodes: SYNC_RUN_FAILURE_CODES,
-      workerId: "w",
-      claimLimit: 3,
-    })
-
-    await queues.syncRuns.enqueue({
-      projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { runId: "a" } }],
-    })
+    const worker = new BatchWorker({ ...workerConfig(queues), claimLimit: 3 })
+    await enqueue(queues, "a")
 
     await worker.start()
     try {
-      await waitFor(() => processed.length === 1)
+      await firstStarted.promise
       await queues.syncRuns.enqueue({
         projectId: PROJECT_ID,
         jobs: [
@@ -518,12 +456,12 @@ describe("QueueWorker", () => {
           { type: "sync.run.requested", payload: { runId: "c" } },
         ],
       })
-      await waitFor(() => processed.length === 3)
+      await allStarted.promise
       expect(completed).toHaveLength(0)
-      release()
-      await waitFor(() => completed.length === 3)
+      release.resolve()
+      await allCompleted.promise
     } finally {
-      release()
+      release.resolve()
       await worker.stop()
     }
 
