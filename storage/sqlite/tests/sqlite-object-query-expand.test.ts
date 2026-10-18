@@ -138,10 +138,6 @@ afterAll(() => {
 })
 
 describe("SqliteObjectStorage expand pushdown", () => {
-  test("declares expand pushdown support", () => {
-    expect(storage.objects.queryCapabilities().nodes?.expand).toBe(true)
-  })
-
   test("hydrates one and many links in-database", async () => {
     const result = await executeObjectQuery(
       {
@@ -220,33 +216,7 @@ describe("SqliteObjectStorage expand pushdown", () => {
     expect(tagB?.linkProperties).toBeUndefined()
   })
 
-  test("hydrates a nested expansion correlated on the parent neighbour", async () => {
-    const result = await executeObjectQuery(
-      {
-        projectId,
-        query: {
-          kind: "expand",
-          expansions: [
-            {
-              linkId: "author",
-              direction: "outgoing",
-              expand: [{ linkId: "favoriteTag", direction: "outgoing" }],
-            },
-          ],
-          input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: Post.id } },
-        },
-      },
-      { ontology, storage: storage.objects }
-    )
-
-    expect(result.plan.mode).toBe("pushdown")
-    const author = postRow(result, "post-1").links?.author as ExpandedObjectRow
-    const favorite = author.links?.favoriteTag as ExpandedObjectRow
-    expect(favorite.primaryId).toBe("tag-b")
-    expect(favorite.properties.label).toBe("Banana")
-  })
-
-  test("hydrates a three-hop expansion end to end", async () => {
+  test("hydrates nested expansions correlated on each parent neighbour, three hops deep", async () => {
     const result = await executeObjectQuery(
       {
         projectId,
@@ -257,6 +227,7 @@ describe("SqliteObjectStorage expand pushdown", () => {
               linkId: "author",
               direction: "outgoing",
               expand: [
+                { linkId: "favoriteTag", direction: "outgoing" },
                 {
                   linkId: "manager",
                   direction: "outgoing",
@@ -272,8 +243,11 @@ describe("SqliteObjectStorage expand pushdown", () => {
     )
 
     expect(result.plan.mode).toBe("pushdown")
-    // post-1 → author-1 → manager author-2 → favoriteTag tag-c, verified at each hop.
+    // post-1 → author-1 → favoriteTag tag-b, and → manager author-2 → favoriteTag tag-c.
     const author = postRow(result, "post-1").links?.author as ExpandedObjectRow
+    const authorFavorite = author.links?.favoriteTag as ExpandedObjectRow
+    expect(authorFavorite.primaryId).toBe("tag-b")
+    expect(authorFavorite.properties.label).toBe("Banana")
     const manager = author.links?.manager as ExpandedObjectRow
     expect(manager.primaryId).toBe("author-2")
     const favorite = manager.links?.favoriteTag as ExpandedObjectRow

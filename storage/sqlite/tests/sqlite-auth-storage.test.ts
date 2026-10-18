@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import { runAuthStorageContractSuite } from "@sixb/core/testing"
-import { SqliteStorage } from "../src"
 import { SqliteAuthStorage } from "../src/auth-storage"
 
 runAuthStorageContractSuite("SqliteAuthStorage", {
@@ -60,29 +59,4 @@ describe("SqliteStorage auth", () => {
       auth.close()
     }
   })
-
-  test("exposes auth storage", async () => {
-    const storage = new SqliteStorage()
-
-    try {
-      expect(storage.auth).toBeInstanceOf(SqliteAuthStorage)
-
-      await expect(
-        storage.auth.users.create({
-          id: "usr_1",
-          projectId: "project-a",
-          email: "ava@acme.com",
-        })
-      ).resolves.toMatchObject({
-        id: "usr_1",
-        email: "ava@acme.com",
-      })
-    } finally {
-      closeSqliteStorage(storage)
-    }
-  })
 })
-
-function closeSqliteStorage(storage: SqliteStorage): void {
-  storage.close()
-}

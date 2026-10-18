@@ -324,7 +324,7 @@ export function freshSqliteDatabase(): Database {
   return Database.deserialize(freshSchema)
 }
 
-export function installFreshSqliteSchema(db: Database): void {
+function installFreshSqliteSchema(db: Database): void {
   for (const migration of sqliteStorageMigrations.steps) {
     const installed = migration.up(db)
     if (installed instanceof Promise) {

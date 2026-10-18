@@ -1,8 +1,6 @@
 import { Database } from "bun:sqlite"
 import { afterEach, beforeEach, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { rm } from "node:fs/promises"
 import {
   col,
   defineDataset,
@@ -12,7 +10,6 @@ import {
   InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
-  migrateStorage,
   prop,
   SixbHost,
 } from "@sixb/core"
@@ -26,6 +23,7 @@ import { startTestProjectionRun } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 import { sqliteStoragePath } from "../src/migrations"
 import { cleanupSourceVersions } from "../src/ontology-storage/source-cleanup"
+import { freshStorageDirectory } from "./fixtures/fresh-storage-directory"
 
 const Device = defineObjectType({
   id: "Device",
@@ -45,9 +43,8 @@ let storage: SqliteStorage
 let db: Database
 
 beforeEach(async () => {
-  directory = await mkdtemp(join(tmpdir(), "sixb-sqlite-source-liveness-"))
+  directory = await freshStorageDirectory()
   storage = new SqliteStorage({ path: directory })
-  await migrateStorage(storage)
   db = new Database(sqliteStoragePath(directory))
   // Records every rewrite of a root, whichever connection makes it.
   db.exec(`

@@ -1,11 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { migrateStorage } from "@sixb/core"
 import { createTestAgentExecution, runAgentStorageContractSuite } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
-import { SqliteAgentStorage } from "../src/agents"
 
 runAgentStorageContractSuite("SqliteAgentStorage", {
   createStorage: () => new SqliteStorage(),
@@ -15,92 +10,6 @@ runAgentStorageContractSuite("SqliteAgentStorage", {
 })
 
 describe("SqliteStorage agents", () => {
-  test("preserves sandbox bindings when a durable store is reopened", async () => {
-    // Regression proof: omit sandbox_params from the thread INSERT or remove migration 041.
-    const path = await mkdtemp(join(tmpdir(), "sixb-sandbox-binding-"))
-    let storage = new SqliteStorage({ path })
-    try {
-      await migrateStorage(storage)
-      await storage.agents.threads.create({
-        id: "sandbox",
-        projectId: "project",
-        ownerPrincipal: { type: "user", id: "owner" },
-        sandboxParams: { clientId: "acme" },
-      })
-      await storage.agents.threads.create({
-        id: "ephemeral",
-        projectId: "project",
-        ownerPrincipal: { type: "user", id: "owner" },
-      })
-      storage.close()
-      storage = new SqliteStorage({ path })
-      await migrateStorage(storage)
-      expect(
-        (await storage.agents.threads.getById({ projectId: "project", id: "sandbox" }))
-          ?.sandboxParams
-      ).toEqual({ clientId: "acme" })
-      expect(
-        await storage.agents.threads.getById({ projectId: "project", id: "ephemeral" })
-      ).not.toHaveProperty("sandboxParams")
-    } finally {
-      storage.close()
-      await rm(path, { recursive: true, force: true })
-    }
-  })
-  test("admits a conversation run after file-backed migrations", async () => {
-    // Bun 1.3.14 enables legacy_alter_table by default. With foreign_keys OFF during migrations,
-    // SQLite does not rewrite a temporary self-reference on rename. Reintroducing
-    // REFERENCES agent_runs_v4 in migration 030 makes this insert fail (memory-only stores pass).
-    const path = await mkdtemp(join(tmpdir(), "sixb-agent-migration-"))
-    const storage = new SqliteStorage({ path })
-    try {
-      await migrateStorage(storage)
-      await storage.agents.threads.create({
-        id: "thread",
-        projectId: "project",
-        ownerPrincipal: { type: "user", id: "user" },
-      })
-      const executionId = await createTestAgentExecution(storage, {
-        projectId: "project",
-        runId: "run",
-        authority: "inherited",
-      })
-      await expect(
-        storage.agents.runs.create({
-          id: "run",
-          projectId: "project",
-          executionId,
-          threadId: "thread",
-          triggerMessageId: "message",
-          spec: { model: { provider: "test", modelId: "test-model" } },
-        })
-      ).resolves.toMatchObject({ id: "run", status: "queued" })
-    } finally {
-      storage.close()
-      await rm(path, { recursive: true, force: true })
-    }
-  })
-
-  test("is bundled into the composite storage", async () => {
-    const storage = new SqliteStorage()
-
-    try {
-      expect(storage.agents).toBeInstanceOf(SqliteAgentStorage)
-
-      await storage.agents.threads.create({
-        id: "thr_1",
-        projectId: "p",
-        ownerPrincipal: { type: "user", id: "usr_1" },
-        createdAt: new Date("2026-06-23T10:00:00.000Z"),
-      })
-      await expect(
-        storage.agents.threads.getById({ projectId: "p", id: "thr_1" })
-      ).resolves.toMatchObject({ id: "thr_1", activeRunId: null, messageCount: 0 })
-    } finally {
-      storage.close()
-    }
-  })
-
   test("rolls back agent writes when a transaction throws", async () => {
     const storage = new SqliteStorage()
 

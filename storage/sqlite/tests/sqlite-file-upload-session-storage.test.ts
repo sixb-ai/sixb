@@ -31,20 +31,23 @@ test("a transition waits for an open storage transaction instead of joining it",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000),
     })
 
-    let started!: () => void
-    const opened = new Promise<void>((resolve) => {
-      started = resolve
-    })
+    const opened = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
     const rolledBack = storage
       .transaction(async () => {
-        started()
-        await Bun.sleep(20)
+        opened.resolve()
+        await release.promise
         throw new Error("rollback")
       })
       .catch(() => undefined)
-    await opened
+    await opened.promise
 
-    await storage.fileUploadSessions.abort("upload_isolated")
+    const aborted = storage.fileUploadSessions.abort("upload_isolated")
+    // SQLite is synchronous: a call that joined the open transaction has written once the pending
+    // microtasks have run. Only then does the transaction roll back.
+    await new Promise((resolve) => setImmediate(resolve))
+    release.resolve()
+    await aborted
     await rolledBack
 
     const session = await storage.fileUploadSessions.getForPrincipal("upload_isolated", principal)

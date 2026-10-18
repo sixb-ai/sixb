@@ -1,12 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { migrateStorage, type Storage } from "@sixb/core"
+import { rm } from "node:fs/promises"
+import type { Storage } from "@sixb/core"
 import { StorageTransactionError } from "@sixb/core/storage"
 import { recordTestActionRun, startTestSyncRun, startTestWebhookRun } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 import { closeSqliteStoreConnection, openSqliteStoreConnection } from "../src/transactions"
+import { freshStorageDirectory } from "./fixtures/fresh-storage-directory"
 
 test("SQLite storage connections enforce foreign keys", () => {
   const connection = openSqliteStoreConnection()
@@ -18,9 +17,8 @@ test("SQLite storage connections enforce foreign keys", () => {
 })
 
 test("file-backed snapshot reads remain available during a write transaction", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "sixb-sqlite-concurrent-read-"))
+  const directory = await freshStorageDirectory()
   const storage = new SqliteStorage({ path: directory })
-  await migrateStorage(storage)
   let releaseTransaction!: () => void
   const blocked = new Promise<void>((resolve) => {
     releaseTransaction = resolve
@@ -76,15 +74,18 @@ describe("SqliteStorage.transaction", () => {
   })
 
   test("rejects root storage calls inside a transaction callback", async () => {
-    await expect(
-      storage.transaction(async () => {
+    // A root call that waited for the transaction instead would never settle; plain awaits keep
+    // that a test timeout instead of a hung process (`expect(promise).rejects` hangs on Bun 1.4.2).
+    const rejected = await storage
+      .transaction(async () => {
         await storage.objects.getByPrimaryId({
           projectId: "my-app",
           objectTypeId: "Room",
           primaryId: "room_1",
         })
       })
-    ).rejects.toThrow("use the provided tx storage")
+      .catch((error: Error) => error.message)
+    expect(rejected).toContain("use the provided tx storage")
   })
 
   test("rolls back writes across every mutated table when the transaction fails", async () => {
@@ -147,8 +148,8 @@ describe("SqliteStorage.transaction", () => {
     expect(rootFinished).toBe(false)
 
     releaseTransaction()
-    await expect(failed).rejects.toThrow("rollback active transaction")
-    await expect(rootWrite).resolves.toMatchObject({ id: "root-write" })
+    expect(await failed.catch((error: Error) => error.message)).toBe("rollback active transaction")
+    expect(await rootWrite).toMatchObject({ id: "root-write" })
     expect(await storage.actionRuns.getById({ projectId: "my-app", id: "rolled-back" })).toBeNull()
   })
 
@@ -200,17 +201,18 @@ describe("SqliteStorage.transaction", () => {
     expect(detachedResolved).toBe(false)
 
     releaseLaterTransaction()
-    await expect(later).rejects.toThrow("roll back later transaction")
-    await expect(detachedWrite).resolves.toMatchObject({ id: "detached-write" })
+    expect(await later.catch((error: Error) => error.message)).toBe("roll back later transaction")
+    expect(await detachedWrite).toMatchObject({ id: "detached-write" })
     expect(
       await storage.actionRuns.getById({ projectId: "my-app", id: "detached-write" })
     ).toMatchObject({ id: "detached-write" })
   })
 
   test("rejects nested transactions", async () => {
-    await expect(storage.transaction((tx) => tx.transaction(() => undefined))).rejects.toThrow(
-      StorageTransactionError
-    )
+    const rejected = await storage
+      .transaction((tx) => tx.transaction(() => undefined))
+      .catch((error: unknown) => error)
+    expect(rejected).toBeInstanceOf(StorageTransactionError)
   })
 
   test("rejects transaction storage usage after completion", async () => {

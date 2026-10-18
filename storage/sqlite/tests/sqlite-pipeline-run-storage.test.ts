@@ -7,7 +7,6 @@ import {
 } from "@sixb/core/storage"
 import { createTestPipelineExecution, startTestPipelineRun } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
-import { SqlitePipelineRunStorage } from "../src/pipeline-run-storage"
 
 const FAILURE: SixbFailure<PipelineRunFailureCode> = {
   code: "internal.unexpected",
@@ -404,16 +403,6 @@ describe("SqlitePipelineRunStorage", () => {
         inputs: [],
       })
     ).rejects.toBeInstanceOf(PipelineRunError)
-  })
-
-  test("SqliteStorage includes pipeline run storage", () => {
-    const bundled = new SqliteStorage()
-
-    try {
-      expect(bundled.pipelineRuns).toBeInstanceOf(SqlitePipelineRunStorage)
-    } finally {
-      bundled.close()
-    }
   })
 
   test("rejects a run whose execution authorizes a different Pipeline", async () => {

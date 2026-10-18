@@ -1,9 +1,6 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite"
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { migrateStorage } from "@sixb/core"
+import { rm } from "node:fs/promises"
 import {
   compileSelectedObjectReadScope,
   linkBatchKey,
@@ -13,11 +10,12 @@ import {
   type SelectedObjectReadScope,
 } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
-import { installFreshSqliteSchema, sqliteStoragePath } from "../src/migrations"
+import { sqliteStoragePath } from "../src/migrations"
 import { SqliteObjectStorage } from "../src/objects"
 import { compileObjectQuery } from "../src/objects/query-compiler"
 import { compileSqliteSelectedObjectReadSource } from "../src/objects/read-scope"
 import { runImmediateTransactionAsync } from "../src/transactions"
+import { freshStorageDirectory } from "./fixtures/fresh-storage-directory"
 
 const projectId = "sqlite-selected-reader"
 const RootType = "SqliteScopeRoot"
@@ -320,11 +318,10 @@ describe("SqliteObjectStorage selected reader invariants", () => {
   })
 
   test("runs selected reads through the file-backed readonly production connection", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "sixb-sqlite-selected-readonly-"))
+    const directory = await freshStorageDirectory()
     const storage = new SqliteStorage({ path: directory })
     let writer: Database | undefined
     try {
-      await migrateStorage(storage)
       writer = new Database(sqliteStoragePath(directory))
       insertObject(writer, RootType, "root-1", { id: "root-1", hidden: "secret" })
 
@@ -381,11 +378,11 @@ describe("SqliteObjectStorage selected reader invariants", () => {
 
   test("keeps the traversal probe and every terminal statement on one WAL snapshot", async () => {
     // Regression check: return run() immediately from runDeferredReadTransaction; this must fail.
-    const directory = await mkdtemp(join(tmpdir(), "sixb-sqlite-selected-snapshot-"))
-    const databasePath = join(directory, "scope.sqlite")
+    // The schema is written as one file instead of migrated statement by statement: syncing each
+    // statement to disk once took this test past its timeout on CI.
+    const directory = await freshStorageDirectory()
+    const databasePath = sqliteStoragePath(directory)
     const setup = new Database(databasePath)
-    // Commit the fixture schema once instead of syncing every migration statement to disk.
-    setup.transaction(() => installFreshSqliteSchema(setup))()
     setup.run("PRAGMA journal_mode = WAL")
     setup.close()
 

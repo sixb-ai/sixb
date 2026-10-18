@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite"
 import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync, statSync } from "node:fs"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { InMemoryStorage, migrateStorage } from "@sixb/core"
@@ -23,10 +23,12 @@ import {
   WEBHOOK_RUN_FAILURE_CODES,
   WORKFLOW_RUN_FAILURE_CODES,
 } from "@sixb/core/storage"
+import { legacySourceFixture } from "../../tests/legacy-source-fixture"
 import { SqliteStorage } from "../src"
 import { SqliteActionRunStorage } from "../src/action-run-storage"
 import {
   createSqliteStorageMigrators,
+  migrateSqliteStorage,
   SQLITE_STORAGE_ADAPTER_ID,
   sqliteStorageMigrations,
   sqliteStoragePath,
@@ -41,13 +43,7 @@ test("adds sandbox state after the shipped params migration without changing exi
   const db = new Database(":memory:")
   try {
     db.exec("CREATE TABLE agent_threads (id TEXT PRIMARY KEY)")
-    const params = sqliteStorageMigrations.steps.find(
-      (step) => step.id === "041-agent-thread-workspaces"
-    )!
-    const state = sqliteStorageMigrations.steps.find(
-      (step) => step.id === "045-agent-thread-sandbox-state"
-    )!
-    params.up(db)
+    migration("041-agent-thread-workspaces").up(db)
     db.query("INSERT INTO agent_threads (id, sandbox_params) VALUES (?, ?)").run(
       "thread",
       JSON.stringify({ clientId: "acme" })
@@ -58,7 +54,7 @@ test("adds sandbox state after the shipped params migration without changing exi
         .all()
         .map((row) => (row as { name: string }).name)
     ).not.toContain("sandbox_state")
-    state.up(db)
+    migration("045-agent-thread-sandbox-state").up(db)
     expect(db.query("SELECT sandbox_params, sandbox_state FROM agent_threads").get()).toEqual({
       sandbox_params: '{"clientId":"acme"}',
       sandbox_state: null,
@@ -69,14 +65,8 @@ test("adds sandbox state after the shipped params migration without changing exi
 })
 test("rewrites legacy intervention actors to the canonical principal shape", () => {
   // Regression proof: remove 046; the legacy { principalType, principalId } values survive.
-  const db = new Database(":memory:")
+  const db = replayedDatabase("046-workflow-intervention-principals")
   try {
-    const legacyIndex = sqliteStorageMigrations.steps.findIndex(
-      (step) => step.id === "046-workflow-intervention-principals"
-    )
-    for (const migration of sqliteStorageMigrations.steps.slice(0, legacyIndex)) {
-      migration.up(db)
-    }
     const insert = db.query(`
       INSERT INTO workflow_interventions (
         project_id, id, workflow_id, workflow_run_id, node_run_id, node_index, node_id,
@@ -100,7 +90,7 @@ test("rewrites legacy intervention actors to the canonical principal shape", () 
     insert.run("current", "submitted", JSON.stringify({ type: "serviceAccount", id: "sa_1" }), null)
     insert.run("pending", "pending", null, null)
 
-    sqliteStorageMigrations.steps[legacyIndex]!.up(db)
+    migration("046-workflow-intervention-principals").up(db)
 
     const rows = db
       .query("SELECT id, submitted_by, cancelled_by FROM workflow_interventions ORDER BY id")
@@ -127,476 +117,75 @@ test("rewrites legacy intervention actors to the canonical principal shape", () 
 })
 
 const LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES = ["webhook.delivery_failed"] as const
-const expectedStorageMigrationRows = [
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "001-initial-schema",
-    status: "applied",
-    version: 1,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "002-workflow-run-output",
-    status: "applied",
-    version: 2,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "003-merge-sync-runs",
-    status: "applied",
-    version: 3,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "004-executions",
-    status: "applied",
-    version: 4,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "005-workflow-executions",
-    status: "applied",
-    version: 5,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "006-narrow-ontology-source-root-index",
-    status: "applied",
-    version: 6,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "007-split-overrides",
-    status: "applied",
-    version: 7,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "008-action-executions",
-    status: "applied",
-    version: 8,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "009-agent-executions",
-    status: "applied",
-    version: 9,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "010-ai-usage-accounting-foundation",
-    status: "applied",
-    version: 10,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "011-sync-failure-record",
-    status: "applied",
-    version: 11,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "012-pipeline-failure-record",
-    status: "applied",
-    version: 12,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "013-workflow-failure-record",
-    status: "applied",
-    version: 13,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "014-agent-failure-record",
-    status: "applied",
-    version: 14,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "015-projection-failure-record",
-    status: "applied",
-    version: 15,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "016-webhook-run-failure-record",
-    status: "applied",
-    version: 16,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "017-action-failure-record",
-    status: "applied",
-    version: 17,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "018-ontology-outbox-failure-record",
-    status: "applied",
-    version: 18,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "019-webhook-delivery-failure-record",
-    status: "applied",
-    version: 19,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "020-drop-run-usage-projections",
-    status: "applied",
-    version: 20,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "021-sync-pipeline-executions",
-    status: "applied",
-    version: 21,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "022-projection-executions",
-    status: "applied",
-    version: 22,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "023-webhook-executions",
-    status: "applied",
-    version: 23,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "024-ontology-commit-executions",
-    status: "applied",
-    version: 24,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "025-connector-connections",
-    status: "applied",
-    version: 25,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "026-ai-cost-accounting",
-    status: "applied",
-    version: 26,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "027-agent-context-checkpoints",
-    status: "applied",
-    version: 27,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "028-object-override-edit-times",
-    status: "applied",
-    version: 28,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "029-model-accounting",
-    status: "applied",
-    version: 29,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "030-ai-usage-limits",
-    status: "applied",
-    version: 30,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "031-subagent-runs",
-    status: "applied",
-    version: 31,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "032-conversation-run-spec",
-    status: "applied",
-    version: 32,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "033-retire-agent-definitions",
-    status: "applied",
-    version: 33,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "034-device-authorizations",
-    status: "applied",
-    version: 34,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "035-share-grants",
-    status: "applied",
-    version: 35,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "036-share-sessions",
-    status: "applied",
-    version: 36,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "037-execution-requester-groups",
-    status: "applied",
-    version: 37,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "038-projection-source-roots",
-    status: "applied",
-    version: 38,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "039-connector-optional-pkce",
-    status: "applied",
-    version: 39,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "040-outbox-publication-order",
-    status: "applied",
-    version: 40,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "041-agent-thread-workspaces",
-    status: "applied",
-    version: 41,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "042-vector-profiles",
-    status: "applied",
-    version: 42,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "043-vector-indexing",
-    status: "applied",
-    version: 43,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "044-vector-batching",
-    status: "applied",
-    version: 44,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "045-agent-thread-sandbox-state",
-    status: "applied",
-    version: 45,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "046-workflow-intervention-principals",
-    status: "applied",
-    version: 46,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "047-ontology-commit-attribution",
-    status: "applied",
-    version: 47,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "048-file-upload-sessions",
-    status: "applied",
-    version: 48,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "049-native-sessions",
-    status: "applied",
-    version: 49,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "050-directory-group-memberships",
-    status: "applied",
-    version: 50,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "051-projection-run-supersession",
-    status: "applied",
-    version: 51,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "052-compact-source-storage",
-    status: "applied",
-    version: 52,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "053-replacement-plans",
-    status: "applied",
-    version: 53,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "054-slim-ontology-outbox",
-    status: "applied",
-    version: 54,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "055-commit-touches",
-    status: "applied",
-    version: 55,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "056-audio-transcription",
-    status: "applied",
-    version: 56,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "057-reranking-model-kind",
-    status: "applied",
-    version: 57,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "058-file-download-grants",
-    status: "applied",
-    version: 58,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "059-drained-source-versions",
-    status: "applied",
-    version: 59,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "060-terminal-action-runs",
-    status: "applied",
-    version: 60,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "061-drop-auth-audience",
-    status: "applied",
-    version: 61,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "062-artifacts",
-    status: "applied",
-    version: 62,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "063-drop-output-diagnostics",
-    status: "applied",
-    version: 63,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "064-activity",
-    status: "applied",
-    version: 64,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "065-activity-timeline",
-    status: "applied",
-    version: 65,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "066-activity-interactions",
-    status: "applied",
-    version: 66,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "067-artifact-kinds",
-    status: "applied",
-    version: 67,
-  },
+/** Every shipped migration, in order. A database records these ids, so they never change. */
+const shippedMigrationIds = [
+  "001-initial-schema",
+  "002-workflow-run-output",
+  "003-merge-sync-runs",
+  "004-executions",
+  "005-workflow-executions",
+  "006-narrow-ontology-source-root-index",
+  "007-split-overrides",
+  "008-action-executions",
+  "009-agent-executions",
+  "010-ai-usage-accounting-foundation",
+  "011-sync-failure-record",
+  "012-pipeline-failure-record",
+  "013-workflow-failure-record",
+  "014-agent-failure-record",
+  "015-projection-failure-record",
+  "016-webhook-run-failure-record",
+  "017-action-failure-record",
+  "018-ontology-outbox-failure-record",
+  "019-webhook-delivery-failure-record",
+  "020-drop-run-usage-projections",
+  "021-sync-pipeline-executions",
+  "022-projection-executions",
+  "023-webhook-executions",
+  "024-ontology-commit-executions",
+  "025-connector-connections",
+  "026-ai-cost-accounting",
+  "027-agent-context-checkpoints",
+  "028-object-override-edit-times",
+  "029-model-accounting",
+  "030-ai-usage-limits",
+  "031-subagent-runs",
+  "032-conversation-run-spec",
+  "033-retire-agent-definitions",
+  "034-device-authorizations",
+  "035-share-grants",
+  "036-share-sessions",
+  "037-execution-requester-groups",
+  "038-projection-source-roots",
+  "039-connector-optional-pkce",
+  "040-outbox-publication-order",
+  "041-agent-thread-workspaces",
+  "042-vector-profiles",
+  "043-vector-indexing",
+  "044-vector-batching",
+  "045-agent-thread-sandbox-state",
+  "046-workflow-intervention-principals",
+  "047-ontology-commit-attribution",
+  "048-file-upload-sessions",
+  "049-native-sessions",
+  "050-directory-group-memberships",
+  "051-projection-run-supersession",
+  "052-compact-source-storage",
+  "053-replacement-plans",
+  "054-slim-ontology-outbox",
+  "055-commit-touches",
+  "056-audio-transcription",
+  "057-reranking-model-kind",
+  "058-file-download-grants",
+  "059-drained-source-versions",
+  "060-terminal-action-runs",
+  "061-drop-auth-audience",
+  "062-artifacts",
+  "063-drop-output-diagnostics",
+  "064-activity",
+  "065-activity-timeline",
+  "066-activity-interactions",
+  "067-artifact-kinds",
 ]
 
 afterEach(async () => {
@@ -608,6 +197,55 @@ afterEach(async () => {
     }
   }
 })
+
+function migration(id: string) {
+  const step = sqliteStorageMigrations.steps.find((candidate) => candidate.id === id)
+  if (!step) throw new Error(`Unknown migration '${id}'.`)
+  return step
+}
+
+const replayedPrefixes = new Map<number, Uint8Array>()
+
+/**
+ * A new in-memory database holding every migration before `id`, or all of them, as replaying them
+ * leaves it. A full replay costs a few hundred milliseconds, so each replay saves a copy every
+ * eight steps and where it stops, and the next one starts from the nearest saved copy. Every
+ * caller gets its own database.
+ */
+function replayedDatabase(id?: string): Database {
+  const steps = sqliteStorageMigrations.steps
+  const end = id === undefined ? steps.length : steps.indexOf(migration(id))
+  const start = Math.max(0, ...[...replayedPrefixes.keys()].filter((index) => index <= end))
+  const cached = replayedPrefixes.get(start)
+  const db = cached ? Database.deserialize(cached) : new Database(":memory:")
+  for (let index = start; index < end; index++) {
+    steps[index]!.up(db)
+    if ((index + 1) % 8 === 0 || index + 1 === end) replayedPrefixes.set(index + 1, db.serialize())
+  }
+  return db
+}
+
+let migratedTemplate: Promise<Uint8Array> | undefined
+
+/** A new storage directory holding a copy of one database the migration runner brought up to date. */
+async function migratedDirectory(): Promise<string> {
+  migratedTemplate ??= (async () => {
+    const directory = await mkdtemp(join(tmpdir(), "sixb-sqlite-migrated-"))
+    tempDirs.push(directory)
+    // The runner alone leaves the file in rollback-journal mode, so the copy needs no WAL files.
+    await migrateSqliteStorage(directory)
+    const db = new Database(sqliteStoragePath(directory), { readonly: true })
+    try {
+      return db.serialize()
+    } finally {
+      db.close()
+    }
+  })()
+  const directory = await mkdtemp(join(tmpdir(), "sixb-sqlite-migrated-"))
+  tempDirs.push(directory)
+  await writeFile(sqliteStoragePath(directory), await migratedTemplate)
+  return directory
+}
 
 describe("SQLite storage migrations", () => {
   test("moves historical snapshots to executions and preserves empty child snapshots", async () => {
@@ -624,10 +262,7 @@ describe("SQLite storage migrations", () => {
         INSERT INTO workflow_runs VALUES ('p', 'workflow', '["finance"]');
         INSERT INTO agent_runs VALUES ('p', 'agent', '["support"]'), ('p', 'empty', '[]');
       `)
-      const migration = sqliteStorageMigrations.steps.find(
-        (step) => step.id === "037-execution-requester-groups"
-      )!
-      await migration.up(db)
+      await migration("037-execution-requester-groups").up(db)
       expect(
         db
           .query(
@@ -650,11 +285,8 @@ describe("SQLite storage migrations", () => {
 
   test("keeps recorded model kinds and admits reranking", async () => {
     // Removal proof: omit 057's UPDATE; the transcription kind below is lost in the swap.
-    const db = new Database(":memory:")
+    const db = replayedDatabase("057-reranking-model-kind")
     try {
-      const steps = sqliteStorageMigrations.steps
-      const index = steps.findIndex((step) => step.id === "057-reranking-model-kind")
-      for (const step of steps.slice(0, index)) await step.up(db)
       const insertUsage = (id: string, modelKind: string | null) =>
         db.run(
           `INSERT INTO ai_model_call_usage (
@@ -668,7 +300,7 @@ describe("SQLite storage migrations", () => {
       insertUsage("unclassified", null)
       expect(() => insertUsage("early-reranking", "reranking")).toThrow()
 
-      await steps[index]!.up(db)
+      await migration("057-reranking-model-kind").up(db)
       insertUsage("reranking", "reranking")
       expect(() => insertUsage("unknown", "unknown")).toThrow()
       expect(db.query("SELECT id, model_kind FROM ai_model_call_usage ORDER BY id").all()).toEqual([
@@ -683,11 +315,8 @@ describe("SQLite storage migrations", () => {
 
   test("counts the roots each superseded version still holds", async () => {
     // Removal proof: omit 059's UPDATE; the drained version below keeps its staged count.
-    const db = new Database(":memory:")
+    const db = replayedDatabase("059-drained-source-versions")
     try {
-      const steps = sqliteStorageMigrations.steps
-      const index = steps.findIndex((step) => step.id === "059-drained-source-versions")
-      for (const step of steps.slice(0, index)) await step.up(db)
       db.exec(`
         INSERT INTO ontology_sources (version_id, project_id, source_id, materialization_id,
           projection_run_id, projection_kind, protocol, status, execution_token, dataset_id,
@@ -703,7 +332,7 @@ describe("SQLite storage migrations", () => {
         VALUES (2, 'p', 'b', 1), (3, 'p', 'a', 0), (3, 'p', 'b', 1);
       `)
 
-      await steps[index]!.up(db)
+      await migration("059-drained-source-versions").up(db)
       expect(db.query("SELECT version_id, status, root_count FROM ontology_sources").all()).toEqual(
         [
           { version_id: 1, status: "superseded", root_count: 0 },
@@ -716,14 +345,155 @@ describe("SQLite storage migrations", () => {
     }
   })
 
+  // Red proof: remove the INSERT ... SELECT backfill from migration 038.
+  test("source-root upgrade preserves active, terminal and unfinished snapshots", () => {
+    const db = replayedDatabase("038-projection-source-roots")
+    try {
+      db.exec("PRAGMA foreign_keys = ON")
+      db.exec(legacySourceFixture())
+      migration("038-projection-source-roots").up(db)
+      expect(
+        db
+          .query(`SELECT materialization_id, active, retired_at IS NOT NULL AS retired
+        FROM ontology_source_roots ORDER BY materialization_id`)
+          .all()
+      ).toEqual([
+        { materialization_id: "abandoned", active: 0, retired: 1 },
+        { materialization_id: "active", active: 1, retired: 0 },
+        { materialization_id: "ready", active: 0, retired: 0 },
+        { materialization_id: "staging", active: 0, retired: 0 },
+        { materialization_id: "superseded", active: 0, retired: 1 },
+      ])
+      expect(
+        db
+          .query(`SELECT count(*) AS count FROM ontology_source_rows AS rows
+        JOIN ontology_source_roots AS roots USING (project_id,source_id,materialization_id,root_sort_key)
+        WHERE roots.active = 1`)
+          .get()
+      ).toEqual({ count: 2 })
+      expect(db.query("PRAGMA foreign_key_check").all()).toEqual([])
+      expect(() =>
+        db.exec(
+          "UPDATE ontology_source_roots SET active=1,retired_at=NULL WHERE materialization_id='superseded'"
+        )
+      ).toThrow("UNIQUE")
+      expect(() => db.exec("UPDATE ontology_sources SET base_commit_id='partial'")).toThrow("CHECK")
+    } finally {
+      db.close()
+    }
+  })
+
+  describe("052 compact source storage", () => {
+    /** The legacy snapshots, upgraded through every migration before 052. */
+    function databaseAt051(): Database {
+      const db = replayedDatabase("038-projection-source-roots")
+      db.exec(legacySourceFixture())
+      const steps = sqliteStorageMigrations.steps
+      const from = steps.indexOf(migration("038-projection-source-roots"))
+      const to = steps.indexOf(migration("052-compact-source-storage"))
+      for (const step of steps.slice(from, to)) step.up(db)
+      return db
+    }
+
+    /** Every migration from 052 on, in one transaction, as the runner commits or rolls back 052. */
+    function migrateFrom052(db: Database): void {
+      const steps = sqliteStorageMigrations.steps
+      const from = steps.indexOf(migration("052-compact-source-storage"))
+      db.transaction(() => {
+        for (const step of steps.slice(from)) step.up(db)
+      })()
+    }
+
+    // Red proofs: drop the CASE fallback to `versions.updated_at` in migration 052 and the superseded
+    // root becomes live again; drop the payload rewrite and the stored assertion keeps its ref copy.
+    test("keeps every version, root, row and live root", () => {
+      const db = databaseAt051()
+      try {
+        // A published root neither active nor retired must not come back to life.
+        db.exec(`UPDATE ontology_source_roots SET retired_at = NULL
+          WHERE materialization_id = 'superseded'`)
+        migrateFrom052(db)
+
+        const key = '["object","Device","a"]'
+        expect(
+          db
+            .query(`SELECT versions.materialization_id, roots.root_key,
+              roots.retired_at IS NOT NULL AS retired,
+              roots.retired_at IS NULL AND roots.deleted = 0
+                AND versions.status IN ('active', 'superseded') AS live
+            FROM ontology_source_roots AS roots
+            JOIN ontology_sources AS versions USING (version_id)
+            ORDER BY versions.materialization_id`)
+            .all()
+        ).toEqual([
+          { materialization_id: "abandoned", root_key: key, retired: 1, live: 0 },
+          { materialization_id: "active", root_key: key, retired: 0, live: 1 },
+          { materialization_id: "ready", root_key: key, retired: 0, live: 0 },
+          { materialization_id: "staging", root_key: key, retired: 0, live: 0 },
+          { materialization_id: "superseded", root_key: key, retired: 1, live: 0 },
+        ])
+        expect(db.query("SELECT count(*) AS count FROM ontology_sources").get()).toEqual({
+          count: 5,
+        })
+        expect(db.query("SELECT count(*) AS count FROM ontology_source_rows").get()).toEqual({
+          count: 10,
+        })
+        expect(db.query("PRAGMA foreign_key_check").all()).toEqual([])
+
+        const [state] = new SqliteMaterializationStateReader(db, "p").objectStates([
+          { objectTypeId: "Device", primaryId: "a" },
+        ])
+        expect(state?.source).toEqual({
+          source: { projectionId: "source" },
+          materializationId: "active",
+          root: { kind: "object", ref: { objectTypeId: "Device", primaryId: "a" } },
+          assertion: {
+            kind: "object",
+            ref: { objectTypeId: "Device", primaryId: "a" },
+            properties: { id: "a", name: "active" },
+          },
+          stagingOrdinal: 0,
+        })
+        expect(
+          db
+            .query("SELECT DISTINCT payload FROM ontology_source_rows WHERE entity_kind = 'link'")
+            .all()
+        ).toEqual([{ payload: null }])
+        expect(() =>
+          db.exec(`INSERT INTO ontology_source_roots (version_id, project_id, root_key, staging_ordinal)
+            SELECT version_id, 'p', '${key}', 1 FROM ontology_sources
+            WHERE materialization_id = 'active'`)
+        ).toThrow("UNIQUE")
+      } finally {
+        db.close()
+      }
+    })
+
+    // Red proof: drop the count check around migration 052 and it commits without the orphan row.
+    test("fails rather than drop a row without a root", () => {
+      const db = databaseAt051()
+      try {
+        db.exec(`DELETE FROM ontology_source_roots WHERE materialization_id = 'staging'`)
+
+        expect(() => migrateFrom052(db)).toThrow(
+          "Source versions, roots or rows were lost while compacting source storage."
+        )
+        expect(
+          db
+            .query("SELECT count(*) AS count FROM ontology_source_rows WHERE root_sort_key <> ''")
+            .get()
+        ).toEqual({ count: 10 })
+      } finally {
+        db.close()
+      }
+    })
+  })
+
   test("keeps projection runs and admits superseded runs and retrying failures", async () => {
     // Removal proof: keep `AND error IS NULL` on 051's running branch; the running run's error
     // below is then rejected.
-    const db = new Database(":memory:")
+    const db = replayedDatabase("051-projection-run-supersession")
     try {
-      const steps = sqliteStorageMigrations.steps
-      const index = steps.findIndex((step) => step.id === "051-projection-run-supersession")
-      for (const step of steps.slice(0, index)) await step.up(db)
       const failure = JSON.stringify({
         code: "projection.execution_failed",
         message: "Projection execution failed.",
@@ -762,7 +532,7 @@ describe("SQLite storage migrations", () => {
       insertRun("failed-run", "failed", "version-1", failure)
       insertRun("running-run", "running", "version-2", null)
 
-      await steps[index]!.up(db)
+      await migration("051-projection-run-supersession").up(db)
       insertRun("superseded-run", "superseded", "version-3", null)
       db.run("UPDATE projection_runs SET error = ? WHERE id = 'running-run'", [failure])
 
@@ -846,11 +616,8 @@ describe("SQLite storage migrations", () => {
   // keeps phase 'enqueue', which `parseActionRunFailure` rejects. Drop the join on
   // `ontology_commits`, and the runs whose edits committed are recorded as failed.
   test("keeps every Action run readable as a terminal record", async () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase("060-terminal-action-runs")
     try {
-      const steps = sqliteStorageMigrations.steps
-      const index = steps.findIndex((step) => step.id === "060-terminal-action-runs")
-      for (const step of steps.slice(0, index)) await step.up(db)
       const failure = (code: string, retryable: boolean, phase: string) =>
         JSON.stringify({
           code,
@@ -916,7 +683,7 @@ describe("SQLite storage migrations", () => {
         insertCommit(id)
       }
 
-      await steps[index]!.up(db)
+      await migration("060-terminal-action-runs").up(db)
       // Read back through the provider: its read path never consults executions.
       const actionRuns = new SqliteActionRunStorage({
         connection: { db, ownsConnection: false },
@@ -1003,11 +770,8 @@ describe("SQLite storage migrations", () => {
   // Removal proof: drop the UPDATE from 061 and the Atlas browser session stays active, listed
   // among the person's sessions though no cookie can reach it.
   test("ends Atlas's browser sessions and keeps the app's and native ones", async () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase("061-drop-auth-audience")
     try {
-      const steps = sqliteStorageMigrations.steps
-      const index = steps.findIndex((step) => step.id === "061-drop-auth-audience")
-      for (const step of steps.slice(0, index)) await step.up(db)
       const insertSession = (id: string, audience: string, refreshTokenHash: string | null) =>
         db.run(
           `INSERT INTO auth_sessions (
@@ -1021,7 +785,7 @@ describe("SQLite storage migrations", () => {
       insertSession("app", "app", null)
       insertSession("native", "atlas", "refresh-hash")
 
-      await steps[index]?.up(db)
+      await migration("061-drop-auth-audience").up(db)
 
       const rows = db.query("SELECT id, revoked_at FROM auth_sessions ORDER BY id").all() as {
         id: string
@@ -1057,10 +821,7 @@ describe("SQLite storage migrations", () => {
         INSERT INTO auth_group_memberships
           VALUES ('p', 'usr_1', 'security-admins', 'manual', '2026-05-14T10:00:00.000Z');
       `)
-      const migration = sqliteStorageMigrations.steps.find(
-        (step) => step.id === "050-directory-group-memberships"
-      )!
-      await migration.up(db)
+      await migration("050-directory-group-memberships").up(db)
       db.run(
         "INSERT INTO auth_group_memberships VALUES ('p', 'usr_1', 'field-ops', 'directory', '2026-05-14T10:01:00.000Z')"
       )
@@ -1112,10 +873,7 @@ describe("SQLite storage migrations", () => {
           ('p', 'c-request', '{"id":"e1","actor":{"id":"alice","type":"user"}}'),
           ('p', 'c-scheduled', '{"id":"e2"}');
       `)
-      const migration = sqliteStorageMigrations.steps.find(
-        (step) => step.id === "047-ontology-commit-attribution"
-      )!
-      await migration.up(db)
+      await migration("047-ontology-commit-attribution").up(db)
 
       expect(readMemoryTableColumns(db, "ontology_commits")).not.toContain("actor")
       const commits = db
@@ -1248,12 +1006,8 @@ describe("SQLite storage migrations", () => {
     )
 
     /** A database at 053 holding `commit` and its events as 053 stored them. */
-    async function databaseAt053(stored = envelopes): Promise<Database> {
-      const db = new Database(":memory:")
-      for (const migration of sqliteStorageMigrations.steps) {
-        if (migration.id === "054-slim-ontology-outbox") break
-        await migration.up(db)
-      }
+    function databaseAt053(stored = envelopes): Database {
+      const db = replayedDatabase("054-slim-ontology-outbox")
       db.run(
         `INSERT INTO executions (
            project_id, id, executor_kind, executor_id, source_kind, source_id,
@@ -1290,16 +1044,12 @@ describe("SQLite storage migrations", () => {
       return db
     }
 
-    function migration054() {
-      return sqliteStorageMigrations.steps.find((step) => step.id === "054-slim-ontology-outbox")!
-    }
-
     // Removal proof: keep `propertyChanges` in a created draft, or drop a context field from the
     // rebuild; the claimed events no longer equal what 053 stored.
     test("keeps every pending event exactly as consumers would have received it", async () => {
-      const db = await databaseAt053()
+      const db = databaseAt053()
       try {
-        await migration054().up(db)
+        await migration("054-slim-ontology-outbox").up(db)
 
         expect(readMemoryTableColumns(db, "ontology_outbox")).not.toContain("envelope")
         expect(db.query("SELECT event FROM ontology_outbox ORDER BY commit_ordinal").all()).toEqual(
@@ -1326,11 +1076,11 @@ describe("SQLite storage migrations", () => {
     // reach consumers with its execution's correlation id instead of its own.
     test("refuses to convert an event that would not rebuild from its commit", async () => {
       const [first, ...rest] = envelopes
-      const db = await databaseAt053([{ ...first!, correlationId: "elsewhere" }, ...rest])
+      const db = databaseAt053([{ ...first!, correlationId: "elsewhere" }, ...rest])
       try {
-        await expect(Promise.resolve().then(() => migration054().up(db))).rejects.toThrow(
-          "1 outbox events would not rebuild from their commit"
-        )
+        await expect(
+          Promise.resolve().then(() => migration("054-slim-ontology-outbox").up(db))
+        ).rejects.toThrow("1 outbox events would not rebuild from their commit")
         expect(readMemoryTableColumns(db, "ontology_outbox")).toContain("envelope")
       } finally {
         db.close()
@@ -1348,7 +1098,7 @@ describe("SQLite storage migrations", () => {
           PRIMARY KEY (project_id, id)
         );
         INSERT INTO ai_model_call_usage VALUES ('project', 'usage', 'mock', 'model', '2026-08-01');`)
-      sqliteStorageMigrations.steps.find((step) => step.id === "026-ai-cost-accounting")?.up(db)
+      migration("026-ai-cost-accounting").up(db)
       db.run(`INSERT INTO ai_model_call_valuations (
         project_id, usage_record_id, status, provider_id, model_id, reason, details, rated_at
       ) VALUES ('project', 'usage', 'unpriceable', 'mock', 'model', 'missingCatalogEntry',
@@ -1390,7 +1140,7 @@ describe("SQLite storage migrations", () => {
           "SELECT usage_record_id, details FROM ai_model_call_valuations ORDER BY usage_record_id"
         )
         .all()
-      sqliteStorageMigrations.steps.find((step) => step.id === "029-model-accounting")!.up(db)
+      migration("029-model-accounting").up(db)
       expect(
         db
           .query("SELECT reason FROM ai_model_call_valuations WHERE usage_record_id = 'usage'")
@@ -1436,21 +1186,8 @@ describe("SQLite storage migrations", () => {
       db.close()
     }
   })
-  test("migrateStorage writes storage-level migration history", async () => {
+  test("migrateStorage writes storage-level migration history once", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-migrations-"))
-    tempDirs.push(tempDir)
-
-    const storage = new SqliteStorage({ path: tempDir })
-    const result = await migrateStorage(storage)
-
-    closeStorage(storage)
-
-    expect(result.status).toBe("migrated")
-    expect(readMigrationRows(sqliteStoragePath(tempDir))).toEqual(expectedStorageMigrationRows)
-  })
-
-  test("repeated migration planning is idempotent", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-idempotent-migrations-"))
     tempDirs.push(tempDir)
     const storage = new SqliteStorage({ path: tempDir })
     try {
@@ -1459,58 +1196,24 @@ describe("SQLite storage migrations", () => {
     } finally {
       storage.close()
     }
+
+    expect(readMigrationRows(sqliteStoragePath(tempDir))).toEqual(
+      shippedMigrationIds.map((id, index) => ({
+        adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+        checksum_length: 64,
+        id,
+        status: "applied",
+        version: index + 1,
+      }))
+    )
   })
 
-  test("indexes the primary Share grant listing order", () => {
-    const db = new Database(":memory:")
+  test("preserves every existing execution, Agent authority included, when adding delegated authority", () => {
+    // Regression proof: restore 036's old service-account-only Agent CHECK; the migration fails.
+    const db = replayedDatabase("036-share-sessions")
     try {
-      const migration = sqliteStorageMigrations.steps.find((step) => step.id === "035-share-grants")
-      if (!migration) throw new Error("Expected the Share grants migration.")
-      migration.up(db)
-
-      expect(readMemoryIndexColumns(db, "idx_share_grants_project_created")).toEqual([
-        "project_id",
-        "created_at",
-        "id",
-      ])
-    } finally {
-      db.close()
-    }
-  })
-
-  test("installs Share sessions with grant identity and expiry indexes", () => {
-    const db = new Database(":memory:")
-    try {
-      for (const migration of sqliteStorageMigrations.steps.slice(0, 36)) migration.up(db)
-      expect(readMemoryIndexColumns(db, "idx_share_sessions_grant")).toEqual([
-        "project_id",
-        "grant_id",
-        "created_at",
-        "id",
-      ])
-      expect(readMemoryIndexColumns(db, "idx_share_sessions_expiry")).toEqual([
-        "project_id",
-        "expires_at",
-      ])
-    } finally {
-      db.close()
-    }
-  })
-
-  test("preserves existing parent and child executions when adding delegated authority", () => {
-    const db = new Database(":memory:")
-    try {
-      const migrationIndex = sqliteStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "036-share-sessions"
-      )
-      const migration = sqliteStorageMigrations.steps[migrationIndex]
-      if (!migration || migrationIndex < 0) {
-        throw new Error("Expected the delegated executions migration.")
-      }
-      for (const previous of sqliteStorageMigrations.steps.slice(0, migrationIndex)) {
-        previous.up(db)
-      }
-
+      // This fixture isolates CHECK/data preservation; foreign-key validity is covered by the
+      // execution storage contract. SQLite's in-memory connection leaves foreign keys disabled.
       db.run(`
         INSERT INTO executions (
           project_id, id, executor_kind, executor_id, source_kind, source_id,
@@ -1529,46 +1232,7 @@ describe("SQLite storage migrations", () => {
           'correlation-1', 'request-parent', 'trustedPrimitive', 'action', 'approve',
           '2026-08-01T12:00:01.000Z'
         );
-      `)
 
-      migration.up(db)
-
-      expect(
-        db
-          .query(`
-            SELECT id, parent_execution_id, authority_kind
-            FROM executions
-            ORDER BY created_at
-          `)
-          .all()
-      ).toEqual([
-        { id: "request-parent", parent_execution_id: null, authority_kind: "disabled" },
-        {
-          id: "action-child",
-          parent_execution_id: "request-parent",
-          authority_kind: "trustedPrimitive",
-        },
-      ])
-      expect(readMemoryForeignKeyTables(db, "executions")).toContain("executions")
-      expect(readMemoryForeignKeyTables(db, "executions")).not.toContain("executions_v2")
-    } finally {
-      db.close()
-    }
-  })
-
-  test("delegated migration preserves inherited Agent authority", () => {
-    // Regression proof: restore 036's old service-account-only Agent CHECK; migration fails.
-    const db = new Database(":memory:")
-    try {
-      const index = sqliteStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "036-share-sessions"
-      )
-      const migration = sqliteStorageMigrations.steps[index]
-      if (!migration || index < 0) throw new Error("Expected delegated executions migration.")
-      for (const previous of sqliteStorageMigrations.steps.slice(0, index)) previous.up(db)
-      // This fixture isolates CHECK/data preservation; foreign-key validity is covered by the
-      // execution storage contract. SQLite's in-memory connection leaves foreign keys disabled.
-      db.run(`
         INSERT INTO executions (
           project_id, id, executor_kind, executor_id, source_kind, source_id,
           correlation_id, parent_execution_id, authority_kind,
@@ -1582,7 +1246,9 @@ describe("SQLite storage migrations", () => {
       const before = db
         .prepare<Record<string, unknown>, []>("SELECT * FROM executions ORDER BY id")
         .all()
-      migration.up(db)
+
+      migration("036-share-sessions").up(db)
+
       expect(db.prepare("SELECT * FROM executions ORDER BY id").all()).toEqual(
         before.map((row) => ({
           ...row,
@@ -1591,15 +1257,16 @@ describe("SQLite storage migrations", () => {
           authority_delegation_session_id: null,
         }))
       )
+      expect(readMemoryForeignKeyTables(db, "executions")).toContain("executions")
+      expect(readMemoryForeignKeyTables(db, "executions")).not.toContain("executions_v2")
     } finally {
       db.close()
     }
   })
 
   test("rejects delegated executions without a delegation kind", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase()
     try {
-      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
       db.run(`
         INSERT INTO share_grants (
           project_id, id, definition_id, target_object_type_id, target_primary_id,
@@ -1639,9 +1306,8 @@ describe("SQLite storage migrations", () => {
   })
 
   test("adds empty per-property edit times to legacy object overrides", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase("028-object-override-edit-times")
     try {
-      for (const migration of sqliteStorageMigrations.steps.slice(0, 27)) migration.up(db)
       db.query(`
         INSERT INTO ontology_object_overrides (
           project_id, object_type_id, primary_id, value, last_commit_id, updated_at
@@ -1655,7 +1321,7 @@ describe("SQLite storage migrations", () => {
         "2026-01-01T11:00:00.000Z"
       )
 
-      sqliteStorageMigrations.steps[27]?.up(db)
+      migration("028-object-override-edit-times").up(db)
 
       expect(
         db
@@ -1668,9 +1334,8 @@ describe("SQLite storage migrations", () => {
   })
 
   test("migrates legacy failed run records from the version 10 schema", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase("011-sync-failure-record")
     try {
-      for (const migration of sqliteStorageMigrations.steps.slice(0, 10)) migration.up(db)
       db.query(`
         INSERT INTO sync_runs (
           project_id, id, sync_id, dataset_id, mode, status, started_at, finished_at,
@@ -1851,8 +1516,8 @@ describe("SQLite storage migrations", () => {
       const executionMigrationIndex = sqliteStorageMigrations.steps.findIndex(
         (migration) => migration.id === "021-sync-pipeline-executions"
       )
-      for (const migration of sqliteStorageMigrations.steps.slice(10, executionMigrationIndex)) {
-        migration.up(db)
+      for (const step of sqliteStorageMigrations.steps.slice(10, executionMigrationIndex)) {
+        step.up(db)
       }
 
       const row = db
@@ -2084,18 +1749,10 @@ describe("SQLite storage migrations", () => {
   })
 
   test("splits legacy overrides and derives unambiguous link slot authority", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase("007-split-overrides")
     try {
-      const splitOverridesIndex = sqliteStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "007-split-overrides"
-      )
-      const splitOverridesMigration = sqliteStorageMigrations.steps[splitOverridesIndex]
-      if (!splitOverridesMigration) {
-        throw new Error("SQLite split-overrides migration is missing.")
-      }
-      for (const migration of sqliteStorageMigrations.steps.slice(0, splitOverridesIndex)) {
-        migration.up(db)
-      }
+      const splitOverridesMigration = migration("007-split-overrides")
+      const splitOverridesIndex = sqliteStorageMigrations.steps.indexOf(splitOverridesMigration)
 
       db.query(
         `INSERT INTO ontology_overrides (
@@ -2184,8 +1841,8 @@ describe("SQLite storage migrations", () => {
       ).toEqual({ count: 5 })
       expect(readMemoryTableNames(db)).not.toContain("ontology_overrides")
       // The reader queries the current schema: finish the upgrade before reading.
-      for (const migration of sqliteStorageMigrations.steps.slice(splitOverridesIndex + 1)) {
-        migration.up(db)
+      for (const step of sqliteStorageMigrations.steps.slice(splitOverridesIndex + 1)) {
+        step.up(db)
       }
       expect(
         new SqliteMaterializationStateReader(db, "project").linkState({
@@ -2200,9 +1857,8 @@ describe("SQLite storage migrations", () => {
   })
 
   test("enforces edge and slot identity independently of the selected target", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase()
     try {
-      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
       const insert = db.query(
         `INSERT INTO ontology_link_overrides (
            project_id, identity_kind, identity_key,
@@ -2277,18 +1933,9 @@ describe("SQLite storage migrations", () => {
   })
 
   test("ontology outbox failure migration replaces legacy diagnostics with a safe failure", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase("018-ontology-outbox-failure-record")
     try {
-      const failureMigrationIndex = sqliteStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "018-ontology-outbox-failure-record"
-      )
-      const failureMigration = sqliteStorageMigrations.steps[failureMigrationIndex]
-      if (failureMigrationIndex !== 17 || !failureMigration) {
-        throw new Error("SQLite ontology outbox failure migration is missing.")
-      }
-      for (const migration of sqliteStorageMigrations.steps.slice(0, failureMigrationIndex)) {
-        migration.up(db)
-      }
+      const failureMigration = migration("018-ontology-outbox-failure-record")
       db.query(`
         INSERT INTO ontology_outbox (
           project_id, id, commit_id, commit_ordinal, envelope, available_at,
@@ -2350,18 +1997,9 @@ describe("SQLite storage migrations", () => {
   })
 
   test("webhook delivery failure migration replaces legacy diagnostics with a safe failure", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase("019-webhook-delivery-failure-record")
     try {
-      const failureMigrationIndex = sqliteStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "019-webhook-delivery-failure-record"
-      )
-      const failureMigration = sqliteStorageMigrations.steps[failureMigrationIndex]
-      if (failureMigrationIndex !== 18 || !failureMigration) {
-        throw new Error("SQLite webhook delivery failure migration is missing.")
-      }
-      for (const migration of sqliteStorageMigrations.steps.slice(0, failureMigrationIndex)) {
-        migration.up(db)
-      }
+      const failureMigration = migration("019-webhook-delivery-failure-record")
       db.query(`
         INSERT INTO webhook_deliveries (
           project_id, connector_id, webhook_id, idempotency_key, status,
@@ -2430,14 +2068,8 @@ describe("SQLite storage migrations", () => {
   })
 
   test("recorded old checksums are rejected before schema mutation", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-checksum-"))
-    tempDirs.push(tempDir)
+    const tempDir = await migratedDirectory()
     const path = sqliteStoragePath(tempDir)
-
-    const first = new SqliteStorage({ path: tempDir })
-    await migrateStorage(first)
-    closeStorage(first)
-
     const db = new Database(path)
     db.query(
       "UPDATE sixb_migrations SET checksum = 'old-checksum' WHERE adapter_id = ? AND version = 1"
@@ -2453,9 +2085,8 @@ describe("SQLite storage migrations", () => {
   })
 
   test("fresh schema installs the exact ontology table set and provenance columns", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase()
     try {
-      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
       const ontologyTables = readMemoryTableNames(db).filter((name) => name.startsWith("ontology_"))
       expect(ontologyTables).toEqual([
         "ontology_commit_touches",
@@ -2549,89 +2180,24 @@ describe("SQLite storage migrations", () => {
   })
 
   test("requires explicit project handling for legacy workflow runs", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase("005-workflow-executions")
     try {
-      for (const migration of sqliteStorageMigrations.steps.slice(0, 4)) {
-        migration.up(db)
-      }
       db.query(`
         INSERT INTO workflow_runs (
           project_id, id, workflow_id, status, input, started_at
         ) VALUES (?, ?, ?, 'queued', '{}', ?)
       `).run("project-a", "legacy-run", "legacy-workflow", "2026-01-01T00:00:00.000Z")
 
-      expect(() => sqliteStorageMigrations.steps[4]?.up(db)).toThrow()
+      expect(() => migration("005-workflow-executions").up(db)).toThrow()
       expect(readMemoryTableColumns(db, "workflow_runs")).not.toContain("execution_id")
     } finally {
       db.close()
     }
   })
 
-  test("makes the workflow execution link required and unique on an empty schema", () => {
-    const db = new Database(":memory:")
-    try {
-      for (const migration of sqliteStorageMigrations.steps) {
-        migration.up(db)
-      }
-
-      const columns = readMemoryTableColumns(db, "workflow_runs")
-      expect(columns).toContain("execution_id")
-      expect(columns).not.toContain("source")
-      expect(columns).not.toContain("requested_by_principal_type")
-      expect(columns).not.toContain("requested_by_principal_id")
-      expect(readMemoryColumn(db, "workflow_runs", "execution_id")?.notnull).toBe(1)
-
-      db.query(`
-        INSERT INTO executions (
-          project_id, id, executor_kind, executor_id, source_kind, source_id,
-          correlation_id, authority_kind, authority_primitive_kind,
-          authority_primitive_id, created_at
-        ) VALUES (?, ?, 'workflow', ?, 'schedule', ?, ?, 'trustedPrimitive', 'workflow', ?, ?)
-      `).run(
-        "project-a",
-        "workflow-execution",
-        "workflow-run",
-        "schedule-event",
-        "workflow-correlation",
-        "reconcile-transaction",
-        "2026-01-01T00:00:00.000Z"
-      )
-      db.query(`
-        INSERT INTO workflow_runs (
-          project_id, id, execution_id, workflow_id, status, input, started_at
-        ) VALUES (?, ?, ?, ?, 'queued', '{}', ?)
-      `).run(
-        "project-a",
-        "workflow-run",
-        "workflow-execution",
-        "reconcile-transaction",
-        "2026-01-01T00:00:00.000Z"
-      )
-
-      expect(() =>
-        db
-          .query(`
-          INSERT INTO workflow_runs (
-            project_id, id, execution_id, workflow_id, status, input, started_at
-          ) VALUES (?, ?, ?, ?, 'queued', '{}', ?)
-        `)
-          .run(
-            "project-a",
-            "second-workflow-run",
-            "workflow-execution",
-            "reconcile-transaction",
-            "2026-01-01T00:00:00.000Z"
-          )
-      ).toThrow("UNIQUE constraint failed")
-    } finally {
-      db.close()
-    }
-  })
-
   test("rejects legacy Action runs instead of inventing their execution authority", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase("008-action-executions")
     try {
-      for (const migration of sqliteStorageMigrations.steps.slice(0, 6)) migration.up(db)
       db.query(`
         INSERT INTO action_runs (
           project_id, id, action_id, subject_kind, status, phase, queued_at, params,
@@ -2645,78 +2211,17 @@ describe("SQLite storage migrations", () => {
         "action:project-a:legacy-action-run"
       )
 
-      const actionExecutionsMigration = sqliteStorageMigrations.steps.find(
-        (migration) => migration.id === "008-action-executions"
-      )
-      if (!actionExecutionsMigration) {
-        throw new Error("SQLite action-executions migration is missing.")
-      }
-      expect(() => actionExecutionsMigration.up(db)).toThrow()
+      expect(() => migration("008-action-executions").up(db)).toThrow()
       expect(readMemoryTableColumns(db, "action_runs")).not.toContain("execution_id")
     } finally {
       db.close()
     }
   })
 
-  test("makes the Action execution link required and unique on an empty schema", () => {
-    const db = new Database(":memory:")
-    try {
-      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
-
-      expect(readMemoryColumn(db, "action_runs", "execution_id")?.notnull).toBe(1)
-      db.query(`
-        INSERT INTO executions (
-          project_id, id, executor_kind, executor_id, source_kind, source_id,
-          correlation_id, authority_kind, authority_primitive_kind,
-          authority_primitive_id, created_at
-        ) VALUES (?, ?, 'action', ?, 'event', ?, ?, 'trustedPrimitive', 'action', ?, ?)
-      `).run(
-        "project-a",
-        "action-execution",
-        "action-run",
-        "action-event",
-        "action-correlation",
-        "send-quote",
-        "2026-01-01T00:00:00.000Z"
-      )
-      const insertRun = (id: string) =>
-        db
-          .query(`
-            INSERT INTO action_runs (
-              project_id, id, execution_id, action_id, subject_kind, status, phase, started_at,
-              finished_at, params, idempotency_key
-            ) VALUES (?, ?, ?, ?, 'none', 'succeeded', 'writeback', ?, ?, '{}', ?)
-          `)
-          .run(
-            "project-a",
-            id,
-            "action-execution",
-            "send-quote",
-            "2026-01-01T00:00:00.000Z",
-            "2026-01-01T00:00:01.000Z",
-            `action:project-a:${id}`
-          )
-      insertRun("action-run")
-
-      expect(() => insertRun("second-action-run")).toThrow("UNIQUE")
-    } finally {
-      db.close()
-    }
-  })
-
   test("rejects legacy Agent runs instead of inventing their execution authority", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase("009-agent-executions")
     try {
-      const agentExecutionsIndex = sqliteStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "009-agent-executions"
-      )
-      const agentExecutionsMigration = sqliteStorageMigrations.steps[agentExecutionsIndex]
-      if (!agentExecutionsMigration) {
-        throw new Error("SQLite agent-executions migration is missing.")
-      }
-      for (const migration of sqliteStorageMigrations.steps.slice(0, agentExecutionsIndex)) {
-        migration.up(db)
-      }
+      const agentExecutionsMigration = migration("009-agent-executions")
       db.query(`
         INSERT INTO agent_runs (
           project_id, id, thread_id, agent_id, trigger_message_id, status, created_at
@@ -2737,42 +2242,11 @@ describe("SQLite storage migrations", () => {
     }
   })
 
-  test("makes Agent execution links required and unique on an empty schema", () => {
-    const db = new Database(":memory:")
-    try {
-      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
-
-      expect(readMemoryColumn(db, "agent_runs", "execution_id")?.notnull).toBe(1)
-      expect(readMemoryColumn(db, "workflow_agent_node_runs", "execution_id")?.notnull).toBe(1)
-      expect(readMemoryTableColumns(db, "agent_runs")).not.toContain("requested_by_principal_type")
-      expect(readMemoryTableColumns(db, "agent_runs")).not.toContain("execution_principal_type")
-      expect(readMemoryTableColumns(db, "workflow_agent_node_runs")).not.toContain(
-        "execution_principal_type"
-      )
-      expect(readMemoryUniqueIndexes(db, "agent_runs")).toContainEqual([
-        "project_id",
-        "execution_id",
-      ])
-      expect(readMemoryUniqueIndexes(db, "workflow_agent_node_runs")).toContainEqual([
-        "project_id",
-        "execution_id",
-      ])
-    } finally {
-      db.close()
-    }
-  })
-
   test("Agent run migrations preserve existing conversations and admit per-turn specs", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase("031-subagent-runs")
     try {
-      const migrationIndex = sqliteStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "031-subagent-runs"
-      )
-      const migration = sqliteStorageMigrations.steps[migrationIndex]
-      if (!migration) throw new Error("SQLite subagent migration is missing.")
-      for (const previous of sqliteStorageMigrations.steps.slice(0, migrationIndex)) {
-        previous.up(db)
-      }
+      const step = migration("031-subagent-runs")
+      const migrationIndex = sqliteStorageMigrations.steps.indexOf(step)
 
       db.run(`
         INSERT INTO auth_service_accounts (
@@ -2812,7 +2286,7 @@ describe("SQLite storage migrations", () => {
         )
       `)
 
-      migration.up(db)
+      step.up(db)
 
       expect(
         db
@@ -2868,18 +2342,9 @@ describe("SQLite storage migrations", () => {
 
   test("rejects legacy Sync and Pipeline runs instead of inventing execution authority", () => {
     for (const kind of ["sync", "pipeline"] as const) {
-      const db = new Database(":memory:")
+      const db = replayedDatabase("021-sync-pipeline-executions")
       try {
-        const executionMigrationIndex = sqliteStorageMigrations.steps.findIndex(
-          (migration) => migration.id === "021-sync-pipeline-executions"
-        )
-        const executionMigration = sqliteStorageMigrations.steps[executionMigrationIndex]
-        if (!executionMigration) {
-          throw new Error("SQLite sync-pipeline-executions migration is missing.")
-        }
-        for (const migration of sqliteStorageMigrations.steps.slice(0, executionMigrationIndex)) {
-          migration.up(db)
-        }
+        const executionMigration = migration("021-sync-pipeline-executions")
         if (kind === "sync") {
           db.query(`
             INSERT INTO sync_runs (
@@ -2909,35 +2374,10 @@ describe("SQLite storage migrations", () => {
     }
   })
 
-  test("makes Sync and Pipeline execution links required and unique", () => {
-    const db = new Database(":memory:")
-    try {
-      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
-
-      for (const table of ["sync_runs", "pipeline_runs"] as const) {
-        expect(readMemoryColumn(db, table, "execution_id")?.notnull).toBe(1)
-        expect(readMemoryColumn(db, table, "queued_at")?.notnull).toBe(1)
-        expect(readMemoryColumn(db, table, "started_at")?.notnull).toBe(0)
-        expect(readMemoryUniqueIndexes(db, table)).toContainEqual(["project_id", "execution_id"])
-      }
-    } finally {
-      db.close()
-    }
-  })
-
   test("rejects legacy Projection runs instead of inventing execution authority", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase("022-projection-executions")
     try {
-      const executionMigrationIndex = sqliteStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "022-projection-executions"
-      )
-      const executionMigration = sqliteStorageMigrations.steps[executionMigrationIndex]
-      if (!executionMigration) {
-        throw new Error("SQLite projection-executions migration is missing.")
-      }
-      for (const migration of sqliteStorageMigrations.steps.slice(0, executionMigrationIndex)) {
-        migration.up(db)
-      }
+      const executionMigration = migration("022-projection-executions")
       db.query(`
         INSERT INTO projection_runs (
           project_id, id, projection_id, projection_kind, materialization_protocol,
@@ -2969,39 +2409,11 @@ describe("SQLite storage migrations", () => {
     }
   })
 
-  test("makes the Projection execution link required and unique", () => {
-    const db = new Database(":memory:")
-    try {
-      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
-
-      expect(readMemoryForeignKeyTables(db, "executions")).toContain("executions")
-      expect(readMemoryForeignKeyTables(db, "executions")).not.toContain("executions_v2")
-      expect(readMemoryColumn(db, "projection_runs", "execution_id")?.notnull).toBe(1)
-      expect(readMemoryColumn(db, "projection_runs", "queued_at")?.notnull).toBe(1)
-      expect(readMemoryColumn(db, "projection_runs", "started_at")?.notnull).toBe(0)
-      expect(readMemoryUniqueIndexes(db, "projection_runs")).toContainEqual([
-        "project_id",
-        "execution_id",
-      ])
-    } finally {
-      db.close()
-    }
-  })
-
   test("rejects legacy Webhook runs and deliveries instead of inventing authority", () => {
     for (const legacyRecord of ["run", "delivery"] as const) {
-      const db = new Database(":memory:")
+      const db = replayedDatabase("023-webhook-executions")
       try {
-        const executionMigrationIndex = sqliteStorageMigrations.steps.findIndex(
-          (migration) => migration.id === "023-webhook-executions"
-        )
-        const executionMigration = sqliteStorageMigrations.steps[executionMigrationIndex]
-        if (!executionMigration) {
-          throw new Error("SQLite webhook-executions migration is missing.")
-        }
-        for (const migration of sqliteStorageMigrations.steps.slice(0, executionMigrationIndex)) {
-          migration.up(db)
-        }
+        const executionMigration = migration("023-webhook-executions")
 
         if (legacyRecord === "run") {
           db.query(`
@@ -3033,39 +2445,10 @@ describe("SQLite storage migrations", () => {
     }
   })
 
-  test("makes the Webhook delivery and execution links required and unique", () => {
-    const db = new Database(":memory:")
-    try {
-      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
-
-      expect(readMemoryTableNames(db)).not.toContain("webhook_deliveries")
-      expect(readMemoryColumn(db, "webhook_runs", "execution_id")?.notnull).toBe(1)
-      expect(readMemoryColumn(db, "webhook_runs", "request_body_bytes")?.notnull).toBe(1)
-      expect(readMemoryColumn(db, "webhook_runs", "request_body_sha256")?.notnull).toBe(1)
-      expect(readMemoryTableColumns(db, "webhook_runs")).not.toContain("delivery_claim_result")
-      expect(readMemoryForeignKeyTables(db, "webhook_runs")).toContain("executions")
-      expect(readMemoryUniqueIndexes(db, "webhook_runs")).toEqual(
-        expect.arrayContaining([
-          ["project_id", "execution_id"],
-          ["project_id", "connector_id", "webhook_id", "idempotency_key"],
-        ])
-      )
-    } finally {
-      db.close()
-    }
-  })
-
   test("rejects legacy ontology commits instead of inventing execution authority", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase("024-ontology-commit-executions")
     try {
-      const migrationIndex = sqliteStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "024-ontology-commit-executions"
-      )
-      const migration = sqliteStorageMigrations.steps[migrationIndex]
-      if (!migration) throw new Error("SQLite ontology-commit execution migration is missing.")
-      for (const previous of sqliteStorageMigrations.steps.slice(0, migrationIndex)) {
-        previous.up(db)
-      }
+      const step = migration("024-ontology-commit-executions")
       db.query(`
         INSERT INTO ontology_commits (
           project_id, id, idempotency_key, request_hash, origin_kind, origin,
@@ -3091,7 +2474,7 @@ describe("SQLite storage migrations", () => {
         "2026-01-01T00:00:00.000Z"
       )
 
-      expect(() => db.transaction(() => migration.up(db))()).toThrow("unknown authority")
+      expect(() => db.transaction(() => step.up(db))()).toThrow("unknown authority")
       expect(readMemoryTableColumns(db, "ontology_commits")).not.toContain("execution_id")
     } finally {
       db.close()
@@ -3099,10 +2482,8 @@ describe("SQLite storage migrations", () => {
   })
 
   test("requires every ontology commit to reference a durable execution", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase()
     try {
-      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
-
       expect(readMemoryColumn(db, "ontology_commits", "execution_id")?.notnull).toBe(1)
       expect(readMemoryForeignKeyTables(db, "ontology_commits")).toContain("executions")
       expect(readMemoryIndexColumns(db, "idx_ontology_commits_execution")).toEqual([
@@ -3115,10 +2496,8 @@ describe("SQLite storage migrations", () => {
   })
 
   test("stores a headless connector attempt as the run's single protocol child", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase()
     try {
-      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
-
       expect(readMemoryTableColumns(db, "connector_connection_runs")).not.toContain(
         "authorization_attempt_id"
       )
@@ -3144,122 +2523,11 @@ describe("SQLite storage migrations", () => {
     }
   })
 
-  test("migrations install auth storage tables", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-auth-migrations-"))
-    tempDirs.push(tempDir)
-
-    const storage = new SqliteStorage({ path: tempDir })
-    await migrateStorage(storage)
-
-    await storage.auth.users.create({
-      id: "usr_1",
-      projectId: "project-a",
-      email: "ava@acme.com",
-      createdAt: new Date("2026-05-14T10:00:00.000Z"),
-    })
-    await expect(
-      storage.auth.users.getByEmail({
-        projectId: "project-a",
-        email: "ava@acme.com",
-      })
-    ).resolves.toMatchObject({
-      id: "usr_1",
-      email: "ava@acme.com",
-    })
-
-    closeStorage(storage)
-
-    const tables = readTableNames(sqliteStoragePath(tempDir))
-    const sessionColumns = readTableColumns(sqliteStoragePath(tempDir), "auth_sessions")
-    expect(tables).toContain("auth_users")
-    expect(tables).toContain("auth_user_identities")
-    expect(tables).toContain("auth_service_accounts")
-    expect(tables).toContain("auth_service_account_group_memberships")
-    expect(tables).toContain("auth_sessions")
-    expect(tables).toContain("auth_access_tokens")
-    expect(tables).toContain("auth_invitations")
-    expect(tables).toContain("auth_invitation_groups")
-    expect(tables).toContain("auth_group_memberships")
-    expect(tables).toContain("auth_magic_links")
-    expect(tables).toContain("auth_oidc_authorization_attempts")
-    expect(tables).toContain("auth_device_authorizations")
-    expect(sessionColumns).not.toContain("audience")
-    expect(sessionColumns).toContain("absolute_expires_at")
-    expect(sessionColumns).toContain("user_agent")
-    expect(sessionColumns).toContain("ip_address")
-  })
-
-  test("migrations install agent attribution and AI usage storage tables", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-agent-migrations-"))
-    tempDirs.push(tempDir)
-
-    const storage = new SqliteStorage({ path: tempDir })
-    await migrateStorage(storage)
-
-    await storage.agents.threads.create({
-      id: "thr_1",
-      projectId: "project-a",
-      ownerPrincipal: { type: "user", id: "usr_1" },
-      createdAt: new Date("2026-06-23T10:00:00.000Z"),
-    })
-    await expect(
-      storage.agents.threads.getById({ projectId: "project-a", id: "thr_1" })
-    ).resolves.toMatchObject({ id: "thr_1", messageCount: 0 })
-
-    closeStorage(storage)
-
-    const path = sqliteStoragePath(tempDir)
-    const tables = readTableNames(path)
-    expect(tables).toContain("agent_threads")
-    expect(tables).toContain("agent_runs")
-    expect(tables).toContain("agent_messages")
-    expect(tables).toContain("agent_context_checkpoints")
-    expect(tables).toContain("ai_model_call_usage")
-    expect(tables).toContain("ai_model_call_usage_groups")
-    expect(tables).toContain("ai_model_call_valuations")
-    expect(tables).not.toContain("ai_price_schedules")
-    expect(readTableColumns(path, "ai_model_call_usage")).toContain("execution_id")
-    expect(readTableColumns(path, "ai_model_call_usage")).not.toContain("execution_kind")
-    expect(readTableColumns(path, "ai_model_call_usage")).not.toContain("requester_principal_id")
-    expect(readTableForeignKeys(path, "ai_model_call_usage")).toContainEqual({
-      from: "execution_id",
-      onDelete: "RESTRICT",
-      table: "executions",
-      to: "id",
-    })
-    const agentRunColumns = readTableColumns(path, "agent_runs")
-    const agentThreadColumns = readTableColumns(path, "agent_threads")
-    const workflowAgentNodeColumns = readTableColumns(path, "workflow_agent_node_runs")
-    expect(workflowAgentNodeColumns).toContain("actor_id")
-    expect(workflowAgentNodeColumns).not.toContain("agent_id")
-    expect(agentRunColumns).not.toContain("requester_group_ids")
-    expect(agentRunColumns).toEqual(
-      expect.arrayContaining(["kind", "parent_run_id", "spawn_key", "spec", "result"])
-    )
-    expect(agentRunColumns).not.toContain("agent_id")
-    expect(agentThreadColumns).not.toContain("agent_id")
-    expect(agentRunColumns).not.toContain("usage_input_tokens")
-    expect(agentRunColumns).not.toContain("usage_output_tokens")
-    expect(agentRunColumns).not.toContain("usage_total_tokens")
-    expect(agentRunColumns).not.toContain("usage_reasoning_tokens")
-    expect(agentRunColumns).not.toContain("usage_cached_input_tokens")
-    expect(workflowAgentNodeColumns).not.toContain("usage")
-    expect(readTableColumns(path, "workflow_runs")).not.toContain("requester_group_ids")
-    expect(readTableColumns(path, "executions")).toContain("requester_group_ids")
-  })
-
   test("AI cost accounting migration preserves existing Phase 1 usage rows", () => {
-    const db = new Database(":memory:")
+    const db = replayedDatabase("026-ai-cost-accounting")
     try {
-      const costIndex = sqliteStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "026-ai-cost-accounting"
-      )
-      const costMigration = sqliteStorageMigrations.steps[costIndex]
-      if (!costMigration) throw new Error("expected AI cost accounting migration")
-      for (const migration of sqliteStorageMigrations.steps.slice(0, costIndex)) {
-        const applied = migration.up(db)
-        if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
-      }
+      const costMigration = migration("026-ai-cost-accounting")
+      const costIndex = sqliteStorageMigrations.steps.indexOf(costMigration)
 
       db.run(`
         INSERT INTO executions (
@@ -3288,10 +2556,10 @@ describe("SQLite storage migrations", () => {
       if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
 
       expect(db.query("SELECT * FROM ai_model_call_usage").get()).toEqual(before)
-      expect(tableColumns(db, "ai_model_call_valuations")).toEqual(
+      expect(readMemoryTableColumns(db, "ai_model_call_valuations")).toEqual(
         expect.arrayContaining(["usage_record_id", "status", "details", "amount_nanos", "rated_at"])
       )
-      expect(tableColumns(db, "ai_price_schedules")).toEqual([])
+      expect(readMemoryTableColumns(db, "ai_price_schedules")).toEqual([])
       db.run(`
         INSERT INTO ai_model_call_valuations (
           project_id, usage_record_id, status, provider_id, model_id, currency, amount_nanos,
@@ -3303,8 +2571,8 @@ describe("SQLite storage migrations", () => {
       `)
       const oldCost = db.query("SELECT * FROM ai_model_call_valuations").get()
       expect(() => db.run("UPDATE ai_model_call_valuations SET status = 'reported'")).toThrow()
-      for (const migration of sqliteStorageMigrations.steps.slice(costIndex + 1)) {
-        migration.up(db)
+      for (const step of sqliteStorageMigrations.steps.slice(costIndex + 1)) {
+        step.up(db)
       }
       // Later agent migrations must preserve the native accounting rows and constraints.
       expect(db.query("SELECT * FROM ai_model_call_valuations").get()).toEqual(oldCost)
@@ -3320,17 +2588,9 @@ describe("SQLite storage migrations", () => {
   test("drops only obsolete run usage projections from an existing schema", () => {
     // Regression guard: remove migration 020 (or any one DROP COLUMN) and this leaves the old
     // projection column behind; deleting the run rows instead breaks the preservation assertions.
-    const db = new Database(":memory:")
+    const db = replayedDatabase("020-drop-run-usage-projections")
     try {
-      const cleanupIndex = sqliteStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "020-drop-run-usage-projections"
-      )
-      const cleanup = sqliteStorageMigrations.steps[cleanupIndex]
-      if (!cleanup) throw new Error("expected run usage cleanup migration")
-      for (const migration of sqliteStorageMigrations.steps.slice(0, cleanupIndex)) {
-        const applied = migration.up(db)
-        if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
-      }
+      const cleanup = migration("020-drop-run-usage-projections")
       db.run(`
         INSERT INTO agent_runs (
           project_id, id, execution_id, thread_id, agent_id, trigger_message_id, status,
@@ -3352,8 +2612,8 @@ describe("SQLite storage migrations", () => {
       const applied = cleanup.up(db)
       if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
 
-      const agentColumns = tableColumns(db, "agent_runs")
-      const workflowColumns = tableColumns(db, "workflow_agent_node_runs")
+      const agentColumns = readMemoryTableColumns(db, "agent_runs")
+      const workflowColumns = readMemoryTableColumns(db, "workflow_agent_node_runs")
       expect(agentColumns.some((column) => column.startsWith("usage_"))).toBe(false)
       expect(workflowColumns).not.toContain("usage")
       expect(
@@ -3407,52 +2667,155 @@ describe("SQLite storage migrations", () => {
     closeStorage(storage)
   })
 
-  test("narrows the source-root index without changing its lookup prefix", () => {
-    const db = new Database(":memory:")
-    try {
-      sqliteStorageMigrations.steps[0]?.up(db)
-      expect(readMemoryIndexColumns(db, "idx_ontology_source_rows_root")).toEqual([
-        "project_id",
-        "source_id",
-        "materialization_id",
-        "root_sort_key",
-        "staging_ordinal",
-        "entity_sort_key",
-      ])
+  describe("the migrated schema", () => {
+    // Removal proof: drop the NOT NULL, the unique index or the reference a row names from the
+    // migration that last rebuilt its table, and that row fails.
+    test.each<{
+      readonly table: string
+      readonly required?: readonly string[]
+      readonly optional?: readonly string[]
+      readonly unique?: readonly (readonly string[])[]
+      readonly restricts?: boolean
+    }>([
+      { table: "workflow_runs" },
+      { table: "action_runs" },
+      { table: "agent_runs" },
+      { table: "workflow_agent_node_runs" },
+      { table: "sync_runs", required: ["queued_at"], optional: ["started_at"] },
+      { table: "pipeline_runs", required: ["queued_at"], optional: ["started_at"] },
+      { table: "projection_runs", required: ["queued_at"], optional: ["started_at"] },
+      {
+        table: "webhook_runs",
+        required: ["request_body_bytes", "request_body_sha256"],
+        unique: [["project_id", "connector_id", "webhook_id", "idempotency_key"]],
+        restricts: true,
+      },
+      {
+        table: "ai_model_call_usage",
+        unique: [["project_id", "execution_id", "attempt", "call_id", "response_id"]],
+        restricts: true,
+      },
+    ])("$table rows each name one durable execution", ({
+      table,
+      required = [],
+      optional = [],
+      unique = [["project_id", "execution_id"]],
+      restricts = false,
+    }) => {
+      const db = replayedDatabase()
+      try {
+        for (const column of ["execution_id", ...required]) {
+          expect(readMemoryColumn(db, table, column)?.notnull, column).toBe(1)
+        }
+        for (const column of optional) {
+          expect(readMemoryColumn(db, table, column)?.notnull, column).toBe(0)
+        }
+        expect(readMemoryUniqueIndexes(db, table)).toEqual(expect.arrayContaining(unique))
+        if (restricts) {
+          expect(readMemoryForeignKeys(db, table)).toContainEqual({
+            from: "execution_id",
+            onDelete: "RESTRICT",
+            table: "executions",
+            to: "id",
+          })
+        }
+      } finally {
+        db.close()
+      }
+    })
 
-      sqliteStorageMigrations.steps[5]?.up(db)
-      expect(readMemoryIndexColumns(db, "idx_ontology_source_rows_root")).toEqual([
-        "project_id",
-        "source_id",
-        "materialization_id",
-        "root_sort_key",
-      ])
-    } finally {
-      db.close()
-    }
-  })
+    test("keeps each execution's parent reference through every rebuild", () => {
+      const db = replayedDatabase()
+      try {
+        expect(readMemoryForeignKeyTables(db, "executions")).toContain("executions")
+        expect(readMemoryForeignKeyTables(db, "executions")).not.toContain("executions_v2")
+      } finally {
+        db.close()
+      }
+    })
 
-  test("the timeseries primary key enforces the (series, at) natural key", () => {
-    const db = new Database(":memory:")
-    try {
-      sqliteStorageMigrations.steps[0]?.up(db)
+    test("keeps no retired column or table", () => {
+      const db = replayedDatabase()
+      try {
+        const retired: Record<string, readonly string[]> = {
+          workflow_runs: [
+            "source",
+            "requested_by_principal_type",
+            "requested_by_principal_id",
+            "requester_group_ids",
+          ],
+          agent_runs: [
+            "agent_id",
+            "requested_by_principal_type",
+            "execution_principal_type",
+            "requester_group_ids",
+            "usage_input_tokens",
+            "usage_output_tokens",
+            "usage_total_tokens",
+            "usage_reasoning_tokens",
+            "usage_cached_input_tokens",
+          ],
+          workflow_agent_node_runs: ["agent_id", "execution_principal_type", "usage"],
+          agent_threads: ["agent_id"],
+          webhook_runs: ["delivery_claim_result"],
+          ai_model_call_usage: ["execution_kind", "requester_principal_id"],
+          auth_sessions: ["audience"],
+        }
+        for (const [table, columns] of Object.entries(retired)) {
+          const present = readMemoryTableColumns(db, table)
+          for (const column of columns) expect(present, `${table}.${column}`).not.toContain(column)
+        }
+        const tables = readMemoryTableNames(db)
+        expect(tables).not.toContain("webhook_deliveries")
+        expect(tables).not.toContain("ai_price_schedules")
+      } finally {
+        db.close()
+      }
+    })
 
-      const insert = db.query(`
-        INSERT INTO timeseries (
-          project_id, object_type_id, object_id, property_id,
-          value, unit, at, last_commit_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      insert.run("p", "Room", "r1", "temp", "70.5", null, "2026-06-01T12:00:00.000Z", "commit-1")
+    test("indexes Share grant listing and session lookups", () => {
+      const db = replayedDatabase()
+      try {
+        expect(readMemoryIndexColumns(db, "idx_share_grants_project_created")).toEqual([
+          "project_id",
+          "created_at",
+          "id",
+        ])
+        expect(readMemoryIndexColumns(db, "idx_share_sessions_grant")).toEqual([
+          "project_id",
+          "grant_id",
+          "created_at",
+          "id",
+        ])
+        expect(readMemoryIndexColumns(db, "idx_share_sessions_expiry")).toEqual([
+          "project_id",
+          "expires_at",
+        ])
+      } finally {
+        db.close()
+      }
+    })
 
-      // A second row at the same (series, at) is rejected by the natural-key
-      // PRIMARY KEY, even with a different commit — appends must upsert.
-      expect(() =>
-        insert.run("p", "Room", "r1", "temp", "71", null, "2026-06-01T12:00:00.000Z", "commit-2")
-      ).toThrow()
-    } finally {
-      db.close()
-    }
+    test("the timeseries primary key enforces the (series, at) natural key", () => {
+      const db = replayedDatabase()
+      try {
+        const insert = db.query(`
+          INSERT INTO timeseries (
+            project_id, object_type_id, object_id, property_id,
+            value, unit, at, last_commit_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        insert.run("p", "Room", "r1", "temp", "70.5", null, "2026-06-01T12:00:00.000Z", "commit-1")
+
+        // A second row at the same (series, at) is rejected by the natural-key
+        // PRIMARY KEY, even with a different commit — appends must upsert.
+        expect(() =>
+          insert.run("p", "Room", "r1", "temp", "71", null, "2026-06-01T12:00:00.000Z", "commit-2")
+        ).toThrow()
+      } finally {
+        db.close()
+      }
+    })
   })
 })
 
@@ -3503,55 +2866,6 @@ function readTableNames(path: string): readonly string[] {
   }
 }
 
-function tableColumns(db: Database, tableName: string): readonly string[] {
-  return (db.query(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>).map(
-    (column) => column.name
-  )
-}
-
-function readTableColumns(path: string, tableName: string): readonly string[] {
-  const db = new Database(path, { readonly: true })
-
-  try {
-    const rows = db.query(`PRAGMA table_info(${tableName})`).all() as Array<{
-      readonly name: string
-    }>
-
-    return rows.map((row) => row.name)
-  } finally {
-    db.close()
-  }
-}
-
-function readTableForeignKeys(
-  path: string,
-  tableName: string
-): readonly {
-  readonly from: string
-  readonly onDelete: string
-  readonly table: string
-  readonly to: string
-}[] {
-  const db = new Database(path, { readonly: true })
-
-  try {
-    const rows = db.query(`PRAGMA foreign_key_list(${tableName})`).all() as Array<{
-      readonly from: string
-      readonly on_delete: string
-      readonly table: string
-      readonly to: string
-    }>
-    return rows.map(({ from, on_delete, table, to }) => ({
-      from,
-      onDelete: on_delete,
-      table,
-      to,
-    }))
-  } finally {
-    db.close()
-  }
-}
-
 function readMemoryTableNames(db: Database): string[] {
   return (
     db.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as {
@@ -3586,6 +2900,24 @@ function readMemoryForeignKeyTables(db: Database, tableName: string): string[] {
   return (
     db.query(`PRAGMA foreign_key_list(${tableName})`).all() as { readonly table: string }[]
   ).map((foreignKey) => foreignKey.table)
+}
+
+function readMemoryForeignKeys(
+  db: Database,
+  tableName: string
+): {
+  readonly from: string
+  readonly onDelete: string
+  readonly table: string
+  readonly to: string
+}[] {
+  const rows = db.query(`PRAGMA foreign_key_list(${tableName})`).all() as Array<{
+    readonly from: string
+    readonly on_delete: string
+    readonly table: string
+    readonly to: string
+  }>
+  return rows.map(({ from, on_delete, table, to }) => ({ from, onDelete: on_delete, table, to }))
 }
 
 function readMemoryColumn(
@@ -3688,13 +3020,7 @@ describe("SQLite migration status is read-only", () => {
   })
 
   test("reports current after a migration, and touches nothing doing it", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-status-current-"))
-    tempDirs.push(tempDir)
-
-    const storage = new SqliteStorage({ path: tempDir })
-    await migrateStorage(storage)
-    closeStorage(storage)
-
+    const tempDir = await migratedDirectory()
     const path = sqliteStoragePath(tempDir)
     const before = statSync(path).mtimeMs
 
@@ -3708,22 +3034,5 @@ describe("SQLite migration status is read-only", () => {
     })
 
     expect(statSync(path).mtimeMs).toBe(before)
-  })
-
-  test("reports pending when history exists but a migration is missing", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-status-pending-"))
-    tempDirs.push(tempDir)
-
-    const storage = new SqliteStorage({ path: tempDir })
-    await migrateStorage(storage)
-    closeStorage(storage)
-
-    const path = sqliteStoragePath(tempDir)
-    const db = new Database(path)
-    db.query("DELETE FROM sixb_migrations WHERE adapter_id = ?").run(SQLITE_STORAGE_ADAPTER_ID)
-    db.close()
-
-    const [migrator] = createSqliteStorageMigrators(tempDir)
-    expect(await migrator?.status()).toMatchObject({ state: "uninitialized" })
   })
 })
