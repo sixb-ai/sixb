@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { FAST_CLI_TIMEOUT_MS, runCliToCompletion } from "./shared/cli-process"
 
 const tempDirs: string[] = []
 
@@ -41,26 +42,24 @@ async function runLakeCommand(
   const logPath = join(tempDir, "operations.log")
   tempDirs.push(tempDir)
 
-  const result = Bun.spawnSync({
+  const result = await runCliToCompletion({
     cmd: ["bun", cliEntry, "lake", subcommand, "--entry", fixtureEntry, ...(options.args ?? [])],
     cwd: repoRoot,
     env: {
-      ...process.env,
       SIXB_CLI_TEST_LOG: logPath,
       ...(options.drift ? { SIXB_CLI_TEST_LAKE_DRIFT: "1" } : {}),
       ...(options.noMaintenance ? { SIXB_CLI_TEST_LAKE_NO_MAINTENANCE: "1" } : {}),
       ...(options.appliedVersion ? { SIXB_CLI_TEST_APPLIED_VERSION: options.appliedVersion } : {}),
     },
-    stdout: "pipe",
-    stderr: "pipe",
+    timeoutMs: FAST_CLI_TIMEOUT_MS,
   })
 
   const logSource = await readFile(logPath, "utf-8").catch(() => "")
 
   return {
     exitCode: result.exitCode,
-    stdout: Buffer.from(result.stdout).toString("utf-8"),
-    stderr: Buffer.from(result.stderr).toString("utf-8"),
+    stdout: result.stdout,
+    stderr: result.stderr,
     logEntries: logSource
       .trim()
       .split("\n")

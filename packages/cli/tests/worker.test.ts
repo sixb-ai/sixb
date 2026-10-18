@@ -3,6 +3,11 @@ import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { resolveWorkerTypeToStart } from "../src/lib/worker-registry"
+import {
+  type CompletedCliProcess,
+  FAST_CLI_TIMEOUT_MS,
+  runCliToCompletion,
+} from "./shared/cli-process"
 
 const tempDirs: string[] = []
 
@@ -34,57 +39,33 @@ function runWorkerFixture(
   fixtureName: string,
   args: readonly string[] = [],
   options: { logPath?: string; env?: Record<string, string | undefined> } = {}
-): {
-  exitCode: number
-  stdout: string
-  stderr: string
-} {
+): Promise<CompletedCliProcess> {
   const repoRoot = resolve(import.meta.dir, "..", "..", "..")
   const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
   const fixtureEntry = resolve(import.meta.dir, "fixtures", fixtureName, "sixb.config.ts")
 
-  const result = Bun.spawnSync({
+  return runCliToCompletion({
     cmd: ["bun", cliEntry, "worker", "--entry", fixtureEntry, ...args],
     cwd: repoRoot,
-    env: options.logPath
-      ? {
-          ...process.env,
-          ...options.env,
-          SIXB_CLI_TEST_LOG: options.logPath,
-        }
-      : { ...process.env, ...options.env },
-    stdout: "pipe",
-    stderr: "pipe",
+    env: options.logPath ? { ...options.env, SIXB_CLI_TEST_LOG: options.logPath } : options.env,
+    timeoutMs: FAST_CLI_TIMEOUT_MS,
   })
-
-  return {
-    exitCode: result.exitCode,
-    stdout: Buffer.from(result.stdout).toString("utf-8"),
-    stderr: Buffer.from(result.stderr).toString("utf-8"),
-  }
 }
 
-function runHelp(): { exitCode: number; stdout: string; stderr: string } {
+function runHelp(): Promise<CompletedCliProcess> {
   const repoRoot = resolve(import.meta.dir, "..", "..", "..")
   const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
 
-  const result = Bun.spawnSync({
+  return runCliToCompletion({
     cmd: ["bun", cliEntry, "help"],
     cwd: repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
+    timeoutMs: FAST_CLI_TIMEOUT_MS,
   })
-
-  return {
-    exitCode: result.exitCode,
-    stdout: Buffer.from(result.stdout).toString("utf-8"),
-    stderr: Buffer.from(result.stderr).toString("utf-8"),
-  }
 }
 
 describe("sixb worker", () => {
-  test("fails fast when the project uses InMemoryQueues", () => {
-    const result = runWorkerFixture("valid-project", ["sync"])
+  test("fails fast when the project uses InMemoryQueues", async () => {
+    const result = await runWorkerFixture("valid-project", ["sync"])
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("requires a queues provider")
@@ -92,8 +73,8 @@ describe("sixb worker", () => {
     expect(result.stderr).toBe("")
   })
 
-  test("rejects unknown worker types before checking queue provider", () => {
-    const result = runWorkerFixture("valid-project", ["missing"])
+  test("rejects unknown worker types before checking queue provider", async () => {
+    const result = await runWorkerFixture("valid-project", ["missing"])
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("Unknown worker 'missing'")
@@ -103,8 +84,8 @@ describe("sixb worker", () => {
     expect(result.stderr).toBe("")
   })
 
-  test("points `sixb worker action` to where Actions run", () => {
-    const result = runWorkerFixture("valid-project", ["action"])
+  test("points `sixb worker action` to where Actions run", async () => {
+    const result = await runWorkerFixture("valid-project", ["action"])
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("'action' is no longer a worker type")
@@ -112,8 +93,8 @@ describe("sixb worker", () => {
     expect(result.stderr).toBe("")
   })
 
-  test("accepts workflow as a known explicit worker type", () => {
-    const result = runWorkerFixture("valid-project", ["workflow"])
+  test("accepts workflow as a known explicit worker type", async () => {
+    const result = await runWorkerFixture("valid-project", ["workflow"])
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("requires a queues provider")
@@ -122,8 +103,8 @@ describe("sixb worker", () => {
     expect(result.stderr).toBe("")
   })
 
-  test("requires a positional worker type", () => {
-    const result = runWorkerFixture("valid-project")
+  test("requires a positional worker type", async () => {
+    const result = await runWorkerFixture("valid-project")
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toContain("sixb worker")
@@ -131,16 +112,16 @@ describe("sixb worker", () => {
     expect(result.stderr).toBe("")
   })
 
-  test("rejects removed worker selector flags", () => {
-    const result = runWorkerFixture("valid-project", ["--type", "pipeline"])
+  test("rejects removed worker selector flags", async () => {
+    const result = await runWorkerFixture("valid-project", ["--type", "pipeline"])
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toContain("Unknown option '--type'")
     expect(result.stderr).toBe("")
   })
 
-  test("validates the agent turn timeout before loading providers", () => {
-    const result = runWorkerFixture("valid-project", [
+  test("validates the agent turn timeout before loading providers", async () => {
+    const result = await runWorkerFixture("valid-project", [
       "agent",
       "--agent-turn-timeout",
       "eventually",
@@ -152,8 +133,8 @@ describe("sixb worker", () => {
     expect(result.stderr).toBe("")
   })
 
-  test("validates worker concurrency before loading providers", () => {
-    const result = runWorkerFixture("valid-project", ["sync", "--concurrency", "0"])
+  test("validates worker concurrency before loading providers", async () => {
+    const result = await runWorkerFixture("valid-project", ["sync", "--concurrency", "0"])
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("Invalid worker concurrency '0'")
@@ -161,8 +142,8 @@ describe("sixb worker", () => {
     expect(result.stderr).toBe("")
   })
 
-  test("rejects a missing worker concurrency value", () => {
-    const result = runWorkerFixture("valid-project", ["sync", "--concurrency"])
+  test("rejects a missing worker concurrency value", async () => {
+    const result = await runWorkerFixture("valid-project", ["sync", "--concurrency"])
 
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toContain("--concurrency requires a value")
@@ -170,9 +151,9 @@ describe("sixb worker", () => {
     expect(result.stderr).toBe("")
   })
 
-  test("preserves the complete equals-form concurrency value for validation", () => {
+  test("preserves the complete equals-form concurrency value for validation", async () => {
     // Reverting getFlag() to split("=")[1] truncates this to 3 and lets startup continue.
-    const result = runWorkerFixture("valid-project", ["sync", "--concurrency=3=4"])
+    const result = await runWorkerFixture("valid-project", ["sync", "--concurrency=3=4"])
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("Invalid worker concurrency '3=4'")
@@ -184,7 +165,7 @@ describe("sixb worker", () => {
     // A project with agent work requires an API origin before migrating. Accounting-only
     // workers can start without one.
     const logPath = await tempLogPath()
-    const result = runWorkerFixture("worker-group", ["agent"], {
+    const result = await runWorkerFixture("worker-group", ["agent"], {
       logPath,
       env: { SIXB_API_PUBLIC_ORIGIN: undefined },
     })
@@ -198,7 +179,7 @@ describe("sixb worker", () => {
 
   test("closes runtime providers when startup fails after loading the runtime", async () => {
     const logPath = await tempLogPath()
-    const result = runWorkerFixture("prod-roles", ["projection"], { logPath })
+    const result = await runWorkerFixture("prod-roles", ["projection"], { logPath })
 
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("No projection definitions are registered")
@@ -209,8 +190,8 @@ describe("sixb worker", () => {
     expect(logEntries).toContainEqual({ type: "lake-storage:close" })
   })
 
-  test("is listed in the CLI help", () => {
-    const result = runHelp()
+  test("is listed in the CLI help", async () => {
+    const result = await runHelp()
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("worker <type>")

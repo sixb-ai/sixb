@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { readLogEntries } from "./shared/cli-process"
+import { FAST_CLI_TIMEOUT_MS, readLogEntries, runCliToCompletion } from "./shared/cli-process"
 
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
@@ -28,8 +28,8 @@ async function tempLogPath(): Promise<string> {
   return join(tempDir, "operations.log")
 }
 
-// Fail-fast cases exit on their own (guard rejection or worker start error), so a
-// synchronous spawn is enough and lets us read the operations log afterward. The
+// Fail-fast cases exit on their own (guard rejection or worker start error), so running
+// to completion is enough and lets us read the operations log afterward. The
 // long-running "starts workers" cases live in worker-group.e2e.ts.
 async function runOnce(
   args: readonly string[],
@@ -38,17 +38,16 @@ async function runOnce(
 ): Promise<{ exitCode: number; stdout: string; logEntries: Array<Record<string, unknown>> }> {
   const logPath = await tempLogPath()
 
-  const result = Bun.spawnSync({
+  const result = await runCliToCompletion({
     cmd: ["bun", cliEntry, ...args, "--entry", fixtureEntry(fixture)],
     cwd: repoRoot,
-    env: { ...process.env, ...env, SIXB_CLI_TEST_LOG: logPath },
-    stdout: "pipe",
-    stderr: "pipe",
+    env: { ...env, SIXB_CLI_TEST_LOG: logPath },
+    timeoutMs: FAST_CLI_TIMEOUT_MS,
   })
 
   return {
     exitCode: result.exitCode,
-    stdout: Buffer.from(result.stdout).toString("utf-8"),
+    stdout: result.stdout,
     logEntries: await readLogEntries(logPath),
   }
 }
