@@ -29,6 +29,7 @@ import { type ArtifactTarget, type ViewerTarget, viewerTargetKey } from "../arti
 import { Viewer } from "../artifacts/viewer"
 import { artifactHref } from "../pages/routes"
 import {
+  type ArtifactPanelPresentation,
   artifactPanelPresentation,
   readArtifactPanelWidth,
   writeArtifactPanelWidth,
@@ -42,6 +43,8 @@ export interface ArtifactPanelValue {
   readonly openKey: string | null
   readonly open: (target: ViewerTarget) => void
   readonly close: () => void
+  /** Where the panel opens: beside the conversation, over the app, or as a dialog. */
+  readonly presentation: ArtifactPanelPresentation
 }
 
 interface PanelHandle {
@@ -140,8 +143,14 @@ export function ArtifactPanelRoot({
   }, [onRouteTargetChange, routeTarget])
 
   const value = useMemo<ArtifactPanelValue>(
-    () => ({ openTarget: target, openKey: target ? viewerTargetKey(target) : null, open, close }),
-    [target, open, close]
+    () => ({
+      openTarget: target,
+      openKey: target ? viewerTargetKey(target) : null,
+      open,
+      close,
+      presentation,
+    }),
+    [target, open, close, presentation]
   )
   const viewer = target ? (
     <Viewer
