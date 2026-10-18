@@ -268,13 +268,21 @@ describe("custom app metadata and manifest generation", () => {
     // system must not flash white. Reproduce by dropping the theme script from withLoadingShell.
     const bootstrap = builtHtml.match(/<script[^>]*data-sixb-theme[^>]*>([^<]*)<\/script>/)?.[1]
     expect(bootstrap).toBeDefined()
-    const classes = new Set<string>()
-    new Function("localStorage", "matchMedia", "document", bootstrap ?? "")(
-      { getItem: (key: string) => (key === "sixb-theme" ? "dark" : null) },
-      () => ({ matches: false }),
-      { documentElement: { classList: { add: (name: string) => classes.add(name) } } }
-    )
-    expect([...classes]).toEqual(["dark"])
+    const themeClasses = (stored: string | null, systemDark: boolean) => {
+      const classes: string[] = []
+      new Function("localStorage", "matchMedia", "document", bootstrap ?? "")(
+        { getItem: (key: string) => (key === "sixb-theme" ? stored : null) },
+        () => ({ matches: systemDark }),
+        { documentElement: { classList: { add: (name: string) => classes.push(name) } } }
+      )
+      return classes
+    }
+    expect(themeClasses("dark", false)).toEqual(["dark"])
+    expect(themeClasses("light", true)).toEqual(["light"])
+    // With no choice stored the app's own theme decides: an app without a ThemeProvider is light
+    // on a dark system. Reproduce by having the script add `dark` for the system's preference.
+    expect(themeClasses(null, true)).toEqual([])
+    expect(themeClasses("system", true)).toEqual([])
     expect(builtHtml).not.toContain("main.tsx")
     const scriptFile = builtHtml.match(/src="\/(app-[a-z0-9]+\.js)"/)?.[1]
     expect(scriptFile).toBeDefined()
