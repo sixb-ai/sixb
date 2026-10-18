@@ -253,7 +253,8 @@ describe("the viewer", () => {
     })
 
     expect(html).toContain(">Q3 operating review</h2>")
-    expect(html).toContain("<span>Document</span>")
+    // The kind leads the title as a tile; the version is a pill beside it.
+    expect(html).toContain('role="img" aria-label="Document"')
     expect(html).toContain("Version 2")
     expect(html).toContain(`href="/artifacts/${ARTIFACT_ID}"`)
     expect(html).toContain('aria-label="Copy link"')
@@ -276,7 +277,7 @@ describe("the viewer", () => {
     })
     expect(html).toContain("Region")
     expect(html).toContain("North")
-    expect(html).toContain("<span>File</span>")
+    expect(html).toContain('role="img" aria-label="File"')
   })
 
   test("shows a sheet as a spreadsheet: its tabs, its typed columns, and its rows", () => {

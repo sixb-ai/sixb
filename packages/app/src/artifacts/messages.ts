@@ -22,6 +22,7 @@ export const en = {
     linkCopied: "Link copied",
     download: (name: string) => `Download ${name}`,
     downloadLabel: "Download",
+    downloadFailed: "The download could not be prepared.",
     openFullPage: "Open full page",
     openInNewTab: (name: string) => `Open ${name} in a new tab`,
     close: "Close",
@@ -111,10 +112,14 @@ export const en = {
     tabs: "Sheets and charts",
     grid: (sheet: string) => `Sheet ${sheet}`,
     downloadCsv: (sheet: string) => `Download ${sheet} as CSV`,
-    sheetAsCsv: (sheet: string) => `${sheet} as CSV`,
-    download: "Download",
-    downloadXlsx: "Workbook as .xlsx",
-    xlsxFailed: "The .xlsx could not be built.",
+    excelWorkbook: "Excel workbook",
+    workbookDetail: (sheets: number) =>
+      sheets === 1
+        ? "1 sheet, with its formats"
+        : `All ${number(sheets)} sheets, with their formats`,
+    sheetsAsCsv: "Sheets as CSV",
+    csvDetail: (rows?: number) =>
+      rows === undefined ? "CSV" : `${rows === 1 ? "1 row" : `${number(rows)} rows`} · CSV`,
     rows: (count: number) => (count === 1 ? "1 row" : `${number(count)} rows`),
     frozenRows: (count: number) => (count === 1 ? "Row 1 frozen" : `Rows 1–${count} frozen`),
     sum: "Sum",
@@ -244,6 +249,7 @@ export const fr: Translation<ArtifactMessages> = {
     linkCopied: "Lien copié",
     download: (name) => `Télécharger ${name}`,
     downloadLabel: "Télécharger",
+    downloadFailed: "Impossible de préparer le téléchargement.",
     openFullPage: "Ouvrir en pleine page",
     openInNewTab: (name) => `Ouvrir ${name} dans un nouvel onglet`,
     close: "Fermer",
@@ -332,10 +338,14 @@ export const fr: Translation<ArtifactMessages> = {
     tabs: "Feuilles et graphiques",
     grid: (sheet) => `Feuille ${sheet}`,
     downloadCsv: (sheet) => `Télécharger ${sheet} en CSV`,
-    sheetAsCsv: (sheet) => `${sheet} en CSV`,
-    download: "Télécharger",
-    downloadXlsx: "Classeur en .xlsx",
-    xlsxFailed: "Impossible de créer le fichier .xlsx.",
+    excelWorkbook: "Classeur Excel",
+    workbookDetail: (sheets) =>
+      sheets === 1
+        ? "1 feuille, avec ses formats"
+        : `Les ${numberFr(sheets)} feuilles, avec leurs formats`,
+    sheetsAsCsv: "Feuilles en CSV",
+    csvDetail: (rows) =>
+      rows === undefined ? "CSV" : `${rows === 1 ? "1 ligne" : `${numberFr(rows)} lignes`} · CSV`,
     rows: (count) => (count === 1 ? "1 ligne" : `${numberFr(count)} lignes`),
     frozenRows: (count) => (count === 1 ? "Ligne 1 figée" : `Lignes 1 à ${count} figées`),
     sum: "Somme",
