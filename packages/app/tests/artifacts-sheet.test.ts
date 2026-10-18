@@ -5,12 +5,14 @@ import {
   latestValue,
   MAX_CHART_POINTS,
 } from "../src/artifacts/renderers/sheet/chart-data"
+import { fitWidth } from "../src/artifacts/renderers/sheet/fit"
 import { cellFormatter, compactFormatter } from "../src/artifacts/renderers/sheet/format"
 import { fileSheetModel, sheetModel } from "../src/artifacts/renderers/sheet/model"
 import {
   cellRange,
   columnLetter,
   moveFocus,
+  rangeHtml,
   rangeLabel,
   rangeStats,
   rangeTsv,
@@ -170,6 +172,30 @@ describe("selection", () => {
     })
   })
 
+  test("finds the smallest and largest number in what is selected", () => {
+    const stats = rangeStats(cellRange({ row: 1, column: 1 }, { row: 4, column: 1 }), model, order)
+    expect(stats).toMatchObject({ min: -15000, max: 5560000 })
+  })
+
+  test("copies as a table of the values as shown, escaped, with links kept", () => {
+    const formatters = model.columns.map((column) => cellFormatter(column, "en-US"))
+    expect(
+      rangeHtml(cellRange({ row: 0, column: 4 }, { row: 1, column: 5 }), model, order, formatters)
+    ).toBe(
+      "<table><tr><th>Closed</th><th>Site</th></tr>" +
+        '<tr><td>Dec 31, 2025</td><td><a href="https://northline.example/q4/">northline.example/q4</a></td></tr></table>'
+    )
+    const tagged = sheetModel(sheet, parseCsv('Quarter\n"<b>Q1 & ""Q2""</b>"\n'))
+    expect(
+      rangeHtml(
+        cellRange({ row: 1, column: 0 }, { row: 1, column: 0 }),
+        tagged,
+        [0],
+        tagged.columns.map((column) => cellFormatter(column, "en-US"))
+      )
+    ).toBe("<table><tr><td>&lt;b&gt;Q1 &amp; &quot;Q2&quot;&lt;/b&gt;</td></tr></table>")
+  })
+
   test("copies as tab-separated values, header included when selected", () => {
     expect(rangeTsv(cellRange({ row: 0, column: 0 }, { row: 2, column: 1 }), model, order)).toBe(
       "Quarter\tRevenue\nQ4 2025\t4120000\nQ1 2026\t4380000.5"
@@ -196,6 +222,39 @@ describe("selection", () => {
       3, 0, 2, 1,
     ])
     expect(sortedOrder(model, null, "en")).toEqual([0, 1, 2, 3])
+  })
+})
+
+describe("fitting a column", () => {
+  const tenPerCharacter = (text: string) => text.length * 10
+
+  test("takes the wider of its header, with its glyph and sort control, and its widest value", () => {
+    const quarter = model.columns[0]
+    const revenue = model.columns[1]
+    if (!quarter || !revenue) throw new Error("Expected columns.")
+    // "Quarter": 70 + 54 for the header; "Q4 2025": 70 + 24 for the cell.
+    expect(fitWidth(quarter, 0, model.rows, cellFormatter(quarter, "en-US"), tenPerCharacter)).toBe(
+      124
+    )
+    // "Revenue": 70 + 54 + 18 for its currency glyph; "$4,380,000.5": 120 + 24.
+    expect(fitWidth(revenue, 1, model.rows, cellFormatter(revenue, "en-US"), tenPerCharacter)).toBe(
+      144
+    )
+  })
+
+  test("reads at most 2,000 rows of a long sheet", () => {
+    const long = fileSheetModel(
+      "Long",
+      parseCsv(["Name", ...Array.from({ length: 10_000 }, (_, index) => `row ${index}`)].join("\n"))
+    )
+    const column = long.columns[0]
+    if (!column) throw new Error("Expected a column.")
+    let measured = 0
+    fitWidth(column, 0, long.rows, cellFormatter(column, "en-US"), (text) => {
+      measured += 1
+      return text.length
+    })
+    expect(measured).toBeLessThanOrEqual(2_001)
   })
 })
 

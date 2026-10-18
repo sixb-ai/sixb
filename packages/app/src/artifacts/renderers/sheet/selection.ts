@@ -1,4 +1,5 @@
 import { parseSheetNumber } from "@sixb/core/artifacts"
+import type { FormattedCell } from "./format"
 import type { SheetModel } from "./model"
 
 // Grid coordinates: row 0 is the header row, row 1 the first data row as currently ordered;
@@ -52,6 +53,8 @@ export interface RangeStats {
   readonly numericCount: number
   readonly sum: number
   readonly average?: number
+  readonly min?: number
+  readonly max?: number
 }
 
 /** What a spreadsheet's status bar says about a selection. Header cells are labels, not values. */
@@ -63,6 +66,8 @@ export function rangeStats(
   let count = 0
   let numericCount = 0
   let sum = 0
+  let min = Number.POSITIVE_INFINITY
+  let max = Number.NEGATIVE_INFINITY
   for (let row = Math.max(range.top, 1); row <= range.bottom; row += 1) {
     const values = model.rows[order[row - 1] ?? -1]
     if (!values) continue
@@ -75,9 +80,16 @@ export function rangeStats(
       if (number === undefined) continue
       numericCount += 1
       sum += number
+      min = Math.min(min, number)
+      max = Math.max(max, number)
     }
   }
-  return { count, numericCount, sum, ...(numericCount > 0 ? { average: sum / numericCount } : {}) }
+  return {
+    count,
+    numericCount,
+    sum,
+    ...(numericCount > 0 ? { average: sum / numericCount, min, max } : {}),
+  }
 }
 
 /** The selection as tab-separated values, the shape every spreadsheet pastes. */
@@ -95,6 +107,45 @@ export function rangeTsv(range: CellRange, model: SheetModel, order: readonly nu
     )
   }
   return lines.join("\n")
+}
+
+/**
+ * The selection as an HTML table of the values as the grid shows them, which a spreadsheet or a
+ * document pastes as rows and columns, formats and links kept. The header row is a row of `<th>`.
+ */
+export function rangeHtml(
+  range: CellRange,
+  model: SheetModel,
+  order: readonly number[],
+  formatters: readonly ((value: string) => FormattedCell)[]
+): string {
+  const rows: string[] = []
+  for (let row = range.top; row <= range.bottom; row += 1) {
+    const values = row === 0 ? null : model.rows[order[row - 1] ?? -1]
+    if (row > 0 && !values) continue
+    const cells: string[] = []
+    for (let column = range.left; column <= range.right; column += 1) {
+      if (!values) {
+        cells.push(`<th>${escapeHtml(model.columns[column]?.name ?? "")}</th>`)
+        continue
+      }
+      const cell = formatters[column]?.(values[column] ?? "") ?? { text: values[column] ?? "" }
+      const text = escapeHtml(cell.text)
+      cells.push(
+        cell.href ? `<td><a href="${escapeHtml(cell.href)}">${text}</a></td>` : `<td>${text}</td>`
+      )
+    }
+    rows.push(`<tr>${cells.join("")}</tr>`)
+  }
+  return `<table>${rows.join("")}</table>`
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
 }
 
 export type MoveKey = "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Home" | "End"

@@ -30,6 +30,11 @@ const browser = installDom([
   "cancelAnimationFrame",
 ])
 const copied: string[] = []
+/** What the rich clipboard was given, by type, when the test puts a `ClipboardItem` in place. */
+const written: Record<string, string>[] = []
+class FakeClipboardItem {
+  constructor(readonly items: Record<string, Blob>) {}
+}
 beforeAll(() => {
   // happy-dom lays nothing out: give the grid a viewport, so it draws every column of the sheet.
   for (const [property, value] of [
@@ -39,11 +44,25 @@ beforeAll(() => {
     Object.defineProperty(browser.HTMLElement.prototype, property, { get: () => value })
   }
   Object.defineProperty(browser.navigator, "clipboard", {
-    value: { writeText: async (text: string) => void copied.push(text) },
+    value: {
+      writeText: async (text: string) => void copied.push(text),
+      write: async (items: FakeClipboardItem[]) => {
+        for (const item of items) {
+          const entries = Object.entries(item.items)
+          written.push(
+            Object.fromEntries(
+              await Promise.all(entries.map(async ([type, blob]) => [type, await blob.text()]))
+            )
+          )
+        }
+      },
+    },
   })
 })
 afterEach(() => {
   copied.length = 0
+  written.length = 0
+  Reflect.deleteProperty(globalThis, "ClipboardItem")
 })
 
 const parsed = parseWorkbook(
@@ -74,9 +93,17 @@ function mount() {
   const status = () => {
     const last = statuses.at(-1)
     if (!last) throw new Error("The grid reported no selection.")
-    return { range: rangeLabel(last.range), column: last.column?.name, ...last.stats }
+    return {
+      range: rangeLabel(last.range),
+      column: last.column?.name,
+      ...last.stats,
+      value: last.value,
+    }
   }
-  const press = async (key: string, modifiers: { shiftKey?: boolean; metaKey?: boolean } = {}) => {
+  const press = async (
+    key: string,
+    modifiers: { shiftKey?: boolean; metaKey?: boolean; ctrlKey?: boolean } = {}
+  ) => {
     await act(async () => {
       fireEvent.keyDown(grid, { key, ...modifiers })
     })
@@ -95,10 +122,13 @@ describe("the sheet grid", () => {
     expect(status()).toEqual({
       range: "B2:B4",
       column: "Revenue",
+      value: "$5,560,000",
       count: 3,
       numericCount: 3,
       sum: 13_580_000,
       average: 13_580_000 / 3,
+      min: 3_900_000,
+      max: 5_560_000,
     })
 
     await press("Escape")
@@ -116,6 +146,50 @@ describe("the sheet grid", () => {
 
     fireEvent.pointerDown(cell(-1, 2), { button: 0 })
     expect(status()).toMatchObject({ range: "C1:C4", numericCount: 3 })
+  })
+
+  test("selects rows and columns by their numbers and letters, with Shift, by dragging, and by key", async () => {
+    // Reproduce by dropping the Shift branches in onPointerDown, the "rows" mode in
+    // onPointerMove, or the Space branch in onKeyDown: each selection below stays one row,
+    // one column, or one cell.
+    const { cell, status, press } = mount()
+    fireEvent.pointerDown(cell(1, -1), { button: 0 })
+    fireEvent.pointerUp(cell(1, -1))
+    expect(status().range).toBe("A2:C2")
+    fireEvent.pointerDown(cell(3, -1), { button: 0, shiftKey: true })
+    fireEvent.pointerUp(cell(3, -1))
+    expect(status().range).toBe("A2:C4")
+
+    fireEvent.pointerDown(cell(-1, 1), { button: 0 })
+    fireEvent.pointerUp(cell(-1, 1))
+    fireEvent.pointerDown(cell(-1, 2), { button: 0, shiftKey: true })
+    fireEvent.pointerUp(cell(-1, 2))
+    expect(status().range).toBe("B1:C4")
+
+    fireEvent.pointerDown(cell(1, -1), { button: 0 })
+    fireEvent.pointerMove(cell(2, 1))
+    fireEvent.pointerUp(cell(2, 1))
+    expect(status().range).toBe("A2:C3")
+
+    fireEvent.pointerDown(cell(2, 1), { button: 0 })
+    fireEvent.pointerUp(cell(2, 1))
+    await press(" ", { shiftKey: true })
+    expect(status().range).toBe("A3:C3")
+    fireEvent.pointerDown(cell(2, 1), { button: 0 })
+    fireEvent.pointerUp(cell(2, 1))
+    await press(" ", { ctrlKey: true })
+    expect(status().range).toBe("B1:B4")
+    await press(" ", { ctrlKey: true, shiftKey: true })
+    expect(status().range).toBe("A1:C4")
+  })
+
+  test("reports the active cell's whole value", async () => {
+    const { status, press } = mount()
+    expect(status().value).toBe("Q4 2025")
+    await press("ArrowRight")
+    expect(status().value).toBe("$4,120,000")
+    await press("ArrowUp")
+    expect(status().value).toBe("Revenue")
   })
 
   test("opens on the range an address named, selected", () => {
@@ -140,6 +214,44 @@ describe("the sheet grid", () => {
     await press("ArrowRight", { shiftKey: true })
     await press("c", { metaKey: true })
     expect(copied).toEqual(["Q4 2025\t4120000\nQ1 2026\t3900000"])
+  })
+
+  test("copies the selection as a table too, where the clipboard takes HTML", async () => {
+    // Reproduce by writing only `writeText` in the grid's copy: the clipboard gets no table.
+    Object.defineProperty(globalThis, "ClipboardItem", {
+      configurable: true,
+      writable: true,
+      value: FakeClipboardItem,
+    })
+    const { press } = mount()
+    await press("ArrowUp")
+    await press("ArrowDown", { shiftKey: true })
+    await press("ArrowRight", { shiftKey: true })
+    await press("c", { metaKey: true })
+    expect(copied).toEqual([])
+    expect(written).toEqual([
+      {
+        "text/plain": "Quarter\tRevenue\nQ4 2025\t4120000",
+        "text/html":
+          "<table><tr><th>Quarter</th><th>Revenue</th></tr><tr><td>Q4 2025</td><td>$4,120,000</td></tr></table>",
+      },
+    ])
+  })
+
+  test("fits a column to its values when its separator is double-clicked", async () => {
+    // Reproduce by double-clicking back to `model.columns[column].width`: the column keeps the
+    // 400 pixels the workbook gave it.
+    const wide = sheetModel(
+      { name: "Wide", frozenRows: 1, frozenColumns: 0, columns: {}, widths: { Quarter: 400 } },
+      parseCsv("Quarter\nQ4 2025\n")
+    )
+    const ui = render(<SheetGrid model={wide} locale="en-US" />)
+    const separator = ui.getByRole("separator", { name: "Resize Quarter" })
+    expect(separator.getAttribute("aria-valuenow")).toBe("400")
+    await act(async () => fireEvent.doubleClick(separator))
+    const fitted = Number(separator.getAttribute("aria-valuenow"))
+    expect(fitted).toBeLessThan(200)
+    expect(fitted).toBeGreaterThanOrEqual(48)
   })
 
   test("tells assistive technology which cell is active, and where each drawn column is", async () => {
@@ -311,6 +423,18 @@ describe("a sheet artifact", () => {
     expect(selectedTab()?.textContent).toBe("Regions")
     await press("Home")
     expect(selectedTab()?.textContent).toBe("Summary")
+  })
+
+  test("shows the active cell's whole value above the grid", async () => {
+    // Reproduce by dropping `status?.value` from NameBox: the bar shows only the address.
+    const ui = render(<ArtifactViewer cache={sheetCache()} artifactId={NUMBERS} />)
+    const value = () => ui.container.querySelector("[data-sheet-value]")?.textContent
+    expect(value()).toBe("Q3 2026")
+    await act(async () => {
+      fireEvent.keyDown(ui.getByRole("grid"), { key: "ArrowRight" })
+    })
+    // The seeded workbook types no column, so Revenue reads as text.
+    expect(value()).toBe("5560000")
   })
 
   test("starts afresh on another artifact, though the same renderer shows it", async () => {

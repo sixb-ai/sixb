@@ -15,6 +15,7 @@ import {
 } from "react"
 import { useArtifactMessages } from "../../messages"
 import { ArtifactAddressLabel, ArtifactLink } from "../../references/references"
+import { elementTextMeasure, fitWidth, type TextMeasure } from "./fit"
 import { cellFormatter, currencySymbol, type FormattedCell } from "./format"
 import type { SheetColumn, SheetModel } from "./model"
 import {
@@ -26,6 +27,7 @@ import {
   type MoveKey,
   moveFocus,
   type RangeStats,
+  rangeHtml,
   rangeStats,
   rangeTsv,
   type SortDirection,
@@ -47,13 +49,15 @@ export interface SheetGridStatus {
   readonly stats: RangeStats
   /** The column the active cell is in. */
   readonly column: SheetColumn | undefined
+  /** The active cell's whole value as it reads: a link's full address, a long text untruncated. */
+  readonly value: string
 }
 
 /**
  * A read-only spreadsheet grid: column letters and row numbers, the header row and any frozen rows
- * and columns kept in view, columns that resize and sort, and a selection by pointer, Shift, and
- * keyboard that copies as TSV. Only the cells in view are drawn, so a sheet of 100,000 rows
- * scrolls like a short one.
+ * and columns kept in view, columns that resize, fit, and sort, and a selection of cells, rows, or
+ * columns by pointer, Shift, and keyboard that copies as TSV and as a table. Only the cells in view
+ * are drawn, so a sheet of 100,000 rows scrolls like a short one.
  */
 export function SheetGrid({
   model,
@@ -92,7 +96,9 @@ export function SheetGrid({
   }, [selected, model])
   const [anchor, setAnchor] = useState<CellPoint>(() => opening?.anchor ?? { row: 1, column: 0 })
   const [focus, setFocus] = useState<CellPoint>(() => opening?.focus ?? { row: 1, column: 0 })
-  const dragging = useRef(false)
+  /** What a drag selects: cells from a cell, rows from a row number, columns from a letter. */
+  const dragging = useRef<"cells" | "rows" | "columns" | null>(null)
+  const measure = useRef<TextMeasure | null>(null)
 
   const order = useMemo(() => sortedOrder(model, sort, locale), [model, sort, locale])
   const formatters = useMemo(
@@ -163,16 +169,22 @@ export function SheetGrid({
   }, [])
 
   useEffect(() => {
+    const raw =
+      focus.row === 0
+        ? (model.columns[focus.column]?.name ?? "")
+        : (model.rows[order[focus.row - 1] ?? -1]?.[focus.column] ?? "")
+    const cell = focus.row === 0 ? null : formatters[focus.column]?.(raw)
     onStatusChange?.({
       range,
       stats: rangeStats(range, model, order),
       column: model.columns[focus.column],
+      value: cell ? (cell.href ?? cell.reference ?? cell.image ?? cell.text) : raw,
     })
-  }, [onStatusChange, range, model, order, focus.column])
+  }, [onStatusChange, range, model, order, formatters, focus.row, focus.column])
 
   useEffect(() => {
     const stop = () => {
-      dragging.current = false
+      dragging.current = null
     }
     window.addEventListener("pointerup", stop)
     return () => window.removeEventListener("pointerup", stop)
@@ -216,6 +228,17 @@ export function SheetGrid({
     setFocus(point)
   }
 
+  /** Every cell of the rows from one to another, header row included when it is one of them. */
+  const selectRows = (from: number, to: number) => {
+    setAnchor({ row: from, column: 0 })
+    setFocus({ row: to, column: columnCount - 1 })
+  }
+
+  const selectColumns = (from: number, to: number) => {
+    setAnchor({ row: 0, column: from })
+    setFocus({ row: rowCount - 1, column: to })
+  }
+
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
     const target = (event.target as HTMLElement).closest<HTMLElement>("[data-cell]")
@@ -224,28 +247,63 @@ export function SheetGrid({
     if (!point) return
     event.preventDefault()
     gridRef.current?.focus({ preventScroll: true })
-    dragging.current = true
     if (point.column < 0) {
-      // A row number selects its row.
-      setAnchor({ row: point.row, column: 0 })
-      setFocus({ row: point.row, column: columnCount - 1 })
+      // A row number selects its row; with Shift, every row from the selection's.
+      dragging.current = "rows"
+      selectRows(event.shiftKey ? anchor.row : point.row, point.row)
       return
     }
     if (point.row < 0) {
-      // A column letter selects its column.
-      setAnchor({ row: 0, column: point.column })
-      setFocus({ row: rowCount - 1, column: point.column })
+      // A column letter selects its column; with Shift, every column from the selection's.
+      dragging.current = "columns"
+      selectColumns(event.shiftKey ? anchor.column : point.column, point.column)
       return
     }
+    dragging.current = "cells"
     select(point, event.shiftKey)
   }
 
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    if (!dragging.current) return
+    const mode = dragging.current
+    if (!mode) return
     const target = (event.target as HTMLElement).closest<HTMLElement>("[data-cell]")
     const point = target ? cellPoint(target) : null
-    if (!point || point.row < 0 || point.column < 0) return
-    if (point.row !== focus.row || point.column !== focus.column) setFocus(point)
+    if (!point) return
+    if (mode === "rows") {
+      if (point.row >= 0 && point.row !== focus.row) {
+        setFocus({ row: point.row, column: columnCount - 1 })
+      }
+    } else if (mode === "columns") {
+      if (point.column >= 0 && point.column !== focus.column) {
+        setFocus({ row: rowCount - 1, column: point.column })
+      }
+    } else if (point.row >= 0 && point.column >= 0) {
+      if (point.row !== focus.row || point.column !== focus.column) setFocus(point)
+    }
+  }
+
+  /** The selection on the clipboard as TSV, and as a table where the browser takes HTML. */
+  const copy = async () => {
+    const text = rangeTsv(range, model, order)
+    try {
+      if (typeof ClipboardItem !== "function" || !navigator.clipboard.write) {
+        throw new Error("No rich clipboard.")
+      }
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/plain": new Blob([text], { type: "text/plain" }),
+          "text/html": new Blob([rangeHtml(range, model, order, formatters)], {
+            type: "text/html",
+          }),
+        }),
+      ])
+    } catch {
+      try {
+        await navigator.clipboard.writeText(text)
+      } catch {
+        // The clipboard can be unavailable, such as on an insecure origin.
+      }
+    }
   }
 
   const onKeyDown = async (event: KeyboardEvent<HTMLDivElement>) => {
@@ -258,11 +316,15 @@ export function SheetGrid({
     }
     if (command && event.key.toLowerCase() === "c") {
       event.preventDefault()
-      try {
-        await navigator.clipboard.writeText(rangeTsv(range, model, order))
-      } catch {
-        // The clipboard can be unavailable, such as on an insecure origin.
-      }
+      await copy()
+      return
+    }
+    // Shift+Space selects the selection's rows, Ctrl+Space its columns, and both every cell.
+    if (event.key === " " && (event.shiftKey || event.ctrlKey) && !event.metaKey) {
+      event.preventDefault()
+      if (event.shiftKey && event.ctrlKey) selectRows(0, rowCount - 1)
+      else if (event.shiftKey) selectRows(anchor.row, focus.row)
+      else selectColumns(anchor.column, focus.column)
       return
     }
     if (event.key === "Escape") {
@@ -308,7 +370,16 @@ export function SheetGrid({
     window.addEventListener("pointerup", up)
   }
 
-  /** The arrows widen and narrow a column from its separator; Enter fits it as it opened. */
+  /** The width that shows the column's name and widest value whole. */
+  const fit = (column: number): number => {
+    const format = formatters[column]
+    const entry = model.columns[column]
+    if (!entry || !format) return widths[column] ?? MIN_COLUMN_WIDTH
+    measure.current ??= elementTextMeasure(gridRef.current)
+    return fitWidth(entry, column, model.rows, format, measure.current)
+  }
+
+  /** The arrows widen and narrow a column from its separator; Enter puts back its first width. */
   const resizeWithKey = (column: number, event: KeyboardEvent<HTMLSpanElement>) => {
     const width = widths[column] ?? 0
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
@@ -406,8 +477,9 @@ export function SheetGrid({
   }
 
   /**
-   * A column's letter, and the separator that resizes it: by dragging, or from the keyboard on
-   * the active cell's column, whose separator is the one in the tab order.
+   * A column's letter, and the separator that resizes it: by dragging, by a double-click that fits
+   * the column to its values, or from the keyboard on the active cell's column, whose separator is
+   * the one in the tab order.
    */
   const letter = (column: number, fixed: boolean) => {
     const selected = column >= range.left && column <= range.right
@@ -441,7 +513,7 @@ export function SheetGrid({
           tabIndex={column === focus.column ? 0 : -1}
           className="absolute inset-y-0 -right-[3px] z-[3] w-[6px] cursor-col-resize outline-none after:absolute after:inset-y-1 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent hover:after:bg-primary focus-visible:after:w-0.5 focus-visible:after:bg-ring"
           onPointerDown={(event) => resize(column, event)}
-          onDoubleClick={() => setWidth(column, model.columns[column]?.width ?? width)}
+          onDoubleClick={() => setWidth(column, fit(column))}
           onKeyDown={(event) => resizeWithKey(column, event)}
         />
       </div>
