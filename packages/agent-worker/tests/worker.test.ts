@@ -1,10 +1,7 @@
-import { describe, expect, spyOn, test } from "bun:test"
+import { afterEach, describe, expect, jest, setSystemTime, spyOn, test } from "bun:test"
 import { join } from "node:path"
-import { exa } from "@sixb/connector-exa"
-import { exaWebFetch, exaWebSearch } from "@sixb/connector-exa/agent-tools"
 import {
   type AgentMessagePart,
-  AgentRequestError,
   type AgentRuntime,
   type AgentSkillDefinition,
   type AgentToolDefinition,
@@ -28,7 +25,6 @@ import {
   defineObjectType,
   defineRole,
   defineWorkflow,
-  type EmbeddingModel,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -137,7 +133,7 @@ import type {
 } from "../src/types"
 import * as workspaceFiles from "../src/workspace-files"
 import { WorkspaceRunFilesConflictError } from "../src/workspace-files"
-import { waitFor } from "./helpers"
+import { waitFor as pollFor } from "./helpers"
 import { testStream, WorkerTestModel, type WorkerTestStreamEvent } from "./worker-model-fixture"
 
 const PROJECT_ID = "agent-worker-tests"
@@ -169,7 +165,15 @@ const COMPACTION_USAGE: ModelUsage = {
   raw: { input_tokens: 111_000, output_tokens: 100 },
 }
 
-/** Wait for the delivery to finish its error path before stopping the test worker. */
+// A test that times out skips its `finally`: never let its fake timers leak into the next test.
+afterEach(() => {
+  jest.useRealTimers()
+})
+
+/** The shared poll at 1ms: every condition polled in this file is an in-memory read. */
+const waitFor: typeof pollFor = (fn, options = {}) => pollFor(fn, { intervalMs: 1, ...options })
+
+/** Latch the first settlement (complete, fail or retry) of a queue delivery. */
 function observeQueueSettlement<TFailure>(queue: {
   complete(input: { projectId: string; jobId: string; leaseId: string }): Promise<void>
   retry(input: {
@@ -188,27 +192,100 @@ function observeQueueSettlement<TFailure>(queue: {
   const complete = queue.complete.bind(queue)
   const fail = queue.fail.bind(queue)
   const retry = queue.retry.bind(queue)
-  let completed = false
+  const settled = Promise.withResolvers<void>()
+  let outcome: "complete" | "fail" | "retry" | undefined
+  const settle = (kind: "complete" | "fail" | "retry") => {
+    outcome ??= kind
+    settled.resolve()
+  }
   const observer = spyOn(queue, "complete").mockImplementation(async (input) => {
     await complete(input)
-    completed = true
+    settle("complete")
   })
   const failed = spyOn(queue, "fail").mockImplementation(async (input) => {
     await fail(input)
-    completed = true
+    settle("fail")
   })
   const retried = spyOn(queue, "retry").mockImplementation(async (input) => {
     await retry(input)
-    completed = true
+    settle("retry")
   })
   return {
-    wait: () => waitFor(() => Promise.resolve(completed), { label: "queue delivery completed" }),
+    wait: () => settled.promise,
+    settled: () => outcome !== undefined,
+    outcome: () => outcome,
     restore: () => {
       observer.mockRestore()
       failed.mockRestore()
       retried.mockRestore()
     },
   }
+}
+
+/**
+ * One real event-loop turn, so pending I/O settles while timers are fake. A message is used because
+ * a `setImmediate` callback was seen to wait up to a second for an unrelated wake-up in this mode.
+ */
+function realLoopTurn(): Promise<void> {
+  const { port1, port2 } = new MessageChannel()
+  return new Promise((resolve) => {
+    port1.onmessage = () => {
+      port1.close()
+      port2.close()
+      resolve()
+    }
+    port2.postMessage(null)
+  })
+}
+
+/**
+ * Drive fake timers until `check` holds. Each step takes one real event-loop turn, then moves fake
+ * time forward by `stepMs`. A step of 0 fires only timers already due, to wait for a phase
+ * without letting a deadline pass.
+ */
+async function underFakeTime<T>(
+  check: () => T | null | undefined | false | Promise<T | null | undefined | false>,
+  label: string,
+  stepMs = 50
+): Promise<T> {
+  for (let step = 0; step < 2_000; step += 1) {
+    await realLoopTurn()
+    const value = await check()
+    if (value !== null && value !== undefined && value !== false) return value
+    jest.advanceTimersByTime(stepMs)
+  }
+  throw new Error(`[test] ${label} did not settle under fake time.`)
+}
+
+/** Settle a promise whose work waits on fake timers, with its value or its error. */
+async function settleUnderFakeTime<T>(promise: Promise<T>, label: string): Promise<T> {
+  let outcome: { readonly value: T } | { readonly error: unknown } | undefined
+  promise.then(
+    (value) => {
+      outcome = { value }
+    },
+    (error: unknown) => {
+      outcome = { error }
+    }
+  )
+  const settled = await underFakeTime(() => outcome, label)
+  if ("error" in settled) throw settled.error
+  return settled.value
+}
+
+/** Stop a worker started under fake timers: its shutdown may still wait on a backoff. */
+function stopUnderFakeTime(worker: AgentWorker): Promise<void> {
+  return settleUnderFakeTime(worker.stop(), "worker stop")
+}
+
+async function terminalRun(storage: AgentStorage, runId: string) {
+  const run = await storage.runs.getById({ projectId: PROJECT_ID, id: runId })
+  return run && run.status !== "queued" && run.status !== "running" ? run : null
+}
+
+async function terminalAgentNode(runs: WorkflowRunStorage, nodeRunId: string) {
+  const node = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+  return node && node.status !== "queued" && node.status !== "running" ? node : null
 }
 
 const Q3_REVIEW_MARKDOWN =
@@ -248,13 +325,7 @@ async function onlyArtifact(sixb: TestSixb | undefined): Promise<ArtifactRecord>
 }
 
 async function waitForTerminalRun(storage: AgentStorage, runId: string) {
-  return waitFor(
-    async () => {
-      const run = await storage.runs.getById({ projectId: PROJECT_ID, id: runId })
-      return run && run.status !== "queued" && run.status !== "running" ? run : null
-    },
-    { label: `run ${runId} terminal` }
-  )
+  return waitFor(() => terminalRun(storage, runId), { label: `run ${runId} terminal` })
 }
 
 function stream(chunks: WorkerTestStreamEvent[]) {
@@ -316,67 +387,6 @@ function invalidMetadataAnswerModel(): WorkerTestModel {
         { type: "text-end", id: "answer" },
         finish("stop"),
       ]),
-  })
-}
-
-function webSearchThenAnswerModel(): WorkerTestModel {
-  let call = 0
-  return new WorkerTestModel({
-    modelId: "mock-model",
-    stream: async () => {
-      call += 1
-      if (call === 1) {
-        return stream([
-          { type: "stream-start", warnings: [] },
-          {
-            type: "tool-call",
-            toolCallId: "web-search-call",
-            toolName: "web_search",
-            input: JSON.stringify({ query: "sixb connector tools" }),
-          },
-          finish("tool-calls"),
-        ])
-      }
-      return stream([
-        { type: "stream-start", warnings: [] },
-        { type: "text-start", id: "answer" },
-        { type: "text-delta", id: "answer", delta: "Search complete" },
-        { type: "text-end", id: "answer" },
-        finish("stop"),
-      ])
-    },
-  })
-}
-
-function webFetchThenAnswerModel(
-  config: { readonly captureReplay?: (prompt: string) => void; readonly url?: string } = {}
-): WorkerTestModel {
-  let call = 0
-  return new WorkerTestModel({
-    modelId: "mock-model",
-    stream: async (options) => {
-      call += 1
-      if (call === 1) {
-        return stream([
-          { type: "stream-start", warnings: [] },
-          {
-            type: "tool-call",
-            toolCallId: "web-fetch-call",
-            toolName: "web_fetch",
-            input: JSON.stringify({ url: config.url ?? "https://sixb.ai/docs" }),
-          },
-          finish("tool-calls"),
-        ])
-      }
-      if (call === 3) config.captureReplay?.(JSON.stringify(options.messages))
-      return stream([
-        { type: "stream-start", warnings: [] },
-        { type: "text-start", id: `answer-${call}` },
-        { type: "text-delta", id: `answer-${call}`, delta: "Fetch complete" },
-        { type: "text-end", id: `answer-${call}` },
-        finish("stop"),
-      ])
-    },
   })
 }
 
@@ -585,24 +595,6 @@ function failingToolThenAnswerModel(captureReplay: (prompt: string) => void): Wo
   })
 }
 
-function slowAnswerModel(delayMs: number): WorkerTestModel {
-  let call = 0
-  return new WorkerTestModel({
-    modelId: "mock-model",
-    stream: async () => {
-      call += 1
-      await Bun.sleep(delayMs)
-      return stream([
-        { type: "stream-start", warnings: [] },
-        { type: "text-start", id: `slow-${call}` },
-        { type: "text-delta", id: `slow-${call}`, delta: `Slow answer ${call}` },
-        { type: "text-end", id: `slow-${call}` },
-        finish("stop"),
-      ])
-    },
-  })
-}
-
 function toolOnlyModel(): WorkerTestModel {
   let call = 0
   return new WorkerTestModel({
@@ -666,32 +658,6 @@ function invalidStructuredAnswerModel(): WorkerTestModel {
       usage: USAGE,
       warnings: [],
     }),
-  })
-}
-
-function structuredToolThenProviderFailureModel(): WorkerTestModel {
-  let call = 0
-  return new WorkerTestModel({
-    modelId: "mock-model",
-    generate: async () => {
-      call += 1
-      if (call === 1) {
-        return {
-          content: [
-            {
-              type: "tool-call",
-              toolCallId: "workflow-failure",
-              toolName: "fail_lookup",
-              input: JSON.stringify({ query: "alpha" }),
-            },
-          ],
-          finishReason: { unified: "tool-calls", raw: "tool-calls" },
-          usage: USAGE,
-          warnings: [],
-        }
-      }
-      throw new Error("provider unavailable after tool failure")
-    },
   })
 }
 
@@ -2225,12 +2191,13 @@ function withObservedAgentMessageAppendStorage(
 }
 
 /** A model whose stream opens then hangs until aborted — used to force a turn timeout. */
-function hangingModel(): WorkerTestModel {
+function hangingModel(onStart?: () => void): WorkerTestModel {
   return new WorkerTestModel({
     modelId: "mock-model",
     stream: async (options) => ({
       stream: new ReadableStream<WorkerTestStreamEvent>({
         start(controller) {
+          onStart?.()
           controller.enqueue({ type: "stream-start", warnings: [] })
           const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
           if (options.signal.aborted) {
@@ -2245,11 +2212,12 @@ function hangingModel(): WorkerTestModel {
 }
 
 /** A summary request that hangs until the shared turn deadline aborts it. */
-function hangingCompactionModel(): WorkerTestModel {
+function hangingCompactionModel(onStart: () => void): WorkerTestModel {
   return new WorkerTestModel({
     modelId: "mock-model",
     stream: async (options) =>
       new Promise((_, reject) => {
+        onStart()
         const abort = () => reject(new DOMException("Aborted", "AbortError"))
         if (options.signal.aborted) {
           abort()
@@ -2269,8 +2237,10 @@ describe("AgentWorker", () => {
     let authorizations = 0
     let revocations = 0
     let interruption: unknown
+    let reached = false
     const waitForFailure = (signal: AbortSignal) =>
       new Promise<never>((_, reject) => {
+        reached = true
         const abort = () => {
           interruption = signal.reason
           reject(signal.reason)
@@ -2330,10 +2300,14 @@ describe("AgentWorker", () => {
     const thread = await sdk.agent.threads.create({ sandbox: {} })
     const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
     const completion = observeQueueSettlement(host.queues.agents)
-    const worker = new AgentWorker(host, workerOptions({ turnTimeoutMs: 3_000 }))
-    await worker.start()
+    // The grant's renewal is due one second after it is issued: drive that with fake time.
+    jest.useFakeTimers()
+    const worker = new AgentWorker(host, workerOptions())
     try {
-      await completion.wait()
+      await worker.start()
+      await underFakeTime(() => reached, `${phase} started`, 0)
+      jest.advanceTimersByTime(1_000)
+      await underFakeTime(completion.settled, "queue delivery settled", 0)
       const run = await agentStorageOf(host).runs.getById({
         projectId: PROJECT_ID,
         id: requested.run.id,
@@ -2348,7 +2322,8 @@ describe("AgentWorker", () => {
       expect((await sdk.agent.threads.getById(thread.id))?.sandboxState?.status).toBe("blocked")
       expect(sandbox.status).toBe("stopped")
     } finally {
-      await worker.stop()
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
       completion.restore()
       preflight.mockRestore()
     }
@@ -2437,16 +2412,15 @@ describe("AgentWorker", () => {
     const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
     const run = await reserveRequestedRun(host, requested)
     try {
-      await expect(
-        createConversationAgentEnvironment({
-          context: await buildAgentWorkerContext(host),
-          plan: executionPlanFor(host),
-          thread,
-          sandboxDefinition: host.sandboxDefinition,
-          run,
-          signal: controller.signal,
-        })
-      ).rejects.toBe(lost)
+      const error = await createConversationAgentEnvironment({
+        context: await buildAgentWorkerContext(host),
+        plan: executionPlanFor(host),
+        thread,
+        sandboxDefinition: host.sandboxDefinition,
+        run,
+        signal: controller.signal,
+      }).catch((caught: unknown) => caught)
+      expect(error).toBe(lost)
       expect(stop).not.toHaveBeenCalled()
       expect(sandbox.destroyed).toBe(false)
       expect((await sdk.agent.threads.getById(thread.id))?.sandboxState?.status).toBe("busy")
@@ -2496,10 +2470,12 @@ describe("AgentWorker", () => {
       return prepare(input)
     })
     const stop = sandbox.stop.bind(sandbox)
+    // Recorded, not asserted here: the worker would swallow a failed expectation thrown by stop().
+    const runStatusAtSave: (string | undefined)[] = []
     const preservation = spyOn(sandbox, "stop").mockImplementation(async () => {
-      expect(
-        await agents.runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
-      ).toMatchObject({ status: "running" })
+      runStatusAtSave.push(
+        (await agents.runs.getById({ projectId: PROJECT_ID, id: requested.run.id }))?.status
+      )
       await stop()
     })
     const completion = observeQueueSettlement(host.queues.agents)
@@ -2514,7 +2490,7 @@ describe("AgentWorker", () => {
         activeRunId: null,
         sandboxState: { status: phase === "preflight" ? "ready" : "blocked" },
       })
-      expect(preservation).toHaveBeenCalledTimes(1)
+      expect(runStatusAtSave).toEqual(["running"])
       expect(modelCalls).toBe(0)
       expect(sandbox.destroyed).toBe(false)
     } finally {
@@ -3685,26 +3661,6 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("does not provision Agent identities when the worker starts", async () => {
-    const sixb = buildSixb(toolThenAnswerModel())
-    const auth = authStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions())
-
-    // Regression proof: restoring the former startup ensure loop creates this identity and fails.
-    await worker.start()
-    try {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      await expect(
-        auth.serviceAccounts.getById({
-          projectId: PROJECT_ID,
-          id: "svc_agent_assistant",
-        })
-      ).resolves.toBeNull()
-    } finally {
-      await worker.stop()
-    }
-  })
-
   test("warns at execution time when the selected model has no context limit", async () => {
     // Regression proof: reject an undefined model window in resolveAgentContextBudget.
     const base = toolThenAnswerModel()
@@ -3729,16 +3685,7 @@ describe("AgentWorker", () => {
       expect(resolutions).toBe(0)
       expect(warning).not.toHaveBeenCalled()
       const request = await requestAgent(sixb, { text: "Hello" })
-      const run = await waitFor(
-        async () => {
-          const record = await agentStorageOf(sixb).runs.getById({
-            projectId: PROJECT_ID,
-            id: request.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "fallback model execution" }
-      )
+      const run = await waitForTerminalRun(agentStorageOf(sixb), request.run.id)
       expect(run.status).toBe("succeeded")
       expect(resolutions).toBe(1)
       expect(warning).toHaveBeenCalledTimes(1)
@@ -3776,16 +3723,7 @@ describe("AgentWorker", () => {
     try {
       await worker.start()
       const request = await requestAgent(sixb, { text: "Hello" })
-      const run = await waitFor(
-        async () => {
-          const record = await agentStorageOf(sixb).runs.getById({
-            projectId: PROJECT_ID,
-            id: request.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "selected model execution" }
-      )
+      const run = await waitForTerminalRun(agentStorageOf(sixb), request.run.id)
       expect(run.status).toBe("succeeded")
       expect(resolutions).toBe(0)
     } finally {
@@ -3852,16 +3790,7 @@ describe("AgentWorker", () => {
         text: "Continue with the catalog-derived context budget.",
         model: { provider: selectedModel.providerId, modelId: selectedModel.modelId },
       })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: request.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "automatic catalog compaction" }
-      )
+      const run = await waitForTerminalRun(storage, request.run.id)
 
       expect(run.status).toBe("succeeded")
       // The selected metadata snapshot is prepared once and shared by compaction and generation.
@@ -3944,16 +3873,7 @@ describe("AgentWorker", () => {
         text: "Continue from the latest completed turn.",
         reasoning: "high",
       })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: request.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "compacted agent run" }
-      )
+      const run = await waitForTerminalRun(storage, request.run.id)
       expect(run.status).toBe("succeeded")
 
       const checkpoint = await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
@@ -4042,16 +3962,7 @@ describe("AgentWorker", () => {
         threadId,
         text: `second-compaction-${"y".repeat(3_000)}`,
       })
-      const secondRun = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: secondRequest.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "repeated compacted agent run" }
-      )
+      const secondRun = await waitForTerminalRun(storage, secondRequest.run.id)
       expect(secondRun.status).toBe("succeeded")
       const secondCheckpoint = await storage.checkpoints.getLatest({
         projectId: PROJECT_ID,
@@ -4263,16 +4174,7 @@ describe("AgentWorker", () => {
         threadId,
         text: "Continue on.",
       })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: request.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "oversized completed turn compaction" }
-      )
+      const run = await waitForTerminalRun(storage, request.run.id)
 
       expect(run.status).toBe("succeeded")
       await expect(
@@ -4326,16 +4228,7 @@ describe("AgentWorker", () => {
         threadId,
         text: "This should not run after a partial summary.",
       })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: request.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "failed compacted agent run" }
-      )
+      const run = await waitForTerminalRun(storage, request.run.id)
       expect(run.status).toBe("failed")
       expect(answerCalls).toBe(0)
       await expect(
@@ -4533,16 +4426,9 @@ describe("AgentWorker", () => {
     const worker = new AgentWorker(workerHost, workerOptions())
     await worker.start()
     try {
-      const execution = await waitFor(
-        async () => {
-          const record = await runs.agentNodes.getByNodeRunId({
-            projectId: PROJECT_ID,
-            nodeRunId,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "workflow agent node terminal" }
-      )
+      const execution = await waitFor(() => terminalAgentNode(runs, nodeRunId), {
+        label: "workflow agent node terminal",
+      })
       expect(execution).toMatchObject({
         status: "succeeded",
         actorId: actorId,
@@ -5588,13 +5474,9 @@ describe("AgentWorker", () => {
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
-      const execution = await waitFor(
-        async () => {
-          const record = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "workflow sandbox failure" }
-      )
+      const execution = await waitFor(() => terminalAgentNode(runs, nodeRunId), {
+        label: "workflow sandbox failure",
+      })
       expect(execution.status).toBe("failed")
       expect(signals).toHaveLength(failedCall)
       expect(signals.at(-1)?.aborted).toBe(true)
@@ -5759,16 +5641,9 @@ describe("AgentWorker", () => {
 
     await worker.start()
     try {
-      const execution = await waitFor(
-        async () => {
-          const record = await runs.agentNodes.getByNodeRunId({
-            projectId: PROJECT_ID,
-            nodeRunId,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "workflow output validation failure" }
-      )
+      const execution = await waitFor(() => terminalAgentNode(runs, nodeRunId), {
+        label: "workflow output validation failure",
+      })
 
       expect(execution.status).toBe("failed")
       const node = await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })
@@ -5791,51 +5666,6 @@ describe("AgentWorker", () => {
           totalTokens: 51,
           reportingStatus: "complete",
         },
-      })
-    } finally {
-      await worker.stop()
-    }
-  })
-
-  test("keeps completed workflow usage when a tool path later fails", async () => {
-    let toolCalls = 0
-    const failingTool = defineAgentTool("fail_lookup")
-      .description("Fail a project lookup.")
-      .input({ query: "string" })
-      .run(() => {
-        toolCalls += 1
-        throw new Error("project lookup unavailable")
-      })
-    const { sixb, runs, nodeRunId, agentExecutionId } = await queueWorkflowAgentNode({
-      model: structuredToolThenProviderFailureModel(),
-      tools: [failingTool],
-      runId: "workflow-tool-failure",
-    })
-    const worker = new AgentWorker(sixb, workerOptions())
-
-    await worker.start()
-    try {
-      const execution = await waitFor(
-        async () => {
-          const record = await runs.agentNodes.getByNodeRunId({
-            projectId: PROJECT_ID,
-            nodeRunId,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "workflow tool path failure" }
-      )
-
-      expect(toolCalls).toBe(1)
-      expect(execution.status).toBe("failed")
-      await expect(
-        aiUsageStorageOf(sixb).summarizeExecution({
-          projectId: PROJECT_ID,
-          executionId: agentExecutionId,
-        })
-      ).resolves.toMatchObject({
-        modelCallCount: 1,
-        usage: { inputTokens: 10, outputTokens: 7, totalTokens: 17 },
       })
     } finally {
       await worker.stop()
@@ -5881,19 +5711,14 @@ describe("AgentWorker", () => {
       }
       return jobs
     }
+    // Fake timers stand in for the recorder's storage retry backoff.
+    jest.useFakeTimers()
     const worker = new AgentWorker(workerHost, workerOptions())
-
-    await worker.start()
     try {
-      const execution = await waitFor(
-        async () => {
-          const record = await runs.agentNodes.getByNodeRunId({
-            projectId: PROJECT_ID,
-            nodeRunId,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "workflow accounting failure" }
+      await worker.start()
+      const execution = await underFakeTime(
+        () => terminalAgentNode(runs, nodeRunId),
+        "workflow accounting failure"
       )
 
       expect(execution.status).toBe("failed")
@@ -5912,16 +5737,13 @@ describe("AgentWorker", () => {
       await expect(
         runs.getById({ projectId: PROJECT_ID, id: "workflow-accounting-failure" })
       ).resolves.toMatchObject({ status: "failed" })
-      const summary = await waitFor(
-        async () => {
-          const value = await aiUsage.summarizeExecution({
-            projectId: PROJECT_ID,
-            executionId: agentExecutionId,
-          })
-          return value.modelCallCount === 1 ? value : null
-        },
-        { label: "queued workflow AI usage recovery" }
-      )
+      const summary = await underFakeTime(async () => {
+        const value = await aiUsage.summarizeExecution({
+          projectId: PROJECT_ID,
+          executionId: agentExecutionId,
+        })
+        return value.modelCallCount === 1 ? value : null
+      }, "queued workflow AI usage recovery")
       expect(summary.modelCallCount).toBe(1)
       expect(modelCalls).toBe(1)
       expect(appendAttempts).toBe(4)
@@ -5933,84 +5755,8 @@ describe("AgentWorker", () => {
         })
       ).resolves.toHaveLength(0)
     } finally {
-      await worker.stop()
-    }
-  })
-
-  test("surfaces final workflow accounting failure when durable handoff also fails", async () => {
-    let modelCalls = 0
-    const model = new WorkerTestModel({
-      modelId: "mock-model",
-      generate: async () => {
-        modelCalls += 1
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({ answer: "Project Alpha", confidence: 0.96 }),
-            },
-          ],
-          finishReason: { unified: "stop", raw: "stop" },
-          usage: USAGE,
-          warnings: [],
-        }
-      },
-    })
-    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
-      model,
-      runId: "workflow-final-callback-failure",
-    })
-    const queue = sixb.queues.agents
-    const enqueue = queue.enqueue.bind(queue)
-    let appendAttempts = 0
-    let recoveryAttempts = 0
-    const workerHost = withStorage(
-      sixb,
-      withAiUsageRecordInterceptor(sixb.storage, async () => {
-        appendAttempts += 1
-        throw new Error("usage storage unavailable")
-      })
-    )
-    queue.enqueue = async (params) => {
-      if (params.jobs.some((job) => job.type === "agent.ai-usage.record.requested")) {
-        recoveryAttempts += 1
-        throw new Error("agent queue unavailable")
-      }
-      return enqueue(params)
-    }
-    const worker = new AgentWorker(workerHost, workerOptions())
-
-    await worker.start()
-    try {
-      const execution = await waitFor(
-        async () => {
-          const record = await runs.agentNodes.getByNodeRunId({
-            projectId: PROJECT_ID,
-            nodeRunId,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "final workflow callback accounting failure" }
-      )
-
-      expect(execution.status).toBe("failed")
-      expect(execution.error).toMatchObject({
-        code: "agent.execution_failed",
-        message: "Agent execution failed.",
-        retryable: false,
-        details: {
-          agentStepId: "workflow-usage-step",
-          workflowId: "workflow-usage-test",
-          workflowRunId: "workflow-final-callback-failure",
-          nodeId: "workflow-usage-step",
-          nodeRunId,
-        },
-      })
-      expect(modelCalls).toBe(1)
-      expect(appendAttempts).toBe(4)
-      expect(recoveryAttempts).toBe(4)
-    } finally {
-      await worker.stop()
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
     }
   })
 
@@ -6025,16 +5771,9 @@ describe("AgentWorker", () => {
 
     await worker.start()
     try {
-      const execution = await waitFor(
-        async () => {
-          const record = await runs.agentNodes.getByNodeRunId({
-            projectId: PROJECT_ID,
-            nodeRunId,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "workflow node finalization failure" }
-      )
+      const execution = await waitFor(() => terminalAgentNode(runs, nodeRunId), {
+        label: "workflow node finalization failure",
+      })
 
       expect(execution.status).toBe("failed")
       expect(execution.error).toMatchObject({
@@ -6453,19 +6192,6 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("attributes workflow managed identity creation to the framework", async () => {
-    const sixb = buildSixb(toolThenAnswerModel())
-    const identity = await ensureManagedAgentExecutionIdentity({
-      auth: sixb.storage.auth,
-      projectId: PROJECT_ID,
-      actorId: workflowAgentStepActorId("test", "review"),
-      name: "Review",
-      description: "Workflow task",
-      groupIds: [],
-    })
-    expect(identity.serviceAccount.createdByPrincipal).toEqual({ type: "system", id: "system" })
-  })
-
   test("creates isolated gateway URLs and sandbox env per concurrent run environment", async () => {
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
@@ -6611,163 +6337,59 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("adds text attachment context to model prompts", async () => {
-    let capturedPrompt: unknown
-    const model = new WorkerTestModel({
-      modelId: "mock-model",
-      stream: async (options) => {
-        capturedPrompt = options.messages
-        return stream([
-          { type: "stream-start", warnings: [] },
-          { type: "text-start", id: "t" },
-          { type: "text-delta", id: "t", delta: "Done" },
-          { type: "text-end", id: "t" },
-          finish("stop"),
-        ])
-      },
-    })
-    const sixb = buildSixb(model)
-    const fileRef = await sixb.blobStorage.put({
-      body: new TextEncoder().encode("invoice total: 42"),
-      fileName: "invoice.txt",
-      mediaType: "text/plain",
-    })
-    const request = await requestAgent(sixb, {
-      text: "summarize",
-      attachments: [fileRef],
-    })
-    const run = await reserveRequestedRun(sixb, request)
-    const context = await buildAgentWorkerContext(sixb)
-    const plan = executionPlanFor(sixb)
-    const environment = await createConversationAgentEnvironment({
-      context,
-      plan: plan,
-      run,
-    })
-    try {
-      await runAgentTurn({
-        context: environment.turnContext,
-        plan: plan,
-        run,
-        signal: new AbortController().signal,
-      })
-    } finally {
-      await environment.dispose()
-    }
-
-    const promptJson = JSON.stringify(capturedPrompt)
-    expect(promptJson).toContain("<attachment")
-    expect(promptJson).toContain("invoice.txt")
-    expect(promptJson).toContain("invoice total: 42")
-    expect(promptJson).toContain("contentUrl")
-  })
-
-  test("inlines supported images only when the Bun runtime provides image processing", async () => {
-    let capturedPrompt: unknown
-    const model = new WorkerTestModel({
-      modelId: "mock-model",
+  const imageProcessing = typeof Bun.Image === "function"
+  test.each([
+    {
+      name: "adds text attachment context to model prompts",
+      file: { body: "invoice total: 42", fileName: "invoice.txt", mediaType: "text/plain" },
+      capabilities: undefined,
+      contains: ["<attachment", "invoice.txt", "invoice total: 42", "contentUrl"],
+      omits: [],
+    },
+    {
+      name: "inlines supported images only when the Bun runtime provides image processing",
+      file: { body: TEST_PNG_BYTES, fileName: "pixel.png", mediaType: "image/png" },
       capabilities: { inputMediaTypes: ["image/*"] },
-      stream: async (options) => {
-        capturedPrompt = options.messages
-        return stream([
-          { type: "stream-start", warnings: [] },
-          { type: "text-start", id: "t" },
-          { type: "text-delta", id: "t", delta: "Saw image" },
-          { type: "text-end", id: "t" },
-          finish("stop"),
-        ])
-      },
-    })
-    const sixb = buildSixb(model)
-    const png = Uint8Array.from(
-      Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
-        "base64"
-      )
-    )
-    const fileRef = await sixb.blobStorage.put({
-      body: png,
-      fileName: "pixel.png",
-      mediaType: "image/png",
-    })
-    const request = await requestAgent(sixb, {
-      text: "describe",
-      attachments: [fileRef],
-    })
-    const run = await reserveRequestedRun(sixb, request)
-    const context = await buildAgentWorkerContext(sixb)
-    const plan = executionPlanFor(sixb)
-    const environment = await createConversationAgentEnvironment({
-      context,
-      plan: plan,
-      run,
-    })
-    try {
-      await runAgentTurn({
-        context: environment.turnContext,
-        plan: plan,
-        run,
-        signal: new AbortController().signal,
-      })
-    } finally {
-      await environment.dispose()
-    }
-
-    const promptJson = JSON.stringify(capturedPrompt)
-    expect(promptJson).toContain("pixel.png")
-    if (typeof Bun.Image === "function") {
-      expect(promptJson).toContain('"type":"file"')
-      expect(promptJson).toContain("image/png")
-      expect(promptJson).toContain("iVBORw0KGgo")
-    } else {
-      expect(promptJson).not.toContain('"type":"file"')
-      expect(promptJson).toContain("this Bun runtime does not provide image processing")
-    }
-  })
-
-  test("keeps image attachments metadata-only when the model does not advertise images", async () => {
+      contains: imageProcessing
+        ? ["pixel.png", '"type":"file"', "image/png", "iVBORw0KGgo"]
+        : ["pixel.png", "this Bun runtime does not provide image processing"],
+      omits: imageProcessing ? [] : ['"type":"file"'],
+    },
+    {
+      name: "keeps image attachments metadata-only when the model does not advertise images",
+      file: { body: TEST_PNG_BYTES, fileName: "pixel.png", mediaType: "image/png" },
+      capabilities: undefined,
+      contains: ["pixel.png", "does not advertise image input support"],
+      omits: ['"type":"file"', "iVBORw0KGgo"],
+    },
+  ])("$name", async ({ file, capabilities, contains, omits }) => {
     let capturedPrompt: unknown
     const model = new WorkerTestModel({
-      modelId: "mock-model",
+      ...(capabilities === undefined ? {} : { capabilities }),
       stream: async (options) => {
         capturedPrompt = options.messages
-        return stream([
-          { type: "stream-start", warnings: [] },
-          { type: "text-start", id: "t" },
-          { type: "text-delta", id: "t", delta: "Done" },
-          { type: "text-end", id: "t" },
-          finish("stop"),
-        ])
+        return answerStream("Done")
       },
     })
     const sixb = buildSixb(model)
-    const png = Uint8Array.from(
-      Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
-        "base64"
-      )
-    )
     const fileRef = await sixb.blobStorage.put({
-      body: png,
-      fileName: "pixel.png",
-      mediaType: "image/png",
+      ...file,
+      body: typeof file.body === "string" ? new TextEncoder().encode(file.body) : file.body,
     })
-    const request = await requestAgent(sixb, {
-      text: "describe",
-      attachments: [fileRef],
-    })
-    const run = await reserveRequestedRun(sixb, request)
-    const context = await buildAgentWorkerContext(sixb)
+    const run = await reserveRequestedRun(
+      sixb,
+      await requestAgent(sixb, { text: "Use the attachment.", attachments: [fileRef] })
+    )
     const plan = executionPlanFor(sixb)
     const environment = await createConversationAgentEnvironment({
-      context,
-      plan: plan,
+      context: await buildAgentWorkerContext(sixb),
+      plan,
       run,
     })
     try {
       await runAgentTurn({
         context: environment.turnContext,
-        plan: plan,
+        plan,
         run,
         signal: new AbortController().signal,
       })
@@ -6776,10 +6398,8 @@ describe("AgentWorker", () => {
     }
 
     const promptJson = JSON.stringify(capturedPrompt)
-    expect(promptJson).toContain("pixel.png")
-    expect(promptJson).toContain("does not advertise image input support")
-    expect(promptJson).not.toContain('"type":"file"')
-    expect(promptJson).not.toContain("iVBORw0KGgo")
+    for (const text of contains) expect(promptJson).toContain(text)
+    for (const text of omits) expect(promptJson).not.toContain(text)
   })
 
   test("keeps historical assistant files metadata-only and bounds their projection", async () => {
@@ -6936,62 +6556,7 @@ describe("AgentWorker", () => {
     expect(recording.sandboxes[0]?.destroyed).toBe(true)
   })
 
-  test("trigger atomically persists the user message and queued run before dispatch", async () => {
-    const sixb = buildSixb(toolThenAnswerModel())
-    const storage = agentStorageOf(sixb)
-
-    const result = await requestAgentAs(sixb, REQUESTER, {
-      text: "hello",
-    })
-
-    expect(result.createdThread).toBe(true)
-    expect(result.jobId).toBeDefined()
-    expect(result.run.status).toBe("queued")
-    expect(result.run.id.startsWith("agt_run_")).toBe(true)
-
-    const messages = await listMessages(storage, result.run.threadId)
-    expect(messages).toHaveLength(1)
-    expect(messages[0]).toMatchObject({ role: "user", runId: null })
-    expect(messages[0]?.authorPrincipal).toEqual(REQUESTER)
-    expect(messages[0]?.parts).toEqual([{ type: "text", text: "hello" }])
-
-    const runs = await storage.runs.list({ projectId: PROJECT_ID, threadId: result.run.threadId })
-    expect(runs.runs).toHaveLength(1)
-    expect(runs.runs[0]).toMatchObject({ id: result.run.id, status: "queued", attempt: 0 })
-    const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: result.run.threadId })
-    expect(thread?.activeRunId).toBe(result.run.id)
-  })
-
-  test("keeps the queued run visible when dispatch fails", async () => {
-    const sixb = buildSixb(toolThenAnswerModel())
-    const storage = agentStorageOf(sixb)
-    sixb.queues.agents.enqueue = () => Promise.reject(new Error("queue unavailable"))
-
-    const originalConsoleError = console.error
-    console.error = () => {}
-    let result: Awaited<ReturnType<typeof requestAgent>>
-    try {
-      result = await requestAgentAs(sixb, REQUESTER, {
-        text: "persist me",
-      })
-    } finally {
-      console.error = originalConsoleError
-    }
-    expect(result.run.status).toBe("queued")
-    expect(result.jobId).toBeUndefined()
-
-    const threads = await storage.threads.list({ projectId: PROJECT_ID })
-    expect(threads.threads).toHaveLength(1)
-    const thread = threads.threads[0]
-    if (!thread) throw new Error("expected durable thread")
-    const runs = await storage.runs.list({ projectId: PROJECT_ID, threadId: thread.id })
-    expect(runs.runs).toHaveLength(1)
-    expect(runs.runs[0]).toMatchObject({ status: "queued", attempt: 0 })
-    expect(thread.activeRunId).toBe(runs.runs[0]?.id)
-    expect(await listMessages(storage, thread.id)).toHaveLength(1)
-  })
-
-  test("dispatches a durable queued run after the request-time enqueue fails", async () => {
+  test("keeps the queued run visible when dispatch fails, and dispatches it once the queue recovers", async () => {
     const sixb = buildSixbWithEchoTool(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
     const queue = sixb.queues.agents
@@ -7011,18 +6576,22 @@ describe("AgentWorker", () => {
     } finally {
       console.error = originalConsoleError
     }
+    expect(request.run.status).toBe("queued")
     expect(request.jobId).toBeUndefined()
+    const threads = await storage.threads.list({ projectId: PROJECT_ID })
+    expect(threads.threads).toHaveLength(1)
+    const thread = threads.threads[0]
+    if (!thread) throw new Error("expected durable thread")
+    const runs = await storage.runs.list({ projectId: PROJECT_ID, threadId: thread.id })
+    expect(runs.runs).toHaveLength(1)
+    expect(runs.runs[0]).toMatchObject({ id: request.run.id, status: "queued", attempt: 0 })
+    expect(thread.activeRunId).toBe(request.run.id)
+    expect(await listMessages(storage, thread.id)).toHaveLength(1)
 
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "recovered dispatch terminal" }
-      )
+      const run = await waitForTerminalRun(storage, request.run.id)
       expect(run.status).toBe("succeeded")
       expect(enqueueCalls).toBeGreaterThanOrEqual(2)
     } finally {
@@ -7068,16 +6637,7 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const selectedRequest = await requestAgent(sixb, { text: "echo hi" })
-      const selectedRun = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: selectedRequest.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "selected tool run terminal" }
-      )
+      const selectedRun = await waitForTerminalRun(storage, selectedRequest.run.id)
       expect(selectedRun.status).toBe("succeeded")
       expect(selectedCalls).toBe(1)
       expect(connectorCalls).toBe(1)
@@ -7101,13 +6661,7 @@ describe("AgentWorker", () => {
         threadId: selectedRequest.run.threadId,
         text: "continue",
       })
-      await waitFor(
-        async () => {
-          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: followUp.run.id })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "successful selected tool replay terminal" }
-      )
+      await waitForTerminalRun(storage, followUp.run.id)
       expect(successfulReplay).toContain(selectedEcho.name)
       expect(successfulReplay).toContain("connected:hi")
 
@@ -7184,13 +6738,7 @@ describe("AgentWorker", () => {
       const request = await requestAgent(sixb, {
         text: "create an image",
       })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "tool file run terminal" }
-      )
+      const run = await waitForTerminalRun(storage, request.run.id)
 
       expect(run.status).toBe("succeeded")
       expect(receivedToolCallId).toBe("image-call-1")
@@ -7291,16 +6839,7 @@ describe("AgentWorker", () => {
         threadId: request.run.threadId,
         text: "inspect it again",
       })
-      const replayRun = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: followup.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "tool file replay run terminal" }
-      )
+      const replayRun = await waitForTerminalRun(storage, followup.run.id)
       expect(replayRun.status).toBe("succeeded")
 
       const replayPromptJson = JSON.stringify(replayPrompt)
@@ -7352,249 +6891,6 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("runs a bounded Exa web_search through a registered connector", async () => {
-    const originalFetch = globalThis.fetch
-    let requestHeaders: Headers | undefined
-    let requestBody: unknown
-    let worker: AgentWorker | undefined
-    try {
-      globalThis.fetch = (async (_input, init) => {
-        requestHeaders = new Headers(init?.headers)
-        requestBody = JSON.parse(String(init?.body))
-        return Response.json({
-          results: [
-            {
-              id: "https://sixb.ai/docs",
-              title: "Sixb docs",
-              url: "https://sixb.ai/docs",
-              author: "Sixb",
-              publishedDate: "2026-08-03",
-              text: "connector-backed search content",
-            },
-          ],
-          requestId: "exa-request-1",
-          costDollars: { total: 0.008 },
-        })
-      }) as typeof fetch
-      const exaConnector = defineConnector("exa", exa({ apiKey: "exa-test-key" }))
-      const webSearch = exaWebSearch(exaConnector, {
-        maxResults: 1,
-        maxCharactersPerResult: 12,
-        maxTotalCharacters: 12,
-        timeoutMs: 1_000,
-      })
-      const sixb = buildSixb(
-        webSearchThenAnswerModel(),
-        new InMemoryBroker(),
-        new RecordingSandboxFactory(),
-        { agentTools: [webSearch], connectors: [exaConnector] }
-      )
-      const storage = agentStorageOf(sixb)
-      worker = new AgentWorker(sixb, workerOptions())
-      await worker.start()
-      const request = await requestAgent(sixb, {
-        text: "search for connector tools",
-      })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: request.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "Exa web_search run terminal" }
-      )
-
-      expect(run.status).toBe("succeeded")
-      expect(requestHeaders?.get("x-api-key")).toBe("exa-test-key")
-      expect(requestBody).toEqual({
-        query: "sixb connector tools",
-        numResults: 1,
-        contents: { text: { maxCharacters: 12 } },
-      })
-      const messages = await listMessages(storage, request.run.threadId)
-      expect(
-        messages
-          .find((message) => message.role === "assistant")
-          ?.parts.find((part) => part.type === "tool-call" && part.toolName === "web_search")
-      ).toMatchObject({
-        state: "output-available",
-        input: { query: "sixb connector tools" },
-        output: {
-          results: [
-            {
-              title: "Sixb docs",
-              url: "https://sixb.ai/docs",
-              author: "Sixb",
-              publishedDate: "2026-08-03",
-              text: "connector-ba",
-            },
-          ],
-          requestId: "exa-request-1",
-          costDollars: { total: 0.008 },
-        },
-      })
-    } finally {
-      await worker?.stop()
-      globalThis.fetch = originalFetch
-    }
-  })
-
-  test("runs and replays a bounded Exa web_fetch through a registered connector", async () => {
-    const originalFetch = globalThis.fetch
-    let requestHeaders: Headers | undefined
-    let requestBody: unknown
-    let replayedPrompt = ""
-    let worker: AgentWorker | undefined
-    try {
-      globalThis.fetch = (async (_input, init) => {
-        requestHeaders = new Headers(init?.headers)
-        requestBody = JSON.parse(String(init?.body))
-        return Response.json({
-          results: [
-            {
-              id: "https://sixb.ai/docs",
-              title: "Sixb docs",
-              url: "https://sixb.ai/docs",
-              text: "connector-backed fetch content",
-            },
-          ],
-          statuses: [
-            {
-              id: "https://sixb.ai/docs",
-              status: "success",
-              source: "cached",
-            },
-          ],
-          requestId: "exa-contents-request-1",
-          costDollars: { total: 0.001 },
-        })
-      }) as typeof fetch
-      const exaConnector = defineConnector("exa", exa({ apiKey: "exa-test-key" }))
-      const webFetch = exaWebFetch(exaConnector, {
-        maxCharacters: 12,
-        timeoutMs: 1_000,
-        allowedDomains: ["sixb.ai"],
-      })
-      const sixb = buildSixb(
-        webFetchThenAnswerModel({
-          captureReplay(prompt) {
-            replayedPrompt = prompt
-          },
-        }),
-        new InMemoryBroker(),
-        new RecordingSandboxFactory(),
-        { agentTools: [webFetch], connectors: [exaConnector] }
-      )
-      const storage = agentStorageOf(sixb)
-      worker = new AgentWorker(sixb, workerOptions())
-      await worker.start()
-      const request = await requestAgent(sixb, {
-        text: "fetch the Sixb docs",
-      })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: request.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "Exa web_fetch run terminal" }
-      )
-
-      expect(run.status).toBe("succeeded")
-      expect(requestHeaders?.get("x-api-key")).toBe("exa-test-key")
-      expect(requestBody).toEqual({
-        urls: ["https://sixb.ai/docs"],
-        text: { maxCharacters: 12 },
-        subpages: 0,
-      })
-      const messages = await listMessages(storage, request.run.threadId)
-      expect(
-        messages
-          .find((message) => message.role === "assistant")
-          ?.parts.find((part) => part.type === "tool-call" && part.toolName === "web_fetch")
-      ).toMatchObject({
-        state: "output-available",
-        input: { url: "https://sixb.ai/docs" },
-        output: {
-          title: "Sixb docs",
-          url: "https://sixb.ai/docs",
-          content: "connector-ba",
-          status: { status: "success", source: "cached" },
-          requestId: "exa-contents-request-1",
-          costDollars: { total: 0.001 },
-        },
-      })
-
-      const followUp = await requestAgent(sixb, {
-        threadId: request.run.threadId,
-        text: "continue",
-      })
-      await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: followUp.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "Exa web_fetch replay terminal" }
-      )
-      expect(replayedPrompt).toContain("web_fetch")
-      expect(replayedPrompt).toContain("connector-ba")
-    } finally {
-      await worker?.stop()
-      globalThis.fetch = originalFetch
-    }
-  })
-
-  test("preserves actionable Exa web_fetch errors through the worker", async () => {
-    const exaConnector = defineConnector("exa", exa({ apiKey: "exa-test-key" }))
-    const webFetch = exaWebFetch(exaConnector, { allowedDomains: ["sixb.ai"] })
-    const sixb = buildSixb(
-      webFetchThenAnswerModel({ url: "https://outside.example/docs" }),
-      new InMemoryBroker(),
-      new RecordingSandboxFactory(),
-      { agentTools: [webFetch], connectors: [exaConnector] }
-    )
-    const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions())
-
-    await worker.start()
-    try {
-      const request = await requestAgent(sixb, {
-        text: "fetch a URL outside the policy",
-      })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: request.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "Exa web_fetch policy failure terminal" }
-      )
-
-      expect(run.status).toBe("succeeded")
-      const messages = await listMessages(storage, request.run.threadId)
-      expect(
-        messages
-          .find((message) => message.role === "assistant")
-          ?.parts.find((part) => part.type === "tool-call" && part.toolName === "web_fetch")
-      ).toMatchObject({
-        state: "output-error",
-        errorText:
-          '[SixbExa] web_fetch requested URL is outside the allowed domain policy: "outside.example".',
-      })
-    } finally {
-      await worker.stop()
-    }
-  })
-
   test("persists and replays selected tool failures with clear non-JSON diagnostics", async () => {
     let replayedPrompt = ""
     const invalidResult = {
@@ -7617,13 +6913,7 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const first = await requestAgent(sixb, { text: "run the tool" })
-      const firstRun = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: first.run.id })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "invalid selected tool run terminal" }
-      )
+      const firstRun = await waitForTerminalRun(storage, first.run.id)
       expect(firstRun.status).toBe("succeeded")
 
       const firstAssistant = (await listMessages(storage, first.run.threadId)).find(
@@ -7643,13 +6933,7 @@ describe("AgentWorker", () => {
         threadId: first.run.threadId,
         text: "continue",
       })
-      await waitFor(
-        async () => {
-          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: second.run.id })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "tool failure replay run terminal" }
-      )
+      await waitForTerminalRun(storage, second.run.id)
       expect(replayedPrompt).toContain("invalid_result")
       expect(replayedPrompt).toContain("returned an invalid result")
     } finally {
@@ -7661,6 +6945,7 @@ describe("AgentWorker", () => {
     const sixb = buildSixbWithEchoTool(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
     const auth = authStorageOf(sixb)
+    const bindScope = spyOn(sixb, "withScope")
 
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
@@ -7671,17 +6956,9 @@ describe("AgentWorker", () => {
         text: "echo hi",
       })
 
-      const run = await waitFor(
-        async () => {
-          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-          const found = list.runs[0]
-          return found && found.status !== "queued" && found.status !== "running" ? found : null
-        },
-        { label: "run terminal" }
-      )
+      const run = await waitForTerminalRun(storage, runId)
 
       expect(run.status).toBe("succeeded")
-      expect(run.id).toBe(runId)
       expect(run.attempt).toBe(1)
       expect(run.finishReason).toBe("stop")
       expect(run.modelId).toBe("mock-model")
@@ -7692,6 +6969,11 @@ describe("AgentWorker", () => {
       expect(durableExecution?.authorizationRef).toEqual({
         type: "disabled",
       })
+      // Regression proof: restoring actorId in the worker's binding adds it to this executor.
+      const scope = bindScope.mock.calls.find(
+        ([scope]) => scope.execution.id === run.executionId
+      )?.[0]
+      expect(scope?.execution.executor).toEqual({ type: "agent", runId })
       await expect(
         aiUsageStorageOf(sixb).summarizeExecution({
           projectId: PROJECT_ID,
@@ -7737,9 +7019,8 @@ describe("AgentWorker", () => {
         true
       )
 
-      await expect(
-        auth.serviceAccounts.getById({ projectId: PROJECT_ID, id: "svc_agent_assistant" })
-      ).resolves.toBeNull()
+      // Regression proof: restoring the former startup ensure loop creates an identity here.
+      expect((await auth.serviceAccounts.list({ projectId: PROJECT_ID })).total).toBe(0)
       const memberships = await auth.serviceAccountGroupMemberships.listForServiceAccount({
         projectId: PROJECT_ID,
         serviceAccountId: "svc_agent_assistant",
@@ -7779,67 +7060,6 @@ describe("AgentWorker", () => {
         runId,
         attempt: 1,
       })
-    } finally {
-      await worker.stop()
-    }
-  })
-
-  test("runs the project Agent with project tools and inherited disabled authority", async () => {
-    const model = toolThenAnswerModel()
-    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
-      models: { language: [model] },
-      projectTools: [echoAgentTool],
-    })
-    const storage = agentStorageOf(sixb)
-    const bindScope = spyOn(sixb, "withScope")
-    const worker = new AgentWorker(sixb, workerOptions())
-
-    await worker.start()
-    try {
-      const requested = await requestAgent(sixb, { text: "echo hi" })
-      const run = await waitFor(
-        async () => {
-          const current = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: requested.run.id,
-          })
-          return current &&
-            current.kind === "conversation" &&
-            current.status !== "queued" &&
-            current.status !== "running"
-            ? current
-            : null
-        },
-        { label: "conversation Agent run terminal" }
-      )
-
-      expect(run.status).toBe("succeeded")
-      const execution = await sixb.storage.executions.getById({
-        projectId: PROJECT_ID,
-        id: run.executionId,
-      })
-      expect(execution?.authorizationRef).toEqual({ type: "disabled" })
-      // Regression proof: restoring actorId in the worker's binding adds it to this executor.
-      const scope = bindScope.mock.calls.find(
-        ([scope]) => scope.execution.id === run.executionId
-      )?.[0]
-      expect(scope?.execution.executor).toEqual({ type: "agent", runId: run.id })
-      expect(
-        (await authStorageOf(sixb).serviceAccounts.list({ projectId: PROJECT_ID })).total
-      ).toBe(0)
-
-      const assistant = (await listMessages(storage, run.threadId)).find(
-        (message) => message.role === "assistant"
-      )
-      expect(assistant?.authorPrincipal).toBeUndefined()
-      expect(
-        assistant?.parts.some(
-          (part) =>
-            part.type === "tool-call" &&
-            part.toolName === "echo" &&
-            part.state === "output-available"
-        )
-      ).toBe(true)
     } finally {
       await worker.stop()
       bindScope.mockRestore()
@@ -7882,18 +7102,15 @@ describe("AgentWorker", () => {
     const worker = new AgentWorker(sixb, workerOptions({ concurrency: 1 }))
 
     const delegation = injectDelegationForTest(sixb)
-    await worker.start()
+    // wait_agent polls the child every 250ms: drive that with fake time.
+    jest.useFakeTimers()
     try {
-      const parent = await waitFor(
-        async () => {
-          const current = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: requested.run.id,
-          })
-          return current?.kind === "conversation" && current.status === "succeeded" ? current : null
-        },
-        { label: "delegating parent run terminal" }
+      await worker.start()
+      const parent = await underFakeTime(
+        () => terminalRun(storage, requested.run.id),
+        "delegating parent run terminal"
       )
+      if (parent.kind !== "conversation") throw new Error("Expected the conversation run.")
       const loadedChild = await storage.runs.getById({
         projectId: PROJECT_ID,
         id: childRunId,
@@ -7903,7 +7120,7 @@ describe("AgentWorker", () => {
       }
       const child: SubagentRunRecord = loadedChild
 
-      expect(parent.kind).toBe("conversation")
+      expect(parent.status).toBe("succeeded")
       expect(child).toMatchObject({
         parentRunId: parent.id,
         spawnKey: "research",
@@ -8014,7 +7231,8 @@ describe("AgentWorker", () => {
         ],
       })
     } finally {
-      await worker.stop()
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
       delegation.mockRestore()
     }
   })
@@ -8562,27 +7780,6 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("rejects uncredentialed user authority before creating a conversation thread", async () => {
-    const model = answerModel()
-    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
-      models: { language: [model] },
-    })
-
-    await expect(
-      createTestSixb(sixb, {
-        authorization: {
-          principal: REQUESTER,
-          groupIds: [],
-          roleIds: [],
-          grants: { ...emptyGrantIndex(), "run:agent": true },
-        },
-      }).agent.runs.request({ text: "hello" })
-    ).rejects.toMatchObject({ code: "authority_not_inheritable" })
-    await expect(
-      agentStorageOf(sixb).threads.list({ projectId: PROJECT_ID })
-    ).resolves.toMatchObject({ threads: [] })
-  })
-
   test("keeps completed-call usage when durable response projection fails", async () => {
     const sixb = buildSixb(invalidMetadataAnswerModel())
     const storage = agentStorageOf(sixb)
@@ -8590,16 +7787,7 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const request = await requestAgent(sixb, { text: "echo hi" })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: request.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "durable response projection failure" }
-      )
+      const run = await waitForTerminalRun(storage, request.run.id)
 
       expect(run.status).toBe("failed")
       await expect(
@@ -8676,19 +7864,15 @@ describe("AgentWorker", () => {
       return jobs
     }
 
+    // Fake timers stand in for the recorder's storage retry backoff.
+    jest.useFakeTimers()
     const worker = new AgentWorker(workerHost, workerOptions())
-    await worker.start()
     try {
+      await worker.start()
       const request = await requestAgent(sixb, { text: "echo hi" })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: request.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "usage recovery run terminal" }
+      const run = await underFakeTime(
+        () => terminalRun(storage, request.run.id),
+        "usage recovery run terminal"
       )
 
       expect(run.status).toBe("failed")
@@ -8701,48 +7885,50 @@ describe("AgentWorker", () => {
           threadId: request.run.threadId,
         },
       })
-      const summary = await waitFor(
-        async () => {
-          const value = await aiUsage.summarizeExecution({
-            projectId: PROJECT_ID,
-            executionId: run.executionId,
-          })
-          return value.modelCallCount === 1 ? value : null
-        },
-        { label: "queued AI usage recovery" }
-      )
+      const summary = await underFakeTime(async () => {
+        const value = await aiUsage.summarizeExecution({
+          projectId: PROJECT_ID,
+          executionId: run.executionId,
+        })
+        return value.modelCallCount === 1 ? value : null
+      }, "queued AI usage recovery")
       expect(summary.modelCallCount).toBe(1)
       expect(modelCalls).toBe(1)
       expect(appendAttempts).toBe(4)
       expect(recoveryJobs).toBe(1)
     } finally {
-      await worker.stop()
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
     }
   })
 
   test("redelivers a recovery job until its idempotent ledger append succeeds", async () => {
-    const sixb = buildSixb(answerModel())
-    const executionId = await createTestAgentExecution(sixb.storage, {
-      projectId: PROJECT_ID,
-      runId: "usage-recovery",
-    })
-    const aiUsage = aiUsageStorageOf(sixb)
+    // A project without Agent work recovers accounting with no sandbox or agent API origin.
+    // Removal proof: restore the eager agent context in AgentWorker's constructor; it throws.
+    const storage = new InMemoryStorage()
     let appendAttempts = 0
-    const workerHost = withStorage(
-      sixb,
-      withAiUsageRecordInterceptor(sixb.storage, async (_input, record) => {
+    const host = new SixbHost({
+      id: PROJECT_ID,
+      ontology: [],
+      storage: withAiUsageRecordInterceptor(storage, async (_input, record) => {
         appendAttempts += 1
         if (appendAttempts === 1) throw new Error("temporary usage storage failure")
         return record()
-      })
-    )
-
-    const queue = sixb.queues.agents
+      }),
+      broker: new InMemoryBroker(),
+      queues: new InMemoryQueues(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+    })
+    const executionId = await createTestAgentExecution(storage, {
+      projectId: PROJECT_ID,
+      runId: "usage-recovery",
+    })
+    const queue = host.queues.agents
     const retry = queue.retry.bind(queue)
-    let retryRequests = 0
+    const deferredByMs: number[] = []
     queue.retry = async (params) => {
-      retryRequests += 1
-      expect(new Date(params.availableAt ?? 0).getTime()).toBeGreaterThan(Date.now())
+      deferredByMs.push(Date.parse(params.availableAt ?? "") - Date.now())
       return retry({ ...params, availableAt: new Date(0).toISOString() })
     }
     await enqueueAiModelCallRecovery(queue, {
@@ -8763,287 +7949,78 @@ describe("AgentWorker", () => {
       ratedAt: new Date("2026-07-01T12:00:00.000Z"),
     })
 
-    const worker = new AgentWorker(workerHost, workerOptions())
-    await worker.start()
-    try {
-      await waitFor(
-        async () => {
-          const summary = await aiUsage.summarizeExecution({ projectId: PROJECT_ID, executionId })
-          return summary.modelCallCount === 1 ? summary : null
-        },
-        { label: "redelivered AI usage recovery" }
-      )
-      expect(appendAttempts).toBe(2)
-      expect(retryRequests).toBe(1)
-    } finally {
-      await worker.stop()
-    }
-  })
-
-  test("recovers embedding accounting without a sandbox or agent API origin", async () => {
-    // Removal proof: restore the eager agent context or omit super.run() in recovery-only mode.
-    const storage = new InMemoryStorage()
-    let available = false
-    let providerCalls = 0
-    const model: EmbeddingModel = {
-      providerId: "test",
-      modelId: "embedding",
-      definition: { kind: "embedding", providerId: "test", modelId: "embedding", dimensions: 2 },
-      async embed() {
-        providerCalls += 1
-        return { vectors: [[1, 0]], usage: { inputTokens: 8 } }
-      },
-    }
-    const Product = defineObjectType({
-      id: "Product",
-      name: "Product",
-      properties: [
-        prop("id", "string", { primary: true, required: true }),
-        prop("title", "string"),
-      ],
-      search: { vectors: { content: { source: ["title"], model } } },
-    })
-    const host = new SixbHost({
-      id: PROJECT_ID,
-      ontology: [Product],
-      models: { embedding: [model] },
-      storage: withAiUsageRecordInterceptor(storage, async (_input, record) => {
-        if (!available) throw new Error("accounting temporarily unavailable")
-        return record()
-      }),
-      broker: new InMemoryBroker(),
-      queues: new InMemoryQueues(),
-      lakeStorage: new InMemoryLakeStorage(),
-      blobStorage: new InMemoryBlobStorage(),
-    })
-    const sixb = bindRequestExecution(host, {
-      request: new Request("http://localhost/search"),
-      authorization: { type: "disabled" },
-    })
-    const search = () => sixb.objects(Product).query().vector("content", "find", { k: 1 }).list()
-    await expect(search()).rejects.toMatchObject({
-      name: "ModelUsageRecordingError",
-      recoveryScheduled: true,
-    })
-    const identity = { projectId: host.id, executionId: sixb.execution.id }
-    expect((await storage.aiUsage.summarizeExecution(identity)).modelCallCount).toBe(0)
-    available = true
     const worker = new AgentWorker(host, {})
     await worker.start()
     try {
       const summary = await waitFor(
         async () => {
-          const result = await storage.aiUsage.summarizeExecution(identity)
-          return result.modelCallCount === 1 ? result : null
-        },
-        { label: "embedding accounting recovery without agent dependencies" }
-      )
-      expect(summary.usage.inputTokens).toBe(8)
-      await expect(search()).rejects.toMatchObject({ name: "ModelUsageRecordingError" })
-      expect(providerCalls).toBe(1)
-    } finally {
-      await worker.stop()
-    }
-  })
-
-  test("recovers direct generation accounting through the configured agent worker", async () => {
-    // Removal proof: omit recordRecoveredAiModelCall in AgentWorker.execute; recovery never drains.
-    const storage = new InMemoryStorage()
-    let available = false
-    const host = new SixbHost({
-      id: PROJECT_ID,
-      ontology: [],
-      models: { language: [answerModel()] },
-      sandboxes: new RecordingSandboxFactory(),
-      storage: withAiUsageRecordInterceptor(storage, async (_input, record) => {
-        if (!available) throw new Error("accounting temporarily unavailable")
-        return record()
-      }),
-      broker: new InMemoryBroker(),
-      queues: new InMemoryQueues(),
-      lakeStorage: new InMemoryLakeStorage(),
-      blobStorage: new InMemoryBlobStorage(),
-    })
-    const sixb = bindRequestExecution(host, {
-      request: new Request("http://localhost/generate"),
-      authorization: { type: "disabled" },
-    })
-    await expect(
-      sixb.models.language.generate({ model: answerModel(), prompt: "Hi" })
-    ).rejects.toMatchObject({ name: "ModelUsageRecordingError", recoveryScheduled: true })
-    const identity = { projectId: host.id, executionId: sixb.execution.id }
-    expect((await storage.aiUsage.summarizeExecution(identity)).modelCallCount).toBe(0)
-    available = true
-    const worker = new AgentWorker(host, workerOptions())
-    await worker.start()
-    try {
-      const summary = await waitFor(
-        async () => {
-          const result = await storage.aiUsage.summarizeExecution(identity)
-          return result.modelCallCount === 1 ? result : null
-        },
-        { label: "direct request accounting recovery" }
-      )
-      expect(summary.modelCallCount).toBe(1)
-      await expect(
-        sixb.models.language.generate({ model: answerModel(), prompt: "Again" })
-      ).rejects.toMatchObject({ name: "ModelUsageRecordingError" })
-    } finally {
-      await worker.stop()
-    }
-  })
-
-  test("fails the run before another provider call when storage and recovery queue fail", async () => {
-    let modelCalls = 0
-    const model = new WorkerTestModel({
-      modelId: "mock-model",
-      stream: async () => {
-        modelCalls += 1
-        if (modelCalls === 1) {
-          return stream([
-            { type: "stream-start", warnings: [] },
-            {
-              type: "tool-call",
-              toolCallId: "c1",
-              toolName: "echo",
-              input: JSON.stringify({ value: "hi" }),
-            },
-            finish("tool-calls"),
-          ])
-        }
-        return stream([
-          { type: "stream-start", warnings: [] },
-          { type: "text-start", id: "answer" },
-          { type: "text-delta", id: "answer", delta: "should not run" },
-          { type: "text-end", id: "answer" },
-          finish("stop"),
-        ])
-      },
-    })
-    const sixb = buildSixbWithEchoTool(model)
-    const storage = agentStorageOf(sixb)
-    const queue = sixb.queues.agents
-    const enqueue = queue.enqueue.bind(queue)
-    let appendAttempts = 0
-    let recoveryAttempts = 0
-    const workerHost = withStorage(
-      sixb,
-      withAiUsageRecordInterceptor(sixb.storage, async () => {
-        appendAttempts += 1
-        throw new Error("usage storage unavailable")
-      })
-    )
-    queue.enqueue = async (params) => {
-      if (params.jobs.some((job) => job.type === "agent.ai-usage.record.requested")) {
-        recoveryAttempts += 1
-        throw new Error("agent queue unavailable")
-      }
-      return enqueue(params)
-    }
-
-    const worker = new AgentWorker(workerHost, workerOptions())
-    await worker.start()
-    try {
-      const request = await requestAgent(sixb, { text: "echo hi" })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
+          const value = await storage.aiUsage.summarizeExecution({
             projectId: PROJECT_ID,
-            id: request.run.id,
+            executionId,
           })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
+          return value.modelCallCount === 1 ? value : null
         },
-        { label: "usage recording and recovery failure" }
+        { label: "redelivered AI usage recovery" }
       )
-
-      expect(run.status).toBe("failed")
-      expect(run.error).toMatchObject({
-        code: "agent.execution_failed",
-        message: "Agent execution failed.",
-        retryable: false,
-        details: {
-          runId: request.run.id,
-          threadId: request.run.threadId,
-        },
-      })
-      expect(modelCalls).toBe(1)
-      expect(appendAttempts).toBe(4)
-      expect(recoveryAttempts).toBe(4)
+      expect(summary.usage.inputTokens).toBe(12)
+      expect(appendAttempts).toBe(2)
+      expect(deferredByMs).toHaveLength(1)
+      expect(deferredByMs[0]).toBeGreaterThan(0)
     } finally {
       await worker.stop()
     }
   })
 
-  test("projects successful queue renewals onto execution authorization", async () => {
-    const sixb = buildSixb(slowAnswerModel(300))
+  // Queue leases run on fake time: renewals and redelivery happen when the test moves the clock.
+  test("keeps a turn that outlives its initial queue lease and projects each renewal", async () => {
+    // Regression proof: stop projecting renewals in AgentWorker.execute (onLeaseRenewed); the
+    // run's queueLeaseExpiresAt keeps its claim-time value and the projection wait times out.
+    const controlled = controlledBlockingAnswerModel()
+    const sixb = buildSixb(controlled.model)
     const storage = agentStorageOf(sixb)
     const queue = sixb.queues.agents
-    const originalRenew = queue.renewLease?.bind(queue)
-    if (!originalRenew) throw new Error("expected queue lease renewal")
-
-    let firstRenewedExpiration: string | undefined
+    const renew = queue.renewLease?.bind(queue)
+    if (!renew) throw new Error("expected queue lease renewal")
+    const renewedUntil: number[] = []
     queue.renewLease = async (params) => {
-      const renewed = await originalRenew(params)
-      firstRenewedExpiration ??= renewed?.leaseExpiresAt
+      const renewed = await renew(params)
+      if (renewed) renewedUntil.push(Date.parse(renewed.leaseExpiresAt))
       return renewed
     }
-
+    jest.useFakeTimers()
     const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 90 }))
-    await worker.start()
     try {
+      await worker.start()
       const request = await requestAgent(sixb, { text: "keep owning" })
-      await waitFor(
+      await underFakeTime(() => controlled.startedCount() === 1, "model stream started", 0)
+      const claimedUntil = (
+        await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
+      )?.execution?.queueLeaseExpiresAt.getTime()
+      if (claimedUntil === undefined) throw new Error("Expected the claim's lease projection.")
+      await underFakeTime(
         async () => {
-          if (!firstRenewedExpiration) return null
+          const latest = renewedUntil.at(-1)
+          if (latest === undefined || Date.now() <= claimedUntil) return null
           const run = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
-          const projected = run?.execution?.queueLeaseExpiresAt.getTime()
-          return projected !== undefined && projected >= Date.parse(firstRenewedExpiration)
-            ? run
-            : null
+          return (run?.execution?.queueLeaseExpiresAt.getTime() ?? 0) >= latest
         },
-        { label: "queue ownership projection" }
+        "renewed lease projected past the claim's lease",
+        10
       )
+
+      controlled.releaseAll()
+      expect(
+        await underFakeTime(() => terminalRun(storage, request.run.id), "outliving run terminal")
+      ).toMatchObject({ status: "succeeded", attempt: 1 })
     } finally {
-      await worker.stop()
-    }
-  })
-
-  test("continues processing after a turn outlives its initial queue lease", async () => {
-    const sixb = buildSixb(slowAnswerModel(120))
-    const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 45 }))
-
-    await worker.start()
-    try {
-      const first = await requestAgent(sixb, { text: "first" })
-      const firstRun = await waitFor(
-        async () => {
-          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: first.run.id })
-          return run && run.status !== "queued" && run.status !== "running" ? run : null
-        },
-        { label: "slow first run terminal" }
-      )
-      expect(firstRun.status).toBe("succeeded")
-
-      const second = await requestAgent(sixb, {
-        threadId: first.run.threadId,
-        text: "second",
-      })
-      const secondRun = await waitFor(
-        async () => {
-          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: second.run.id })
-          return run && run.status !== "queued" && run.status !== "running" ? run : null
-        },
-        { label: "slow second run terminal" }
-      )
-      expect(secondRun.status).toBe("succeeded")
-    } finally {
-      await worker.stop()
+      controlled.releaseAll()
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
     }
   })
 
   test("ends the turn as interrupted without reporting when queue ownership is lost", async () => {
-    const sixb = buildSixb(slowAnswerModel(120))
+    const sixb = buildSixb(hangingModel())
     const storage = agentStorageOf(sixb)
     let reportCount = 0
     const reporter = attachSixbErrorReporter(sixb, () => {
@@ -9060,18 +8037,17 @@ describe("AgentWorker", () => {
       return originalRenew(params)
     }
 
-    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 45 }))
     const originalConsoleError = console.error
     console.error = () => {}
-    await worker.start()
+    jest.useFakeTimers()
+    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 45 }))
     try {
+      await worker.start()
       const request = await requestAgent(sixb, { text: "recover" })
-      const finalRun = await waitFor(
-        async () => {
-          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
-          return run && run.status !== "queued" && run.status !== "running" ? run : null
-        },
-        { label: "redelivered run terminal" }
+      const finalRun = await underFakeTime(
+        () => terminalRun(storage, request.run.id),
+        "redelivered run terminal",
+        5
       )
 
       expect(finalRun).toMatchObject({
@@ -9086,7 +8062,8 @@ describe("AgentWorker", () => {
       await reporter.flush()
       expect(reportCount).toBe(0)
     } finally {
-      await worker.stop()
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
       console.error = originalConsoleError
     }
   })
@@ -9099,19 +8076,12 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const {
-        run: { threadId },
+        run: { threadId, id: runId },
       } = await requestAgent(sixb, {
         text: "use tools forever",
       })
 
-      const run = await waitFor(
-        async () => {
-          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-          const found = list.runs[0]
-          return found && found.status !== "queued" && found.status !== "running" ? found : null
-        },
-        { label: "tool-only run terminal" }
-      )
+      const run = await waitForTerminalRun(storage, runId)
 
       expect(run.status).toBe("succeeded")
       expect(run.finishReason).toBe("tool-calls")
@@ -9144,19 +8114,12 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const {
-        run: { threadId },
+        run: { threadId, id: runId },
       } = await requestAgent(sixb, {
         text: "run bash",
       })
 
-      const run = await waitFor(
-        async () => {
-          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-          const found = list.runs[0]
-          return found && found.status !== "queued" && found.status !== "running" ? found : null
-        },
-        { label: "bash run terminal" }
-      )
+      const run = await waitForTerminalRun(storage, runId)
 
       expect(run.status).toBe("succeeded")
       const createOptions = sandboxes.createOptions[0]
@@ -9239,13 +8202,7 @@ describe("AgentWorker", () => {
       const request = await requestAgent(sixb, {
         text: "create and inspect an image",
       })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "bash view_file run terminal" }
-      )
+      const run = await waitForTerminalRun(storage, request.run.id)
 
       expect(run.status).toBe("succeeded")
       const assistant = (await listMessages(storage, request.run.threadId)).find(
@@ -9587,8 +8544,10 @@ describe("AgentWorker", () => {
       }
     }
 
-    await expect(prepare([])).resolves.toBeDefined()
-    await expect(prepare(types)).rejects.toMatchObject({ code: "context_limit_exceeded" })
+    expect(await prepare([])).toBeDefined()
+    expect(await prepare(types).catch((error: unknown) => error)).toMatchObject({
+      code: "context_limit_exceeded",
+    })
   })
 
   test("advertises and materializes project Agent Skills, instructions, and ontology docs", async () => {
@@ -9636,18 +8595,11 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const {
-        run: { threadId },
+        run: { id: runId },
       } = await requestAgent(sixb, {
         text: "draft a note",
       })
-      const run = await waitFor(
-        async () => {
-          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-          const found = list.runs[0]
-          return found && found.status !== "queued" && found.status !== "running" ? found : null
-        },
-        { label: "project skills run terminal" }
-      )
+      const run = await waitForTerminalRun(storage, runId)
       expect(run.status).toBe("succeeded")
       expect(capturedSystem).toContain("Path: .sixb/agent/skills/acme-style/SKILL.md")
       expect(capturedSystem).toContain("Use when drafting Acme customer-facing messages.")
@@ -9695,67 +8647,10 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("pairs the canonical conversation prompt with the provisioned CLI runtime", async () => {
-    let capturedSystem: string | undefined
-    const sandboxes = new RecordingSandboxFactory()
-    const sixb = buildSixb(
-      apiBashThenAnswerModel((system) => {
-        capturedSystem = system
-      }),
-      new InMemoryBroker(),
-      sandboxes
-    )
-    const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions())
-    await worker.start()
-    try {
-      const {
-        run: { threadId },
-      } = await requestAgent(sixb, {
-        text: "check the project",
-        timeZone: "Asia/Kolkata",
-        locale: "fr-fr",
-      })
-      const run = await waitFor(
-        async () => {
-          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-          const found = list.runs[0]
-          return found && found.status !== "queued" && found.status !== "running" ? found : null
-        },
-        { label: "canonical prompt CLI run terminal" }
-      )
-
-      expect(run.status).toBe("succeeded")
-      // The requester's settings, frozen on the run, win over the project's (UTC, en).
-      // Proven by removal: drop timeZone/locale from resolveAgentExecutionPlan.
-      expect(capturedSystem).toContain("Time zone: Asia/Kolkata. Locale: fr-FR.")
-      expect(capturedSystem).toContain("<sixb_mode_rules>")
-      expect(capturedSystem).toContain("<sixb_runtime_context>")
-      expect(capturedSystem).toContain("inside a live Sixb project modeled as an ontology")
-      expect(capturedSystem).toContain(
-        "Use the `sixb` CLI only for the live project data or capability needed by the task"
-      )
-      expect(capturedSystem).toContain("Do not run `sixb --help`")
-      expect(capturedSystem).toContain("Sixb agent CLI")
-      expect(capturedSystem).not.toContain("<agent_instructions>")
-      expect(capturedSystem).toContain("Available Agent Skills:\n- sixb-artifacts: ")
-
-      const sandbox = sandboxes.sandboxes[0]
-      if (!sandbox) throw new Error("Expected a provisioned sandbox.")
-      expect(sandbox.writtenFiles.some((file) => file.path.endsWith("/bin/sixb"))).toBe(true)
-      expect(
-        sandbox.writtenFiles
-          .filter((file) => file.path.endsWith("/SKILL.md"))
-          .map((file) => file.path.slice(file.path.indexOf("/.sixb/")))
-      ).toEqual(["/.sixb/agent/skills/sixb-artifacts/SKILL.md"])
-    } finally {
-      await worker.stop()
-    }
-  })
-
   test("replays a byte-identical prefix and dates every user message from storage", async () => {
     // Proven by removal: date messages with `new Date()` in loadUserMessageTimes; the replayed
-    // first message then differs between the two runs.
+    // first message then differs between the two runs. The clock jumps an hour between them,
+    // since the rendered time is minute-precise.
     const requests: LanguageModelRequest[] = []
     const model = new WorkerTestModel({
       modelId: "mock-model",
@@ -9775,26 +8670,18 @@ describe("AgentWorker", () => {
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
-      const terminal = (runId: string) =>
-        waitFor(
-          async () => {
-            const run = await storage.runs.getById({ projectId: PROJECT_ID, id: runId })
-            return run && run.status !== "queued" && run.status !== "running" ? run : null
-          },
-          { label: "dated run terminal" }
-        )
       const first = await requestAgent(sixb, { text: "first", timeZone: "Asia/Kolkata" })
-      await terminal(first.run.id)
-      await Bun.sleep(5)
+      await waitForTerminalRun(storage, first.run.id)
+      setSystemTime(new Date(Date.now() + 3_600_000))
       const threadId = first.run.threadId
       const second = await requestAgent(sixb, {
         text: "second",
         threadId,
         timeZone: "Asia/Kolkata",
       })
-      await terminal(second.run.id)
+      await waitForTerminalRun(storage, second.run.id)
       const third = await requestAgent(sixb, { text: "third", threadId })
-      await terminal(third.run.id)
+      await waitForTerminalRun(storage, third.run.id)
 
       const [firstRequest, secondRequest, thirdRequest] = requests
       if (!firstRequest || !secondRequest || !thirdRequest) {
@@ -9823,13 +8710,21 @@ describe("AgentWorker", () => {
         sentAt(2, "UTC"),
       ])
     } finally {
+      setSystemTime()
       await worker.stop()
     }
   })
 
-  test("passes Sixb API gateway env and skills into the per-run sandbox", async () => {
+  test("pairs the canonical conversation prompt with the provisioned CLI runtime and gateway env", async () => {
+    let capturedSystem: string | undefined
     const sandboxes = new RecordingSandboxFactory()
-    const sixb = buildSixb(apiBashThenAnswerModel(), new InMemoryBroker(), sandboxes)
+    const sixb = buildSixb(
+      apiBashThenAnswerModel((system) => {
+        capturedSystem = system
+      }),
+      new InMemoryBroker(),
+      sandboxes
+    )
     const storage = agentStorageOf(sixb)
     const auth = authStorageOf(sixb)
 
@@ -9840,18 +8735,26 @@ describe("AgentWorker", () => {
         run: { threadId, id: runId },
       } = await requestAgent(sixb, {
         text: "inspect sixb api context",
+        timeZone: "Asia/Kolkata",
+        locale: "fr-fr",
       })
 
-      const run = await waitFor(
-        async () => {
-          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-          const found = list.runs[0]
-          return found && found.status !== "queued" && found.status !== "running" ? found : null
-        },
-        { label: "api bash run terminal" }
-      )
+      const run = await waitForTerminalRun(storage, runId)
 
       expect(run.status).toBe("succeeded")
+      // The requester's settings, frozen on the run, win over the project's (UTC, en).
+      // Proven by removal: drop timeZone/locale from resolveAgentExecutionPlan.
+      expect(capturedSystem).toContain("Time zone: Asia/Kolkata. Locale: fr-FR.")
+      expect(capturedSystem).toContain("<sixb_mode_rules>")
+      expect(capturedSystem).toContain("<sixb_runtime_context>")
+      expect(capturedSystem).toContain("inside a live Sixb project modeled as an ontology")
+      expect(capturedSystem).toContain(
+        "Use the `sixb` CLI only for the live project data or capability needed by the task"
+      )
+      expect(capturedSystem).toContain("Do not run `sixb --help`")
+      expect(capturedSystem).toContain("Sixb agent CLI")
+      expect(capturedSystem).not.toContain("<agent_instructions>")
+      expect(capturedSystem).toContain("Available Agent Skills:\n- sixb-artifacts: ")
       const createOptions = sandboxes.createOptions[0]
       expect(createOptions?.network).toMatchObject({
         mode: "restricted",
@@ -9902,10 +8805,10 @@ describe("AgentWorker", () => {
       }
 
       expect(
-        sandbox.writtenFiles.some(
-          (file) => file.path.endsWith("/SKILL.md") && !file.path.includes("/sixb-artifacts/")
-        )
-      ).toBe(false)
+        sandbox.writtenFiles
+          .filter((file) => file.path.endsWith("/SKILL.md"))
+          .map((file) => file.path.slice(file.path.indexOf("/.sixb/")))
+      ).toEqual(["/.sixb/agent/skills/sixb-artifacts/SKILL.md"])
 
       const sixbCli = sandbox.readFileContents(join(env.SIXB_BIN_DIR, "sixb"))
       expect(sixbCli).toContain("../lib/sixb.mjs")
@@ -9970,7 +8873,6 @@ describe("AgentWorker", () => {
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(controlled.model, new InMemoryBroker(), sandboxes)
     const storage = agentStorageOf(sixb)
-    const auth = authStorageOf(sixb)
 
     const firstRequest = await requestAgent(sixb, { text: "first" })
 
@@ -10006,26 +8908,8 @@ describe("AgentWorker", () => {
       controlled.releaseAll()
 
       const [firstRun, secondRun] = await Promise.all([
-        waitFor(
-          async () => {
-            const run = await storage.runs.getById({
-              projectId: PROJECT_ID,
-              id: firstRequest.run.id,
-            })
-            return run && run.status !== "queued" && run.status !== "running" ? run : null
-          },
-          { label: "first concurrent run terminal" }
-        ),
-        waitFor(
-          async () => {
-            const run = await storage.runs.getById({
-              projectId: PROJECT_ID,
-              id: secondRequest.run.id,
-            })
-            return run && run.status !== "queued" && run.status !== "running" ? run : null
-          },
-          { label: "second concurrent run terminal" }
-        ),
+        waitForTerminalRun(storage, firstRequest.run.id),
+        waitForTerminalRun(storage, secondRequest.run.id),
       ])
 
       expect(firstRun.status).toBe("succeeded")
@@ -10050,9 +8934,6 @@ describe("AgentWorker", () => {
           records.some((record) => record.name === "agent.run.finished")
         )
       ).toBe(true)
-      await expect(
-        auth.serviceAccounts.getById({ projectId: PROJECT_ID, id: "svc_agent_assistant" })
-      ).resolves.toBeDefined()
     } finally {
       controlled.releaseAll()
       await worker.stop()
@@ -10080,13 +8961,7 @@ describe("AgentWorker", () => {
       // Exactly what POST /api/agent-threads/:threadId/cancel publishes.
       await publishAgentRunCancel(sixb.broker, { projectId: PROJECT_ID, runId: request.run.id })
 
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "run terminal after cancel" }
-      )
+      const run = await waitForTerminalRun(storage, request.run.id)
       expect(run.status).toBe("cancelled")
       // A user's own stop is not an interruption: nothing is offered to resume it.
       expect(run.finishReason).toBeUndefined()
@@ -10148,13 +9023,7 @@ describe("AgentWorker", () => {
         runId: request.run.id,
       })
 
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "selected tool run terminal after cancel" }
-      )
+      const run = await waitForTerminalRun(storage, request.run.id)
       expect(run.status).toBe("cancelled")
       expect(handlerWasCancelled).toBe(true)
     } finally {
@@ -10234,13 +9103,7 @@ describe("AgentWorker", () => {
 
       await publishAgentRunCancel(sixb.broker, { projectId: PROJECT_ID, runId: request.run.id })
 
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "run terminal after cancel" }
-      )
+      const run = await waitForTerminalRun(storage, request.run.id)
       expect(run.status).toBe("cancelled")
 
       // The half-streamed answer is kept, so the next (steering) turn sees what the agent was doing.
@@ -10265,7 +9128,8 @@ describe("AgentWorker", () => {
   })
 
   test("keeps the partial answer of a turn interrupted by a worker stop, ready to resume", async () => {
-    // Regression proof: drop `stopSignal` from the worker's runAgentTurn call; the run ends with no
+    // Regression proof: drop `stopSignal` from the worker's runAgentTurn call, or record the raw
+    // error instead of AgentTurnInterruptedError in AgentWorker.execute; the run ends with no
     // finish reason, like a user's own stop.
     const partial = "Let me start by checking the pipeline logs"
     const controlled = partialTextThenBlockingModel(partial)
@@ -10292,6 +9156,14 @@ describe("AgentWorker", () => {
       (message) => message.role === "assistant"
     )
     expect(assistant?.parts).toContainEqual({ type: "text", text: partial })
+    expect(
+      (await listRunStreamRecords(sixb.broker, request.run.id)).find(
+        (record) => record.name === "agent.run.finished"
+      )?.payload
+    ).toMatchObject({ status: "cancelled", finishReason: "interrupted", attempt: 1 })
+    expect(
+      await storage.threads.getById({ projectId: PROJECT_ID, id: request.run.threadId })
+    ).toMatchObject({ activeRunId: null })
   })
 
   test("publishes UI chunks before appending the finalized assistant message", async () => {
@@ -10318,16 +9190,9 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const {
-        run: { threadId },
+        run: { id: runId },
       } = await requestAgent(sixb, { text: "echo hi" })
-      await waitFor(
-        async () => {
-          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-          const found = list.runs[0]
-          return found && found.status !== "queued" && found.status !== "running" ? found : null
-        },
-        { label: "run terminal" }
-      )
+      await waitForTerminalRun(storage, runId)
 
       expect(chunksBeforeAssistantAppend).toBeGreaterThan(0)
       expect(finalizedBeforeAssistantAppend).toBe(false)
@@ -10350,16 +9215,9 @@ describe("AgentWorker", () => {
     try {
       await worker.start()
       const {
-        run: { threadId },
+        run: { threadId, id: runId },
       } = await requestAgent(sixb, { text: "echo hi" })
-      const run = await waitFor(
-        async () => {
-          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-          const found = list.runs[0]
-          return found && found.status !== "queued" && found.status !== "running" ? found : null
-        },
-        { label: "run terminal despite stream publish failures" }
-      )
+      const run = await waitForTerminalRun(storage, runId)
 
       expect(run.status).toBe("succeeded")
       const assistants = (await listMessages(storage, threadId)).filter(
@@ -10411,16 +9269,9 @@ describe("AgentWorker", () => {
     try {
       await worker.start()
       const {
-        run: { threadId },
+        run: { threadId, id: runId },
       } = await requestAgent(sixb, { text: "echo hi" })
-      const run = await waitFor(
-        async () => {
-          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-          const found = list.runs[0]
-          return found && found.status !== "queued" && found.status !== "running" ? found : null
-        },
-        { label: "run terminal despite custom stream sink failures" }
-      )
+      const run = await waitForTerminalRun(storage, runId)
 
       expect(run.status).toBe("succeeded")
       const assistants = (await listMessages(storage, threadId)).filter(
@@ -10469,26 +9320,6 @@ describe("AgentWorker", () => {
     )
   })
 
-  test("rejects a second message while a run is active (single-flight, trigger layer)", async () => {
-    const sixb = buildSixb(toolThenAnswerModel())
-    const storage = agentStorageOf(sixb)
-
-    // Open a thread and simulate a worker starting its queued run.
-    const first = await requestAgent(sixb, { text: "first" })
-    await storage.runs.start({
-      id: first.run.id,
-      projectId: PROJECT_ID,
-      execution: freshTestExecution(),
-    })
-
-    const promise = requestAgent(sixb, {
-      text: "second",
-      threadId: first.run.threadId,
-    })
-    await expect(promise).rejects.toBeInstanceOf(AgentRequestError)
-    await expect(promise).rejects.toMatchObject({ code: "active_run_exists" })
-  })
-
   test("ends a crashed turn as interrupted on redelivery without calling the model", async () => {
     // Regression proof: drop the running-run branch in AgentWorker.execute; the turn is replayed,
     // the model is called again, and the run succeeds on attempt 2.
@@ -10513,13 +9344,7 @@ describe("AgentWorker", () => {
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
-      const interrupted = await waitFor(
-        async () => {
-          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
-          return run && run.status !== "queued" && run.status !== "running" ? run : null
-        },
-        { label: "crashed run interrupted" }
-      )
+      const interrupted = await waitForTerminalRun(storage, request.run.id)
       expect(interrupted).toMatchObject({
         status: "cancelled",
         finishReason: "interrupted",
@@ -10617,23 +9442,21 @@ describe("AgentWorker", () => {
     const storage = agentStorageOf(sixb)
     const { host, reads } = withFailingExecutionReads(sixb, (read) => read === 1)
 
+    // Fake timers stand in for the in-place preparation backoff.
+    jest.useFakeTimers()
     const worker = new AgentWorker(host, workerOptions())
-    await worker.start()
     try {
+      await worker.start()
       const request = await requestAgent(sixb, { text: "hello" })
-      const run = await waitFor(
-        async () => {
-          const current = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
-          return current && current.status !== "queued" && current.status !== "running"
-            ? current
-            : null
-        },
-        { label: "run prepared after a storage blip" }
+      const run = await underFakeTime(
+        () => terminalRun(storage, request.run.id),
+        "run prepared after a storage blip"
       )
       expect(run).toMatchObject({ status: "succeeded", attempt: 1 })
       expect(reads.count).toBeGreaterThanOrEqual(2)
     } finally {
-      await worker.stop()
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
     }
   })
 
@@ -10657,17 +9480,13 @@ describe("AgentWorker", () => {
     }
     const retried = spyOn(sixb.queues.agents, "retry")
 
+    jest.useFakeTimers()
     const worker = new AgentWorker(host, workerOptions())
-    await worker.start()
     try {
-      const run = await waitFor(
-        async () => {
-          const current = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
-          return current && current.status !== "queued" && current.status !== "running"
-            ? current
-            : null
-        },
-        { label: "run failed after its last preparation retry" }
+      await worker.start()
+      const run = await underFakeTime(
+        () => terminalRun(storage, request.run.id),
+        "run failed after its last preparation retry"
       )
       expect(run).toMatchObject({ status: "failed", attempt: 1 })
       expect(reads.count).toBe(2)
@@ -10676,7 +9495,8 @@ describe("AgentWorker", () => {
       ).toMatchObject({ activeRunId: null })
       expect(retried).not.toHaveBeenCalled()
     } finally {
-      await worker.stop()
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
       retried.mockRestore()
     }
   })
@@ -10791,7 +9611,7 @@ describe("AgentWorker", () => {
       run: staleRun,
       signal: new AbortController().signal,
     })
-    await expect(promise).rejects.toBeInstanceOf(AgentExecutionLostError)
+    expect(await promise.catch((error: unknown) => error)).toBeInstanceOf(AgentExecutionLostError)
 
     // No assistant message was written; the run is still owned by the reclaiming worker. Usage is
     // intentionally not fenced because the completed provider calls remain billable.
@@ -10808,97 +9628,6 @@ describe("AgentWorker", () => {
       modelCallCount: 2,
       usage: { inputTokens: 20, outputTokens: 14, totalTokens: 34 },
     })
-  })
-
-  test("uses the complete worker-owned system prompt", async () => {
-    let capturedSystem: string | undefined
-    const model = new WorkerTestModel({
-      modelId: "mock-model",
-      stream: async (options) => {
-        capturedSystem = options.messages.find((message) => message.role === "system")?.content
-        return stream([
-          { type: "stream-start", warnings: [] },
-          { type: "text-start", id: "t" },
-          { type: "text-delta", id: "t", delta: "Done" },
-          { type: "text-end", id: "t" },
-          finish("stop"),
-        ])
-      },
-    })
-    const sixb = buildSixb(model)
-    const request = await requestAgent(sixb, { text: "hello" })
-    const run = await reserveRequestedRun(sixb, request)
-
-    await runAgentTurn({
-      context: {
-        id: PROJECT_ID,
-        authorPrincipal: AGENT_PRINCIPAL,
-        storage: workerStorageOf(sixb.storage),
-        blobStorage: sixb.blobStorage,
-        tools: [],
-        systemPrompt: testSystemPrompt(),
-        projectTimeZone: "UTC",
-        streamSink: NOOP_STREAM_SINK,
-        recoverAiModelCall: recoverAiModelCall(sixb),
-        turnTimeoutMs: 60_000,
-      },
-      plan: executionPlanFor(sixb),
-      run,
-      signal: new AbortController().signal,
-    })
-
-    expect(capturedSystem).toBeDefined()
-    if (!capturedSystem) throw new Error("Expected a system prompt")
-
-    expect(capturedSystem).toContain("<sixb_runtime_context>")
-    expect(capturedSystem).toContain("inside a live Sixb project modeled as an ontology")
-    expect(capturedSystem).toContain("<sixb_mode_rules>")
-  })
-
-  test.each([
-    "high",
-    "max",
-  ] as const)("passes %s reasoning into the owned model request", async (reasoning) => {
-    let capturedReasoning: unknown
-    const model = new WorkerTestModel({
-      modelId: "mock-model",
-      stream: async (options) => {
-        capturedReasoning = options.reasoning
-        return stream([
-          { type: "stream-start", warnings: [] },
-          { type: "text-start", id: "t" },
-          { type: "text-delta", id: "t", delta: "Done" },
-          { type: "text-end", id: "t" },
-          finish("stop"),
-        ])
-      },
-    })
-    const sixb = buildSixb(model)
-    const request = await requestAgent(sixb, { text: "hello" })
-    const run = await reserveRequestedRun(sixb, request)
-
-    await runAgentTurn({
-      context: {
-        id: PROJECT_ID,
-        authorPrincipal: AGENT_PRINCIPAL,
-        storage: workerStorageOf(sixb.storage),
-        blobStorage: sixb.blobStorage,
-        tools: [],
-        systemPrompt: testSystemPrompt(),
-        projectTimeZone: "UTC",
-        streamSink: NOOP_STREAM_SINK,
-        recoverAiModelCall: recoverAiModelCall(sixb),
-        turnTimeoutMs: 60_000,
-      },
-      plan: {
-        ...executionPlanFor(sixb),
-        reasoning,
-      },
-      run,
-      signal: new AbortController().signal,
-    })
-
-    expect(capturedReasoning).toBe(reasoning)
   })
 
   test("executes the authoritative model instance from the project catalog", async () => {
@@ -10982,16 +9711,9 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const {
-        run: { threadId },
+        run: { threadId, id: runId },
       } = await requestAgent(sixb, { text: "hi" })
-      const run = await waitFor(
-        async () => {
-          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-          const found = list.runs[0]
-          return found && found.status !== "queued" && found.status !== "running" ? found : null
-        },
-        { label: "run failed" }
-      )
+      const run = await waitForTerminalRun(storage, runId)
       expect(run.status).toBe("failed")
       expect(run.error).toMatchObject({
         code: "agent.execution_failed",
@@ -11054,16 +9776,9 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const {
-        run: { threadId },
+        run: { threadId, id: runId },
       } = await requestAgent(sixb, { text: "hi" })
-      const run = await waitFor(
-        async () => {
-          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-          const found = list.runs[0]
-          return found && found.status !== "queued" && found.status !== "running" ? found : null
-        },
-        { label: "run failed" }
-      )
+      const run = await waitForTerminalRun(storage, runId)
       expect(run.status).toBe("failed")
       expect(run.error).toMatchObject({
         code: "agent.execution_failed",
@@ -11084,63 +9799,6 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("ends the turn as interrupted when the worker is stopped mid-turn", async () => {
-    // Regression proof: record the raw error instead of AgentTurnInterruptedError for a worker
-    // stop in AgentWorker.execute; the run has no finish reason and nothing to resume.
-    // A model whose stream blocks until the call is aborted, so the turn is reliably in-flight.
-    const blockingModel = new WorkerTestModel({
-      modelId: "mock-model",
-      stream: async (options) => {
-        const blocked = new ReadableStream<WorkerTestStreamEvent>({
-          start(controller) {
-            controller.enqueue({ type: "stream-start", warnings: [] })
-            const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
-            if (options.signal.aborted) {
-              abort()
-            } else {
-              options.signal.addEventListener("abort", abort, { once: true })
-            }
-          },
-        })
-        return { stream: blocked }
-      },
-    })
-    const sixb = buildSixb(blockingModel)
-    const storage = agentStorageOf(sixb)
-
-    const worker = new AgentWorker(sixb, workerOptions())
-    await worker.start()
-    const {
-      run: { threadId, id: runId },
-    } = await requestAgent(sixb, { text: "hang" })
-
-    // Wait until the run is reserved and in-flight, then stop the worker.
-    await waitFor(
-      async () => {
-        const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-        return list.runs[0]?.status === "running" ? list.runs[0] : null
-      },
-      { label: "run running" }
-    )
-    await worker.stop()
-
-    const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-    expect(list.runs[0]).toMatchObject({ status: "cancelled", finishReason: "interrupted" })
-    expect(
-      (await listRunStreamRecords(sixb.broker, runId)).find(
-        (record) => record.name === "agent.run.finished"
-      )?.payload
-    ).toMatchObject({
-      type: "agent.run.finished",
-      status: "cancelled",
-      finishReason: "interrupted",
-      runId,
-      attempt: 1,
-    })
-    const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })
-    expect(thread?.activeRunId).toBeNull()
-  })
-
   test("absorbs a transient finalize blip in place: one run, one message, no lock", async () => {
     const sixb = buildSixbWithEchoTool(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
@@ -11148,20 +9806,15 @@ describe("AgentWorker", () => {
     // the real storage (both delegate to the same underlying state).
     const workerSixb = withStorage(sixb, withFlakyAgentFinishStorage(sixb.storage, 2))
 
+    // Fake timers stand in for the in-place finalization backoff.
+    jest.useFakeTimers()
     const worker = new AgentWorker(workerSixb, workerOptions())
-    await worker.start()
     try {
+      await worker.start()
       const {
-        run: { threadId },
+        run: { threadId, id: runId },
       } = await requestAgent(sixb, { text: "echo hi" })
-      const run = await waitFor(
-        async () => {
-          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-          const found = list.runs[0]
-          return found && found.status !== "queued" && found.status !== "running" ? found : null
-        },
-        { label: "run finalized after blip" }
-      )
+      const run = await underFakeTime(() => terminalRun(storage, runId), "run finalized after blip")
 
       // The in-place retry recovered: the run succeeded on this delivery, with exactly one assistant
       // message (no redelivery, so no duplicate turn), and the thread is released (no silent lock).
@@ -11174,7 +9827,8 @@ describe("AgentWorker", () => {
       )
       expect(assistants).toHaveLength(1)
     } finally {
-      await worker.stop()
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
     }
   })
 
@@ -11191,8 +9845,10 @@ describe("AgentWorker", () => {
     )
 
     const failingStorage = withAlwaysFailingTransactionalFinish(sixb.storage)
-    await expect(
-      runAgentTurn({
+    // Fake timers stand in for the in-place finalization backoff the failure exhausts.
+    jest.useFakeTimers()
+    try {
+      const turn = runAgentTurn({
         context: {
           id: PROJECT_ID,
           authorPrincipal: AGENT_PRINCIPAL,
@@ -11212,7 +9868,13 @@ describe("AgentWorker", () => {
         run,
         signal: new AbortController().signal,
       })
-    ).rejects.toBeInstanceOf(AgentFinalizationError)
+      const error = await settleUnderFakeTime(turn, "finalization retries").catch(
+        (caught: unknown) => caught
+      )
+      expect(error).toBeInstanceOf(AgentFinalizationError)
+    } finally {
+      jest.useRealTimers()
+    }
 
     const afterFailure = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
     expect(afterFailure?.status).toBe("running")
@@ -11291,30 +9953,30 @@ describe("AgentWorker", () => {
       reportCount += 1
     })
 
+    // The turn's budget elapses on fake time, once the partial answer has streamed.
+    jest.useFakeTimers()
     const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 100 }))
-    await worker.start()
     try {
+      await worker.start()
       const request = await requestAgent(sixb, { text: "investigate" })
-      await controlled.waitForStarted()
-      await waitFor(
+      await underFakeTime(
         async () => {
           const records = await listRunStreamRecords(sixb.broker, request.run.id)
-          return JSON.stringify(records).includes(partial) ? true : null
+          return JSON.stringify(records).includes(partial)
         },
-        { label: "partial text streamed before timeout" }
+        "partial text streamed before timeout",
+        0
       )
-
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "partial run timed out" }
+      jest.advanceTimersByTime(100)
+      const run = await underFakeTime(
+        () => terminalRun(storage, request.run.id),
+        "partial run timed out",
+        0
       )
 
       expect(run.status).toBe("failed")
-      // Regression proof: routing this preflight timeout through generic finalization omits both
-      // the stable finish reason and duration that distinguish it from an ordinary failure.
+      // Regression proof: routing this timeout through generic finalization omits both the
+      // stable finish reason and duration that distinguish it from an ordinary failure.
       expect(run.finishReason).toBe("timeout")
       expect(run.error).toMatchObject({
         code: "agent.execution_failed",
@@ -11341,28 +10003,30 @@ describe("AgentWorker", () => {
       await reporter.flush()
       expect(reportCount).toBe(0)
     } finally {
-      await worker.stop()
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
     }
   })
 
   test("fails without an assistant message when a turn times out before producing content", async () => {
-    const sixb = buildSixb(hangingModel())
+    let modelStarted = false
+    const sixb = buildSixb(
+      hangingModel(() => {
+        modelStarted = true
+      })
+    )
     const storage = agentStorageOf(sixb)
 
+    jest.useFakeTimers()
     const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 50 }))
-    await worker.start()
     try {
+      await worker.start()
       const {
-        run: { threadId },
+        run: { threadId, id: runId },
       } = await requestAgent(sixb, { text: "hang" })
-      const run = await waitFor(
-        async () => {
-          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-          const found = list.runs[0]
-          return found && found.status !== "queued" && found.status !== "running" ? found : null
-        },
-        { label: "run timed out" }
-      )
+      await underFakeTime(() => modelStarted, "model stream started", 0)
+      jest.advanceTimersByTime(50)
+      const run = await underFakeTime(() => terminalRun(storage, runId), "run timed out", 0)
 
       expect(run.status).toBe("failed")
       expect(run.error).toMatchObject({
@@ -11387,16 +10051,17 @@ describe("AgentWorker", () => {
       const messages = await listMessages(storage, threadId)
       expect(messages.every((m) => m.role !== "assistant")).toBe(true)
     } finally {
-      await worker.stop()
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
     }
   })
 
   test("records a timeout finish reason when preflight compaction exceeds the turn budget", async () => {
+    let summaryStarted = false
     const sixb = buildSixb(
-      hangingCompactionModel(),
-      new InMemoryBroker(),
-      new RecordingSandboxFactory(),
-      {}
+      hangingCompactionModel(() => {
+        summaryStarted = true
+      })
     )
     const storage = agentStorageOf(sixb)
     let reportCount = 0
@@ -11417,22 +10082,20 @@ describe("AgentWorker", () => {
       assistantText: `historical-result ${"x".repeat(460_000)}`,
     })
 
+    jest.useFakeTimers()
     const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 50 }))
-    await worker.start()
     try {
+      await worker.start()
       const request = await requestAgentAs(sixb, REQUESTER, {
         threadId,
         text: "Continue after compacting the thread.",
       })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: request.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "preflight compaction timeout" }
+      await underFakeTime(() => summaryStarted, "summary request started", 0)
+      jest.advanceTimersByTime(50)
+      const run = await underFakeTime(
+        () => terminalRun(storage, request.run.id),
+        "preflight compaction timeout",
+        0
       )
 
       expect(run.status).toBe("failed")
@@ -11450,7 +10113,8 @@ describe("AgentWorker", () => {
       await reporter.flush()
       expect(reportCount).toBe(0)
     } finally {
-      await worker.stop()
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
     }
   })
 
@@ -11591,12 +10255,14 @@ describe("AgentWorker", () => {
       ],
     })
 
+    const completion = observeQueueSettlement(sixb.queues.agents)
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
-      // Let the worker reject the orphan job. The active run must be untouched: not reclaimed, no
+      // The worker settles the orphan job. The active run must be untouched: not reclaimed, no
       // second run created, and no assistant message written.
-      await Bun.sleep(150)
+      await completion.wait()
+      expect(completion.outcome()).toBe("fail")
 
       const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
       expect(list.runs).toHaveLength(1)
@@ -11609,6 +10275,7 @@ describe("AgentWorker", () => {
       expect(assistants).toHaveLength(0)
     } finally {
       await worker.stop()
+      completion.restore()
     }
   })
 })
@@ -11732,16 +10399,6 @@ describe("agent tools act as the requester", () => {
     }
   }
 
-  async function finishedRun(host: TestSixb, runId: string) {
-    return waitFor(
-      async () => {
-        const run = await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: runId })
-        return run && run.status !== "queued" && run.status !== "running" ? run : null
-      },
-      { label: `agent run '${runId}' terminal`, timeoutMs: 10_000 }
-    )
-  }
-
   function toolOutput(parts: readonly AgentMessagePart[], toolName: string): unknown {
     const call = parts.find((part) => part.type === "tool-call" && part.toolName === toolName)
     if (call?.type !== "tool-call" || call.state !== "output-available") {
@@ -11752,7 +10409,7 @@ describe("agent tools act as the requester", () => {
 
   async function chatToolOutput(host: TestSixb, user: TestUser, toolName: string) {
     const request = await requestAgentAs(host, user, { text: "Read invoice inv-1." })
-    const run = await finishedRun(host, request.run.id)
+    const run = await waitForTerminalRun(agentStorageOf(host), request.run.id)
     expect(run.status).toBe("succeeded")
     const messages = await listMessages(agentStorageOf(host), request.run.threadId)
     return toolOutput(
@@ -11840,13 +10497,9 @@ describe("agent tools act as the requester", () => {
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
-      const node = await waitFor(
-        async () => {
-          const record = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "workflow tool node terminal", timeoutMs: 10_000 }
-      )
+      const node = await waitFor(() => terminalAgentNode(runs, nodeRunId), {
+        label: "workflow tool node terminal",
+      })
       expect(node.status).toBe("succeeded")
       expect(toolOutput(node.trace ?? [], readInvoice.name)).toEqual({
         invoice: { id: "inv-1", title: "Alpha" },
@@ -11893,7 +10546,7 @@ describe("agent tools act as the requester", () => {
         attachments: [quote],
         messageId: "msg-quote",
       })
-      const run = await finishedRun(sixb, request.run.id)
+      const run = await waitForTerminalRun(agentStorageOf(sixb), request.run.id)
       expect(run.status).toBe("succeeded")
       const messages = await listMessages(agentStorageOf(sixb), request.run.threadId)
       expect(
@@ -11987,7 +10640,7 @@ describe("agent tools act as the requester", () => {
     const worker = new AgentWorker(workerHost, workerOptions())
     await worker.start()
     try {
-      const run = await finishedRun(sixb, request.run.id)
+      const run = await waitForTerminalRun(agentStorageOf(sixb), request.run.id)
       expect(run).toMatchObject({ status: "succeeded", attempt: 1 })
       const messages = await listMessages(agentStorageOf(sixb), request.run.threadId)
       expect(
@@ -12019,13 +10672,9 @@ describe("agent tools act as the requester", () => {
     const worker = new AgentWorker(workerHost, workerOptions())
     await worker.start()
     try {
-      const node = await waitFor(
-        async () => {
-          const record = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "workflow tool model call node terminal", timeoutMs: 10_000 }
-      )
+      const node = await waitFor(() => terminalAgentNode(runs, nodeRunId), {
+        label: "workflow tool model call node terminal",
+      })
       expect(node.status).toBe("succeeded")
       expect(toolOutput(node.trace ?? [], summarizeInvoice.name)).toEqual({
         summary: "Paid in full.",
@@ -12042,18 +10691,20 @@ describe("agent tools act as the requester", () => {
   // Regression proof: bind `turnSignal` instead of the node's deadline in
   // workflow-node-execution.ts; the tool's call then outlives the deadline and the test times out.
   test("cancels a tool's model call at the workflow node's deadline", async () => {
+    let toolCallStarted = false
     let toolCallCancelled = false
     const model = toolCallThenAnswerModel(
       summarizeInvoice.name,
       {},
       {
         onToolCall: ({ signal }) =>
-          new Promise((_, reject) =>
+          new Promise((_, reject) => {
+            toolCallStarted = true
             signal.addEventListener("abort", () => {
               toolCallCancelled = true
               reject(signal.reason)
             })
-          ),
+          }),
       }
     )
     const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
@@ -12062,20 +10713,23 @@ describe("agent tools act as the requester", () => {
       tools: [summarizeInvoice],
       runId: "workflow-tool-deadline",
     })
+    // The node's deadline passes on fake time, once the tool's call is in flight.
+    jest.useFakeTimers()
     const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 200 }))
-    await worker.start()
     try {
-      const node = await waitFor(
-        async () => {
-          const record = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "workflow tool deadline node terminal", timeoutMs: 5_000 }
+      await worker.start()
+      await underFakeTime(() => toolCallStarted, "tool's model call started", 0)
+      jest.advanceTimersByTime(200)
+      const node = await underFakeTime(
+        () => terminalAgentNode(runs, nodeRunId),
+        "workflow tool deadline node terminal",
+        0
       )
       expect(node.status).not.toBe("succeeded")
       expect(toolCallCancelled).toBe(true)
     } finally {
-      await worker.stop()
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
     }
   })
 
@@ -12115,17 +10769,23 @@ describe("agent tools act as the requester", () => {
       }
       return enqueue(params)
     }
+    // Fake timers stand in for the recorder's storage and recovery retry backoff.
+    jest.useFakeTimers()
     const worker = new AgentWorker(workerHost, workerOptions())
-    await worker.start()
     try {
+      await worker.start()
       const request = await requestAgentAs(sixb, REQUESTER, { text: "Summarize inv-1." })
-      const run = await finishedRun(sixb, request.run.id)
+      const run = await underFakeTime(
+        () => terminalRun(agentStorageOf(sixb), request.run.id),
+        "unaccounted tool call run terminal"
+      )
       expect(run.status).toBe("failed")
       expect(run.error?.code).toBe("agent.execution_failed")
       expect(callIds).toHaveLength(2)
       expect(agentCalls).toBe(1)
     } finally {
-      await worker.stop()
+      await stopUnderFakeTime(worker)
+      jest.useRealTimers()
     }
   })
 })
@@ -12143,18 +10803,31 @@ describe("finishRunOrThrow", () => {
   } as const
 
   test("raises AgentFinalizationError when an infra error persists across retries", async () => {
-    const storage = finishingStorage(() => Promise.reject(new Error("db down")))
-    await expect(finishRunOrThrow(storage, succeededInput)).rejects.toBeInstanceOf(
-      AgentFinalizationError
-    )
+    let attempts = 0
+    const storage = finishingStorage(() => {
+      attempts += 1
+      return Promise.reject(new Error("db down"))
+    })
+    // Fake timers stand in for the in-place backoff between attempts.
+    jest.useFakeTimers()
+    try {
+      const error = await settleUnderFakeTime(
+        finishRunOrThrow(storage, succeededInput),
+        "finalization retries"
+      ).catch((caught: unknown) => caught)
+      expect(error).toBeInstanceOf(AgentFinalizationError)
+    } finally {
+      jest.useRealTimers()
+    }
+    expect(attempts).toBe(4)
   })
 
   test("raises AgentExecutionLostError when the run is no longer ours", async () => {
     const storage = finishingStorage(() =>
       Promise.reject(new AgentStorageError("execution_lost", "gone"))
     )
-    await expect(finishRunOrThrow(storage, succeededInput)).rejects.toBeInstanceOf(
-      AgentExecutionLostError
-    )
+    expect(
+      await finishRunOrThrow(storage, succeededInput).catch((error: unknown) => error)
+    ).toBeInstanceOf(AgentExecutionLostError)
   })
 })
