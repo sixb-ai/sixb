@@ -1,5 +1,6 @@
 import { posix } from "node:path"
 import type { Sandbox } from "@sixb/core"
+import type { ArtifactTheme } from "@sixb/core/artifacts"
 import {
   FRAME_ASSETS,
   FRAME_DEFAULT_THEMES,
@@ -65,6 +66,8 @@ export async function checkDeckLayout(input: {
   readonly entry: Uint8Array
   /** Names the check's directory, so each version's screenshots stay apart. */
   readonly name: string
+  /** The deck's `theme.json`, which the reader's frame applies over the app's theme. */
+  readonly theme?: ArtifactTheme
   readonly signal: AbortSignal
   /** Test seam; production allows 120 seconds. */
   readonly timeoutMs?: number
@@ -85,12 +88,9 @@ export async function checkDeckLayout(input: {
           { path: posix.join(library, "kit.css"), contents: asset("__sixb/kit.css") },
           { path: posix.join(library, "runtime.js"), contents: asset("__sixb/runtime.js") },
           { path: posix.join(library, "probe.js"), contents: `(${layoutProbe.toString()})` },
-          {
-            path: posix.join(library, "themes.json"),
-            contents: JSON.stringify(FRAME_DEFAULT_THEMES),
-          },
         ]),
     { path: posix.join(output, "entry.html"), contents: entry },
+    { path: posix.join(output, "themes.json"), contents: JSON.stringify(deckThemes(input.theme)) },
     { path: posix.join(output, "files.json"), contents: JSON.stringify(input.files) },
   ])
   installed.add(sandbox)
@@ -157,6 +157,20 @@ export async function checkDeckLayout(input: {
           ]),
     ],
   }
+}
+
+/**
+ * The themes a reader sees the deck in: Sixb's light and dark, or only the mode its `theme.json`
+ * pins, each with the deck's tokens over Sixb's.
+ */
+function deckThemes(theme: ArtifactTheme | undefined) {
+  const modes = theme?.mode ? [theme.mode] : (["light", "dark"] as const)
+  return Object.fromEntries(
+    modes.map((mode) => {
+      const base = FRAME_DEFAULT_THEMES[mode]
+      return [mode, { ...base, tokens: { ...base.tokens, ...theme?.tokens } }]
+    })
+  )
 }
 
 function asset(path: string): string {

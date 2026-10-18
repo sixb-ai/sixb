@@ -224,7 +224,14 @@ export function layoutProbe(slideNumber: number): LayoutProblem[] {
     const stack = document.elementsFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
     // An SVG's text is not hit between its glyphs: then everything under the point counts.
     const start = Math.max(0, stack.indexOf(element))
-    for (const node of stack.slice(start)) {
+    const under = stack.slice(start)
+    // A photo or a video paints colors no style names.
+    const pictures = under.filter((node) => /^(img|picture|video|canvas)$/i.test(node.tagName))
+    for (const node of under) {
+      if (pictures.includes(node)) return null
+      // A box holding the picture paints under it, though its ::before, a scrim over the photo,
+      // puts it above the picture in the stack.
+      if (pictures.some((picture) => node.contains(picture))) continue
       const style = getComputedStyle(node)
       // An SVG shape paints with its fill: a chart's label sits on its bar.
       const shape = node instanceof SVGGeometryElement

@@ -112,8 +112,9 @@ redrawing or retyping them: it is the same chart the sheet draws, and it cannot 
 
 Publishing refuses a deck without `index.html` or without a `section.slide`.
 
-Once a deck publishes, Sixb lays it out in the sandbox's browser as the reader will see it, in
-light and in dark mode, and warns about each slide that has something past its edge, running
+Once a deck publishes, Sixb lays it out in the sandbox's browser as the reader will see it, with
+its `theme.json`, in light and in dark mode or in the one mode it pins, and warns about each
+slide that has something past its edge, running
 into the footer, drawn over other text, or cut off; text under 18px; text under WCAG AA contrast;
 an image that did not load; or an error while the deck loaded. Each warning names the slide, the
 element as CSS names it (`p.kicker`), and where it is on the 1280×720 slide. The result names

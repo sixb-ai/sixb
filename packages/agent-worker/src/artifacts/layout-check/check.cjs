@@ -1,15 +1,16 @@
 // The Agent's layout check, run in the sandbox by publish_artifact: it serves a deck as the API
 // serves its frame, with the kit and the runtime, opens it in the sandbox's headless Chromium at
-// 1280×720 with each slide filling the page, measures every slide in Sixb's light and dark
-// themes with the layout probe, and screenshots every slide in light. It writes one line of JSON:
+// 1280×720 with each slide filling the page, measures every slide in each of the deck's themes
+// with the layout probe, and screenshots every slide in the first. It writes one line of JSON:
 // { slides, problems, errors, screenshots, stopped? } or { skipped }.
 //
 //   node check.cjs <deck directory> <output directory> <library directory> <deadline in ms>
 //
-// The library holds what the worker installs beside this script: kit.css, runtime.js, probe.js,
-// themes.json. The output directory holds entry.html, the deck's entry with the kit and runtime,
-// and files.json, the paths the version publishes: only those are served, since the reader gets
-// only those.
+// The library holds what the worker installs beside this script: kit.css, runtime.js, probe.js.
+// The output directory holds entry.html, the deck's entry with the kit and runtime; files.json,
+// the paths the version publishes: only those are served, since the reader gets only those; and
+// themes.json, the themes the reader sees the deck in: Sixb's light and dark, or the mode the
+// deck's theme.json pins, with its tokens.
 //
 // A deck can stop answering, with a script that never yields or a font that never loads, and a
 // browser outlives a node that is killed. So every wait on the page is bounded, and when one runs
@@ -120,7 +121,7 @@ async function main() {
   const playwright = loadPlaywright()
   if (!playwright) return { skipped: "no_browser" }
   const probe = fs.readFileSync(path.join(lib, "probe.js"), "utf8")
-  const themes = JSON.parse(fs.readFileSync(path.join(lib, "themes.json"), "utf8"))
+  const themes = JSON.parse(fs.readFileSync(path.join(out, "themes.json"), "utf8"))
   const server = await serve()
   let browser
   try {
@@ -170,7 +171,7 @@ async function main() {
           { protocol: PROTOCOL, method, params }
         )
       )
-    for (const name of ["light", "dark"]) {
+    for (const [index, name] of Object.keys(themes).entries()) {
       step = `the deck in ${name} mode`
       await send("theme", themes[name])
       for (let slide = 1; slide <= found.slides; slide++) {
@@ -188,7 +189,7 @@ async function main() {
         for (const problem of await within(step, page.evaluate(`(${probe})(${slide})`))) {
           problems.push({ ...problem, slide, theme: name })
         }
-        if (name === "light") {
+        if (index === 0) {
           const file = path.join(out, `slide-${String(slide).padStart(2, "0")}.png`)
           await page.screenshot({ path: file, timeout: STEP_MS })
           screenshots.push(file)

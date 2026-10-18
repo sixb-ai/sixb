@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { ArtifactTheme } from "@sixb/core/artifacts"
 import { checkDeckLayout } from "../src/artifacts/layout-check/layout-check"
 import { LocalBashSandbox } from "./helpers"
 
@@ -18,7 +19,8 @@ const playwright =
 
 const DECK = `<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Checked</title></head>
+<head><meta charset="utf-8"><title>Checked</title>
+<style>#photo::before { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgb(0 0 0 / 0.6), transparent) }</style></head>
 <body>
   <section class="slide title">
     <p class="eyebrow"><span>Q3 2026</span><span>Review</span></p>
@@ -57,6 +59,10 @@ const DECK = `<!doctype html>
     </svg>
     <sixb-embed src="artifact:art_0000000000#chart=revenue" title="Revenue" style="height: 160px"></sixb-embed>
     <img src="artifact:art_0000000000/figures/map.png" alt="" style="width: 200px; height: 80px">
+  </section>
+  <section class="slide image bleed" id="photo">
+    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9'%3E%3Crect width='16' height='9' fill='%23303030'/%3E%3C/svg%3E" alt="">
+    <h2 style="position: absolute; left: 96px; bottom: 88px; z-index: 1; color: #ffffff">On a photo</h2>
   </section>
 </body>
 </html>`
@@ -98,7 +104,7 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
   })
   afterAll(() => rmSync(root, { recursive: true, force: true }))
 
-  const check = (deck: string, files: readonly string[], name: string) =>
+  const check = (deck: string, files: readonly string[], name: string, theme?: ArtifactTheme) =>
     checkDeckLayout({
       handle: {
         sandbox: new LocalBashSandbox(root),
@@ -111,6 +117,7 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
       files,
       entry: new TextEncoder().encode(deck),
       name,
+      ...(theme ? { theme } : {}),
       signal: AbortSignal.timeout(90_000),
     })
 
@@ -121,10 +128,12 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
       // bar reads as white on the slide. What the fifth slide shows from other artifacts is the
       // app's to draw: an empty box here, not a broken image. Reproduce the first slide's by
       // measuring text lines at their font's full height: a number set tight over its label
-      // reads as drawn over it.
+      // reads as drawn over it. The sixth slide's heading is on a photo, whose colors no style
+      // names: reproduce by measuring under the photo, or past it to the slide that its scrim
+      // lifts above it in the stack, and the white heading reads as white on white.
       const result = await check(DECK, ["index.html"], "checked")
       if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
-      expect(result.screenshots).toHaveLength(5)
+      expect(result.screenshots).toHaveLength(6)
       const found = result.warnings.map((warning) => `${warning.part ?? "-"} ${warning.code}`)
       expect(found.sort()).toEqual(
         [
@@ -142,6 +151,28 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
       expect(result.warnings.find((warning) => warning.part === "5")?.message).toContain(
         "“Tiny label” is 12px"
       )
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
+    "measures a deck in the mode and the tokens its theme.json sets",
+    async () => {
+      // The reader's frame applies the deck's theme.json over the app's theme. Reproduce by
+      // measuring in Sixb's themes alone: the pale note passes, and the fixed ink fails in dark.
+      const deck = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Themed</title></head><body>
+  <section class="slide"><h2>A light deck</h2>
+    <p class="note">A pale note</p>
+    <p style="color: #202020">Ink that stays dark</p>
+  </section></body></html>`
+      const result = await check(deck, ["index.html"], "themed", {
+        mode: "light",
+        tokens: { "--muted-foreground": "#c8c8c8" },
+      })
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+      expect(result.warnings.map((warning) => warning.message)).toEqual([
+        expect.stringContaining("p.note “A pale note” has a contrast of"),
+      ])
     },
     { timeout: 120_000 }
   )
