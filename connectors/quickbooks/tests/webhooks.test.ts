@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
 import { defineConnector, noopLogger } from "@sixb/core"
-import { type QuickBooksEventContext, quickbooks, quickbooksEventsWebhook } from "../src"
+import { quickbooks, quickbooksEventsWebhook } from "../src"
 
 const token = "verifier-test-token"
 const event = {
@@ -53,49 +53,7 @@ test("webhook verifies exact raw bytes and rejects malformed, unsigned and alter
   expect(hook.idempotencyKey).toBeUndefined()
 })
 
-test("full payload handler controls account lookup, custom responses and duplicate event handling", async () => {
-  const received: QuickBooksEventContext[] = []
-  const lookups: string[] = []
-  const hook = quickbooksEventsWebhook({
-    verifierToken: token,
-    async onEvent(context) {
-      received.push(context)
-      for (const item of context.body) await context.connections.forAccount(item.intuitaccountid)
-      return { status: 200, headers: { "x-processed": "yes" }, body: "OK" }
-    },
-  })
-  const payload = [event, { ...event, intuitaccountid: "456" }, event]
-  const context: QuickBooksEventContext = {
-    ...verifyContext(JSON.stringify(payload)),
-    body: hook.body.parse(payload),
-    logger: noopLogger,
-    sixb: {} as never,
-    client: async () => {
-      throw new Error("top-level client should not be resolved")
-    },
-    connections: {
-      async forAccount(id) {
-        lookups.push(id)
-        return []
-      },
-    },
-  }
-  expect(await hook.handle(context)).toEqual({
-    status: 200,
-    headers: { "x-processed": "yes" },
-    body: "OK",
-  })
-  expect(received).toHaveLength(1)
-  expect(received[0]?.body).toBe(payload)
-  expect(lookups).toEqual(["123", "456", "123"])
-})
-
-test("webhook awaits handler completion, defaults to HTTP 200 and propagates failures", async () => {
-  let finish: (() => void) | undefined
-  const pending = new Promise<void>((resolve) => {
-    finish = resolve
-  })
-  const hook = quickbooksEventsWebhook({ verifierToken: token, onEvent: () => pending })
+test("handler gets the whole batch once, its response or a default 200 after completion, and failures", async () => {
   const context = {
     ...verifyContext("[]"),
     body: [],
@@ -110,6 +68,29 @@ test("webhook awaits handler completion, defaults to HTTP 200 and propagates fai
       throw new Error("unused")
     },
   }
+  // Events are neither split nor deduplicated: one call receives the parsed array as delivered.
+  const received: unknown[] = []
+  const custom = quickbooksEventsWebhook({
+    verifierToken: token,
+    onEvent(context) {
+      received.push(context.body)
+      return { status: 200, headers: { "x-processed": "yes" }, body: "OK" }
+    },
+  })
+  const payload = [event, { ...event, intuitaccountid: "456" }, event]
+  expect(await custom.handle({ ...context, body: custom.body.parse(payload) })).toEqual({
+    status: 200,
+    headers: { "x-processed": "yes" },
+    body: "OK",
+  })
+  expect(received).toHaveLength(1)
+  expect(received[0]).toBe(payload)
+
+  let finish: (() => void) | undefined
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve
+  })
+  const hook = quickbooksEventsWebhook({ verifierToken: token, onEvent: () => pending })
   let completed = false
   const result = Promise.resolve(hook.handle(context)).then((value) => {
     completed = true

@@ -91,6 +91,8 @@ describe("stripe events webhook", () => {
     expect(received[0]?.event.id).toBe("evt_1")
     expect(received[0]?.event.type).toBe("customer.created")
     expect(received[0]?.client).toBe(client)
+    // Stripe retries deliveries, so the event id is the idempotency key.
+    expect(webhook.idempotencyKey?.({ body: EVENT } as unknown as IdempotencyContext)).toBe("evt_1")
   })
 
   test("rejects tampered, stale, and unsigned deliveries", async () => {
@@ -115,12 +117,6 @@ describe("stripe events webhook", () => {
     )
   })
 
-  test("reports the event id as the delivery idempotency key", () => {
-    const webhook = stripeEventsWebhook({ allowUnverified: true, onEvent: () => {} })
-
-    expect(webhook.idempotencyKey?.({ body: EVENT } as unknown as IdempotencyContext)).toBe("evt_1")
-  })
-
   test("rejects malformed event payloads", () => {
     const webhook = stripeEventsWebhook({ allowUnverified: true, onEvent: () => {} })
 
@@ -130,14 +126,11 @@ describe("stripe events webhook", () => {
     )
   })
 
-  test("requires a secret or an explicit unverified opt-in", () => {
+  test("requires a secret or an explicit unverified opt-in, and a valid tolerance", () => {
     // @ts-expect-error - neither `credential` nor `allowUnverified`
     const missing: Parameters<typeof stripeEventsWebhook>[0] = { onEvent: () => {} }
 
     expect(() => stripeEventsWebhook(missing)).toThrow(/Stripe-Signature/)
-  })
-
-  test("validates the webhook tolerance", () => {
     expect(() =>
       stripeEventsWebhook({ allowUnverified: true, onEvent: () => {}, toleranceMs: 0 })
     ).toThrow("webhookToleranceMs must be a positive finite number")

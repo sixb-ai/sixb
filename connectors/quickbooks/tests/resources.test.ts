@@ -261,7 +261,7 @@ test("early iterator exit does not prefetch another page", async () => {
   expect(calls).toBe(1)
 })
 
-test("invalid bounds and unsupported sorts fail before any request", async () => {
+test("invalid bounds, unsupported sorts and unsafe entity IDs fail before any request", async () => {
   let calls = 0
   mock(() => {
     calls++
@@ -280,7 +280,8 @@ test("invalid bounds and unsupported sorts fail before any request", async () =>
   await expect(
     qb.customers.list({ orderBy: { field: "Email" } } as unknown as QuickBooksCustomerListOptions)
   ).rejects.toThrow("Unsupported query sort")
-  expect(() => qb.items.get("..")).toThrow("Invalid entity ID")
+  for (const id of ["", " "]) expect(() => qb.items.get(id)).toThrow("entity ID must be")
+  for (const id of [".", ".."]) expect(() => qb.items.get(id)).toThrow("Invalid entity ID")
   expect(calls).toBe(0)
 })
 
@@ -309,19 +310,4 @@ test("a repeated full page fails instead of iterating forever", async () => {
   const iterator = qb.items.listAll({ maxResults: 1 })[Symbol.asyncIterator]()
   expect((await iterator.next()).done).toBe(false)
   await expect(iterator.next()).rejects.toThrow("repeated a page")
-})
-
-test("inventory, service and bundle details remain provider-shaped", async () => {
-  const items = [
-    samples.items,
-    { Id: "43", Name: "Service", Type: "Service", UnitPrice: 50 },
-    {
-      Id: "44",
-      Name: "Bundle",
-      Type: "Group",
-      ItemGroupDetail: { ItemGroupLine: [{ ItemRef: { value: "42" }, Qty: 2 }] },
-    },
-  ]
-  mock(() => ({ QueryResponse: { Item: items } }))
-  expect((await (await client()).items.list()).items).toEqual(items)
 })

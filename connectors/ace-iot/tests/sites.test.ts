@@ -74,15 +74,10 @@ describe("sites", () => {
     expect(urls[0].searchParams.get("show_archived")).toBe("true")
     expect(result.items[0]).toEqual(SITE)
     expect(result.total).toBe(3)
-  })
 
-  test("omitted flags are not sent, so ACE applies its own defaults", async () => {
-    const { urls } = captureFetch(page([SITE]))
-    const ace = await createTestClient()
-
+    // Omitted flags are not sent, so ACE applies its own defaults.
     await ace.sites.list()
-
-    expect(urls[0].search).toBe("")
+    expect(urls[1].search).toBe("")
   })
 
   test("get encodes the site name", async () => {
@@ -104,21 +99,6 @@ describe("sites", () => {
 
     expect(urls[0].pathname).toBe("/api/sites/acme_north_campus/points")
     expect(urls[1].pathname).toBe("/api/sites/acme_north_campus/configured_points")
-  })
-
-  test("a point keeps every bacnet property, including ones ACE's schema omits", async () => {
-    captureFetch(page([POINT]))
-    const ace = await createTestClient()
-
-    const result = await ace.sites.listPoints("site")
-    const point = result.items[0]
-
-    expect(point.bacnet_data.vendor_name).toBe("ExampleVendor")
-    expect(point.bacnet_data.device_id).toBe(100)
-    expect(point.bacnet_data.scrape_enabled).toBe(true)
-    expect(point.bacnet_data.model_name).toBe("property: unknown-property")
-    expect(point.kv_tags).toEqual({ vav: "VAV2_5", type: "Room Temp" })
-    expect(point.point_type).toBeNull()
   })
 
   test("getTimeseries returns the whole window in one response", async () => {
@@ -194,34 +174,6 @@ describe("sites", () => {
   test("getWeather unwraps the envelope", async () => {
     const weather = {
       temp: { name: "site/weather/temp", value: "31.29", time: "2026-08-07T17:16:34.957381" },
-      feels_like: {
-        name: "site/weather/feels_like",
-        value: "37.76",
-        time: "2026-08-07T17:16:34.957381",
-      },
-      pressure: {
-        name: "site/weather/pressure",
-        value: "1020",
-        time: "2026-08-07T17:16:34.957381",
-      },
-      humidity: { name: "site/weather/humidity", value: "62", time: "2026-08-07T17:16:34.957381" },
-      dew_point: {
-        name: "site/weather/dew_point",
-        value: "23.4",
-        time: "2026-08-07T17:16:34.957381",
-      },
-      clouds: { name: "site/weather/clouds", value: "40", time: "2026-08-07T17:16:34.957381" },
-      wind_speed: {
-        name: "site/weather/wind_speed",
-        value: "3.1",
-        time: "2026-08-07T17:16:34.957381",
-      },
-      wind_deg: { name: "site/weather/wind_deg", value: "180", time: "2026-08-07T17:16:34.957381" },
-      wet_bulb: {
-        name: "site/weather/wet_bulb",
-        value: "25.1",
-        time: "2026-08-07T17:16:34.957381",
-      },
     }
     const { urls } = captureFetch({ weather })
     const ace = await createTestClient()

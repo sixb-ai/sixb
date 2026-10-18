@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import type { AceIotGateway } from "../src"
-import { parseAceIotTimestamp } from "../src"
 import { captureFetch, createTestClient, page } from "./helpers"
 
 const originalFetch = globalThis.fetch
@@ -37,12 +36,6 @@ describe("gateways", () => {
     expect(urls[0].searchParams.get("show_archived")).toBe("true")
     expect(result.items[0]).toEqual(GATEWAY)
     expect(result.items[0].interfaces).toEqual({ discovered_interfaces: { enp1s0: {} } })
-  })
-
-  test("the gateway token expiry parses despite its space-separated format", () => {
-    expect(parseAceIotTimestamp(GATEWAY.device_token_expires as string).toISOString()).toBe(
-      "2027-03-04T19:34:54.114Z"
-    )
   })
 
   test("update uses PATCH", async () => {

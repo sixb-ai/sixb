@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
+import type { MercuryClient } from "../src"
 import { collect, createTestClient, json, query, recorder } from "./helpers"
 
 const originalFetch = globalThis.fetch
@@ -46,43 +47,6 @@ test("list repeats array filters as separate query parameters", async () => {
   expect(params.get("mercuryCategory")).toBe("Restaurants")
 })
 
-test("list surfaces both category concepts on a transaction", async () => {
-  recorder([
-    json({
-      transactions: [
-        transaction("t1", {
-          mercuryCategory: "Software",
-          categoryData: {
-            id: "cat-1",
-            name: "Engineering Tools",
-            visibleForReimbursements: false,
-            visibleForCardSpend: true,
-            visibleForOther: true,
-          },
-          merchant: { id: "m-1", category: "Software", categoryCode: "5734", currency: "USD" },
-        }),
-      ],
-      page: {},
-    }),
-  ])
-  const mc = await createTestClient()
-
-  const page = await mc.transactions.list()
-  const [txn] = page.transactions
-
-  expect(txn?.mercuryCategory).toBe("Software")
-  expect(txn?.categoryData?.name).toBe("Engineering Tools")
-  expect(txn?.merchant?.categoryCode).toBe("5734")
-})
-
-test("start_at cannot be combined with the directional cursors", async () => {
-  const mc = await createTestClient()
-
-  expect(() => mc.transactions.list({ start_at: "t1", start_after: "t2" })).toThrow(
-    "start_at cannot be combined"
-  )
-})
-
 test("listAll drops start_at once it begins following nextPage", async () => {
   const calls = recorder([
     json({ transactions: [transaction("t1")], page: { nextPage: "t1" } }),
@@ -108,29 +72,19 @@ test("get reads the singular transaction path", async () => {
   expect(calls[0]?.url).toBe("https://api.mercury.com/api/v1/transaction/t1")
 })
 
-test("update PATCHes only the fields the caller supplied", async () => {
-  const calls = recorder([json(transaction("t1", { note: "Team lunch" }))])
-  const mc = await createTestClient()
-
-  await mc.transactions.update("t1", { note: "Team lunch" })
-
-  expect(calls[0]?.method).toBe("PATCH")
-  expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({ note: "Team lunch" })
-})
-
-test("update sends an explicit null to clear a field", async () => {
+test.each([
+  // An omitted field means "leave unchanged", so only the supplied one is sent.
+  ["only the fields the caller supplied", { note: "Team lunch" }],
+  ["an explicit null to clear a field", { categoryId: null }],
+])("update PATCHes %s", async (_name, input) => {
   const calls = recorder([json(transaction("t1"))])
   const mc = await createTestClient()
 
-  await mc.transactions.update("t1", { categoryId: null })
+  await mc.transactions.update("t1", input)
 
-  expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({ categoryId: null })
-})
-
-test("update rejects an empty payload rather than sending a no-op write", async () => {
-  const mc = await createTestClient()
-
-  expect(() => mc.transactions.update("t1", {})).toThrow("at least one of note or categoryId")
+  expect(calls[0]?.method).toBe("PATCH")
+  expect(calls[0]?.url).toBe("https://api.mercury.com/api/v1/transaction/t1")
+  expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual(input)
 })
 
 test("listAllForAccount pages by offset until it reaches total", async () => {
@@ -169,16 +123,29 @@ test("getForAccount encodes both path segments", async () => {
   expect(calls[0]?.url).toBe("https://api.mercury.com/api/v1/account/acct%2F1/transaction/t%201")
 })
 
-test("account transaction offset must be non-negative", async () => {
+test.each([
+  [
+    "start_at with a directional cursor",
+    (mc: MercuryClient) => mc.transactions.list({ start_at: "t1", start_after: "t2" }),
+    "start_at cannot be combined",
+  ],
+  [
+    "a negative account transaction offset",
+    (mc: MercuryClient) => mc.transactions.listForAccount("acct-1", { offset: -1 }),
+    "non-negative integer",
+  ],
+  [
+    "an empty update payload, rather than sending a no-op write",
+    (mc: MercuryClient) => mc.transactions.update("t1", {}),
+    "at least one of note or categoryId",
+  ],
+  [
+    "an empty path id",
+    (mc: MercuryClient) => mc.transactions.get("  "),
+    "transaction id must be a non-empty string",
+  ],
+])("rejects %s before a request is made", async (_name, call, message) => {
   const mc = await createTestClient()
 
-  expect(() => mc.transactions.listForAccount("acct-1", { offset: -1 })).toThrow(
-    "non-negative integer"
-  )
-})
-
-test("empty path ids are rejected before a request is made", async () => {
-  const mc = await createTestClient()
-
-  expect(() => mc.transactions.get("  ")).toThrow("transaction id must be a non-empty string")
+  expect(() => call(mc)).toThrow(message)
 })

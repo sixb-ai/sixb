@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import { MetaApiError, meta } from "../src"
 
 const CONTEXT = {
@@ -27,6 +27,7 @@ describe("meta connector — insights", () => {
   })
   afterEach(() => {
     globalThis.fetch = originalFetch
+    jest.useRealTimers()
   })
 
   test("account insights send metric, period, metric_type and unix-second windows", async () => {
@@ -63,19 +64,6 @@ describe("meta connector — insights", () => {
     expect(insights.map((insight) => insight.name)).toEqual(["views", "total_interactions"])
   })
 
-  test("omits metric_type when not requested", async () => {
-    let requested = ""
-    mockFetch((input) => {
-      requested = String(input)
-      return Promise.resolve(json({ data: [] }))
-    })
-
-    const client = await meta({ accessToken: "t" }).connect(CONTEXT)
-    await client.instagram("ig-1").insights.get({ metrics: ["reach"], period: "day" })
-
-    expect(new URL(requested).searchParams.has("metric_type")).toBe(false)
-  })
-
   test("empty metrics resolve to no request", async () => {
     let called = false
     mockFetch(() => {
@@ -90,12 +78,12 @@ describe("meta connector — insights", () => {
     expect(called).toBe(false)
   })
 
-  test("page insights apply the page token override", async () => {
+  test("page insights apply the page token override and omit an unset metric_type", async () => {
     let auth = ""
-    let path = ""
+    let requested = ""
     mockFetch((input, init) => {
       auth = new Headers(init?.headers).get("authorization") ?? ""
-      path = new URL(String(input)).pathname
+      requested = String(input)
       return Promise.resolve(json({ data: [{ name: "page_media_view" }] }))
     })
 
@@ -104,7 +92,10 @@ describe("meta connector — insights", () => {
       .facebook("page-1", { accessToken: "page-tok" })
       .insights.get({ metrics: ["page_media_view"], period: "day" })
 
-    expect(path).toBe("/v23.0/page-1/insights")
+    const url = new URL(requested)
+    expect(url.pathname).toBe("/v23.0/page-1/insights")
+    expect(url.searchParams.get("period")).toBe("day")
+    expect(url.searchParams.has("metric_type")).toBe(false)
     expect(auth).toBe("Bearer page-tok")
   })
 
@@ -177,36 +168,17 @@ describe("meta connector — insights", () => {
     expect(JSON.parse(error.rawBody)).toEqual(error.body)
   })
 
-  test("retries Meta throttling codes returned with HTTP 400", async () => {
-    let calls = 0
+  test.each([
+    { code: 4, calls: 2 },
+    { code: 190, calls: 1 },
+  ])("retries an HTTP 400 only for Meta throttling codes (code $code)", async ({ code, calls }) => {
+    let attempts = 0
     mockFetch(() => {
-      calls += 1
+      attempts += 1
       return Promise.resolve(
-        calls === 1
-          ? json(
-              { error: { message: "Application request limit reached", code: 4 } },
-              { status: 400 }
-            )
+        attempts === 1
+          ? json({ error: { message: "Rejected", code } }, { status: 400 })
           : json({ data: [{ name: "reach" }] })
-      )
-    })
-
-    const client = await meta({
-      accessToken: "t",
-      retry: { maxRetries: 1, delayMs: () => 0 },
-    }).connect(CONTEXT)
-    const insights = await client.instagram("ig-1").insights.get({ metrics: ["reach"] })
-
-    expect(calls).toBe(2)
-    expect(insights[0]?.name).toBe("reach")
-  })
-
-  test("does not retry non-throttling Graph errors", async () => {
-    let calls = 0
-    mockFetch(() => {
-      calls += 1
-      return Promise.resolve(
-        json({ error: { message: "Invalid token", code: 190 } }, { status: 400 })
       )
     })
 
@@ -214,13 +186,19 @@ describe("meta connector — insights", () => {
       accessToken: "t",
       retry: { maxRetries: 2, delayMs: () => 0 },
     }).connect(CONTEXT)
-    const promise = client.instagram("ig-1").insights.get({ metrics: ["reach"] })
+    const result = await client
+      .instagram("ig-1")
+      .insights.get({ metrics: ["reach"] })
+      .catch((error: unknown) => error)
 
-    await expect(promise).rejects.toBeInstanceOf(MetaApiError)
-    expect(calls).toBe(1)
+    expect(attempts).toBe(calls)
+    if (calls === 1) expect(result).toBeInstanceOf(MetaApiError)
+    else expect(result).toEqual([expect.objectContaining({ name: "reach" })])
   })
 
-  test("retries 429 responses honoring Retry-After", async () => {
+  // Regression proof: make the default delayMs ignore Retry-After (1000ms backoff); it must fail.
+  test("retries 429 responses after the Retry-After delay by default", async () => {
+    jest.useFakeTimers()
     let calls = 0
     mockFetch(() => {
       calls += 1
@@ -228,16 +206,22 @@ describe("meta connector — insights", () => {
         calls === 1
           ? json(
               { error: { message: "rate limited" } },
-              { status: 429, headers: { "Retry-After": "0" } }
+              { status: 429, headers: { "Retry-After": "2" } }
             )
           : json({ data: [{ name: "reach" }] })
       )
     })
 
     const client = await meta({ accessToken: "t" }).connect(CONTEXT)
-    const insights = await client.instagram("ig-1").insights.get({ metrics: ["reach"] })
+    const insights = client.instagram("ig-1").insights.get({ metrics: ["reach"] })
+    for (let turn = 0; turn < 100 && jest.getTimerCount() === 0; turn++) await Promise.resolve()
 
+    jest.advanceTimersByTime(1_999)
+    await Promise.resolve()
+    expect(calls).toBe(1)
+    jest.advanceTimersByTime(1)
+
+    expect((await insights)[0]?.name).toBe("reach")
     expect(calls).toBe(2)
-    expect(insights[0]?.name).toBe("reach")
   })
 })

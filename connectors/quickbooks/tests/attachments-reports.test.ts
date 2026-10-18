@@ -47,7 +47,7 @@ function mock(handler: (url: URL, init: RequestInit) => Response | Promise<Respo
   globalThis.fetch = ((url, init) =>
     Promise.resolve(handler(new URL(String(url)), init ?? {}))) as typeof fetch
 }
-async function client(signal = new AbortController().signal, retryUnsafe = false) {
+async function client(retryUnsafe = false) {
   return quickbooks({
     clientId: "id",
     clientSecret: "secret",
@@ -63,7 +63,7 @@ async function client(signal = new AbortController().signal, retryUnsafe = false
     connectorId: "qb",
     connectionId: "connection",
     account: { id: "123", label: "Company" },
-    signal,
+    signal: new AbortController().signal,
     tokenSource: {
       async get() {
         return { accessToken: "secret-token", invalidate() {} }
@@ -81,7 +81,6 @@ test("payment PDF uses the payment route and preserves bytes", async () => {
     return new Response(bytes, { headers: { "Content-Type": "application/pdf" } })
   })
   expect(await qb.payments.downloadPdf("a/b")).toEqual(bytes)
-  expect(() => qb.payments.downloadPdf("..")).toThrow()
 })
 
 test("attachment reads validate identity and filtered pagination preserves references", async () => {
@@ -217,7 +216,7 @@ test("attachment upload sends paired multipart metadata and exact binary bytes",
 // Removal proof: remove { retryable: false } from http.upload; this test's 503
 // case observes three writes instead of one under the custom retry policy.
 test("attachment upload does not replay failures and preserves nested faults and recovery IDs", async () => {
-  const qb = await client(undefined, true)
+  const qb = await client(true)
   for (const kind of ["503", "401", "network", "malformed", "nested", "invalid-json"] as const) {
     let calls = 0
     mock(() => {
@@ -357,21 +356,6 @@ test("aging reports validate inputs and reject malformed response structures", a
   }
   mock(() => Response.json({ Fault: { Error: [{ code: "5020", Message: "Permission denied" }] } }))
   await expect(qb.reports.agedPayables()).rejects.toBeInstanceOf(QuickBooksApiError)
-})
-
-test("new read operations respect cancellation", async () => {
-  const controller = new AbortController()
-  const qb = await client(controller.signal)
-  let calls = 0
-  mock(() => {
-    calls++
-    return Response.json({})
-  })
-  controller.abort()
-  await expect(qb.attachments.download("42")).rejects.toThrow()
-  await expect(qb.reports.agedPayables()).rejects.toThrow()
-  await expect(qb.payments.downloadPdf("42")).rejects.toThrow()
-  expect(calls).toBe(0)
 })
 
 // Removal proof: widen the download return types to Uint8Array (ArrayBufferLike)

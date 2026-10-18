@@ -124,14 +124,15 @@ test("sending uses octet-stream and an encoded optional recipient, not a JSON en
   }
 })
 
-test("writes never replay HTTP failures or lost responses, including sends and 401 refresh", async () => {
+test("writes never replay HTTP failures, HTTP 200 faults or lost responses, including sends and 401 refresh", async () => {
   // Regression proof: remove { retryable: false } in http.ts. This test then observes
   // three POSTs under the custom retry policy (and a 401 credential invalidation).
   let invalidations = 0
   const qb = await client(() => {
     invalidations++
   })
-  for (const status of [400, 401, 429, 503, "network"] as const) {
+  // HTTP 200 with a Fault body is an API failure (live Preferences writes returned this).
+  for (const status of [200, 400, 401, 429, 503, "network"] as const) {
     for (const send of [false, true]) {
       let calls = 0
       mock(() => {
@@ -154,6 +155,7 @@ test("writes never replay HTTP failures or lost responses, including sends and 4
       expect(error).toBeInstanceOf(status === "network" ? QuickBooksWriteError : QuickBooksApiError)
       expect(error).toHaveProperty("writeRequestId", "recoverable")
       if (status !== "network") {
+        expect(error).toHaveProperty("status", status)
         expect(error).toHaveProperty("requestId", "trace-id")
         expect(error).toHaveProperty("errors.0.code", "5010")
       }

@@ -142,7 +142,7 @@ describe("meta connector — batch", () => {
     ])
   })
 
-  test("marks the outer POST as replayable because every sub-request is a GET", async () => {
+  test("retries the outer batch POST on a transient failure", async () => {
     let attempts = 0
     mockFetch(() => {
       attempts += 1

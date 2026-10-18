@@ -132,26 +132,21 @@ describe("clients", () => {
       packageName: "historian",
       description: "Forward historian",
     })
-
-    const body = inits[0].body as FormData
-    expect(body).toBeInstanceOf(FormData)
-    expect((body.get("file") as File).name).toBe("historian-1.0.whl")
-    expect(urls[0].searchParams.get("package_name")).toBe("historian")
-    expect(urls[0].searchParams.get("description")).toBe("Forward historian")
-    // fetch has to set the multipart boundary itself.
-    expect(new Headers(inits[0].headers).get("content-type")).toBeNull()
-  })
-
-  test("a Blob upload takes the explicit filename", async () => {
-    const { inits } = captureFetch(undefined)
-    const ace = await createTestClient()
-
+    // A Blob carries no name of its own, so it takes the explicit one.
     await ace.clients.uploadVolttronAgentPackage("acme", {
       file: new Blob(["wheel"]),
       packageName: "historian",
       filename: "explicit.whl",
     })
 
-    expect(((inits[0].body as FormData).get("file") as File).name).toBe("explicit.whl")
+    const body = inits[0].body as FormData
+    expect(body).toBeInstanceOf(FormData)
+    expect((body.get("file") as File).name).toBe("historian-1.0.whl")
+    expect(urls[0].pathname).toBe("/api/clients/acme/volttron_agent_package")
+    expect(urls[0].searchParams.get("package_name")).toBe("historian")
+    expect(urls[0].searchParams.get("description")).toBe("Forward historian")
+    // fetch has to set the multipart boundary itself.
+    expect(new Headers(inits[0].headers).get("content-type")).toBeNull()
+    expect(((inits[1].body as FormData).get("file") as File).name).toBe("explicit.whl")
   })
 })

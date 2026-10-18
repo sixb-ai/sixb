@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, jest, test } from "bun:test"
 import {
   type AgentToolAttachments,
   type AgentToolFiles,
@@ -271,6 +271,8 @@ describe("Exa web_search agent tool", () => {
       "example.com#fragment",
       "*.*.example.com",
       "bad_label.example",
+      "-bad.example",
+      "bad-.example",
     ]) {
       expect(() => exaWebSearch(definition, { allowedDomains: [domain] })).toThrow(
         "allowedDomains entries must be Exa domain filters"
@@ -278,35 +280,42 @@ describe("Exa web_search agent tool", () => {
     }
   })
 
-  test("times out a provider request that does not observe cancellation", async () => {
-    const started = Promise.withResolvers<void>()
-    let receivedSignal: AbortSignal | undefined
-    const { execute } = harness(
-      {
-        search(_request, options) {
-          receivedSignal = options?.signal
-          started.resolve()
-          return new Promise(() => {})
+  // The connector-resolution row runs on the default timeout. Neither stage observes cancellation.
+  // Awaits use `.catch`, not `expect().rejects`: Bun's matcher on a promise that never settles
+  // outlives the per-test timeout, so a broken timeout would hang the file instead of failing.
+  test.each([
+    ["provider request", { timeoutMs: 10 }, 10],
+    ["connector resolution", {}, 20_000],
+  ] as const)("times out a hung %s", async (stage, options, timeoutMs) => {
+    jest.useFakeTimers()
+    try {
+      const started = Promise.withResolvers<void>()
+      let receivedSignal: AbortSignal | undefined
+      const hang = () => {
+        started.resolve()
+        return new Promise<never>(() => {})
+      }
+      const { execute } = harness(
+        {
+          search(_request, requestOptions) {
+            receivedSignal = requestOptions?.signal
+            return hang()
+          },
         },
-      },
-      { timeoutMs: 10 }
-    )
-    const execution = execute("slow search")
-    await started.promise
+        options,
+        new AbortController().signal,
+        stage === "connector resolution" ? hang : undefined
+      )
+      const execution = execute("slow search")
+      await started.promise
 
-    await expect(execution).rejects.toThrow("web_search timed out after 10ms")
-    expect(receivedSignal?.aborted).toBe(true)
-  })
+      jest.advanceTimersByTime(timeoutMs)
 
-  test("times out connector resolution", async () => {
-    const { execute } = harness(
-      { search: async () => response([]) },
-      { timeoutMs: 10 },
-      new AbortController().signal,
-      () => new Promise(() => {})
-    )
-
-    await expect(execute("slow connector")).rejects.toThrow("web_search timed out after 10ms")
+      await expectPublicFailure(execution, `web_search timed out after ${timeoutMs}ms`)
+      if (stage === "provider request") expect(receivedSignal?.aborted).toBe(true)
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   test("passes run cancellation to a provider request that does not observe it", async () => {
@@ -330,7 +339,7 @@ describe("Exa web_search agent tool", () => {
 
     controller.abort(cancellation)
 
-    await expect(execution).rejects.toBe(cancellation)
+    expect(await execution.catch((caught) => caught)).toBe(cancellation)
     expect(receivedSignal?.aborted).toBe(true)
   })
 
@@ -567,34 +576,32 @@ describe("Exa web_fetch agent tool", () => {
     for (const options of [{ maxCharacters: 0 }, { timeoutMs: Number.POSITIVE_INFINITY }]) {
       expect(() => exaWebFetch(definition, options)).toThrow("[SixbExa]")
     }
+    // Filter syntax is shared with web_search, whose definition test covers each invalid form.
     expect(() => exaWebFetch(definition, { allowedDomains: [] })).toThrow(
       "allowedDomains must contain from 1 to 1200 domains"
     )
-    for (const domain of [
-      "https://sixb.ai/docs",
-      "sixb.ai:443",
-      "user@sixb.ai",
-      "sixb.ai?",
-      "sixb.ai/docs#",
-      "bad_label.example",
-      "-bad.example",
-      "bad-.example",
-      " ",
-    ]) {
-      expect(() => exaWebFetch(definition, { deniedDomains: [domain] })).toThrow(
-        "deniedDomains entries must be Exa domain filters"
-      )
-    }
+    expect(() => exaWebFetch(definition, { deniedDomains: ["sixb.ai:443"] })).toThrow(
+      "deniedDomains entries must be Exa domain filters"
+    )
   })
 
   test("times out connector resolution and passes cancellation to contents requests", async () => {
-    const timedOut = fetchHarness(
-      {},
-      { timeoutMs: 10 },
-      new AbortController().signal,
-      () => new Promise(() => {})
-    )
-    await expectPublicFailure(timedOut.execute("https://sixb.ai"), "web_fetch timed out after 10ms")
+    jest.useFakeTimers()
+    try {
+      const resolving = Promise.withResolvers<void>()
+      const timedOut = fetchHarness({}, { timeoutMs: 10 }, new AbortController().signal, () => {
+        resolving.resolve()
+        return new Promise(() => {})
+      })
+      const execution = timedOut.execute("https://sixb.ai")
+      await resolving.promise
+
+      jest.advanceTimersByTime(10)
+
+      await expectPublicFailure(execution, "web_fetch timed out after 10ms")
+    } finally {
+      jest.useRealTimers()
+    }
 
     const started = Promise.withResolvers<void>()
     let receivedSignal: AbortSignal | undefined
@@ -611,12 +618,12 @@ describe("Exa web_fetch agent tool", () => {
       { timeoutMs: 1_000 },
       controller.signal
     )
-    const execution = cancelled.execute("https://sixb.ai")
+    const execution = Promise.resolve(cancelled.execute("https://sixb.ai"))
     await started.promise
 
     controller.abort(cancellation)
 
-    await expect(execution).rejects.toBe(cancellation)
+    expect(await execution.catch((caught) => caught)).toBe(cancellation)
     expect(receivedSignal?.aborted).toBe(true)
   })
 })

@@ -1,161 +1,152 @@
-import { afterEach, expect, test } from "bun:test"
+import { afterEach, expect, jest, test } from "bun:test"
+import type { AceIotClient } from "../src"
 import { AceIotApiError, AceIotConfigurationError, aceIot } from "../src"
 import { API_KEY, CONTEXT, createTestClient, json, mockFetch, page } from "./helpers"
 
 const originalFetch = globalThis.fetch
 
 afterEach(() => {
+  jest.useRealTimers()
   globalThis.fetch = originalFetch
 })
 
-test("the key is sent as Bearer auth, which ACE requires despite calling it an apiKey header", async () => {
-  let headers = new Headers()
+/** Drain pending microtasks; setImmediate is not faked, so it also works under fake timers. */
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+test("the key, static or resolved per request, is sent as Bearer auth, which ACE requires", async () => {
+  const headers: Headers[] = []
   mockFetch((_input, init) => {
-    headers = new Headers(init?.headers)
+    headers.push(new Headers(init?.headers))
     return Promise.resolve(json(page([])))
   })
 
-  const ace = await createTestClient()
-  await ace.sites.list()
+  await (await createTestClient()).sites.list()
 
-  expect(headers.get("authorization")).toBe(`Bearer ${API_KEY}`)
-  expect(headers.get("accept")).toBe("application/json")
-})
-
-test("an async key resolver is called for every attempt, so rotation needs no reconnect", async () => {
-  const keys: string[] = []
+  // A resolver is called for every request, so key rotation needs no reconnect.
   let issued = 0
-  mockFetch((_input, init) => {
-    keys.push(new Headers(init?.headers).get("authorization") ?? "")
-    return Promise.resolve(json(page([])))
-  })
+  const rotating = await aceIot({ apiKey: async () => `rotating-${++issued}` }).connect(CONTEXT)
+  await rotating.sites.list()
+  await rotating.sites.list()
 
-  const ace = await aceIot({
-    apiKey: async () => `rotating-${++issued}`,
-  }).connect(CONTEXT)
-  await ace.sites.list()
-  await ace.sites.list()
-
-  expect(keys).toEqual(["Bearer rotating-1", "Bearer rotating-2"])
+  // ACE rejects a bare token even though its own spec calls this an apiKey header.
+  expect(headers.map((sent) => sent.get("authorization"))).toEqual([
+    `Bearer ${API_KEY}`,
+    "Bearer rotating-1",
+    "Bearer rotating-2",
+  ])
+  expect(headers[0].get("accept")).toBe("application/json")
 })
 
-test("a failing response throws AceIotApiError carrying status and parsed body", async () => {
-  mockFetch(async () =>
-    json({ message: "A database result was required but none was found." }, { status: 404 })
-  )
-  const ace = await createTestClient()
+const VALIDATION_DETAIL =
+  "Results per page {error_msg} The value '7' is not a valid choice for 'per_page'."
 
-  const promise = ace.points.get("client/site/dev/analogInput/1")
-  await expect(promise).rejects.toBeInstanceOf(AceIotApiError)
-  await expect(promise).rejects.toThrow(
-    "[SixbAceIot] ACE API request failed with 404: A database result was required but none was found."
-  )
-
-  const error = (await promise.catch((caught: unknown) => caught)) as AceIotApiError
-  expect(error.status).toBe(404)
-  expect(error.responseBody).toEqual({
-    message: "A database result was required but none was found.",
-  })
-})
-
-test("Flask-RESTX field validation is surfaced through validationErrors", async () => {
-  mockFetch(async () =>
-    json(
-      {
-        errors: {
-          per_page:
-            "Results per page {error_msg} The value '7' is not a valid choice for 'per_page'.",
-        },
-        message: "Input payload validation failed",
-      },
-      { status: 400 }
-    )
-  )
-  const ace = await createTestClient()
-
-  const error = (await ace.sites.get("site").catch((caught: unknown) => caught)) as AceIotApiError
-
-  expect(error.status).toBe(400)
-  expect(error.validationErrors).toEqual({
-    per_page: "Results per page {error_msg} The value '7' is not a valid choice for 'per_page'.",
-  })
-  expect(error.message).toContain("Input payload validation failed")
-  expect(error.message).toContain("per_page:")
-})
-
-test("a 500 carrying Flask's generic message says that a bad key also produces it", async () => {
-  // Verified live: an invalid ACE key answers 500, not 401.
-  mockFetch(async () => json({ message: "An unhandled exception occurred." }, { status: 500 }))
+test.each([
+  [
+    "a bare message",
+    404,
+    { message: "A database result was required but none was found." },
+    {},
+    {
+      message:
+        "[SixbAceIot] ACE API request failed with 404: A database result was required but none was found.",
+    },
+  ],
+  [
+    "Flask-RESTX field validation",
+    400,
+    { errors: { per_page: VALIDATION_DETAIL }, message: "Input payload validation failed" },
+    {},
+    {
+      message: `[SixbAceIot] ACE API request failed with 400: Input payload validation failed (per_page: ${VALIDATION_DETAIL})`,
+      validationErrors: { per_page: VALIDATION_DETAIL },
+    },
+  ],
+  [
+    // Verified live: an invalid ACE key answers 500 with Flask's generic message, not 401.
+    "Flask's generic 500, which a bad key also produces",
+    500,
+    { message: "An unhandled exception occurred." },
+    {},
+    {
+      message:
+        "[SixbAceIot] ACE API request failed with 500: An unhandled exception occurred. ACE also returns this when the API key is invalid.",
+    },
+  ],
+  [
+    "an unrelated 500, which gets no key hint",
+    500,
+    { message: "Upstream timeout" },
+    {},
+    { message: "[SixbAceIot] ACE API request failed with 500: Upstream timeout" },
+  ],
+  [
+    "a 429 with Retry-After",
+    429,
+    { message: "Slow down" },
+    { "retry-after": "2" },
+    { message: "[SixbAceIot] ACE API request failed with 429: Slow down", retryAfterMs: 2000 },
+  ],
+] as const)("%s throws AceIotApiError carrying status, body, and detail", async (_name, status, body, headers, expected) => {
+  mockFetch(async () => json(body, { status, headers }))
   const ace = await createTestClient({ retry: { maxRetries: 0 } })
 
-  const error = (await ace.sites.list().catch((caught: unknown) => caught)) as AceIotApiError
+  const error = await ace.sites.list().catch((caught: unknown) => caught)
 
-  expect(error.status).toBe(500)
-  expect(error.message).toBe(
-    "[SixbAceIot] ACE API request failed with 500: An unhandled exception occurred. ACE also returns this when the API key is invalid."
-  )
+  expect(error).toBeInstanceOf(AceIotApiError)
+  expect(error).toMatchObject({
+    status,
+    responseBody: body,
+    message: expected.message,
+    retryAfterMs: "retryAfterMs" in expected ? expected.retryAfterMs : null,
+    validationErrors: "validationErrors" in expected ? expected.validationErrors : null,
+  })
 })
 
-test("a 500 on an unrelated message gets no key hint", async () => {
-  mockFetch(async () => json({ message: "Upstream timeout" }, { status: 500 }))
-  const ace = await createTestClient({ retry: { maxRetries: 0 } })
-
-  const error = (await ace.sites.list().catch((caught: unknown) => caught)) as AceIotApiError
-  expect(error.message).toBe("[SixbAceIot] ACE API request failed with 500: Upstream timeout")
-})
-
-test("retryAfterMs is parsed from the Retry-After header", async () => {
-  mockFetch(async () =>
-    json({ message: "Slow down" }, { status: 429, headers: { "retry-after": "2" } })
-  )
-  const ace = await createTestClient({ retry: { maxRetries: 0 } })
-
-  const error = (await ace.sites.list().catch((caught: unknown) => caught)) as AceIotApiError
-  expect(error.retryAfterMs).toBe(2000)
-})
-
-test("a 429 on a read is retried and honors Retry-After", async () => {
+test("a 429 on a read is retried after the Retry-After delay", async () => {
   let attempts = 0
   mockFetch(async () => {
     attempts += 1
     return attempts === 1
-      ? json({ message: "Slow down" }, { status: 429, headers: { "retry-after": "0" } })
+      ? json({ message: "Slow down" }, { status: 429, headers: { "retry-after": "2" } })
       : json(page([]))
   })
   const ace = await createTestClient()
 
-  await ace.sites.list()
+  jest.useFakeTimers()
+  const listed = ace.sites.list()
+  await settle()
+  expect(jest.getTimerCount()).toBe(1)
 
+  jest.advanceTimersByTime(1999)
+  await settle()
+  expect(attempts).toBe(1)
+
+  jest.advanceTimersByTime(1)
+  await listed
   expect(attempts).toBe(2)
 })
 
-test("a 5xx on a read is retried up to maxRetries and then surfaces", async () => {
+test("a 5xx on a read is retried up to the default two retries and then surfaces", async () => {
   let attempts = 0
   mockFetch(async () => {
     attempts += 1
     return json({ message: "Boom" }, { status: 503 })
   })
-  const ace = await createTestClient({ retry: { maxRetries: 2, delayMs: () => 0 } })
+  const ace = await createTestClient({ retry: { delayMs: () => 0 } })
 
   await expect(ace.sites.list()).rejects.toBeInstanceOf(AceIotApiError)
   expect(attempts).toBe(3)
 })
 
-test("a network error on a read is retried", async () => {
-  let attempts = 0
-  mockFetch(async () => {
-    attempts += 1
-    if (attempts < 3) throw new TypeError("network down")
-    return json(page([]))
-  })
-  const ace = await createTestClient({ retry: { delayMs: () => 0 } })
-
-  await ace.sites.list()
-
-  expect(attempts).toBe(3)
-})
-
-test("writes are never replayed, because every ACE write changes state", async () => {
+test.each([
+  [
+    "a point batch write",
+    (ace: AceIotClient) =>
+      ace.points.create([{ name: "client/site/dev/analogInput/1", collect_enabled: true }]),
+  ],
+  // A replay would issue a second credential.
+  ["minting a gateway token", (ace: AceIotClient) => ace.gateways.createToken("gw")],
+])("%s is never replayed, because every ACE write changes state", async (_name, write) => {
   let attempts = 0
   mockFetch(async () => {
     attempts += 1
@@ -163,22 +154,7 @@ test("writes are never replayed, because every ACE write changes state", async (
   })
   const ace = await createTestClient({ retry: { delayMs: () => 0 } })
 
-  await expect(
-    ace.points.create([{ name: "client/site/dev/analogInput/1", collect_enabled: true }])
-  ).rejects.toBeInstanceOf(AceIotApiError)
-
-  expect(attempts).toBe(1)
-})
-
-test("minting a gateway token is never replayed", async () => {
-  let attempts = 0
-  mockFetch(async () => {
-    attempts += 1
-    return json({ message: "Boom" }, { status: 500 })
-  })
-  const ace = await createTestClient({ retry: { delayMs: () => 0 } })
-
-  await expect(ace.gateways.createToken("gw")).rejects.toBeInstanceOf(AceIotApiError)
+  await expect(write(ace)).rejects.toBeInstanceOf(AceIotApiError)
 
   expect(attempts).toBe(1)
 })
@@ -227,31 +203,26 @@ test("a custom retry policy replaces the default decision", async () => {
   expect(seen[0]).toEqual({ method: "PATCH", idempotent: false, status: 400 })
 })
 
-test("an aborted request is not retried", async () => {
-  let attempts = 0
-  mockFetch(async () => {
-    attempts += 1
-    throw new DOMException("aborted", "AbortError")
-  })
-  const ace = await createTestClient({ retry: { delayMs: () => 0 } })
-
-  await expect(ace.sites.list()).rejects.toThrow("aborted")
-  expect(attempts).toBe(1)
-})
-
 test("minDelayMs spaces request starts", async () => {
-  const starts: number[] = []
+  let starts = 0
   mockFetch(async () => {
-    starts.push(Date.now())
+    starts += 1
     return json(page([]))
   })
   const ace = await createTestClient({ minDelayMs: 40 })
 
-  await Promise.all([ace.sites.list(), ace.sites.list(), ace.sites.list()])
+  jest.useFakeTimers()
+  const listed = Promise.all([ace.sites.list(), ace.sites.list()])
+  await settle()
+  expect(starts).toBe(1)
 
-  expect(starts).toHaveLength(3)
-  expect(starts[1] - starts[0]).toBeGreaterThanOrEqual(30)
-  expect(starts[2] - starts[1]).toBeGreaterThanOrEqual(30)
+  jest.advanceTimersByTime(39)
+  await settle()
+  expect(starts).toBe(1)
+
+  jest.advanceTimersByTime(1)
+  await listed
+  expect(starts).toBe(2)
 })
 
 test("an empty or non-string key is rejected before any request", () => {

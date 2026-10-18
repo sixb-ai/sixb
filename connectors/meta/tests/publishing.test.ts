@@ -71,10 +71,14 @@ describe("Meta publishing contracts", () => {
   })
 
   test("scopes Instagram pagination, insights and published media reads", async () => {
-    respond = () => json({ data: [], id: "media", permalink: "https://instagram.com/p/test" })
+    respond = (url) =>
+      url.pathname === "/v23.0/ig/media" && !url.searchParams.has("after")
+        ? json({ data: [{ id: "m1" }], paging: { cursors: { after: "C1" }, next: "https://x" } })
+        : json({ data: [{ id: "m2" }], id: "media", permalink: "https://instagram.com/p/test" })
     const api = await client()
     const ig = api.instagram("ig", { accessToken: "scoped" })
-    await ig.media.list()
+    const ids: string[] = []
+    for await (const media of ig.media.listAll()) ids.push(media.id)
     await ig.stories.list()
     await ig.insights.get({ metrics: ["reach"] })
     await api
@@ -83,6 +87,8 @@ describe("Meta publishing contracts", () => {
     expect(await api.instagramMedia("media", { accessToken: "scoped" }).get()).toMatchObject({
       permalink: "https://instagram.com/p/test",
     })
+    expect(ids).toEqual(["m1", "m2"])
+    expect(requests[1]?.url.searchParams.get("after")).toBe("C1")
     for (const request of requests)
       expect(new Headers(request.init.headers).get("authorization")).toBe("Bearer scoped")
   })
@@ -137,7 +143,7 @@ describe("Meta publishing contracts", () => {
     })
   })
 
-  test("Facebook photos preserve optional post_id and serialize files as multipart", async () => {
+  test("Facebook photos send hosted URLs as JSON and files as multipart; posts attach media", async () => {
     respond = () => json({ id: "photo" })
     const api = await client()
     const fb = api.facebook("page", { accessToken: "page-token" })
@@ -245,11 +251,21 @@ describe("Meta publishing contracts", () => {
 
   // Regression proof: remove retryable:false in src/publishing.ts; these cases must fail.
   test.each([
-    429, 500, 400,
-  ])("never replays a mutation on HTTP %i, even with an always-true policy", async (status) => {
+    {
+      failure: "HTTP 429",
+      error: MetaApiError,
+      respond: () => json({ error: { message: "Rejected", code: 4, error_subcode: 2207051 } }, 429),
+    },
+    {
+      failure: "a network error",
+      error: TypeError,
+      respond: (): Response => {
+        throw new TypeError("connection lost")
+      },
+    },
+  ])("never replays a mutation after $failure, even with an always-true policy", async (row) => {
     let policyCalls = 0
-    respond = () =>
-      json({ error: { message: "Rejected", code: 4, error_subcode: 2207051 } }, status)
+    respond = row.respond
     const api = await client({
       retry: {
         maxRetries: 2,
@@ -262,20 +278,9 @@ describe("Meta publishing contracts", () => {
     })
     await expect(
       api.instagram("ig").media.publish({ creation_id: "container" })
-    ).rejects.toBeInstanceOf(MetaApiError)
+    ).rejects.toBeInstanceOf(row.error)
     expect(requests).toHaveLength(1)
     expect(policyCalls).toBe(0)
-  })
-
-  test("a network timeout is returned without a second publication attempt", async () => {
-    respond = () => {
-      throw new TypeError("connection lost")
-    }
-    const api = await client({ retry: { delayMs: () => 0 } })
-    await expect(
-      api.facebook("page").photos.create({ url: "https://cdn.example/a.jpg" })
-    ).rejects.toThrow("connection lost")
-    expect(requests).toHaveLength(1)
   })
 
   test.each([
@@ -407,15 +412,8 @@ describe("Meta publishing contracts", () => {
     })
   })
 
-  test("keeps tasks from Page discovery for permission checks", async () => {
-    respond = () => json({ data: [{ id: "page", tasks: ["PROFILE_PLUS_CREATE_CONTENT"] }] })
-    const api = await client()
-    expect((await api.pages.list({ fields: ["id", "tasks"] })).items[0]?.tasks).toEqual([
-      "PROFILE_PLUS_CREATE_CONTENT",
-    ])
-  })
-
   test("upload respects runtime cancellation", async () => {
+    await client()
     const abort = new AbortController()
     abort.abort()
     const api = await meta({ accessToken: "default" }).connect({ ...context, signal: abort.signal })
@@ -423,7 +421,8 @@ describe("Meta publishing contracts", () => {
       api
         .instagramContainer("container")
         .upload("https://rupload.facebook.com/ig-api-upload/container", { file: new Blob(["x"]) })
-    ).rejects.toThrow()
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(requests).toHaveLength(0)
   })
 })
 

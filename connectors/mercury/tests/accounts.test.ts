@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { collect, createTestClient, json, mockFetch, query, recorder, TOKEN } from "./helpers"
+import { collect, createTestClient, json, query, recorder } from "./helpers"
 
 const originalFetch = globalThis.fetch
 
@@ -24,7 +24,7 @@ function account(id: string) {
   }
 }
 
-test("list sends bearer auth and cursor params against the accounts endpoint", async () => {
+test("list sends cursor params to the accounts endpoint and decodes accounts", async () => {
   const calls = recorder([json({ accounts: [account("a1")], page: {} })])
   const mc = await createTestClient()
 
@@ -35,19 +35,6 @@ test("list sends bearer auth and cursor params against the accounts endpoint", a
   expect(calls[0]?.url).toStartWith("https://api.mercury.com/api/v1/accounts?")
   expect(query(calls[0]?.url ?? "").get("limit")).toBe("250")
   expect(query(calls[0]?.url ?? "").get("order")).toBe("desc")
-})
-
-test("bearer token is sent exactly as provided, including its secret-token prefix", async () => {
-  const authorizations: (string | null)[] = []
-  mockFetch(async (_input, init) => {
-    authorizations.push(new Headers(init?.headers).get("authorization"))
-    return json({ accounts: [], page: {} })
-  })
-
-  const mc = await createTestClient()
-  await mc.accounts.list()
-
-  expect(authorizations).toEqual([`Bearer ${TOKEN}`])
 })
 
 test("listAll follows page.nextPage as start_after and stops when it is absent", async () => {
@@ -76,17 +63,12 @@ test("listAll throws when the API repeats a cursor instead of looping forever", 
   await expect(collect(mc.accounts.listAll())).rejects.toThrow(/repeated nextPage cursor/)
 })
 
-test("start_after and end_before are rejected together", async () => {
+test.each([
+  ["start_after with end_before", { start_after: "a1", end_before: "a9" }, "mutually exclusive"],
+  ["a limit over Mercury's 1000 ceiling", { limit: 1001 }, "between 1 and 1000"],
+  ["a zero limit", { limit: 0 }, "between 1 and 1000"],
+])("list rejects %s before a request", async (_name, options, message) => {
   const mc = await createTestClient()
 
-  expect(() => mc.accounts.list({ start_after: "a1", end_before: "a9" })).toThrow(
-    "mutually exclusive"
-  )
-})
-
-test("limit is validated against Mercury's 1000 ceiling", async () => {
-  const mc = await createTestClient()
-
-  expect(() => mc.accounts.list({ limit: 1001 })).toThrow("between 1 and 1000")
-  expect(() => mc.accounts.list({ limit: 0 })).toThrow("between 1 and 1000")
+  expect(() => mc.accounts.list(options)).toThrow(message)
 })

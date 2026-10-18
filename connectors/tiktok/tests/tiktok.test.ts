@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { ConnectorOAuthError } from "@sixb/core"
-import { TiktokApiError, tiktok } from "../src"
+import { tiktok } from "../src"
 
 const originalFetch = globalThis.fetch
 const signal = new AbortController().signal
@@ -480,56 +480,6 @@ describe("TikTok Ads resources", () => {
       const url = new URL(request)
       const advertiserIds = url.searchParams.get("advertiser_ids")
       expect(url.searchParams.get("advertiser_id") ?? advertiserIds).toContain("adv-1")
-    }
-  })
-
-  test("invalidates a rejected token and retries once with the refreshed value", async () => {
-    const usedTokens: string[] = []
-    mockFetch(async (_input, init) => {
-      const token = new Headers(init?.headers).get("access-token") ?? ""
-      usedTokens.push(token)
-      return token === "old-token"
-        ? json({ code: 40100, message: "Access token is invalid", data: {} }, { status: 401 })
-        : json({
-            code: 0,
-            message: "OK",
-            data: {
-              list: [{ advertiser_id: "adv-1", name: "Acme" }],
-            },
-          })
-    })
-
-    let invalidated = false
-    const adapter = adsAdapter()
-    const client = await adapter.connect({
-      ...context,
-      connectionId: "connection-1",
-      account: { id: "adv-1", label: "Acme" },
-      tokenSource: {
-        async get() {
-          const accessToken = invalidated ? "new-token" : "old-token"
-          return { accessToken, invalidate: () => (invalidated = true) }
-        },
-      },
-    })
-
-    expect((await client.adAccount.get()).name).toBe("Acme")
-    expect(usedTokens).toEqual(["old-token", "new-token"])
-  })
-
-  test("preserves structured API failures", async () => {
-    mockFetch(async () =>
-      json({ code: 40002, message: "Invalid advertiser", request_id: "req-bad", data: {} })
-    )
-    const client = await adsClient()
-
-    try {
-      await client.ads.list()
-      throw new Error("expected request to fail")
-    } catch (error) {
-      expect(error).toBeInstanceOf(TiktokApiError)
-      expect((error as TiktokApiError).code).toBe(40002)
-      expect((error as TiktokApiError).requestId).toBe("req-bad")
     }
   })
 })

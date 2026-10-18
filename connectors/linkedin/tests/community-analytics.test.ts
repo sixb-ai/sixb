@@ -82,63 +82,40 @@ describe("linkedin community analytics", () => {
     })
   })
 
-  // Regression guard: restore indexed ugcPosts parameters to reproduce the rejected wire shape.
-  test("serializes UGC posts as a Rest.li list", async () => {
-    const organization = organizationUrn(123)
-    const firstPost = ugcPostUrn(789)
-    const secondPost = ugcPostUrn(790)
+  // Regression guard: restore indexed ugcPosts parameters, or percent-encode the List syntax, to
+  // reproduce the rejected wire shapes. Values are the raw (still-encoded) query parameters.
+  test.each([
+    {
+      batch: "UGC posts",
+      posts: [ugcPostUrn(789), ugcPostUrn(790)],
+      shares: undefined,
+      ugcPosts: "List(urn%3Ali%3AugcPost%3A789,urn%3Ali%3AugcPost%3A790)",
+    },
+    {
+      batch: "shares",
+      posts: [shareUrn(456), shareUrn(457)],
+      shares: "List(urn%3Ali%3Ashare%3A456,urn%3Ali%3Ashare%3A457)",
+      ugcPosts: undefined,
+    },
+    {
+      batch: "mixed shares and UGC posts",
+      posts: [shareUrn(456), ugcPostUrn(789)],
+      shares: "List(urn%3Ali%3Ashare%3A456)",
+      ugcPosts: "List(urn%3Ali%3AugcPost%3A789)",
+    },
+    { batch: "no posts", posts: [], shares: undefined, ugcPosts: undefined },
+  ])("serializes $batch as independent Rest.li lists", async ({ posts, shares, ugcPosts }) => {
     const calls = recorder([json({ elements: [] })])
     const client = await createTestClient()
 
-    await client.organizationAnalytics.shares(organization, {
-      posts: [firstPost, secondPost],
-    })
+    await client.organizationAnalytics.shares(organizationUrn(123), { posts })
 
-    const url = calls[0]?.url ?? ""
-    expect(url).toContain("ugcPosts=List(urn%3Ali%3AugcPost%3A789,urn%3Ali%3AugcPost%3A790)")
-    expect(url).not.toContain("ugcPosts%5B0%5D")
-    expect(new URL(url).searchParams.get("ugcPosts")).toBe(`List(${firstPost},${secondPost})`)
-  })
-
-  test("serializes shares as a Rest.li list", async () => {
-    const organization = organizationUrn(123)
-    const firstShare = shareUrn(456)
-    const secondShare = shareUrn(457)
-    const calls = recorder([json({ elements: [] })])
-    const client = await createTestClient()
-
-    await client.organizationAnalytics.shares(organization, {
-      posts: [firstShare, secondShare],
-    })
-
-    const url = calls[0]?.url ?? ""
-    expect(url).toContain("shares=List(urn%3Ali%3Ashare%3A456,urn%3Ali%3Ashare%3A457)")
-    expect(url).not.toContain("shares=List%28")
-  })
-
-  test("serializes mixed share and UGC post batches independently", async () => {
-    const organization = organizationUrn(123)
-    const share = shareUrn(456)
-    const ugcPost = ugcPostUrn(789)
-    const calls = recorder([json({ elements: [] })])
-    const client = await createTestClient()
-
-    await client.organizationAnalytics.shares(organization, { posts: [share, ugcPost] })
-
-    const url = calls[0]?.url ?? ""
-    expect(url).toContain("shares=List(urn%3Ali%3Ashare%3A456)")
-    expect(url).toContain("ugcPosts=List(urn%3Ali%3AugcPost%3A789)")
-  })
-
-  test("omits Rest.li post lists when no posts are requested", async () => {
-    const calls = recorder([json({ elements: [] })])
-    const client = await createTestClient()
-
-    await client.organizationAnalytics.shares(organizationUrn(123), { posts: [] })
-
-    const params = new URL(calls[0]?.url ?? "").searchParams
-    expect(params.has("shares")).toBe(false)
-    expect(params.has("ugcPosts")).toBe(false)
+    const query = new URL(calls[0]?.url ?? "").search.slice(1).split("&")
+    const raw = (key: string) =>
+      query.find((entry) => entry.startsWith(`${key}=`))?.slice(key.length + 1)
+    expect(raw("shares")).toBe(shares)
+    expect(raw("ugcPosts")).toBe(ugcPosts)
+    expect(query.some((entry) => entry.includes("%5B0%5D"))).toBe(false)
   })
 
   test("preserves Rest.li post lists through query tunneling", async () => {

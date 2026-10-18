@@ -43,21 +43,22 @@ function verifyCtx(body: string, signature: string | null): VerifyCtx {
 }
 
 describe("mercury events webhook", () => {
-  test("registers only when onEvent is set", () => {
+  const body = JSON.stringify(EVENT)
+  const tampered = JSON.stringify({ ...EVENT, resourceId: "attacker-controlled" })
+  const sixMinutesAgo = Date.now() - 6 * 60 * 1000
+
+  test("registers the events route only when onEvent is set, alongside any extra webhooks", () => {
     expect(mercury({ accessToken: TOKEN }).webhooks).toBeUndefined()
     expect(
       mercury({ accessToken: TOKEN, webhookAllowUnverified: true, onEvent: () => {} }).webhooks
     ).toHaveLength(1)
-  })
 
-  test("extra webhooks are registered alongside the built-in events route", () => {
     const connector = mercury({
       accessToken: TOKEN,
       webhookAllowUnverified: true,
       onEvent: () => {},
       webhooks: [mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {} }) as never],
     })
-
     expect(connector.webhooks).toHaveLength(2)
   })
 
@@ -69,7 +70,6 @@ describe("mercury events webhook", () => {
         received.push(context)
       },
     })
-    const body = JSON.stringify(EVENT)
     const sixb = { id: "demo" }
     const client = () => Promise.resolve({} as never)
 
@@ -92,33 +92,33 @@ describe("mercury events webhook", () => {
     expect(received[0]?.client).toBe(client)
   })
 
-  test("rejects a tampered body under a valid-looking signature", () => {
+  test.each([
+    [
+      "a tampered body under a valid-looking signature",
+      tampered,
+      sign(SECRET, body),
+      "Invalid webhook signature",
+    ],
+    [
+      "a signature produced with the wrong secret",
+      body,
+      sign("whsec_other", body),
+      "Invalid webhook signature",
+    ],
+    // The replay window.
+    ["a stale timestamp", body, sign(SECRET, body, sixMinutesAgo), "outside the allowed window"],
+    ["a missing signature header", body, null, "Missing Mercury-Signature"],
+    ["a header without a timestamp", body, "v1=deadbeef", "Malformed Mercury-Signature header"],
+    [
+      "a non-numeric timestamp",
+      body,
+      "t=notanumber,v1=deadbeef",
+      "Malformed Mercury-Signature timestamp",
+    ],
+  ])("rejects %s", (_name, delivered, signature, message) => {
     const webhook = mercuryEventsWebhook({ credential: SECRET, onEvent: () => {} })
-    const signed = JSON.stringify(EVENT)
-    const tampered = JSON.stringify({ ...EVENT, resourceId: "attacker-controlled" })
 
-    expect(() => webhook.verify?.(verifyCtx(tampered, sign(SECRET, signed)))).toThrow(
-      "Invalid webhook signature"
-    )
-  })
-
-  test("rejects a signature produced with the wrong secret", () => {
-    const webhook = mercuryEventsWebhook({ credential: SECRET, onEvent: () => {} })
-    const body = JSON.stringify(EVENT)
-
-    expect(() => webhook.verify?.(verifyCtx(body, sign("whsec_other", body)))).toThrow(
-      "Invalid webhook signature"
-    )
-  })
-
-  test("rejects a stale timestamp to block replays", () => {
-    const webhook = mercuryEventsWebhook({ credential: SECRET, onEvent: () => {} })
-    const body = JSON.stringify(EVENT)
-    const sixMinutesAgo = Date.now() - 6 * 60 * 1000
-
-    expect(() => webhook.verify?.(verifyCtx(body, sign(SECRET, body, sixMinutesAgo)))).toThrow(
-      "outside the allowed window"
-    )
+    expect(() => webhook.verify?.(verifyCtx(delivered, signature))).toThrow(message)
   })
 
   test("accepts a stale timestamp when the tolerance is widened", () => {
@@ -127,23 +127,8 @@ describe("mercury events webhook", () => {
       onEvent: () => {},
       toleranceMs: 60 * 60 * 1000,
     })
-    const body = JSON.stringify(EVENT)
-    const sixMinutesAgo = Date.now() - 6 * 60 * 1000
 
     expect(() => webhook.verify?.(verifyCtx(body, sign(SECRET, body, sixMinutesAgo)))).not.toThrow()
-  })
-
-  test("rejects a missing or malformed signature header", () => {
-    const webhook = mercuryEventsWebhook({ credential: SECRET, onEvent: () => {} })
-    const body = JSON.stringify(EVENT)
-
-    expect(() => webhook.verify?.(verifyCtx(body, null))).toThrow("Missing Mercury-Signature")
-    expect(() => webhook.verify?.(verifyCtx(body, "v1=deadbeef"))).toThrow(
-      "Malformed Mercury-Signature header"
-    )
-    expect(() => webhook.verify?.(verifyCtx(body, "t=notanumber,v1=deadbeef"))).toThrow(
-      "Malformed Mercury-Signature timestamp"
-    )
   })
 
   test("skips verification when no secret is configured", () => {
@@ -208,7 +193,7 @@ describe("mercuryEventsWebhook without a secret", () => {
     expect(() => mercuryEventsWebhook(missing)).toThrow(/Mercury-Signature/)
   })
 
-  test("accepts unverified deliveries when asked to, and says so", () => {
+  test("accepts unverified deliveries when asked to, and says so only then", () => {
     const warnings = captureWarnings(() =>
       mercuryEventsWebhook({ allowUnverified: true, onEvent: () => {} })
     )
@@ -216,14 +201,11 @@ describe("mercuryEventsWebhook without a secret", () => {
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain("Mercury-Signature")
     expect(warnings[0]).toContain("accepts unverified requests")
-  })
 
-  test("stays quiet when a secret is configured", () => {
-    const warnings = captureWarnings(() =>
-      mercuryEventsWebhook({ credential: "whsec_test", onEvent: () => {} })
-    )
-
-    expect(warnings).toEqual([])
+    // A configured secret stays quiet.
+    expect(
+      captureWarnings(() => mercuryEventsWebhook({ credential: SECRET, onEvent: () => {} }))
+    ).toEqual([])
   })
 })
 

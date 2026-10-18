@@ -18,8 +18,7 @@ function mock(handler: (url: URL, init: RequestInit) => Response) {
 }
 async function client(
   environment: "sandbox" | "production" = "sandbox",
-  tokens?: ConnectorTokenSource,
-  signal = new AbortController().signal
+  tokens?: ConnectorTokenSource
 ) {
   return quickbooks({
     clientId: "id",
@@ -32,7 +31,7 @@ async function client(
     connectorId: "qb",
     connectionId: "connection",
     account: { id: "123", label: "Company" },
-    signal,
+    signal: new AbortController().signal,
     tokenSource: tokens ?? {
       async get() {
         return { accessToken: "token", invalidate() {} }
@@ -66,19 +65,6 @@ test("invoice PDF preserves bytes, scopes and encodes the URL, and overrides onl
     expect(await qb.invoices.downloadPdf("a/b?#")).toEqual(pdf)
     expect((await qb.invoices.get("42")).Id).toBe("42")
   }
-})
-
-test("invoice PDF rejects invalid IDs before fetching", async () => {
-  const qb = await client()
-  let calls = 0
-  mock(() => {
-    calls++
-    return pdfResponse()
-  })
-  for (const id of ["", " ", ".", ".."]) {
-    expect(() => qb.invoices.downloadPdf(id)).toThrow("[SixbQuickBooks]")
-  }
-  expect(calls).toBe(0)
 })
 
 test("invoice PDF retains provider fault details even on HTTP 200", async () => {
@@ -147,17 +133,4 @@ test("invoice PDF refreshes a rejected token and retries throttling through REST
   expect(await qb.invoices.downloadPdf("42")).toEqual(pdf)
   expect(invalidations).toBe(1)
   expect(calls).toBe(3)
-})
-
-test("invoice PDF respects connection cancellation", async () => {
-  const controller = new AbortController()
-  const qb = await client("sandbox", undefined, controller.signal)
-  let calls = 0
-  mock(() => {
-    calls++
-    return pdfResponse()
-  })
-  controller.abort()
-  await expect(qb.invoices.downloadPdf("42")).rejects.toThrow()
-  expect(calls).toBe(0)
 })

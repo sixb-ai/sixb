@@ -36,14 +36,25 @@ describe("linkedin reliability", () => {
     expect(authorizations).toEqual(["Bearer token-1", "Bearer token-2"])
   })
 
-  test("does not retry writes by default", async () => {
-    const calls = recorder([json({ message: "temporary" }, { status: 503 })])
-    const client = await createTestClient({ retry: { maxRetries: 2, delayMs: () => 0 } })
+  // 503 hits the LinkedIn retry layer's method gate; 401 hits the REST layer's refresh gate.
+  test.each([
+    503, 401,
+  ])("never replays or invalidates a write rejected with HTTP %i", async (status) => {
+    const calls = recorder([json({ message: "rejected" }, { status })])
+    let invalidations = 0
+    const client = await createTestClient(
+      { retry: { maxRetries: 2, delayMs: () => 0 } },
+      testTokenSource(
+        () => "token",
+        () => invalidations++
+      )
+    )
 
     await expect(
       client.adAccounts.create({ name: "Acme", type: "BUSINESS" })
     ).rejects.toBeInstanceOf(LinkedinApiError)
     expect(calls).toHaveLength(1)
+    expect(invalidations).toBe(0)
   })
 
   test("invalidates and refreshes the exact token rejected by a read", async () => {
@@ -135,24 +146,6 @@ describe("linkedin reliability", () => {
 
     expect(methods).toEqual(["POST", "POST"])
     expect(invalidations).toBe(1)
-  })
-
-  test("never replays or invalidates a rejected write", async () => {
-    const calls = recorder([json({ message: "expired" }, { status: 401 })])
-    let invalidations = 0
-    const client = await createTestClient(
-      {},
-      testTokenSource(
-        () => "expired-token",
-        () => invalidations++
-      )
-    )
-
-    await expect(
-      client.adAccounts.create({ name: "Acme", type: "BUSINESS" })
-    ).rejects.toBeInstanceOf(LinkedinApiError)
-    expect(calls).toHaveLength(1)
-    expect(invalidations).toBe(0)
   })
 
   test("preserves structured API errors and response metadata", async () => {
