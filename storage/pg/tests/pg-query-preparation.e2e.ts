@@ -11,7 +11,7 @@ import type { PostgresStorage } from "../src"
 import { compilePgObjectQuery } from "../src/objects/query-compiler"
 import { findPgSortIndexBound } from "../src/objects/query-indexes"
 import { createPgClient, type SQL, type SqlParameter } from "../src/pg-client"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 const Article = defineObjectType({
   id: "Article",
@@ -47,7 +47,7 @@ beforeAll(async () => {
   const created = await createTestStorage()
   storage = created.storage
   sql = createPgClient({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: created.connectionString,
     schemaName: created.schemaName,
     max: 2,
   })
@@ -58,8 +58,7 @@ beforeAll(async () => {
 })
 afterAll(async () => {
   await sql?.end()
-  await storage?.dropSchema()
-  await storage?.close()
+  if (storage) await disposeTestStorage(storage)
 })
 
 // Guard removal: omit the sort entry-size predicate from query-indexes.ts: the

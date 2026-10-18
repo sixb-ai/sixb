@@ -2,14 +2,11 @@ import { describe, expect, test } from "bun:test"
 import type { ArtifactVersionInput } from "@sixb/core/storage"
 import { runArtifactStorageContractSuite } from "@sixb/core/testing"
 import { PostgresStorage } from "../src"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage, waitForLockWait } from "./helpers"
 
 runArtifactStorageContractSuite("PgArtifactStorage", {
   createStorage: async () => (await createTestStorage()).storage,
-  teardown: async (storage) => {
-    await storage.dropSchema()
-    await storage.close()
-  },
+  teardown: disposeTestStorage,
 })
 
 const projectId = "pg-artifacts"
@@ -30,10 +27,10 @@ describe("PgArtifactStorage under concurrent writes", () => {
     // Reproduce by dropping the `FOR UPDATE` lock at the start of `deleteVersionsByOrigin`: the
     // cleanup reads the artifact as the failed run left it, deletes it, and the cascade takes the
     // version published meanwhile.
-    const { storage, schemaName } = await createTestStorage()
+    const { storage, schemaName, connectionString } = await createTestStorage()
     // Another process on the same database, as a retry's cleanup would be.
     const other = new PostgresStorage({
-      connectionString: process.env.DATABASE_URL ?? "",
+      connectionString,
       schemaName,
       max: 2,
     })
@@ -56,7 +53,7 @@ describe("PgArtifactStorage under concurrent writes", () => {
           version: version("run_retried", 1),
         })
         cleanup = other.artifacts.deleteVersionsByOrigin({ projectId, runId: "run_failed" })
-        await Bun.sleep(300)
+        await waitForLockWait(connectionString, cleanup)
       })
       expect(await cleanup).toBe(1)
       expect(await artifacts.get({ projectId, id: "art_raced" })).toMatchObject({
@@ -67,8 +64,7 @@ describe("PgArtifactStorage under concurrent writes", () => {
       ).not.toBeNull()
     } finally {
       await other.close()
-      await storage.dropSchema()
-      await storage.close()
+      await disposeTestStorage(storage)
     }
   })
 })

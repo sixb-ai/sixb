@@ -21,7 +21,7 @@ import { startTestProjectionRun } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { cleanupSourceVersions } from "../src/ontology-storage/source-cleanup"
 import { createPgClient, type SQL } from "../src/pg-client"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 const Device = defineObjectType({
   id: "Device",
@@ -43,7 +43,7 @@ beforeEach(async () => {
   const created = await createTestStorage()
   storage = created.storage
   sql = createPgClient({
-    connectionString: process.env.DATABASE_URL!,
+    connectionString: created.connectionString,
     schemaName: created.schemaName,
     max: 1,
   })
@@ -51,8 +51,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await sql.end()
-  await storage.dropSchema()
-  await storage.close()
+  await disposeTestStorage(storage)
 })
 
 // A row keeps the transaction id that last wrote it (`xmin`), so a root whose xmin equals its

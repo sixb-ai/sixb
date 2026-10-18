@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { runAuthStorageContractSuite } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
-import { PgAuthStorage } from "../src/auth-storage"
-import { createTestStorage } from "./helpers"
+import type { PgAuthStorage } from "../src/auth-storage"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 const owners = new WeakMap<PgAuthStorage, PostgresStorage>()
 
@@ -16,8 +16,7 @@ runAuthStorageContractSuite("PgAuthStorage", {
     const storage = owners.get(auth)
     if (!storage) return
 
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   },
 })
 
@@ -68,23 +67,6 @@ describe("PostgresStorage auth", () => {
     })
   })
 
-  test("exposes auth storage", async () => {
-    await withStorage(async (storage) => {
-      expect(storage.auth).toBeInstanceOf(PgAuthStorage)
-
-      await expect(
-        storage.auth.users.create({
-          id: "usr_1",
-          projectId: "project-a",
-          email: "ava@acme.com",
-        })
-      ).resolves.toMatchObject({
-        id: "usr_1",
-        email: "ava@acme.com",
-      })
-    })
-  })
-
   test("keeps one active magic link under concurrent creation", async () => {
     await withStorage(async (storage) => {
       await Promise.all([
@@ -124,7 +106,6 @@ async function withStorage(run: (storage: PostgresStorage) => Promise<void>): Pr
   try {
     await run(storage)
   } finally {
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   }
 }

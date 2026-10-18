@@ -1,7 +1,7 @@
 import type { FileUploadSessionStore } from "@sixb/core/storage"
 import { runFileUploadSessionStorageContractSuite } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 const storages = new Map<FileUploadSessionStore, PostgresStorage>()
 
@@ -15,7 +15,6 @@ runFileUploadSessionStorageContractSuite("PgFileUploadSessionStorage", {
     const storage = storages.get(fileUploadSessions)
     if (!storage) return
     storages.delete(fileUploadSessions)
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   },
 })

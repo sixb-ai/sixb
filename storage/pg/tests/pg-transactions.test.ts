@@ -47,24 +47,17 @@ function pgError(code: string, fields: Record<string, string> = {}): Error {
 }
 
 describe("runPgTransaction", () => {
-  test("folds serializable isolation into BEGIN and commits", async () => {
+  test.each([
+    [undefined, "BEGIN"],
+    ["serializable", "BEGIN ISOLATION LEVEL SERIALIZABLE"],
+  ] as const)("folds isolation %p into %p, commits, and releases", async (isolation, begin) => {
     const pool = fakePool()
 
-    const result = await runPgTransaction(pool.sql, async () => "ok", {
-      isolation: "serializable",
-    })
+    const result = await runPgTransaction(pool.sql, async () => "ok", { isolation })
 
     expect(result).toBe("ok")
-    expect(pool.statements).toEqual(["BEGIN ISOLATION LEVEL SERIALIZABLE", "COMMIT"])
+    expect(pool.statements).toEqual([begin, "COMMIT"])
     expect(pool.released()).toBe(true)
-  })
-
-  test("omits the transaction mode when no isolation is requested", async () => {
-    const pool = fakePool()
-
-    await runPgTransaction(pool.sql, async () => "ok")
-
-    expect(pool.statements).toEqual(["BEGIN", "COMMIT"])
   })
 
   test("rolls back and releases the connection when the callback throws", async () => {

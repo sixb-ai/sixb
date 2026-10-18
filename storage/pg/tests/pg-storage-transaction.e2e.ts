@@ -3,7 +3,7 @@ import type { Storage } from "@sixb/core"
 import { StorageTransactionError } from "@sixb/core/storage"
 import { recordTestActionRun, startTestSyncRun, startTestWebhookRun } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 describe("PostgresStorage.transaction", () => {
   let storage: PostgresStorage
@@ -13,8 +13,7 @@ describe("PostgresStorage.transaction", () => {
   })
 
   afterEach(async () => {
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   })
 
   test("commits writes atomically", async () => {

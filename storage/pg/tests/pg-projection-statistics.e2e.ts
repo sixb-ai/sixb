@@ -21,7 +21,7 @@ import type { PostgresStorage } from "../src"
 import { PgMaterializationStateReader } from "../src/ontology-storage/materialization-state"
 import { replacementAssertionRows } from "../src/ontology-storage/source-roots"
 import { createPgClient, type SQLClient } from "../src/pg-client"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 interface PlanNode {
   readonly "Relation Name"?: string
@@ -50,8 +50,8 @@ async function visitedRows(
 
 // Red proof: remove ANALYZE in sources.markReady. The cold plan rereads the run for each identity.
 test("a freshly sealed source uses bounded identity reads before autovacuum runs", async () => {
-  const { storage, schemaName } = await createTestStorage()
-  const sql = createPgClient({ connectionString: process.env.DATABASE_URL!, schemaName, max: 1 })
+  const { storage, schemaName, connectionString } = await createTestStorage()
+  const sql = createPgClient({ connectionString, schemaName, max: 1 })
   try {
     await sql.unsafe(
       "ALTER TABLE ontology_source_rows SET (autovacuum_enabled=false); ANALYZE ontology_source_rows"
@@ -116,15 +116,14 @@ test("a freshly sealed source uses bounded identity reads before autovacuum runs
     expect(await query).toHaveLength(100)
   } finally {
     await sql.end()
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   }
 }, 60_000)
 
 // Red proof: remove the effective-table ANALYZE in finalize. The cold lookup scans all links.
 test("a published bulk load leaves selective statistics for the next sparse projection", async () => {
-  const { storage, schemaName } = await createTestStorage()
-  const sql = createPgClient({ connectionString: process.env.DATABASE_URL!, schemaName, max: 1 })
+  const { storage, schemaName, connectionString } = await createTestStorage()
+  const sql = createPgClient({ connectionString, schemaName, max: 1 })
   try {
     await sql.unsafe(
       "ALTER TABLE links SET (autovacuum_enabled=false); ALTER TABLE objects SET (autovacuum_enabled=false); ANALYZE links"
@@ -186,8 +185,7 @@ test("a published bulk load leaves selective statistics for the next sparse proj
     expect(after!.reltuples).toBe(before!.reltuples)
   } finally {
     await sql.end()
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   }
 }, 60_000)
 
@@ -195,8 +193,8 @@ test("a published bulk load leaves selective statistics for the next sparse proj
 // ANALYZE_ROWS = 10_000. The plan tables keep the statistics of the first plan, which expect none
 // of the second plan's rows, and each key lookup reads all of its work.
 test("a streamed plan seeks its staged work by key before its links are planned", async () => {
-  const { storage, schemaName } = await createTestStorage()
-  const sql = createPgClient({ connectionString: process.env.DATABASE_URL!, schemaName, max: 1 })
+  const { storage, schemaName, connectionString } = await createTestStorage()
+  const sql = createPgClient({ connectionString, schemaName, max: 1 })
   try {
     await sql.unsafe(
       "ALTER TABLE ontology_replacement_plan_identities SET (autovacuum_enabled=false); " +

@@ -2,22 +2,17 @@ import { expect, test } from "bun:test"
 import { runConnectorConnectionStorageContractSuite } from "@sixb/core/testing"
 import { PostgresStorage } from "../src"
 import { getPostgresStorageTestingAdapter } from "../src/testing"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 runConnectorConnectionStorageContractSuite("PgConnectorConnectionStorage", {
   createStorage: async () => (await createTestStorage()).storage,
   advanceTime: (storage, durationMs) =>
     getPostgresStorageTestingAdapter(storage).advanceConnectorConnectionTime(durationMs),
-  teardown: async (storage) => {
-    await storage.dropSchema()
-    await storage.close()
-  },
+  teardown: disposeTestStorage,
 })
 
 test("serializes callback, slot and credential claims across storage replicas", async () => {
-  const { storage: first, schemaName } = await createTestStorage()
-  const connectionString = process.env.DATABASE_URL
-  if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+  const { storage: first, schemaName, connectionString } = await createTestStorage()
   const second = new PostgresStorage({ connectionString, schemaName, max: 2 })
   const projectId = "project-a"
   const connectorId = "social"
@@ -158,7 +153,7 @@ test("serializes callback, slot and credential claims across storage replicas", 
     ])
     expect(claims.filter((claim) => claim !== null)).toHaveLength(1)
   } finally {
-    await first.dropSchema()
-    await Promise.all([first.close(), second.close()])
+    await second.close()
+    await disposeTestStorage(first)
   }
 })

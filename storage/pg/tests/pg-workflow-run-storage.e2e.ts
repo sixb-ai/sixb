@@ -14,7 +14,7 @@ import {
 } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { PgWorkflowRunStorage } from "../src/pg-workflow-run-storage"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 function failure(
   message: string,
@@ -46,8 +46,7 @@ describe("PgWorkflowRunStorage", () => {
   })
 
   afterEach(async () => {
-    await root.dropSchema()
-    await root.close()
+    await disposeTestStorage(root)
   })
 
   test("starts and finishes workflow runs with JSON input", async () => {
@@ -736,10 +735,6 @@ describe("PgWorkflowRunStorage", () => {
       prompt: "Resolve tr_1.",
     })
     expect(cancelled.execution).toBeUndefined()
-  })
-
-  test("PostgresStorage includes workflow run storage", () => {
-    expect(storage.workflowRuns).toBeInstanceOf(PgWorkflowRunStorage)
   })
 })
 

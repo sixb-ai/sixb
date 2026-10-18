@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import type { ProjectionMaterializationIdentity } from "@sixb/core/storage"
 import { runProjectionRunStorageContractSuite } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 const replacementIdentity = {
   projectionId: "devices",
@@ -62,8 +62,7 @@ test("PgProjectionRunStorage serializes concurrent reclaims", async () => {
       })
     ).rejects.toMatchObject({ name: "ProjectionRunError", kind: "execution-lost" })
   } finally {
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   }
 })
 
@@ -78,7 +77,6 @@ runProjectionRunStorageContractSuite("PgProjectionRunStorage contract", {
   cleanup: async (context) => {
     const owner = contractStorageOwners.get(context.projectionRuns)
     if (!owner) return
-    await owner.dropSchema()
-    await owner.close()
+    await disposeTestStorage(owner)
   },
 })

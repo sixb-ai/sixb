@@ -5,7 +5,7 @@ import {
   seedAiUsageStorageContractExecutions,
 } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 const bundles = new Map<AiUsageStorage, PostgresStorage>()
 
@@ -24,8 +24,7 @@ runAiUsageStorageContractSuite("PgAiUsageStorage", {
     const storage = bundles.get(aiUsage)
     if (storage) {
       bundles.delete(aiUsage)
-      await storage.dropSchema()
-      await storage.close()
+      await disposeTestStorage(storage)
     }
   },
 })
@@ -52,8 +51,7 @@ describe("PostgresStorage AI usage", () => {
         created: true,
       })
     } finally {
-      await storage.dropSchema()
-      await storage.close()
+      await disposeTestStorage(storage)
     }
   })
 })

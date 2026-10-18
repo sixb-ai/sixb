@@ -1,7 +1,7 @@
 import type { FileDownloadGrantStorage } from "@sixb/core/storage"
 import { runFileDownloadGrantStorageContractSuite } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 const storages = new Map<FileDownloadGrantStorage, PostgresStorage>()
 
@@ -15,7 +15,6 @@ runFileDownloadGrantStorageContractSuite("PgFileDownloadGrantStorage", {
     const storage = storages.get(fileDownloadGrants)
     if (!storage) return
     storages.delete(fileDownloadGrants)
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   },
 })

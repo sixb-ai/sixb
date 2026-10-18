@@ -11,7 +11,7 @@ import { compilePgSelectedObjectReadSource } from "../src/objects/read-scope"
 import { PgObjectReader } from "../src/objects/reader"
 import { compilePgIndexedTextCount } from "../src/objects/text-count-index"
 import { createPgClient, type SQL, type SqlParameter } from "../src/pg-client"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 let storage: PostgresStorage
 let sql: SQL
@@ -28,7 +28,7 @@ beforeAll(async () => {
   const created = await createTestStorage()
   storage = created.storage
   sql = createPgClient({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: created.connectionString,
     schemaName: created.schemaName,
     max: 2,
   })
@@ -43,8 +43,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await sql?.end()
-  await storage?.dropSchema()
-  await storage?.close()
+  if (storage) await disposeTestStorage(storage)
 })
 
 async function normalCount(query: ObjectQuery): Promise<number> {

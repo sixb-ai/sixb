@@ -2,26 +2,23 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { ActionRunError } from "@sixb/core/storage"
 import { createTestActionRunRecord, runActionRunStorageContractSuite } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage, waitForLockWait } from "./helpers"
 
 runActionRunStorageContractSuite("PostgresStorage Action runs", {
   createStorage: async () => (await createTestStorage()).storage,
-  cleanup: async (storage) => {
-    await storage.dropSchema()
-    await storage.close()
-  },
+  cleanup: disposeTestStorage,
 })
 
 describe("PgActionRunStorage", () => {
   let storage: PostgresStorage
+  let connectionString: string
 
   beforeEach(async () => {
-    ;({ storage } = await createTestStorage())
+    ;({ storage, connectionString } = await createTestStorage())
   })
 
   afterEach(async () => {
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   })
 
   // Two processes can execute the same run id; the one that records it second must get a refusal
@@ -55,7 +52,7 @@ describe("PgActionRunStorage", () => {
       .finally(() => {
         secondSettled = true
       })
-    await Bun.sleep(20)
+    await waitForLockWait(connectionString, second)
     expect(secondSettled).toBe(false)
 
     release.resolve()

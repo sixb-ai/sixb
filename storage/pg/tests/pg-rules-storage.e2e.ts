@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { RuleEventSubject } from "@sixb/core"
 import type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "@sixb/core/internal/events"
 import type { PostgresStorage } from "../src"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 const defaultSubject: RuleEventSubject = {
   kind: "object",
@@ -78,8 +78,7 @@ describe("PgRulesStorage", () => {
   })
 
   afterEach(async () => {
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   })
 
   test("getActive returns null before a rule is triggered", async () => {

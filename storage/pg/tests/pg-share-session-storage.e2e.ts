@@ -6,7 +6,7 @@ import {
   runShareSessionStorageContractSuite,
 } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
-import { createTestStorage } from "./helpers"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 const storages = new Map<ShareSessionStorage, PostgresStorage>()
 
@@ -21,8 +21,7 @@ runShareSessionStorageContractSuite("PgShareSessionStorage", {
     const storage = storages.get(shareSessions)
     if (!storage) return
     storages.delete(shareSessions)
-    await storage.dropSchema()
-    await storage.close()
+    await disposeTestStorage(storage)
   },
 })
 
@@ -59,8 +58,7 @@ describe("Postgres Share session storage integration", () => {
         })
       ).resolves.toBeNull()
     } finally {
-      await storage.dropSchema()
-      await storage.close()
+      await disposeTestStorage(storage)
     }
   })
 })

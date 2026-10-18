@@ -1,31 +1,30 @@
 import { expect, test } from "bun:test"
 import { legacySourceFixture } from "../../tests/legacy-source-fixture"
-import { postgresStorageMigrations, quoteIdent } from "../src/migrations"
+import { postgresStorageMigrations } from "../src/migrations"
 import { PgMaterializationStateReader } from "../src/ontology-storage/materialization-state"
 import { createPgClient } from "../src/pg-client"
+import { createTestStorage, disposeTestStorage } from "./helpers"
 
 // Red proofs: drop the CASE fallback to `versions.updated_at` in migration 052 and the superseded
 // root becomes live again; drop the payload rewrite and the stored assertion keeps its ref copy.
 test("compacting source storage keeps every root, row and live root", async () => {
-  const schema = `compact_sources_${crypto.randomUUID().replaceAll("-", "")}`
+  const steps = postgresStorageMigrations.steps
+  const roots = steps.findIndex((step) => step.id === "039-projection-source-roots")
+  const compact = steps.findIndex((step) => step.id === "052-compact-source-storage")
+  expect(roots).toBeGreaterThan(-1)
+  expect(compact).toBeGreaterThan(roots)
+  const created = await createTestStorage({ migrateThrough: roots })
   const sql = createPgClient({
-    connectionString: process.env.DATABASE_URL!,
-    schemaName: schema,
+    connectionString: created.connectionString,
+    schemaName: created.schemaName,
     max: 1,
   })
   try {
-    await sql.unsafe(`CREATE SCHEMA ${quoteIdent(schema)}`)
     const context = {
       exec: async (text: string) => {
         await sql.unsafe(text)
       },
     }
-    const steps = postgresStorageMigrations.steps
-    const roots = steps.findIndex((step) => step.id === "039-projection-source-roots")
-    const compact = steps.findIndex((step) => step.id === "052-compact-source-storage")
-    expect(roots).toBeGreaterThan(-1)
-    expect(compact).toBeGreaterThan(roots)
-    for (const step of steps.slice(0, roots)) await step.up(context)
     await sql.unsafe(legacySourceFixture())
     for (const step of steps.slice(roots, compact)) await step.up(context)
     // A published root neither active nor retired must not come back to life.
@@ -74,7 +73,7 @@ test("compacting source storage keeps every root, row and live root", async () =
         WHERE materialization_id = 'active'`)
     ).rejects.toThrow("duplicate key")
   } finally {
-    await sql.unsafe(`DROP SCHEMA IF EXISTS ${quoteIdent(schema)} CASCADE`)
     await sql.end()
+    await disposeTestStorage(created.storage)
   }
 })
