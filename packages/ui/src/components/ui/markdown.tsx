@@ -1,8 +1,7 @@
 import { badgeLabel, highlightCode } from "@sixb/ui/lib/shiki"
 import { cn } from "@sixb/ui/lib/utils"
 import { Check, Copy } from "lucide-react"
-import * as React from "react"
-import { useEffect, useState } from "react"
+import { type ComponentProps, useEffect, useMemo, useState } from "react"
 import ReactMarkdown, { type Components, defaultUrlTransform, type Options } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { useUiMessages } from "../../lib/i18n/ui"
@@ -36,7 +35,7 @@ const COMPONENTS: Components = {
   },
 }
 
-export interface MarkdownProps extends Omit<React.ComponentProps<"div">, "children"> {
+export interface MarkdownProps extends Omit<ComponentProps<"div">, "children"> {
   /** The markdown source to render. */
   readonly children: string
   /** Element renderers that replace the defaults, such as an `img` that resolves relative paths. */
@@ -62,7 +61,7 @@ function Markdown({
   urlTransform,
   ...props
 }: MarkdownProps) {
-  const mergedComponents = React.useMemo(
+  const mergedComponents = useMemo(
     () => (components ? { ...COMPONENTS, ...components } : COMPONENTS),
     [components]
   )
