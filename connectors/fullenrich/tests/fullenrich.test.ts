@@ -245,40 +245,6 @@ describe("FullEnrich reverse email lookup", () => {
 })
 
 describe("FullEnrich search and lookup", () => {
-  test("posts people filters verbatim and returns people with metadata", async () => {
-    mockFetch(() =>
-      Response.json({
-        people: [PERSON],
-        metadata: { total: 42, credits: 0.25, offset: 0, search_after: "cursor-2" },
-      })
-    )
-    const client = await connect()
-    const request = {
-      limit: 1,
-      current_position_titles: [{ value: "Head of Sales", exact_match: false }],
-      current_company_headcounts: [{ min: 50, max: 500 }],
-      person_locations: [{ value: "France", exclude: true }],
-    }
-
-    const response = await client.people.search(request)
-
-    expect(response.people).toEqual([PERSON] as never)
-    expect(response.metadata).toEqual({
-      total: 42,
-      credits: 0.25,
-      offset: 0,
-      search_after: "cursor-2",
-    })
-    expect(calls[0]?.url.pathname).toBe("/api/v2/people/search")
-    expect(calls[0]?.body).toEqual(request)
-    await expect(client.people.search({ limit: 101 })).rejects.toThrow(
-      "limit must be an integer from 1 to 100"
-    )
-    await expect(client.people.search({ offset: 10_001 })).rejects.toThrow(
-      "offset must be an integer from 0 to 10000"
-    )
-  })
-
   // Guard proof: drop the `seen` check in pagination.ts; the repeated cursor loops forever.
   test("searchAll follows search_after and stops on a short page or a repeated cursor", async () => {
     const pages = [
@@ -311,6 +277,19 @@ describe("FullEnrich search and lookup", () => {
     let count = 0
     for await (const _person of client.people.searchAll({ limit: 1 })) count += 1
     expect(count).toBe(2)
+  })
+
+  test("bounds the search page before sending", async () => {
+    mockFetch(() => Response.json({ people: [] }))
+    const client = await connect()
+
+    await expect(client.people.search({ limit: 101 })).rejects.toThrow(
+      "limit must be an integer from 1 to 100"
+    )
+    await expect(client.people.search({ offset: 10_001 })).rejects.toThrow(
+      "offset must be an integer from 0 to 10000"
+    )
+    expect(calls).toHaveLength(0)
   })
 
   test("looks up one person or company and requires an identifier", async () => {

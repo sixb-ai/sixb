@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import {
   MondayApiError,
   type MondayColumnWrites,
@@ -15,6 +15,7 @@ interface Call {
 const originalFetch = globalThis.fetch
 let calls: Call[] = []
 afterEach(() => {
+  jest.useRealTimers()
   globalThis.fetch = originalFetch
   calls = []
 })
@@ -47,6 +48,10 @@ async function client(
     connectorId: "monday",
     signal,
   })
+}
+/** Let the transport finish an answered attempt and schedule its backoff. */
+async function settle() {
+  for (let i = 0; i < 100; i++) await Promise.resolve()
 }
 async function collect<T>(items: AsyncIterable<T>): Promise<T[]> {
   const result: T[] = []
@@ -118,53 +123,64 @@ describe("Monday transport", () => {
     expect(calls).toHaveLength(2)
   })
 
-  test("retries GraphQL complexity rejection with its body delay", async () => {
+  // Guard proof: ignore the body delay in monday.ts `delayMs`; the 1s default backoff fires
+  // within the advanced 4,999ms and the single-call assertion fails.
+  test("retries GraphQL complexity rejection after its body delay", async () => {
     mock(() =>
       calls.length === 1
         ? Response.json({
             errors: [
               {
                 message: "Wait",
-                extensions: { code: "COMPLEXITY_BUDGET_EXHAUSTED", retry_in_seconds: 0 },
+                extensions: { code: "COMPLEXITY_BUDGET_EXHAUSTED", retry_in_seconds: 5 },
               },
             ],
           })
         : response({ items: [item()] })
     )
-    expect((await (await client()).items.get("123"))?.id).toBe("123")
+    const api = await client()
+    jest.useFakeTimers()
+    const result = api.items.get("123")
+    await settle()
+    jest.advanceTimersByTime(4_999)
+    await settle()
+    expect(calls).toHaveLength(1)
+    jest.advanceTimersByTime(1)
+    expect((await result)?.id).toBe("123")
     expect(calls).toHaveLength(2)
   })
 
-  test("does not hide partial read errors or retry authorization/daily-limit failures", async () => {
-    const api = await client()
-    for (const body of [
-      {
+  // Guard proof: retry every HTTP 429 regardless of error code; the HTTP 429 rows must fail.
+  test.each([
+    {
+      failure: "a partial read with a retryable code",
+      status: 200,
+      body: {
         data: { items: [item()] },
         errors: [
           { message: "Wait", extensions: { code: "ComplexityException", retry_in_seconds: 0 } },
         ],
       },
-      { errors: [{ message: "Denied", extensions: { code: "UserUnauthorizedException" } }] },
-      { errors: [{ message: "Daily limit", extensions: { code: "DAILY_LIMIT_EXCEEDED" } }] },
-    ]) {
-      mock(() => Response.json(body))
-      await expect(api.items.get("123")).rejects.toBeInstanceOf(MondayApiError)
-    }
-    expect(calls).toHaveLength(3)
-  })
-
-  // Guard proof: retry every HTTP 429 regardless of error code; this test must fail.
-  test("surfaces permanent provider failures even with HTTP 429", async () => {
-    const api = await client()
-    for (const body of [
-      { errors: [{ message: "Daily limit", extensions: { code: "DAILY_LIMIT_EXCEEDED" } }] },
-      { error_code: "DAILY_LIMIT_EXCEEDED", error_message: "Daily limit" },
-      { errors: [{ message: "Denied", extensions: { code: "UserUnauthorizedException" } }] },
-    ]) {
-      mock(() => Response.json(body, { status: 429, headers: { "retry-after": "0" } }))
-      await expect(api.items.get("123")).rejects.toBeInstanceOf(MondayApiError)
-    }
-    expect(calls).toHaveLength(3)
+    },
+    {
+      failure: "a daily limit (HTTP 429)",
+      status: 429,
+      body: { errors: [{ message: "Daily limit", extensions: { code: "DAILY_LIMIT_EXCEEDED" } }] },
+    },
+    {
+      failure: "a legacy daily limit (HTTP 429)",
+      status: 429,
+      body: { error_code: "DAILY_LIMIT_EXCEEDED", error_message: "Daily limit" },
+    },
+    {
+      failure: "an authorization failure (HTTP 429)",
+      status: 429,
+      body: { errors: [{ message: "Denied", extensions: { code: "UserUnauthorizedException" } }] },
+    },
+  ])("surfaces $failure without retrying", async ({ status, body }) => {
+    mock(() => Response.json(body, { status, headers: { "retry-after": "0" } }))
+    await expect((await client()).items.get("123")).rejects.toBeInstanceOf(MondayApiError)
+    expect(calls).toHaveLength(1)
   })
 
   // Guard proof: mark writes idempotent/retryable in http.ts; this test must fail.
@@ -199,13 +215,13 @@ describe("Monday transport", () => {
 
   test("request cancellation interrupts provider backoff", async () => {
     const abort = new AbortController()
-    mock(() => {
-      setTimeout(() => abort.abort(), 10)
-      return Response.json({}, { status: 429, headers: { "retry-after": "60" } })
-    })
-    await expect(
-      (await client()).items.get("123", {}, { signal: abort.signal })
-    ).rejects.toMatchObject({ name: "AbortError" })
+    mock(() => Response.json({}, { status: 429, headers: { "retry-after": "60" } }))
+    const result = (await client()).items.get("123", {}, { signal: abort.signal })
+    await settle()
+    abort.abort()
+    // Await with catch: Bun 1.4.2 hangs the process on `expect(...).rejects` of a promise that
+    // never settles, while a plain await lets the test timeout report a regression.
+    expect(await result.catch((error: unknown) => error)).toMatchObject({ name: "AbortError" })
     expect(calls).toHaveLength(1)
   })
 
@@ -225,9 +241,8 @@ describe("Monday transport", () => {
           })
         })
     )
-    await expect((await client({ timeoutMs: 10 })).items.get("123")).rejects.toMatchObject({
-      name: "TimeoutError",
-    })
+    const timedOut = (await client({ timeoutMs: 1 })).items.get("123")
+    expect(await timedOut.catch((error: unknown) => error)).toMatchObject({ name: "TimeoutError" })
     expect(calls).toHaveLength(1)
   })
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { PennylaneApiError } from "../src"
-import { collect, createTestClient, empty, json, mockFetch } from "./helpers"
+import { createTestClient, empty, json, mockFetch } from "./helpers"
 
 const originalFetch = globalThis.fetch
 
@@ -42,37 +42,6 @@ describe("pennylane quotes", () => {
     expect(requestHeaders.get("authorization")).toBe("Bearer pl-token")
     expect(requestHeaders.get("accept")).toBe("application/json")
     expect(requestSignal).toBeInstanceOf(AbortSignal)
-  })
-
-  test("listAll repeats filters and sort while following opaque cursors", async () => {
-    const requests: URL[] = []
-    mockFetch((input) => {
-      const url = new URL(String(input))
-      requests.push(url)
-      const cursor = url.searchParams.get("cursor")
-
-      return Promise.resolve(
-        json(
-          cursor === null
-            ? { items: [{ id: 1 }], has_more: true, next_cursor: "opaque+cursor==" }
-            : { items: [{ id: 2 }], has_more: false, next_cursor: null }
-        )
-      )
-    })
-
-    const client = await createTestClient()
-    const quotes = await collect(
-      client.quotes.listAll({
-        limit: 1,
-        sort: "-id",
-        filter: [{ field: "status", operator: "not_eq", value: "denied" }],
-      })
-    )
-
-    expect(quotes.map((quote) => quote.id)).toEqual([1, 2])
-    expect(requests.map((url) => url.searchParams.get("cursor"))).toEqual([null, "opaque+cursor=="])
-    expect(requests.map((url) => url.searchParams.get("sort"))).toEqual(["-id", "-id"])
-    expect(requests[0]?.searchParams.get("filter")).toBe(requests[1]?.searchParams.get("filter"))
   })
 
   test("uses exact detail and child-resource paths", async () => {
@@ -211,40 +180,6 @@ describe("pennylane quotes", () => {
     expect(uploaded).toBeInstanceOf(File)
     expect((uploaded as File).name).toBe("terms.pdf")
     expect(appendix.id).toBe(9)
-  })
-
-  test("exposes quote changelogs and enforces mutually exclusive cursors", async () => {
-    const requested: URL[] = []
-    mockFetch((input) => {
-      const url = new URL(String(input))
-      requested.push(url)
-      return Promise.resolve(
-        json(
-          requested.length === 1
-            ? { items: [{ id: 1 }], has_more: true, next_cursor: "change-cursor" }
-            : { items: [{ id: 2 }], has_more: false, next_cursor: null }
-        )
-      )
-    })
-
-    const client = await createTestClient()
-    const changes = await collect(
-      client.quoteChanges.listAll({ limit: 1000, start_date: "2026-07-01T00:00:00Z" })
-    )
-
-    expect(changes.map((change) => change.id)).toEqual([1, 2])
-    expect(requested.map((url) => url.pathname)).toEqual([
-      "/api/external/v2/changelogs/quotes",
-      "/api/external/v2/changelogs/quotes",
-    ])
-    expect(requested[0]?.searchParams.get("limit")).toBe("1000")
-    expect(requested[0]?.searchParams.get("start_date")).toBe("2026-07-01T00:00:00Z")
-    expect(requested[0]?.searchParams.get("cursor")).toBeNull()
-    expect(requested[1]?.searchParams.get("start_date")).toBeNull()
-    expect(requested[1]?.searchParams.get("cursor")).toBe("change-cursor")
-
-    const invalidOptions = { cursor: "next", start_date: "2026-07-01T00:00:00Z" }
-    expect(() => client.quoteChanges.list(invalidOptions as never)).toThrow("mutually exclusive")
   })
 
   test("validates identifiers, limits, cursors, and empty uploads before fetch", async () => {

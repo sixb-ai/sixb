@@ -18,13 +18,16 @@ describe("companycam events webhook", () => {
     ).toHaveLength(1)
   })
 
-  test("verifies the signature, dispatches the event, and responds 200", async () => {
+  test("verifies the signature quietly, dispatches the event, and responds 200", async () => {
     const received: CompanyCamEventContext[] = []
-    const webhook = companyCamEventsWebhook({
-      credential: "s",
-      onEvent: (context) => {
-        received.push(context)
-      },
+    let webhook!: ReturnType<typeof companyCamEventsWebhook>
+    const warnings = captureWarnings(() => {
+      webhook = companyCamEventsWebhook({
+        credential: "s",
+        onEvent: (context) => {
+          received.push(context)
+        },
+      })
     })
     const body = JSON.stringify({
       event_type: "project.created",
@@ -51,6 +54,7 @@ describe("companycam events webhook", () => {
       client,
     } as unknown as HandleCtx)
 
+    expect(warnings).toEqual([])
     expect(result).toEqual({ status: 200 })
     expect(received).toHaveLength(1)
     expect(received[0]?.event.type).toBe("project.created")
@@ -74,16 +78,6 @@ describe("companycam events webhook", () => {
       } as unknown as VerifyCtx)
     ).toThrow("Invalid webhook signature")
   })
-
-  test("skips verification when no secret is configured", () => {
-    const webhook = companyCamEventsWebhook({ allowUnverified: true, onEvent: () => {} })
-    expect(() =>
-      webhook.verify?.({
-        request: new Request("https://x/hook", { method: "POST" }),
-        rawBody: new TextEncoder().encode("{}"),
-      } as unknown as VerifyCtx)
-    ).not.toThrow()
-  })
 })
 
 describe("companyCamEventsWebhook without a secret", () => {
@@ -101,21 +95,20 @@ describe("companyCamEventsWebhook without a secret", () => {
   })
 
   test("accepts unverified deliveries when asked to, and says so", () => {
-    const warnings = captureWarnings(() =>
-      companyCamEventsWebhook({ allowUnverified: true, onEvent: () => {} })
-    )
+    let webhook!: ReturnType<typeof companyCamEventsWebhook>
+    const warnings = captureWarnings(() => {
+      webhook = companyCamEventsWebhook({ allowUnverified: true, onEvent: () => {} })
+    })
 
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain("X-CompanyCam-Signature")
     expect(warnings[0]).toContain("accepts unverified requests")
-  })
-
-  test("stays quiet when a secret is configured", () => {
-    const warnings = captureWarnings(() =>
-      companyCamEventsWebhook({ credential: "whsec_test", onEvent: () => {} })
-    )
-
-    expect(warnings).toEqual([])
+    expect(() =>
+      webhook.verify?.({
+        request: new Request("https://x/hook", { method: "POST" }),
+        rawBody: new TextEncoder().encode("{}"),
+      } as unknown as VerifyCtx)
+    ).not.toThrow()
   })
 })
 

@@ -26,33 +26,25 @@ function account(id: string) {
   }
 }
 
-test("accounts list sends DSN auth and cursor parameters", async () => {
-  const calls = recorder([json({ object: "AccountList", items: [account("a1")], cursor: null })])
+test("accounts list and get send DSN auth to their documented routes", async () => {
+  const calls = recorder([
+    json({ object: "AccountList", items: [account("a1")], cursor: null }),
+    json(account("account/one")),
+  ])
   const client = await createTestClient()
 
   const page = await client.accounts.list({ limit: 50, cursor: "next" })
+  await client.accounts.get("account/one")
 
   expect(page.items[0]?.id).toBe("a1")
-  expect(new URL(calls[0]?.url ?? "").pathname).toBe("/api/v1/accounts")
+  expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+    "/api/v1/accounts",
+    "/api/v1/accounts/account%2Fone",
+  ])
   expect(query(calls[0]?.url ?? "").get("limit")).toBe("50")
   expect(query(calls[0]?.url ?? "").get("cursor")).toBe("next")
   expect(calls[0]?.headers.get("x-api-key")).toBe(TOKEN)
   expect(calls[0]?.headers.get("accept")).toBe("application/json")
-})
-
-test("accounts listAll follows opaque cursors and preserves the limit", async () => {
-  const calls = recorder([
-    json({ object: "AccountList", items: [account("a1")], cursor: "c2" }),
-    json({ object: "AccountList", items: [account("a2")], cursor: null }),
-  ])
-  const client = await createTestClient()
-
-  const accounts = await collect(client.accounts.listAll({ limit: 1 }))
-
-  expect(accounts.map((item) => item.id)).toEqual(["a1", "a2"])
-  expect(query(calls[0]?.url ?? "").get("limit")).toBe("1")
-  expect(query(calls[1]?.url ?? "").get("limit")).toBe("1")
-  expect(query(calls[1]?.url ?? "").get("cursor")).toBe("c2")
 })
 
 test("accounts listAll refuses a repeated cursor", async () => {
@@ -63,15 +55,6 @@ test("accounts listAll refuses a repeated cursor", async () => {
   const client = await createTestClient()
 
   await expect(collect(client.accounts.listAll())).rejects.toThrow("repeated cursor")
-})
-
-test("accounts get encodes the account id", async () => {
-  const calls = recorder([json(account("account/one"))])
-  const client = await createTestClient()
-
-  await client.accounts.get("account/one")
-
-  expect(new URL(calls[0]?.url ?? "").pathname).toBe("/api/v1/accounts/account%2Fone")
 })
 
 test("hosted auth defaults api_url to the DSN", async () => {

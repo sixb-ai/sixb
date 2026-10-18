@@ -8,9 +8,15 @@ import {
 } from "../src"
 import { createTeamleaderClient } from "../src/client"
 import type {
+  TeamleaderCompanyAddressInput,
   TeamleaderContactAddressInput,
   TeamleaderCustomField,
   TeamleaderCustomFieldDefinition,
+  TeamleaderDealCreateRequest,
+  TeamleaderDealUpdateRequest,
+  TeamleaderProductAddRequest,
+  TeamleaderProductUpdateRequest,
+  TeamleaderQuotationSendRequest,
 } from "../src/types"
 
 type IsExact<TActual, TExpected> = [TActual] extends [TExpected]
@@ -25,6 +31,14 @@ const contactAddressInputTypesAreExact: IsExact<
 > = true
 const genericContactAddressFieldIsForbidden: IsExact<
   TeamleaderContactAddressInput["address"]["address"],
+  undefined
+> = true
+const companyAddressInputTypesAreExact: IsExact<
+  TeamleaderCompanyAddressInput["type"],
+  "primary" | "invoicing" | "delivery" | "visiting"
+> = true
+const genericCompanyAddressFieldIsForbidden: IsExact<
+  TeamleaderCompanyAddressInput["address"]["address"],
   undefined
 > = true
 
@@ -48,32 +62,21 @@ function jsonResponse(body: unknown, init?: ResponseInit): Response {
 }
 
 describe("teamleader connector", () => {
-  test("creates a Teamleader adapter", async () => {
-    const adapter = teamleader({
-      accessToken: "test-token",
-      fetch: mockFetch(() => Promise.resolve(jsonResponse({ data: [] }))),
-    })
-
-    const client = await adapter.connect({
-      projectId: "demo",
-      connectorId: "teamleader",
-      signal: new AbortController().signal,
-    })
-
-    const response = await client.deals.list()
-
-    expect(adapter.type).toBe("teamleader")
-    expect(response.data).toEqual([])
-  })
-
-  test("sends JSON POST requests with a bearer token", async () => {
+  test("connects an adapter that POSTs JSON with a resolved bearer token and forwards webhooks", async () => {
     const requests: CapturedRequest[] = []
-    const client = createTeamleaderClient({
+    const webhook = defineTeamleaderWebhook("events").handle(() => {})
+    const adapter = teamleader({
       accessToken: () => "resolved-token",
+      webhooks: [webhook],
       fetch: mockFetch((input, init) => {
         requests.push({ input, init })
         return Promise.resolve(jsonResponse({ data: [{ id: "deal-1" }] }))
       }),
+    })
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "teamleader",
+      signal: new AbortController().signal,
     })
 
     const response = await client.deals.list({
@@ -84,6 +87,8 @@ describe("teamleader connector", () => {
     const [request] = requests
     const headers = new Headers(request.init?.headers)
 
+    expect(adapter.type).toBe("teamleader")
+    expect(adapter.webhooks).toEqual([webhook])
     expect(String(request.input)).toBe("https://api.focus.teamleader.eu/deals.list")
     expect(request.init?.method).toBe("POST")
     expect(headers.get("authorization")).toBe("Bearer resolved-token")
@@ -114,7 +119,7 @@ describe("teamleader connector", () => {
       }),
     })
 
-    const created = await client.deals.create({
+    const createRequest: TeamleaderDealCreateRequest = {
       lead: {
         customer: { type: "company", id: "company-1" },
         contact_person_id: "contact-1",
@@ -131,8 +136,8 @@ describe("teamleader connector", () => {
       custom_fields: [{ id: "field-1", value: "BeHome" }],
       currency: { code: "EUR", exchange_rate: 1 },
       purchase_order_number: "000023",
-    })
-    await client.deals.update({
+    }
+    const updateRequest: TeamleaderDealUpdateRequest = {
       id: "deal-1",
       title: "Updated deal",
       summary: null,
@@ -145,14 +150,18 @@ describe("teamleader connector", () => {
       custom_fields: [{ id: "field-1", value: ["BeHome", "Placard"] }],
       currency: { code: "EUR", exchange_rate: 1 },
       purchase_order_number: null,
-    })
-    await client.deals.move({ id: "deal-1", phase_id: "phase-2" })
-    await client.deals.win({ id: "deal-1" })
-    await client.deals.lose({
+    }
+    const loseRequest = {
       id: "deal-1",
       reason_id: "lost-reason-1",
       extra_info: "Decision postponed",
-    })
+    }
+
+    const created = await client.deals.create(createRequest)
+    await client.deals.update(updateRequest)
+    await client.deals.move({ id: "deal-1", phase_id: "phase-2" })
+    await client.deals.win({ id: "deal-1" })
+    await client.deals.lose(loseRequest)
     await client.deals.delete({ id: "deal-1" })
 
     expect(created.data).toEqual({ type: "deal", id: "deal-1" })
@@ -165,41 +174,11 @@ describe("teamleader connector", () => {
       "/deals.delete",
     ])
     expect(requests.map((request) => JSON.parse(String(request.init?.body)))).toEqual([
-      {
-        lead: {
-          customer: { type: "company", id: "company-1" },
-          contact_person_id: "contact-1",
-        },
-        title: "Interesting business deal",
-        summary: "Additional information",
-        source_id: "source-1",
-        department_id: "department-1",
-        responsible_user_id: "user-1",
-        phase_id: "phase-1",
-        estimated_value: { amount: 123.3, currency: "EUR" },
-        estimated_probability: 0.75,
-        estimated_closing_date: "2017-05-09",
-        custom_fields: [{ id: "field-1", value: "BeHome" }],
-        currency: { code: "EUR", exchange_rate: 1 },
-        purchase_order_number: "000023",
-      },
-      {
-        id: "deal-1",
-        title: "Updated deal",
-        summary: null,
-        source_id: null,
-        department_id: null,
-        responsible_user_id: null,
-        estimated_value: null,
-        estimated_probability: null,
-        estimated_closing_date: null,
-        custom_fields: [{ id: "field-1", value: ["BeHome", "Placard"] }],
-        currency: { code: "EUR", exchange_rate: 1 },
-        purchase_order_number: null,
-      },
+      createRequest,
+      updateRequest,
       { id: "deal-1", phase_id: "phase-2" },
       { id: "deal-1" },
-      { id: "deal-1", reason_id: "lost-reason-1", extra_info: "Decision postponed" },
+      loseRequest,
       { id: "deal-1" },
     ])
   })
@@ -236,13 +215,14 @@ describe("teamleader connector", () => {
       text: "Quotation text",
     })
     const download = await client.quotations.download({ id: "quotation-1", format: "pdf" })
-    await client.quotations.send({
+    const sendRequest: TeamleaderQuotationSendRequest = {
       quotations: ["quotation-1"],
       recipients: { to: [{ email_address: "quentin@sixb.ai" }] },
       subject: "Quotation",
       content: "Sign your offer here #LINK",
       language: "fr",
-    })
+    }
+    await client.quotations.send(sendRequest)
     await client.quotations.update({ id: "quotation-1", text: "Updated text" })
     await client.quotations.accept({ id: "quotation-1" })
     await client.quotations.delete({ id: "quotation-1" })
@@ -260,13 +240,7 @@ describe("teamleader connector", () => {
     expect(requests.map((request) => JSON.parse(String(request.init?.body)))).toEqual([
       { deal_id: "deal-1", text: "Quotation text" },
       { id: "quotation-1", format: "pdf" },
-      {
-        quotations: ["quotation-1"],
-        recipients: { to: [{ email_address: "quentin@sixb.ai" }] },
-        subject: "Quotation",
-        content: "Sign your offer here #LINK",
-        language: "fr",
-      },
+      sendRequest,
       { id: "quotation-1", text: "Updated text" },
       { id: "quotation-1" },
       { id: "quotation-1" },
@@ -289,7 +263,7 @@ describe("teamleader connector", () => {
       }),
     })
 
-    const added = await client.products.add({
+    const addRequest: TeamleaderProductAddRequest = {
       name: "Hosting",
       code: "HOST-001",
       description: "Product used for hosting web solutions",
@@ -305,8 +279,8 @@ describe("teamleader connector", () => {
       product_category_id: "category-1",
       tax_rate_id: "tax-rate-1",
       custom_fields: [{ id: "field-1", value: "external-reference" }],
-    })
-    await client.products.update({
+    }
+    const updateRequest: TeamleaderProductUpdateRequest = {
       id: "product-1",
       name: "Updated hosting",
       code: null,
@@ -323,7 +297,10 @@ describe("teamleader connector", () => {
       product_category_id: "category-1",
       tax_rate_id: "tax-rate-1",
       custom_fields: [{ id: "field-1", value: "updated-reference" }],
-    })
+    }
+
+    const added = await client.products.add(addRequest)
+    await client.products.update(updateRequest)
     await client.products.delete({ id: "product-1" })
 
     expect(added.data).toEqual({ type: "product", id: "product-1" })
@@ -333,41 +310,8 @@ describe("teamleader connector", () => {
       "/products.delete",
     ])
     expect(requests.map((request) => JSON.parse(String(request.init?.body)))).toEqual([
-      {
-        name: "Hosting",
-        code: "HOST-001",
-        description: "Product used for hosting web solutions",
-        purchase_price: { amount: 50, currency: "EUR" },
-        selling_price: { amount: 100, currency: "EUR" },
-        unit_of_measure_id: "unit-1",
-        price_list_prices: [
-          { price_list_id: "price-list-1", price: { amount: 90, currency: "EUR" } },
-        ],
-        stock: { amount: 12 },
-        configuration: { stock_threshold: { minimum: 4, action: "notify" } },
-        department_id: "department-1",
-        product_category_id: "category-1",
-        tax_rate_id: "tax-rate-1",
-        custom_fields: [{ id: "field-1", value: "external-reference" }],
-      },
-      {
-        id: "product-1",
-        name: "Updated hosting",
-        code: null,
-        description: null,
-        purchase_price: null,
-        selling_price: { amount: 120, currency: "EUR" },
-        unit_of_measure_id: null,
-        price_list_prices: [
-          { price_list_id: "price-list-1", price: { amount: 110, currency: "EUR" } },
-        ],
-        stock: { amount: 10 },
-        configuration: null,
-        department_id: "department-1",
-        product_category_id: "category-1",
-        tax_rate_id: "tax-rate-1",
-        custom_fields: [{ id: "field-1", value: "updated-reference" }],
-      },
+      addRequest,
+      updateRequest,
       { id: "product-1" },
     ])
   })
@@ -514,6 +458,162 @@ describe("teamleader connector", () => {
       unlinkRequest,
       updateLinkRequest,
       uploadAvatarRequest,
+    ])
+  })
+
+  test("supports every documented company endpoint", async () => {
+    expect(companyAddressInputTypesAreExact).toBe(true)
+    expect(genericCompanyAddressFieldIsForbidden).toBe(true)
+
+    const requests: CapturedRequest[] = []
+    const client = createTeamleaderClient({
+      accessToken: "test-token",
+      fetch: mockFetch((input, init) => {
+        requests.push({ input, init })
+        const path = new URL(String(input)).pathname
+
+        if (path === "/companies.list") {
+          return Promise.resolve(jsonResponse({ data: [] }))
+        }
+
+        if (path === "/companies.info") {
+          return Promise.resolve(jsonResponse({ data: { id: "company-1" } }))
+        }
+
+        if (path === "/companies.add") {
+          return Promise.resolve(
+            jsonResponse({ data: { type: "company", id: "company-1" } }, { status: 201 })
+          )
+        }
+
+        return Promise.resolve(new Response(undefined, { status: 204 }))
+      }),
+    })
+
+    const addRequest = {
+      name: "Pied Piper",
+      business_type_id: "business-type-1",
+      vat_number: "BE0899623035",
+      national_identification_number: "63326426",
+      emails: [
+        { type: "primary", email: "info@piedpiper.eu" },
+        { type: "invoicing", email: "invoicing@piedpiper.eu" },
+      ],
+      telephones: [
+        { type: "phone", number: "092980615" },
+        { type: "fax", number: "092980616" },
+      ],
+      website: "https://piedpiper.com",
+      addresses: [
+        {
+          type: "primary",
+          address: {
+            addressee: "Pied Piper",
+            line_1: "Dok Noord 3A 101",
+            postal_code: "9000",
+            city: "Ghent",
+            country: "BE",
+            area_level_two_id: "area-1",
+          },
+        },
+      ],
+      iban: "BE12123412341234",
+      bic: "BICBANK",
+      language: "en",
+      responsible_user_id: "user-1",
+      remarks: "Met at expo",
+      tags: ["prospect", "expo"],
+      custom_fields: [{ id: "field-1", value: "external-reference" }],
+      marketing_mails_consent: false,
+      preferred_currency: "EUR",
+    } as const
+    const updateRequest = {
+      id: "company-1",
+      name: "Pied Piper Europe",
+      business_type_id: null,
+      vat_number: null,
+      national_identification_number: null,
+      emails: [{ type: "primary", email: "hello@piedpiper.eu" }],
+      telephones: [{ type: "phone", number: "092980617" }],
+      website: "https://piedpiper.eu",
+      addresses: [],
+      iban: null,
+      bic: null,
+      language: null,
+      responsible_user_id: null,
+      remarks: null,
+      tags: [],
+      custom_fields: [{ id: "field-1", value: "updated-reference" }],
+      custom_fields_update_strategy: "partial",
+      marketing_mails_consent: true,
+      preferred_currency: null,
+    } as const
+    const tagRequest = { id: "company-1", tags: ["customer", "newsletter"] } as const
+    const untagRequest = { id: "company-1", tags: ["prospect"] } as const
+    const uploadLogoRequest = { id: "company-1", image: null } as const
+
+    await client.companies.list({
+      filter: {
+        email: { type: "primary", email: "info@piedpiper.eu" },
+        ids: ["company-1"],
+        term: "Pied Piper",
+        updated_since: "2016-02-04T16:44:33+00:00",
+        tags: ["prospect"],
+        vat_number: "BE0899623035",
+        national_identification_number: "63326426",
+        status: "active",
+        marketing_mails_consent: false,
+      },
+      page: { size: 20, number: 1 },
+      sort: [{ field: "name", order: "asc" }],
+      includes: "custom_fields,price_list",
+    })
+    await client.companies.info({
+      id: "company-1",
+      includes: "related_companies,related_contacts",
+    })
+    const added = await client.companies.add(addRequest)
+    await client.companies.update(updateRequest)
+    await client.companies.delete({ id: "company-1" })
+    await client.companies.tag(tagRequest)
+    await client.companies.untag(untagRequest)
+    await client.companies.uploadLogo(uploadLogoRequest)
+
+    expect(added.data).toEqual({ type: "company", id: "company-1" })
+    expect(requests.map((request) => new URL(String(request.input)).pathname)).toEqual([
+      "/companies.list",
+      "/companies.info",
+      "/companies.add",
+      "/companies.update",
+      "/companies.delete",
+      "/companies.tag",
+      "/companies.untag",
+      "/companies.uploadLogo",
+    ])
+    expect(requests.map((request) => JSON.parse(String(request.init?.body)))).toEqual([
+      {
+        filter: {
+          email: { type: "primary", email: "info@piedpiper.eu" },
+          ids: ["company-1"],
+          term: "Pied Piper",
+          updated_since: "2016-02-04T16:44:33+00:00",
+          tags: ["prospect"],
+          vat_number: "BE0899623035",
+          national_identification_number: "63326426",
+          status: "active",
+          marketing_mails_consent: false,
+        },
+        page: { size: 20, number: 1 },
+        sort: [{ field: "name", order: "asc" }],
+        includes: "custom_fields,price_list",
+      },
+      { id: "company-1", includes: "related_companies,related_contacts" },
+      addRequest,
+      updateRequest,
+      { id: "company-1" },
+      tagRequest,
+      untagRequest,
+      uploadLogoRequest,
     ])
   })
 
@@ -673,16 +773,6 @@ describe("teamleader connector", () => {
 
     expect(bodies).toEqual([registration, registration])
   })
-
-  test("forwards connector webhook definitions", () => {
-    const webhook = defineTeamleaderWebhook("events").handle(() => {})
-    const adapter = teamleader({
-      accessToken: "test-token",
-      webhooks: [webhook],
-    })
-
-    expect(adapter.webhooks).toEqual([webhook])
-  })
 })
 
 describe("custom field helpers", () => {
@@ -718,19 +808,7 @@ describe("custom field helpers", () => {
 })
 
 describe("defineTeamleaderWebhook", () => {
-  test("keeps webhook body unknown unless a generic is provided", () => {
-    const webhook = defineTeamleaderWebhook("events").handle(({ body }) => ({
-      status: 200,
-      body: { received: typeof body },
-    }))
-
-    expect(webhook.kind).toBe("webhook")
-    expect(webhook.method).toBe("POST")
-    expect(webhook.body.format).toBe("json")
-    expect(webhook.body.parse({ type: "deal.updated" })).toEqual({ type: "deal.updated" })
-  })
-
-  test("supports TypeScript-only body typing", async () => {
+  test("builds a JSON POST webhook with a caller-typed body and idempotency key", async () => {
     type DealUpdatedBody = {
       readonly type: "deal.updated"
       readonly subject: {
@@ -746,10 +824,8 @@ describe("defineTeamleaderWebhook", () => {
         body: { id: body.subject.id },
       }))
 
-    const body = webhook.body.parse({
-      type: "deal.updated",
-      subject: { type: "deal", id: "deal-1" },
-    })
+    const payload = { type: "deal.updated", subject: { type: "deal", id: "deal-1" } } as const
+    const body = webhook.body.parse(payload)
     const idempotencyKey = await webhook.idempotencyKey?.({
       body,
       rawBody: new Uint8Array(),
@@ -763,6 +839,10 @@ describe("defineTeamleaderWebhook", () => {
       },
     })
 
+    expect(webhook.kind).toBe("webhook")
+    expect(webhook.method).toBe("POST")
+    expect(webhook.body.format).toBe("json")
+    expect(body).toEqual(payload)
     expect(idempotencyKey).toBe("deal-1")
   })
 })

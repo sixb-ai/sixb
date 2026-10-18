@@ -126,26 +126,8 @@ describe("FullEnrich search tools", () => {
   })
 
   // Live FullEnrich returns a cursor after the last result. Guard proof: drop `!exhausted` in
-  // pageOutput; next_cursor reappears.
-  test("search tools omit next_cursor once the first page reaches the reported total", async () => {
-    const output = await run(
-      fullEnrichSearchCompanies(definition),
-      { filters: { domains: [{ value: "example.com", exact_match: true }] }, page: { limit: 1 } },
-      {
-        companies: {
-          search: async () => ({
-            companies: [COMPANY],
-            metadata: { total: 1, credits: 0, offset: 0, search_after: "past-the-end" },
-          }),
-        },
-      }
-    )
-
-    expect(output).not.toHaveProperty("next_cursor")
-    expect(output).toMatchObject({ total: 1, credits: 0 })
-  })
-
-  test("search_companies returns next_cursor only for a full page and enforces maxResults", async () => {
+  // pageOutput; next_cursor reappears on the page that reaches the reported total.
+  test("search_companies returns next_cursor only for a full page short of the total and enforces maxResults", async () => {
     const requests: unknown[] = []
     const tool = fullEnrichSearchCompanies(definition, { maxResults: 2 })
     const client: ClientStub = {
@@ -173,6 +155,21 @@ describe("FullEnrich search tools", () => {
       industry: "Software Development",
     })
     expect(output.next_cursor).toBe("next")
+
+    const lastPage = await run(
+      tool,
+      { filters: {}, page: {} },
+      {
+        companies: {
+          search: async () => ({
+            companies: [COMPANY, COMPANY],
+            metadata: { total: 2, credits: 0, offset: 0, search_after: "past-the-end" },
+          }),
+        },
+      }
+    )
+    expect(lastPage).not.toHaveProperty("next_cursor")
+    expect(lastPage).toMatchObject({ total: 2, credits: 0 })
 
     const error = await run(tool, { filters: {}, page: { limit: 3 } }, client).catch(
       (caught: unknown) => caught
@@ -430,7 +427,7 @@ describe("FullEnrich enrichment tools", () => {
 })
 
 describe("FullEnrich tool bounds", () => {
-  test("get_enrichment_credits returns the balance", async () => {
+  test("get_enrichment_credits returns the balance, times out a slow provider with a public error, and keeps run cancellation raw", async () => {
     expect(
       await run(
         fullEnrichCreditBalance(definition),
@@ -440,28 +437,26 @@ describe("FullEnrich tool bounds", () => {
         }
       )
     ).toEqual({ balance: 4200 })
-  })
 
-  test("times out a slow provider with a public error and keeps run cancellation raw", async () => {
     const pending: ClientStub = {
       account: { credits: () => new Promise(() => {}) },
     }
 
     const error = await run(
-      fullEnrichCreditBalance(definition, { timeoutMs: 5 }),
+      fullEnrichCreditBalance(definition, { timeoutMs: 1 }),
       {},
       pending
     ).catch((caught: unknown) => caught)
     expect(error).toBeInstanceOf(AgentToolPublicError)
     expect((error as Error).message).toBe(
-      "[SixbFullEnrich] get_enrichment_credits timed out after 5ms."
+      "[SixbFullEnrich] get_enrichment_credits timed out after 1ms."
     )
 
     const controller = new AbortController()
     const reason = new Error("run canceled")
     const running = run(fullEnrichCreditBalance(definition), {}, pending, controller.signal)
     controller.abort(reason)
-    await expect(running).rejects.toBe(reason)
+    expect(await running.catch((error: unknown) => error)).toBe(reason)
   })
 
   test("rejects invalid host options when the tool is defined", () => {

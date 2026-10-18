@@ -9,68 +9,53 @@ afterEach(() => {
 })
 
 describe("pennylane reliability", () => {
-  test("retries transient GET responses", async () => {
+  test("does not retry write requests by default", async () => {
     let calls = 0
     mockFetch(() => {
       calls += 1
-      const count = calls
-      if (count === 1) {
-        return Promise.resolve(json({ error: "temporary" }, { status: 503 }))
-      }
-      return Promise.resolve(json({ items: [], has_more: false, next_cursor: null }))
-    })
-
-    const client = await createTestClient({ retry: { maxRetries: 1, delayMs: () => 0 } })
-    await client.quotes.list()
-
-    expect(calls).toBe(2)
-  })
-
-  test("does not retry write requests by default", async () => {
-    const methods: string[] = []
-    mockFetch(() => {
-      methods.push("called")
       return Promise.resolve(json({ error: "temporary" }, { status: 503 }))
     })
 
     const client = await createTestClient({ retry: { maxRetries: 2, delayMs: () => 0 } })
-    await expect(
-      client.quotes.create({
-        date: "2026-07-10",
-        deadline: "2026-08-10",
-        customer_id: 7,
-        invoice_lines: [],
-      })
-    ).rejects.toBeInstanceOf(PennylaneApiError)
-    await expect(client.quotes.updateStatus(42, { status: "accepted" })).rejects.toBeInstanceOf(
-      PennylaneApiError
-    )
-    expect(methods).toHaveLength(2)
+    const writes = [
+      () =>
+        client.quotes.create({
+          date: "2026-07-10",
+          deadline: "2026-08-10",
+          customer_id: 7,
+          invoice_lines: [],
+        }),
+      () => client.quotes.updateStatus(42, { status: "accepted" }),
+      // Pennylane can create related records along with a ledger account.
+      () => client.ledgerAccounts.create({ number: "401100", label: "Supplier account" }),
+    ]
+    for (const write of writes) {
+      await expect(write()).rejects.toBeInstanceOf(PennylaneApiError)
+    }
+    expect(calls).toBe(writes.length)
   })
 
-  test("fails instead of looping on inconsistent pagination metadata", async () => {
-    mockFetch(() =>
-      Promise.resolve(json({ items: [{ id: 1 }], has_more: true, next_cursor: null }))
-    )
+  test.each([
+    {
+      failure: "inconsistent pagination metadata",
+      page: { items: [{ id: 1 }], has_more: true, next_cursor: null },
+      cursor: undefined,
+      error: "has_more=true but next_cursor is missing",
+    },
+    {
+      failure: "a repeated cursor",
+      page: { items: [{ id: 1 }], has_more: true, next_cursor: "same" },
+      cursor: "same",
+      error: "repeated next_cursor",
+    },
+  ])("listAll fails instead of looping on $failure", async ({ page, cursor, error }) => {
+    mockFetch(() => Promise.resolve(json(page)))
 
     const client = await createTestClient()
-    await expect(collect(client.quotes.listAll())).rejects.toThrow(
-      "has_more=true but next_cursor is missing"
-    )
+    await expect(collect(client.quotes.listAll({ cursor }))).rejects.toThrow(error)
   })
 
-  test("fails on repeated cursors", async () => {
-    mockFetch(() =>
-      Promise.resolve(json({ items: [{ id: 1 }], has_more: true, next_cursor: "same" }))
-    )
-
-    const client = await createTestClient()
-    await expect(collect(client.quotes.listAll({ cursor: "same" }))).rejects.toThrow(
-      "repeated next_cursor"
-    )
-  })
-
-  test("resolves rotated access tokens for every attempt", async () => {
+  test("retries transient GET responses with a freshly resolved access token", async () => {
     const authorizations: (string | null)[] = []
     let tokenNumber = 0
     mockFetch((_input, init) => {

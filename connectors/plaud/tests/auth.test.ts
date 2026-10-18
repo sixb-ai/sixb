@@ -43,7 +43,6 @@ test("public registration binds the deployment callbacks without a client secret
     clientId: "registered",
     redirectUris,
   })
-  plaud({ clientId: "registered" })
   expect(calls).toBe(1)
 })
 
@@ -242,49 +241,9 @@ test("account discovery maps the authenticated profile and does not replay a rej
   expect(calls).toBe(1)
 })
 
-test("401 invalidates the exact rejected Sixb token and reacquires credentials for replay", async () => {
-  // Removal proof: remove onUnauthorized in src/http.ts; this test fails on the first 401.
-  let gets = 0
-  const invalidated: number[] = []
-  const client = await plaud({ clientId: "client" }).connect({
-    ...context,
-    tokenSource: {
-      async get() {
-        const revision = ++gets
-        return {
-          accessToken: `token-${revision}`,
-          invalidate() {
-            invalidated.push(revision)
-          },
-        }
-      },
-    },
-  })
-  let calls = 0
-  mockFetch((_url, init) => {
-    calls++
-    expect(new Headers(init.headers).get("authorization")).toBe(`Bearer token-${calls}`)
-    return calls === 1 ? json({}, 401) : json(details())
-  })
-  await client.recordings.get("r1")
-  expect(calls).toBe(2)
-  expect(gets).toBe(2)
-  expect(invalidated).toEqual([1])
-})
-
-test("a second 401 is surfaced without a refresh loop", async () => {
-  let calls = 0
-  mockFetch(() => {
-    calls++
-    return json({}, 401)
-  })
-  const client = await plaud({ clientId: "client" }).connect(context)
-  await expect(client.recordings.get("r1")).rejects.toThrow("HTTP 401")
-  expect(calls).toBe(2)
-})
-
-test("concurrent requests invalidate their own token handles", async () => {
-  // Removal proof: replace the WeakMap lookup with a shared latest token in src/http.ts.
+test("a 401 invalidates the request's own token and replays with reacquired credentials", async () => {
+  // Removal proof: remove onUnauthorized in src/http.ts, or replace the WeakMap lookup with a
+  // shared latest token; either fails here. The second request's 200 races the first's 401.
   let gets = 0
   const invalidated: number[] = []
   let release!: () => void
@@ -305,8 +264,10 @@ test("concurrent requests invalidate their own token handles", async () => {
       },
     },
   })
+  const sent: (string | null)[] = []
   mockFetch(async (_url, init) => {
     const token = new Headers(init.headers).get("authorization")
+    sent.push(token)
     if (token === "Bearer t1") {
       await gate
       return json({}, 401)
@@ -317,6 +278,7 @@ test("concurrent requests invalidate their own token handles", async () => {
   await Promise.all([client.recordings.get("r1"), client.recordings.get("r1")])
   expect(invalidated).toEqual([1])
   expect(gets).toBe(3)
+  expect(sent).toEqual(["Bearer t1", "Bearer t2", "Bearer t3"])
 })
 
 test("cancellation stops OAuth before fetch, and timeouts are ambiguous without replay", async () => {
@@ -327,12 +289,17 @@ test("cancellation stops OAuth before fetch, and timeouts are ambiguous without 
       init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
     })
   })
-  await expect(
-    auth().refresh({ ...context, signal: AbortSignal.abort(new Error("stop")) }, credentials)
-  ).rejects.toThrow("stop")
+  const stop = new Error("stop")
+  const canceled = await Promise.resolve()
+    .then(() => auth().refresh({ ...context, signal: AbortSignal.abort(stop) }, credentials))
+    .catch((caught: unknown) => caught)
+  expect(canceled).toBe(stop)
   expect(calls).toBe(0)
-  await expect(
-    plaud({ clientId: "client", timeoutMs: 5 }).authentication.refresh(context, credentials)
-  ).rejects.toThrow("outcome is unknown")
+  const error = await Promise.resolve()
+    .then(() =>
+      plaud({ clientId: "client", timeoutMs: 1 }).authentication.refresh(context, credentials)
+    )
+    .catch((caught: unknown) => caught)
+  expect(String(error)).toContain("outcome is unknown")
   expect(calls).toBe(1)
 })

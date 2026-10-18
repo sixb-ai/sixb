@@ -72,35 +72,26 @@ describe("FullEnrich result webhooks", () => {
     expect(received[0]?.client).toBe(client)
   })
 
-  test("resolves a key resolver when verifying", async () => {
+  // Guard proof: return early from verifySignature; every rejection below stops throwing.
+  test("verifies with the resolved key and rejects missing, tampered, and wrong-key signatures", async () => {
     const webhook = enrichmentWebhook(
       () => {},
       async () => "rotated_key"
     )
     const body = JSON.stringify(ENRICHMENT)
+    const tampered = JSON.stringify({ ...ENRICHMENT, status: "CANCELED" })
 
     await expect(
       Promise.resolve(webhook.verify?.(verifyCtx(body, sign("rotated_key", body))))
     ).resolves.toBeUndefined()
-    await expect(
-      Promise.resolve(webhook.verify?.(verifyCtx(body, sign(API_KEY, body))))
-    ).rejects.toThrow("Invalid webhook signature")
-  })
-
-  // Guard proof: return early from verifySignature; every rejection below stops throwing.
-  test("rejects missing, tampered, and wrong-key signatures", async () => {
-    const webhook = enrichmentWebhook()
-    const body = JSON.stringify(ENRICHMENT)
-    const tampered = JSON.stringify({ ...ENRICHMENT, status: "CANCELED" })
-
     await expect(Promise.resolve(webhook.verify?.(verifyCtx(body, null)))).rejects.toThrow(
       "Missing X-Signature-SHA1 header"
     )
     await expect(
-      Promise.resolve(webhook.verify?.(verifyCtx(tampered, sign(API_KEY, body))))
+      Promise.resolve(webhook.verify?.(verifyCtx(tampered, sign("rotated_key", body))))
     ).rejects.toThrow("Invalid webhook signature")
     await expect(
-      Promise.resolve(webhook.verify?.(verifyCtx(body, sign("other_key", body))))
+      Promise.resolve(webhook.verify?.(verifyCtx(body, sign(API_KEY, body))))
     ).rejects.toThrow("Invalid webhook signature")
   })
 
