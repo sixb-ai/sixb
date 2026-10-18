@@ -179,6 +179,32 @@ describe("a deck's frame", () => {
     expect(await kit.text()).toContain("@layer sixb-kit")
   })
 
+  test("serves a page's entry in the page layout, with the page's kit, and its data beside it", async () => {
+    // Reproduce by giving a page the deck's layout in frames/entries.ts: its entry asks for the
+    // deck's kit and its runtime lays it out as slides.
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const page = await publish(fixture, alice, "page", [
+      await fixture.put(
+        "index.html",
+        "<!doctype html><html><head><title>Planner</title></head><body><main></main></body></html>",
+        "text/html"
+      ),
+      await fixture.put("data/units.json", '[{"unit":"V-12"}]', "application/json"),
+    ])
+    const minted = await mint(fixture, alice, page.artifact.id)
+    expect(minted.status).toBe(200)
+    const { path } = (await minted.json()) as { path: string }
+    const html = await (await fixture.app.fetch(new Request(url(`${path}index.html`)))).text()
+    expect(html).toContain(
+      '<head><link rel="stylesheet" href="__sixb/page.css"><script src="__sixb/runtime.js" data-sixb-layout="page"></script><title>'
+    )
+    const kit = await fixture.app.fetch(new Request(url(`${path}__sixb/page.css`)))
+    expect(await kit.text()).toContain(".card {")
+    const data = await fixture.app.fetch(new Request(url(`${path}data/units.json`)))
+    expect(await data.json()).toEqual([{ unit: "V-12" }])
+  })
+
   test("serves the version's files, and nothing else, under its policy", async () => {
     const { app, frame } = await deck()
     const base = `http://api.localhost${frame.path}`

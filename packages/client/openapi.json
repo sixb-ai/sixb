@@ -34896,7 +34896,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["document", "sheet", "slides", "file"],
+              "enum": ["document", "sheet", "slides", "page", "file"],
               "description": "Only artifacts of this kind"
             }
           },
@@ -34938,7 +34938,7 @@
                           },
                           "kind": {
                             "type": "string",
-                            "enum": ["document", "sheet", "slides", "file"]
+                            "enum": ["document", "sheet", "slides", "page", "file"]
                           },
                           "title": {
                             "type": "string"
@@ -35065,7 +35065,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -35125,7 +35125,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -35185,7 +35185,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -35260,7 +35260,7 @@
                         },
                         "kind": {
                           "type": "string",
-                          "enum": ["document", "sheet", "slides", "file"]
+                          "enum": ["document", "sheet", "slides", "page", "file"]
                         },
                         "title": {
                           "type": "string"
@@ -35455,6 +35455,20 @@
                                 }
                               },
                               "required": ["kind", "slides"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": ["page"]
+                                },
+                                "title": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["kind"],
                               "additionalProperties": false
                             },
                             {
@@ -35720,7 +35734,7 @@
                         },
                         "kind": {
                           "type": "string",
-                          "enum": ["document", "sheet", "slides", "file"]
+                          "enum": ["document", "sheet", "slides", "page", "file"]
                         },
                         "title": {
                           "type": "string"
@@ -35993,7 +36007,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -36053,7 +36067,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -36113,7 +36127,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -36188,7 +36202,7 @@
                         },
                         "kind": {
                           "type": "string",
-                          "enum": ["document", "sheet", "slides", "file"]
+                          "enum": ["document", "sheet", "slides", "page", "file"]
                         },
                         "title": {
                           "type": "string"
@@ -36383,6 +36397,20 @@
                                 }
                               },
                               "required": ["kind", "slides"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": ["page"]
+                                },
+                                "title": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["kind"],
                               "additionalProperties": false
                             },
                             {
@@ -36923,6 +36951,20 @@
                             }
                           },
                           "required": ["kind", "slides"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": ["page"]
+                            },
+                            "title": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["kind"],
                           "additionalProperties": false
                         },
                         {

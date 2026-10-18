@@ -364,6 +364,7 @@ describe("Postgres storage migrations", () => {
             "066-activity",
             "067-activity-timeline",
             "068-activity-interactions",
+            "069-artifact-kinds",
           ],
         },
       ])
@@ -843,6 +844,13 @@ describe("Postgres storage migrations", () => {
           id: "068-activity-interactions",
           status: "applied",
           version: 68,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "069-artifact-kinds",
+          status: "applied",
+          version: 69,
         },
       ])
     })
@@ -3377,6 +3385,13 @@ describe("Postgres storage migrations", () => {
           id: "068-activity-interactions",
           status: "applied",
           version: 68,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "069-artifact-kinds",
+          status: "applied",
+          version: 69,
         },
       ])
     } finally {

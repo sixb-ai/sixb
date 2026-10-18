@@ -400,3 +400,166 @@ export const FRAME_DECK_CSS = kit(`  :root {
     font-weight: 600;
   }
 `)
+
+/**
+ * A page's kit: what makes plain HTML read as a finished page in the app's theme. A measured type
+ * scale; tables, forms, and buttons drawn like the app's; a centered column for `<main>`; and a
+ * few components a page picks by class: `.lede`, `.eyebrow`, `.card`, `.grid`, `.stat`, `.tag`,
+ * `.callout`. Every rule sits in the kit's layer, so a page's own CSS wins wherever it differs.
+ */
+export const FRAME_PAGE_CSS = kit(`  html { color-scheme: light; }
+  html.dark { color-scheme: dark; }
+  body {
+    background: var(--background);
+    font-size: 15px;
+    line-height: 1.6;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* A page reads in a centered column with room around it, narrower on a phone. */
+  main { display: block; max-width: 1120px; margin: 0 auto; padding: 40px 32px 56px; }
+  @media (max-width: 640px) { main { padding: 24px 16px 40px; } }
+
+  /* Type. */
+  :is(h1, h2, h3, h4) { margin: 0 0 0.5em; color: var(--foreground); text-wrap: balance; }
+  h1 { font-size: 32px; line-height: 1.15; font-weight: 650; letter-spacing: -0.025em; }
+  h2 { margin-top: 1.6em; font-size: 21px; line-height: 1.25; font-weight: 620; letter-spacing: -0.015em; }
+  h3 { margin-top: 1.4em; font-size: 16px; line-height: 1.35; font-weight: 600; }
+  h4 { font-size: 14px; font-weight: 600; }
+  :is(h1, h2, h3, h4):first-child { margin-top: 0; }
+  @media (max-width: 640px) { h1 { font-size: 26px; } h2 { font-size: 19px; } }
+  p { margin: 0 0 1em; text-wrap: pretty; }
+  .lede { max-width: 42em; margin-bottom: 1.6em; font-size: 17px; line-height: 1.55; color: var(--muted-foreground); }
+  .eyebrow {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+  small, .muted { color: var(--muted-foreground); }
+  small { font-size: 13px; }
+  a { color: var(--foreground); text-decoration-color: color-mix(in oklab, var(--foreground) 35%, transparent); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: currentColor; }
+  strong { font-weight: 600; }
+  hr { margin: 32px 0; border: 0; border-top: 1px solid var(--border); }
+  :is(ul, ol) { margin: 0 0 1em; padding-left: 1.25em; }
+  li + li { margin-top: 0.25em; }
+  code { font-family: var(--font-mono); font-size: 0.88em; padding: 0.1em 0.35em; border-radius: 5px; background: var(--muted); }
+  pre { margin: 0 0 1em; padding: 14px 16px; overflow-x: auto; border-radius: var(--radius); background: var(--muted); font-size: 13px; line-height: 1.5; }
+  pre code { padding: 0; background: none; }
+  img, svg, video, canvas { max-width: 100%; }
+  img, video { height: auto; }
+
+  /* Tables: hairline rows, quiet headers, numbers aligned. Wide ones scroll in their box. */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+  :is(th, td) { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+  th { font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--muted-foreground); white-space: nowrap; }
+  :is(th, td):first-child { padding-left: 0; }
+  :is(th, td):last-child { padding-right: 0; }
+  :is(th, td).num, :is(th, td)[data-numeric] { text-align: right; }
+  .table-scroll { overflow-x: auto; }
+
+  /* Forms and buttons, drawn like the app's. */
+  label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 550; }
+  :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]), select, textarea) {
+    width: 100%;
+    min-height: 36px;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: calc(var(--radius) - 2px);
+    background: var(--card);
+    color: var(--foreground);
+    font: inherit;
+    font-size: 14px;
+    line-height: 1.4;
+    box-shadow: 0 1px 1px rgb(0 0 0 / 0.03);
+    transition: border-color 0.12s, box-shadow 0.12s;
+  }
+  :is(input, select, textarea):focus-visible {
+    outline: none;
+    border-color: color-mix(in oklab, var(--foreground) 45%, var(--border));
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--foreground) 12%, transparent);
+  }
+  input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color: var(--primary); }
+  textarea { min-height: 88px; resize: vertical; }
+  button, .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 0 14px;
+    border: 1px solid transparent;
+    border-radius: calc(var(--radius) - 2px);
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 550;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 0.12s, border-color 0.12s, opacity 0.12s;
+  }
+  :is(button, .button):hover { background: color-mix(in oklab, var(--primary) 88%, var(--background)); }
+  :is(button, .button):focus-visible { outline: 2px solid var(--ring, var(--foreground)); outline-offset: 2px; }
+  :is(button, .button):disabled { opacity: 0.5; cursor: default; }
+  :is(button, .button).secondary { border-color: var(--border); background: var(--card); color: var(--foreground); }
+  :is(button, .button).secondary:hover { background: var(--muted); }
+  :is(button, .button).ghost { background: transparent; color: var(--foreground); }
+  :is(button, .button).ghost:hover { background: var(--muted); }
+  fieldset { margin: 0 0 16px; padding: 0; border: 0; }
+  .field { margin-bottom: 16px; }
+
+  /* Components. */
+  .card {
+    padding: 20px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--card);
+    color: var(--card-foreground);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  }
+  .card > :last-child { margin-bottom: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px; margin-bottom: 24px; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .stat .label { font-size: 13px; color: var(--muted-foreground); }
+  .stat .value { margin-top: 4px; font-size: 30px; line-height: 1.1; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .stat .delta { margin-top: 6px; font-size: 13px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.6;
+  }
+  .callout { margin: 0 0 1em; padding: 14px 16px; border-radius: var(--radius); background: var(--muted); }
+  .callout > :last-child { margin-bottom: 0; }
+
+  /*
+   * Another artifact on the page: the app draws it over this box, sized by the page's CSS like any
+   * block. Until it does, the box shows where it goes.
+   */
+  sixb-embed {
+    display: block;
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    margin-bottom: 1em;
+    border-radius: var(--radius);
+    background: var(--muted);
+  }
+  sixb-embed[title]::after {
+    content: attr(title);
+    position: absolute;
+    inset: auto 16px 12px;
+    font-size: 13px;
+    color: var(--muted-foreground);
+  }
+  img[data-sixb-ref="unavailable"] { display: block; min-width: 120px; min-height: 68px; border-radius: var(--radius); background: var(--muted); }
+`)

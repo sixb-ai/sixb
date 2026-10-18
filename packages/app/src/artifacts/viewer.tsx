@@ -39,6 +39,7 @@ import { ArtifactReferencesProvider } from "./references/references"
 import { DocumentRenderer } from "./renderers/document"
 import { FileRenderer } from "./renderers/file"
 import { ViewerLoading, ViewerNotice } from "./renderers/notice"
+import { PageRenderer } from "./renderers/page"
 import { useWorkbookDownloads } from "./renderers/sheet/downloads"
 import { SheetRenderer } from "./renderers/sheet/sheet"
 import { SlidesRenderer } from "./renderers/slides/slides"
@@ -197,6 +198,8 @@ function ArtifactBody({
       return <SheetRenderer version={version} part={part} />
     case "slides":
       return <SlidesRenderer version={version} part={part} />
+    case "page":
+      return <PageRenderer version={version} />
     case "file": {
       const source = versionFileSource(version, version.entry)
       return source ? (
@@ -313,8 +316,8 @@ function SheetDownloadMenu({ version }: { readonly version: ArtifactVersion }) {
 }
 
 /**
- * A document or a file downloads as its entry. A deck's entry is only its slides' markup, which is
- * no file the reader wants on its own.
+ * A document or a file downloads as its entry. A deck's or a page's entry is only its markup, no
+ * file the reader wants on its own without the files beside it.
  */
 function EntryDownloadMenu({
   version,
@@ -325,7 +328,8 @@ function EntryDownloadMenu({
 }) {
   const messages = useArtifactMessages()
   const locale = useLocale()
-  const source = kind === "slides" ? null : versionFileSource(version, version.entry)
+  const source =
+    kind === "slides" || kind === "page" ? null : versionFileSource(version, version.entry)
   if (!source) return null
   return (
     <DownloadMenu

@@ -21,6 +21,8 @@ export const ARTIFACT_LIMITS = {
   maxPieSlices: 5,
   /** A deck's `index.html` is parsed whole when it is published. */
   maxDeckBytes: 2 * 1024 * 1024,
+  /** A page's `index.html` is parsed whole when it is published; its scripts and data are not. */
+  maxPageBytes: 2 * 1024 * 1024,
   maxSlides: 100,
   /** `artifact:` addresses one version may use. */
   maxReferences: 200,

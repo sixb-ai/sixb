@@ -590,6 +590,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 66,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "067-artifact-kinds",
+    status: "applied",
+    version: 67,
+  },
 ]
 
 afterEach(async () => {
@@ -774,6 +781,62 @@ describe("SQLite storage migrations", () => {
           )
           .get()
       ).toEqual({ count: 6 })
+    } finally {
+      db.close()
+    }
+  })
+
+  // Removal proof: drop the INSERT from 067 and the artifact, its version, and its grant are gone;
+  // drop the RENAME and nothing references `artifacts` any more.
+  test("rebuilds artifacts for the page and canvas kinds, keeping their versions and grants", async () => {
+    const db = new Database(":memory:")
+    try {
+      const steps = sqliteStorageMigrations.steps
+      const index = steps.findIndex((step) => step.id === "067-artifact-kinds")
+      for (const step of steps.slice(0, index)) await step.up(db)
+      const at = "2026-01-01T00:00:00.000Z"
+      db.run(
+        `INSERT INTO artifacts VALUES ('p', 'art_deck000001', 'slides', 'Deck', 'user', 'u', 1, 2, ?, ?)`,
+        [at, at]
+      )
+      db.run(
+        `INSERT INTO artifact_versions (
+          project_id, artifact_id, version, title, entry, files, outline, refs,
+          author_principal_type, author_principal_id, created_at
+        ) VALUES ('p', 'art_deck000001', 1, 'Deck', 'index.html', '[]', '{"kind":"slides"}', '[]',
+          'user', 'u', ?)`,
+        [at]
+      )
+      db.run(`INSERT INTO artifact_frame_grants VALUES ('p', ?, 'art_deck000001', 1, '[]', ?, ?)`, [
+        "a".repeat(64),
+        at,
+        "2026-01-01T01:00:00.000Z",
+      ])
+      for (const step of steps.slice(index, index + 1)) await step.up(db)
+
+      expect(db.query("SELECT id, kind, next_version FROM artifacts").all()).toEqual([
+        { id: "art_deck000001", kind: "slides", next_version: 2 },
+      ])
+      for (const kind of ["page", "canvas"]) {
+        db.run(`INSERT INTO artifacts VALUES ('p', ?, ?, 'New', 'user', 'u', 1, 2, ?, ?)`, [
+          `art_${kind}`,
+          kind,
+          at,
+          at,
+        ])
+      }
+      expect(() =>
+        db.run(
+          `INSERT INTO artifacts VALUES ('p', 'art_x', 'video', 'X', 'user', 'u', 1, 2, ?, ?)`,
+          [at, at]
+        )
+      ).toThrow()
+      // The versions and grants still belong to the rebuilt table: deleting the deck takes them.
+      db.run("PRAGMA foreign_keys = ON")
+      expect(db.query("PRAGMA foreign_key_check").all()).toEqual([])
+      db.run("DELETE FROM artifacts WHERE id = 'art_deck000001'")
+      expect(db.query("SELECT COUNT(*) AS n FROM artifact_versions").get()).toEqual({ n: 0 })
+      expect(db.query("SELECT COUNT(*) AS n FROM artifact_frame_grants").get()).toEqual({ n: 0 })
     } finally {
       db.close()
     }
