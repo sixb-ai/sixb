@@ -662,7 +662,6 @@
         "@sixb/cli-core": "workspace:^",
       },
       "devDependencies": {
-        "@sixb/connector-exa": "workspace:*",
         "@sixb/core": "workspace:*",
         "@sixb/sandboxes-local": "workspace:*",
         "@types/bun": "latest",
