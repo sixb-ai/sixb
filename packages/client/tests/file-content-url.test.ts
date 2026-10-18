@@ -17,6 +17,25 @@ const input = {
 }
 
 describe("objectFileContentUrl", () => {
+  // Media elements cannot send the selector header. Regression proof: read the grant from the
+  // default client instead of `input.client` and the shared assertion fails.
+  test("names the Share in the query only for a shared client", () => {
+    const shared = createSixbClient({
+      baseUrl: "https://api.example.com",
+      auth: { kind: "shared", grantId: "shr_1" },
+    })
+    expect(
+      new URL(objectFileContentUrl({ ...input, client: shared })).searchParams.getAll("shareGrant")
+    ).toEqual(["shr_1"])
+
+    for (const auth of [undefined, { kind: "cookie" as const }]) {
+      const client = createSixbClient({ baseUrl: "https://api.example.com", auth })
+      expect(
+        new URL(objectFileContentUrl({ ...input, client })).searchParams.has("shareGrant")
+      ).toBe(false)
+    }
+  })
+
   test("uses the client base path and encodes object IDs and JSON pointers", () => {
     const client = createSixbClient({ baseUrl: "https://sixb.test/prefix/api" })
     const url = new URL(objectFileContentUrl({ ...input, client, disposition: "attachment" }))

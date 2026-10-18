@@ -583,6 +583,46 @@ describe("SixbHost auth runtime", () => {
     )
   })
 
+  test("reveals invitation links only when the caller opts in", async () => {
+    // The strategy always returns a link; the runtime alone decides whether the caller sees it.
+    const strategy: MagicLinkAuthStrategy = {
+      id: "magic-link",
+      kind: "magicLink" as const,
+      async requestMagicLink() {
+        return { status: "sent" as const }
+      },
+      async deliverInvitation() {
+        return {
+          status: "sent" as const,
+          link: {
+            url: "https://api.example/auth/callback?token=secret",
+            expiresAt: new Date("2099-05-16T10:15:00.000Z"),
+          },
+        }
+      },
+      async completeMagicLinkSignIn(): Promise<never> {
+        throw new Error("unused")
+      },
+    }
+    const { deps, sixb } = createInviteRuntime({ strategy })
+    const caller = await seedAuthenticatedUser(sixb, deps, {
+      userId: "usr_admin",
+      email: "admin@acme.com",
+      groupIds: ["security-admins"],
+    })
+    const input = { email: "ava@acme.com", groups: [commercial] }
+
+    const concealed = await sixb.auth.invite(caller, input, invitationDestination)
+    expect(concealed.delivery).toEqual({ status: "sent" })
+
+    const revealed = await sixb.auth.invite(
+      caller,
+      { ...input, revealLink: true },
+      invitationDestination
+    )
+    expect(revealed.delivery.link?.url).toContain("token=secret")
+  })
+
   test("rejects invalid or unauthorized invitation input before writing", async () => {
     const { deps, sixb } = createInviteRuntime()
     const caller = await seedAuthenticatedUser(sixb, deps, {

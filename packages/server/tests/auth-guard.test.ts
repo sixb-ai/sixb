@@ -257,22 +257,37 @@ describe("server auth guard", () => {
       ["POST", "/api/auth/sign-out-all", undefined],
     ] as const
 
-    for (const [method, path, body] of mutations) {
-      const send = (cookie?: string) =>
-        app.fetch(
-          new Request(`http://localhost${path}`, {
-            method,
-            headers: {
-              ...(body ? { "content-type": "application/json" } : {}),
-              ...(cookie ? { cookie } : {}),
-            },
-            body: body ? JSON.stringify(body) : undefined,
-          })
-        )
+    const send = (
+      [method, path, body]: (typeof mutations)[number],
+      headers: Record<string, string> = {}
+    ) =>
+      app.fetch(
+        new Request(`http://localhost${path}`, {
+          method,
+          headers: { ...(body ? { "content-type": "application/json" } : {}), ...headers },
+          body: body ? JSON.stringify(body) : undefined,
+        })
+      )
 
-      expect((await send()).status, `${method} ${path} anonymously`).toBe(401)
-      expect((await send(seeded.cookie)).status, `${method} ${path} without CSRF`).toBe(403)
+    for (const mutation of mutations) {
+      const label = `${mutation[0]} ${mutation[1]}`
+      expect((await send(mutation)).status, `${label} anonymously`).toBe(401)
+      const withoutCsrf = await send(mutation, { cookie: seeded.cookie })
+      expect(withoutCsrf.status, `${label} without CSRF`).toBe(403)
+      expect(await withoutCsrf.json(), `${label} without CSRF`).toEqual({
+        error: "CSRF verification failed",
+      })
     }
+
+    // With the token, the invitation passes the guard and reaches the route, whose own 403 is for
+    // the caller's missing membership policy.
+    const withCsrf = await send(mutations[1], {
+      cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
+      ...seeded.csrfHeader,
+    })
+    expect(await withCsrf.json()).toEqual({
+      error: expect.stringContaining("not allowed to create or manage invitations"),
+    })
   })
 
   test("protects a route registered outside the known prefixes", async () => {

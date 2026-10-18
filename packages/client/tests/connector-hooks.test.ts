@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { QueryClient } from "@tanstack/react-query"
-import { readConnectorConnectionCallback } from "../src/connectors/connection"
+import {
+  connectorConnectionReturnTo,
+  readConnectorConnectionCallback,
+} from "../src/connectors/connection"
 import {
   getConnectorConnectionRunQueryKey,
   listConnectorConnectionsQueryKey,
@@ -329,5 +332,13 @@ describe("connector connection callback", () => {
     expect(
       readConnectorConnectionCallback("https://app.sixb.test/settings?connectionRunId=ccr_123")
     ).toBeNull()
+  })
+
+  test("preserves application URL state while removing callback parameters", () => {
+    expect(
+      connectorConnectionReturnTo(
+        "https://app.sixb.test/settings?tab=connectors&connectionConnectorId=tiktok&connectionRunId=ccr_123#oauth"
+      )
+    ).toBe("https://app.sixb.test/settings?tab=connectors#oauth")
   })
 })

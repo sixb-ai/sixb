@@ -543,14 +543,19 @@ describe("browser client auth", () => {
     expect(redirects).toHaveLength(1)
   })
 
-  test("does not auto-redirect explicit sign-out requests, including path-prefixed ones", async () => {
+  // Reproduce: drop the trailing-slash strip in `isAuthRedirectExcludedRequest` (browser.ts); a
+  // root base URL then expects `//api/auth/sign-out` and redirects.
+  test.each([
+    { baseUrl: "http://localhost:3002", path: "/api/auth/sign-out" },
+    { baseUrl: "http://localhost:3002/platform", path: "/platform/api/auth/sign-out" },
+  ])("does not auto-redirect explicit sign-out requests to $baseUrl", async ({ baseUrl, path }) => {
     const redirects: string[] = []
     const controller = configureBrowserClient(
       {
         getCurrentUrl: () => "http://localhost:3001/devices",
         redirect: (url) => redirects.push(url),
       },
-      { ...runtimeConfig, api: { baseUrl: "http://localhost:3002/platform" } }
+      { ...runtimeConfig, api: { baseUrl } }
     )
     controller.setCsrfToken("csrf_current")
     let requestUrl = ""
@@ -564,7 +569,7 @@ describe("browser client auth", () => {
 
     await signOut({ fetch: fetchMock })
 
-    expect(new URL(requestUrl).pathname).toBe("/platform/api/auth/sign-out")
+    expect(new URL(requestUrl).pathname).toBe(path)
     expect(controller.getCsrfToken()).toBe("csrf_current")
     expect(redirects).toEqual([])
   })

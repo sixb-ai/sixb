@@ -144,6 +144,7 @@ describe("/ws/events subscriptions", () => {
     })
   })
 
+  // Reproduce: make `open()` in routes/ws/events.ts subscribe the socket to every event.
   test("scopes run streams by run id", async () => {
     await withWsServer(async ({ baseUrl, sixb }) => {
       const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/events`)
@@ -151,6 +152,7 @@ describe("/ws/events subscriptions", () => {
       try {
         expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
 
+        jest.useFakeTimers()
         await sixb.events.append({
           events: [
             {
@@ -167,6 +169,15 @@ describe("/ws/events subscriptions", () => {
             },
           ],
         })
+        // Nothing is pushed before the subscription. Run past the hub's flush delay: an event
+        // pushed to the unsubscribed socket would now be sent, ahead of this message's reply.
+        jest.advanceTimersByTime(50)
+        jest.useRealTimers()
+        ws.send("not json")
+        expect(await nextWsMessage(ws)).toEqual({
+          type: "error",
+          message: "Message must be a JSON object.",
+        })
 
         ws.send(
           JSON.stringify({
@@ -177,8 +188,7 @@ describe("/ws/events subscriptions", () => {
           })
         )
 
-        // Nothing is pushed before the subscription: its acknowledgement is the next message. The
-        // events written since the socket opened are replayed after it.
+        // The events written since the socket opened are replayed after the acknowledgement.
         expect(await nextWsMessage(ws)).toMatchObject({
           type: "subscribed",
           topic: "syncs",

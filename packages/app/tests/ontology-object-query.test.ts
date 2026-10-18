@@ -40,11 +40,12 @@ describe("object query properties", () => {
     ])
   })
 
-  test("sort and facet as the server reports, and hide what it reports no capability for", () => {
+  test("filter, sort and facet as the server reports, and hide what it reports no capability for", () => {
     const reading = property(
       { type: "valueTypeRef", valueTypeId: "reading" },
       { operators: ["eq"], sortable: true, facet: true }
     )
+    expect(isFilterableProperty(reading)).toBe(true)
     expect(isSortableProperty(reading)).toBe(true)
     expect(isFacetProperty(reading)).toBe(true)
 
