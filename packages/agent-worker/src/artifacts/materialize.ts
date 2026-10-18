@@ -278,6 +278,8 @@ async function readBlob(
   const reader = (await waitForAbort(blobStorage.open(blobId), signal)).getReader()
   const cancel = () => void reader.cancel(signal.reason).catch(() => {})
   signal.addEventListener("abort", cancel, { once: true })
+  // A cancel between the open and the listener fires no event.
+  if (signal.aborted) cancel()
   try {
     const chunks: Uint8Array[] = []
     for (;;) {
