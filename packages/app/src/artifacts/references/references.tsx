@@ -363,6 +363,9 @@ function EmbedBody({
       ) : (
         <CardEmbed version={version} address={address} />
       )
+    case "board":
+    case "region":
+      return <CardEmbed version={version} address={address} />
   }
 }
 
@@ -723,6 +726,13 @@ function partLabel(part: ResolvedArtifactPart, version: ArtifactVersion): string
       return String(part.slide)
     case "file":
       return part.path
+    case "board":
+    case "region": {
+      const { outline } = version
+      const item =
+        outline.kind === "canvas" ? outline.items.find((entry) => entry.id === part.id) : undefined
+      return item?.title ?? part.id
+    }
     case "artifact":
       return undefined
   }

@@ -14,6 +14,22 @@ export {
   parseSheetPart,
   type SheetPart,
 } from "./address"
+export {
+  CANVAS_FILE,
+  type Canvas,
+  type CanvasArrow,
+  type CanvasBoard,
+  type CanvasEmbed,
+  type CanvasEnd,
+  type CanvasItem,
+  type CanvasNote,
+  type CanvasSection,
+  type CanvasShape,
+  type CanvasShapeItem,
+  type CanvasText,
+  type CanvasTextSize,
+  parseCanvas,
+} from "./canvas"
 export { CsvParseError, type CsvTable, formatCsv, parseCsv } from "./csv"
 export {
   checkFormula,
@@ -41,6 +57,8 @@ export { ARTIFACT_KINDS, type ArtifactKind } from "./kinds"
 export { ARTIFACT_LIMITS } from "./limits"
 export {
   type ArtifactOutline,
+  type CanvasOutline,
+  type CanvasOutlineItem,
   createHeadingSlugger,
   type DocumentHeading,
   type DocumentOutline,
@@ -55,6 +73,7 @@ export {
   resolveArtifactAddress,
 } from "./resolve"
 export { ARTIFACT_THEME_FILE, type ArtifactTheme, parseArtifactTheme } from "./theme"
+export { ARTIFACT_TONES, type ArtifactTone } from "./tones"
 export {
   NUMERIC_COLUMN_TYPES,
   parseSheetDate,
@@ -65,7 +84,6 @@ export {
   type SheetColumnFormat,
   type SheetColumnType,
   type SheetHighlight,
-  type SheetTone,
   type SheetTotal,
   sheetFilePath,
   WORKBOOK_FILE,

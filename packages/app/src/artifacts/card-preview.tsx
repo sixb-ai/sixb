@@ -9,6 +9,8 @@ import { fileView } from "./file-view"
 import { ArtifactKindIcon, type ArtifactKindName } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
 import { type ArtifactVersion, useArtifactTheme, useFileText, versionFileSource } from "./queries"
+import { useCanvas } from "./renderers/canvas/renderer"
+import { CanvasThumbnail } from "./renderers/canvas/thumbnail"
 import { PageScreen } from "./renderers/page"
 import { chartData } from "./renderers/sheet/chart-data"
 import { CHART_ICONS } from "./renderers/sheet/chart-icon"
@@ -152,6 +154,8 @@ function VersionPreview({
         <DeckPreview version={version} />
       ) : kind === "page" ? (
         <PageScreen version={version} />
+      ) : kind === "canvas" ? (
+        <CanvasPreview version={version} />
       ) : source ? (
         <FilePreview source={source} />
       ) : (
@@ -159,6 +163,13 @@ function VersionPreview({
       )}
     </div>
   )
+}
+
+/** A canvas drawn small, once its `canvas.json` is read. */
+function CanvasPreview({ version }: { readonly version: ArtifactVersion }) {
+  const canvas = useCanvas(version)
+  if (canvas === undefined) return <Skeleton pulse />
+  return canvas ? <CanvasThumbnail canvas={canvas} /> : <Skeleton />
 }
 
 function DocumentPreview({ version }: { readonly version: ArtifactVersion }) {

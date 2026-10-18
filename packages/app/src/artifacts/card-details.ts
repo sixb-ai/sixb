@@ -32,6 +32,11 @@ export function versionSummary(
     case "slides":
       details.push(messages.card.slides(outline.slides.length))
       break
+    case "canvas": {
+      const boards = outline.items.filter((item) => item.type === "board").length
+      if (boards > 0) details.push(messages.card.boards(boards))
+      break
+    }
     case "file": {
       // A file reads as its format, which says more than "File".
       const file = version.files.find((candidate) => candidate.path === version.entry)

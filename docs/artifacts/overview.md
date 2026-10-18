@@ -12,6 +12,7 @@ owner reads it.
 | `sheet`    | Tables of data, one CSV per sheet, with typed columns and their charts |
 | `slides`   | A deck: `index.html` with one `<section class="slide">` per slide      |
 | `page`     | A web page: `index.html` and its scripts, styles, images, and data     |
+| `canvas`   | An endless board of boards, sections, notes, shapes, and arrows        |
 | `file`     | One file, shown as its type allows or offered for download             |
 
 ## Publish an artifact
@@ -254,6 +255,47 @@ fleet-planner/
   phone's 390px, as it checks a deck, and warns about content past the screen's right edge,
   overlapping or cut off text, text under 12px, a control under 24px, low contrast, a broken image,
   or a script error, with a screenshot at each width to look at before it revises.
+
+## Write a canvas
+
+A canvas is `canvas.json`, listing its items on an endless board, with the HTML files its boards
+show beside it. Use one for what reads best laid out side by side: several screens of a flow, a
+brainstorm or a retro, a diagram, a mood board.
+
+```json
+{
+  "items": [
+    { "id": "first-run", "type": "section", "x": 0, "y": -120, "w": 1020, "h": 964, "title": "First run" },
+    { "id": "welcome", "type": "board", "file": "boards/welcome.html", "x": 0, "y": 0, "w": 390, "h": 844, "title": "Welcome" },
+    { "id": "region", "type": "board", "file": "boards/region.html", "x": 630, "y": 0, "w": 390, "h": 844 },
+    { "id": "next", "type": "arrow", "from": "welcome", "to": "region", "label": "Get started" },
+    { "id": "ask", "type": "note", "x": 630, "y": 1010, "w": 300, "text": "Skip this screen with GPS?" },
+    { "id": "title", "type": "text", "x": 0, "y": -300, "text": "Field app onboarding", "size": "xl" },
+    { "id": "paid", "type": "shape", "shape": "diamond", "x": 1100, "y": 1010, "w": 200, "h": 140, "text": "Paid?" },
+    { "id": "sla", "type": "embed", "src": "artifact:art_k3m9q2x7tp#chart=sla-trend", "x": 1500, "y": 0, "w": 640, "h": 400 }
+  ]
+}
+```
+
+| Item      | Is                                                                                   |
+| --------- | ------------------------------------------------------------------------------------ |
+| `board`   | An HTML file of the canvas, shown as a page `w` by `h`: a screen, a mockup, a poster |
+| `section` | A group's heading, drawn at the top left of the region it names                      |
+| `note`    | A sticky note of plain text that grows to hold it; `tone` picks its color            |
+| `text`    | A label or a heading, `size` `s`, `m`, `l`, or `xl`                                  |
+| `shape`   | A `rect`, `ellipse`, or `diamond`, with optional text                                |
+| `arrow`   | From one item, or a point `{ "x", "y" }`, to another, with an optional `label`, `dashed` |
+| `embed`   | Another artifact, or a part of one, at a size                                        |
+
+- Each item has an `id` of lowercase letters, digits, and hyphens, and sits at `x` and `y` in
+  pixels. Items draw in the order listed, and a canvas opens fitted to everything.
+- Boards are pages: Sixb adds the page kit and runtime to each, and boards may share CSS and
+  images beside them (`boards/shared.css`).
+- `artifact:…#welcome` opens the canvas on that board or section. A canvas holds at most 500 items
+  and 40 boards; sizes run from 40 to 8,000 pixels and positions within ±100,000.
+
+Readers drag or scroll to pan, pinch or ⌘-scroll to zoom, fit everything with the controls, and
+press the zoom to go to 100%.
 
 ## Reference another artifact
 

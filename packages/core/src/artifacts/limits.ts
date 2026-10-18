@@ -24,6 +24,15 @@ export const ARTIFACT_LIMITS = {
   /** A page's `index.html` is parsed whole when it is published; its scripts and data are not. */
   maxPageBytes: 2 * 1024 * 1024,
   maxSlides: 100,
+  /** A canvas's items, its live boards, and where they may sit, in pixels. */
+  maxCanvasBytes: 512 * 1024,
+  maxCanvasItems: 500,
+  maxCanvasBoards: 40,
+  minCanvasItemSize: 40,
+  maxCanvasItemSize: 8000,
+  maxCanvasPosition: 100_000,
+  /** A board's HTML is parsed whole when it is published, as a page's is. */
+  maxBoardBytes: 2 * 1024 * 1024,
   /** `artifact:` addresses one version may use. */
   maxReferences: 200,
 } as const

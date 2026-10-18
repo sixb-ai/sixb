@@ -136,7 +136,7 @@ describe("the artifacts gallery", () => {
     // No kind is a stop of its own: the group is, and it hands focus on to the chosen kind.
     expect(ui.getByRole("radiogroup", { name: "Filter by kind" })).toBeTruthy()
     expect(ui.getAllByRole("radio").map((radio) => radio.getAttribute("tabindex"))).toEqual(
-      Array.from({ length: 6 }, () => "-1")
+      Array.from({ length: 7 }, () => "-1")
     )
     const all = ui.getByRole("radio", { name: "All" })
     expect(all.getAttribute("aria-checked")).toBe("true")

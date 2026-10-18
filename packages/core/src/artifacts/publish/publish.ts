@@ -23,6 +23,7 @@ import {
   readArtifactText,
 } from "./files"
 import { brokenDependents, type FoundReference, resolveReferences } from "./references"
+import { validateCanvas } from "./validate/canvas"
 import { validateDocument } from "./validate/document"
 import { validateFileArtifact } from "./validate/file"
 import { validatePage } from "./validate/page"
@@ -184,6 +185,8 @@ async function validateKind(
       return validateSlides(blobStorage, files)
     case "page":
       return validatePage(blobStorage, files)
+    case "canvas":
+      return validateCanvas(blobStorage, files)
     default:
       // A caller past the API's schema, such as a script on the SDK, can name any kind.
       throw invalidArtifact(`'${kind satisfies never}' is not a kind of artifact.`)
