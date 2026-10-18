@@ -10,7 +10,7 @@ import { fileView } from "./file-view"
 import { ArtifactKindIcon, type ArtifactKindName } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
 import { type ArtifactVersion, useArtifactTheme, useFileText, versionFileSource } from "./queries"
-import { PageFace } from "./renderers/page"
+import { PageScreen } from "./renderers/page"
 import { chartData } from "./renderers/sheet/chart-data"
 import { previewFormatter } from "./renderers/sheet/format"
 import { MiniChart } from "./renderers/sheet/mini-chart"
@@ -151,7 +151,7 @@ function VersionPreview({
       ) : kind === "slides" ? (
         <DeckPreview version={version} />
       ) : kind === "page" ? (
-        <PageFace version={version} />
+        <PageScreen version={version} />
       ) : source ? (
         <FilePreview source={source} />
       ) : (

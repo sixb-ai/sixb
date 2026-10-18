@@ -525,7 +525,7 @@ export const FRAME_PAGE_CSS = kit(`  html { color-scheme: light; }
   /* Cards stack with room between them; in a grid or a row, its gap spaces them. */
   .card { margin-bottom: 16px; }
   :is(.grid, .row) > .card { margin-bottom: 0; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px; margin-bottom: 24px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 16px; margin-bottom: 24px; }
   .row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
   .stat .label { font-size: 13px; color: var(--muted-foreground); }
   .stat .value { margin-top: 4px; font-size: 30px; line-height: 1.1; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }

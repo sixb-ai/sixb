@@ -2,143 +2,424 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Q4 fleet planner</title>
+  <title>Q4 crew capacity planner</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
   <style>
-    .planner { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 24px; align-items: start; margin-bottom: 16px; }
-    .planner > .card { margin: 0; }
-    @media (max-width: 760px) { .planner { grid-template-columns: minmax(0, 1fr); } }
-    .bar { height: 6px; border-radius: 999px; background: var(--muted); overflow: hidden; }
-    .bar > span { display: block; height: 100%; background: var(--chart-1); border-radius: inherit; }
-    .load { width: 30%; }
+    :root { --over: #c2410c; --ok: #15803d; }
+    html.dark { --over: #fb923c; --ok: #4ade80; }
+
+    .head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 32px; margin-bottom: 28px; }
+    .head .lede { margin-bottom: 0; }
+
+    /* A segmented control: one radio per scenario, the checked one raised. */
+    .segmented { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: var(--muted); }
+    .segmented label { position: relative; margin: 0; }
+    .segmented input { position: absolute; opacity: 0; pointer-events: none; }
+    .segmented span { display: block; padding: 6px 14px; border-radius: 7px; font-size: 13px; font-weight: 550; line-height: 18px; color: var(--muted-foreground); white-space: nowrap; cursor: pointer; transition: background-color 0.15s, color 0.15s; }
+    .segmented input:checked + span { background: var(--card); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 0 0 1px var(--border); }
+    .segmented input:focus-visible + span { outline: 2px solid var(--foreground); outline-offset: 1px; }
+
+    .layout { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 20px; align-items: start; margin-bottom: 16px; }
+    .layout > * { margin: 0; }
+    .side { position: sticky; top: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
+    .side h3 { margin: 0; }
+    .main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+    .main > .card { margin: 0; }
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: minmax(0, 1fr); }
+      .side { position: static; }
+    }
+
+    /* Sliders, filled up to their value. */
+    .slider-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+    .slider-head label { margin: 0; }
+    .slider-head output { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    input[type="range"] { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 24px; margin: 0; background: transparent; cursor: pointer; }
+    input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: linear-gradient(to right, var(--foreground) var(--fill), var(--border) var(--fill)); }
+    input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; margin-top: -7px; border: 1px solid var(--border); border-radius: 50%; background: var(--card); box-shadow: 0 1px 3px rgb(0 0 0 / 0.18); }
+    input[type="range"]::-moz-range-track { height: 4px; border-radius: 999px; background: var(--border); }
+    input[type="range"]::-moz-range-progress { height: 4px; border-radius: 999px; background: var(--foreground); }
+    input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border: 1px solid var(--border); border-radius: 50%; background: var(--card); }
+    .scale { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted-foreground); }
+
+    /* A switch: a checkbox drawn as a track and a knob. */
+    .switch { display: flex; align-items: center; gap: 10px; margin: 0; font-weight: 500; cursor: pointer; }
+    .switch input { position: absolute; opacity: 0; pointer-events: none; }
+    .switch .track { flex: none; position: relative; width: 36px; height: 22px; border-radius: 999px; background: var(--border); transition: background-color 0.15s; }
+    .switch .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 2px rgb(0 0 0 / 0.25); transition: transform 0.15s; }
+    .switch input:checked + .track { background: var(--foreground); }
+    .switch input:checked + .track::after { transform: translateX(14px); }
+    .switch input:focus-visible + .track { outline: 2px solid var(--foreground); outline-offset: 2px; }
+    .switch small { display: block; font-weight: 400; }
+
+    /* Region chips, each with its series' swatch. */
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { position: relative; margin: 0; }
+    .chip input { position: absolute; opacity: 0; pointer-events: none; }
+    .chip span { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 0 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); font-size: 13px; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
+    .chip span::before { content: ""; width: 9px; height: 9px; border-radius: 3px; background: var(--swatch); }
+    .chip input:not(:checked) + span { opacity: 0.45; text-decoration: line-through; }
+    .chip input:focus-visible + span { outline: 2px solid var(--foreground); outline-offset: 1px; }
+
+    .stat .value.over { color: var(--over); }
+    .stat .value.ok { color: var(--ok); }
+
+    .chart-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; margin-bottom: 8px; }
+    .chart-head h3 { margin: 0; }
+    .key { display: flex; gap: 14px; font-size: 12px; color: var(--muted-foreground); }
+    .key span { display: inline-flex; align-items: center; gap: 6px; }
+    .key i { width: 14px; height: 0; border-top: 2px dashed var(--over); }
+    .key b { margin-right: -3px; color: var(--over); font-weight: 600; }
+    #chart { height: 340px; }
+    @media (max-width: 640px) { #chart { height: 280px; } }
+
+    td:first-child { white-space: nowrap; }
+    td .swatch { display: inline-block; width: 9px; height: 9px; margin-right: 8px; border-radius: 3px; background: var(--swatch); }
+    .gap { font-weight: 600; }
+    .gap.over { color: var(--over); }
+    .gap.ok { color: var(--ok); }
+    .spark { display: block; width: 120px; height: 28px; }
+    .spark path { fill: none; stroke: var(--foreground); stroke-width: 1.5; }
+    .spark .area { fill: var(--muted); stroke: none; }
+    .spark circle { fill: var(--over); }
+    @media (max-width: 640px) { .trend { display: none; } }
   </style>
 </head>
 <body>
   <main>
-    <p class="eyebrow">Q4 2026 · Field service</p>
-    <h1>Fleet planner</h1>
-    <p class="lede">How many crews and vans next quarter's service visits need, by region. Change the assumptions to plan for a busier quarter.</p>
+    <header class="head">
+      <div>
+        <p class="eyebrow">Q4 2026 · Field service</p>
+        <h1>Crew capacity planner</h1>
+        <p class="lede">Crews next quarter's visits need, week by week, against the crews we have. Pick a scenario or move the assumptions; every number follows.</p>
+      </div>
+      <div class="segmented" role="radiogroup" aria-label="Scenario">
+        <label><input type="radio" name="scenario" value="base" checked><span>Base</span></label>
+        <label><input type="radio" name="scenario" value="busy"><span>Busy winter</span></label>
+        <label><input type="radio" name="scenario" value="storm"><span>Storm season</span></label>
+      </div>
+    </header>
 
     <div class="grid">
-      <div class="card stat"><div class="label">Visits forecast</div><div class="value" id="visits">–</div><div class="delta" id="growth-note">–</div></div>
-      <div class="card stat"><div class="label">Crews needed</div><div class="value" id="crews">–</div><div class="delta" id="crews-delta">–</div></div>
-      <div class="card stat"><div class="label">Vans needed</div><div class="value" id="vans">–</div><div class="delta">One per crew, plus spares</div></div>
+      <div class="card stat"><div class="label">Visits forecast</div><div class="value" id="visits">–</div><div class="delta" id="visits-note">–</div></div>
+      <div class="card stat"><div class="label">Crews needed at peak</div><div class="value" id="peak">–</div><div class="delta" id="peak-note">–</div></div>
+      <div class="card stat"><div class="label">Crews available</div><div class="value" id="capacity">–</div><div class="delta" id="capacity-note">–</div></div>
+      <div class="card stat"><div class="label">At peak</div><div class="value" id="gap">–</div><div class="delta" id="gap-note">–</div></div>
     </div>
 
-    <div class="planner">
-      <form class="card" id="inputs">
+    <div class="layout">
+      <form class="card side" id="inputs">
         <h3>Assumptions</h3>
-        <div class="field">
-          <label for="growth">Visit growth on Q3 (%)</label>
-          <input id="growth" type="number" value="8" min="-50" max="100" step="1">
+        <div>
+          <div class="slider-head"><label for="growth">Visit growth on Q3</label><output id="growth-out" for="growth"></output></div>
+          <input id="growth" type="range" min="-10" max="40" step="1">
+          <div class="scale"><span>−10%</span><span>+40%</span></div>
         </div>
-        <div class="field">
-          <label for="per-crew">Visits per crew per week</label>
-          <input id="per-crew" type="number" value="22" min="5" max="60">
+        <div>
+          <div class="slider-head"><label for="pace">Visits per crew per day</label><output id="pace-out" for="pace"></output></div>
+          <input id="pace" type="range" min="3" max="7" step="0.25">
+          <div class="scale"><span>3</span><span>7</span></div>
         </div>
-        <div class="field">
-          <label for="spares">Spare vans</label>
-          <select id="spares">
-            <option value="0.1" selected>10% of the fleet</option>
-            <option value="0.15">15% of the fleet</option>
-            <option value="0.2">20% of the fleet</option>
-          </select>
+        <div>
+          <div class="slider-head"><label for="overtime">Overtime allowed</label><output id="overtime-out" for="overtime"></output></div>
+          <input id="overtime" type="range" min="0" max="25" step="5">
+          <div class="scale"><span>None</span><span>25%</span></div>
         </div>
-        <div class="row">
-          <button type="button" id="reset" class="secondary">Reset</button>
-          <span class="tag" id="status">Within today's fleet</span>
+        <div>
+          <div class="slider-head"><label for="contractors">Contract crews</label><output id="contractors-out" for="contractors"></output></div>
+          <input id="contractors" type="range" min="0" max="8" step="1">
+          <div class="scale"><span>0</span><span>8</span></div>
         </div>
+        <label class="switch"><input id="storms" type="checkbox"><span class="track"></span><span>Storm season<small class="muted">Visits +25% from mid-November</small></span></label>
+        <div>
+          <label>Regions</label>
+          <div class="chips" id="regions"></div>
+        </div>
+        <div class="row"><button type="button" class="secondary" id="reset">Reset to base</button></div>
       </form>
 
-      <div class="card">
-        <h3>By region</h3>
-        <div class="table-scroll">
-          <table>
-            <thead><tr><th>Region</th><th class="num">Q3 visits</th><th class="num">Q4 forecast</th><th class="num">Crews</th><th>Load</th></tr></thead>
-            <tbody id="regions"></tbody>
-          </table>
+      <div class="main">
+        <div class="card">
+          <div class="chart-head">
+            <h3>Crews needed by week</h3>
+            <div class="key"><span><i></i>Crews available</span><span><b>Red</b> weeks fall short</span></div>
+          </div>
+          <div id="chart" role="img" aria-label="Crews needed each week of Q4 by region, against crews available"></div>
+        </div>
+        <div class="card">
+          <h3>By region</h3>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Region</th><th class="num">Q4 visits</th><th class="num">Crews today</th><th class="num">Needed at peak</th><th class="num">Gap</th><th class="trend">Crews by week</th></tr></thead>
+              <tbody id="table"></tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
 
-    <p class="note">Source: field service records, Q3 2026. A quarter is 13 weeks; the fleet runs 24 crews today.</p>
+    <p class="note">Source: field service records, Q3 2026, and the Q4 visit forecast. A crew works 5 days a week; overtime adds to every crew, contract crews to the whole fleet.</p>
   </main>
 
   <script>
-    const WEEKS = 13
-    const TODAY_CREWS = 24
-    const DEFAULTS = { growth: "8", perCrew: "22", spares: "0.1" }
+    const SCENARIOS = {
+      base: { growth: 8, pace: 5, overtime: 10, contractors: 0, storms: false },
+      busy: { growth: 18, pace: 5, overtime: 15, contractors: 2, storms: false },
+      storm: { growth: 8, pace: 5, overtime: 15, contractors: 2, storms: true },
+    }
+    const STORM_WEEKS = 6
     const number = new Intl.NumberFormat("en-US")
-    const field = {
-      growth: document.getElementById("growth"),
-      perCrew: document.getElementById("per-crew"),
-      spares: document.getElementById("spares"),
-    }
-    let regions = []
+    const one = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 })
+    const field = (id) => document.getElementById(id)
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches
+    let plan = null
+    let chart = null
 
-    function cell(text, className) {
-      const td = document.createElement("td")
-      if (className) td.className = className
-      td.textContent = text
-      return td
+    /** The page's colors, read from the theme each time it draws. */
+    function palette() {
+      const style = getComputedStyle(document.documentElement)
+      const read = (name) => style.getPropertyValue(name).trim()
+      return {
+        foreground: read("--foreground"),
+        muted: read("--muted-foreground"),
+        border: read("--border"),
+        card: read("--card"),
+        over: read("--over"),
+        font: read("--font-sans"),
+        series: [1, 2, 3, 4, 5].map((index) => read(`--chart-${index}`)),
+      }
     }
 
-    function plan() {
-      const growth = Number(field.growth.value) / 100
-      const perCrew = Math.max(1, Number(field.perCrew.value))
-      const rows = regions.map((region) => {
-        const forecast = Math.round(region.visits * (1 + growth))
-        return { ...region, forecast, crews: Math.ceil(forecast / (perCrew * WEEKS)) }
+    /** Counts a stat up or down to its new value. */
+    function tween(element, to, format) {
+      const from = Number(element.dataset.value ?? to)
+      element.dataset.value = String(to)
+      if (reduced || from === to) {
+        element.textContent = format(to)
+        return
+      }
+      const start = performance.now()
+      const step = (now) => {
+        const t = Math.min(1, (now - start) / 380)
+        element.textContent = format(from + (to - from) * (1 - (1 - t) ** 3))
+        if (t < 1) requestAnimationFrame(step)
+      }
+      requestAnimationFrame(step)
+    }
+
+    function settings() {
+      return {
+        growth: Number(field("growth").value),
+        pace: Number(field("pace").value),
+        overtime: Number(field("overtime").value),
+        contractors: Number(field("contractors").value),
+        storms: field("storms").checked,
+        regions: [...document.querySelectorAll("#regions input:checked")].map((input) => input.value),
+      }
+    }
+
+    function apply(scenario) {
+      for (const [name, value] of Object.entries(SCENARIOS[scenario])) {
+        if (typeof value === "boolean") field(name).checked = value
+        else field(name).value = String(value)
+      }
+      for (const input of document.querySelectorAll("#regions input")) input.checked = true
+      document.querySelector(`input[name="scenario"][value="${scenario}"]`).checked = true
+      render()
+    }
+
+    /** Each region's visits and crews needed, week by week, under the settings. */
+    function model(s) {
+      const perCrewWeek = s.pace * plan.daysPerWeek
+      const factor = (week) =>
+        (1 + s.growth / 100) * (s.storms && week >= plan.stormWeek && week < plan.stormWeek + STORM_WEEKS ? 1.25 : 1)
+      const regions = plan.regions.map((region, index) => {
+        const visits = region.weekly.map((value, week) => value * factor(week))
+        const weekly = visits.map((value) => value / perCrewWeek)
+        return {
+          ...region,
+          index,
+          weekly,
+          visits: visits.reduce((sum, value) => sum + value, 0),
+          peak: Math.max(...weekly),
+          on: s.regions.includes(region.region),
+        }
       })
-      const visits = rows.reduce((sum, row) => sum + row.forecast, 0)
-      const crews = rows.reduce((sum, row) => sum + row.crews, 0)
-      const vans = Math.ceil(crews * (1 + Number(field.spares.value)))
-      const change = crews - TODAY_CREWS
+      const shown = regions.filter((region) => region.on)
+      const needed = plan.weeks.map((_, week) => shown.reduce((sum, region) => sum + region.weekly[week], 0))
+      const crewsToday = shown.reduce((sum, region) => sum + region.crews, 0)
+      const available = (crewsToday + s.contractors) * (1 + s.overtime / 100)
+      return { shown, needed, crewsToday, available }
+    }
 
-      document.getElementById("visits").textContent = number.format(visits)
-      document.getElementById("growth-note").textContent =
-        `${growth >= 0 ? "+" : ""}${Math.round(growth * 100)}% on Q3`
-      document.getElementById("crews").textContent = number.format(crews)
-      document.getElementById("crews-delta").textContent =
-        change === 0 ? "As many as today" : `${change > 0 ? "+" : ""}${change} on today's ${TODAY_CREWS}`
-      document.getElementById("vans").textContent = number.format(vans)
-      document.getElementById("status").textContent =
-        change <= 0 ? "Within today's fleet" : `Hire ${change} ${change === 1 ? "crew" : "crews"}`
+    function render() {
+      if (!plan) return
+      const s = settings()
+      const m = model(s)
+      for (const [id, text] of [
+        ["growth", `${s.growth > 0 ? "+" : ""}${s.growth}%`],
+        ["pace", one.format(s.pace)],
+        ["overtime", s.overtime ? `${s.overtime}%` : "None"],
+        ["contractors", String(s.contractors)],
+      ]) {
+        const input = field(id)
+        field(`${id}-out`).textContent = text
+        input.style.setProperty("--fill", `${((input.value - input.min) / (input.max - input.min)) * 100}%`)
+      }
 
-      const most = Math.max(1, ...rows.map((row) => row.crews))
-      document.getElementById("regions").replaceChildren(
-        ...rows.map((row) => {
-          const tr = document.createElement("tr")
-          const load = cell("", "load")
-          const bar = document.createElement("div")
-          bar.className = "bar"
-          bar.append(document.createElement("span"))
-          bar.firstChild.style.width = `${Math.round((row.crews / most) * 100)}%`
-          load.append(bar)
-          tr.append(
-            cell(row.region),
-            cell(number.format(row.visits), "num"),
-            cell(number.format(row.forecast), "num"),
-            cell(String(row.crews), "num"),
-            load
-          )
-          return tr
+      const visits = m.shown.reduce((sum, region) => sum + region.visits, 0)
+      const q3 = m.shown.reduce((sum, region) => sum + region.q3Visits, 0)
+      const peak = Math.max(0, ...m.needed)
+      const short = m.needed.filter((value) => value > m.available).length
+      const gap = m.available - peak
+      tween(field("visits"), visits, (value) => number.format(Math.round(value)))
+      field("visits-note").textContent = q3
+        ? `${visits >= q3 ? "+" : "−"}${Math.abs(Math.round((visits / q3 - 1) * 100))}% on Q3`
+        : "No regions chosen"
+      tween(field("peak"), peak, (value) => one.format(value))
+      field("peak-note").textContent = `Week of ${plan.weeks[m.needed.indexOf(peak)] ?? "–"}`
+      tween(field("capacity"), m.available, (value) => one.format(value))
+      field("capacity-note").textContent =
+        `${m.crewsToday} crews${s.contractors ? ` + ${s.contractors} contract` : ""}${s.overtime ? `, ${s.overtime}% overtime` : ""}`
+      tween(field("gap"), gap, (value) => `${value < 0 ? "−" : "+"}${one.format(Math.abs(value))} crews`)
+      field("gap").className = `value ${gap < 0 ? "over" : "ok"}`
+      field("gap-note").textContent = short ? `Short in ${short} of 13 weeks` : "Covered every week"
+
+      drawChart(m)
+      drawTable(m, s)
+    }
+
+    function drawChart(m) {
+      if (!window.echarts) {
+        field("chart").textContent = "The chart needs cdn.jsdelivr.net, which this page could not reach."
+        return
+      }
+      const p = palette()
+      chart ??= echarts.init(field("chart"))
+      const short = plan.weeks.filter((_, week) => m.needed[week] > m.available)
+      chart.setOption(
+        {
+          animation: !reduced,
+          animationDuration: 350,
+          textStyle: { fontFamily: p.font },
+          grid: { left: 4, right: 12, top: 28, bottom: 4, containLabel: true },
+          tooltip: {
+            trigger: "axis",
+            axisPointer: { type: "shadow", shadowStyle: { color: p.border, opacity: 0.4 } },
+            backgroundColor: p.card,
+            borderColor: p.border,
+            textStyle: { color: p.foreground, fontFamily: p.font, fontSize: 13 },
+            valueFormatter: (value) => one.format(value),
+          },
+          xAxis: {
+            type: "category",
+            data: plan.weeks,
+            axisTick: { show: false },
+            axisLine: { lineStyle: { color: p.border } },
+            axisLabel: {
+              fontSize: 12,
+              hideOverlap: true,
+              // A week the crews fall short in is named in the warning color.
+              color: (week) => (short.includes(week) ? p.over : p.muted),
+              fontWeight: 500,
+            },
+          },
+          yAxis: {
+            type: "value",
+            name: "Crews",
+            nameTextStyle: { color: p.muted, fontSize: 12, align: "left" },
+            splitLine: { lineStyle: { color: p.border } },
+            axisLabel: { color: p.muted, fontSize: 12 },
+          },
+          series: [
+            ...m.shown.map((region) => ({
+              name: region.region,
+              type: "bar",
+              stack: "crews",
+              barMaxWidth: 34,
+              itemStyle: { color: p.series[region.index], borderColor: p.card, borderWidth: 1 },
+              emphasis: { focus: "series" },
+              data: region.weekly.map((value) => Math.round(value * 10) / 10),
+            })),
+            {
+              name: "Crews available",
+              type: "line",
+              step: "middle",
+              symbol: "none",
+              z: 5,
+              lineStyle: { color: p.over, width: 2, type: [6, 4] },
+              data: plan.weeks.map(() => Math.round(m.available * 10) / 10),
+            },
+          ],
+        },
+        { replaceMerge: ["series"] }
+      )
+    }
+
+    /** A region's crews by week as a small line, its peak marked when it outruns its crews. */
+    function sparkline(values, limit) {
+      const width = 120
+      const height = 28
+      const top = Math.max(limit, ...values) * 1.05
+      const x = (index) => (index / (values.length - 1)) * width
+      const y = (value) => height - 3 - (value / top) * (height - 6)
+      const line = values.map((value, index) => `${index ? "L" : "M"}${x(index).toFixed(1)},${y(value).toFixed(1)}`).join("")
+      const peak = values.indexOf(Math.max(...values))
+      const dot = values[peak] > limit ? `<circle cx="${x(peak)}" cy="${y(values[peak])}" r="2.5"></circle>` : ""
+      return `<svg class="spark" viewBox="0 0 ${width} ${height}" aria-hidden="true"><path class="area" d="${line}L${width},${height}L0,${height}Z"></path><path d="${line}"></path>${dot}</svg>`
+    }
+
+    function drawTable(m, s) {
+      field("table").replaceChildren(
+        ...m.shown.map((region) => {
+          const capacity = region.crews * (1 + s.overtime / 100)
+          const gap = capacity - region.peak
+          const row = document.createElement("tr")
+          row.style.setProperty("--swatch", `var(--chart-${region.index + 1})`)
+          row.innerHTML = `
+            <td><span class="swatch"></span></td>
+            <td class="num">${number.format(Math.round(region.visits))}</td>
+            <td class="num">${region.crews}</td>
+            <td class="num">${one.format(region.peak)}</td>
+            <td class="num gap ${gap < 0 ? "over" : "ok"}">${gap < 0 ? "−" : "+"}${one.format(Math.abs(gap))}</td>
+            <td class="trend">${sparkline(region.weekly, capacity)}</td>`
+          row.cells[0].append(region.region)
+          return row
         })
       )
     }
 
-    document.getElementById("inputs").addEventListener("input", plan)
-    document.getElementById("reset").addEventListener("click", () => {
-      field.growth.value = DEFAULTS.growth
-      field.perCrew.value = DEFAULTS.perCrew
-      field.spares.value = DEFAULTS.spares
-      plan()
+    field("inputs").addEventListener("input", (event) => {
+      // A moved assumption is no longer the scenario it started from.
+      if (event.target.name !== "scenario" && event.target.closest("#regions") === null) {
+        for (const input of document.querySelectorAll('input[name="scenario"]')) input.checked = false
+      }
+      render()
     })
+    for (const input of document.querySelectorAll('input[name="scenario"]')) {
+      input.addEventListener("change", () => apply(input.value))
+    }
+    field("reset").addEventListener("click", () => apply("base"))
+    // A chart on a canvas keeps the colors it was drawn in: draw it again in the new theme.
+    addEventListener("sixb:theme", render)
+    new ResizeObserver(() => chart?.resize()).observe(field("chart"))
 
-    fetch("data/regions.json")
+    fetch("data/plan.json")
       .then((response) => response.json())
       .then((data) => {
-        regions = data
-        plan()
+        plan = data
+        field("regions").replaceChildren(
+          ...plan.regions.map((region, index) => {
+            const chip = document.createElement("label")
+            chip.className = "chip"
+            chip.style.setProperty("--swatch", `var(--chart-${index + 1})`)
+            chip.innerHTML = `<input type="checkbox" checked><span></span>`
+            chip.querySelector("input").value = region.region
+            chip.querySelector("span").textContent = region.region
+            return chip
+          })
+        )
+        apply("base")
       })
   </script>
 </body>

@@ -1,0 +1,234 @@
+{
+  "region": "Harbor",
+  "date": "2026-10-20",
+  "shiftHours": 8,
+  "crews": [
+    { "id": "A", "name": "Crew A", "lead": "M. Okafor", "skills": ["Line", "Transformer"] },
+    { "id": "B", "name": "Crew B", "lead": "J. Lindqvist", "skills": ["Line", "Vegetation"] },
+    { "id": "C", "name": "Crew C", "lead": "R. Alvarez", "skills": ["Underground", "Meter"] },
+    { "id": "D", "name": "Crew D", "lead": "S. Tanaka", "skills": ["Transformer", "Meter"] },
+    { "id": "E", "name": "Crew E", "lead": "D. Mensah", "skills": ["Vegetation", "Line"] }
+  ],
+  "orders": [
+    {
+      "id": "WO-48213",
+      "title": "Replace pole-top transformer",
+      "skill": "Transformer",
+      "hours": 3,
+      "priority": "P2",
+      "address": "459 Dockside Way",
+      "due": "12:00",
+      "crew": "A"
+    },
+    {
+      "id": "WO-48220",
+      "title": "Restore service drop",
+      "skill": "Line",
+      "hours": 1.5,
+      "priority": "P1",
+      "address": "805 Dockside Way",
+      "due": "16:30",
+      "crew": "B"
+    },
+    {
+      "id": "WO-48227",
+      "title": "Clear limbs from primary",
+      "skill": "Vegetation",
+      "hours": 2,
+      "priority": "P3",
+      "address": "42 Cannery Row",
+      "due": "10:00",
+      "crew": "B"
+    },
+    {
+      "id": "WO-48234",
+      "title": "Investigate flickering lights",
+      "skill": "Line",
+      "hours": 1,
+      "priority": "P3",
+      "address": "538 Pier Rd",
+      "due": "15:30",
+      "crew": "A"
+    },
+    {
+      "id": "WO-48241",
+      "title": "Swap failed smart meter",
+      "skill": "Meter",
+      "hours": 0.5,
+      "priority": "P2",
+      "address": "775 Cannery Row",
+      "due": "11:00",
+      "crew": "C"
+    },
+    {
+      "id": "WO-48248",
+      "title": "Repair underground fault",
+      "skill": "Underground",
+      "hours": 4,
+      "priority": "P2",
+      "address": "717 Mariner Pl",
+      "due": "08:30",
+      "crew": "C"
+    },
+    {
+      "id": "WO-48255",
+      "title": "Re-fuse cutout",
+      "skill": "Line",
+      "hours": 1,
+      "priority": "P2",
+      "address": "437 Lighthouse Ln",
+      "due": "14:30",
+      "crew": "A"
+    },
+    {
+      "id": "WO-48262",
+      "title": "Trim right-of-way span",
+      "skill": "Vegetation",
+      "hours": 2.5,
+      "priority": "P3",
+      "address": "543 Seawall Ave",
+      "due": "08:30",
+      "crew": "E"
+    },
+    {
+      "id": "WO-48269",
+      "title": "Inspect padmount cabinet",
+      "skill": "Underground",
+      "hours": 1,
+      "priority": "P3",
+      "address": "966 Gull Ct",
+      "due": "13:00",
+      "crew": "C"
+    },
+    {
+      "id": "WO-48276",
+      "title": "Reconnect after storm damage",
+      "skill": "Line",
+      "hours": 2,
+      "priority": "P2",
+      "address": "958 Pier Rd",
+      "due": "16:30",
+      "crew": "A"
+    },
+    {
+      "id": "WO-48283",
+      "title": "Replace cracked crossarm",
+      "skill": "Line",
+      "hours": 2.5,
+      "priority": "P2",
+      "address": "797 Lighthouse Ln",
+      "due": "13:00",
+      "crew": "B"
+    },
+    {
+      "id": "WO-48290",
+      "title": "Meter base repair",
+      "skill": "Meter",
+      "hours": 1.5,
+      "priority": "P1",
+      "address": "625 Tidewater Dr",
+      "due": "10:30",
+      "crew": "D"
+    },
+    {
+      "id": "WO-48297",
+      "title": "Replace pole-top transformer",
+      "skill": "Transformer",
+      "hours": 3,
+      "priority": "P2",
+      "address": "94 Dockside Way",
+      "due": "12:00",
+      "crew": null
+    },
+    {
+      "id": "WO-48304",
+      "title": "Restore service drop",
+      "skill": "Line",
+      "hours": 1.5,
+      "priority": "P3",
+      "address": "130 Tidewater Dr",
+      "due": "14:00",
+      "crew": null
+    },
+    {
+      "id": "WO-48311",
+      "title": "Clear limbs from primary",
+      "skill": "Vegetation",
+      "hours": 2,
+      "priority": "P3",
+      "address": "978 Cannery Row",
+      "due": "14:30",
+      "crew": null
+    },
+    {
+      "id": "WO-48318",
+      "title": "Investigate flickering lights",
+      "skill": "Line",
+      "hours": 1,
+      "priority": "P3",
+      "address": "10 Pier Rd",
+      "due": "08:30",
+      "crew": null
+    },
+    {
+      "id": "WO-48325",
+      "title": "Swap failed smart meter",
+      "skill": "Meter",
+      "hours": 0.5,
+      "priority": "P1",
+      "address": "476 Breakwater Rd",
+      "due": "09:00",
+      "crew": null
+    },
+    {
+      "id": "WO-48332",
+      "title": "Repair underground fault",
+      "skill": "Underground",
+      "hours": 4,
+      "priority": "P3",
+      "address": "493 Lighthouse Ln",
+      "due": "08:30",
+      "crew": null
+    },
+    {
+      "id": "WO-48339",
+      "title": "Re-fuse cutout",
+      "skill": "Line",
+      "hours": 1,
+      "priority": "P3",
+      "address": "210 Pier Rd",
+      "due": "14:00",
+      "crew": null
+    },
+    {
+      "id": "WO-48346",
+      "title": "Trim right-of-way span",
+      "skill": "Vegetation",
+      "hours": 2.5,
+      "priority": "P1",
+      "address": "105 Pier Rd",
+      "due": "12:00",
+      "crew": null
+    },
+    {
+      "id": "WO-48353",
+      "title": "Inspect padmount cabinet",
+      "skill": "Underground",
+      "hours": 1,
+      "priority": "P3",
+      "address": "961 Mariner Pl",
+      "due": "08:00",
+      "crew": null
+    },
+    {
+      "id": "WO-48360",
+      "title": "Reconnect after storm damage",
+      "skill": "Line",
+      "hours": 2,
+      "priority": "P2",
+      "address": "526 Ferry St",
+      "due": "09:30",
+      "crew": null
+    }
+  ]
+}

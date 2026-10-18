@@ -1,0 +1,53 @@
+{
+  "quarter": "Q4 2026",
+  "weeks": [
+    "Oct 5",
+    "Oct 12",
+    "Oct 19",
+    "Oct 26",
+    "Nov 2",
+    "Nov 9",
+    "Nov 16",
+    "Nov 23",
+    "Nov 30",
+    "Dec 7",
+    "Dec 14",
+    "Dec 21",
+    "Dec 28"
+  ],
+  "stormWeek": 6,
+  "crewsToday": 24,
+  "daysPerWeek": 5,
+  "regions": [
+    {
+      "region": "North",
+      "crews": 7,
+      "q3Visits": 1882,
+      "weekly": [131, 130, 132, 136, 148, 148, 221, 153, 154, 166, 160, 127, 140]
+    },
+    {
+      "region": "Harbor",
+      "crews": 6,
+      "q3Visits": 1385,
+      "weekly": [91, 95, 99, 103, 103, 110, 182, 114, 110, 119, 115, 93, 96]
+    },
+    {
+      "region": "Keystone",
+      "crews": 5,
+      "q3Visits": 1189,
+      "weekly": [76, 81, 84, 89, 91, 92, 131, 98, 97, 104, 104, 76, 86]
+    },
+    {
+      "region": "Elm Valley",
+      "crews": 4,
+      "q3Visits": 955,
+      "weekly": [66, 69, 66, 71, 70, 77, 107, 75, 81, 83, 77, 64, 70]
+    },
+    {
+      "region": "Riverside",
+      "crews": 2,
+      "q3Visits": 727,
+      "weekly": [50, 49, 54, 56, 54, 60, 83, 57, 62, 65, 59, 48, 53]
+    }
+  ]
+}

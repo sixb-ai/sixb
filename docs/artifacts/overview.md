@@ -222,6 +222,8 @@ fleet-planner/
 - A page runs its own scripts, with the same limits as a deck: it can't read the app's cookies or
   call the API as the reader, and it loads only its own files and a few public CDNs (jsDelivr,
   cdnjs, unpkg, and Google Fonts). Read data from JSON files published beside it with `fetch`.
+  A chart drawn on a canvas redraws on the window's `sixb:theme` event, which fires when the app
+  sends its theme, light or dark.
 - A link to another artifact (`<a href="artifact:…">`) opens it where the reader is.
 - When the Agent publishes a page, its sandbox's headless browser loads it at 1280px and at a
   phone's 390px, as it checks a deck, and warns about content past the screen's right edge,

@@ -24,7 +24,7 @@ import { ArtifactFrame } from "./frame"
 import { ArtifactKindIcon } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
 import { type ArtifactVersion, useArtifactTheme } from "./queries"
-import { PageFace } from "./renderers/page"
+import { PageScreen } from "./renderers/page"
 import { artifactThemeAttributes } from "./theme"
 
 type ArtifactSummary = ListArtifactsResponse["artifacts"][number]
@@ -324,51 +324,6 @@ function FirstSlide({ version }: { readonly version: ArtifactVersion }) {
           className="absolute inset-0"
         />
       </div>
-    </div>
-  )
-}
-
-/** The width a page's card draws it at before scaling it down: a laptop's. */
-const PAGE_WIDTH = 1280
-
-/**
- * A page's top, live in a frame laid out at a laptop's width and scaled down to the card, in the
- * page's own theme. It fades in over the page's face, which stays if it never loads.
- */
-function PageScreen({ version }: { readonly version: ArtifactVersion }) {
-  const theme = artifactThemeAttributes(useArtifactTheme(version))
-  const box = useRef<HTMLDivElement | null>(null)
-  const [scale, setScale] = useState(0)
-  useLayoutEffect(() => {
-    const element = box.current
-    if (!element) return
-    const measure = () => setScale(element.clientWidth / PAGE_WIDTH)
-    measure()
-    if (typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver(measure)
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [])
-  return (
-    <div
-      ref={box}
-      className={cn("absolute inset-0 overflow-hidden bg-background", theme.className)}
-      style={theme.style}
-    >
-      <PageFace version={version} />
-      {scale > 0 ? (
-        <div
-          className="absolute top-0 left-0 origin-top-left"
-          style={{ width: PAGE_WIDTH, height: `${100 / scale}%`, transform: `scale(${scale})` }}
-        >
-          <ArtifactFrame
-            version={version}
-            title={version.title}
-            decorative
-            className="absolute inset-0"
-          />
-        </div>
-      ) : null}
     </div>
   )
 }

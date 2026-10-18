@@ -69,8 +69,8 @@ const DECK = `<!doctype html>
 
 /**
  * A page that reads well at 1280px but not on a phone: a fixed-width box wider than 390px, beside
- * a wide table that scrolls in its own box, which is fine. It also has fine print, a control too
- * small to hit, and a script that throws.
+ * a wide table that scrolls in its own box, which is fine. It also has a card whose background
+ * fades between themes, fine print, a control too small to hit, and a script that throws.
  */
 const PAGE = `<!doctype html>
 <html lang="en">
@@ -81,10 +81,17 @@ const PAGE = `<!doctype html>
     <p class="lede">Everything here reads well at a laptop's width.</p>
     <div id="fixed" style="width: 640px">A box as wide as a laptop's column</div>
     <div class="table-scroll"><table style="min-width: 800px"><tr><td>A wide table</td><td>scrolls in its box</td></tr></table></div>
+    <div class="card" style="transition: background-color 1s">A card that fades into the theme</div>
     <p style="font-size: 10px">Fine print</p>
     <button type="button" style="min-height: 0; height: 18px; padding: 0 4px">x</button>
   </main>
-  <script>plan()</script>
+  <script>
+    // Drawn again in each theme, as a chart on a canvas is.
+    addEventListener("sixb:theme", (event) => {
+      if (event.detail.dark) document.querySelector("main").insertAdjacentHTML("beforeend", '<p style="font-size: 9px">Redrawn for dark</p>')
+    })
+    plan()
+  </script>
 </body>
 </html>`
 
@@ -245,6 +252,16 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
       expect(codes).not.toContain("layout_wide@desktop")
       expect(codes).toContain("layout_small_target@desktop")
       expect(codes).toContain("layout_small_text@desktop")
+      // Contrast is measured on what the reader sees: a card's colors once their transition
+      // ends, and nothing for the table's cells out of view in its box. Reproduce by removing
+      // check.cjs's style that stops transitions, or the probe's viewport test: the card or a
+      // cell reads as light text on white.
+      expect(codes.filter((code) => code.startsWith("layout_contrast"))).toEqual([])
+      // The page heard the theme arrive: what it draws for dark mode is measured. Reproduce by
+      // removing the runtime's sixb:theme event: the dark-mode text is never drawn.
+      expect(result.warnings.some((warning) => warning.message.includes("Redrawn for dark"))).toBe(
+        true
+      )
       const wide = result.warnings.filter((warning) => warning.code === "layout_wide")
       expect(wide).toHaveLength(1)
       expect(wide[0]?.message).toContain("div “A box as wide as a laptop's column”")

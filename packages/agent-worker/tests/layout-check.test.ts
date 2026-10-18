@@ -262,6 +262,7 @@ exports.chromium = {
     const page = {
       on() {},
       async goto() {},
+      async addStyleTag() {},
       async evaluate(fn) {
         if (typeof fn === "string") return []
         return String(fn).includes(".length") ? 2 : undefined

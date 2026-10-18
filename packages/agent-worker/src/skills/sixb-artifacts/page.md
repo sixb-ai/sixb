@@ -75,14 +75,24 @@ colors: `--foreground`, `--muted-foreground`, `--background`, `--card`, `--muted
 asks for a look, add `theme.json` (see `document.md`) or set the variables in your CSS. The page's
 own CSS overrides the kit.
 
+The theme is monochrome. For a status that needs a color, such as short or over, define your own
+with a dark-mode value, and use it sparingly:
+
+```css
+:root { --over: #c2410c; --ok: #15803d; }
+html.dark { --over: #fb923c; --ok: #4ade80; }
+```
+
 ## Write
 
 - Put the controls where the reader starts, and show the result change as they change them,
   without a submit button.
 - Lead with the numbers that matter as `.stat` cards; put detail in tables below.
 - Format numbers for the reader: `new Intl.NumberFormat().format(1284)`. Label units.
-- Draw a chart as an inline `<svg>`, in the theme's chart variables (`fill="var(--chart-1)"`), as
-  `slides.md` describes; or show a sheet's chart with `<sixb-embed>` (`references.md`).
+- Build controls the reader changes: segmented controls, sliders, switches, chips (radios and
+  checkboxes drawn as the examples draw them), search, sortable tables.
+- For one simple chart, an inline `<svg>` in the theme's chart variables is enough; for charts the
+  reader hovers, zooms, or filters, use a library (below).
 - No emoji as icons, no decorative gradients, glows, or drop shadows.
 
 ## What runs
@@ -92,8 +102,16 @@ cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com, and Google Fonts; nothing els
 
 - Put the data in JSON files beside the page and read them with `fetch("data/regions.json")`.
   Write the numbers into the files when you publish; the page can't reach an API.
-- Plain JavaScript is enough for most pages. Load a library from a CDN only when it saves real
-  work, such as a charting library for many charts.
+- Load a library from a CDN, by exact version, when it does real work: ECharts for interactive
+  charts (`https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js`), SortableJS for drag
+  and drop (`https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js`). Say on the page what
+  failed when `window.echarts` is missing, instead of showing nothing.
+- A chart drawn on a canvas keeps the colors it was drawn in. Read the variables with
+  `getComputedStyle(document.documentElement)` each time you draw, and draw again on
+  `addEventListener("sixb:theme", draw)`, which fires when the app sends its theme and when the
+  reader switches mode.
+- Skip animations when `matchMedia("(prefers-reduced-motion: reduce)")` matches (ECharts:
+  `animation: false`). The check measures with reduced motion, so its screenshots show charts drawn.
 - The page has no storage: what the reader enters lasts while it is open. Give inputs sensible
   defaults and a Reset.
 - A link to another artifact (`<a href="artifact:…">`) opens it beside the conversation; a link to
@@ -131,5 +149,11 @@ A script error means the page may show nothing at all: fix it first.
 
 ## Examples
 
-`examples/page/` holds two finished pages built on the kit: a fleet planner whose inputs change
-its stats and table, and a service-level dashboard that reads its data from JSON and draws a chart.
+`examples/page/` holds three finished pages built on the kit, each with its data in JSON beside it:
+
+- `fleet-planner`: scenarios, sliders, a switch, and region chips drive animated stats, an ECharts
+  chart of crews needed against crews available, and a table with sparklines.
+- `service-explorer`: nine months of service as a calendar heatmap, a zoomable trend, causes, and
+  a sortable table; a day picked anywhere fills a panel with every region that day.
+- `dispatch-board`: work orders dragged between crews with SortableJS, live capacity meters, a
+  skill check on each drop, a filter and search, and auto-assign.
