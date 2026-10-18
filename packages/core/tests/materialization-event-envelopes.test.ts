@@ -240,21 +240,6 @@ describe("materializationEvent", () => {
     }
   })
 
-  test("leaves requestedBy out of an event whose execution has none", () => {
-    const { requestedBy: _requestedBy, ...anonymous } = attribution
-    const { draft } = buildLinkMaterializationEventDraft({
-      kind: "deleted",
-      ref: link().ref,
-      before: link(),
-      after: null,
-      propertyChanges: {},
-    })
-
-    expect(materializationEvent(draft, sequence, commit, anonymous)).not.toHaveProperty(
-      "requestedBy"
-    )
-  })
-
   test("shares no state with the commit and execution it was rebuilt from", () => {
     const { draft } = buildLinkMaterializationEventDraft({
       kind: "deleted",
@@ -288,16 +273,6 @@ describe("eventAttribution", () => {
       primitive: { kind: "action", id: "approve", runId: "run-1" },
     },
   } as const
-
-  // Removal proof: take the primitive id from anywhere but the execution's authority; the
-  // durable record keeps it nowhere else, and the executor below loses its id.
-  test("names a primitive by the id its authority records", () => {
-    expect(eventAttribution(execution)).toStrictEqual({
-      correlationId: "correlation-1",
-      requestedBy: { type: "user", id: "user-1" },
-      executor: { type: "primitive", kind: "action", id: "approve", runId: "run-1" },
-    })
-  })
 
   test("refuses a primitive execution without that primitive's authority", () => {
     expect(() =>

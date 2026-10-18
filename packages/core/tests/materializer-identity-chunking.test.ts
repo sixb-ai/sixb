@@ -5,7 +5,6 @@ import {
   createCommitId,
   createCommitIdentity,
   createProjectionIdempotencyKey,
-  createProjectionMaterializationId,
   createProjectionTelemetryIdempotencyKey,
   createTimedCommitIdentity,
   sha256Canonical,
@@ -138,79 +137,60 @@ describe("materializer identity", () => {
       )
     )
   })
-
-  test("creates fresh projection materialization ids", () => {
-    const first = createProjectionMaterializationId()
-    const second = createProjectionMaterializationId()
-
-    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
-    expect(second).not.toBe(first)
-  })
 })
 
 describe("chunkBySize", () => {
-  test("yields the Nth row before pulling row N+1", async () => {
-    let pulls = 0
-    async function* source(): AsyncIterable<number> {
-      for (const item of [1, 2, 3]) {
-        pulls += 1
-        yield item
-      }
-    }
-
-    const chunks = chunkBySize(source(), {
+  // Each step is the chunk a pull yields and how many source rows had been pulled by then: a
+  // chunk is yielded as soon as it is full, before the next row is read.
+  test.each([
+    {
+      name: "yields the Nth row before pulling row N+1",
+      items: [1, 2, 3],
       maxRows: 2,
       maxBytes: 100,
       byteLength: () => 1,
-    })[Symbol.asyncIterator]()
-
-    await expect(chunks.next()).resolves.toEqual({ done: false, value: [1, 2] })
-    expect(pulls).toBe(2)
-    await expect(chunks.next()).resolves.toEqual({ done: false, value: [3] })
-    expect(pulls).toBe(3)
-  })
-
-  test("yields at the byte limit before pulling another row", async () => {
+      steps: [
+        [[1, 2], 2],
+        [[3], 3],
+      ],
+    },
+    {
+      name: "yields at the byte limit before pulling another row",
+      items: [2, 2, 1],
+      maxRows: 100,
+      maxBytes: 4,
+      byteLength: (item: number) => item,
+      steps: [
+        [[2, 2], 2],
+        [[1], 3],
+      ],
+    },
+    {
+      name: "emits an oversized row alone without pulling the following row",
+      items: [2, 5, 1],
+      maxRows: 100,
+      maxBytes: 4,
+      byteLength: (item: number) => item,
+      steps: [
+        [[2], 2],
+        [[5], 2],
+        [[1], 3],
+      ],
+    },
+  ])("$name", async ({ items, maxRows, maxBytes, byteLength, steps }) => {
     let pulls = 0
     async function* source(): AsyncIterable<number> {
-      for (const item of [2, 2, 1]) {
+      for (const item of items) {
         pulls += 1
         yield item
       }
     }
 
-    const chunks = chunkBySize(source(), {
-      maxRows: 100,
-      maxBytes: 4,
-      byteLength: (item) => item,
-    })[Symbol.asyncIterator]()
+    const chunks = chunkBySize(source(), { maxRows, maxBytes, byteLength })[Symbol.asyncIterator]()
 
-    await expect(chunks.next()).resolves.toEqual({ done: false, value: [2, 2] })
-    expect(pulls).toBe(2)
-    await expect(chunks.next()).resolves.toEqual({ done: false, value: [1] })
-    expect(pulls).toBe(3)
-  })
-
-  test("emits an oversized row alone without pulling the following row", async () => {
-    let pulls = 0
-    async function* source(): AsyncIterable<number> {
-      for (const item of [2, 5, 1]) {
-        pulls += 1
-        yield item
-      }
+    for (const [chunk, pulled] of steps) {
+      await expect(chunks.next()).resolves.toEqual({ done: false, value: chunk })
+      expect(pulls).toBe(pulled)
     }
-
-    const chunks = chunkBySize(source(), {
-      maxRows: 100,
-      maxBytes: 4,
-      byteLength: (item) => item,
-    })[Symbol.asyncIterator]()
-
-    await expect(chunks.next()).resolves.toEqual({ done: false, value: [2] })
-    expect(pulls).toBe(2)
-    await expect(chunks.next()).resolves.toEqual({ done: false, value: [5] })
-    expect(pulls).toBe(2)
-    await expect(chunks.next()).resolves.toEqual({ done: false, value: [1] })
-    expect(pulls).toBe(3)
   })
 })

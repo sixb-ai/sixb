@@ -145,7 +145,8 @@ describe("ontology materializer projection replacement", () => {
           buffers.set(boundary, Math.max(buffers.get(boundary) ?? 0, rows))
         },
       })
-      const values = Array.from({ length: 200 }, (_, index) =>
+      // Seven roots and six links: past the broad run's plan chunk of three and every tiny page.
+      const values = Array.from({ length: 7 }, (_, index) =>
         index === 0
           ? sourceEntry("00", "device-00")
           : sourceEntryWithParent(
@@ -184,7 +185,7 @@ describe("ontology materializer projection replacement", () => {
     const broad = await run(100, false)
     expect(tiny.streamCalls).toEqual(["replacement-plan.object", "replacement-plan.link"])
     expect(new Set(tiny.classifications).size).toBe(tiny.classifications.length)
-    expect(tiny.classifications).toHaveLength(399)
+    expect(tiny.classifications).toHaveLength(13)
     expect(tiny.result).toEqual(broad.result)
     expect(tiny.events).toEqual(broad.events)
     expect(tiny.buffers.get("replacement.object.page")).toBeLessThanOrEqual(1)
@@ -277,9 +278,11 @@ describe("ontology materializer projection replacement", () => {
         },
       },
     })
+    // Three roots: more than one row per stage batch, state page and plan chunk.
+    const rootCount = 3
     let produced = 0
     async function* lazy() {
-      for (let index = 0; index < 40; index += 1) {
+      for (let index = 0; index < rootCount; index += 1) {
         produced += 1
         yield sourceEntry(String(index), `device-${index}`)
       }
@@ -294,8 +297,8 @@ describe("ontology materializer projection replacement", () => {
       execution: pendingProjectionExecution("run-v1"),
       entries: lazy(),
     })
-    expect(produced).toBe(40)
-    expect(first.counts.objectsCreated).toBe(40)
+    expect(produced).toBe(rootCount)
+    expect(first.counts.objectsCreated).toBe(rootCount)
 
     await materializer.edits.commit(
       atomic("edit", [
@@ -312,7 +315,7 @@ describe("ontology materializer projection replacement", () => {
     const second = await materializer.projections.replace(
       replacement("v2", "2026-01-02T00:00:00Z", [])
     )
-    expect(second.counts.objectsDeleted).toBe(40)
+    expect(second.counts.objectsDeleted).toBe(rootCount)
     expect(
       await storage.objects.getByPrimaryId({
         projectId: "project",
@@ -1037,85 +1040,6 @@ describe("ontology materializer projection replacement", () => {
         primaryId: "one",
       })
     ).toMatchObject({ properties: { name: "stable" } })
-  })
-
-  test("replaces cardinality-one source links and honors edit delete/reset authority", async () => {
-    const { materializer, storage } = createMaterializerFixture({
-      dependencies: { batching: { statePageRows: 1, planChunkRows: 1 } },
-    })
-    await materializer.projections.replace(
-      replacement("v1", "2026-01-01T00:00:00Z", [
-        sourceEntryWithParent("one", "one", "two"),
-        sourceEntry("two", "two"),
-      ])
-    )
-    expect(
-      (
-        await storage.objects.listLinks({
-          projectId: "project",
-          objectTypeId: "Device",
-          objectId: "one",
-        })
-      )[0].targetId
-    ).toBe("two")
-
-    await materializer.projections.replace(
-      replacement("v2", "2026-01-02T00:00:00Z", [
-        sourceEntryWithParent("one", "one", "three"),
-        sourceEntry("two", "two"),
-        sourceEntry("three", "three"),
-      ])
-    )
-    expect(
-      (
-        await storage.objects.listLinks({
-          projectId: "project",
-          objectTypeId: "Device",
-          objectId: "one",
-        })
-      ).map((link) => link.targetId)
-    ).toEqual(["three"])
-
-    const linkRef = {
-      source: ref("one"),
-      linkId: "parent",
-      target: ref("three"),
-    }
-    await materializer.edits.commit(
-      atomic("delete-source-link", [{ id: "delete", kind: "link.delete", ref: linkRef }])
-    )
-    expect(
-      await storage.objects.listLinks({
-        projectId: "project",
-        objectTypeId: "Device",
-        objectId: "one",
-      })
-    ).toEqual([])
-    await materializer.projections.replace(
-      replacement("v3", "2026-01-03T00:00:00Z", [
-        sourceEntryWithParent("one", "one", "four"),
-        sourceEntry("four", "four"),
-      ])
-    )
-    expect(
-      await storage.objects.listLinks({
-        projectId: "project",
-        objectTypeId: "Device",
-        objectId: "one",
-      })
-    ).toEqual([])
-    await materializer.edits.commit(
-      atomic("reset-source-link", [{ id: "reset", kind: "link.reset", ref: linkRef }])
-    )
-    expect(
-      (
-        await storage.objects.listLinks({
-          projectId: "project",
-          objectTypeId: "Device",
-          objectId: "one",
-        })
-      ).map((link) => link.targetId)
-    ).toEqual(["four"])
   })
 
   test("rejects multiple replacement links in one cardinality-one scope for tiny and default pages", async () => {

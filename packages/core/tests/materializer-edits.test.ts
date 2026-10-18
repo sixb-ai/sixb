@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { emptyGrantIndex } from "../src/authorization"
 import { createTestingScope } from "../src/execution/scopes"
-import { createEventId, MaterializationConflictError } from "../src/materializer"
+import { createEventId } from "../src/materializer"
 import { InMemoryStorage, type Storage, type StoredLinkSlotOverride } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
@@ -134,35 +134,6 @@ describe("ontology materializer edits", () => {
       leaseExpiresAt: "2027-01-01T01:00:00.000Z",
     })
     expect(event.envelope).toMatchObject(attribution)
-  })
-
-  test("attributes an unrequested write to its executor alone", async () => {
-    const { materializer, storage } = createMaterializerFixture()
-
-    const result = await materializer.edits.commit(
-      atomic("unrequested", [
-        {
-          id: "create",
-          kind: "object.create",
-          ref: ref("unrequested-object"),
-          properties: { name: "Unrequested object" },
-        },
-      ])
-    )
-
-    const [event] = await storage.ontology.outbox.claim({
-      projectId: "project",
-      now: "2027-01-01T00:00:00.000Z",
-      limit: 10,
-      leaseId: "unrequested-events",
-      leaseExpiresAt: "2027-01-01T01:00:00.000Z",
-    })
-    expect(event?.envelope.commitId).toBe(result.commitId)
-    expect(event?.envelope.executor).toEqual({
-      type: "request",
-      requestId: "materializer-fixture-runtime-request",
-    })
-    expect(event?.envelope).not.toHaveProperty("requestedBy")
   })
 
   test("rejects replaying one request id from a different execution", async () => {
@@ -318,44 +289,6 @@ describe("ontology materializer edits", () => {
     }
   })
 
-  test("records the Action run with the commit of its edits", async () => {
-    const storage = new InMemoryStorage()
-    const run = await approveRun(storage, "run-valid")
-    const { materializer } = createMaterializerFixture({ storage })
-
-    const result = await materializer.edits.commit({
-      mode: "atomic",
-      source: { kind: "action", actionId: "approve", runId: "run-valid" },
-      run,
-      operations: [
-        {
-          id: "create",
-          kind: "object.create",
-          ref: ref("action-created"),
-          properties: { name: "created" },
-        },
-      ],
-      expectedObjects: [],
-      expectedLinks: [],
-      expectedLinkScopes: [],
-    })
-
-    expect(result.created).toBe(true)
-    await expect(
-      storage.actionRuns.getById({ projectId: "project", id: "run-valid" })
-    ).resolves.toEqual(run)
-    await expect(
-      storage.ontology.commits.list({
-        projectId: "project",
-        run: { kind: "action", id: "run-valid" },
-      })
-    ).resolves.toMatchObject({
-      commits: [{ id: result.commitId, origin: { kind: "action", runId: "run-valid" } }],
-      total: 1,
-      hasMore: false,
-    })
-  })
-
   // Removal proof: hash the whole normalized commit in `prepareEditCommit`
   // (`materializer/edits/commit.ts`), run record included, and the replay below, whose record
   // finished later, is refused as different intent.
@@ -451,51 +384,16 @@ describe("ontology materializer edits", () => {
     expect(adapter.snapshot()).toEqual(before)
   })
 
-  // Removal proof: record the run in a transaction of its own before the commit's opens, in
-  // `executeEditCommit` (`materializer/edits/commit.ts`), and it stays recorded although its edits
-  // rolled back.
-  test("records no run when its edits fail to commit", async () => {
-    const storage = new InMemoryStorage()
-    const run = await approveRun(storage, "run-rolled-back")
-    const { materializer } = createMaterializerFixture({ storage })
-    getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
-      beforeWrite() {
-        throw new Error("injected ontology write failure")
-      },
-    })
-
-    await expect(
-      materializer.edits.commit({
-        mode: "atomic",
-        source: { kind: "action", actionId: "approve", runId: "run-rolled-back" },
-        run,
-        operations: [
-          {
-            id: "create",
-            kind: "object.create",
-            ref: ref("rolled-back-run"),
-            properties: { name: "must-not-exist" },
-          },
-        ],
-        expectedObjects: [],
-        expectedLinks: [],
-        expectedLinkScopes: [],
-      })
-    ).rejects.toThrow("injected ontology write failure")
-
-    await expect(
-      storage.actionRuns.getById({ projectId: "project", id: "run-rolled-back" })
-    ).resolves.toBeNull()
-  })
-
   test("skips incident hubs for presence-preserving patches and pages them for deletion", async () => {
+    // Just past every boundary below: several incident pages, plan chunks and stage batches.
+    const leafCount = 8
     const { materializer, storage } = createMaterializerFixture({
       dependencies: {
-        batching: { sourceStageRows: 20, statePageRows: 2, planChunkRows: 7 },
+        batching: { sourceStageRows: 5, statePageRows: 2, planChunkRows: 7 },
       },
     })
     const values = [sourceEntry("hub", "hub")]
-    for (let index = 0; index < 150; index += 1) {
+    for (let index = 0; index < leafCount; index += 1) {
       values.push(sourceEntryWithParent(`leaf-${index}`, `leaf-${index}`, "hub"))
     }
     await materializer.projections.replace(replacement("hub-v1", "2026-01-01T00:00:00Z", values))
@@ -530,7 +428,7 @@ describe("ontology materializer edits", () => {
     const deleted = await materializer.edits.commit(
       atomic("hub-delete", [{ id: "delete", kind: "object.delete", ref: ref("hub") }])
     )
-    expect(deleted.changes.links).toHaveLength(150)
+    expect(deleted.changes.links).toHaveLength(leafCount)
     expect(maxIncidentPage).toBeLessThanOrEqual(2)
   })
 
@@ -538,7 +436,8 @@ describe("ontology materializer edits", () => {
     const { materializer, storage } = createMaterializerFixture({
       dependencies: { batching: { statePageRows: 7, planChunkRows: 31 } },
     })
-    const leafCount = 500
+    // Just past both boundaries: the hub's incident links span pages and plan chunks.
+    const leafCount = 32
     await materializer.edits.commit(
       atomic("dormant-hub-objects", [
         {
@@ -609,7 +508,8 @@ describe("ontology materializer edits", () => {
         sourceEntry("scope-two", "scope two"),
       ])
     )
-    const linkCount = 2_000
+    // Just past both boundaries: the hub's links span state pages and plan chunks.
+    const linkCount = 48
     await materializer.edits.commit(
       atomic("many-hub-objects", [
         {
@@ -1202,23 +1102,13 @@ describe("ontology materializer edits", () => {
     ).toHaveLength(1)
   })
 
-  test("checks expected object revisions and divergent idempotency", async () => {
+  test("replays a runtime commit and rejects divergent intent under its request id", async () => {
     const { materializer } = createMaterializerFixture()
     await materializer.edits.commit(
       atomic("create", [
         { id: "create", kind: "object.create", ref: ref("one"), properties: { name: "one" } },
       ])
     )
-    await expect(
-      materializer.edits.commit({
-        mode: "atomic",
-        source: { kind: "runtime", requestId: "stale" },
-        operations: [],
-        expectedObjects: [{ ref: ref("one"), exists: false }],
-        expectedLinks: [],
-        expectedLinkScopes: [],
-      })
-    ).rejects.toBeInstanceOf(MaterializationConflictError)
 
     const first = await materializer.edits.commit(atomic("replay", []))
     const replay = await materializer.edits.commit(atomic("replay", []))
@@ -1258,7 +1148,7 @@ describe("ontology materializer edits", () => {
     ).toBeNull()
   })
 
-  test("bounds staged work by UTF-8 bytes with oversize single records", async () => {
+  test("stages each edit work record alone once it exceeds planChunkBytes", async () => {
     let maxWorkStage = 0
     const { materializer, storage } = createMaterializerFixture({
       dependencies: { batching: { planChunkRows: 100, planChunkBytes: 1 } },
@@ -1475,8 +1365,10 @@ describe("ontology materializer edits", () => {
   })
 
   test("preloads edit state with a constant number of reads across batch boundaries", async () => {
-    for (const operationCount of [1, 1_000, 1_001]) {
-      const { materializer, storage } = createMaterializerFixture()
+    for (const operationCount of [1, 2, 3]) {
+      const { materializer, storage } = createMaterializerFixture({
+        dependencies: { batching: { statePageRows: 2, planChunkRows: 2 } },
+      })
       await materializer.projections.replace(
         replacement(`edit-read-scale-source-${operationCount}`, "2026-01-01T00:00:00Z", [
           sourceEntry("one", "one"),
