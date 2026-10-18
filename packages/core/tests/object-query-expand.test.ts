@@ -159,9 +159,20 @@ describe("object query expand — builder", () => {
 
 describe("object query expand — normalization", () => {
   test("normalizes authoring order to the same tree (stable cache key)", () => {
-    const limitThenExpand = sixb.objects(Project).query().limit(10).expand(Project.l.opportunity).ir
-    const expandThenLimit = sixb.objects(Project).query().expand(Project.l.opportunity).limit(10).ir
+    const limitThenExpand = sixb
+      .objects(Project)
+      .query()
+      .orderBy(Project.p.updatedAt, "desc")
+      .limit(10)
+      .expand(Project.l.opportunity).ir
+    const expandThenLimit = sixb
+      .objects(Project)
+      .query()
+      .expand(Project.l.opportunity)
+      .orderBy(Project.p.updatedAt, "desc")
+      .limit(10).ir
 
+    // The expand is hoisted above both the limit and the sort.
     expect(expandThenLimit).toEqual(limitThenExpand)
     expect(limitThenExpand.kind).toBe("expand")
   })

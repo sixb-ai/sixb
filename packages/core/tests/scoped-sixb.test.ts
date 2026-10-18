@@ -994,6 +994,7 @@ describe("bound Sixb operational access", () => {
       code: "authority_not_inheritable",
     })
     expect((await host.storage.agents!.runs.list({ projectId: host.id })).runs).toEqual([])
+    expect((await host.storage.agents!.threads.list({ projectId: host.id })).threads).toEqual([])
   })
 
   test("agent threads require both the run grant and ownership", async () => {
@@ -1025,15 +1026,18 @@ describe("bound Sixb object writes", () => {
   // A write needs view and edit on the exact type: an upsert answers with the merged row, and
   // `can.view(Contract)` covers `signed-contract` while `can.edit(Contract)` must not.
   test.each([
-    ["view alone grants no edit", "commercial", "contract"],
-    ["edit without view is refused", "blind-writers", "contract"],
-    ["edit on one type leaves an ungranted type unwritable", "editors", "invoice"],
-    ["edit does not expand to subtypes", "editors", "signed-contract"],
-  ] as const)("a write is refused: %s", async (_case, group, objectTypeId) => {
+    ["view alone grants no edit", "commercial", Contract],
+    ["edit without view is refused", "blind-writers", Contract],
+    ["edit on one type leaves an ungranted type unwritable", "editors", Invoice],
+    ["edit does not expand to subtypes", "editors", SignedContract],
+  ] as const)("a write is refused through either channel: %s", async (_case, group, type) => {
     const host = createRuntime()
+    // The principal exists, so only the edit guard stands between it and a successful write.
+    await seedPrincipal(host)
     const scoped = bindPrincipal(host, contextFor(host, [group]))
 
-    await expect(scoped.objects.upsert(objectTypeId, { id: "c2" })).rejects.toThrow(
+    await expect(scoped.objects.upsert(type.id, { id: "c2" })).rejects.toThrow(AuthorizationError)
+    await expect(scoped.objects(type).upsert({ properties: { id: "c2" } })).rejects.toThrow(
       AuthorizationError
     )
   })

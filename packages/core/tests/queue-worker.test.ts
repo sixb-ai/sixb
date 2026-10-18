@@ -157,6 +157,8 @@ describe("QueueWorker", () => {
     expect(claimCalls).toBeLessThan(100)
   })
 
+  // To see this fail, drop the `CLAIM_FAILURE_DELAY_MS` sleep in `QueueWorker.claim`: the worker
+  // then retries a failed claim at once, and burns through all five before any time passes.
   test("restarts the loop after repeated queue claim failures", async () => {
     jest.useFakeTimers()
     const queues = new InMemoryQueues()
@@ -185,6 +187,15 @@ describe("QueueWorker", () => {
     await enqueue(queues)
 
     await worker.start()
+    await flush()
+    // A failed claim is retried after a second, not at once.
+    jest.advanceTimersByTime(999)
+    await flush()
+    expect(claimCalls).toBe(1)
+    jest.advanceTimersByTime(1)
+    await flush()
+    expect(claimCalls).toBe(2)
+
     await runTimersUntil(() => claimedOnCall !== undefined)
     await worker.stop()
 
