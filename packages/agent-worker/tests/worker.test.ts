@@ -2612,7 +2612,7 @@ describe("AgentWorker", () => {
     true,
     false,
   ])("recreates confirmed lost state and retains reset context (Git source: %s)", async (withSource) => {
-    // Regression proof: disable the unavailable-state branch in openThreadSandbox; run 2 fails.
+    // Regression proof: disable the unavailable-state branch in createOrResume; run 2 fails.
     const sessions: RecordingSandbox[] = []
     const names: string[] = []
     const prompts: string[] = []
@@ -2948,7 +2948,7 @@ describe("AgentWorker", () => {
   })
 
   test("applies the authentication guest environment on creation and resume", async () => {
-    // Regression proof: build ThreadSandboxSession's options without grant.env; the session and
+    // Regression proof: build WorkspaceAccess's session env without grant.env; the session and
     // command assertions fail. Spread grant.env after recipe.env; the GUEST_SHARED value fails.
     const expected = { GIT_AUTHOR_NAME: "Integration", GUEST_SHARED: "recipe" }
     const sessions: (Readonly<Record<string, string>> | undefined)[] = []
@@ -3226,7 +3226,7 @@ describe("AgentWorker", () => {
   })
 
   test("refuses a stored workspace without a recipe before model or sandbox work", async () => {
-    // Regression proof: remove the configuration guard in openThreadSandbox.
+    // Regression proof: remove the configuration guard in persistentRunSandbox.
     let modelCalls = 0
     const factory = new RecordingSandboxFactory()
     const model = answerModel(() => {
@@ -5958,6 +5958,29 @@ describe("AgentWorker", () => {
       await environment.dispose()
     }
     expect(recording.sandboxes[0]?.destroyed).toBe(true)
+  })
+
+  test("releases a run's sandbox when its environment fails after provisioning started", async () => {
+    // Regression proof: remove dispose() from the system prompt's catch in startAgentEnvironment;
+    // the sandbox is created and never destroyed.
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
+    const request = await requestAgent(sixb, { text: "hi" })
+    const run = await reserveRequestedRun(sixb, request)
+    const context = await buildAgentWorkerContext(sixb)
+
+    // The locale is read only to build the system prompt, after provisioning has started.
+    const failing: AgentExecutionContext = Object.defineProperty({ ...context }, "locale", {
+      get: () => {
+        throw new Error("locale unavailable")
+      },
+    })
+
+    await expect(
+      createConversationAgentEnvironment({ context: failing, plan: executionPlanFor(sixb), run })
+    ).rejects.toThrow("locale unavailable")
+
+    await waitFor(() => sandboxes.sandboxes[0]?.destroyed || null, { label: "sandbox released" })
   })
 
   test("dispose detaches an in-flight sandbox teardown that destroys once boot settles", async () => {

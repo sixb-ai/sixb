@@ -1,5 +1,6 @@
 import { AgentToolPublicError, type Storage } from "@sixb/core"
 import type { AgentCompactionFailureCode } from "@sixb/core/agents/streams"
+import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 
 /** Failed preservation is a failure even when the run was also cancelled. */
 export class AgentEnvironmentSaveError extends Error {
@@ -30,6 +31,18 @@ export class AgentExecutionLostError extends Error {
   constructor(readonly runId: string) {
     super(`[SixbAgentWorker] Lost execution ownership of agent run '${runId}'.`)
   }
+}
+
+/**
+ * Whether this delivery lost its run: its execution token, or its queue lease, which `signal` (the
+ * delivery's) may carry. The current owner records the run's fate; this delivery touches nothing.
+ */
+export function isLostExecution(error: unknown, signal?: AbortSignal): boolean {
+  return (
+    error instanceof AgentExecutionLostError ||
+    error instanceof QueueDeliveryLeaseLostError ||
+    signal?.reason instanceof QueueDeliveryLeaseLostError
+  )
 }
 
 /**

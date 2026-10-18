@@ -70,7 +70,17 @@ recording are outside its guarantee.
 
 ## How agents use a sandbox
 
-You rarely call `runCommand` yourself. The agent worker does it:
+You rarely call `runCommand` yourself. The agent worker does it, and every run kind goes through
+one lifecycle, `RunSandbox` in [run-sandbox.ts](../src/run-sandbox.ts), with one of two behaviors:
+
+- **Ephemeral** ([ephemeral-run-sandbox.ts](../src/ephemeral-run-sandbox.ts)): a blank sandbox
+  created for one run (an unbound conversation, a subagent or a workflow node) and destroyed when
+  the run releases it.
+- **Persistent** ([persistent-run-sandbox.ts](../src/persistent-run-sandbox.ts)): a bound
+  conversation's thread workspace, resumed by each run and saved by `beforeFinalize` before the
+  run's terminal write. Run teardown never destroys it.
+
+For a blank sandbox:
 
 1. When a run starts, the worker calls `factory.create(...)` with a **restricted** network policy
    whose only allowed origin is the sixb API gateway. The agent can reach the gateway and nothing
@@ -79,10 +89,13 @@ You rarely call `runCommand` yourself. The agent worker does it:
    sandbox tool awaits it lazily on first use, so boot latency does not block the turn.
 3. Each `read` call runs a fixed, bounded script with model input passed as command arguments. Each
    `bash` call becomes `runCommand("bash", ["-lc", script], ...)`.
-4. On run teardown the worker calls `destroy()`.
+4. On run teardown the worker releases it, which calls `destroy()`.
 
-Because egress is locked to the gateway, the agent's only way to read or write app data is through
-that gateway — there is no open internet. See
+A thread's workspace is ready before the first model call instead, so the system prompt can
+describe it, and its network follows its recipe, which always includes the gateway.
+
+Because a blank sandbox's egress is locked to the gateway, its agent's only way to read or write
+app data is through that gateway — there is no open internet. See
 [Agent tools and the gateway](../../../docs/models/tools-and-authorization.md) for what the gateway exposes.
 
 ## Child agents
