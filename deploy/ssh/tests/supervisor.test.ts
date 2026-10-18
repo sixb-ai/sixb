@@ -120,9 +120,11 @@ describe("supervisor", () => {
   test("runs every instance, restarts what exits, logs its output, and reports the release", async () => {
     const { manifestPath } = await startSupervisor()
 
+    // The count rises before the restart is scheduled, so only a second exit proves a restarted
+    // instance ran. Removal proof: empty the restart timer in the supervisor's `handleExit`.
     const report = await until(
       () => status(manifestPath),
-      (value) => value.processes.some((entry) => entry.service === "workers" && entry.restarts > 0)
+      (value) => value.processes.some((entry) => entry.service === "workers" && entry.restarts > 1)
     )
     expect(report.running).toBe(true)
     expect(report.release?.commit).toBe("abc123")

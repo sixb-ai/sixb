@@ -77,7 +77,9 @@ describe("DuckLakeStorage optimistic concurrency", () => {
 
     await expect(
       delayedWrite.commit({ expectedLatestVersionId: initialVersion.versionId })
-    ).rejects.toThrow("Optimistic commit failed")
+    ).rejects.toThrow(
+      `expected latest version '${initialVersion.versionId}', found '${winningVersion.versionId}'`
+    )
 
     expect(await secondStorage.getLatestVersion(ordersDataset.id)).toMatchObject({
       versionId: winningVersion.versionId,
@@ -86,6 +88,9 @@ describe("DuckLakeStorage optimistic concurrency", () => {
       { orderId: "ord_1", customerName: "Ada" },
       { orderId: "ord_3", customerName: "Katherine" },
     ])
+    expect(
+      (await storage.listVersions(ordersDataset.id)).map((version) => version.versionId)
+    ).toEqual([winningVersion.versionId, initialVersion.versionId])
   })
 
   test("lets an attached local DuckDB peer observe another provider's commit", async () => {

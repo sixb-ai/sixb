@@ -192,7 +192,9 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
 
           await expect(
             storage.assertDatasetDefinitionsCompatible([changedDataset])
-          ).rejects.toThrow("changing column 'orderId' type")
+          ).rejects.toThrow(
+            /Lake dataset definition check failed[\s\S]*changing column 'orderId' type/
+          )
           await expect(storage.createDataset(changedDataset)).rejects.toBeInstanceOf(
             LakeStorageError
           )
@@ -939,6 +941,7 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
           await write.abort()
           await write.abort()
 
+          await expect(write.writeRows([])).rejects.toThrow("already closed")
           expect(await storage.getLatestVersion(writeDataset.id)).toBeNull()
           expect(await storage.listVersions(writeDataset.id)).toEqual([])
           await expect(
