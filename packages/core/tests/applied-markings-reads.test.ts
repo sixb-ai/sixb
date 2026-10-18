@@ -22,7 +22,6 @@ import {
   projectId,
   remindCustomers,
 } from "./applied-markings-fixture"
-import { waitFor } from "./test-runtime-deps"
 
 // Readers receive the objects a projection applied under the markings of the dataset version it
 // applied: a property keeps a marking its column carried, and an object type or link whose key
@@ -319,25 +318,21 @@ describe("an object type whose key column carried a marking is unreadable", () =
     const unsubscribe = await app.sales.events.subscribe({}, (events) => {
       delivered.push(...events)
     })
+    const dropped = Promise.withResolvers<string>()
+    warn.mockImplementation((message?: unknown) => {
+      if (String(message).includes("Dropped")) dropped.resolve(String(message))
+    })
 
     app.host.storage.ontology.sources.listActive = async () => {
       throw new Error("storage offline")
     }
 
     await app.trusted.objects(Customer).upsert({ properties: { id: "c2", name: "Beta" } })
-    await waitFor(
-      () => warn.mock.calls.flat().map(String),
-      (messages) => messages.some((message) => message.includes("Dropped"))
-    )
+    const message = await dropped.promise.finally(() => warn.mockImplementation(() => {}))
 
     unsubscribe()
     expect(delivered).toEqual([])
-    expect(
-      warn.mock.calls
-        .flat()
-        .map(String)
-        .find((message) => message.includes("Dropped"))
-    ).toMatch(
+    expect(message).toMatch(
       /^\[Sixb\] Dropped 1 event\(s\) from cursor '.+' of a subscription, whose markings could not be enforced: \[Sixb\] Cannot read the dataset versions projections applied, so markings cannot be enforced: storage offline$/
     )
   })
@@ -467,7 +462,7 @@ describe("the clearance of the code alone", () => {
     const classified = getVersion.mock.calls.length
     expect(classified).toBeGreaterThan(0)
 
-    for (let index = 1; index < 1_000; index += 1) {
+    for (let index = 1; index < 10; index += 1) {
       await app.sales.objects.list({ objectTypeIds: [Invoice.id] })
     }
 

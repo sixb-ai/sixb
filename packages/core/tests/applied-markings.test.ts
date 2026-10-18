@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import type { DatasetVersion } from "../src/lake-storage"
 import {
   APPLIED_MARKINGS_FRESH_MS,
@@ -20,6 +20,9 @@ const warn = spyOn(console, "warn").mockImplementation(() => {})
 afterEach(() => warn.mockClear())
 afterAll(() => warn.mockRestore())
 
+/** A refresh over these in-memory sources is a chain of promise callbacks: one macrotask drains it. */
+const drain = () => new Promise<void>((resolve) => setImmediate(resolve))
+
 /** The host's resolver, its lake, and its sources, behind a hand-driven clock. */
 async function setup(
   options: {
@@ -38,6 +41,7 @@ async function setup(
   let lakeFailure: Error | undefined
   let storageGate: Promise<void> | undefined
   let lakeGate: Promise<void> | undefined
+  let lakeReached: (() => void) | undefined
 
   const applied = createAppliedMarkings({
     projectId,
@@ -55,6 +59,7 @@ async function setup(
     lakeStorage: {
       getVersion: async (datasetId, versionId) => {
         calls.getVersion += 1
+        lakeReached?.()
         await lakeGate
         if (lakeFailure) throw lakeFailure
         return project.lake.getVersion(datasetId, versionId)
@@ -100,14 +105,19 @@ async function setup(
         release()
       }
     },
-    holdLake(): () => void {
-      let release = () => {}
-      lakeGate = new Promise((resolve) => {
-        release = resolve
-      })
-      return () => {
-        lakeGate = undefined
-        release()
+    /** Hold the next lake reads; `reached` settles once a read is waiting on the hold. */
+    holdLake(): { readonly reached: Promise<void>; release(): void } {
+      const reached = Promise.withResolvers<void>()
+      const gate = Promise.withResolvers<void>()
+      lakeReached = reached.resolve
+      lakeGate = gate.promise
+      return {
+        reached: reached.promise,
+        release() {
+          lakeGate = undefined
+          lakeReached = undefined
+          gate.resolve()
+        },
       }
     },
   }
@@ -389,7 +399,7 @@ describe("applied markings", () => {
     expect(app.calls.listActive).toBe(2)
 
     release()
-    await Bun.sleep(5)
+    await drain()
     expect(await app.applied.current()).toBe(NO_APPLIED_MARKINGS)
     expect(app.calls.listActive).toBe(2)
 
@@ -409,9 +419,9 @@ describe("applied markings", () => {
     app.failStorage(new Error("storage offline"))
     app.clock.now = APPLIED_MARKINGS_FRESH_MS
     expect(await app.applied.current()).toBe(snapshot)
-    await Bun.sleep(5)
+    await drain()
     expect(await app.applied.current()).toBe(snapshot)
-    await Bun.sleep(5)
+    await drain()
     expect(warn.mock.calls).toEqual([
       [
         "[Sixb] Could not read the dataset versions projections applied: storage offline. Reads keep the markings read before for up to 10s, then fail until it succeeds.",
@@ -420,7 +430,7 @@ describe("applied markings", () => {
 
     app.clock.now = APPLIED_MARKINGS_MAX_AGE_MS
     expect(await app.applied.current()).toBe(snapshot)
-    await Bun.sleep(5)
+    await drain()
 
     app.clock.now = APPLIED_MARKINGS_MAX_AGE_MS + 1
     await expect(app.applied.current()).rejects.toThrow(
@@ -434,7 +444,7 @@ describe("applied markings", () => {
     app.failStorage(new Error("storage offline"))
     app.clock.now += APPLIED_MARKINGS_FRESH_MS
     await app.applied.current()
-    await Bun.sleep(5)
+    await drain()
     expect(warn).toHaveBeenCalledTimes(2)
   })
 
@@ -449,13 +459,14 @@ describe("applied markings", () => {
   test("a projection applied while the first snapshot is read is read by the next read", async () => {
     const app = await setup()
     app.apply(await app.normalized(titleFromAmount))
-    const release = app.holdLake()
+    const lake = app.holdLake()
     const first = app.applied.current()
-    await Bun.sleep(1)
+    // The first read has listed the Day 1 sources and waits on the lake.
+    await lake.reached
 
     app.apply(await app.normalized())
     app.applied.invalidate()
-    release()
+    lake.release()
     await first
     expect(await app.applied.current()).toBe(NO_APPLIED_MARKINGS)
   })
@@ -466,14 +477,20 @@ describe("applied markings", () => {
     app.apply(await app.normalized(titleFromAmount))
     const release = app.holdStorage()
 
-    // Bounded here too, so a missing deadline fails this test instead of hanging it.
-    const read = await Promise.race([
-      app.applied.current().then(
+    // The deadline is a timer: fake time reaches it without waiting.
+    jest.useFakeTimers()
+    let read: string
+    try {
+      const reading = app.applied.current().then(
         () => "resolved",
         (error: Error) => error.message
-      ),
-      Bun.sleep(1_000).then(() => "still waiting"),
-    ])
+      )
+      jest.advanceTimersByTime(40)
+      // Bounded here too, so a missing deadline fails this test instead of hanging it.
+      read = await Promise.race([reading, drain().then(() => "still waiting")])
+    } finally {
+      jest.useRealTimers()
+    }
     expect(read).toBe(
       "[Sixb] Cannot read the dataset versions projections applied, so markings cannot be enforced: [Sixb] Reading the dataset versions projections applied took longer than 0.04s."
     )

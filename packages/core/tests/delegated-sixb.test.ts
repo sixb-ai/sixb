@@ -56,6 +56,10 @@ const rejectProposal: ActionDefinition = defineAction("reject-proposal")
   .params({})
   .edits(() => {})
 
+const refreshProposals: ActionDefinition = defineAction("refresh-proposals")
+  .params({})
+  .edits(() => {})
+
 interface TestProposalQuery {
   list(): Promise<{ objects: readonly { primaryId: string }[] }>
   count(): Promise<number>
@@ -117,7 +121,7 @@ function createRuntime() {
   return new SixbHost({
     id: "delegated-sixb-test",
     ontology: [Proposal, ArchivedProposal, LineItem],
-    actions: [approveProposal, rejectProposal],
+    actions: [approveProposal, rejectProposal, refreshProposals],
     ...createTestRuntimeDeps(),
   })
 }
@@ -278,6 +282,14 @@ describe("delegated Sixb runtime", () => {
         runId: "cross-reject",
       })
     ).rejects.toBeInstanceOf(AuthorizationError)
+
+    // An Action the runtime does not know is refused like an unshared pair, without naming it.
+    await expect(
+      sharedProposals.requestAction({ id: "proposal-1", actionId: "unknown-action" })
+    ).rejects.toMatchObject({
+      name: "AuthorizationError",
+      message: expect.not.stringContaining("Unknown action"),
+    })
 
     expect(
       await host.storage.actionRuns?.getById({
@@ -530,7 +542,7 @@ describe("delegated Sixb runtime", () => {
     })
   })
 
-  test("does not inherit parent actions onto delegated subtype subjects", async () => {
+  test("refuses global Actions and does not inherit parent actions onto delegated subtype subjects", async () => {
     const host = createRuntime()
     const sixb = createTestSixb(host)
     await sixb.objects(ArchivedProposal).upsert({
@@ -579,6 +591,14 @@ describe("delegated Sixb runtime", () => {
     expect(shared.actions.listForType(ArchivedProposal)).toEqual([])
     expect(shared.actions.listForType(Proposal)).toEqual([])
 
+    // Delegated V1 shares exact object Actions only: a global Action, or an object Action requested
+    // without its subject, is refused.
+    await expect(shared.actions.request({ actionId: refreshProposals.id })).rejects.toBeInstanceOf(
+      AuthorizationError
+    )
+    await expect(shared.actions.request({ actionId: approveProposal.id })).rejects.toBeInstanceOf(
+      AuthorizationError
+    )
     await expect(
       shared.actions.request({
         actionId: approveProposal.id,

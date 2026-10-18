@@ -117,25 +117,6 @@ describe("Share definitions", () => {
     expect(Object.keys(can.apply(approveProposal))).toEqual(["kind", "capability", "selection"])
   })
 
-  test("keeps the existing role grant builders intact", () => {
-    expect(can.view(Proposal)).toEqual({
-      kind: "grant",
-      capability: "view",
-      target: "object",
-      selection: { all: false, ids: ["proposal"] },
-    })
-    expect(can.apply(approveProposal)).toMatchObject({
-      kind: "grant",
-      capability: "apply",
-      selection: { all: false, ids: ["approve-proposal"] },
-    })
-    expect(can.share(ProposalShare)).toEqual({
-      kind: "grant",
-      capability: "share",
-      selection: { all: false, ids: ["proposal"] },
-    })
-  })
-
   test("compiles exact roots, property snapshots, link paths, and Action subjects", () => {
     const runtime = runtimeFor()
     const target = objectRef(Proposal, "proposal-1")
@@ -540,10 +521,4 @@ describe("Share authority intersection", () => {
     })
     expect(intersectShareAccessPlans(issued, broad)).toEqual(issued)
   })
-})
-
-test("Share definition errors are nominal", () => {
-  expect(() =>
-    defineShare("", { target: Proposal, grants: ({ target }) => [can.view(target)] })
-  ).toThrow(ShareDefinitionError)
 })

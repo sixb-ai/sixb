@@ -177,7 +177,7 @@ describe("security definitions", () => {
     expect(canPerformMembershipOperation(scope, "suspend", ["commercial"])).toBe(false)
   })
 
-  test("createSixb discovers membership policies from security policies folder", async () => {
+  test("createSixb discovers groups, membership policies, roles, and markings from security/", async () => {
     const projectRoot = await createTempProjectRoot()
 
     await writeProjectFile(
@@ -190,7 +190,6 @@ export const commercial = defineGroup("commercial")
 export const finance = defineGroup("finance")
 `
     )
-
     await writeProjectFile(
       projectRoot,
       "security/policies/member-administration.ts",
@@ -204,23 +203,86 @@ export const memberAdministration = defineMembershipPolicy("member-administratio
 })
 `
     )
-
-    const sixb = await createSixb({
+    await writeProjectFile(
       projectRoot,
-      ontologies: [Account],
-      ...createTestRuntimeDeps(),
-    })
+      "security/markings/financial.ts",
+      `import { defineMarking } from "${coreModuleUrl}"
 
-    expect(sixb.definitions.security.getMembershipPolicyById("member-administration")).toEqual({
+export const financial = defineMarking("financial", { label: "Financial" })
+`
+    )
+    await writeProjectFile(
+      projectRoot,
+      "ontology/invoice.ts",
+      `import { defineObjectType, prop } from "${coreModuleUrl}"
+import { financial } from "../security/markings/financial"
+
+export const Invoice = defineObjectType({
+  id: "invoice",
+  name: "Invoice",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("amount", "double", { markings: [financial] }),
+  ],
+})
+`
+    )
+    await writeProjectFile(
+      projectRoot,
+      "security/roles/finance-reader.ts",
+      `import { can, defineRole } from "${coreModuleUrl}"
+import { Invoice } from "../../ontology/invoice"
+import { finance } from "../groups/team"
+import { financial } from "../markings/financial"
+
+export const financeReader = defineRole("finance.reader", {
+  grantedTo: [finance],
+  grants: [can.view(Invoice)],
+  clearances: [financial],
+})
+`
+    )
+
+    const sixb = await createSixb({ projectRoot, ...createTestRuntimeDeps() })
+    const security = sixb.definitions.security
+
+    expect(security.listGroups().map((group) => group.id)).toEqual([
+      "commercial",
+      "finance",
+      "security-admins",
+    ])
+    expect(security.getMembershipPolicyById("member-administration")).toEqual({
       kind: "membershipPolicy",
       id: "member-administration",
       grantedToGroupIds: ["security-admins"],
       scopeGroupIds: ["commercial", "finance"],
       can: ["invite", "assignGroups", "suspend"],
     })
+    expect(security.listMarkings()).toEqual([
+      { kind: "marking", id: "financial", label: "Financial" },
+    ])
+    expect(security.getRoleById("finance.reader")).toEqual({
+      kind: "role",
+      id: "finance.reader",
+      grantedToGroupIds: ["finance"],
+      grants: [
+        {
+          kind: "grant",
+          capability: "view",
+          target: "object",
+          selection: { all: false, ids: ["invoice"] },
+        },
+      ],
+      clearances: ["financial"],
+    })
+    expect(
+      sixb.definitions.ontology
+        .getObjectTypeById("invoice")
+        ?.properties.find((property) => property.id === "amount")?.markings
+    ).toEqual(["financial"])
   })
 
-  test("explicit groups and membership policies register without filesystem discovery", async () => {
+  test("explicit groups, membership policies, and roles register without filesystem discovery", async () => {
     const securityAdmins: GroupDefinition = { kind: "group", id: "security-admins" }
     const commercial: GroupDefinition = { kind: "group", id: "commercial" }
     const membershipPolicy: MembershipPolicyDefinition = {
@@ -230,105 +292,72 @@ export const memberAdministration = defineMembershipPolicy("member-administratio
       scopeGroupIds: ["commercial"],
       can: ["invite", "assignGroups"],
     }
+    const role = defineRole("account.viewer", {
+      grantedTo: [commercial],
+      grants: [can.view(Account)],
+    })
 
     const sixb = await createSixb({
       projectRoot: await createTempProjectRoot(),
       ontologies: [Account],
       groups: [securityAdmins, commercial],
       membershipPolicies: [membershipPolicy],
+      roles: [role],
       ...createTestRuntimeDeps(),
     })
 
     expect(sixb.definitions.security.listGroups()).toEqual([securityAdmins, commercial])
     expect(sixb.definitions.security.listMembershipPolicies()).toEqual([membershipPolicy])
+    expect(sixb.definitions.security.listRoles()).toEqual([role])
   })
 
-  test("runtime registration rejects duplicate group ids", () => {
-    expect(() =>
-      createRuntime({
-        groups: [
-          { kind: "group", id: "security-admins" },
-          { kind: "group", id: "security-admins" },
-        ],
-      })
-    ).toThrow(SecurityValidationError)
+  const memberAdmin: MembershipPolicyDefinition = {
+    kind: "membershipPolicy",
+    id: "member-admin",
+    grantedToGroupIds: ["security-admins"],
+    scopeGroupIds: ["commercial"],
+    can: ["invite"],
+  }
+  const securityAdmins: GroupDefinition = { kind: "group", id: "security-admins" }
+  const commercial: GroupDefinition = { kind: "group", id: "commercial" }
+  const accountViewer = defineRole("account.viewer", {
+    grantedTo: [commercial],
+    grants: [can.view(Account)],
   })
 
-  test("runtime registration rejects duplicate membership policy ids", () => {
-    const groups: GroupDefinition[] = [
-      { kind: "group", id: "security-admins" },
-      { kind: "group", id: "commercial" },
-    ]
-    const policy: MembershipPolicyDefinition = {
-      kind: "membershipPolicy",
-      id: "member-admin",
-      grantedToGroupIds: ["security-admins"],
-      scopeGroupIds: ["commercial"],
-      can: ["invite"],
-    }
-
-    expect(() => createRuntime({ groups, membershipPolicies: [policy, policy] })).toThrow(
-      SecurityValidationError
-    )
-  })
-
-  test("runtime registration rejects membership policies referencing unknown groups", () => {
-    expect(() =>
-      createRuntime({
-        groups: [{ kind: "group", id: "security-admins" }],
-        membershipPolicies: [
-          {
-            kind: "membershipPolicy",
-            id: "member-admin",
-            grantedToGroupIds: ["security-admins"],
-            scopeGroupIds: ["commercial"],
-            can: ["invite"],
-          },
-        ],
-      })
-    ).toThrow("unknown group 'commercial'")
-  })
-
-  test("runtime registration rejects membership policies without granted groups", () => {
-    expect(() =>
-      createRuntime({
-        groups: [{ kind: "group", id: "commercial" }],
-        membershipPolicies: [
-          {
-            kind: "membershipPolicy",
-            id: "member-admin",
-            grantedToGroupIds: [],
-            scopeGroupIds: ["commercial"],
-            can: ["invite"],
-          },
-        ],
-      })
-    ).toThrow("must grant membership authority")
-  })
-
-  test("runtime registration rejects membership policies without operations", () => {
-    expect(() =>
-      createRuntime({
-        groups: [{ kind: "group", id: "security-admins" }],
-        membershipPolicies: [
-          {
-            kind: "membershipPolicy",
-            id: "member-admin",
-            grantedToGroupIds: ["security-admins"],
-            scopeGroupIds: [],
-            can: [],
-          },
-        ],
-      })
-    ).toThrow("must declare at least one operation")
-  })
-
-  test("empty security definitions remain allowed at the definition layer", () => {
-    const sixb = createRuntime()
-
-    expect(sixb.definitions.security.listGroups()).toEqual([])
-    expect(sixb.definitions.security.listRoles()).toEqual([])
-    expect(sixb.definitions.security.listMembershipPolicies()).toEqual([])
+  test.each([
+    ["duplicate group ids", { groups: [securityAdmins, securityAdmins] }, "Duplicate group id"],
+    [
+      "duplicate membership policy ids",
+      { groups: [securityAdmins, commercial], membershipPolicies: [memberAdmin, memberAdmin] },
+      "Duplicate membership policy id",
+    ],
+    [
+      "membership policies referencing unknown groups",
+      { groups: [securityAdmins], membershipPolicies: [memberAdmin] },
+      "unknown group 'commercial'",
+    ],
+    [
+      "membership policies without granted groups",
+      { groups: [commercial], membershipPolicies: [{ ...memberAdmin, grantedToGroupIds: [] }] },
+      "must grant membership authority",
+    ],
+    [
+      "membership policies without operations",
+      {
+        groups: [securityAdmins],
+        membershipPolicies: [{ ...memberAdmin, scopeGroupIds: [], can: [] }],
+      },
+      "must declare at least one operation",
+    ],
+    [
+      "duplicate role ids",
+      { groups: [commercial], roles: [accountViewer, accountViewer] },
+      "Duplicate role id",
+    ],
+    ["roles referencing unknown groups", { roles: [accountViewer] }, "unknown group 'commercial'"],
+  ] as const)("runtime registration rejects %s", (_case, options, message) => {
+    expect(() => createRuntime(options)).toThrow(message)
   })
 })
 
@@ -363,47 +392,148 @@ describe("role definitions", () => {
     })
   })
 
-  test("can.view dedupes ids within an explicit selection", () => {
-    expect(can.view([Account, Account])).toEqual({
-      kind: "grant",
-      capability: "view",
-      target: "object",
-      selection: { all: false, ids: ["account"] },
-    })
-  })
-
-  test("can.view supports dataset definitions and scopes", () => {
-    expect(can.view(AccountSnapshot)).toEqual({
-      kind: "grant",
-      capability: "view",
-      target: "dataset",
-      selection: { all: false, ids: ["account.snapshot"] },
-    })
-    expect(can.view(every.dataset()).selection).toEqual({ all: true, except: [] })
-    expect(can.view(every.dataset().except([AccountSnapshot]))).toEqual({
-      kind: "grant",
-      capability: "view",
-      target: "dataset",
-      selection: { all: true, except: ["account.snapshot"] },
-    })
-  })
-
-  test("can.observe exposes explicit project observability capabilities", () => {
-    expect(can.observe(project.logs)).toEqual({
-      kind: "grant",
-      capability: "observe",
-      target: "logs",
-    })
-    expect(can.observe(project.activity)).toEqual({
-      kind: "grant",
-      capability: "observe",
-      target: "activity",
-    })
-    expect(can.observe(agent.usage)).toEqual({
-      kind: "grant",
-      capability: "observe",
-      target: "aiUsage",
-    })
+  // What each builder records: its capability, its target family (absent where the capability names
+  // only one), and an explicit id list or the whole registered universe minus exclusions.
+  test.each([
+    [
+      "can.view dedupes ids within an explicit selection",
+      can.view([Account, Account]),
+      { capability: "view", target: "object", selection: { all: false, ids: ["account"] } },
+    ],
+    [
+      "can.view selects every object type",
+      can.view(every.object()),
+      { capability: "view", target: "object", selection: { all: true, except: [] } },
+    ],
+    [
+      "can.view excludes object types from the universe",
+      can.view(every.object().except([Account])),
+      { capability: "view", target: "object", selection: { all: true, except: ["account"] } },
+    ],
+    [
+      "can.view takes a dataset definition",
+      can.view(AccountSnapshot),
+      {
+        capability: "view",
+        target: "dataset",
+        selection: { all: false, ids: ["account.snapshot"] },
+      },
+    ],
+    [
+      "can.view selects every dataset",
+      can.view(every.dataset()),
+      { capability: "view", target: "dataset", selection: { all: true, except: [] } },
+    ],
+    [
+      "can.view excludes datasets from the universe",
+      can.view(every.dataset().except([AccountSnapshot])),
+      {
+        capability: "view",
+        target: "dataset",
+        selection: { all: true, except: ["account.snapshot"] },
+      },
+    ],
+    [
+      "can.observe takes project logs",
+      can.observe(project.logs),
+      { capability: "observe", target: "logs" },
+    ],
+    [
+      "can.observe takes project activity",
+      can.observe(project.activity),
+      { capability: "observe", target: "activity" },
+    ],
+    [
+      "can.observe takes Agent usage",
+      can.observe(agent.usage),
+      { capability: "observe", target: "aiUsage" },
+    ],
+    [
+      "can.run takes a sync definition",
+      can.run(syncAccounts),
+      { capability: "run", target: "sync", selection: { all: false, ids: ["sync-accounts"] } },
+    ],
+    [
+      "can.run takes a homogeneous list",
+      can.run([syncAccounts]),
+      { capability: "run", target: "sync", selection: { all: false, ids: ["sync-accounts"] } },
+    ],
+    [
+      "can.run selects every sync",
+      can.run(every.sync()),
+      { capability: "run", target: "sync", selection: { all: true, except: [] } },
+    ],
+    [
+      "can.run excludes syncs from the universe",
+      can.run(every.sync().except([syncAccounts])),
+      { capability: "run", target: "sync", selection: { all: true, except: ["sync-accounts"] } },
+    ],
+    [
+      "can.run takes a pipeline definition",
+      can.run(normalizeAccountsPipeline),
+      {
+        capability: "run",
+        target: "pipeline",
+        selection: { all: false, ids: ["normalize-accounts"] },
+      },
+    ],
+    [
+      "can.run selects every pipeline",
+      can.run(every.pipeline()),
+      { capability: "run", target: "pipeline", selection: { all: true, except: [] } },
+    ],
+    [
+      "can.run excludes pipelines from the universe",
+      can.run(every.pipeline().except([normalizeAccountsPipeline])),
+      {
+        capability: "run",
+        target: "pipeline",
+        selection: { all: true, except: ["normalize-accounts"] },
+      },
+    ],
+    ["can.run takes the project Agent", can.run(agent), { capability: "run", target: "agent" }],
+    [
+      "can.manage takes a connector definition",
+      can.manage(sourceConnector),
+      { capability: "manage", target: "connector", selection: { all: false, ids: ["source"] } },
+    ],
+    [
+      "can.manage excludes connectors from the universe",
+      can.manage(every.connector().except([sourceConnector])),
+      { capability: "manage", target: "connector", selection: { all: true, except: ["source"] } },
+    ],
+    [
+      "can.manage takes Agent usage",
+      can.manage(agent.usage),
+      { capability: "manage", target: "aiUsage" },
+    ],
+    [
+      "can.edit takes an object type",
+      can.edit(Account),
+      { capability: "edit", selection: { all: false, ids: ["account"] } },
+    ],
+    [
+      "can.edit selects every object type",
+      can.edit(every.object()),
+      { capability: "edit", selection: { all: true, except: [] } },
+    ],
+    [
+      "can.edit excludes object types from the universe",
+      can.edit(every.object().except([Account])),
+      { capability: "edit", selection: { all: true, except: ["account"] } },
+    ],
+    [
+      "can.append takes an object type",
+      can.append(Account),
+      { capability: "append", selection: { all: false, ids: ["account"] } },
+    ],
+    [
+      "can.append selects every object type",
+      can.append(every.object()),
+      { capability: "append", selection: { all: true, except: [] } },
+    ],
+  ] as const)("%s", (_case, grant, expected) => {
+    expect(grant).toEqual({ kind: "grant", ...expected })
   })
 
   test("AI usage builders reject strings and unrelated references at runtime", () => {
@@ -444,250 +574,125 @@ describe("role definitions", () => {
     expect(Object.isFrozen(project.activity)).toBe(true)
   })
 
-  test("can.run supports sync and pipeline scopes and the project Agent", () => {
-    expect(can.run(syncAccounts)).toEqual({
-      kind: "grant",
-      capability: "run",
-      target: "sync",
-      selection: { all: false, ids: ["sync-accounts"] },
-    })
-    expect(can.run(every.sync()).selection).toEqual({ all: true, except: [] })
-    expect(can.run(every.sync().except([syncAccounts]))).toEqual({
-      kind: "grant",
-      capability: "run",
-      target: "sync",
-      selection: { all: true, except: ["sync-accounts"] },
-    })
-    expect(can.run(normalizeAccountsPipeline)).toEqual({
-      kind: "grant",
-      capability: "run",
-      target: "pipeline",
-      selection: { all: false, ids: ["normalize-accounts"] },
-    })
-    expect(can.run(every.pipeline()).selection).toEqual({ all: true, except: [] })
-    expect(can.run(every.pipeline().except([normalizeAccountsPipeline]))).toEqual({
-      kind: "grant",
-      capability: "run",
-      target: "pipeline",
-      selection: { all: true, except: ["normalize-accounts"] },
-    })
-    expect(can.run(agent)).toEqual({
-      kind: "grant",
-      capability: "run",
-      target: "agent",
-    })
-  })
-
-  test("can.manage supports connector definitions and scopes", () => {
-    expect(can.manage(sourceConnector)).toEqual({
-      kind: "grant",
-      capability: "manage",
-      target: "connector",
-      selection: { all: false, ids: ["source"] },
-    })
-    expect(can.manage(every.connector().except([sourceConnector])).selection).toEqual({
-      all: true,
-      except: ["source"],
-    })
-    expect(can.manage(agent.usage)).toEqual({
-      kind: "grant",
-      capability: "manage",
-      target: "aiUsage",
-    })
-  })
-
-  test("can.edit and can.append build object-type write grants without a target field", () => {
-    // No `target`, like `can.apply`: the capability names its one target family, so the builder
-    // resolves against `["object"]` and discards the result rather than storing a redundant field.
-    expect(can.edit(Account)).toEqual({
-      kind: "grant",
-      capability: "edit",
-      selection: { all: false, ids: ["account"] },
-    })
-    expect(can.append(Account)).toEqual({
-      kind: "grant",
-      capability: "append",
-      selection: { all: false, ids: ["account"] },
-    })
-
-    expect(can.edit(every.object()).selection).toEqual({ all: true, except: [] })
-    expect(can.edit(every.object().except([Account])).selection).toEqual({
-      all: true,
-      except: ["account"],
-    })
-    expect(can.append(every.object()).selection).toEqual({ all: true, except: [] })
-  })
-
-  test("the write builders reject the wrong target family", () => {
-    expect(() => can.edit(every.dataset() as never)).toThrow(
-      "[Sixb] can.edit accepts object selectors, but received every.dataset()."
-    )
-    expect(() => can.append(every.action() as never)).toThrow(
-      "[Sixb] can.append accepts object selectors, but received every.action()."
-    )
-    expect(() => can.edit(syncAccounts as never)).toThrow(
-      "[Sixb] can.edit accepts object definitions, but received one targeting sync."
-    )
-    expect(() => can.append(AccountSnapshot as never)).toThrow(
-      "[Sixb] can.append accepts object definitions, but received one targeting dataset."
-    )
-  })
-
-  test("scopes select the whole universe, with optional exclusions", () => {
-    expect(can.view(every.object()).selection).toEqual({ all: true, except: [] })
-    expect(can.view(every.object().except([Account])).selection).toEqual({
-      all: true,
-      except: ["account"],
-    })
-  })
-
-  test("a breadth selector from the wrong family is rejected, not silently granted", () => {
-    // Typing already blocks this from TypeScript. The runtime check is what protects an untyped
-    // caller, or an `as never`, from turning `can.apply` into a grant over every object type.
-    expect(() => can.apply(every.object() as never)).toThrow(
-      "[Sixb] can.apply accepts action selectors, but received every.object()."
-    )
-    expect(() => can.view(every.sync() as never)).toThrow(
-      "[Sixb] can.view accepts object or dataset selectors, but received every.sync()."
-    )
-    expect(() => can.run(every.dataset() as never)).toThrow(
-      "[Sixb] can.run accepts workflow or sync or pipeline selectors, but received every.dataset()."
-    )
-  })
-
-  test("a definition from the wrong family is rejected, not filed under its own target", () => {
+  // Typing already blocks these from TypeScript. The runtime check is what protects an untyped
+  // caller, or an `as never`, from filing a grant under another target family.
+  test.each([
+    [
+      "can.edit(every.dataset())",
+      () => can.edit(every.dataset() as never),
+      "[Sixb] can.edit accepts object selectors, but received every.dataset().",
+    ],
+    [
+      "can.append(every.action())",
+      () => can.append(every.action() as never),
+      "[Sixb] can.append accepts object selectors, but received every.action().",
+    ],
+    [
+      "can.edit(sync)",
+      () => can.edit(syncAccounts as never),
+      "[Sixb] can.edit accepts object definitions, but received one targeting sync.",
+    ],
+    [
+      "can.append(dataset)",
+      () => can.append(AccountSnapshot as never),
+      "[Sixb] can.append accepts object definitions, but received one targeting dataset.",
+    ],
+    // A breadth selector from the wrong family would otherwise grant over every object type.
+    [
+      "can.apply(every.object())",
+      () => can.apply(every.object() as never),
+      "[Sixb] can.apply accepts action selectors, but received every.object().",
+    ],
+    [
+      "can.view(every.sync())",
+      () => can.view(every.sync() as never),
+      "[Sixb] can.view accepts object or dataset selectors, but received every.sync().",
+    ],
+    [
+      "can.run(every.dataset())",
+      () => can.run(every.dataset() as never),
+      "[Sixb] can.run accepts workflow or sync or pipeline selectors, but received every.dataset().",
+    ],
     // Recognising a `kind` is not accepting it. These used to return `run:dataset` / `view:sync`,
-    // and since neither is in `GRANT_KINDS`, startup died on `spec.universeKey` with a `TypeError`
-    // naming neither the role nor the definition.
-    expect(() => can.run(AccountSnapshot as never)).toThrow(
-      "[Sixb] can.run accepts workflow or sync or pipeline definitions, but received one targeting dataset."
-    )
-    expect(() => can.view(syncAccounts as never)).toThrow(
-      "[Sixb] can.view accepts object or dataset definitions, but received one targeting sync."
-    )
-    // The guard sits in `targetOfDefinition`, so it covers the two builders that never read `target`
-    // back either. This used to reach startup and be reported as an unknown *action*.
-    expect(() => can.apply(AccountSnapshot as never)).toThrow(
-      "[Sixb] can.apply accepts action definitions, but received one targeting dataset."
-    )
+    // and since neither is in `GRANT_KINDS`, startup died on a `TypeError` naming neither the role
+    // nor the definition. The guard sits in `targetOfDefinition`, so it covers `can.apply` too.
+    [
+      "can.run(dataset)",
+      () => can.run(AccountSnapshot as never),
+      "[Sixb] can.run accepts workflow or sync or pipeline definitions, but received one targeting dataset.",
+    ],
+    [
+      "can.view(sync)",
+      () => can.view(syncAccounts as never),
+      "[Sixb] can.view accepts object or dataset definitions, but received one targeting sync.",
+    ],
+    [
+      "can.apply(dataset)",
+      () => can.apply(AccountSnapshot as never),
+      "[Sixb] can.apply accepts action definitions, but received one targeting dataset.",
+    ],
+    // Sniffing only `input[0]` filed the pipeline's id under `run:sync`, so startup then reported a
+    // real pipeline as an unknown sync. Every element has to agree on the target.
+    [
+      "can.run([sync, pipeline])",
+      () => can.run([syncAccounts, normalizeAccountsPipeline] as never),
+      "[Sixb] can.run requires one target per grant, but received both sync and pipeline definitions. Use one grant each.",
+    ],
+    [
+      "can.view([object, dataset])",
+      () => can.view([Account, AccountSnapshot] as never),
+      "[Sixb] can.view requires one target per grant, but received both object and dataset definitions. Use one grant each.",
+    ],
+  ] as const)("%s is rejected, not filed under another target", (_case, build, message) => {
+    expect(build).toThrow(message)
   })
 
-  test("an explicit list of two targets is rejected, not filed under the first one", () => {
-    // Sniffing only `input[0]` filed the pipeline's id under `run:sync`, so startup validation then
-    // reported a real pipeline as an unknown *sync*. Every element has to agree on the target.
-    expect(() => can.run([syncAccounts, normalizeAccountsPipeline] as never)).toThrow(
-      "[Sixb] can.run requires one target per grant, but received both sync and pipeline definitions. Use one grant each."
-    )
-    expect(() => can.view([Account, AccountSnapshot] as never)).toThrow(
-      "[Sixb] can.view requires one target per grant, but received both object and dataset definitions. Use one grant each."
-    )
-    // A homogeneous list still resolves to the one target it describes.
-    expect(can.run([syncAccounts]).target).toBe("sync")
+  test.each([
+    [
+      "roles granted to no groups",
+      () => defineRole("empty", { grantedTo: [], grants: [can.view(Account)] }),
+      "grantedTo must not be empty",
+    ],
+    [
+      "grant items that are not grants",
+      () =>
+        defineRole("invalid", {
+          grantedTo: [commercial],
+          grants: [{ kind: "group", id: "commercial" } as unknown as GroupDefinition & never],
+        }),
+      "must contain only grant definitions from 'can'",
+    ],
+  ] as const)("defineRole rejects %s", (_case, define, message) => {
+    expect(define).toThrow(message)
   })
 
-  test("defineRole rejects roles granted to no groups", () => {
-    expect(() => defineRole("empty", { grantedTo: [], grants: [can.view(Account)] })).toThrow(
-      SecurityValidationError
-    )
-  })
+  test.each([
+    ["view", "object", "unknown object type 'missing'"],
+    ["view", "dataset", "unknown dataset 'missing'"],
+    ["edit", null, "unknown object type 'missing'"],
+    ["append", null, "unknown object type 'missing'"],
+    ["apply", null, "unknown action 'missing'"],
+    ["run", "sync", "unknown sync 'missing'"],
+    ["run", "pipeline", "unknown pipeline 'missing'"],
+    ["manage", "connector", "unknown connector 'missing'"],
+  ] as const)("runtime registration rejects a %s grant on an unknown %s", (capability, target, message) => {
+    const role = {
+      kind: "role",
+      id: "unknown.target",
+      grantedToGroupIds: ["commercial"],
+      grants: [
+        {
+          kind: "grant",
+          capability,
+          ...(target === null ? {} : { target }),
+          selection: { all: false, ids: ["missing"] },
+        },
+      ],
+    } as unknown as RoleDefinition
 
-  test("defineRole rejects roles with no grants", () => {
-    expect(() => defineRole("empty", { grantedTo: [commercial], grants: [] })).toThrow(
-      SecurityValidationError
-    )
-  })
-
-  test("defineRole rejects grant items that are not grants", () => {
     expect(() =>
-      defineRole("invalid", {
-        grantedTo: [commercial],
-        grants: [{ kind: "group", id: "commercial" } as unknown as GroupDefinition & never],
-      })
-    ).toThrow("must contain only grant definitions from 'can'")
-  })
-
-  test("runtime registration rejects duplicate role ids", () => {
-    const role = defineRole("contract.operator", {
-      grantedTo: [commercial],
-      grants: [can.view(Account)],
-    })
-
-    expect(() => createRuntime({ groups: [commercial], roles: [role, role] })).toThrow(
-      "Duplicate role id"
-    )
-  })
-
-  test("runtime registration rejects roles referencing unknown groups", () => {
-    const role = defineRole("contract.operator", {
-      grantedTo: [commercial],
-      grants: [can.view(Account)],
-    })
-
-    expect(() => createRuntime({ roles: [role] })).toThrow("unknown group 'commercial'")
-  })
-
-  test("runtime registration rejects view grants on unknown object types", () => {
-    const role: RoleDefinition = {
-      kind: "role",
-      id: "contract.operator",
-      grantedToGroupIds: ["commercial"],
-      grants: [
-        {
-          kind: "grant",
-          capability: "view",
-          target: "object",
-          selection: { all: false, ids: ["missing"] },
-        },
-      ],
-    }
-
-    expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
-      "unknown object type 'missing'"
-    )
-  })
-
-  test("runtime registration rejects view grants on unknown datasets", () => {
-    const role: RoleDefinition = {
-      kind: "role",
-      id: "dataset.viewer",
-      grantedToGroupIds: ["commercial"],
-      grants: [
-        {
-          kind: "grant",
-          capability: "view",
-          target: "dataset",
-          selection: { all: false, ids: ["missing"] },
-        },
-      ],
-    }
-
-    expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
-      "unknown dataset 'missing'"
-    )
-  })
-
-  test("runtime registration rejects write grants on unknown object types", () => {
-    const editRole: RoleDefinition = {
-      kind: "role",
-      id: "contract.editor",
-      grantedToGroupIds: ["commercial"],
-      grants: [{ kind: "grant", capability: "edit", selection: { all: false, ids: ["missing"] } }],
-    }
-    const appendRole: RoleDefinition = {
-      kind: "role",
-      id: "contract.ingestor",
-      grantedToGroupIds: ["commercial"],
-      grants: [
-        { kind: "grant", capability: "append", selection: { all: false, ids: ["missing"] } },
-      ],
-    }
-
-    expect(() => createRuntime({ groups: [commercial], roles: [editRole] })).toThrow(
-      "unknown object type 'missing'"
-    )
-    expect(() => createRuntime({ groups: [commercial], roles: [appendRole] })).toThrow(
-      "unknown object type 'missing'"
-    )
+      createRuntime({ groups: [commercial], roles: [role], connectors: [sourceConnector] })
+    ).toThrow(message)
   })
 
   test("an unregistered capability is named in the error, and the list is derived", () => {
@@ -708,82 +713,10 @@ describe("role definitions", () => {
     )
   })
 
-  test("runtime registration rejects manage grants on unknown connectors", () => {
-    const role: RoleDefinition = {
-      kind: "role",
-      id: "connector.manager",
-      grantedToGroupIds: ["commercial"],
-      grants: [
-        {
-          kind: "grant",
-          capability: "manage",
-          target: "connector",
-          selection: { all: false, ids: ["missing"] },
-        },
-      ],
-    }
-
-    expect(() =>
-      createRuntime({ groups: [commercial], roles: [role], connectors: [sourceConnector] })
-    ).toThrow("unknown connector 'missing'")
-  })
-
-  test("runtime registration rejects apply grants on unknown actions", () => {
-    const role: RoleDefinition = {
-      kind: "role",
-      id: "contract.operator",
-      grantedToGroupIds: ["commercial"],
-      grants: [{ kind: "grant", capability: "apply", selection: { all: false, ids: ["missing"] } }],
-    }
-
-    expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
-      "unknown action 'missing'"
-    )
-  })
-
-  test("runtime registration rejects run grants on unknown syncs", () => {
-    const role: RoleDefinition = {
-      kind: "role",
-      id: "sync.runner",
-      grantedToGroupIds: ["commercial"],
-      grants: [
-        {
-          kind: "grant",
-          capability: "run",
-          target: "sync",
-          selection: { all: false, ids: ["missing"] },
-        },
-      ],
-    }
-
-    expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
-      "unknown sync 'missing'"
-    )
-  })
-
-  test("runtime registration rejects run grants on unknown pipelines", () => {
-    const role: RoleDefinition = {
-      kind: "role",
-      id: "pipeline.runner",
-      grantedToGroupIds: ["commercial"],
-      grants: [
-        {
-          kind: "grant",
-          capability: "run",
-          target: "pipeline",
-          selection: { all: false, ids: ["missing"] },
-        },
-      ],
-    }
-
-    expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
-      "unknown pipeline 'missing'"
-    )
-  })
-
-  // Logs and AI usage are one surface each. Reproduce: drop `observe` and the AI-usage `manage`
-  // from the singleton check in assertGrantDefinition and these grants are accepted.
-  test("runtime registration rejects selections on logs and AI usage grants", () => {
+  // Logs, AI usage, and the project Agent are one surface each. Reproduce: drop `observe` and the
+  // AI-usage `manage` from the singleton check in assertGrantDefinition and these grants are
+  // accepted.
+  test("runtime registration rejects selections on logs, AI usage, and Agent grants", () => {
     for (const grant of [
       {
         kind: "grant",
@@ -803,6 +736,12 @@ describe("role definitions", () => {
         target: "aiUsage",
         selection: { all: true, except: [] },
       },
+      {
+        kind: "grant",
+        capability: "run",
+        target: "agent",
+        selection: { all: false, ids: ["missing"] },
+      },
     ]) {
       const role = {
         kind: "role",
@@ -816,26 +755,6 @@ describe("role definitions", () => {
     }
   })
 
-  test("runtime registration rejects legacy Agent grant selections", () => {
-    const role = {
-      kind: "role",
-      id: "agent.runner",
-      grantedToGroupIds: ["commercial"],
-      grants: [
-        {
-          kind: "grant",
-          capability: "run",
-          target: "agent",
-          selection: { all: false, ids: ["missing"] },
-        },
-      ],
-    } as unknown as RoleDefinition
-
-    expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
-      "run grant on 'agent' must not declare a selection"
-    )
-  })
-
   test("runtime registration rejects an Agent grant when no language model is configured", () => {
     const role = defineRole("agent.runner", {
       grantedTo: [commercial],
@@ -845,166 +764,6 @@ describe("role definitions", () => {
     expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
       "grants run on the project Agent, but it is unavailable"
     )
-  })
-
-  test("valid roles register and resolve from the security registry", () => {
-    const role = defineRole("contract.operator", {
-      grantedTo: [commercial],
-      grants: [can.view(Account), can.apply(reboot)],
-    })
-
-    const sixb = createRuntime({
-      groups: [commercial],
-      roles: [role],
-      actions: [reboot],
-    })
-
-    expect(sixb.definitions.security.listRoles()).toEqual([role])
-    expect(sixb.definitions.security.getRoleById("contract.operator")).toEqual(role)
-    expect(sixb.definitions.security.getRoleById("missing")).toBeNull()
-  })
-
-  test("createSixb discovers roles from security/roles", async () => {
-    const projectRoot = await createTempProjectRoot()
-
-    await writeProjectFile(
-      projectRoot,
-      "ontology/account.ts",
-      `import { defineObjectType, prop } from "${coreModuleUrl}"
-
-export const Account = defineObjectType({
-  id: "account",
-  name: "Account",
-  properties: [prop("id", "string", { required: true, primary: true })],
-})
-`
-    )
-
-    await writeProjectFile(
-      projectRoot,
-      "actions/reboot.ts",
-      `import { defineAction } from "${coreModuleUrl}"
-
-export const reboot = defineAction("reboot")
-  .params({})
-  .edits(() => {})
-`
-    )
-
-    await writeProjectFile(
-      projectRoot,
-      "security/groups/team.ts",
-      `import { defineGroup } from "${coreModuleUrl}"
-
-export const commercial = defineGroup("commercial")
-`
-    )
-
-    await writeProjectFile(
-      projectRoot,
-      "security/roles/contract-operator.ts",
-      `import { can, defineRole } from "${coreModuleUrl}"
-import { reboot } from "../../actions/reboot"
-import { Account } from "../../ontology/account"
-import { commercial } from "../groups/team"
-
-export const contractOperator = defineRole("contract.operator", {
-  grantedTo: [commercial],
-  grants: [can.view(Account), can.apply(reboot)],
-})
-`
-    )
-
-    const sixb = await createSixb({
-      projectRoot,
-      ...createTestRuntimeDeps(),
-    })
-
-    expect(sixb.definitions.security.getRoleById("contract.operator")).toEqual({
-      kind: "role",
-      id: "contract.operator",
-      grantedToGroupIds: ["commercial"],
-      grants: [
-        {
-          kind: "grant",
-          capability: "view",
-          target: "object",
-          selection: { all: false, ids: ["account"] },
-        },
-        { kind: "grant", capability: "apply", selection: { all: false, ids: ["reboot"] } },
-      ],
-    })
-  })
-
-  test("createSixb discovers markings from security/markings", async () => {
-    const projectRoot = await createTempProjectRoot()
-
-    await writeProjectFile(
-      projectRoot,
-      "security/markings/financial.ts",
-      `import { defineMarking } from "${coreModuleUrl}"
-
-export const financial = defineMarking("financial", { label: "Financial" })
-`
-    )
-
-    await writeProjectFile(
-      projectRoot,
-      "ontology/invoice.ts",
-      `import { defineObjectType, prop } from "${coreModuleUrl}"
-import { financial } from "../security/markings/financial"
-
-export const Invoice = defineObjectType({
-  id: "invoice",
-  name: "Invoice",
-  properties: [
-    prop("id", "string", { required: true, primary: true }),
-    prop("amount", "double", { markings: [financial] }),
-  ],
-})
-`
-    )
-
-    await writeProjectFile(
-      projectRoot,
-      "security/groups/finance.ts",
-      `import { defineGroup } from "${coreModuleUrl}"
-
-export const finance = defineGroup("finance")
-`
-    )
-
-    await writeProjectFile(
-      projectRoot,
-      "security/roles/finance-clearance.ts",
-      `import { defineRole } from "${coreModuleUrl}"
-import { finance } from "../groups/finance"
-import { financial } from "../markings/financial"
-
-export const financeClearance = defineRole("finance.clearance", {
-  grantedTo: [finance],
-  clearances: [financial],
-})
-`
-    )
-
-    const sixb = await createSixb({
-      projectRoot,
-      ...createTestRuntimeDeps(),
-    })
-
-    expect(sixb.definitions.security.listMarkings()).toEqual([
-      { kind: "marking", id: "financial", label: "Financial" },
-    ])
-    expect(sixb.definitions.security.getRoleById("finance.clearance")).toMatchObject({
-      grants: [],
-      clearances: ["financial"],
-    })
-    expect(
-      sixb.definitions.ontology
-        .getObjectTypeById("invoice")
-        ?.properties.find((property) => property.id === "amount")?.markings
-    ).toEqual(["financial"])
   })
 })
 

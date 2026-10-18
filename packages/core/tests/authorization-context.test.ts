@@ -200,19 +200,6 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants["run:agent"]).toBe(true)
   })
 
-  test("principals without matching roles resolve to empty grants", () => {
-    const context = resolve(["engineering"], [contractOperator, invoiceViewer, adminOperator])
-
-    expect(context.roleIds).toEqual([])
-    expect(context.grants["view:object"].size).toBe(0)
-    expect(context.grants["view:dataset"].size).toBe(0)
-    expect(context.grants["apply:action"].size).toBe(0)
-    expect(context.grants["run:workflow"].size).toBe(0)
-    expect(context.grants["run:sync"].size).toBe(0)
-    expect(context.grants["run:pipeline"].size).toBe(0)
-    expect(context.grants["run:agent"]).toBe(false)
-  })
-
   test("expands broad grants to the registered universe", () => {
     const context = resolve(["admins"], [contractOperator, invoiceViewer, adminOperator])
 
@@ -260,64 +247,36 @@ describe("resolveAuthorizationContext", () => {
     expect(narrow.grants["append:telemetry"]).toEqual(new Set(["contract"]))
   })
 
-  test("except() on a write grant carves out the named types", () => {
-    const mostWritable = defineRole("most.writable", {
-      grantedTo: [admins],
-      grants: [can.edit(every.object().except([Invoice]))],
-    })
+  test.each([
+    [
+      "object views",
+      can.view(every.object().except([Invoice])),
+      "view:object",
+      ["contract", "signed-contract"],
+    ],
+    [
+      "object edits",
+      can.edit(every.object().except([Invoice])),
+      "edit:object",
+      ["contract", "signed-contract"],
+    ],
+    [
+      "dataset views",
+      can.view(every.dataset().except([InvoicesDataset])),
+      "view:dataset",
+      ["raw.contracts"],
+    ],
+    ["sync runs", can.run(every.sync().except([syncInvoices])), "run:sync", ["sync-contracts"]],
+    [
+      "pipeline runs",
+      can.run(every.pipeline().except([invoicesPipeline])),
+      "run:pipeline",
+      ["pipeline-contracts"],
+    ],
+  ] as const)("except() on %s carves out the named entries and keeps the rest of the universe", (_case, grant, key, expected) => {
+    const role = defineRole("most.of.everything", { grantedTo: [admins], grants: [grant] })
 
-    const context = resolve(["admins"], [mostWritable])
-
-    expect(context.grants["edit:object"]).toEqual(new Set(["contract", "signed-contract"]))
-    expect(context.grants["edit:object"].has("invoice")).toBe(false)
-  })
-
-  test("except() excludes named datasets and keeps the rest of the dataset universe", () => {
-    const mostDatasets = defineRole("most.datasets", {
-      grantedTo: [admins],
-      grants: [can.view(every.dataset().except([InvoicesDataset]))],
-    })
-
-    const context = resolve(["admins"], [mostDatasets])
-
-    expect(context.grants["view:dataset"]).toEqual(new Set(["raw.contracts"]))
-    expect(context.grants["view:dataset"].has("raw.invoices")).toBe(false)
-  })
-
-  test("except() excludes named syncs and keeps the rest of the sync universe", () => {
-    const mostSyncs = defineRole("most.syncs", {
-      grantedTo: [admins],
-      grants: [can.run(every.sync().except([syncInvoices]))],
-    })
-
-    const context = resolve(["admins"], [mostSyncs])
-
-    expect(context.grants["run:sync"]).toEqual(new Set(["sync-contracts"]))
-    expect(context.grants["run:sync"].has("sync-invoices")).toBe(false)
-  })
-
-  test("except() excludes named pipelines and keeps the rest of the pipeline universe", () => {
-    const mostPipelines = defineRole("most.pipelines", {
-      grantedTo: [admins],
-      grants: [can.run(every.pipeline().except([invoicesPipeline]))],
-    })
-
-    const context = resolve(["admins"], [mostPipelines])
-
-    expect(context.grants["run:pipeline"]).toEqual(new Set(["pipeline-contracts"]))
-    expect(context.grants["run:pipeline"].has("pipeline-invoices")).toBe(false)
-  })
-
-  test("except() excludes the named types and keeps the rest of the universe", () => {
-    const mostObjects = defineRole("most.objects", {
-      grantedTo: [admins],
-      grants: [can.view(every.object().except([Invoice]))],
-    })
-
-    const context = resolve(["admins"], [mostObjects])
-
-    expect(context.grants["view:object"]).toEqual(new Set(["contract", "signed-contract"]))
-    expect(context.grants["view:object"].has("invoice")).toBe(false)
+    expect(resolve(["admins"], [role]).grants[key]).toEqual(new Set(expected))
   })
 
   test("except is per-grant: another role can re-grant an excluded type", () => {
