@@ -1,5 +1,5 @@
 import { client, getAgentMessageFileContent, getArtifactFileContent } from "@sixb/client"
-import { en } from "./messages"
+import { useArtifactMessages } from "./messages"
 
 /** The parts of a stored file reference the viewer reads. */
 export interface ViewerFileRef {
@@ -17,7 +17,10 @@ export interface ViewerFileRef {
 export interface FileSource {
   readonly id: string
   readonly fileRef: ViewerFileRef
-  /** The file's name for display: its path in an artifact, else its own name. */
+  /**
+   * The file's name: its path in an artifact, else its own name. Empty for a message file that
+   * has none, which a view names in the reader's language with {@link useFileName}.
+   */
   readonly name: string
   readonly inlineUrl: string
   readonly downloadUrl: string
@@ -63,8 +66,6 @@ export function messageFileSource(input: {
   /** JSON pointer to the file reference in the message, such as `/parts/2/fileRef`. */
   readonly path: string
   readonly fileRef: ViewerFileRef
-  /** The name when the file has none of its own. */
-  readonly fallbackName?: string
   readonly baseUrl?: string
 }): FileSource {
   const routePath = `/api/agent-threads/${encodeURIComponent(input.threadId)}/messages/${encodeURIComponent(
@@ -75,7 +76,7 @@ export function messageFileSource(input: {
   return {
     id: `message:${input.messageId}${input.path}`,
     fileRef: input.fileRef,
-    name: input.fileRef.fileName?.trim() || input.fallbackName || en.files.file,
+    name: input.fileRef.fileName?.trim() ?? "",
     inlineUrl: url("inline"),
     downloadUrl: url("attachment"),
     queryKey: ["message-file", input.threadId, input.messageId, input.path, input.fileRef.digest],
@@ -90,6 +91,12 @@ export function messageFileSource(input: {
       return response.data
     },
   }
+}
+
+/** The file's name to show: its own, or a word for a file in the reader's language. */
+export function useFileName(source: FileSource): string {
+  const messages = useArtifactMessages().files
+  return source.name || messages.file
 }
 
 function contentUrl(routePath: string, query: Record<string, string>, baseUrl?: string): string {

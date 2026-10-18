@@ -1,5 +1,4 @@
 import { Markdown, type MarkdownProps } from "@sixb/ui/components"
-import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import {
   AlertTriangle,
@@ -18,25 +17,24 @@ import {
   useRef,
   useState,
 } from "react"
+import { useCopyFeedback } from "../copy-feedback"
 import { type ArtifactMessages, useArtifactMessages } from "../messages"
 import {
   type ArtifactVersion,
-  useArtifactTheme,
   useFileText,
   versionFileSource,
   versionImageSource,
 } from "../queries"
-import { ARTIFACT_REHYPE_PLUGINS, artifactUrlTransform } from "../references/embed-tree"
+import { artifactUrlTransform, rehypeArtifactEmbeds } from "../references/embed-tree"
 import { withArtifactReferences } from "../references/references"
 import { artifactLink } from "../target"
-import { artifactThemeAttributes } from "../theme"
+import { useArtifactThemeAttributes } from "../theme"
 import { CALLOUT_KINDS, type CalloutKind, rehypeArtifactDocument } from "./document-tree"
 import { ViewerLoading, ViewerNotice } from "./notice"
 
-const DOCUMENT_ENTRY = "document.md"
 // Embeds first, so an artifact shown alone in its paragraph is an embed, not a captioned figure.
 const REHYPE_PLUGINS: MarkdownProps["rehypePlugins"] = [
-  ...ARTIFACT_REHYPE_PLUGINS,
+  rehypeArtifactEmbeds,
   rehypeArtifactDocument,
 ]
 
@@ -57,10 +55,9 @@ export function DocumentRenderer({
   readonly part?: string
 }) {
   const messages = useArtifactMessages()
-  const locale = useLocale()
-  const source = versionFileSource(version, DOCUMENT_ENTRY)
+  const source = versionFileSource(version, version.entry)
   const file = useFileText(source)
-  const theme = artifactThemeAttributes(useArtifactTheme(version))
+  const theme = useArtifactThemeAttributes(version)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const headings = useMemo(
     () =>
@@ -97,12 +94,10 @@ export function DocumentRenderer({
     return <ViewerNotice title={file.error ? messages.files[file.error] : messages.files.noText} />
   }
 
-  const published = new Date(version.createdAt).toLocaleDateString(locale, { dateStyle: "long" })
   return (
     <div
       ref={scrollRef}
       data-sixb-artifact=""
-      data-sixb-artifact-print=""
       className={cn(
         "@container min-h-0 flex-1 overflow-y-auto bg-background text-foreground",
         theme.className
@@ -111,10 +106,6 @@ export function DocumentRenderer({
     >
       <div className="mx-auto flex w-full max-w-[66rem] gap-14 px-6 py-10 @lg:px-12 @lg:py-14">
         <article className="min-w-0 flex-1">
-          {/* The header says which version this is; a printed page says it here. */}
-          <p className="sixb-document-meta hidden print:block">
-            {messages.document.meta(version.version, published)}
-          </p>
           <Markdown
             className="sixb-document"
             components={components}
@@ -127,7 +118,7 @@ export function DocumentRenderer({
         {headings.length > 1 ? (
           <nav
             aria-label={messages.document.outline}
-            className="sticky top-14 hidden w-48 shrink-0 self-start print:hidden @4xl:block"
+            className="sticky top-14 hidden w-48 shrink-0 self-start @4xl:block"
           >
             <p className="mb-3 text-xs font-semibold text-muted-foreground">
               {messages.document.outline}
@@ -275,7 +266,7 @@ function SectionAnchor({
   readonly slug: string
   readonly label: string
 }) {
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopyFeedback()
   return (
     <button
       type="button"
@@ -283,25 +274,19 @@ function SectionAnchor({
       aria-label={label}
       title={label}
       data-copied={copied ? "" : undefined}
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(
-            artifactLink(
-              {
-                type: "artifact",
-                artifactId: version.artifactId,
-                version: version.version,
-                part: slug,
-              },
-              latestVersion,
-              location.origin
-            )
+      onClick={() => {
+        copy(
+          artifactLink(
+            {
+              type: "artifact",
+              artifactId: version.artifactId,
+              version: version.version,
+              part: slug,
+            },
+            latestVersion,
+            location.origin
           )
-          setCopied(true)
-          setTimeout(() => setCopied(false), 1500)
-        } catch {
-          // The clipboard can be unavailable, such as on an insecure origin; the heading still links.
-        }
+        )
       }}
     >
       <Link2 aria-hidden="true" />

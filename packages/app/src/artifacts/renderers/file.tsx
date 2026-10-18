@@ -4,7 +4,7 @@ import { useLocale } from "@sixb/ui/lib/i18n"
 import { Download, ExternalLink, File as FileIcon } from "lucide-react"
 import { useMemo } from "react"
 import { formatFileSize } from "../file-size"
-import type { FileSource } from "../file-source"
+import { type FileSource, useFileName } from "../file-source"
 import { fileView } from "../file-view"
 import { useArtifactMessages } from "../messages"
 import { useFileText } from "../queries"
@@ -19,34 +19,41 @@ import { SheetTable } from "./sheet/sheet"
  */
 export function FileRenderer({ source }: { readonly source: FileSource }) {
   const view = fileView(source.fileRef)
+  const name = useFileName(source)
   switch (view) {
     case "image":
       return (
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-muted/30 p-4 sm:p-8">
           <img
             src={source.inlineUrl}
-            alt={source.name}
+            alt={name}
             className="max-h-full max-w-full rounded-md object-contain"
           />
         </div>
       )
     case "pdf":
-      return <PdfFile source={source} />
+      return <PdfFile source={source} name={name} />
     case "markdown":
     case "text":
-      return <TextFile source={source} markdown={view === "markdown"} />
+      return <TextFile source={source} name={name} markdown={view === "markdown"} />
     case "csv":
     case "tsv":
-      return <TableFile source={source} kind={view} />
+      return <TableFile source={source} name={name} kind={view} />
     case "download":
-      return <DownloadCard source={source} />
+      return <DownloadCard source={source} name={name} />
   }
 }
 
-function TextFile({ source, markdown }: { source: FileSource; markdown: boolean }) {
+interface FileProps {
+  readonly source: FileSource
+  /** The file's name as the reader sees it. */
+  readonly name: string
+}
+
+function TextFile({ source, name, markdown }: FileProps & { readonly markdown: boolean }) {
   const messages = useArtifactMessages().files
   const file = useFileText(source)
-  if (file.tooLarge) return <DownloadCard source={source} tooLarge />
+  if (file.tooLarge) return <DownloadCard source={source} name={name} tooLarge />
   if (file.loading) return <ViewerLoading label={messages.loading} />
   if (file.error || file.text === undefined) {
     return <ViewerNotice title={file.error ? messages[file.error] : messages.noText} />
@@ -64,7 +71,7 @@ function TextFile({ source, markdown }: { source: FileSource; markdown: boolean 
   )
 }
 
-function TableFile({ source, kind }: { source: FileSource; kind: "csv" | "tsv" }) {
+function TableFile({ source, name, kind }: FileProps & { readonly kind: "csv" | "tsv" }) {
   const messages = useArtifactMessages().files
   const file = useFileText(source)
   const parsed = useMemo(() => {
@@ -72,14 +79,14 @@ function TableFile({ source, kind }: { source: FileSource; kind: "csv" | "tsv" }
     try {
       const table = parseCsv(file.text, { delimiter: kind === "tsv" ? "\t" : "," })
       if (table.header.length === 0) return { error: messages.emptyFile }
-      return { model: fileSheetModel(source.name, table) }
+      return { model: fileSheetModel(name, table) }
     } catch (error) {
       if (error instanceof CsvParseError) return { error: messages.malformedNear(error.line) }
       throw error
     }
-  }, [file.text, kind, source.name, messages])
+  }, [file.text, kind, name, messages])
 
-  if (file.tooLarge) return <DownloadCard source={source} tooLarge />
+  if (file.tooLarge) return <DownloadCard source={source} name={name} tooLarge />
   if (file.loading) return <ViewerLoading label={messages.loading} />
   if (file.error) {
     return <ViewerNotice title={messages.tableFailed} description={messages[file.error]} />
@@ -91,13 +98,13 @@ function TableFile({ source, kind }: { source: FileSource; kind: "csv" | "tsv" }
   return <SheetTable model={parsed.model} />
 }
 
-function PdfFile({ source }: { source: FileSource }) {
+function PdfFile({ source, name }: FileProps) {
   const messages = useArtifactMessages()
   return (
     <object
       data={source.inlineUrl}
       type="application/pdf"
-      title={source.name}
+      title={name}
       className="flex min-h-0 w-full flex-1 bg-muted/30"
     >
       <ViewerNotice
@@ -108,11 +115,11 @@ function PdfFile({ source }: { source: FileSource }) {
             <Button variant="outline" size="sm" asChild>
               <a href={source.inlineUrl} target="_blank" rel="noreferrer">
                 <ExternalLink />
-                {messages.viewer.openInNewTab(source.name)}
+                {messages.viewer.openInNewTab(name)}
               </a>
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <a href={source.downloadUrl} download={source.name}>
+              <a href={source.downloadUrl} download={name}>
                 <Download />
                 {messages.viewer.downloadLabel}
               </a>
@@ -124,7 +131,11 @@ function PdfFile({ source }: { source: FileSource }) {
   )
 }
 
-function DownloadCard({ source, tooLarge = false }: { source: FileSource; tooLarge?: boolean }) {
+function DownloadCard({
+  source,
+  name,
+  tooLarge = false,
+}: FileProps & { readonly tooLarge?: boolean }) {
   const messages = useArtifactMessages()
   const locale = useLocale()
   return (
@@ -135,14 +146,10 @@ function DownloadCard({ source, tooLarge = false }: { source: FileSource; tooLar
         </span>
       }
       title={tooLarge ? messages.files.tooLarge : messages.files.noPreview}
-      description={`${source.name} · ${formatFileSize(source.fileRef.sizeBytes, locale, messages.files)}`}
+      description={`${name} · ${formatFileSize(source.fileRef.sizeBytes, locale, messages.files)}`}
       action={
         <Button size="sm" asChild>
-          <a
-            href={source.downloadUrl}
-            download={source.name}
-            aria-label={messages.viewer.download(source.name)}
-          >
+          <a href={source.downloadUrl} download={name} aria-label={messages.viewer.download(name)}>
             <Download />
             {messages.viewer.downloadLabel}
           </a>

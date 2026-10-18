@@ -1,4 +1,9 @@
-import { isArtifactAddress, parseSheetDate, parseSheetNumber } from "@sixb/core/artifacts"
+import {
+  isArtifactAddress,
+  parseSheetDate,
+  parseSheetNumber,
+  type SheetColumnFormat,
+} from "@sixb/core/artifacts"
 import type { SheetColumn } from "./model"
 
 /** A cell as the grid shows it. */
@@ -11,6 +16,44 @@ export interface FormattedCell {
   readonly reference?: string
   /** An image cell's path in the artifact. */
   readonly image?: string
+}
+
+/**
+ * A number formatter for the reader's locale, in a column's style when one is given: its currency,
+ * or percents from fractions. Formatters are built once for each locale and options, since a
+ * sheet asks for the same few on every cell it draws.
+ */
+export function numberFormat(
+  locale: string,
+  options: Intl.NumberFormatOptions,
+  format?: SheetColumnFormat
+): Intl.NumberFormat {
+  const resolved: Intl.NumberFormatOptions = {
+    ...(format?.type === "currency"
+      ? { style: "currency", currency: format.currency ?? "USD" }
+      : format?.type === "percent"
+        ? { style: "percent" }
+        : {}),
+    ...options,
+  }
+  const key = `${locale}\u0000${JSON.stringify(resolved)}`
+  let formatter = NUMBER_FORMATS.get(key)
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(locale, resolved)
+    NUMBER_FORMATS.set(key, formatter)
+  }
+  return formatter
+}
+
+const NUMBER_FORMATS = new Map<string, Intl.NumberFormat>()
+
+/** A currency's sign as a column header shows it beside the name: `$`, `€`, `£`. */
+export function currencySymbol(currency: string): string {
+  return (
+    numberFormat("en", { style: "currency", currency, currencyDisplay: "narrowSymbol" })
+      .formatToParts(0)
+      .find((part) => part.type === "currency")?.value ?? currency
+  )
 }
 
 /**
@@ -27,15 +70,11 @@ export function cellFormatter(
     case "number":
     case "currency":
     case "percent": {
-      const formatter = new Intl.NumberFormat(locale, {
-        ...(format.type === "currency"
-          ? { style: "currency", currency: format.currency ?? "USD" }
-          : format.type === "percent"
-            ? { style: "percent" }
-            : {}),
-        minimumFractionDigits: decimals,
-        maximumFractionDigits: decimals,
-      })
+      const formatter = numberFormat(
+        locale,
+        { minimumFractionDigits: decimals, maximumFractionDigits: decimals },
+        format
+      )
       return (value) => {
         const number = parseSheetNumber(value)
         if (number === undefined) return { text: value }
@@ -72,15 +111,14 @@ export function cellFormatter(
 /** A short form for chart axes: `$4.1M`, `35%`, `12K`. */
 export function compactFormatter(column: SheetColumn, locale: string): (value: number) => string {
   const { format } = column
-  const formatter = new Intl.NumberFormat(locale, {
-    ...(format.type === "currency"
-      ? { style: "currency", currency: format.currency ?? "USD" }
-      : format.type === "percent"
-        ? { style: "percent" }
-        : {}),
-    notation: format.type === "percent" ? "standard" : "compact",
-    maximumFractionDigits: format.type === "percent" ? Math.min(column.decimals, 1) : 1,
-  })
+  const formatter = numberFormat(
+    locale,
+    {
+      notation: format.type === "percent" ? "standard" : "compact",
+      maximumFractionDigits: format.type === "percent" ? Math.min(column.decimals, 1) : 1,
+    },
+    format
+  )
   return (value) => formatter.format(value)
 }
 
@@ -95,13 +133,7 @@ export function previewFormatter(
   const full = cellFormatter(column, locale)
   const { format } = column
   if (format.type !== "number" && format.type !== "currency") return full
-  const compact = new Intl.NumberFormat(locale, {
-    ...(format.type === "currency"
-      ? { style: "currency", currency: format.currency ?? "USD" }
-      : {}),
-    notation: "compact",
-    maximumSignificantDigits: 3,
-  })
+  const compact = numberFormat(locale, { notation: "compact", maximumSignificantDigits: 3 }, format)
   return (value) => {
     const number = parseSheetNumber(value)
     if (number === undefined || Math.abs(number) < 10_000) return full(value)

@@ -7,8 +7,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@sixb/ui/components"
-import { cn } from "@sixb/ui/lib/utils"
-import { useMemo } from "react"
+import { memo, useMemo } from "react"
 import {
   Area,
   AreaChart,
@@ -31,18 +30,17 @@ import type { SheetModel } from "./model"
 /**
  * Every chart in a sheet, drawn by Sixb from the sheet's data: the theme's chart colors, axes and
  * tooltips formatted as the columns are, a legend only when there are several series, and the
- * latest value labelled. Loaded on demand, so a sheet without charts never fetches it.
+ * latest value labelled. Loaded on demand, so a sheet without charts never fetches it, and drawn
+ * again only when its data changes: the grid beside it re-renders on every move of the selection.
  */
-export default function SheetChart({
+export default memo(function SheetChart({
   chart,
   model,
   locale,
-  className,
 }: {
   readonly chart: WorkbookChart
   readonly model: SheetModel
   readonly locale: string
-  readonly className?: string
 }) {
   const data = useMemo(() => chartData(chart, model), [chart, model])
   const config = useMemo<ChartConfig>(
@@ -65,7 +63,8 @@ export default function SheetChart({
   )
   const formatValue = (value: unknown, key: string) =>
     typeof value === "number" ? (values[key]?.(String(value)).text ?? String(value)) : String(value)
-  const formatX = (value: unknown) => cellFormatter(data.x, locale)(String(value)).text
+  const x = cellFormatter(data.x, locale)
+  const formatX = (value: unknown) => x(String(value)).text
   const lastIndex = data.rows.length - 1
   const several = data.series.length > 1
   // Straight segments between the values there are; a few points also show as dots.
@@ -165,7 +164,7 @@ export default function SheetChart({
     const total = slices.reduce((sum, slice) => sum + slice.value, 0)
     const share = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 0 })
     return (
-      <div className={cn("flex h-full min-h-0 w-full flex-col gap-3", className)}>
+      <div className="flex h-full min-h-0 w-full flex-col gap-3">
         <ChartContainer config={config} className="aspect-auto min-h-0 w-full flex-1">
           <PieChart accessibilityLayer>
             <ChartTooltip
@@ -193,16 +192,17 @@ export default function SheetChart({
               strokeWidth={0}
               isAnimationActive={false}
             >
-              {slices.map((slice) => (
-                <Cell key={slice.label} fill={slice.color} />
+              {/* By position: two slices can share a label. */}
+              {slices.map((slice, index) => (
+                <Cell key={index} fill={slice.color} />
               ))}
             </Pie>
           </PieChart>
         </ChartContainer>
         {/* The legend names each slice with its value and share; the chart's colors alone don't. */}
         <ul className="mx-auto my-0 grid w-full max-w-sm shrink-0 list-none gap-1.5 p-0 text-xs">
-          {slices.map((slice) => (
-            <li key={slice.label} className="flex items-center gap-2">
+          {slices.map((slice, index) => (
+            <li key={index} className="flex items-center gap-2">
               <span className="size-2 shrink-0 rounded-[2px]" style={{ background: slice.color }} />
               <span className="min-w-0 flex-1 truncate text-muted-foreground">{slice.label}</span>
               <span className="font-medium text-foreground tabular-nums">
@@ -219,7 +219,7 @@ export default function SheetChart({
   }
 
   return (
-    <ChartContainer config={config} className={cn("aspect-auto h-full w-full", className)}>
+    <ChartContainer config={config} className="aspect-auto h-full w-full">
       {chart.type === "line" ? (
         <LineChart {...cartesian}>
           {axes}
@@ -284,4 +284,4 @@ export default function SheetChart({
       )}
     </ChartContainer>
   )
-}
+})

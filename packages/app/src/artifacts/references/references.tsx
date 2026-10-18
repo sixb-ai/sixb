@@ -4,12 +4,8 @@ import {
   type CellRange,
   isArtifactAddress,
   parseArtifactAddress,
-  parseCsv,
-  parseWorkbook,
   type ResolvedArtifactPart,
   resolveArtifactAddress,
-  sheetFilePath,
-  WORKBOOK_FILE,
 } from "@sixb/core/artifacts"
 import { Markdown, type MarkdownProps } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
@@ -28,7 +24,6 @@ import {
   useContext,
   useMemo,
 } from "react"
-import { artifactHref } from "../../pages/routes"
 import { ArtifactCardFace } from "../card-preview"
 import { ArtifactFrame } from "../frame"
 import { ArtifactKindIcon } from "../kind-icon"
@@ -37,10 +32,9 @@ import { type ArtifactVersion, useFileText, versionFileSource } from "../queries
 import { documentComponents } from "../renderers/document"
 import { rehypeArtifactDocument } from "../renderers/document-tree"
 import { cellFormatter } from "../renderers/sheet/format"
-import { type SheetModel, sheetModel } from "../renderers/sheet/model"
-import type { ArtifactTarget } from "../target"
+import { useSheetModel, useWorkbook } from "../renderers/sheet/workbook"
+import { type ArtifactTarget, artifactTargetHref } from "../target"
 import {
-  ARTIFACT_REHYPE_PLUGINS,
   artifactUrlTransform,
   EMBED_ATTRIBUTE,
   rehypeArtifactEmbeds,
@@ -48,6 +42,9 @@ import {
 } from "./embed-tree"
 
 const SheetChart = lazy(() => import("../renderers/sheet/chart"))
+
+// Embeds come first, so a lone `artifact:` image is an embed rather than a captioned figure.
+const REPLY_PLUGINS = [rehypeArtifactEmbeds]
 
 /** A whole sheet shows its first rows; a range shows as written, up to a page of rows. */
 const EMBED_ROWS = 12
@@ -129,27 +126,15 @@ function hostComponent<Tag extends "a" | "img" | "div">(
 }
 
 /**
- * Opens an address where links open: beside the conversation, in place in the viewer, or on the
- * artifact's own page when nothing here hosts it. For a reference that is not a link, such as one
- * a deck's frame reports.
+ * Opens an address where links open: beside the conversation, or in place in the viewer. For a
+ * reference that is not a link, such as one a deck's frame reports.
  */
 export function useOpenArtifactAddress(): (address: string) => void {
   const { open } = useContext(References)
   return useCallback(
     (address: string) => {
       const parsed = parseArtifactAddress(address)
-      if (!parsed) return
-      const target = targetOf(parsed)
-      if (open) {
-        open(target)
-        return
-      }
-      window.location.assign(
-        artifactHref(parsed.artifactId, {
-          ...(target.version === undefined ? {} : { version: target.version }),
-          ...(target.part === undefined ? {} : { part: target.part }),
-        })
-      )
+      if (parsed) open?.(targetOf(parsed))
     },
     [open]
   )
@@ -168,7 +153,7 @@ export function ReferencingMarkdown({
     <Markdown
       className={className}
       components={components}
-      rehypePlugins={ARTIFACT_REHYPE_PLUGINS}
+      rehypePlugins={REPLY_PLUGINS}
       urlTransform={artifactUrlTransform}
     >
       {children}
@@ -192,10 +177,7 @@ export function ArtifactLink({
   const target = targetOf(parsed)
   return (
     <a
-      href={artifactHref(parsed.artifactId, {
-        ...(parsed.version === undefined ? {} : { version: parsed.version }),
-        ...(target.part === undefined ? {} : { part: target.part }),
-      })}
+      href={artifactTargetHref(target)}
       className={className}
       onClick={(event: MouseEvent<HTMLAnchorElement>) => {
         if (!open || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
@@ -276,22 +258,19 @@ function LoadedEmbed({
     retry: false,
   })
   const version = query.data
+  const resolved = version
+    ? resolveArtifactAddress(address, {
+        kind: version.outline.kind,
+        outline: version.outline,
+        files: version.files,
+      })
+    : null
   if (fill) {
-    if (!version) {
-      return (
-        <FilledFigure>
-          <Pending loading={query.isLoading} fill />
-        </FilledFigure>
-      )
-    }
-    const resolved = resolveArtifactAddress(address, {
-      kind: version.outline.kind,
-      outline: version.outline,
-      files: version.files,
-    })
     return (
-      <FilledFigure address={written}>
-        {"problem" in resolved ? (
+      <FilledFigure {...(version ? { address: written } : {})}>
+        {!version || !resolved ? (
+          <Pending loading={query.isLoading} fill />
+        ) : "problem" in resolved ? (
           <Unavailable
             title={messages.unavailable}
             description={messages.missingPart(version.title)}
@@ -308,18 +287,13 @@ function LoadedEmbed({
       </FilledFigure>
     )
   }
-  if (!version) {
+  if (!version || !resolved) {
     return (
       <Figure caption={caption}>
         <Pending loading={query.isLoading} />
       </Figure>
     )
   }
-  const resolved = resolveArtifactAddress(address, {
-    kind: version.outline.kind,
-    outline: version.outline,
-    files: version.files,
-  })
   if ("problem" in resolved) {
     return (
       <Figure
@@ -403,8 +377,13 @@ function SheetEmbed({
 }) {
   const locale = useLocale()
   const messages = useArtifactMessages().references
-  const { model, loading } = useSheetModel(version, sheet)
-  if (!model) return <Pending loading={loading} />
+  const { workbook, loading } = useWorkbook(version)
+  const csv = useSheetModel(
+    version,
+    workbook?.sheets.find((entry) => entry.name === sheet)
+  )
+  const { model } = csv
+  if (!model) return <Pending loading={loading || csv.loading} />
   const left = range?.left ?? 0
   const right = range ? range.right : Math.min(model.columns.length, EMBED_COLUMNS) - 1
   const columns = model.columns.slice(left, right + 1)
@@ -468,10 +447,14 @@ function ChartEmbed({
   readonly fill?: boolean
 }) {
   const locale = useLocale()
-  const workbook = useWorkbook(version)
-  const declared = workbook.workbook?.charts.find((entry) => entry.name === chart)
-  const { model, loading } = useSheetModel(version, declared?.sheet)
-  if (!declared || !model) return <Pending loading={workbook.loading || loading} />
+  const { workbook, loading } = useWorkbook(version)
+  const declared = workbook?.charts.find((entry) => entry.name === chart)
+  const csv = useSheetModel(
+    version,
+    workbook?.sheets.find((entry) => entry.name === declared?.sheet)
+  )
+  const { model } = csv
+  if (!declared || !model) return <Pending loading={loading || csv.loading} />
   return (
     <div className={cn("px-3 pt-3 pb-2", fill ? "h-full" : "h-64")}>
       <Suspense fallback={<div className="h-full animate-pulse rounded-lg bg-muted/50" />}>
@@ -488,7 +471,7 @@ function SectionEmbed({
   readonly version: ArtifactVersion
   readonly slug: string
 }) {
-  const { text, loading } = useFileText(versionFileSource(version, "document.md"))
+  const { text, loading } = useFileText(versionFileSource(version, version.entry))
   // The whole document renders, and only the section stays: its headings get the ids publishing
   // named them by, so the slug finds the same heading the reader sees.
   const plugins = useMemo(
@@ -720,34 +703,6 @@ function Pending({
   ) : (
     <Unavailable title={messages.unavailable} description={messages.unavailableDescription} />
   )
-}
-
-function useWorkbook(version: ArtifactVersion) {
-  const file = useFileText(versionFileSource(version, WORKBOOK_FILE))
-  const workbook = useMemo(() => {
-    if (file.text === undefined) return undefined
-    const parsed = parseWorkbook(file.text)
-    return "workbook" in parsed ? parsed.workbook : undefined
-  }, [file.text])
-  return { workbook, loading: file.loading }
-}
-
-function useSheetModel(
-  version: ArtifactVersion,
-  name: string | undefined
-): { readonly model: SheetModel | null; readonly loading: boolean } {
-  const { workbook, loading } = useWorkbook(version)
-  const sheet = workbook?.sheets.find((entry) => entry.name === name)
-  const csv = useFileText(sheet ? versionFileSource(version, sheetFilePath(sheet.name)) : null)
-  const model = useMemo(() => {
-    if (!sheet || csv.text === undefined) return null
-    try {
-      return sheetModel(sheet, parseCsv(csv.text))
-    } catch {
-      return null
-    }
-  }, [sheet, csv.text])
-  return { model, loading: loading || csv.loading }
 }
 
 /** The part an embed shows, named for its source line: a sheet's range, a chart, a section. */

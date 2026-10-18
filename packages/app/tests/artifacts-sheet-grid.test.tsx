@@ -1,9 +1,15 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test"
+import type { GetArtifactResponse, GetArtifactVersionResponse } from "@sixb/client"
+import { getArtifactQueryKey, getArtifactVersionQueryKey } from "@sixb/client/hooks"
 import { parseCsv, parseWorkbook } from "@sixb/core/artifacts"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
+import { artifactFileSource } from "../src/artifacts/file-source"
 import { SheetGrid, type SheetGridStatus } from "../src/artifacts/renderers/sheet/grid"
 import { sheetModel } from "../src/artifacts/renderers/sheet/model"
 import { rangeLabel } from "../src/artifacts/renderers/sheet/selection"
+import { Viewer } from "../src/artifacts/viewer"
 import { installDom } from "./helpers/dom"
 
 const browser = installDom([
@@ -60,7 +66,8 @@ function mount() {
   )
   const grid = view.getByRole("grid")
   const cell = (row: number, column: number) => {
-    const element = grid.querySelector(`[data-row="${row}"][data-column="${column}"]`)
+    // Column letters sit beside the grid, not in it: they are not cells.
+    const element = view.container.querySelector(`[data-row="${row}"][data-column="${column}"]`)
     if (!element) throw new Error(`No cell at row ${row}, column ${column}`)
     return element
   }
@@ -135,6 +142,42 @@ describe("the sheet grid", () => {
     expect(copied).toEqual(["Q4 2025\t4120000\nQ1 2026\t3900000"])
   })
 
+  test("tells assistive technology which cell is active, and where each drawn column is", async () => {
+    // Reproduce by dropping `aria-activedescendant` from the grid, or `aria-colindex` from
+    // GridCell: focus stays on the grid, so nothing else says which cell the arrows reached.
+    const { grid, cell, press } = mount()
+    expect(grid.getAttribute("aria-colcount")).toBe("4")
+    expect(grid.getAttribute("aria-activedescendant")).toBe(cell(1, 0).id)
+    await press("ArrowRight")
+    await press("ArrowDown")
+    expect(grid.getAttribute("aria-activedescendant")).toBe(cell(2, 1).id)
+    expect(cell(2, 1).getAttribute("aria-colindex")).toBe("3")
+    expect(cell(0, 2).getAttribute("aria-colindex")).toBe("4")
+    expect(grid.querySelector('[role="rowheader"]')?.getAttribute("aria-colindex")).toBe("1")
+    expect(grid.querySelector('[data-column="-1"][data-row="-1"]')).toBeNull()
+  })
+
+  test("resizes the active cell's column from its separator with the arrow keys", async () => {
+    // Reproduce by dropping the separator's `tabIndex` or its `onKeyDown`: the keyboard cannot
+    // reach it, or it does nothing there.
+    const { cell, press } = mount()
+    await press("ArrowRight")
+    const separators = Array.from(document.querySelectorAll<HTMLElement>('[role="separator"]'))
+    expect(separators.map((separator) => separator.tabIndex)).toEqual([-1, 0, -1])
+    const separator = separators[1] as HTMLElement
+    expect(separator.getAttribute("aria-label")).toBe("Resize Revenue")
+    const before = Number(separator.getAttribute("aria-valuenow"))
+    await act(async () => {
+      fireEvent.keyDown(separator, { key: "ArrowRight" })
+    })
+    expect(Number(separator.getAttribute("aria-valuenow"))).toBe(before + 16)
+    expect((cell(1, 1) as HTMLElement).style.width).toBe(`${before + 16}px`)
+    await act(async () => {
+      fireEvent.keyDown(separator, { key: "Enter" })
+    })
+    expect(Number(separator.getAttribute("aria-valuenow"))).toBe(before)
+  })
+
   test("sorts by a column's values, then the other way, then back to the sheet's order", async () => {
     const { grid, cell } = mount()
     const quarters = () => [1, 2, 3].map((row) => cell(row, 0).textContent?.trim())
@@ -147,5 +190,144 @@ describe("the sheet grid", () => {
     expect(quarters()).toEqual(["Q2 2026", "Q4 2025", "Q1 2026"])
     await act(async () => fireEvent.click(sort))
     expect(quarters()).toEqual(["Q4 2025", "Q1 2026", "Q2 2026"])
+  })
+})
+
+const NUMBERS = "art_numbers001"
+const VISITS = "art_v1s1ts0001"
+
+/**
+ * Sheet artifacts, version 1 of each, read already: the same sheet names in each, so the same
+ * renderer shows either.
+ */
+function sheetCache(): QueryClient {
+  const cache = new QueryClient({
+    defaultOptions: { queries: { enabled: false, retry: false, staleTime: Infinity } },
+  })
+  const seed = (artifactId: string, csv: Record<string, string>) => {
+    const texts: Record<string, string> = {
+      "workbook.json": JSON.stringify({
+        sheets: Object.keys(csv).map((name) => ({ name })),
+      }),
+      ...Object.fromEntries(
+        Object.entries(csv).map(([name, text]) => [`sheets/${name}.csv`, text])
+      ),
+    }
+    const files = Object.entries(texts).map(([path, text]) => ({
+      path,
+      file: {
+        blobId: `${artifactId}/${path}`,
+        digest: `sha256:${"0".repeat(64)}`,
+        sizeBytes: text.length,
+        mediaType: path.endsWith(".csv") ? "text/csv" : "application/json",
+      },
+    }))
+    cache.setQueryData(getArtifactQueryKey({ path: { artifactId } }), {
+      artifact: {
+        id: artifactId,
+        projectId: "project",
+        kind: "sheet",
+        title: artifactId,
+        owner: { type: "user", id: "user-1" },
+        latestVersion: 1,
+        createdAt: "2026-10-01T12:00:00.000Z",
+        updatedAt: "2026-10-01T12:00:00.000Z",
+      },
+      versions: [
+        {
+          version: 1,
+          title: artifactId,
+          author: { type: "user", id: "user-1" },
+          createdAt: "2026-10-01T12:00:00.000Z",
+        },
+      ],
+    } satisfies GetArtifactResponse)
+    cache.setQueryData(getArtifactVersionQueryKey({ path: { artifactId, version: "1" } }), {
+      artifactId,
+      version: 1,
+      title: artifactId,
+      entry: "workbook.json",
+      files,
+      outline: { kind: "sheet", sheets: [], charts: [] },
+      references: [],
+      author: { type: "user", id: "user-1" },
+      createdAt: "2026-10-01T12:00:00.000Z",
+    } satisfies GetArtifactVersionResponse)
+    for (const file of files) {
+      const source = artifactFileSource({ artifactId, version: 1, ...file, fileRef: file.file })
+      cache.setQueryData([...source.queryKey, "text"], texts[file.path])
+    }
+  }
+  seed(NUMBERS, {
+    Summary: "Quarter,Revenue\nQ3 2026,5560000\n",
+    Regions: "Region,Visits\nNorth,1284\n",
+  })
+  seed(VISITS, {
+    Summary: "Region,Visits,Within SLA\nNorth,1284,0.961\n",
+    Regions: "Region\nSouth\n",
+  })
+  return cache
+}
+
+function ArtifactViewer({ cache, artifactId }: { cache: QueryClient; artifactId: string }) {
+  return (
+    <QueryClientProvider client={cache}>
+      <MemoryRouter>
+        <Viewer target={{ type: "artifact", artifactId }} onTargetChange={() => {}} />
+      </MemoryRouter>
+    </QueryClientProvider>
+  )
+}
+
+describe("a sheet artifact", () => {
+  const selectedTab = () =>
+    Array.from(document.querySelectorAll('[role="tab"]')).find(
+      (tab) => tab.getAttribute("aria-selected") === "true"
+    )
+
+  test("moves along its tabs with the arrow keys, and shows the one it reaches in the panel", async () => {
+    // Reproduce by dropping the tablist's `onKeyDown` in WorkbookView: ArrowRight leaves Summary
+    // selected, and the tab order holds every tab.
+    const ui = render(<ArtifactViewer cache={sheetCache()} artifactId={NUMBERS} />)
+    const tabs = () => ui.getAllByRole("tab")
+    expect(tabs().map((tab) => tab.tabIndex)).toEqual([0, -1])
+    const press = async (key: string) => {
+      await act(async () => {
+        fireEvent.keyDown(document.activeElement ?? document.body, { key })
+      })
+    }
+    tabs()[0]?.focus()
+    await press("ArrowRight")
+    expect(selectedTab()?.textContent).toBe("Regions")
+    // Compared, not matched: a failed match prints the whole page.
+    expect(document.activeElement === selectedTab()).toBe(true)
+    const panel = ui.getByRole("tabpanel")
+    expect(panel.getAttribute("aria-labelledby")).toBe(selectedTab()?.id ?? "")
+    expect(selectedTab()?.getAttribute("aria-controls")).toBe(panel.id)
+    expect(panel.querySelector('[role="grid"]')?.getAttribute("aria-label")).toBe("Sheet Regions")
+    await press("ArrowRight")
+    expect(selectedTab()?.textContent).toBe("Summary")
+    await press("End")
+    expect(selectedTab()?.textContent).toBe("Regions")
+    await press("Home")
+    expect(selectedTab()?.textContent).toBe("Summary")
+  })
+
+  test("starts afresh on another artifact, though the same renderer shows it", async () => {
+    // Reproduce by dropping the `key` on ArtifactBody in ArtifactView: the second artifact opens
+    // on the tab chosen in the first, as the panel's Back or a revisited version did.
+    const cache = sheetCache()
+    const ui = render(<ArtifactViewer cache={cache} artifactId={NUMBERS} />)
+    await act(async () => {
+      fireEvent.click(ui.getByRole("tab", { name: "Regions" }))
+    })
+    expect(selectedTab()?.textContent).toBe("Regions")
+
+    ui.rerender(<ArtifactViewer cache={cache} artifactId={VISITS} />)
+    expect(selectedTab()?.textContent).toBe("Summary")
+    // Its third column, which the first artifact's sheet does not have, gets its own width.
+    const third = ui.container.querySelector<HTMLElement>('[data-row="0"][data-column="2"]')
+    expect(third?.textContent).toContain("Within SLA")
+    expect(Number.parseFloat(third?.style.width ?? "0")).toBeGreaterThan(0)
   })
 })

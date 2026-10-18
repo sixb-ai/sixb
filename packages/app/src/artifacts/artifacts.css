@@ -5,13 +5,6 @@
  * the parts a report needs. Theme tokens only, so the app's theme, dark mode, and an artifact's own
  * `theme.json` all apply.
  */
-.sixb-document-meta {
-  margin: 0 0 0.75rem;
-  color: var(--muted-foreground);
-  font-size: 0.8125rem;
-  font-variant-numeric: tabular-nums;
-}
-
 .prose.sixb-document {
   max-width: 70ch;
   font-size: 1.0625rem;
@@ -138,38 +131,6 @@
   border-top: 1px solid var(--border);
   color: var(--muted-foreground);
   font-size: 0.8125rem;
-}
-
-/* Printing an artifact prints only the artifact, on plain paper. */
-@media print {
-  body * {
-    visibility: hidden;
-  }
-
-  [data-sixb-artifact-print],
-  [data-sixb-artifact-print] * {
-    visibility: visible;
-  }
-
-  [data-sixb-artifact-print] {
-    position: absolute;
-    inset: 0 auto auto 0;
-    width: 100%;
-    overflow: visible;
-  }
-
-  .prose.sixb-document {
-    max-width: none;
-    font-size: 11pt;
-  }
-
-  .prose.sixb-document :is(figure, table, pre, .sixb-callout) {
-    break-inside: avoid;
-  }
-
-  .sixb-section-anchor {
-    display: none;
-  }
 }
 
 /* An embed: another artifact shown inside a document or a reply, or filling a deck's box. It sets

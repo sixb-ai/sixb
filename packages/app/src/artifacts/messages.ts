@@ -33,7 +33,6 @@ export const en = {
     loadFailed: "This artifact could not be loaded.",
   },
   document: {
-    meta: (version: number, date: string) => `Version ${number(version)} · ${date}`,
     outline: "On this page",
     copySection: (heading: string) => `Copy a link to “${heading}”`,
     callouts: {
@@ -122,6 +121,7 @@ export const en = {
     resize: (column: string) => `Resize ${column}`,
     empty: "This sheet has no rows.",
     loadFailed: "This sheet could not be read.",
+    tooLarge: "This sheet is too large to show here",
     types: {
       text: "Text",
       number: "Number",
@@ -143,9 +143,7 @@ export const en = {
     gigabytes: "GB",
     terabytes: "TB",
     noPreview: "No preview for this file",
-    noPreviewDescription: "Download it to open it in another app.",
     tooLarge: "This file is too large to preview",
-    tooLargeDescription: "Download it to see all of it.",
     loading: "Loading file…",
     gone: "This file is no longer available.",
     storageUnavailable: "File storage is not available.",
@@ -189,7 +187,6 @@ export const fr: Translation<ArtifactMessages> = {
     loadFailed: "Impossible de charger cet artefact.",
   },
   document: {
-    meta: (version, date) => `Version ${numberFr(version)} · ${date}`,
     outline: "Sur cette page",
     copySection: (heading) => `Copier un lien vers « ${heading} »`,
     callouts: {
@@ -277,6 +274,7 @@ export const fr: Translation<ArtifactMessages> = {
     resize: (column) => `Redimensionner ${column}`,
     empty: "Cette feuille n’a aucune ligne.",
     loadFailed: "Impossible de lire cette feuille.",
+    tooLarge: "Cette feuille est trop volumineuse pour s’afficher ici",
     types: {
       text: "Texte",
       number: "Nombre",
@@ -298,9 +296,7 @@ export const fr: Translation<ArtifactMessages> = {
     gigabytes: "Go",
     terabytes: "To",
     noPreview: "Pas d’aperçu pour ce fichier",
-    noPreviewDescription: "Téléchargez-le pour l’ouvrir dans une autre application.",
     tooLarge: "Ce fichier est trop volumineux pour l’aperçu",
-    tooLargeDescription: "Téléchargez-le pour le voir en entier.",
     loading: "Chargement du fichier…",
     gone: "Ce fichier n’est plus disponible.",
     storageUnavailable: "Le stockage des fichiers n’est pas disponible.",
