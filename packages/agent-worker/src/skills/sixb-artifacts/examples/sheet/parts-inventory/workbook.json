@@ -4,13 +4,19 @@
       "name": "Inventory",
       "frozenColumns": 1,
       "columns": {
-        "On hand": "number",
+        "Status": {
+          "type": "tag",
+          "tones": { "Reorder": "negative", "Low": "warning", "In stock": "positive" }
+        },
+        "On hand": { "type": "number", "highlight": "bars" },
         "Reorder point": "number",
         "Lead time (weeks)": "number",
         "Unit cost": { "type": "currency", "currency": "USD" },
         "Last received": "date",
-        "Supplier": "link"
+        "Supplier": "link",
+        "Counted": "boolean"
       },
+      "descriptions": { "Counted": "Counted by hand in the September cycle count." },
       "widths": { "Part": 200 }
     },
     {

@@ -72,14 +72,22 @@ export function distinctValues(
   readonly more: number
 } {
   const counts = new Map<string, number>()
+  const key = valueKey(model.columns[column])
   for (const row of model.rows) {
-    const value = (row[column] ?? "").trim()
+    const value = key(row[column] ?? "")
     counts.set(value, (counts.get(value) ?? 0) + 1)
   }
   const values = Array.from(counts, ([value, count]) => ({ value, count })).sort(
     (a, b) => b.count - a.count || a.value.localeCompare(b.value)
   )
   return { values: values.slice(0, limit), more: Math.max(0, values.length - limit) }
+}
+
+/** The value a checklist lists and a filter compares: trimmed, and a checkbox's in one case. */
+function valueKey(column: SheetColumn | undefined): (value: string) => string {
+  return column?.format.type === "boolean"
+    ? (value) => value.trim().toLowerCase()
+    : (value) => value.trim()
 }
 
 function rowTest(
@@ -90,7 +98,8 @@ function rowTest(
   if (isInactiveFilter(filter)) return () => true
   if (filter.kind === "values") {
     const excluded = new Set(filter.excluded)
-    return (value) => !excluded.has(value.trim())
+    const key = valueKey(column)
+    return (value) => !excluded.has(key(value))
   }
   const { op } = filter
   if (op === "empty") return (value) => !value.trim()

@@ -1,13 +1,13 @@
-Part,SKU,Category,Depot,On hand,Reorder point,Lead time (weeks),Unit cost,Last received,Supplier
-Scroll compressor 5 ton,CMP-5T-220,Compressors,North,2,4,9,2840,2026-08-14,https://parts.example.com/cmp-5t-220
-Scroll compressor 3 ton,CMP-3T-220,Compressors,Central,3,4,9,2190,2026-08-21,https://parts.example.com/cmp-3t-220
-Condenser fan motor,FAN-075-1PH,Motors,North,14,8,2,318.5,2026-09-26,https://parts.example.com/fan-075-1ph
-Blower motor 1/2 hp,BLW-050-VS,Motors,South,9,6,3,412,2026-09-19,https://parts.example.com/blw-050-vs
-Run capacitor 45/5 µF,CAP-455-370,Electrical,Coastal,62,40,1,18.75,2026-10-02,https://parts.example.com/cap-455-370
-Contactor 40 A 2-pole,CON-40-2P,Electrical,Central,31,20,1,27.4,2026-09-30,https://parts.example.com/con-40-2p
-Control board,BRD-ICM-282,Controls,North,5,6,4,264,2026-09-05,https://parts.example.com/brd-icm-282
-"Thermostat, 7-day programmable",TST-7D-PRO,Controls,South,18,10,2,129.99,2026-09-24,https://parts.example.com/tst-7d-pro
-Expansion valve 3 ton,TXV-3T-R410,Refrigerant circuit,Coastal,7,5,5,186,2026-09-11,https://parts.example.com/txv-3t-r410
-Filter drier 3/8 in,FD-038-SW,Refrigerant circuit,North,40,24,1,22.6,2026-10-01,https://parts.example.com/fd-038-sw
-R-410A cylinder 25 lb,REF-410A-25,Refrigerant circuit,Central,11,12,2,348,2026-09-17,https://parts.example.com/ref-410a-25
-Pleated filter 20x25x4,FLT-20254-M11,Filters,South,120,80,1,24.1,2026-10-06,https://parts.example.com/flt-20254-m11
+Part,SKU,Category,Depot,Status,On hand,Reorder point,Lead time (weeks),Unit cost,Last received,Supplier,Counted
+Scroll compressor 5 ton,CMP-5T-220,Compressors,North,Reorder,2,4,9,2840,2026-08-14,https://parts.example.com/cmp-5t-220,true
+Scroll compressor 3 ton,CMP-3T-220,Compressors,Central,Reorder,3,4,9,2190,2026-08-21,https://parts.example.com/cmp-3t-220,true
+Condenser fan motor,FAN-075-1PH,Motors,North,In stock,14,8,2,318.5,2026-09-26,https://parts.example.com/fan-075-1ph,false
+Blower motor 1/2 hp,BLW-050-VS,Motors,South,In stock,9,6,3,412,2026-09-19,https://parts.example.com/blw-050-vs,true
+Run capacitor 45/5 µF,CAP-455-370,Electrical,Coastal,In stock,62,40,1,18.75,2026-10-02,https://parts.example.com/cap-455-370,true
+Contactor 40 A 2-pole,CON-40-2P,Electrical,Central,In stock,31,20,1,27.4,2026-09-30,https://parts.example.com/con-40-2p,true
+Control board,BRD-ICM-282,Controls,North,Reorder,5,6,4,264,2026-09-05,https://parts.example.com/brd-icm-282,false
+"Thermostat, 7-day programmable",TST-7D-PRO,Controls,South,In stock,18,10,2,129.99,2026-09-24,https://parts.example.com/tst-7d-pro,true
+Expansion valve 3 ton,TXV-3T-R410,Refrigerant circuit,Coastal,Low,7,5,5,186,2026-09-11,https://parts.example.com/txv-3t-r410,true
+Filter drier 3/8 in,FD-038-SW,Refrigerant circuit,North,In stock,40,24,1,22.6,2026-10-01,https://parts.example.com/fd-038-sw,true
+R-410A cylinder 25 lb,REF-410A-25,Refrigerant circuit,Central,Reorder,11,12,2,348,2026-09-17,https://parts.example.com/ref-410a-25,false
+Pleated filter 20x25x4,FLT-20254-M11,Filters,South,In stock,120,80,1,24.1,2026-10-06,https://parts.example.com/flt-20254-m11,true

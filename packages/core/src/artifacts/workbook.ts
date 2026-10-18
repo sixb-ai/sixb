@@ -15,11 +15,37 @@ export const SHEET_COLUMN_TYPES = [
   "date",
   "link",
   "image",
+  "boolean",
+  "tag",
 ] as const
 export type SheetColumnType = (typeof SHEET_COLUMN_TYPES)[number]
 
 /** Column types whose cells are numbers, so a chart can plot them and a range can sum them. */
 export const NUMERIC_COLUMN_TYPES: readonly SheetColumnType[] = ["number", "currency", "percent"]
+
+/**
+ * The colors a tag's values take: the theme's meanings, or one of its chart colors. A value not
+ * named is neutral.
+ */
+export const SHEET_TONES = [
+  "neutral",
+  "positive",
+  "warning",
+  "negative",
+  "chart-1",
+  "chart-2",
+  "chart-3",
+  "chart-4",
+  "chart-5",
+] as const
+export type SheetTone = (typeof SHEET_TONES)[number]
+
+/**
+ * How a numeric column's cells are shaded by value, across the column: a bar in the cell, a
+ * shade from light to dark, or two colors either side of zero.
+ */
+export const SHEET_HIGHLIGHTS = ["bars", "scale", "diverging"] as const
+export type SheetHighlight = (typeof SHEET_HIGHLIGHTS)[number]
 
 /** What a sheet's totals row shows under a column, over the rows the reader sees. */
 export const SHEET_TOTALS = ["sum", "average", "min", "max", "count"] as const
@@ -38,6 +64,10 @@ export interface SheetColumnFormat {
   readonly compact?: boolean
   /** A sign on positive values too, `+3.2%`, for numbers, currencies, and percents. */
   readonly signed?: boolean
+  /** A tag column's colors by value. */
+  readonly tones?: Readonly<Record<string, SheetTone>>
+  /** How a numeric column's cells are shaded by value. */
+  readonly highlight?: SheetHighlight
 }
 
 export interface WorkbookSheet {
@@ -124,6 +154,8 @@ class WorkbookError extends Error {}
 
 const SHEET_NAME_MAX = 60
 const DESCRIPTION_MAX = 300
+const TONES_MAX = 20
+const TAG_MAX = 60
 const CHART_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/
 const CONTROL = /[\u0000-\u001f\u007f]/
 
@@ -248,7 +280,15 @@ function readSheet(value: unknown, index: number): WorkbookSheet {
 
 function readColumnFormat(value: unknown, at: string): SheetColumnFormat {
   if (typeof value === "string") return { type: columnType(value, at) }
-  const input = record(value, at, ["type", "currency", "decimals", "compact", "signed"])
+  const input = record(value, at, [
+    "type",
+    "currency",
+    "decimals",
+    "compact",
+    "signed",
+    "tones",
+    "highlight",
+  ])
   const type = columnType(input.type, at)
   if (input.currency !== undefined) {
     if (type !== "currency")
@@ -274,11 +314,49 @@ function readColumnFormat(value: unknown, at: string): SheetColumnFormat {
       throw new WorkbookError(`${at} sets "${key}" but is not a ${named} column.`)
     }
   }
+  let tones: Record<string, SheetTone> | undefined
+  if (input.tones !== undefined) {
+    if (type !== "tag") throw new WorkbookError(`${at} sets "tones" but is not a tag column.`)
+    tones = {}
+    const entries = Object.entries(record(input.tones, `${at} "tones"`, null))
+    if (entries.length > TONES_MAX) {
+      throw new WorkbookError(
+        `${at} "tones" names ${entries.length} values; it takes at most ${TONES_MAX}.`
+      )
+    }
+    for (const [tag, tone] of entries) {
+      if (!tag.trim() || tag.length > TAG_MAX) {
+        throw new WorkbookError(
+          `${at} "tones" names a value of ${tag.length} characters; a tag is 1 to ${TAG_MAX}.`
+        )
+      }
+      if (!(SHEET_TONES as readonly unknown[]).includes(tone)) {
+        throw new WorkbookError(
+          `${at} gives '${tag}' the tone ${JSON.stringify(tone)}; use one of ${SHEET_TONES.join(", ")}.`
+        )
+      }
+      tones[tag] = tone as SheetTone
+    }
+  }
+  if (input.highlight !== undefined) {
+    if (!(SHEET_HIGHLIGHTS as readonly unknown[]).includes(input.highlight)) {
+      throw new WorkbookError(
+        `${at} "highlight" is ${JSON.stringify(input.highlight)}; use one of ${SHEET_HIGHLIGHTS.join(", ")}.`
+      )
+    }
+    if (!NUMERIC_COLUMN_TYPES.includes(type)) {
+      throw new WorkbookError(
+        `${at} sets "highlight" but is not a number, currency, or percent column.`
+      )
+    }
+  }
   return {
     type,
     ...(typeof input.currency === "string" ? { currency: input.currency } : {}),
     ...(input.compact === true ? { compact: true } : {}),
     ...(input.signed === true ? { signed: true } : {}),
+    ...(tones ? { tones } : {}),
+    ...(input.highlight === undefined ? {} : { highlight: input.highlight as SheetHighlight }),
     ...(input.decimals === undefined
       ? {}
       : { decimals: integer(input.decimals, 0, 0, 6, `${at} "decimals"`) }),

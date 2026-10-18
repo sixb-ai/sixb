@@ -14,6 +14,7 @@ import {
 import { findMatches, MAX_FIND_MATCHES } from "../src/artifacts/renderers/sheet/find"
 import { fitWidth } from "../src/artifacts/renderers/sheet/fit"
 import { cellFormatter, compactFormatter } from "../src/artifacts/renderers/sheet/format"
+import { cellHighlight, highlightRanges } from "../src/artifacts/renderers/sheet/highlight"
 import { fileSheetModel, sheetModel } from "../src/artifacts/renderers/sheet/model"
 import {
   cellRange,
@@ -606,5 +607,109 @@ describe("totals and number styles", () => {
     // A column with no numbers left has no total but a count.
     expect(columnTotals(regions, []).get(1)?.value).toBeUndefined()
     expect(columnTotals(regions, []).get(4)?.value).toBe(0)
+  })
+})
+
+describe("checkboxes, tags, and highlights", () => {
+  const board = (() => {
+    const parsed = parseWorkbook(
+      JSON.stringify({
+        sheets: [
+          {
+            name: "Board",
+            columns: {
+              Status: { type: "tag", tones: { Late: "negative", Done: "positive" } },
+              Audited: "boolean",
+              Revenue: { type: "currency", highlight: "bars" },
+              Margin: { type: "percent", highlight: "scale" },
+              Change: { type: "percent", highlight: "diverging" },
+              Flat: { type: "number", highlight: "scale" },
+            },
+          },
+        ],
+      })
+    )
+    if (!("workbook" in parsed)) throw new Error(parsed.error)
+    return sheetModel(
+      parsed.workbook.sheets[0] as Workbook["sheets"][number],
+      parseCsv(
+        [
+          "Name,Status,Audited,Revenue,Margin,Change,Flat",
+          "North,Late,true,400,0.1,0.2,5",
+          "South,Done,FALSE,100,0.3,-0.1,5",
+          "East,Review,,,0.2,0,5",
+          "West,,maybe,-100,,,",
+        ].join("\n")
+      )
+    )
+  })()
+  const formatted = (name: string, value: string) => {
+    const column = board.columns.find((candidate) => candidate.name === name)
+    if (!column) throw new Error(`No column ${name}`)
+    return cellFormatter(column, "en-US")(value)
+  }
+
+  test("read a boolean as a checkbox and a tag in its tone", () => {
+    expect(formatted("Audited", "true")).toEqual({ text: "TRUE", check: true })
+    expect(formatted("Audited", " FALSE ")).toEqual({ text: "FALSE", check: false })
+    expect(formatted("Audited", "maybe")).toEqual({ text: "maybe" })
+    expect(formatted("Status", "Late")).toEqual({ text: "Late", tag: "negative" })
+    expect(formatted("Status", "Review")).toEqual({ text: "Review", tag: "neutral" })
+    expect(formatted("Status", "")).toEqual({ text: "" })
+  })
+
+  test("filter a checkbox and a tag column by their values", () => {
+    const order = board.rows.map((_, index) => index)
+    const names = (filters: Parameters<typeof filteredOrder>[2]) =>
+      filteredOrder(board, order, filters, "en-US").map((index) => board.rows[index]?.[0])
+    // A checkbox's values list once each, whatever their case. Reproduce by keying them as
+    // written: FALSE and false list twice, and excluding one leaves the other.
+    expect(distinctValues(board, 2).values).toEqual([
+      { value: "", count: 1 },
+      { value: "false", count: 1 },
+      { value: "maybe", count: 1 },
+      { value: "true", count: 1 },
+    ])
+    expect(names({ 2: { kind: "values", excluded: ["false"] } })).toEqual(["North", "East", "West"])
+    expect(names({ 1: { kind: "values", excluded: ["Late", "Done"] } })).toEqual(["East", "West"])
+  })
+
+  test("shade by the column's span, at its ends, all equal, and across gaps", () => {
+    const ranges = highlightRanges(board)
+    const at = (column: number, value: string) => {
+      const range = ranges.get(column)
+      if (!range) throw new Error(`No range for column ${column}`)
+      return cellHighlight(range, value)
+    }
+    // Bars run from zero: the column spans -100 to 400, so zero sits a fifth of the way in.
+    expect(at(3, "400")).toEqual({ kind: "bar", from: 0.2, to: 1, negative: false })
+    expect(at(3, "-100")).toEqual({ kind: "bar", from: 0, to: 0.2, negative: true })
+    expect(at(3, "0")).toEqual({ kind: "bar", from: 0.2, to: 0.2, negative: false })
+    // A scale is lightest at the least value and darkest at the greatest.
+    expect(at(4, "0.1")).toEqual({
+      kind: "shade",
+      color: expect.stringContaining("var(--foreground) 3%"),
+    })
+    expect(at(4, "0.3")).toEqual({
+      kind: "shade",
+      color: expect.stringContaining("var(--foreground) 17%"),
+    })
+    // Diverging: success above zero, destructive below, nothing at zero.
+    expect(at(5, "0.2")).toEqual({
+      kind: "shade",
+      color: expect.stringContaining("var(--success) 24%"),
+    })
+    expect(at(5, "-0.1")).toEqual({
+      kind: "shade",
+      color: expect.stringContaining("var(--destructive) 15%"),
+    })
+    expect(at(5, "0")).toBeUndefined()
+    // All equal: the middle of the scale. Empty and unreadable cells: no highlight.
+    expect(at(6, "5")).toEqual({
+      kind: "shade",
+      color: expect.stringContaining("var(--foreground) 10%"),
+    })
+    expect(at(4, "")).toBeUndefined()
+    expect(at(4, "n/a")).toBeUndefined()
   })
 })

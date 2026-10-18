@@ -25,8 +25,9 @@ const workbook = (() => {
         {
           name: "Regions",
           columns: {
-            Visits: { type: "number", compact: true },
-            Change: { type: "percent", decimals: 1, signed: true },
+            Visits: { type: "number", compact: true, highlight: "bars" },
+            Change: { type: "percent", decimals: 1, signed: true, highlight: "diverging" },
+            Audited: "boolean",
           },
           totals: { Visits: "sum", Change: "average" },
         },
@@ -55,7 +56,7 @@ const plan = sheetModel(
 
 const regions = sheetModel(
   workbook.sheets[2] as Workbook["sheets"][number],
-  parseCsv("Region,Visits,Change\nNorth,1284000,0.04\nSouth,962000,-0.01\n")
+  parseCsv("Region,Visits,Change,Audited\nNorth,1284000,0.04,true\nSouth,962000,-0.01,FALSE\n")
 )
 
 const unzip = Bun.which("unzip")
@@ -170,5 +171,19 @@ describe.skipIf(!unzip)("a workbook as .xlsx", () => {
     )
     // A sheet without totals has no totals row.
     expect(await run("-p", file, "xl/worksheets/sheet1.xml")).not.toContain("SUBTOTAL")
+  })
+
+  test("writes checkboxes as booleans and highlights as conditional formats", async () => {
+    const sheet = await run("-p", file, "xl/worksheets/sheet3.xml")
+    expect(sheet).toContain('<c r="D2" t="b"><v>1</v></c>')
+    expect(sheet).toContain('<c r="D3" t="b"><v>0</v></c>')
+    expect(sheet).toContain(
+      '<conditionalFormatting sqref="B2:B3"><cfRule type="dataBar" priority="1">'
+    )
+    expect(sheet).toContain(
+      '<conditionalFormatting sqref="C2:C3"><cfRule type="colorScale" priority="2"><colorScale><cfvo type="min"/><cfvo type="num" val="0"/><cfvo type="max"/>'
+    )
+    // Excel reads the parts of a worksheet in order: formats after the data, before the links.
+    expect(sheet.indexOf("</sheetData>")).toBeLessThan(sheet.indexOf("<conditionalFormatting"))
   })
 })

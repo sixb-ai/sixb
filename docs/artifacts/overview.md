@@ -112,7 +112,11 @@ Central,962,0.934,-0.013,141950
 
 - A column is `text` unless the workbook gives it a type: `number`, `currency`, `percent` (written
   as a fraction, `0.961`), `date` (`2026-09-30`), `link` (a full `https://` or `http://` address),
-  or `image` (the path of an image file in the artifact).
+  `image` (the path of an image file in the artifact), `boolean` (`true` or `false`, shown as a
+  checkbox), or `tag` (a label shown as a chip, colored by `tones`: `positive`, `warning`,
+  `negative`, `neutral`, or `chart-1` to `chart-5`).
+- `highlight` shades a numeric column by value across the whole column: `bars`, a `scale` from
+  light to dark, or `diverging` colors either side of zero.
 - Values are formatted in the reader's locale, so write them without symbols or separators.
   `compact` shows a number or currency as `$182K` or `1.2M`; `signed` puts `+` on positive
   numbers, currencies, and percents.
@@ -140,7 +144,8 @@ double-clicking its edge too, select cells, rows,
 or columns to see their sum, average, min, max, and count, read a cell's whole value above the
 grid, find values with ⌘F or Ctrl+F, copy cells as a table that pastes into other spreadsheets, and
 download each sheet as CSV or the whole workbook as an `.xlsx` file, with its column formats, frozen
-panes, widths, links, and totals as `SUBTOTAL` formulas. A CSV or TSV `file` artifact opens in the same grid.
+panes, widths, links, checkboxes as booleans, highlights as conditional formats, and totals as
+`SUBTOTAL` formulas. A CSV or TSV `file` artifact opens in the same grid.
 
 ## Write slides
 

@@ -3,6 +3,7 @@ import {
   parseSheetDate,
   parseSheetNumber,
   type SheetColumnFormat,
+  type SheetTone,
 } from "@sixb/core/artifacts"
 import type { SheetColumn } from "./model"
 
@@ -18,6 +19,10 @@ export interface FormattedCell {
   readonly image?: string
   /** A number in a text column, which aligns right as a spreadsheet aligns any number. */
   readonly number?: boolean
+  /** A boolean cell's value, drawn as a checkbox. */
+  readonly check?: boolean
+  /** A tag cell's tone, drawn as a chip in it. */
+  readonly tag?: SheetTone
 }
 
 /**
@@ -113,6 +118,18 @@ export function cellFormatter(
         const path = value.trim()
         if (isArtifactAddress(path)) return { text: path, reference: path }
         return path ? { text: path.split("/").at(-1) ?? path, image: path } : { text: "" }
+      }
+    case "boolean":
+      // TRUE and FALSE, as a spreadsheet writes them: what find, filters, and copies read.
+      return (value) => {
+        const word = value.trim().toLowerCase()
+        if (word !== "true" && word !== "false") return { text: value }
+        return { text: word.toUpperCase(), check: word === "true" }
+      }
+    case "tag":
+      return (value) => {
+        const tag = value.trim()
+        return tag ? { text: tag, tag: format.tones?.[tag] ?? "neutral" } : { text: "" }
       }
     case "text":
       return (value) =>

@@ -16,7 +16,8 @@ export const XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.sp
  * A workbook as an `.xlsx` file: one worksheet per sheet, in order, with the header row bold, each
  * column's values typed and in its format (grouped or compact numbers, the currency's sign, signs on
  * signed columns, percents, dates), links that open, the frozen rows and columns, the column widths
- * the grid shows, and the totals row as formulas.
+ * the grid shows, booleans as TRUE and FALSE, highlights as conditional formats, and the totals
+ * row as formulas.
  */
 export async function workbookXlsx(sheets: readonly SheetModel[]): Promise<Uint8Array> {
   const styles = new StyleSheet()
@@ -119,6 +120,7 @@ function worksheet(
     return `<row r="${row}">${cells.join("")}</row>`
   })
   const totals = totalsRow(sheet, styles)
+  const shading = conditionalFormats(sheet)
 
   const xml = [
     XML,
@@ -131,10 +133,37 @@ function worksheet(
       )
       .join("")}</cols>`,
     `<sheetData><row r="1">${header}</row>${rows.join("")}${totals}</sheetData>`,
+    shading,
     hyperlinks.length > 0 ? `<hyperlinks>${hyperlinks.join("")}</hyperlinks>` : "",
     "</worksheet>",
   ].join("")
   return { xml, links }
+}
+
+/**
+ * Each highlighted column as Excel's conditional format over its data rows: a data bar, a scale
+ * from white to gray, or a diverging scale with red below zero and green above, in Excel's own
+ * colors for them.
+ */
+function conditionalFormats(sheet: SheetModel): string {
+  if (sheet.rows.length === 0) return ""
+  let priority = 0
+  return sheet.columns
+    .map((column, index) => {
+      const highlight = column.format.highlight
+      if (!highlight) return ""
+      priority += 1
+      const sqref = `${columnLetter(index)}2:${columnLetter(index)}${sheet.rows.length + 1}`
+      const rule =
+        highlight === "bars"
+          ? '<dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="FF8EA9C1"/></dataBar>'
+          : highlight === "scale"
+            ? '<colorScale><cfvo type="min"/><cfvo type="max"/><color rgb="FFFFFFFF"/><color rgb="FFA6A6A6"/></colorScale>'
+            : '<colorScale><cfvo type="min"/><cfvo type="num" val="0"/><cfvo type="max"/><color rgb="FFF8696B"/><color rgb="FFFFFFFF"/><color rgb="FF63BE7B"/></colorScale>'
+      const type = highlight === "bars" ? "dataBar" : "colorScale"
+      return `<conditionalFormatting sqref="${sqref}"><cfRule type="${type}" priority="${priority}">${rule}</cfRule></conditionalFormatting>`
+    })
+    .join("")
 }
 
 /** Excel's SUBTOTAL function for each total, in the forms that pass rows a filter hides. */
@@ -216,8 +245,15 @@ function cellWriter(
       return (ref, value) =>
         isArtifactAddress(value.trim()) ? text(ref, value) : text(ref, value.trim(), style)
     }
+    case "boolean":
+      return (ref, value) => {
+        const word = value.trim().toLowerCase()
+        if (word !== "true" && word !== "false") return text(ref, value)
+        return `<c r="${ref}" t="b"><v>${word === "true" ? 1 : 0}</v></c>`
+      }
     case "image":
     case "text":
+    case "tag":
       return (ref, value) => text(ref, value)
   }
 }
