@@ -8,17 +8,18 @@ import type {
 } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
 import { Handle, type NodeProps, type NodeTypes, Position, useStore } from "@xyflow/react"
-import { AppWindow, Link2, Maximize2 } from "lucide-react"
+import { AppWindow, ArrowUpRight, Link2, Maximize2 } from "lucide-react"
 import type { ReactNode } from "react"
 import { useArtifactMessages } from "../../messages"
+import { ArtifactEmbed, ArtifactLink } from "../../references/references"
 import { TONE_COLORS } from "../../tones"
 import { LiveBoard, useLiveBoards } from "./board"
 import { type CanvasFlowNode, TEXT_SIZES } from "./layout"
 
 /**
- * Every item's look on the board. Boards are pages under their names, live where the board shows
- * them, and embeds outlines; sections are headings; the rest draw as they are, in the theme's
- * colors.
+ * Every item's look on the board. Boards and embeds are pages and artifacts under their names,
+ * live where the board shows them; sections are headings; the rest draw as they are, in the
+ * theme's colors.
  */
 export const CANVAS_NODE_TYPES: NodeTypes = {
   board: BoardNode,
@@ -69,7 +70,7 @@ function useNamed(width: number): boolean {
 
 /**
  * The row above a board or an embed: its icon and name, ending in an ellipsis before the item's
- * right edge, where an action can sit.
+ * right edge, where its action sits.
  */
 function NameRow({
   width,
@@ -290,21 +291,42 @@ function ShapeNode(props: NodeProps<CanvasFlowNode>) {
   )
 }
 
-/** Another artifact on the canvas, as its outline under its name until it draws there. */
+/**
+ * Another artifact on the canvas at the item's size, as a deck's box shows one: a chart, a range,
+ * a slide, a section, a page's card, or another canvas's board. One the reader can't open, or
+ * whose part is gone, says so in place.
+ */
 function EmbedNode(props: NodeProps<CanvasFlowNode>) {
   const embed = itemOf<CanvasEmbed>(props)
   const messages = useArtifactMessages().canvas
   const scale = useNameScale()
-  const named = useNamed(embed.w)
+  const named = Boolean(useNamed(embed.w) && scale && embed.title)
   return (
     <div className="relative size-full">
       <Ends />
-      {embed.title && scale && named ? (
-        <NameRow width={embed.w} scale={scale} icon={<Link2 />} name={embed.title} />
+      {named && scale && embed.title ? (
+        <NameRow
+          width={embed.w}
+          scale={scale}
+          icon={<Link2 />}
+          name={embed.title}
+          action={
+            <ArtifactLink
+              address={embed.src}
+              className="nodrag nopan pointer-events-auto -my-1 flex size-6 shrink-0 items-center justify-center rounded-md outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <ArrowUpRight className="size-3.5" aria-hidden="true" />
+              <span className="sr-only">{messages.open}</span>
+            </ArtifactLink>
+          }
+        />
       ) : null}
-      <div className="flex size-full flex-col items-center justify-center gap-2 rounded-[6px] border border-dashed border-border bg-card/60 text-muted-foreground">
-        <Link2 className="size-6 opacity-50" aria-hidden="true" />
-        <span className="text-sm">{embed.title ?? messages.embed}</span>
+      {/* Named, its link is in the row above; the embed's own gives way. */}
+      <div
+        className="sixb-canvas-surface sixb-canvas-embed size-full overflow-hidden"
+        {...(named ? { "data-named": "" } : {})}
+      >
+        <ArtifactEmbed address={embed.src} caption={embed.title ?? ""} fill />
       </div>
     </div>
   )

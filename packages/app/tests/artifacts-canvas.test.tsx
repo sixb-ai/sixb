@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { GetArtifactVersionResponse } from "@sixb/client"
+import { getArtifactVersionQueryKey } from "@sixb/client/hooks"
 import { type Canvas, parseCanvas } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
@@ -132,12 +133,22 @@ describe("a canvas's card", () => {
 })
 
 describe("a canvas's board", () => {
-  async function mount(mode: "light" | "dark") {
+  async function mount(
+    mode: "light" | "dark",
+    canvas: Canvas = CANVAS,
+    seed: (cache: QueryClient) => void = () => {}
+  ) {
     // Imported here, as the viewer loads it: the board's module brings React Flow.
     const { default: CanvasBoard } = await import("../src/artifacts/renderers/canvas/canvas")
+    const cache = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
+    seed(cache)
     let view: ReturnType<typeof render> | undefined
     await act(async () => {
-      view = render(<CanvasBoard canvas={CANVAS} title="Checkout" mode={mode} />)
+      view = render(
+        <QueryClientProvider client={cache}>
+          <CanvasBoard canvas={canvas} title="Checkout" mode={mode} />
+        </QueryClientProvider>
+      )
     })
     if (!view) throw new Error("The board did not render.")
     return view
@@ -153,11 +164,62 @@ describe("a canvas's board", () => {
     expect(node("ask")?.textContent).toBe("Annual first?")
     expect(node("title")?.textContent).toBe("Checkout")
     expect(node("paid")?.querySelector("polygon")).not.toBeNull()
-    expect(node("chart")?.textContent).toContain("Embedded artifact")
+    // The chart it embeds can't be read here: the item says so in place.
+    expect(node("chart")?.textContent).toContain("Unavailable")
     // A board takes focus from the keyboard; a note is read where it lies.
     expect(node("home")?.getAttribute("tabindex")).toBe("0")
     expect(node("ask")?.getAttribute("tabindex")).toBeNull()
     expect(view.getByRole("region").getAttribute("aria-label")).toBe("Canvas Checkout")
+    view.unmount()
+  })
+
+  test("shows another artifact at the item's size, and says so where the reader can't open it", async () => {
+    const plan = "art_p4gep4n000"
+    const canvas = canvasOf({
+      items: [
+        {
+          id: "plan",
+          type: "embed",
+          src: `artifact:${plan}`,
+          x: 0,
+          y: 0,
+          w: 480,
+          h: 300,
+          title: "Plan",
+        },
+        {
+          id: "gone",
+          type: "embed",
+          src: "artifact:art_g0neg0ne00#chart=x",
+          x: 600,
+          y: 0,
+          w: 480,
+          h: 300,
+        },
+      ],
+    })
+    const view = await mount("light", canvas, (cache) =>
+      cache.setQueryData(
+        getArtifactVersionQueryKey({ path: { artifactId: plan, version: "latest" } }),
+        {
+          artifactId: plan,
+          version: 2,
+          title: "Q4 crew capacity planner",
+          entry: "index.html",
+          files: [],
+          outline: { kind: "page", title: "Q4 crew capacity planner" },
+          references: [],
+          author: { type: "user", id: "user-1" },
+          createdAt: "2026-10-18T12:00:00.000Z",
+        }
+      )
+    )
+    const node = (id: string) =>
+      view.container.querySelector<HTMLElement>(`.react-flow__node[data-id="${id}"]`)
+    // Reproduce by drawing embeds as tiles: neither shows the artifact or the notice.
+    expect(node("plan")?.textContent).toContain("Q4 crew capacity planner")
+    expect(node("plan")?.style.width).toBe("480px")
+    expect(node("gone")?.textContent).toContain("It was deleted, or it isn't shared with you.")
     view.unmount()
   })
 
