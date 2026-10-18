@@ -7,7 +7,7 @@ describe("projection value coercion", () => {
       normalizeProjectedValue({
         columnType: "decimal",
         schema: "decimal",
-        value: "09007199254740993.0100",
+        value: "+009007199254740993.0100",
       })
     ).toEqual({ ok: true, value: "9007199254740993.01" })
   })

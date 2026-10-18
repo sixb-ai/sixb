@@ -148,7 +148,7 @@ async function run(host: SixbHost): Promise<Record<string, DatasetVersion>> {
         throw new Error(`Pipeline run failed: ${record.error?.message}`)
       if (Date.now() - startedAt > 2_000) throw new Error("Timed out waiting for the run.")
 
-      await Bun.sleep(10)
+      await new Promise<void>((resolve) => setImmediate(resolve))
     }
   } finally {
     await worker.stop()

@@ -191,7 +191,7 @@ async function project(app: Deployment, version: DatasetVersion): Promise<Projec
     while (Date.now() - startedAt < 5_000) {
       const run = await app.host.storage.projectionRuns?.getById({ projectId, id: runId })
       if (run?.status === "succeeded" || run?.status === "failed") return run
-      await Bun.sleep(20)
+      await new Promise<void>((resolve) => setImmediate(resolve))
     }
     throw new Error(`[Test] Projection run '${runId}' did not settle.`)
   } finally {

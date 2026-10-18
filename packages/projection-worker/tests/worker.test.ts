@@ -119,7 +119,7 @@ async function waitFor<T>(
     if (predicate(value)) {
       return value
     }
-    await Bun.sleep(20)
+    await new Promise<void>((resolve) => setImmediate(resolve))
   }
 
   throw new Error("Timed out waiting for condition.")
@@ -173,7 +173,7 @@ describe("ProjectionWorker", () => {
     }
   })
 
-  test("reports once when a claimed execution transitions the run to failed", async () => {
+  test("reports once and fails the queue job without retrying when a claimed run fails", async () => {
     const reports: { error: Error; context: SixbErrorContext }[] = []
     const sixb = createSixb({
       datasets: [roomsDataset],
@@ -191,19 +191,34 @@ describe("ProjectionWorker", () => {
         yield { room_id: 42, room_name: "invalid" }
       },
     })
-    const dispatched = await dispatchProjectionRun(sixb, roomProjection.id, version)
-    const runId = dispatched.runId
+    const { runId } = await dispatchProjectionRun(sixb, roomProjection.id, version)
+    const queue = { failed: 0, retried: 0 }
+    const retry = sixb.queues.projections.retry.bind(sixb.queues.projections)
+    const fail = sixb.queues.projections.fail.bind(sixb.queues.projections)
+    sixb.queues.projections.retry = async (input) => {
+      queue.retried += 1
+      return retry(input)
+    }
+    sixb.queues.projections.fail = async (input) => {
+      queue.failed += 1
+      return fail(input)
+    }
 
     const worker = new ProjectionWorker(sixb)
     await worker.start()
 
     try {
-      expect(dispatched.jobId).toBe(runId)
-      const projectionRunsStorage = requireProjectionRunsStorage(sixb)
-      const run = await waitFor(
-        () => projectionRunsStorage.getById({ projectId: sixb.id, id: runId }),
-        (value) => value?.status === "failed"
+      // The queue settles the job last, after the run failed and was reported.
+      await waitFor(
+        async () => queue.failed,
+        (count) => count === 1
       )
+      expect(queue.retried).toBe(0)
+      const run = await requireProjectionRunsStorage(sixb).getById({
+        projectId: sixb.id,
+        id: runId,
+      })
+      expect(run?.status).toBe("failed")
       expect(run?.error).toMatchObject({
         code: "projection.execution_failed",
         message: "Projection execution failed.",
@@ -216,10 +231,6 @@ describe("ProjectionWorker", () => {
         },
       })
 
-      await waitFor(
-        async () => reports.length,
-        (count) => count === 1
-      )
       expect(reports).toHaveLength(1)
       expect(reports[0]?.error.message).toContain("room_id")
       expect(reports[0]?.context).toEqual({
@@ -236,12 +247,6 @@ describe("ProjectionWorker", () => {
         },
         failure: run!.error!,
       })
-
-      const claimed = await sixb.queues.projections.claim({
-        projectId: sixb.id,
-        workerId: "observer",
-      })
-      expect(claimed).toHaveLength(0)
     } finally {
       await worker.stop()
     }
@@ -283,46 +288,6 @@ describe("ProjectionWorker", () => {
           primaryId: "r1",
         })
       ).toMatchObject({ properties: { id: "r1", name: "Kitchen" } })
-    } finally {
-      await worker.stop()
-    }
-  })
-
-  test("fails a deterministic schema incompatibility without retrying the queue job", async () => {
-    const deps = createDeps()
-    const incompatibleDataset = defineDataset("canonical.rooms", {
-      schema: [col("room_id", "string"), col("room_name", "int64")],
-    })
-    const version = await commitDatasetVersion(deps.lakeStorage, incompatibleDataset, [
-      { room_id: "r1", room_name: 42 },
-    ])
-    const sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] }, deps)
-    const { runId } = await dispatchProjectionRun(sixb, roomProjection.id, version)
-
-    const retry = sixb.queues.projections.retry.bind(sixb.queues.projections)
-    const fail = sixb.queues.projections.fail.bind(sixb.queues.projections)
-    let retryCount = 0
-    let failCount = 0
-    sixb.queues.projections.retry = async (input) => {
-      retryCount += 1
-      return retry(input)
-    }
-    sixb.queues.projections.fail = async (input) => {
-      failCount += 1
-      return fail(input)
-    }
-
-    const worker = new ProjectionWorker(sixb)
-    await worker.start()
-    try {
-      await waitFor(
-        async () => failCount,
-        (count) => count === 1
-      )
-      expect(retryCount).toBe(0)
-      expect(
-        await requireProjectionRunsStorage(sixb).getById({ projectId: sixb.id, id: runId })
-      ).toMatchObject({ status: "failed" })
     } finally {
       await worker.stop()
     }

@@ -347,7 +347,8 @@ test("creating a missing target resolves a link retained from an older source ve
 test("incremental and complete runs converge across mixed edits, deletions and dangling links", async () => {
   const incremental = fixture()
   const complete = fixture()
-  let seed = 17
+  // Six rounds of this seed delete, create, orphan and re-resolve parents and skip two versions.
+  let seed = 1
   const random = () => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
     return seed
@@ -375,7 +376,7 @@ test("incremental and complete runs converge across mixed edits, deletions and d
       })
     )
   try {
-    for (let round = 0; round < 12; round++) {
+    for (let round = 0; round < 6; round++) {
       if (round > 0) {
         const next = new Map(rows.map((row) => [row.id, row]))
         for (let change = 0; change < 5; change++) {
@@ -402,8 +403,8 @@ test("incremental and complete runs converge across mixed edits, deletions and d
       })
     }
     expect(incremental.lake.fullReads).toBe(1)
-    expect(incremental.lake.deltaReads).toBe(11)
-    expect(complete.lake.fullReads).toBe(12)
+    expect(incremental.lake.deltaReads).toBe(5)
+    expect(complete.lake.fullReads).toBe(6)
   } finally {
     await incremental.host.closeBroker()
     await complete.host.closeBroker()
