@@ -1,4 +1,4 @@
-import { describe, expect, jest, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import { ConnectorOAuthError } from "../src"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import {
@@ -15,6 +15,11 @@ import {
   requireConnectionProcess,
   settle,
 } from "./connector-connections.fixture"
+
+// A fake-timer test that times out never reaches its own cleanup; keep it from leaking.
+afterEach(() => {
+  jest.useRealTimers()
+})
 
 const selector = { owner: projectOwner, slot: "social" }
 

@@ -1,4 +1,4 @@
-import { describe, expect, jest, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import {
   type AgentToolAttachments,
   type AgentToolFiles,
@@ -21,6 +21,11 @@ import {
   exaWebFetch,
   exaWebSearch,
 } from "../src/agent-tools"
+
+// A fake-timer test that times out never reaches its own cleanup; keep it from leaking.
+afterEach(() => {
+  jest.useRealTimers()
+})
 
 const unusedFiles: AgentToolFiles = {
   async put() {

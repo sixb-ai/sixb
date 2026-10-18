@@ -1,4 +1,4 @@
-import { describe, expect, jest, spyOn, test } from "bun:test"
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test"
 import type { SixbErrorContext } from "../src"
 import type { Broker } from "../src/broker"
 import {
@@ -12,6 +12,11 @@ import {
   SixbErrorReporter,
 } from "../src/error-reporting/internal"
 import { DomainEventService } from "../src/events"
+
+// A fake-timer test that times out never reaches its own cleanup; keep it from leaking.
+afterEach(() => {
+  jest.useRealTimers()
+})
 
 const PROJECT_ID = "error-reporting-tests"
 const OCCURRED_AT = "2026-07-29T12:00:00.000Z"

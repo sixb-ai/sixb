@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, jest, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, jest, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -30,6 +30,11 @@ import { EVENTS_STREAM } from "../src/events"
 import { InMemoryConnectorConnectionStorage } from "../src/storage/connector-connections"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
+
+// A fake-timer test that times out never reaches its own cleanup; keep it from leaking.
+afterEach(() => {
+  jest.useRealTimers()
+})
 
 const coreModuleUrl = pathToFileURL(resolve(import.meta.dir, "..", "src", "index.ts")).href
 

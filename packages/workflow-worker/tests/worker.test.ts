@@ -29,6 +29,11 @@ import {
 } from "@sixb/core/testing"
 import { WorkflowWorker } from "../src"
 
+// A fake-timer test that times out never reaches its own cleanup; keep it from leaking.
+afterEach(() => {
+  jest.useRealTimers()
+})
+
 const Transaction = defineObjectType({
   id: "Transaction",
   name: "Transaction",

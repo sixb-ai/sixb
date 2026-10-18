@@ -1,4 +1,4 @@
-import { describe, expect, jest, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import { ConnectorService } from "../src/connectors/service"
 import {
   authorize,
@@ -16,6 +16,11 @@ import {
   serializedSnapshot,
   settle,
 } from "./connector-connections.fixture"
+
+// A fake-timer test that times out never reaches its own cleanup; keep it from leaking.
+afterEach(() => {
+  jest.useRealTimers()
+})
 
 describe("connector connection lifecycle", () => {
   test("shares one authorization, disconnects one connection, and revokes all remaining", async () => {
