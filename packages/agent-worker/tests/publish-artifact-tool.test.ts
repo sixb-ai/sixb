@@ -647,23 +647,38 @@ describe("materializeThreadArtifacts", () => {
     }
   })
 
-  test("stops downloading when the run is cancelled", async () => {
+  // Reproduce the first row by dropping readBlob's abort listener, and the second by dropping its
+  // check for a cancel that came before that listener: either way the install waits on the blob.
+  test.each([
+    { when: "while the blob downloads", on: "pull" },
+    { when: "after the blob opens, before the install listens", on: "getReader" },
+  ] as const)("stops downloading when the run is cancelled $when", async ({ on }) => {
     write("a/document.md", "# First\n\nOne.\n")
     await publish({ path: "a", kind: "document", title: "First" })
-    // A blob that never finishes arriving, as a stalled download does. It is pulled once the
-    // install reads it.
-    const downloading = Promise.withResolvers<void>()
-    blobStorage.open = async () =>
-      new ReadableStream<Uint8Array>(
+    const cancel = new AbortController()
+    const cancelRun = () => cancel.abort(new Error("cancelled"))
+    blobStorage.open = async () => {
+      // A blob that never finishes arriving, as a stalled download does. It is pulled once read.
+      const stalled = new ReadableStream<Uint8Array>(
         {
           pull: () => {
-            downloading.resolve()
+            if (on === "pull") cancelRun()
             return new Promise(() => {})
           },
         },
         { highWaterMark: 0 }
       )
-    const cancel = new AbortController()
+      if (on === "getReader") {
+        const getReader = stalled.getReader.bind(stalled)
+        Object.defineProperty(stalled, "getReader", {
+          value: () => {
+            cancelRun()
+            return getReader()
+          },
+        })
+      }
+      return stalled
+    }
     const installing = materializeThreadArtifacts({
       projectId,
       threadId: run.threadId,
@@ -674,13 +689,13 @@ describe("materializeThreadArtifacts", () => {
       manifestPath: ".sixb/agent/context/artifacts.json",
       signal: cancel.signal,
     })
-    // Reproduce by dropping the signal: the install is still waiting on the blob.
-    await downloading.promise
-    cancel.abort(new Error("cancelled"))
+    let bound: ReturnType<typeof setTimeout> | undefined
     const outcome = await Promise.race([
       installing.catch((error: unknown) => error),
-      Bun.sleep(1_000).then(() => "still downloading"),
-    ])
+      new Promise((resolve) => {
+        bound = setTimeout(resolve, 1_000, "still downloading")
+      }),
+    ]).finally(() => clearTimeout(bound))
     expect(outcome).toEqual(new Error("cancelled"))
   })
 })

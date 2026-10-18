@@ -115,7 +115,12 @@ describe("agent tool-result media bridge", () => {
     })
   })
 
-  test("cancels an in-flight blob projection", async () => {
+  // Reproduce the first row by dropping readBlobBytes's abort listener, and the second by dropping
+  // its check for a cancel that came before that listener: either way the projection waits.
+  test.each([
+    { when: "while the blob is read", on: "pull" },
+    { when: "after the blob opens, before the projection listens", on: "getReader" },
+  ] as const)("cancels an in-flight blob projection $when", async ({ on }) => {
     const fileRef: FileRef = {
       blobId: `blob_${"a".repeat(64)}`,
       digest: `sha256:${"a".repeat(64)}`,
@@ -123,7 +128,8 @@ describe("agent tool-result media bridge", () => {
       fileName: "generated.png",
       mediaType: "image/png",
     }
-    const opened = Promise.withResolvers<void>()
+    const abort = new AbortController()
+    const reason = new Error("stop projection")
     let streamCancelled = false
     const blobStorage: BlobStorage = {
       async put() {
@@ -137,18 +143,32 @@ describe("agent tool-result media bridge", () => {
         }
       },
       async open() {
-        return new ReadableStream<Uint8Array>({
-          pull() {
-            opened.resolve()
+        // A blob that never finishes arriving, as a stalled download does. It is pulled once read.
+        const stalled = new ReadableStream<Uint8Array>(
+          {
+            pull() {
+              if (on === "pull") abort.abort(reason)
+              return new Promise(() => {})
+            },
+            cancel() {
+              streamCancelled = true
+            },
           },
-          cancel() {
-            streamCancelled = true
-          },
-        })
+          { highWaterMark: 0 }
+        )
+        if (on === "getReader") {
+          const getReader = stalled.getReader.bind(stalled)
+          Object.defineProperty(stalled, "getReader", {
+            value: () => {
+              abort.abort(reason)
+              return getReader()
+            },
+          })
+        }
+        return stalled
       },
     }
     const bridge = new AgentToolResultMediaBridge({ blobStorage })
-    const abort = new AbortController()
     await bridge.toModelOutput({
       output: richImageResult(fileRef),
       signal: abort.signal,
@@ -156,12 +176,14 @@ describe("agent tool-result media bridge", () => {
     })
 
     const projection = prepareBridge(bridge, imageModel(), [])
-    await opened.promise
-    await new Promise<void>((resolve) => setTimeout(resolve, 0))
-    const reason = new Error("stop projection")
-    abort.abort(reason)
-
-    await expect(projection).rejects.toBe(reason)
+    let bound: ReturnType<typeof setTimeout> | undefined
+    const outcome = await Promise.race([
+      projection.catch((error: unknown) => error),
+      new Promise((resolve) => {
+        bound = setTimeout(resolve, 1_000, "still projecting")
+      }),
+    ]).finally(() => clearTimeout(bound))
+    expect(outcome).toBe(reason)
     expect(streamCancelled).toBe(true)
   })
 })

@@ -484,6 +484,8 @@ async function readBlobBytes(
     void reader.cancel(signal.reason)
   }
   signal.addEventListener("abort", cancelOnAbort, { once: true })
+  // A cancel between the open and the listener fires no event.
+  if (signal.aborted) cancelOnAbort()
   try {
     for (;;) {
       const { done, value } = await reader.read()
