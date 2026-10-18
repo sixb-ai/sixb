@@ -15,6 +15,8 @@ import {
 } from "react"
 import { useArtifactMessages } from "../../messages"
 import { ArtifactAddressLabel, ArtifactLink } from "../../references/references"
+import { findMatches } from "./find"
+import { modulo, type SheetFind, type SheetFindCount } from "./find-bar"
 import { elementTextMeasure, fitWidth, type TextMeasure } from "./fit"
 import { cellFormatter, currencySymbol, type FormattedCell } from "./format"
 import type { SheetColumn, SheetModel } from "./model"
@@ -65,11 +67,16 @@ export function SheetGrid({
   onStatusChange,
   imageUrl,
   selected,
+  find,
+  onFind,
   className,
 }: {
   readonly model: SheetModel
   readonly locale: string
   readonly onStatusChange?: (status: SheetGridStatus) => void
+  /** A search: its matches are marked, and the current one is selected and brought into view. */
+  readonly find?: SheetFind
+  readonly onFind?: (found: SheetFindCount) => void
   /** An image cell's URL by its path in the artifact; images show only where they resolve. */
   readonly imageUrl?: (path: string) => string | undefined
   /** A range to open on, selected and in view, such as the one an address named. */
@@ -108,6 +115,17 @@ export function SheetGrid({
   const rowCount = model.rows.length + 1
   const columnCount = model.columns.length
   const range = useMemo(() => cellRange(anchor, focus), [anchor, focus])
+
+  const findQuery = find?.query ?? ""
+  const findIndex = find?.index ?? 0
+  const matches = useMemo(
+    () => findMatches(model, order, formatters, findQuery),
+    [model, order, formatters, findQuery]
+  )
+  const matched = useMemo(
+    () => new Set(matches.points.map((point) => `${point.row}:${point.column}`)),
+    [matches]
+  )
 
   // Layout, in content pixels.
   const rowNumberWidth = Math.max(44, String(rowCount).length * 8 + 24)
@@ -214,6 +232,23 @@ export function SheetGrid({
     },
     [frozenRows, frozenColumns, headerHeight, rowNumberWidth, offsets, frozenWidth]
   )
+
+  useEffect(() => {
+    onFind?.({ count: matches.points.length, capped: matches.capped })
+  }, [onFind, matches])
+
+  // The current match becomes the selection, in view. Only a new query, a step, or a new order
+  // moves it: resizing a column or scrolling leaves the reader's own selection be.
+  const revealMatch = useRef(reveal)
+  revealMatch.current = reveal
+  useEffect(() => {
+    const count = matches.points.length
+    const point = count > 0 ? matches.points[modulo(findIndex, count)] : undefined
+    if (!point) return
+    setAnchor(point)
+    setFocus(point)
+    revealMatch.current(point)
+  }, [matches, findIndex])
 
   const revealedOpening = useRef(false)
   useLayoutEffect(() => {
@@ -426,6 +461,7 @@ export function SheetGrid({
           lastFixed={fixed && column === frozenColumns - 1}
           selected={inRange(range, row, column)}
           active={row === focus.row && column === focus.column}
+          matched={matched.has(`${row}:${column}`)}
           style={style}
         >
           {header ? (
@@ -622,6 +658,7 @@ function GridCell({
   lastFixed,
   selected,
   active,
+  matched,
   style,
   children,
 }: {
@@ -633,6 +670,8 @@ function GridCell({
   readonly lastFixed: boolean
   readonly selected: boolean
   readonly active: boolean
+  /** It holds what the find bar searches for. */
+  readonly matched: boolean
   readonly style: CSSProperties
   readonly children: ReactNode
 }) {
@@ -651,8 +690,17 @@ function GridCell({
         header ? "bg-background font-semibold" : "bg-background",
         fixed && "sticky z-[1]",
         lastFixed && "shadow-[1px_0_0_var(--border)]",
-        selected && !active && "bg-[color-mix(in_oklab,var(--primary)_7%,var(--background))]"
+        selected &&
+          !active &&
+          !matched &&
+          "bg-[color-mix(in_oklab,var(--primary)_7%,var(--background))]",
+        // Matches are marked as a page's find marks them; the current one, the active cell, more.
+        matched &&
+          (active
+            ? "bg-[color-mix(in_oklab,var(--warning)_45%,var(--background))]"
+            : "bg-[color-mix(in_oklab,var(--warning)_20%,var(--background))]")
       )}
+      data-matched={matched ? "" : undefined}
       style={style}
     >
       {children}

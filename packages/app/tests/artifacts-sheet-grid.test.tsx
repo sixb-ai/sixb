@@ -78,6 +78,21 @@ const model = sheetModel(
   )
 )
 
+/**
+ * Types into the focused input: its value set through the element's own setter, then the key
+ * coming up. react-dom is imported before this file installs a window, so it takes the page for
+ * one without input events and reads an input's changes on keyup, as it does in such browsers.
+ */
+function typeInto(input: HTMLElement, value: string) {
+  let prototype: object | null = Object.getPrototypeOf(input)
+  while (prototype && !Object.getOwnPropertyDescriptor(prototype, "value")) {
+    prototype = Object.getPrototypeOf(prototype)
+  }
+  if (!prototype) throw new Error("Expected an input.")
+  Object.getOwnPropertyDescriptor(prototype, "value")?.set?.call(input, value)
+  fireEvent.keyUp(input, { key: value.at(-1) ?? "" })
+}
+
 function mount() {
   const statuses: SheetGridStatus[] = []
   const view = render(
@@ -252,6 +267,37 @@ describe("the sheet grid", () => {
     const fitted = Number(separator.getAttribute("aria-valuenow"))
     expect(fitted).toBeLessThan(200)
     expect(fitted).toBeGreaterThanOrEqual(48)
+  })
+
+  test("marks what a search finds, selects the current match, and wraps around", async () => {
+    // Reproduce by dropping the effect that selects `matches.points[…]`: the selection stays A2.
+    const counts: number[] = []
+    const statuses: SheetGridStatus[] = []
+    const grid = (index: number) => (
+      <SheetGrid
+        model={model}
+        locale="en-US"
+        find={{ query: "2026", index }}
+        onFind={(found) => counts.push(found.count)}
+        onStatusChange={(status) => statuses.push(status)}
+      />
+    )
+    const ui = render(grid(0))
+    const selection = () => {
+      const last = statuses.at(-1)
+      return last ? rangeLabel(last.range) : null
+    }
+    expect(counts.at(-1)).toBe(2)
+    expect(selection()).toBe("A3")
+    const marked = Array.from(ui.container.querySelectorAll("[data-matched]"))
+    expect(marked.map((cell) => cell.textContent)).toEqual(["Q1 2026", "Q2 2026"])
+
+    ui.rerender(grid(1))
+    expect(selection()).toBe("A4")
+    ui.rerender(grid(2))
+    expect(selection()).toBe("A3")
+    ui.rerender(grid(-1))
+    expect(selection()).toBe("A4")
   })
 
   test("tells assistive technology which cell is active, and where each drawn column is", async () => {
@@ -435,6 +481,36 @@ describe("a sheet artifact", () => {
     })
     // The seeded workbook types no column, so Revenue reads as text.
     expect(value()).toBe("5560000")
+  })
+
+  test("opens find with Cmd+F inside the sheet, and leaves the browser's find alone outside it", async () => {
+    // Reproduce by dropping `onKeyDown` from WorkbookView's root: Cmd+F in the grid opens nothing.
+    const ui = render(<ArtifactViewer cache={sheetCache()} artifactId={NUMBERS} />)
+    const outside = new KeyboardEvent("keydown", { key: "f", metaKey: true, cancelable: true })
+    document.body.dispatchEvent(outside)
+    expect(outside.defaultPrevented).toBe(false)
+    expect(ui.queryByRole("search")).toBeNull()
+
+    await act(async () => {
+      fireEvent.keyDown(ui.getByRole("grid"), { key: "f", metaKey: true })
+      await Bun.sleep(20)
+    })
+    const input = ui.getByRole("searchbox", { name: "Find in sheet" })
+    expect(document.activeElement === input).toBe(true)
+    await act(async () => {
+      typeInto(input, "q3")
+    })
+    expect(ui.getByRole("search").textContent).toContain("1 of 1")
+    await act(async () => {
+      typeInto(input, "nothing like it")
+    })
+    expect(ui.getByRole("search").textContent).toContain("No matches")
+
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Escape" })
+    })
+    expect(ui.queryByRole("search")).toBeNull()
+    expect(document.activeElement === ui.getByRole("grid")).toBe(true)
   })
 
   test("starts afresh on another artifact, though the same renderer shows it", async () => {

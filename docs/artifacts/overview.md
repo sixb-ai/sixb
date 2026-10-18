@@ -122,7 +122,8 @@ workbook 20 sheets and 10 charts.
 
 Readers sort columns, fit a column to its values by double-clicking its edge, select cells, rows,
 or columns to see their sum, average, min, max, and count, read a cell's whole value above the
-grid, copy cells as a table that pastes into other spreadsheets, and download each sheet as CSV. A CSV or TSV `file` artifact opens in the same grid.
+grid, find values with ⌘F or Ctrl+F, copy cells as a table that pastes into other spreadsheets, and
+download each sheet as CSV. A CSV or TSV `file` artifact opens in the same grid.
 
 ## Write slides
 

@@ -7,13 +7,21 @@ import {
 import { Button } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { AreaChart as AreaIcon, ChartColumn, ChartLine, ChartPie, Download } from "lucide-react"
-import { type KeyboardEvent, lazy, type ReactNode, Suspense, useId, useState } from "react"
+import {
+  AreaChart as AreaIcon,
+  ChartColumn,
+  ChartLine,
+  ChartPie,
+  Download,
+  Search,
+} from "lucide-react"
+import { type KeyboardEvent, lazy, type ReactNode, Suspense, useId, useRef, useState } from "react"
 import { formatFileSize } from "../../file-size"
 import { type ArtifactMessages, useArtifactMessages } from "../../messages"
 import { type ArtifactVersion, versionImageSource } from "../../queries"
 import { useArtifactThemeAttributes } from "../../theme"
 import { ViewerLoading, ViewerNotice } from "../notice"
+import { FindBar, useSheetFind } from "./find-bar"
 import { cellFormatter, numberFormat } from "./format"
 import { SheetGrid, type SheetGridStatus } from "./grid"
 import type { SheetColumn, SheetModel } from "./model"
@@ -27,9 +35,9 @@ type Tab =
   | { readonly kind: "chart"; readonly name: string }
 
 /**
- * A sheet artifact as a spreadsheet: a tab per sheet and per chart, a name box with the selection
- * and its column's type, the grid with the sheet's charts beside it, and a status bar that sums
- * what is selected. `part` opens a sheet by name (`Summary`, `Summary!A1:D5`) or a chart
+ * A sheet artifact as a spreadsheet: a tab per sheet and per chart, a bar with the selection and
+ * the active cell's value or the find bar, the grid with the sheet's charts beside it, and a
+ * status bar that sums what is selected. `part` opens a sheet by name (`Summary`, `Summary!A1:D5`) or a chart
  * (`chart=revenue`).
  */
 export function SheetRenderer({
@@ -88,6 +96,8 @@ function WorkbookView({
     workbook.sheets.find((entry) => entry.name === sheetName)
   )
   const [status, setStatus] = useState<SheetGridStatus | null>(null)
+  const root = useRef<HTMLDivElement | null>(null)
+  const finder = useSheetFind(root)
   const sheetCharts = workbook.charts.filter((entry) => entry.sheet === sheetName)
   const theme = useArtifactThemeAttributes(version)
   const tabs: readonly (Tab & { readonly label: ReactNode })[] = [
@@ -123,7 +133,9 @@ function WorkbookView({
 
   return (
     <div
+      ref={root}
       data-sixb-artifact=""
+      onKeyDown={tab.kind === "sheet" ? finder.onKeyDown : undefined}
       className={cn(
         "@container flex min-h-0 flex-1 flex-col bg-background text-foreground",
         theme.className
@@ -149,6 +161,17 @@ function WorkbookView({
             </TabButton>
           ))}
         </div>
+        {tab.kind === "sheet" && model ? (
+          <button
+            type="button"
+            onClick={finder.show}
+            aria-label={messages.sheet.find}
+            title={messages.sheet.find}
+            className="flex size-[30px] shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Search className="size-3.5" aria-hidden="true" />
+          </button>
+        ) : null}
         {source ? (
           <a
             href={source.downloadUrl}
@@ -169,7 +192,9 @@ function WorkbookView({
         aria-labelledby={tabId(current)}
         className="flex min-h-0 flex-1 flex-col"
       >
-        {tab.kind === "sheet" ? <NameBox status={status} messages={messages} /> : null}
+        {tab.kind === "sheet" ? (
+          <NameBox status={status} messages={messages} finder={finder} />
+        ) : null}
 
         <div className="flex min-h-0 flex-1">
           {!model ? (
@@ -201,6 +226,8 @@ function WorkbookView({
                 model={model}
                 locale={locale}
                 onStatusChange={setStatus}
+                find={finder.find}
+                onFind={finder.onFound}
                 imageUrl={(path) => versionImageSource(version, path)?.inlineUrl}
                 className="flex-1"
               />
@@ -242,10 +269,23 @@ export function SheetTable({ model }: { readonly model: SheetModel }) {
   const messages = useArtifactMessages()
   const locale = useLocale()
   const [status, setStatus] = useState<SheetGridStatus | null>(null)
+  const root = useRef<HTMLDivElement | null>(null)
+  const finder = useSheetFind(root)
   return (
-    <div className="@container flex min-h-0 flex-1 flex-col bg-background">
-      <NameBox status={status} messages={messages} />
-      <SheetGrid model={model} locale={locale} onStatusChange={setStatus} className="flex-1" />
+    <div
+      ref={root}
+      onKeyDown={finder.onKeyDown}
+      className="@container flex min-h-0 flex-1 flex-col bg-background"
+    >
+      <NameBox status={status} messages={messages} finder={finder} />
+      <SheetGrid
+        model={model}
+        locale={locale}
+        onStatusChange={setStatus}
+        find={finder.find}
+        onFind={finder.onFound}
+        className="flex-1"
+      />
       <StatusBar model={model} status={status} locale={locale} messages={messages} />
     </div>
   )
@@ -323,17 +363,37 @@ function ChartIcon({ type }: { readonly type: WorkbookChart["type"] }) {
 function NameBox({
   status,
   messages,
+  finder,
 }: {
   readonly status: SheetGridStatus | null
   readonly messages: ArtifactMessages
+  readonly finder: ReturnType<typeof useSheetFind>
 }) {
-  const column = status?.column
   return (
     <div className="flex h-10 shrink-0 items-center gap-3 overflow-hidden border-b border-border/70 px-3 text-[13px]">
       <span className="flex h-6 min-w-14 items-center justify-center rounded-md border border-border px-2 font-mono text-xs tabular-nums">
         {status ? rangeLabel(status.range) : "A1"}
       </span>
       <span className="h-4 w-px shrink-0 bg-border" aria-hidden="true" />
+      {finder.open ? (
+        <FindBar state={finder} />
+      ) : (
+        <ActiveValue status={status} messages={messages} />
+      )}
+    </div>
+  )
+}
+
+function ActiveValue({
+  status,
+  messages,
+}: {
+  readonly status: SheetGridStatus | null
+  readonly messages: ArtifactMessages
+}) {
+  const column = status?.column
+  return (
+    <>
       <span
         data-sheet-value=""
         className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap select-text [scrollbar-width:none]"
@@ -348,7 +408,7 @@ function NameBox({
           </span>
         </span>
       ) : null}
-    </div>
+    </>
   )
 }
 

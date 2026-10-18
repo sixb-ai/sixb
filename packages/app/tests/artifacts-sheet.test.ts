@@ -5,6 +5,7 @@ import {
   latestValue,
   MAX_CHART_POINTS,
 } from "../src/artifacts/renderers/sheet/chart-data"
+import { findMatches, MAX_FIND_MATCHES } from "../src/artifacts/renderers/sheet/find"
 import { fitWidth } from "../src/artifacts/renderers/sheet/fit"
 import { cellFormatter, compactFormatter } from "../src/artifacts/renderers/sheet/format"
 import { fileSheetModel, sheetModel } from "../src/artifacts/renderers/sheet/model"
@@ -224,6 +225,62 @@ describe("selection", () => {
     expect(sortedOrder(model, null, "en")).toEqual([0, 1, 2, 3])
   })
 })
+
+describe("finding in a sheet", () => {
+  const formatters = model.columns.map((column) => cellFormatter(column, "en-US"))
+  const order = model.rows.map((_, index) => index)
+  const found = (query: string, rows = order) =>
+    findMatches(model, rows, formatters, query).points.map((point) =>
+      rangeLabel(cellRange(point, point))
+    )
+
+  test("matches a value as shown or as stored, in reading order, never the header", () => {
+    // "4,380" is how the grid shows 4380000.5; "4380" is how it is stored.
+    expect(found("4,380")).toEqual(["B3"])
+    expect(found("4380")).toEqual(["B3"])
+    // Row 2's site, northline.example/q4, holds a "q" too.
+    expect(found("q")).toEqual(["A2", "F2", "A3", "A4", "A5"])
+    expect(found("2026")).toEqual(["A3", "A4", "E4", "A5", "E5", "E3"].sort(byReading))
+    expect(found("Revenue")).toEqual([])
+    expect(found("   ")).toEqual([])
+  })
+
+  test("ignores case and accents", () => {
+    const cafe = fileSheetModel("Places", parseCsv("Name\nCafé Nord\nCAFE SUD\n"))
+    const column = cafe.columns[0]
+    if (!column) throw new Error("Expected a column.")
+    const points = findMatches(cafe, [0, 1], [cellFormatter(column, "en-US")], "cafe").points
+    expect(points).toEqual([
+      { row: 1, column: 0 },
+      { row: 2, column: 0 },
+    ])
+  })
+
+  test("follows the sheet's current order", () => {
+    expect(found("q4", [3, 2, 1, 0])).toEqual(["A5", "F5"])
+  })
+
+  test("stops at its limit, and says so", () => {
+    const many = fileSheetModel(
+      "Many",
+      parseCsv(["A,B", ...Array.from({ length: 6_000 }, () => "x,x")].join("\n"))
+    )
+    const result = findMatches(
+      many,
+      many.rows.map((_, index) => index),
+      many.columns.map((column) => cellFormatter(column, "en-US")),
+      "x"
+    )
+    expect(result.points).toHaveLength(MAX_FIND_MATCHES)
+    expect(result.capped).toBe(true)
+  })
+})
+
+/** A1 names in reading order: along each row, then down. */
+function byReading(left: string, right: string): number {
+  const row = (name: string) => Number(name.slice(1))
+  return row(left) - row(right) || left.localeCompare(right)
+}
 
 describe("fitting a column", () => {
   const tenPerCharacter = (text: string) => text.length * 10
