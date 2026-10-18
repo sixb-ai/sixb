@@ -120,7 +120,9 @@ Publishing reads every typed cell and every chart against its sheet and refuses 
 the file, row, and column to fix. A sheet holds at most 200 columns and 100,000 rows, and a
 workbook 20 sheets and 10 charts.
 
-Each column's menu sorts by it, filters it, fits it to its values, freezes the columns up to it, or
+A sheet opens as a workbook: the name box and the active cell's value above the grid, where typing
+a cell or range such as `B4` or `A1:D12` in the name box goes there, and the sheet tabs with the
+selection's figures below it. Each column's menu sorts by it, filters it, fits it to its values, freezes the columns up to it, or
 hides it; these arrange the reader's view and change nothing in the artifact. A text or link column
 filters by a checklist of its values, a number or date column by a condition such as greater than
 or between, and the status bar counts the rows the filters keep. Readers fit a column by
