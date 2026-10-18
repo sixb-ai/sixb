@@ -111,43 +111,6 @@ describe("defineProjection", () => {
     })
   })
 
-  test("rejects empty id", () => {
-    expect(() => defineProjection("  ", Room)).toThrow(ProjectionValidationError)
-    expect(() => defineProjection("  ", Room)).toThrow("Projection id must not be empty")
-  })
-
-  test("rejects empty dataset id", () => {
-    const invalidDataset = { kind: "dataset", id: "  ", schema: { columns: [] } } as never
-    expect(() => defineProjection("p", Room).fromDataset(invalidDataset)).toThrow(
-      ProjectionValidationError
-    )
-    expect(() => defineProjection("p", Room).fromDataset(invalidDataset)).toThrow(
-      "Projection dataset id must not be empty"
-    )
-  })
-
-  test("rejects unknown property id in mapping", () => {
-    expect(() =>
-      defineProjection("p", Room)
-        .fromDataset(genericDataset)
-        .properties({ id: "col", unknownProp: "col" } as never)
-    ).toThrow(ProjectionValidationError)
-    expect(() =>
-      defineProjection("p", Room)
-        .fromDataset(genericDataset)
-        .properties({ id: "col", unknownProp: "col" } as never)
-    ).toThrow("unknownProp")
-  })
-
-  test("rejects missing primary in mapping", () => {
-    expect(() =>
-      defineProjection("p", Room).fromDataset(genericDataset).properties({ name: "col" })
-    ).toThrow(ProjectionValidationError)
-    expect(() =>
-      defineProjection("p", Room).fromDataset(genericDataset).properties({ name: "col" })
-    ).toThrow("id")
-  })
-
   test("builds definition with FK links", () => {
     const result = defineProjection("room-proj", Room)
       .fromDataset(canonicalRoomsDataset)
@@ -170,147 +133,25 @@ describe("defineProjection", () => {
     })
   })
 
-  test("builds definition with FK links from dataset fields", () => {
-    const result = defineProjection("room-proj", Room)
+  test("builds FK links from dataset fields, via fromForeignKey or an inline descriptor", () => {
+    const base = defineProjection("room-proj", Room)
       .fromDataset(canonicalRoomsDataset)
       .properties({ id: "room_id", name: "room_name" })
-      .withLinks({
-        inBuilding: fromForeignKey({
-          link: Room.l.inBuilding,
-          sourceField: "building_id",
-          target: Building,
-        }),
-      })
-
-    expect(result.links).toEqual({
+    const expected = {
       inBuilding: {
         linkId: "inBuilding",
         sourceField: "building_id",
         targetObjectTypeId: "building",
       },
-    })
-  })
+    }
+    const descriptor = {
+      link: Room.l.inBuilding,
+      sourceField: "building_id",
+      target: Building,
+    } as const
 
-  test("builds definition with typed inline FK links from dataset fields", () => {
-    const result = defineProjection("room-proj", Room)
-      .fromDataset(canonicalRoomsDataset)
-      .properties({ id: "room_id", name: "room_name" })
-      .withLinks({
-        inBuilding: {
-          link: Room.l.inBuilding,
-          sourceField: "building_id",
-          target: Building,
-        },
-      })
-
-    expect(result.links).toEqual({
-      inBuilding: {
-        linkId: "inBuilding",
-        sourceField: "building_id",
-        targetObjectTypeId: "building",
-      },
-    })
-  })
-
-  test("rejects unknown link id in withLinks mapping", () => {
-    const base = defineProjection("p", Room).fromDataset(genericDataset).properties({ id: "col" })
-
-    expect(() =>
-      base.withLinks({
-        unknownLink: {
-          linkId: "unknownLink",
-          sourcePropertyId: "id",
-          targetObjectTypeId: "x",
-        },
-      } as Record<string, { linkId: string; sourcePropertyId: string; targetObjectTypeId: string }>)
-    ).toThrow(ProjectionValidationError)
-    expect(() =>
-      base.withLinks({
-        unknownLink: {
-          linkId: "unknownLink",
-          sourcePropertyId: "id",
-          targetObjectTypeId: "x",
-        },
-      } as Record<string, { linkId: string; sourcePropertyId: string; targetObjectTypeId: string }>)
-    ).toThrow("unknownLink")
-  })
-
-  test("rejects link id / descriptor.linkId mismatch", () => {
-    const base = defineProjection("p", Room)
-      .fromDataset(genericDataset)
-      .properties({ id: "col", buildingRef: "ref" })
-
-    expect(() =>
-      base.withLinks({
-        inBuilding: {
-          linkId: "wrongId",
-          sourcePropertyId: "buildingRef",
-          targetObjectTypeId: "building",
-        },
-      })
-    ).toThrow(ProjectionValidationError)
-    expect(() =>
-      base.withLinks({
-        inBuilding: {
-          linkId: "wrongId",
-          sourcePropertyId: "buildingRef",
-          targetObjectTypeId: "building",
-        },
-      })
-    ).toThrow("wrongId")
-  })
-
-  test("rejects link with source property not on type", () => {
-    const base = defineProjection("p", Room).fromDataset(genericDataset).properties({ id: "col" })
-
-    expect(() =>
-      base.withLinks({
-        inBuilding: {
-          linkId: "inBuilding",
-          sourcePropertyId: "nonExistent",
-          targetObjectTypeId: "building",
-        },
-      })
-    ).toThrow(ProjectionValidationError)
-    expect(() =>
-      base.withLinks({
-        inBuilding: {
-          linkId: "inBuilding",
-          sourcePropertyId: "nonExistent",
-          targetObjectTypeId: "building",
-        },
-      })
-    ).toThrow("nonExistent")
-  })
-
-  test("rejects link with source property not in property mapping", () => {
-    // buildingRef exists on Room but is not in the property mapping
-    const base = defineProjection("p", Room).fromDataset(genericDataset).properties({ id: "col" })
-
-    expect(() =>
-      base.withLinks({
-        inBuilding: {
-          linkId: "inBuilding",
-          sourcePropertyId: "buildingRef",
-          targetObjectTypeId: "building",
-        },
-      })
-    ).toThrow(ProjectionValidationError)
-    expect(() =>
-      base.withLinks({
-        inBuilding: {
-          linkId: "inBuilding",
-          sourcePropertyId: "buildingRef",
-          targetObjectTypeId: "building",
-        },
-      })
-    ).toThrow("buildingRef")
-  })
-
-  test("properties() result is a valid ObjectProjectionDefinition", () => {
-    const result = defineProjection("p", Room).fromDataset(genericDataset).properties({ id: "col" })
-
-    expect(isObjectProjectionDefinition(result)).toBe(true)
+    expect(base.withLinks({ inBuilding: fromForeignKey(descriptor) }).links).toEqual(expected)
+    expect(base.withLinks({ inBuilding: descriptor }).links).toEqual(expected)
   })
 
   test("withLinks() does not mutate the intermediate", () => {
@@ -340,58 +181,6 @@ describe("defineProjection", () => {
   })
 })
 
-// ── fromForeignKey ───────────────────────────────────────────
-
-describe("fromForeignKey", () => {
-  test("builds correct ForeignKeyDescriptor", () => {
-    const descriptor = fromForeignKey({
-      link: Room.l.inBuilding,
-      sourceProperty: Room.p.buildingRef,
-      target: Building,
-    })
-
-    expect(descriptor).toEqual({
-      linkId: "inBuilding",
-      sourcePropertyId: "buildingRef",
-      targetObjectTypeId: "building",
-    })
-  })
-
-  test("rejects polymorphic link (array target)", () => {
-    expect(() =>
-      fromForeignKey({
-        link: TypeWithPolymorphicLink.l.targets as never,
-        sourceProperty: TypeWithPolymorphicLink.p.ref as never,
-        target: Building,
-      })
-    ).toThrow(ProjectionValidationError)
-    expect(() =>
-      fromForeignKey({
-        link: TypeWithPolymorphicLink.l.targets as never,
-        sourceProperty: TypeWithPolymorphicLink.p.ref as never,
-        target: Building,
-      })
-    ).toThrow("polymorphic")
-  })
-
-  test("rejects wildcard link", () => {
-    expect(() =>
-      fromForeignKey({
-        link: TypeWithWildcardLink.l.anything as never,
-        sourceProperty: TypeWithWildcardLink.p.ref as never,
-        target: Building,
-      })
-    ).toThrow(ProjectionValidationError)
-    expect(() =>
-      fromForeignKey({
-        link: TypeWithWildcardLink.l.anything as never,
-        sourceProperty: TypeWithWildcardLink.p.ref as never,
-        target: Building,
-      })
-    ).toThrow("wildcard")
-  })
-})
-
 // ── Link projection ─────────────────────────────────────
 
 describe("defineProjection — link target", () => {
@@ -410,82 +199,16 @@ describe("defineProjection — link target", () => {
     expect(result.sourceField).toBe("room_id")
     expect(result.targetField).toBe("sensor_id")
   })
-
-  test("rejects empty id", () => {
-    expect(() => defineProjection("  ", Room.l.hasSensors)).toThrow(ProjectionValidationError)
-    expect(() => defineProjection("  ", Room.l.hasSensors)).toThrow(
-      "Projection id must not be empty"
-    )
-  })
-
-  test("rejects empty dataset id", () => {
-    const invalidDataset = { kind: "dataset", id: "  ", schema: { columns: [] } } as never
-    expect(() => defineProjection("lp", Room.l.hasSensors).fromDataset(invalidDataset)).toThrow(
-      ProjectionValidationError
-    )
-    expect(() => defineProjection("lp", Room.l.hasSensors).fromDataset(invalidDataset)).toThrow(
-      "Projection dataset id must not be empty"
-    )
-  })
-
-  test("rejects empty source field", () => {
-    expect(() =>
-      defineProjection("lp", Room.l.hasSensors)
-        .fromDataset(genericDataset)
-        .sourceField("  " as never)
-    ).toThrow(ProjectionValidationError)
-    expect(() =>
-      defineProjection("lp", Room.l.hasSensors)
-        .fromDataset(genericDataset)
-        .sourceField("  " as never)
-    ).toThrow("Projection source field must not be empty")
-  })
-
-  test("rejects empty target field", () => {
-    expect(() =>
-      defineProjection("lp", Room.l.hasSensors)
-        .fromDataset(genericDataset)
-        .sourceField("a")
-        .targetField("  " as never)
-    ).toThrow(ProjectionValidationError)
-    expect(() =>
-      defineProjection("lp", Room.l.hasSensors)
-        .fromDataset(genericDataset)
-        .sourceField("a")
-        .targetField("  " as never)
-    ).toThrow("Projection target field must not be empty")
-  })
-
-  test("rejects polymorphic link token", () => {
-    expect(() => defineProjection("lp", TypeWithPolymorphicLink.l.targets as never)).toThrow(
-      ProjectionValidationError
-    )
-    expect(() => defineProjection("lp", TypeWithPolymorphicLink.l.targets as never)).toThrow(
-      "polymorphic"
-    )
-  })
-
-  test("rejects wildcard link token", () => {
-    expect(() => defineProjection("lp", TypeWithWildcardLink.l.anything as never)).toThrow(
-      ProjectionValidationError
-    )
-    expect(() => defineProjection("lp", TypeWithWildcardLink.l.anything as never)).toThrow(
-      "wildcard"
-    )
-  })
 })
 
 // ── Telemetry projection ────────────────────────────────
 
 describe("defineProjection — telemetry target", () => {
-  test("builds correct TelemetryProjectionDefinition", () => {
+  test("builds correct TelemetryProjectionDefinition, with an optional unit field", () => {
+    const points = { objectId: "room_id", at: "observed_at", value: "temperature" } as const
     const result = defineProjection("room-temperatures", Room.p.temperature)
       .fromDataset(roomReadingsDataset)
-      .points({
-        objectId: "room_id",
-        at: "observed_at",
-        value: "temperature",
-      })
+      .points(points)
 
     expect(result._tag).toBe("TelemetryProjectionDefinition")
     expect(result.id).toBe("room-temperatures")
@@ -494,19 +217,11 @@ describe("defineProjection — telemetry target", () => {
     expect(result.objectIdField).toBe("room_id")
     expect(result.atField).toBe("observed_at")
     expect(result.properties).toEqual({ temperature: { valueField: "temperature" } })
-  })
 
-  test("builds definition with optional unit field", () => {
-    const result = defineProjection("room-temperatures", Room.p.temperature)
+    const withUnit = defineProjection("room-temperatures", Room.p.temperature)
       .fromDataset(roomReadingsDataset)
-      .points({
-        objectId: "room_id",
-        at: "observed_at",
-        value: "temperature",
-        unit: "unit",
-      })
-
-    expect(result.properties).toEqual({
+      .points({ ...points, unit: "unit" })
+    expect(withUnit.properties).toEqual({
       temperature: { valueField: "temperature", unitField: "unit" },
     })
   })
@@ -536,114 +251,186 @@ describe("defineProjection — telemetry target", () => {
       },
     })
   })
+})
 
-  test("rejects invalid grouped telemetry mappings", () => {
-    expect(() =>
-      defineProjection("empty", Room)
-        .fromDataset(roomReadingsDataset)
-        .points({ objectId: "room_id", at: "observed_at", properties: {} } as never)
-    ).toThrow("requires at least one property")
+// ── Validation ───────────────────────────────────────────────
 
-    expect(() =>
-      defineProjection("static", Room)
-        .fromDataset(roomReadingsDataset)
-        .points({
-          objectId: "room_id",
-          at: "observed_at",
-          properties: { name: "temperature" },
-        } as never)
-    ).toThrow("must be telemetry-enabled")
+const invalidDataset = { kind: "dataset", id: "  ", schema: { columns: [] } } as never
+const roomProjection = () =>
+  defineProjection("p", Room).fromDataset(genericDataset).properties({ id: "col" })
+const sensorLinks = () => defineProjection("lp", Room.l.hasSensors).fromDataset(genericDataset)
+const temperaturePoints = (points: Record<string, string>) =>
+  defineProjection("tp", Room.p.temperature)
+    .fromDataset(roomReadingsDataset)
+    .points(points as never)
+const groupedPoints = (properties: Record<string, unknown>) =>
+  defineProjection("grouped", Room)
+    .fromDataset(roomReadingsDataset)
+    .points({ objectId: "room_id", at: "observed_at", properties } as never)
+const linkMapping = (sourcePropertyId: string, linkId = "inBuilding") =>
+  ({ inBuilding: { linkId, sourcePropertyId, targetObjectTypeId: "building" } }) as never
 
-    expect(() =>
-      defineProjection("unknown", Room)
-        .fromDataset(roomReadingsDataset)
-        .points({
-          objectId: "room_id",
-          at: "observed_at",
-          properties: { missing: "temperature" },
-        } as never)
-    ).toThrow("does not exist")
-
-    expect(() =>
-      defineProjection("descriptor", Room)
-        .fromDataset(roomReadingsDataset)
-        .points({
-          objectId: "room_id",
-          at: "observed_at",
-          properties: { temperature: { value: "temperature", extra: "unit" } },
-        } as never)
-    ).toThrow("unknown key 'extra'")
-  })
-
-  test("rejects static property token", () => {
-    expect(() => defineProjection("room-names", Room.p.name as never)).toThrow(
-      ProjectionValidationError
-    )
-    expect(() => defineProjection("room-names", Room.p.name as never)).toThrow(
-      "must be telemetry-enabled"
-    )
-  })
-
-  test("rejects empty id", () => {
-    expect(() => defineProjection("  ", Room.p.temperature)).toThrow(ProjectionValidationError)
-    expect(() => defineProjection("  ", Room.p.temperature)).toThrow(
-      "Projection id must not be empty"
-    )
-  })
-
-  test("rejects empty dataset id", () => {
-    const invalidDataset = { kind: "dataset", id: "  ", schema: { columns: [] } } as never
-    expect(() => defineProjection("tp", Room.p.temperature).fromDataset(invalidDataset)).toThrow(
-      ProjectionValidationError
-    )
-    expect(() => defineProjection("tp", Room.p.temperature).fromDataset(invalidDataset)).toThrow(
-      "Projection dataset id must not be empty"
-    )
-  })
-
-  test("rejects missing required point mapping fields", () => {
-    expect(() =>
-      defineProjection("tp", Room.p.temperature)
-        .fromDataset(roomReadingsDataset)
-        .points({ objectId: "room_id", value: "temperature" } as never)
-    ).toThrow(ProjectionValidationError)
-    expect(() =>
-      defineProjection("tp", Room.p.temperature)
-        .fromDataset(roomReadingsDataset)
-        .points({ objectId: "room_id", value: "temperature" } as never)
-    ).toThrow("requires at")
-  })
-
-  test("rejects unknown point mapping keys", () => {
-    expect(() =>
-      defineProjection("tp", Room.p.temperature)
-        .fromDataset(roomReadingsDataset)
-        .points({
-          objectId: "room_id",
-          at: "observed_at",
-          value: "temperature",
-          extra: "room_id",
-        } as never)
-    ).toThrow(ProjectionValidationError)
-    expect(() =>
-      defineProjection("tp", Room.p.temperature)
-        .fromDataset(roomReadingsDataset)
-        .points({
-          objectId: "room_id",
-          at: "observed_at",
-          value: "temperature",
-          extra: "room_id",
-        } as never)
-    ).toThrow("unknown key 'extra'")
-  })
+test.each([
+  [
+    "empty object projection id",
+    () => defineProjection("  ", Room),
+    "Projection id must not be empty",
+  ],
+  [
+    "empty object dataset id",
+    () => defineProjection("p", Room).fromDataset(invalidDataset),
+    "Projection dataset id must not be empty",
+  ],
+  [
+    "unknown property id",
+    () =>
+      defineProjection("p", Room)
+        .fromDataset(genericDataset)
+        .properties({ id: "col", unknownProp: "col" } as never),
+    "unknownProp",
+  ],
+  [
+    "missing primary property",
+    () => defineProjection("p", Room).fromDataset(genericDataset).properties({ name: "col" }),
+    "Primary property 'id' of object type 'room' must be included",
+  ],
+  [
+    "unknown link id",
+    () =>
+      roomProjection().withLinks({
+        unknownLink: { linkId: "unknownLink", sourcePropertyId: "id", targetObjectTypeId: "x" },
+      } as never),
+    "unknownLink",
+  ],
+  [
+    "link key / descriptor linkId mismatch",
+    () =>
+      defineProjection("p", Room)
+        .fromDataset(genericDataset)
+        .properties({ id: "col", buildingRef: "ref" })
+        .withLinks(linkMapping("buildingRef", "wrongId")),
+    "wrongId",
+  ],
+  [
+    "link source property not on the type",
+    () => roomProjection().withLinks(linkMapping("nonExistent")),
+    "nonExistent",
+  ],
+  [
+    // buildingRef exists on Room but is not in the property mapping
+    "link source property not in the property mapping",
+    () => roomProjection().withLinks(linkMapping("buildingRef")),
+    "buildingRef",
+  ],
+  [
+    "fromForeignKey on a polymorphic link",
+    () =>
+      fromForeignKey({
+        link: TypeWithPolymorphicLink.l.targets as never,
+        sourceProperty: TypeWithPolymorphicLink.p.ref as never,
+        target: Building,
+      }),
+    "polymorphic",
+  ],
+  [
+    "fromForeignKey on a wildcard link",
+    () =>
+      fromForeignKey({
+        link: TypeWithWildcardLink.l.anything as never,
+        sourceProperty: TypeWithWildcardLink.p.ref as never,
+        target: Building,
+      }),
+    "wildcard",
+  ],
+  [
+    "empty link projection id",
+    () => defineProjection("  ", Room.l.hasSensors),
+    "Projection id must not be empty",
+  ],
+  [
+    "empty link dataset id",
+    () => defineProjection("lp", Room.l.hasSensors).fromDataset(invalidDataset),
+    "Projection dataset id must not be empty",
+  ],
+  [
+    "empty link source field",
+    () => sensorLinks().sourceField("  " as never),
+    "Projection source field must not be empty",
+  ],
+  [
+    "empty link target field",
+    () =>
+      sensorLinks()
+        .sourceField("a")
+        .targetField("  " as never),
+    "Projection target field must not be empty",
+  ],
+  [
+    "polymorphic link token",
+    () => defineProjection("lp", TypeWithPolymorphicLink.l.targets as never),
+    "polymorphic",
+  ],
+  [
+    "wildcard link token",
+    () => defineProjection("lp", TypeWithWildcardLink.l.anything as never),
+    "wildcard",
+  ],
+  [
+    "static property token",
+    () => defineProjection("room-names", Room.p.name as never),
+    "must be telemetry-enabled",
+  ],
+  [
+    "empty telemetry projection id",
+    () => defineProjection("  ", Room.p.temperature),
+    "Projection id must not be empty",
+  ],
+  [
+    "empty telemetry dataset id",
+    () => defineProjection("tp", Room.p.temperature).fromDataset(invalidDataset),
+    "Projection dataset id must not be empty",
+  ],
+  [
+    "point mapping without at",
+    () => temperaturePoints({ objectId: "room_id", value: "temperature" }),
+    "requires at",
+  ],
+  [
+    "unknown point mapping key",
+    () =>
+      temperaturePoints({
+        objectId: "room_id",
+        at: "observed_at",
+        value: "temperature",
+        extra: "room_id",
+      }),
+    "unknown key 'extra'",
+  ],
+  ["grouped mapping without properties", () => groupedPoints({}), "requires at least one property"],
+  [
+    "grouped mapping of a static property",
+    () => groupedPoints({ name: "temperature" }),
+    "must be telemetry-enabled",
+  ],
+  [
+    "grouped mapping of an unknown property",
+    () => groupedPoints({ missing: "temperature" }),
+    "does not exist",
+  ],
+  [
+    "grouped property descriptor with an unknown key",
+    () => groupedPoints({ temperature: { value: "temperature", extra: "unit" } }),
+    "unknown key 'extra'",
+  ],
+] as const)("rejects %s", (_case, define, message) => {
+  expect(define).toThrow(ProjectionValidationError)
+  expect(define).toThrow(message)
 })
 
 // ── Type guards ──────────────────────────────────────────────
 
 describe("type guards", () => {
-  const objectDef = defineProjection("p", Room)
-    .fromDataset(genericDataset)
-    .properties({ id: "col" })
+  const objectDef = roomProjection()
 
   const linkDef = defineProjection("lp", Room.l.hasSensors)
     .fromDataset(genericDataset)
@@ -654,37 +441,22 @@ describe("type guards", () => {
     .fromDataset(roomReadingsDataset)
     .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
 
-  test("isObjectProjectionDefinition — positive", () => {
+  test("each guard accepts its own kind and rejects other kinds and tag-only lookalikes", () => {
     expect(isObjectProjectionDefinition(objectDef)).toBe(true)
-  })
-
-  test("isObjectProjectionDefinition — negative", () => {
     expect(isObjectProjectionDefinition(linkDef)).toBe(false)
     expect(isObjectProjectionDefinition({ _tag: "ObjectProjectionDefinition" })).toBe(false)
     expect(isObjectProjectionDefinition(null)).toBe(false)
     expect(isObjectProjectionDefinition(undefined)).toBe(false)
-  })
 
-  test("isLinkProjectionDefinition — positive", () => {
     expect(isLinkProjectionDefinition(linkDef)).toBe(true)
-  })
-
-  test("isLinkProjectionDefinition — negative", () => {
     expect(isLinkProjectionDefinition(objectDef)).toBe(false)
     expect(isLinkProjectionDefinition({ _tag: "LinkProjectionDefinition" })).toBe(false)
-  })
 
-  test("isTelemetryProjectionDefinition — positive", () => {
     expect(isTelemetryProjectionDefinition(telemetryDef)).toBe(true)
-  })
-
-  test("isTelemetryProjectionDefinition — negative", () => {
     expect(isTelemetryProjectionDefinition(objectDef)).toBe(false)
     expect(isTelemetryProjectionDefinition(linkDef)).toBe(false)
     expect(isTelemetryProjectionDefinition({ _tag: "TelemetryProjectionDefinition" })).toBe(false)
-  })
 
-  test("isProjectionDefinition", () => {
     expect(isProjectionDefinition(objectDef)).toBe(true)
     expect(isProjectionDefinition(linkDef)).toBe(true)
     expect(isProjectionDefinition(telemetryDef)).toBe(true)

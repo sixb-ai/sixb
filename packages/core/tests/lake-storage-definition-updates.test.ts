@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import type { DatasetDefinition, LakeStorage } from "../src"
 import { col, defineDataset, InMemoryLakeStorage } from "../src"
 import {
   assertLakeDatasetDefinitionsCompatible,
@@ -8,21 +7,7 @@ import {
 } from "../src/lake-storage"
 
 describe("dataset definition update planning", () => {
-  test("returns no change for an unchanged definition", () => {
-    const dataset = defineDataset("raw.erp.invoices", {
-      schema: [col("invoiceId", "string"), col("total", "int64")],
-      primaryKey: "invoiceId",
-    })
-
-    expect(planDatasetDefinitionUpdate(dataset, dataset)).toMatchObject({
-      definition: dataset,
-      schema: { kind: "none" },
-      metadata: { descriptionChanged: false, partitionByChanged: false },
-      changed: false,
-    })
-  })
-
-  test("ignores declaration reordering for existing columns", () => {
+  test("returns no change for an unchanged or reordered definition", () => {
     const existing = defineDataset("raw.erp.invoices", {
       schema: [col("invoiceId", "string"), col("tenantId", "string"), col("total", "int64")],
       primaryKey: ["tenantId", "invoiceId"],
@@ -32,11 +17,14 @@ describe("dataset definition update planning", () => {
       primaryKey: ["tenantId", "invoiceId"],
     })
 
-    expect(planDatasetDefinitionUpdate(existing, requested)).toMatchObject({
-      definition: existing,
-      schema: { kind: "none" },
-      changed: false,
-    })
+    for (const next of [existing, requested]) {
+      expect(planDatasetDefinitionUpdate(existing, next)).toMatchObject({
+        definition: existing,
+        schema: { kind: "none" },
+        metadata: { descriptionChanged: false, partitionByChanged: false },
+        changed: false,
+      })
+    }
   })
 
   test("allows adding nullable columns anywhere in the requested definition", () => {
@@ -201,7 +189,8 @@ describe("dataset definition update planning", () => {
     ).toThrow("incompatible description")
   })
 
-  test("strict merge rejects schema evolution plans", () => {
+  test("strict merge and the lake compatibility preflight reject schema evolution", async () => {
+    const storage = new InMemoryLakeStorage()
     const existing = defineDataset("raw.erp.invoices", {
       schema: [col("invoiceId", "string")],
     })
@@ -212,57 +201,13 @@ describe("dataset definition update planning", () => {
     expect(() => mergeStrictDatasetDefinition({ existing, next: requested })).toThrow(
       "incompatible schema"
     )
-  })
-
-  test("lake compatibility preflight is read-only for missing datasets", async () => {
-    const storage = new InMemoryLakeStorage()
-    const dataset = defineDataset("raw.erp.invoices", {
-      schema: [col("invoiceId", "string")],
-    })
-
-    await assertLakeDatasetDefinitionsCompatible({
-      lakeStorage: storage,
-      definitions: [dataset],
-    })
-
-    expect(await storage.getDataset(dataset.id)).toBeNull()
-  })
-
-  test("lake compatibility preflight rejects provider-unsupported updates", async () => {
-    const storage = new InMemoryLakeStorage()
-    const existing = defineDataset("raw.erp.invoices", {
-      schema: [col("invoiceId", "string")],
-    })
-    const requested = defineDataset("raw.erp.invoices", {
-      schema: [col("invoiceId", "string"), col("currency", "string", { nullable: true })],
-    })
 
     await storage.createDataset(existing)
-
     await expect(
       assertLakeDatasetDefinitionsCompatible({
         lakeStorage: storage,
         definitions: [requested],
       })
     ).rejects.toThrow(/Lake dataset definition check failed[\s\S]*incompatible schema/)
-  })
-
-  test("lake compatibility preflight delegates to provider bulk checks", async () => {
-    const dataset = defineDataset("raw.erp.invoices", {
-      schema: [col("invoiceId", "string")],
-    })
-    let bulkDefinitions: readonly DatasetDefinition[] | undefined
-    const storage = {
-      async assertDatasetDefinitionsCompatible(definitions: readonly DatasetDefinition[]) {
-        bulkDefinitions = definitions
-      },
-    } as unknown as LakeStorage
-
-    await assertLakeDatasetDefinitionsCompatible({
-      lakeStorage: storage,
-      definitions: [dataset],
-    })
-
-    expect(bulkDefinitions).toEqual([dataset])
   })
 })

@@ -121,12 +121,13 @@ test("ingestion checks authority and registration before consuming input or crea
 
 test("ingestion uses the registered schema and cancels one-shot input atomically", async () => {
   const { lakeStorage, sixb } = setup()
+  // Valid for the caller's copy, which drops `name`; the registered schema requires it.
   await expect(
     sixb.datasets.ingest(
-      { ...dataset, schema: { columns: [col("id", "string")] } },
-      { changes: [change.upsert({ id: "42" })] }
+      { ...dataset, schema: { columns: [col("id", "string"), col("revision", "int64")] } },
+      { changes: [change.upsert({ id: "42", revision: 1 })] }
     )
-  ).rejects.toThrow()
+  ).rejects.toThrow("missing required column 'name'")
   const controller = new AbortController()
   await expect(
     sixb.datasets.ingest(dataset, {

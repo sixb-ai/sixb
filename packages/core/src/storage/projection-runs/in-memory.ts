@@ -77,16 +77,13 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
   /** Durable per-run history prevents a reclaimed execution token from becoming valid again. */
   private readonly executionTokensByRun = new Map<string, Set<string>>()
   private readonly runRootOperation: RunRootOperation
-  private readonly createExecutionToken: () => string
 
   constructor(input: {
     readonly executions: ExecutionStorage
     readonly runRootOperation?: RunRootOperation
-    readonly executionToken?: () => string
   }) {
     this.executions = input.executions
     this.runRootOperation = input.runRootOperation ?? runDirectly
-    this.createExecutionToken = input.executionToken ?? randomUUID
   }
 
   private readonly executions: ExecutionStorage
@@ -388,7 +385,7 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
     runId: string,
     currentToken: string | undefined
   ): string {
-    const executionToken = this.createExecutionToken()
+    const executionToken = randomUUID()
     assertProjectionRunNonEmpty(executionToken, "executionToken")
     const usedTokens = this.executionTokensByRun.get(key) ?? new Set<string>()
     if (currentToken) usedTokens.add(currentToken)

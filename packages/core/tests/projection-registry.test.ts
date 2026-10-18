@@ -555,40 +555,14 @@ describe("projection registry", () => {
         prop("reading", "double", { mode: "telemetry", required: true }),
       ],
     })
-    expect(
-      () =>
-        new ProjectionRegistry({
-          projections: [],
-          ontology: new OntologyRegistry({ sources: [RequiredTelemetry] }),
-          datasetsById: new Map(),
-        })
-    ).toThrow(ProjectionValidationError)
-    expect(
-      () =>
-        new ProjectionRegistry({
-          projections: [],
-          ontology: new OntologyRegistry({ sources: [RequiredTelemetry] }),
-          datasetsById: new Map(),
-        })
-    ).toThrow("cannot be required")
-  })
-
-  test("requires mostRecent to reference a timestamp dataset column", () => {
-    const invalid = {
-      ...defineProjection("rooms", Room)
-        .fromDataset(rooms)
-        .properties({ id: "room_id", name: "room_name" }),
-      conflictResolution: { strategy: "mostRecent", sourceTimestamp: "room_name" } as const,
-    }
-
-    expect(
-      () =>
-        new ProjectionRegistry({
-          projections: [invalid],
-          ontology: registry(),
-          datasetsById: datasets(rooms),
-        })
-    ).toThrow("must reference a timestamp dataset column")
+    const requiredTelemetry = () =>
+      new ProjectionRegistry({
+        projections: [],
+        ontology: new OntologyRegistry({ sources: [RequiredTelemetry] }),
+        datasetsById: new Map(),
+      })
+    expect(requiredTelemetry).toThrow(ProjectionValidationError)
+    expect(requiredTelemetry).toThrow("cannot be required")
   })
 
   test("requires mostRecent to reference a non-null timestamp dataset column", () => {
@@ -599,20 +573,24 @@ describe("projection registry", () => {
         col("updated_at", "timestamp", { nullable: true }),
       ],
     })
-    const invalid = {
-      ...defineProjection("nullable-rooms", Room)
-        .fromDataset(nullableRooms)
-        .properties({ id: "room_id", name: "room_name" }),
-      conflictResolution: { strategy: "mostRecent", sourceTimestamp: "updated_at" } as const,
-    }
-
-    expect(
-      () =>
+    const mostRecent =
+      (dataset: typeof rooms | typeof nullableRooms, sourceTimestamp: string) => () =>
         new ProjectionRegistry({
-          projections: [invalid],
+          projections: [
+            {
+              ...defineProjection("rooms", Room)
+                .fromDataset(dataset)
+                .properties({ id: "room_id", name: "room_name" }),
+              conflictResolution: { strategy: "mostRecent", sourceTimestamp },
+            },
+          ],
           ontology: registry(),
-          datasetsById: datasets(nullableRooms),
+          datasetsById: datasets(dataset),
         })
-    ).toThrow("must reference a non-null timestamp dataset column")
+
+    expect(mostRecent(rooms, "room_name")).toThrow("must reference a timestamp dataset column")
+    expect(mostRecent(nullableRooms, "updated_at")).toThrow(
+      "must reference a non-null timestamp dataset column"
+    )
   })
 })

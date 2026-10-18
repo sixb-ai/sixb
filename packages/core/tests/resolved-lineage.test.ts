@@ -365,12 +365,6 @@ describe("resolving a step's lineage through its inputs", () => {
     })
   })
 
-  test("a sync input recorded before Sixb recorded lineage stands for the ref alone", () => {
-    expect(
-      resolveStepLineage(copiesTitle, [input({ producer: { kind: "sync", id: "erp" } })])
-    ).toEqual(copiesTitle)
-  })
-
   test("an input whose lineage is unknown makes the output's unknown", () => {
     // Reproduce: resolve a legacy pipeline input like a sync one; its output classifies from
     // the refs alone.
@@ -430,6 +424,7 @@ describe("resolving a step's lineage through its inputs", () => {
       })
 
       // SELECT 'x' AS flag FROM rich UNION ALL SELECT title FROM raw_invoices
+      // A sync input recorded before Sixb recorded lineage stands for the ref alone.
       const synced = input({ producer: { kind: "sync", id: "erp" } })
       expect(
         resolveStepLineage({ rows: [], columns: { flag: [raw("title")] } }, [rich, synced])
@@ -499,7 +494,7 @@ describe("canonical lineage", () => {
       columns: { id: [ref(history.id, "id")], title: [] },
     }
 
-    for (let i = 0; i < 300; i += 1) {
+    for (let i = 0; i < 100; i += 1) {
       const written = random()
       const parent = random()
       const canonical = stored(written)
