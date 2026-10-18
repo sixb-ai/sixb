@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
@@ -511,7 +512,7 @@ describe("createCustomApp.dev", () => {
       // Regression proof: eagerly calling buildSharedAppDev() at startup makes the global parallel
       // suite hit Bun 1.3.14's shared native bundler state and report EISDIR/Unseekable reads.
       const sharedDevRoot = join(tempRoot, ".sixb", "generated", "shared-dev")
-      expect(await Bun.file(join(sharedDevRoot, "0")).exists()).toBe(false)
+      expect(existsSync(join(sharedDevRoot, "0"))).toBe(false)
     } finally {
       await server.stop()
     }

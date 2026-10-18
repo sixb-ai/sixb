@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { dirname, join, resolve } from "node:path"
@@ -32,7 +33,7 @@ async function runDev(root: string): Promise<void> {
     const normal = await fetch(`${origin}/`)
     const sharedDevRoot = join(root, ".sixb", "generated", "shared-dev")
     assert(
-      !(await Bun.file(join(sharedDevRoot, "0")).exists()),
+      !existsSync(join(sharedDevRoot, "0")),
       "ordinary dev startup must not build the shared graph"
     )
     const [shared, concurrentShared] = await Promise.all([

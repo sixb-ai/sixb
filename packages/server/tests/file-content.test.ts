@@ -30,15 +30,23 @@ describe("file content helpers", () => {
       ["", "application/octet-stream", "attachment"],
       [undefined, "application/octet-stream", "attachment"],
     ] as const) {
-      const response = await createFileContentResponse({
-        blobStorage,
-        fileRef: { ...stored, fileName: "file", ...(mediaType === undefined ? {} : { mediaType }) },
-      })
-      const label = String(mediaType)
-      expect(response?.headers.get("content-type"), label).toBe(contentType)
-      expect(response?.headers.get("content-disposition"), label).toStartWith(`${disposition};`)
-      expect(response?.headers.get("content-security-policy"), label).toBe(SANDBOXED)
-      expect(response?.headers.get("x-content-type-options"), label).toBe("nosniff")
+      // Asking for `inline` explicitly cannot lift a type off the list.
+      for (const requested of [undefined, "inline"] as const) {
+        const response = await createFileContentResponse({
+          blobStorage,
+          fileRef: {
+            ...stored,
+            fileName: "file",
+            ...(mediaType === undefined ? {} : { mediaType }),
+          },
+          disposition: requested,
+        })
+        const label = `${mediaType} (${requested ?? "default"})`
+        expect(response?.headers.get("content-type"), label).toBe(contentType)
+        expect(response?.headers.get("content-disposition"), label).toStartWith(`${disposition};`)
+        expect(response?.headers.get("content-security-policy"), label).toBe(SANDBOXED)
+        expect(response?.headers.get("x-content-type-options"), label).toBe("nosniff")
+      }
     }
   })
 

@@ -40,6 +40,7 @@ const installedBrowserGlobals = [
   "IS_REACT_ACT_ENVIRONMENT",
 ] as const
 const previousBrowserGlobals = new Map<string, PropertyDescriptor | undefined>()
+const queryClients: QueryClient[] = []
 
 // Hook state changes never touch the DOM, so Testing Library only re-checks on its interval (50ms by
 // default). The checks are in-memory reads, so poll them every millisecond.
@@ -103,7 +104,13 @@ beforeEach(() => {
 
 afterEach(async () => {
   cleanup()
-  await Bun.sleep(0)
+  // Drops each cache's five-minute garbage-collection timers.
+  for (const queryClient of queryClients.splice(0)) queryClient.clear()
+  // React Query delivers observer notifications on a zero-delay timer, and `Bun.sleep(0)` resolves
+  // before one runs. Run the notifications still scheduled while the DOM globals exist: React reads
+  // `window.event` even for an unmounted hook, and `afterAll` removes `window`, so a notification
+  // left behind crashed whichever test file ran next in this process.
+  await new Promise((resolve) => setTimeout(resolve, 0))
 })
 
 afterAll(async () => {
@@ -318,12 +325,14 @@ describe("connector replacement errors", () => {
 })
 
 function connectorQueryClient(): QueryClient {
-  return new QueryClient({
+  const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
       mutations: { retry: false },
     },
   })
+  queryClients.push(queryClient)
+  return queryClient
 }
 
 function seedConnectorQueries(
