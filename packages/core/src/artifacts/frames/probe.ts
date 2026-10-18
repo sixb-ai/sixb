@@ -1,14 +1,16 @@
-/** A problem the layout probe found on a slide, where it is on the slide, and its text. */
+/** A problem the layout probe found on a slide or a page, where it is, and its text. */
 export interface LayoutProblem {
   readonly code:
     | "outside"
     | "footer"
+    | "wide"
     | "overlap"
     | "clipped"
     | "small_text"
+    | "small_target"
     | "contrast"
     | "broken_image"
-  /** In the slide's 1280×720 pixels. */
+  /** In the slide's 1280×720 pixels, or the page's from its top left. */
   readonly rect: {
     readonly x: number
     readonly y: number
@@ -28,28 +30,37 @@ export interface LayoutProblem {
 }
 
 /**
- * Measures the slide the frame shows, laid out at its own size (`sixb-fill`), and returns what a
- * reader would find wrong with it. Run in the page as its own source, `(${layoutProbe})(3)`, so it
- * names nothing outside itself.
+ * Measures a slide the frame shows, laid out at its own size (`sixb-fill`), or the whole page, and
+ * returns what a reader would find wrong with it. Run in the frame as its own source,
+ * `(${layoutProbe})(3)` or `(${layoutProbe})("page")`, so it names nothing outside itself.
  *
- * - `outside`: text or an image past the slide's edge, which the slide cuts off.
- * - `footer`: text or an image over the footer's rule, the source, or the number.
+ * - `outside` (a slide): text or an image past the slide's edge, which the slide cuts off.
+ * - `footer` (a slide): text or an image over the footer's rule, the source, or the number.
+ * - `wide` (a page): text or an image past the window's right edge, outside any box that scrolls
+ *   sideways, which makes the whole page scroll sideways.
  * - `overlap`: text drawn over other text, line box on line box.
  * - `clipped`: text its own box cuts off.
- * - `small_text`: text under 18px as drawn, an SVG's scaled with it.
+ * - `small_text`: text under 18px on a slide, 12px on a page, as drawn, an SVG's scaled with it.
+ * - `small_target` (a page): a button, field, or other control under 24px either way.
  * - `contrast`: text under WCAG AA against the solid colors painted under it, its own box's,
  *   any box it overlaps, and an SVG shape's fill (4.5:1, or 3:1 from 24px, or 18.66px bold); text
  *   over an image or a gradient is not judged.
  * - `broken_image`: an image of the deck's own that did not load.
  *
- * Another artifact's chart or image is a box here, sized as the deck sizes it: it is measured as
- * one, and its content is the app's.
+ * Another artifact's chart or image is a box here, sized as its host sizes it: it is measured as
+ * one, and its content is the app's. A page is measured where the viewport shows it, so the check
+ * sizes the viewport to the page first.
  */
-export function layoutProbe(slideNumber: number): LayoutProblem[] {
+export function layoutProbe(scope: number | "page"): LayoutProblem[] {
   const MAX_PER_CODE = 8
-  const slide = document.querySelectorAll<HTMLElement>("section.slide")[slideNumber - 1]
+  const page = scope === "page"
+  const slide = page
+    ? document.body
+    : document.querySelectorAll<HTMLElement>("section.slide")[scope - 1]
   if (!slide) return []
-  const box = slide.getBoundingClientRect()
+  const box = page
+    ? document.documentElement.getBoundingClientRect()
+    : slide.getBoundingClientRect()
   const problems: LayoutProblem[] = []
   const counts = new Map<string, number>()
   const selector = (element: Element) =>
@@ -108,10 +119,11 @@ export function layoutProbe(slideNumber: number): LayoutProblem[] {
     (element) => (element.textContent ?? "").trim() !== "" && shown(element)
   )
 
-  // Past the slide's edge, or over the footer. The outermost offender stands for what it holds.
+  // Past the slide's edge, or over the footer; on a page, past the window's right edge. The
+  // outermost offender stands for what it holds.
   const footer = getComputedStyle(slide, "::after")
   const footerTop =
-    footer.content === "none" || footer.display === "none"
+    page || footer.content === "none" || footer.display === "none"
       ? Number.POSITIVE_INFINITY
       : box.bottom -
         Number.parseFloat(footer.bottom) -
@@ -119,9 +131,23 @@ export function layoutProbe(slideNumber: number): LayoutProblem[] {
         Number.parseFloat(footer.lineHeight) -
         Number.parseFloat(footer.borderTopWidth)
   const outside: Element[] = []
+  // A box that scrolls sideways holds what is wider than the window, as a wide table's does.
+  const scrolls = (element: Element) => {
+    for (let node = element.parentElement; node && node !== slide; node = node.parentElement) {
+      if (/auto|scroll/.test(getComputedStyle(node).overflowX)) return true
+    }
+    return false
+  }
   for (const element of content) {
     if (outside.some((parent) => parent.contains(element))) continue
     const rect = element.getBoundingClientRect()
+    if (page) {
+      if (rect.right > window.innerWidth + 1 && !scrolls(element)) {
+        outside.push(element)
+        report("wide", element)
+      }
+      continue
+    }
     if (
       rect.left < box.left - 1 ||
       rect.top < box.top - 1 ||
@@ -278,7 +304,7 @@ export function layoutProbe(slideNumber: number): LayoutProblem[] {
   ]
   for (const { element, size, ink } of texts) {
     if (outside.some((parent) => parent.contains(element))) continue
-    if (size < 17.5) {
+    if (size < (page ? 11.5 : 17.5)) {
       report("small_text", element, { size: Math.round(size * 10) / 10 })
     }
     const color = rgba(ink)
@@ -294,6 +320,22 @@ export function layoutProbe(slideNumber: number): LayoutProblem[] {
         ratio: Math.round(ratio * 100) / 100,
         colors: [hex(solid), hex(behind)],
       })
+    }
+  }
+
+  // A control a finger or a pointer can miss: WCAG's 24px minimum target, on a page.
+  if (page) {
+    const controls = slide.querySelectorAll(
+      'button, select, textarea, summary, [role="button"], a.button, input:not([type="hidden"], [type="checkbox"], [type="radio"])'
+    )
+    for (const control of Array.from(controls)) {
+      if (!shown(control)) continue
+      const rect = control.getBoundingClientRect()
+      if (rect.width < 23.5 || rect.height < 23.5) {
+        report("small_target", control, {
+          size: Math.round(Math.min(rect.width, rect.height)),
+        })
+      }
     }
   }
 

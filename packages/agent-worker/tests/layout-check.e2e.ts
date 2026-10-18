@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ArtifactTheme } from "@sixb/core/artifacts"
-import { checkDeckLayout } from "../src/artifacts/layout-check/layout-check"
+import { checkLayout } from "../src/artifacts/layout-check/layout-check"
 import { LocalBashSandbox } from "./helpers"
 
 // The layout check in a real headless Chromium, through Playwright for Node as the agent image
@@ -67,6 +67,27 @@ const DECK = `<!doctype html>
 </body>
 </html>`
 
+/**
+ * A page that reads well at 1280px but not on a phone: a fixed-width box wider than 390px, beside
+ * a wide table that scrolls in its own box, which is fine. It also has fine print, a control too
+ * small to hit, and a script that throws.
+ */
+const PAGE = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Planner</title></head>
+<body>
+  <main>
+    <h1>Fleet planner</h1>
+    <p class="lede">Everything here reads well at a laptop's width.</p>
+    <div id="fixed" style="width: 640px">A box as wide as a laptop's column</div>
+    <div class="table-scroll"><table style="min-width: 800px"><tr><td>A wide table</td><td>scrolls in its box</td></tr></table></div>
+    <p style="font-size: 10px">Fine print</p>
+    <button type="button" style="min-height: 0; height: 18px; padding: 0 4px">x</button>
+  </main>
+  <script>plan()</script>
+</body>
+</html>`
+
 /** A deck whose script stops answering once the check asks for its second slide. */
 const HANGING_DECK = `<!doctype html>
 <html lang="en">
@@ -104,8 +125,15 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
   })
   afterAll(() => rmSync(root, { recursive: true, force: true }))
 
-  const check = (deck: string, files: readonly string[], name: string, theme?: ArtifactTheme) =>
-    checkDeckLayout({
+  const check = (
+    deck: string,
+    files: readonly string[],
+    name: string,
+    theme?: ArtifactTheme,
+    layout: "deck" | "page" = "deck"
+  ) =>
+    checkLayout({
+      layout,
       handle: {
         sandbox: new LocalBashSandbox(root),
         env: {
@@ -197,6 +225,34 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
       expect(messages).toContain("img/unlisted.svg did not load (404)")
       expect(messages).not.toContain("img/listed.svg")
       expect(result.warnings.map((warning) => warning.code)).toContain("layout_broken_image")
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
+    "checks a page at a laptop's width and a phone's, for what a page gets wrong",
+    async () => {
+      // Reproduce by dropping the `scrolls` test in the probe's page rule: the table that scrolls
+      // in its own box is reported as running past the screen too.
+      const result = await check(PAGE, ["index.html"], "page", undefined, "page")
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+      expect(result.screenshots).toEqual([
+        ".sixb/agent/checks/page/desktop.png",
+        ".sixb/agent/checks/page/phone.png",
+      ])
+      const codes = result.warnings.map((warning) => `${warning.code}@${warning.part ?? ""}`)
+      expect(codes).toContain("layout_wide@phone")
+      expect(codes).not.toContain("layout_wide@desktop")
+      expect(codes).toContain("layout_small_target@desktop")
+      expect(codes).toContain("layout_small_text@desktop")
+      const wide = result.warnings.filter((warning) => warning.code === "layout_wide")
+      expect(wide).toHaveLength(1)
+      expect(wide[0]?.message).toContain("div “A box as wide as a laptop's column”")
+      expect(
+        result.warnings.some(
+          (warning) => warning.code === "layout_load_error" && warning.message.includes("plan")
+        )
+      ).toBe(true)
     },
     { timeout: 120_000 }
   )

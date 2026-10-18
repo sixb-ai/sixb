@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ArtifactTheme } from "@sixb/core/artifacts"
 import type { CommandResult, RunCommandOptions } from "@sixb/core/sandboxes"
-import { checkDeckLayout, layoutWarnings } from "../src/artifacts/layout-check/layout-check"
+import { checkLayout, layoutWarnings } from "../src/artifacts/layout-check/layout-check"
 import { LocalBashSandbox } from "./helpers"
 
 type Problem = Parameters<typeof layoutWarnings>[0][number]
@@ -62,6 +62,35 @@ describe("layout warnings", () => {
     ])
   })
 
+  test("name a page's problems by the widths they are at, with a page's own limits", () => {
+    const warnings = layoutWarnings([
+      problem({ slide: undefined, view: "desktop", size: 11, text: "Updated daily" }),
+      problem({ slide: undefined, view: "phone", size: 11, text: "Updated daily" }),
+      problem({
+        code: "small_target",
+        slide: undefined,
+        view: "phone",
+        selector: "button.ghost",
+        text: "×",
+        size: 18,
+      }),
+    ])
+    expect(warnings).toEqual([
+      {
+        code: "layout_small_target",
+        part: "phone",
+        message:
+          "On a phone (390px): button.ghost “×” is 18px across; make each control at least 24px each way.",
+      },
+      {
+        code: "layout_small_text",
+        part: "desktop",
+        message:
+          "At 1280px and on a phone (390px): p.eyebrow “Updated daily” is 11px; nothing on a page may be under 12px.",
+      },
+    ])
+  })
+
   test("stop at twelve, and say how many more the screenshots show", () => {
     const warnings = layoutWarnings(
       Array.from({ length: 15 }, (_, index) =>
@@ -105,10 +134,12 @@ describe("the layout check", () => {
       readonly name?: string
       readonly timeoutMs?: number
       readonly theme?: ArtifactTheme
+      readonly layout?: "deck" | "page"
     } = {}
   ) =>
-    checkDeckLayout({
+    checkLayout({
       handle,
+      layout: options.layout ?? "deck",
       directory: join(root, "deck"),
       files: ["index.html", "img/chart.png"],
       entry: new TextEncoder().encode("<!doctype html><html><head></head><body></body></html>"),
@@ -121,6 +152,7 @@ describe("the layout check", () => {
   test("installs the kit, the runtime, and the probe, and serves the entry with them", async () => {
     const { handle, commands, written } = sandbox({
       stdout: JSON.stringify({
+        layout: "deck",
         slides: 1,
         problems: [problem({})],
         errors: ["img/chart.png did not load (404)"],
@@ -177,12 +209,13 @@ describe("the layout check", () => {
       dark: false,
       tokens: { "--foreground": "#2b2b2b", "--background": "#fafafa" },
     })
-    expect(written.filter((path) => path.startsWith(library))).toHaveLength(4)
+    expect(written.filter((path) => path.startsWith(library))).toHaveLength(5)
     expect(written.filter((path) => path.endsWith("/entry.html"))).toHaveLength(2)
   })
 
   test("keeps what a check reported, however its command ended", async () => {
     const report = {
+      layout: "deck",
       slides: 4,
       problems: [problem({ slide: 2 })],
       errors: [],
@@ -258,6 +291,66 @@ exports.chromium = {
     },
     10_000
   )
+
+  test("lays a page out in the page layout, at a laptop's width and a phone's", async () => {
+    // Reproduce by passing "deck" to injectFrameAssets for every check: the page asks for the
+    // deck's kit, and its runtime lays it out as slides.
+    const output = join(root, ".sixb/agent/checks/art_0000000000-v1")
+    const { handle, commands } = sandbox({
+      stdout: JSON.stringify({
+        layout: "page",
+        slides: 0,
+        problems: [
+          problem({
+            code: "wide",
+            slide: undefined,
+            view: "phone",
+            selector: "table",
+            text: "Region",
+            rect: { x: 16, y: 480, width: 620, height: 240 },
+          }),
+        ],
+        errors: ["Uncaught TypeError: plan is not a function"],
+        screenshots: [join(output, "desktop.png"), join(output, "phone.png")],
+      }),
+    })
+    expect(await check(handle, { layout: "page" })).toEqual({
+      status: "checked",
+      screenshots: [
+        ".sixb/agent/checks/art_0000000000-v1/desktop.png",
+        ".sixb/agent/checks/art_0000000000-v1/phone.png",
+      ],
+      warnings: [
+        {
+          code: "layout_wide",
+          part: "phone",
+          message:
+            "On a phone (390px): table “Region” runs past the screen's right edge at 16,480 (620×240), so the whole page scrolls sideways; let it wrap or shrink, or put it in a box that scrolls (.table-scroll).",
+        },
+        {
+          code: "layout_load_error",
+          message: "While the page loaded: Uncaught TypeError: plan is not a function.",
+        },
+      ],
+    })
+    expect(readFileSync(join(output, "entry.html"), "utf8")).toContain(
+      '<link rel="stylesheet" href="__sixb/page.css"><script src="__sixb/runtime.js" data-sixb-layout="page">'
+    )
+    expect(commands[0]?.options.env).toMatchObject({ SIXB_CHECK_LAYOUT: "page" })
+  })
+
+  test("counts a report for another layout as a failed check", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const report = JSON.stringify({ layout: "deck", slides: 1, problems: [], screenshots: [] })
+      expect(await check(sandbox({ stdout: report }).handle, { layout: "page" })).toEqual({
+        status: "skipped",
+        reason: "the check failed in the sandbox",
+      })
+    } finally {
+      warn.mockRestore()
+    }
+  })
 
   test("says it did not run without a browser, or when it fails, and never refuses", async () => {
     expect(await check(sandbox({ stdout: '{"skipped":"no_browser"}\n' }).handle)).toEqual({

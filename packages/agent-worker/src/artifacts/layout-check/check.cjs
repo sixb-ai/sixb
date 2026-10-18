@@ -1,34 +1,43 @@
-// The Agent's layout check, run in the sandbox by publish_artifact: it serves a deck as the API
-// serves its frame, with the kit and the runtime, opens it in the sandbox's headless Chromium at
-// 1280×720 with each slide filling the page, measures every slide in each of the deck's themes
-// with the layout probe, and screenshots every slide in the first. It writes one line of JSON:
-// { slides, problems, errors, screenshots, stopped? } or { skipped }.
+// The Agent's layout check, run in the sandbox by publish_artifact: it serves a deck or a page as
+// the API serves its frame, with the kit and the runtime, and opens it in the sandbox's headless
+// Chromium. A deck shows at 1280×720 with each slide filling the page, and every slide is
+// measured in each of its themes with the layout probe and screenshot in the first. A page loads at
+// 1280px and at a phone's 390px, is measured whole in each theme, its top 4000px, and screenshot
+// at each width. It writes one line of JSON:
+// { layout, slides, problems, errors, screenshots, stopped? } or { skipped }.
 //
-//   node check.cjs <deck directory> <output directory> <library directory> <deadline in ms>
+//   node check.cjs <directory> <output directory> <library directory> <deadline in ms> <layout>
 //
-// The library holds what the worker installs beside this script: deck.css, runtime.js, probe.js.
-// The output directory holds entry.html, the deck's entry with the kit and runtime; files.json,
+// The library holds what the worker installs beside this script: deck.css, page.css, runtime.js,
+// probe.js. The output directory holds entry.html, the entry with the kit and runtime; files.json,
 // the paths the version publishes: only those are served, since the reader gets only those; and
-// themes.json, the themes the reader sees the deck in: Sixb's light and dark, or the mode the
-// deck's theme.json pins, with its tokens.
+// themes.json, the themes the reader sees it in: Sixb's light and dark, or the mode its
+// theme.json pins, with its tokens.
 //
-// A deck can stop answering, with a script that never yields or a font that never loads, and a
-// browser outlives a node that is killed. So every wait on the page is bounded, and when one runs
-// out, or the deadline passes, the check reports what it found so far and exits: Playwright kills
-// the browser it launched when node exits.
+// A deck or a page can stop answering, with a script that never yields or a font that never
+// loads, and a browser outlives a node that is killed. So every wait on the page is bounded, and
+// when one runs out, or the deadline passes, the check reports what it found so far and exits:
+// Playwright kills the browser it launched when node exits.
 "use strict"
 
 const http = require("node:http")
 const fs = require("node:fs")
 const path = require("node:path")
 
-const [deck, out, lib, deadline] = process.argv.slice(2)
+const [deck, out, lib, deadline, layout = "deck"] = process.argv.slice(2)
 const DEADLINE_MS = Number(deadline) || 100_000
 /** The most one step waits on the page: its fonts, a slide's measure, a screenshot. */
 const STEP_MS = 10_000
 const PROTOCOL = "sixb-frame/1"
 /** The frame's own files, served from the library as the API serves them beside a version's. */
-const FRAME_FILES = new Set(["/__sixb/deck.css", "/__sixb/runtime.js"])
+const FRAME_FILES = new Set(["/__sixb/deck.css", "/__sixb/page.css", "/__sixb/runtime.js"])
+/** The widths a page is checked at: a laptop's, and a phone's. */
+const VIEWS = [
+  { name: "desktop", width: 1280, height: 800 },
+  { name: "phone", width: 390, height: 844 },
+]
+/** How much of a page the check measures and shows, from its top. */
+const PAGE_HEIGHT = 4000
 const TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -49,7 +58,7 @@ const TYPES = {
 }
 
 /** What the check has found so far, which a check that stops early reports. */
-const found = { slides: 0, problems: [], errors: [], screenshots: [] }
+const found = { layout, slides: 0, problems: [], errors: [], screenshots: [] }
 const findings = () => ({ ...found, errors: [...new Set(found.errors)].slice(0, 10) })
 
 let reported = false
@@ -134,7 +143,8 @@ async function main() {
     server.close()
     return { skipped: "no_browser", detail: String(error?.message ?? error).slice(0, 300) }
   }
-  let step = "the deck"
+  const noun = layout === "page" ? "the page" : "the deck"
+  let step = noun
   let stalled = false
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })
@@ -154,15 +164,18 @@ async function main() {
       }
     })
     const { port } = server.address()
-    // A font or a library from a CDN may be out of reach; the deck is measured as it loaded.
-    await page
-      .goto(`http://127.0.0.1:${port}/index.html#sixb-fill`, { waitUntil: "load", timeout: 15_000 })
-      .catch((error) => errors.push(`the deck did not finish loading: ${error.message}`))
-    await within("the deck's fonts", page.evaluate(() => document.fonts?.ready)).catch(() => {})
-    found.slides = await within(
-      step,
-      page.evaluate(() => document.querySelectorAll("section.slide").length)
-    )
+    // A font or a library from a CDN may be out of reach; the entry is measured as it loaded.
+    const load = async (url) => {
+      await page
+        .goto(url, { waitUntil: "load", timeout: 15_000 })
+        .catch((error) => errors.push(`${noun} did not finish loading: ${error.message}`))
+      await within(`${noun}'s fonts`, page.evaluate(() => document.fonts?.ready)).catch(() => {})
+    }
+    const settle = () =>
+      within(
+        step,
+        page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
+      )
     const send = (method, params) =>
       within(
         step,
@@ -172,6 +185,43 @@ async function main() {
           { protocol: PROTOCOL, method, params }
         )
       )
+    if (layout === "page") {
+      for (const view of VIEWS) {
+        step = `the page at ${view.width}px`
+        await page.setViewportSize({ width: view.width, height: view.height })
+        await load(`http://127.0.0.1:${port}/index.html`)
+        for (const [index, name] of Object.keys(themes).entries()) {
+          step = `the page at ${view.width}px in ${name} mode`
+          await send("theme", themes[name])
+          await settle()
+          // The page in one view, up to its cut: the probe judges only what the viewport shows.
+          const height = await within(
+            step,
+            page.evaluate(() => document.documentElement.scrollHeight)
+          )
+          await page.setViewportSize({
+            width: view.width,
+            height: Math.max(view.height, Math.min(PAGE_HEIGHT, height)),
+          })
+          await settle()
+          for (const problem of await within(step, page.evaluate(`(${probe})("page")`))) {
+            problems.push({ ...problem, view: view.name, theme: name })
+          }
+          if (index === 0) {
+            const file = path.join(out, `${view.name}.png`)
+            await page.screenshot({ path: file, timeout: STEP_MS })
+            screenshots.push(file)
+          }
+          await page.setViewportSize({ width: view.width, height: view.height })
+        }
+      }
+      return findings()
+    }
+    await load(`http://127.0.0.1:${port}/index.html#sixb-fill`)
+    found.slides = await within(
+      step,
+      page.evaluate(() => document.querySelectorAll("section.slide").length)
+    )
     for (const [index, name] of Object.keys(themes).entries()) {
       step = `the deck in ${name} mode`
       await send("theme", themes[name])
@@ -183,10 +233,7 @@ async function main() {
           slide,
           { timeout: 5_000 }
         )
-        await within(
-          step,
-          page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
-        )
+        await settle()
         for (const problem of await within(step, page.evaluate(`(${probe})(${slide})`))) {
           problems.push({ ...problem, slide, theme: name })
         }

@@ -158,6 +158,37 @@ describe("publish_artifact", () => {
     })
   })
 
+  test("points the Agent at a page's screenshots at both widths, and its warnings", () => {
+    // Reproduce by wording every check as a deck's: the Agent looks for slide-NN.png.
+    const output = {
+      artifactId: "art_fl33tpl4n0",
+      version: 2,
+      kind: "page",
+      title: "Fleet planner",
+      warnings: [
+        {
+          code: "layout_wide",
+          part: "phone",
+          message: "On a phone (390px): table “Region” runs past the screen's right edge.",
+        },
+      ],
+      layoutCheck: {
+        screenshots: [
+          ".sixb/agent/checks/art_fl33tpl4n0-v2/desktop.png",
+          ".sixb/agent/checks/art_fl33tpl4n0-v2/phone.png",
+        ],
+      },
+    }
+    expect(tools().version.toModelOutput?.(output, context)).toEqual({
+      type: "text",
+      value: [
+        'Published "Fleet planner" as artifact art_fl33tpl4n0, version 2.',
+        "Warning (phone): On a phone (390px): table “Region” runs past the screen's right edge.",
+        "Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is .sixb/agent/checks/art_fl33tpl4n0-v2/desktop.png at 1280px and .sixb/agent/checks/art_fl33tpl4n0-v2/phone.png at 390px, each its top 4000px. Open them with view_file, fix what the warnings name, and publish the next version.",
+      ].join("\n"),
+    })
+  })
+
   test("publishes one Markdown file as a document and any other file under its name", async () => {
     write("drafts/brief.md", "# Brief\n\nShort.\n")
     write("exports/regions.csv", "region,visits\nNorth,1284\n")
@@ -421,13 +452,19 @@ describe("the sixb-artifacts skill's examples", () => {
       "examples/slides/launch-plan",
       "examples/sheet/service-metrics",
       "examples/sheet/parts-inventory",
+      "examples/page/fleet-planner",
+      "examples/page/sla-dashboard",
     ])
     // slides.md says the decks use its layouts and classes alone; a legend's swatch is one.
-    for (const deck of examples.filter((file) => file.path.endsWith(".html"))) {
+    const decks = examples.filter(
+      (file) => file.path.startsWith("examples/slides/") && file.path.endsWith(".html")
+    )
+    expect(decks).toHaveLength(2)
+    for (const deck of decks) {
       expect(String(deck.contents)).not.toMatch(/<style|style="(?!--swatch:)/)
     }
     for (const directory of directories) {
-      const kind = directory.split("/")[1] as "document" | "sheet" | "slides"
+      const kind = directory.split("/")[1] as "document" | "sheet" | "slides" | "page"
       expect(await publish({ path: directory, kind, title: directory })).toMatchObject({
         version: 1,
         kind,

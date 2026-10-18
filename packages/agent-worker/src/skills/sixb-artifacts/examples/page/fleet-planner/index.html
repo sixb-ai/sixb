@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Q4 fleet planner</title>
+  <style>
+    .planner { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 24px; align-items: start; margin-bottom: 16px; }
+    .planner > .card { margin: 0; }
+    @media (max-width: 760px) { .planner { grid-template-columns: minmax(0, 1fr); } }
+    .bar { height: 6px; border-radius: 999px; background: var(--muted); overflow: hidden; }
+    .bar > span { display: block; height: 100%; background: var(--chart-1); border-radius: inherit; }
+    .load { width: 30%; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Q4 2026 · Field service</p>
+    <h1>Fleet planner</h1>
+    <p class="lede">How many crews and vans next quarter's service visits need, by region. Change the assumptions to plan for a busier quarter.</p>
+
+    <div class="grid">
+      <div class="card stat"><div class="label">Visits forecast</div><div class="value" id="visits">–</div><div class="delta" id="growth-note">–</div></div>
+      <div class="card stat"><div class="label">Crews needed</div><div class="value" id="crews">–</div><div class="delta" id="crews-delta">–</div></div>
+      <div class="card stat"><div class="label">Vans needed</div><div class="value" id="vans">–</div><div class="delta">One per crew, plus spares</div></div>
+    </div>
+
+    <div class="planner">
+      <form class="card" id="inputs">
+        <h3>Assumptions</h3>
+        <div class="field">
+          <label for="growth">Visit growth on Q3 (%)</label>
+          <input id="growth" type="number" value="8" min="-50" max="100" step="1">
+        </div>
+        <div class="field">
+          <label for="per-crew">Visits per crew per week</label>
+          <input id="per-crew" type="number" value="22" min="5" max="60">
+        </div>
+        <div class="field">
+          <label for="spares">Spare vans</label>
+          <select id="spares">
+            <option value="0.1" selected>10% of the fleet</option>
+            <option value="0.15">15% of the fleet</option>
+            <option value="0.2">20% of the fleet</option>
+          </select>
+        </div>
+        <div class="row">
+          <button type="button" id="reset" class="secondary">Reset</button>
+          <span class="tag" id="status">Within today's fleet</span>
+        </div>
+      </form>
+
+      <div class="card">
+        <h3>By region</h3>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Region</th><th class="num">Q3 visits</th><th class="num">Q4 forecast</th><th class="num">Crews</th><th>Load</th></tr></thead>
+            <tbody id="regions"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <p class="note">Source: field service records, Q3 2026. A quarter is 13 weeks; the fleet runs 24 crews today.</p>
+  </main>
+
+  <script>
+    const WEEKS = 13
+    const TODAY_CREWS = 24
+    const DEFAULTS = { growth: "8", perCrew: "22", spares: "0.1" }
+    const number = new Intl.NumberFormat("en-US")
+    const field = {
+      growth: document.getElementById("growth"),
+      perCrew: document.getElementById("per-crew"),
+      spares: document.getElementById("spares"),
+    }
+    let regions = []
+
+    function cell(text, className) {
+      const td = document.createElement("td")
+      if (className) td.className = className
+      td.textContent = text
+      return td
+    }
+
+    function plan() {
+      const growth = Number(field.growth.value) / 100
+      const perCrew = Math.max(1, Number(field.perCrew.value))
+      const rows = regions.map((region) => {
+        const forecast = Math.round(region.visits * (1 + growth))
+        return { ...region, forecast, crews: Math.ceil(forecast / (perCrew * WEEKS)) }
+      })
+      const visits = rows.reduce((sum, row) => sum + row.forecast, 0)
+      const crews = rows.reduce((sum, row) => sum + row.crews, 0)
+      const vans = Math.ceil(crews * (1 + Number(field.spares.value)))
+      const change = crews - TODAY_CREWS
+
+      document.getElementById("visits").textContent = number.format(visits)
+      document.getElementById("growth-note").textContent =
+        `${growth >= 0 ? "+" : ""}${Math.round(growth * 100)}% on Q3`
+      document.getElementById("crews").textContent = number.format(crews)
+      document.getElementById("crews-delta").textContent =
+        change === 0 ? "As many as today" : `${change > 0 ? "+" : ""}${change} on today's ${TODAY_CREWS}`
+      document.getElementById("vans").textContent = number.format(vans)
+      document.getElementById("status").textContent =
+        change <= 0 ? "Within today's fleet" : `Hire ${change} ${change === 1 ? "crew" : "crews"}`
+
+      const most = Math.max(1, ...rows.map((row) => row.crews))
+      document.getElementById("regions").replaceChildren(
+        ...rows.map((row) => {
+          const tr = document.createElement("tr")
+          const load = cell("", "load")
+          const bar = document.createElement("div")
+          bar.className = "bar"
+          bar.append(document.createElement("span"))
+          bar.firstChild.style.width = `${Math.round((row.crews / most) * 100)}%`
+          load.append(bar)
+          tr.append(
+            cell(row.region),
+            cell(number.format(row.visits), "num"),
+            cell(number.format(row.forecast), "num"),
+            cell(String(row.crews), "num"),
+            load
+          )
+          return tr
+        })
+      )
+    }
+
+    document.getElementById("inputs").addEventListener("input", plan)
+    document.getElementById("reset").addEventListener("click", () => {
+      field.growth.value = DEFAULTS.growth
+      field.perCrew.value = DEFAULTS.perCrew
+      field.spares.value = DEFAULTS.spares
+      plan()
+    })
+
+    fetch("data/regions.json")
+      .then((response) => response.json())
+      .then((data) => {
+        regions = data
+        plan()
+      })
+  </script>
+</body>
+</html>

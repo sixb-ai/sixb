@@ -11,7 +11,7 @@ import {
   type Storage,
 } from "@sixb/core"
 import { ARTIFACT_KINDS, ARTIFACT_THEME_FILE, parseArtifactTheme } from "@sixb/core/artifacts"
-import { HTML_ENTRY } from "@sixb/core/internal/artifacts/frames"
+import { frameLayout, HTML_ENTRY } from "@sixb/core/internal/artifacts/frames"
 import {
   ARTIFACT_LIMITS,
   artifactVersionWarnings,
@@ -32,7 +32,7 @@ import {
 } from "../sandbox-files"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 import type { AgentFileBudget } from "../tools/tool-files"
-import { checkDeckLayout, type LayoutCheck } from "./layout-check/layout-check"
+import { checkLayout, type LayoutCheck } from "./layout-check/layout-check"
 import type { InstalledArtifacts, PublishedArtifactFile } from "./materialize"
 
 const CREATE_TOOL = "publish_artifact"
@@ -277,21 +277,23 @@ async function publish(
       error
     )
   }
-  // A published deck is laid out in the sandbox's browser, so the Agent sees what the reader
-  // will, and fixes it in its next version.
-  const deck = kind === "slides" ? sources.find((source) => source.path === HTML_ENTRY) : undefined
-  const deckEntry = contents.find((file) => file.path === HTML_ENTRY)
+  // A published deck or page is laid out in the sandbox's browser, so the Agent sees what the
+  // reader will, and fixes it in its next version.
+  const layout = frameLayout(kind)
+  const web = layout ? sources.find((source) => source.path === HTML_ENTRY) : undefined
+  const webEntry = contents.find((file) => file.path === HTML_ENTRY)
   const themeFile = contents.find((file) => file.path === ARTIFACT_THEME_FILE)
   // Publishing has read it already: a version with a theme.json it refused is not here.
   const theme = themeFile ? parseArtifactTheme(new TextDecoder().decode(themeFile.bytes)) : null
   let check: LayoutCheck | undefined
-  if (deck && deckEntry) {
+  if (layout && web && webEntry) {
     try {
-      check = await checkDeckLayout({
+      check = await checkLayout({
         handle,
-        directory: posix.dirname(deck.absolutePath),
+        layout,
+        directory: posix.dirname(web.absolutePath),
         files: contents.map((file) => file.path),
-        entry: deckEntry.bytes,
+        entry: webEntry.bytes,
         name: `${published.artifact.id}-v${published.version.version}`,
         ...(theme && "theme" in theme ? { theme: theme.theme } : {}),
         signal,
@@ -441,12 +443,17 @@ function publishSummary(output: JsonValue, tool: PublishToolName): string {
   const check = output.layoutCheck
   if (typeof check === "object" && check !== null && !Array.isArray(check)) {
     const screenshots = Array.isArray(check.screenshots) ? check.screenshots.map(String) : []
+    const page = output.kind === "page"
     if (typeof check.skipped === "string") {
-      lines.push(`The layout check did not run: ${check.skipped}. Read index.html slide by slide.`)
+      lines.push(
+        `The layout check did not run: ${check.skipped}. ${page ? "Read index.html and its scripts closely." : "Read index.html slide by slide."}`
+      )
     } else if (screenshots.length > 0) {
       const directory = posix.dirname(screenshots[0] ?? "")
       lines.push(
-        `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with view_file, fix what the warnings name, and publish the next version.`
+        page
+          ? `Layout check: the page as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/desktop.png at 1280px and ${directory}/phone.png at 390px, each its top 4000px. Open them with view_file, fix what the warnings name, and publish the next version.`
+          : `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with view_file, fix what the warnings name, and publish the next version.`
       )
     }
   }
