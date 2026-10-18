@@ -53,6 +53,14 @@ export function withArtifactTarget(
   return next
 }
 
+/** The target's own page in the app, at its version and part. */
+export function artifactTargetHref(target: ArtifactTarget): string {
+  return artifactHref(target.artifactId, {
+    ...(target.version === undefined ? {} : { version: target.version }),
+    ...(target.part ? { part: target.part } : {}),
+  })
+}
+
 /**
  * A link to the target's own page, for people to share: pinned to its version only when that is
  * not the latest, so a link to the current artifact keeps following its new versions.
@@ -62,10 +70,7 @@ export function artifactLink(
   latestVersion: number | undefined,
   origin: string
 ): string {
-  const pinned = target.version !== undefined && target.version !== latestVersion
-  const href = artifactHref(target.artifactId, {
-    ...(pinned && target.version !== undefined ? { version: target.version } : {}),
-    ...(target.part ? { part: target.part } : {}),
-  })
-  return new URL(href, origin).toString()
+  const { version, ...unpinned } = target
+  const pinned = version !== undefined && version !== latestVersion
+  return new URL(artifactTargetHref(pinned ? target : unpinned), origin).toString()
 }

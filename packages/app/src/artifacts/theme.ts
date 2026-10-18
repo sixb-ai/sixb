@@ -1,5 +1,6 @@
 import type { ArtifactTheme } from "@sixb/core/artifacts"
 import type { CSSProperties } from "react"
+import { type ArtifactVersion, useArtifactTheme } from "./queries"
 
 export interface ArtifactThemeAttributes {
   /** `dark` or `light` when the artifact pins a mode, so the app's tokens for it apply. */
@@ -20,4 +21,9 @@ export function artifactThemeAttributes(theme: ArtifactTheme | null): ArtifactTh
     ...(theme.mode ? { className: theme.mode } : {}),
     ...(Object.keys(tokens).length === 0 ? {} : { style: { ...tokens } as CSSProperties }),
   }
+}
+
+/** The version's theme, for its renderer's root, once its `theme.json` is read. */
+export function useArtifactThemeAttributes(version: ArtifactVersion): ArtifactThemeAttributes {
+  return artifactThemeAttributes(useArtifactTheme(version))
 }

@@ -1,19 +1,23 @@
 import type { GetArtifactVersionResponse } from "@sixb/client"
 import { ARTIFACT_THEME_FILE, type ArtifactTheme, parseArtifactTheme } from "@sixb/core/artifacts"
 import { useQuery } from "@tanstack/react-query"
+import { useMemo } from "react"
 import { artifactFileSource, type FileSource } from "./file-source"
 import { type FileLoadError, fileLoadError, MAX_TEXT_PREVIEW_BYTES } from "./file-view"
 
 export type ArtifactVersion = GetArtifactVersionResponse
 
-/** A file's text, read whole when it is small enough to preview. */
-export function useFileText(source: FileSource | null): {
+/** A file's text, read whole when it is at most `maxBytes`: by default, what a preview reads. */
+export function useFileText(
+  source: FileSource | null,
+  maxBytes: number = MAX_TEXT_PREVIEW_BYTES
+): {
   readonly text: string | undefined
   readonly loading: boolean
   readonly error: FileLoadError | null
   readonly tooLarge: boolean
 } {
-  const tooLarge = source !== null && source.fileRef.sizeBytes > MAX_TEXT_PREVIEW_BYTES
+  const tooLarge = source !== null && source.fileRef.sizeBytes > maxBytes
   const query = useQuery({
     queryKey: [...(source?.queryKey ?? ["no-file"]), "text"],
     enabled: source !== null && !tooLarge,
@@ -49,9 +53,12 @@ export function versionFileSource(version: ArtifactVersion, path: string): FileS
 /** The version's `theme.json`, when it has one that still reads. */
 export function useArtifactTheme(version: ArtifactVersion): ArtifactTheme | null {
   const { text } = useFileText(versionFileSource(version, ARTIFACT_THEME_FILE))
-  if (text === undefined) return null
-  const parsed = parseArtifactTheme(text)
-  return "theme" in parsed ? parsed.theme : null
+  // One theme for as long as its text: a frame sends the theme again when it changes.
+  return useMemo(() => {
+    if (text === undefined) return null
+    const parsed = parseArtifactTheme(text)
+    return "theme" in parsed ? parsed.theme : null
+  }, [text])
 }
 
 /** An image a document shows, by the relative path its Markdown names, resolved as publishing did. */
