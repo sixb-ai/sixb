@@ -89,6 +89,21 @@ describe("decideDocsBuild", () => {
     expect(decision.build).toBe(build)
     expect(decision.reason).toContain(reason)
   })
+
+  test("asks git about every watched path", () => {
+    let asked: readonly string[] = []
+    decideDocsBuild({
+      previousSha: deployedSha,
+      git: probe({
+        changedPaths: (_range, pathspecs) => {
+          asked = pathspecs
+          return []
+        },
+      }),
+    })
+
+    expect(asked).toEqual(WATCHED_PATHS)
+  })
 })
 
 /**

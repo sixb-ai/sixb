@@ -146,6 +146,36 @@ describe("BullMqQueues (Redis-specific)", () => {
     })
   })
 
+  describe("stalled redelivery", () => {
+    // A claim without leaseMs must use the provider's defaultLeaseMs, not a built-in default.
+    test("redelivers via BullMQ's stalled check when the lock expires", async () => {
+      const provider = createTestQueues({ defaultLeaseMs: 100, stalledInterval: 50 })
+
+      try {
+        const [job] = await provider.syncRuns.enqueue({
+          projectId: "project-a",
+          jobs: [{ type: "sync.run.requested", payload: { runId: "run-s-1" } }],
+        })
+        const [firstClaim] = await provider.syncRuns.claim({
+          projectId: "project-a",
+          workerId: "worker-1",
+        })
+
+        await Bun.sleep(300)
+        const [secondClaim] = await provider.syncRuns.claim({
+          projectId: "project-a",
+          workerId: "worker-2",
+        })
+
+        expect(firstClaim?.job.attempt).toBe(1)
+        expect(secondClaim?.job.id).toBe(job?.id)
+        expect(secondClaim!.job.attempt).toBeGreaterThanOrEqual(2)
+      } finally {
+        await provider.close()
+      }
+    })
+  })
+
   describe("terminal failure diagnostics", () => {
     test("projects the stable code and message onto BullMQ's native failed job", async () => {
       const connection = createBorrowedConnection()
