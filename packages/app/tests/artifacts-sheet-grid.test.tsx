@@ -678,6 +678,36 @@ describe("a sheet artifact", () => {
     expect(document.activeElement === ui.getByRole("grid")).toBe(true)
   })
 
+  test("goes to the cell or range typed in the name box, and marks one it can't read", async () => {
+    // Reproduce by dropping the `goTo` effect in SheetGrid: Enter leaves the selection on A2.
+    const ui = render(<ArtifactViewer cache={sheetCache()} artifactId={NUMBERS} />)
+    const nameBox = ui.getByRole("textbox", { name: /Name box/ }) as HTMLInputElement
+    expect(nameBox.value).toBe("A2")
+    const enter = async (text: string) => {
+      nameBox.focus()
+      await act(async () => typeInto(nameBox, text))
+      await act(async () => {
+        fireEvent.keyDown(nameBox, { key: "Enter" })
+      })
+    }
+    await enter("b1:b2")
+    expect(nameBox.value).toBe("B1:B2")
+    expect(document.activeElement === ui.getByRole("grid")).toBe(true)
+
+    await enter("not a cell")
+    expect(nameBox.getAttribute("aria-invalid")).toBe("true")
+    await act(async () => {
+      fireEvent.keyDown(nameBox, { key: "Escape" })
+    })
+    expect(nameBox.value).toBe("B1:B2")
+  })
+
+  test("selects every cell from the corner, as a spreadsheet's corner does", async () => {
+    const ui = render(<ArtifactViewer cache={sheetCache()} artifactId={NUMBERS} />)
+    await act(async () => fireEvent.click(ui.getByRole("button", { name: "Select all" })))
+    expect((ui.getByRole("textbox", { name: /Name box/ }) as HTMLInputElement).value).toBe("A1:B2")
+  })
+
   test("keeps each sheet's columns as the reader left them across its tabs", async () => {
     // Reproduce by not passing `view` to SheetGrid in WorkbookView: Summary's widened column is
     // back to its first width when the reader returns to it.

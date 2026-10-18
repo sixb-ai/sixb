@@ -59,14 +59,15 @@ export function SheetDownloads({
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger
           aria-label={messages.download}
-          className="flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium text-foreground transition-colors outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+          title={messages.download}
+          className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-muted data-[state=open]:text-foreground"
         >
           {state === "working" ? (
             <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
           ) : (
             <Download className="size-3.5" aria-hidden="true" />
           )}
-          <span className="hidden @md:inline">{messages.download}</span>
+          <span className="hidden @lg:inline">{messages.download}</span>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-56">
           {source ? (

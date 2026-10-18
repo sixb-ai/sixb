@@ -116,7 +116,7 @@ export function FindBar({
         onKeyDown={onKeyDown}
         placeholder={messages.find}
         aria-label={messages.find}
-        className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-[13px] outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-search-cancel-button]:hidden"
+        className="h-7 min-w-0 flex-1 rounded-md bg-transparent px-2 text-[13px] outline-none placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
       />
       <span className="shrink-0 px-1 text-xs text-muted-foreground tabular-nums" aria-live="polite">
         {query.trim()

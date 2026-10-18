@@ -16,25 +16,27 @@ import {
   ListFilter,
   Search,
 } from "lucide-react"
-import { type KeyboardEvent, lazy, type ReactNode, Suspense, useId, useRef, useState } from "react"
+import { lazy, Suspense, useId, useRef, useState } from "react"
 import { formatFileSize } from "../../file-size"
-import { type ArtifactMessages, useArtifactMessages } from "../../messages"
+import { useArtifactMessages } from "../../messages"
 import { type ArtifactVersion, versionImageSource } from "../../queries"
 import { useArtifactThemeAttributes } from "../../theme"
 import { ViewerLoading, ViewerNotice } from "../notice"
 import { SheetDownloads } from "./downloads"
-import { FindBar, useSheetFind } from "./find-bar"
-import { cellFormatter, numberFormat } from "./format"
+import { useSheetFind } from "./find-bar"
+import {
+  CommandBar,
+  CommandButton,
+  FindPanel,
+  nameBoxRange,
+  SheetBar,
+  type SheetTabItem,
+  StatusFigures,
+} from "./frame"
 import { SheetGrid, type SheetGridStatus } from "./grid"
 import type { SheetModel } from "./model"
 import { rangeLabel } from "./selection"
-import {
-  INITIAL_SHEET_VIEW,
-  type SheetView,
-  type SheetViewUpdate,
-  setAutoFilter,
-  useSheetViews,
-} from "./view"
+import { INITIAL_SHEET_VIEW, type SheetView, setAutoFilter, useSheetViews } from "./view"
 import { useSheetModel, useWorkbook } from "./workbook"
 
 const SheetChart = lazy(() => import("./chart"))
@@ -44,10 +46,10 @@ type Tab =
   | { readonly kind: "chart"; readonly name: string }
 
 /**
- * A sheet artifact as a spreadsheet: a tab per sheet and per chart, a bar with the selection and
- * the active cell's value or the find bar, the grid with the sheet's charts beside it, and a
- * status bar that sums what is selected. `part` opens a sheet by name (`Summary`, `Summary!A1:D5`) or a chart
- * (`chart=revenue`).
+ * A sheet artifact as a spreadsheet workbook: the formula bar with the name box and the active
+ * cell's value, the grid with the sheet's charts beside it, and the sheet bar with a tab per sheet
+ * and per chart and the status figures of the selection. `part` opens a sheet by name (`Summary`,
+ * `Summary!A1:D5`) or a chart (`chart=revenue`).
  */
 export function SheetRenderer({
   version,
@@ -105,6 +107,7 @@ function WorkbookView({
     workbook.sheets.find((entry) => entry.name === sheetName)
   )
   const [status, setStatus] = useState<SheetGridStatus | null>(null)
+  const [goTo, setGoTo] = useState<{ range: CellRange; seq: number } | null>(null)
   const root = useRef<HTMLDivElement | null>(null)
   const finder = useSheetFind(root)
   const views = useSheetViews()
@@ -112,14 +115,16 @@ function WorkbookView({
   const updateView = views.updateOf(sheetName)
   const sheetCharts = workbook.charts.filter((entry) => entry.sheet === sheetName)
   const theme = useArtifactThemeAttributes(version)
-  const tabs: readonly (Tab & { readonly label: ReactNode })[] = [
+  const tabs: readonly (Tab & SheetTabItem)[] = [
     ...workbook.sheets.map((entry) => ({
       kind: "sheet" as const,
+      key: `sheet:${entry.name}`,
       name: entry.name,
       label: entry.name,
     })),
     ...workbook.charts.map((entry) => ({
       kind: "chart" as const,
+      key: `chart:${entry.name}`,
       name: entry.name,
       label: (
         <>
@@ -132,16 +137,7 @@ function WorkbookView({
   const current = tabs.findIndex((entry) => entry.kind === tab.kind && entry.name === tab.name)
   const tabId = (index: number) => `${id}-tab-${index}`
   const panelId = `${id}-panel`
-
-  // Arrow keys move along the tabs and open the one they reach, as a spreadsheet's tabs do.
-  const onTabKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const next = tabKeyTarget(event.key, current, tabs.length)
-    const target = next === null ? undefined : tabs[next]
-    if (next === null || !target) return
-    event.preventDefault()
-    event.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus()
-    onTab({ kind: target.kind, name: target.name })
-  }
+  const onSheet = tab.kind === "sheet" && model
 
   return (
     <div
@@ -154,145 +150,151 @@ function WorkbookView({
       )}
       style={theme.style}
     >
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border/70 pr-3">
-        <div
-          role="tablist"
-          aria-label={messages.sheet.tabs}
-          onKeyDown={onTabKeyDown}
-          className="flex h-full min-w-0 flex-1 items-end gap-0.5 overflow-x-auto px-3 [scrollbar-width:none]"
-        >
-          {tabs.map((entry, index) => (
-            <TabButton
-              key={`${entry.kind}:${entry.name}`}
-              id={tabId(index)}
-              panel={panelId}
-              selected={index === current}
-              onSelect={() => onTab({ kind: entry.kind, name: entry.name })}
-            >
-              {entry.label}
-            </TabButton>
-          ))}
-        </div>
-        {tab.kind === "sheet" && model ? (
-          <button
-            type="button"
-            aria-pressed={view.autoFilter}
-            onClick={() => updateView((current) => setAutoFilter(current, !current.autoFilter))}
-            title={messages.sheet.filterMode}
-            className={cn(
-              "flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
-              view.autoFilter ? "bg-muted text-foreground" : "text-muted-foreground"
-            )}
-          >
-            <ListFilter className="size-3.5" aria-hidden="true" />
-            <span className="hidden @md:inline">{messages.sheet.filterMode}</span>
-          </button>
-        ) : null}
-        {tab.kind === "sheet" && model ? (
-          <button
-            type="button"
-            onClick={finder.show}
-            aria-label={messages.sheet.find}
-            title={messages.sheet.find}
-            className="flex size-[30px] shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Search className="size-3.5" aria-hidden="true" />
-          </button>
-        ) : null}
-        <SheetDownloads
-          version={version}
-          workbook={workbook}
-          sheet={sheetName}
-          source={source}
-          title={version.title}
-        />
-      </div>
+      <CommandBar
+        // A chart's tab names the chart in the name box, as a spreadsheet names a selected chart.
+        address={chart ? chart.name : onSheet && status ? rangeLabel(status.range) : ""}
+        value={chart ? (chart.title ?? chart.name) : onSheet ? status?.value : null}
+        {...(onSheet
+          ? {
+              onGoTo: (text: string) => {
+                const range = nameBoxRange(text)
+                if (range) setGoTo((current) => ({ range, seq: (current?.seq ?? 0) + 1 }))
+                return !!range
+              },
+            }
+          : {})}
+        tools={
+          <>
+            {onSheet ? (
+              <>
+                <CommandButton
+                  label={messages.sheet.find}
+                  icon={<Search aria-hidden="true" />}
+                  pressed={finder.open}
+                  onClick={finder.open ? finder.close : finder.show}
+                />
+                <CommandButton
+                  label={messages.sheet.filterMode}
+                  icon={<ListFilter aria-hidden="true" />}
+                  pressed={view.autoFilter}
+                  onClick={() =>
+                    updateView((current) => setAutoFilter(current, !current.autoFilter))
+                  }
+                  showLabel
+                />
+              </>
+            ) : null}
+            <SheetDownloads
+              version={version}
+              workbook={workbook}
+              sheet={sheetName}
+              source={source}
+              title={version.title}
+            />
+          </>
+        }
+      />
 
       <div
         role="tabpanel"
         id={panelId}
         aria-labelledby={tabId(current)}
-        className="flex min-h-0 flex-1 flex-col"
+        className="relative flex min-h-0 flex-1"
       >
-        {tab.kind === "sheet" ? <NameBox status={status} finder={finder} /> : null}
-
-        <div className="flex min-h-0 flex-1">
-          {!model ? (
-            loading ? (
-              <ViewerLoading label={messages.viewer.loading} />
-            ) : tooLarge && source ? (
-              <ViewerNotice
-                title={messages.sheet.tooLarge}
-                description={formatFileSize(source.fileRef.sizeBytes, locale, messages.files)}
-                action={
-                  <Button size="sm" asChild>
-                    <a href={source.downloadUrl} download={`${sheetName}.csv`}>
-                      <Download />
-                      {messages.sheet.downloadCsv(sheetName)}
-                    </a>
-                  </Button>
-                }
-              />
-            ) : (
-              <ViewerNotice title={messages.sheet.loadFailed} />
-            )
-          ) : chart ? (
-            <ChartPanel chart={chart} model={model} locale={locale} sheet={sheetName} large />
+        {tab.kind === "sheet" ? <FindPanel finder={finder} /> : null}
+        {!model ? (
+          loading ? (
+            <ViewerLoading label={messages.viewer.loading} />
+          ) : tooLarge && source ? (
+            <ViewerNotice
+              title={messages.sheet.tooLarge}
+              description={formatFileSize(source.fileRef.sizeBytes, locale, messages.files)}
+              action={
+                <Button size="sm" asChild>
+                  <a href={source.downloadUrl} download={`${sheetName}.csv`}>
+                    <Download />
+                    {messages.sheet.downloadCsv(sheetName)}
+                  </a>
+                </Button>
+              }
+            />
           ) : (
-            <>
-              <SheetGrid
-                key={`${version.artifactId}@${version.version}:${sheetName}`}
-                {...(selected ? { selected } : {})}
-                model={model}
-                locale={locale}
-                onStatusChange={setStatus}
-                find={finder.find}
-                onFind={finder.onFound}
-                view={view}
-                onViewChange={updateView}
-                imageUrl={(path) => versionImageSource(version, path)?.inlineUrl}
-                className="flex-1"
-              />
-              {sheetCharts.length > 0 ? (
-                <aside className="hidden w-[360px] shrink-0 flex-col gap-3 overflow-y-auto border-l border-border/70 bg-muted/20 p-3 @4xl:flex">
-                  {sheetCharts.map((entry) => (
-                    <div
-                      key={entry.name}
-                      className="rounded-xl border border-border/70 bg-background p-3 shadow-[0_1px_2px_rgb(0_0_0/0.04)]"
-                    >
-                      <ChartPanel
-                        chart={entry}
-                        model={model}
-                        locale={locale}
-                        sheet={sheetName}
-                        onOpen={() => onTab({ kind: "chart", name: entry.name })}
-                      />
-                    </div>
-                  ))}
-                </aside>
-              ) : null}
-            </>
-          )}
-        </div>
-
-        <StatusBar
-          model={model}
-          status={tab.kind === "sheet" ? status : null}
-          view={tab.kind === "sheet" ? view : INITIAL_SHEET_VIEW}
-          onViewChange={updateView}
-          locale={locale}
-          messages={messages}
-        />
+            <ViewerNotice title={messages.sheet.loadFailed} />
+          )
+        ) : chart ? (
+          <ChartPanel chart={chart} model={model} locale={locale} sheet={sheetName} large />
+        ) : (
+          <>
+            <SheetGrid
+              key={`${version.artifactId}@${version.version}:${sheetName}`}
+              {...(selected ? { selected } : {})}
+              {...(goTo ? { goTo } : {})}
+              model={model}
+              locale={locale}
+              onStatusChange={setStatus}
+              find={finder.find}
+              onFind={finder.onFound}
+              view={view}
+              onViewChange={updateView}
+              imageUrl={(path) => versionImageSource(version, path)?.inlineUrl}
+              className="flex-1"
+            />
+            {sheetCharts.length > 0 ? (
+              <aside className="hidden w-[360px] shrink-0 flex-col gap-3 overflow-y-auto border-l border-border/70 bg-muted/20 p-3 @4xl:flex">
+                {sheetCharts.map((entry) => (
+                  <div
+                    key={entry.name}
+                    className="rounded-xl border border-border/70 bg-background p-3 shadow-[0_1px_2px_rgb(0_0_0/0.04)]"
+                  >
+                    <ChartPanel
+                      chart={entry}
+                      model={model}
+                      locale={locale}
+                      sheet={sheetName}
+                      onOpen={() => onTab({ kind: "chart", name: entry.name })}
+                    />
+                  </div>
+                ))}
+              </aside>
+            ) : null}
+          </>
+        )}
       </div>
+
+      <SheetBar
+        tabs={{
+          items: tabs,
+          current,
+          onSelect: (index) => {
+            const target = tabs[index]
+            if (target) onTab({ kind: target.kind, name: target.name })
+          },
+          tabId,
+          panelId,
+        }}
+        status={
+          model ? (
+            <StatusFigures
+              model={model}
+              status={tab.kind === "sheet" ? status : null}
+              view={tab.kind === "sheet" ? view : INITIAL_SHEET_VIEW}
+              onViewChange={updateView}
+              locale={locale}
+              messages={messages}
+            />
+          ) : null
+        }
+      />
     </div>
   )
 }
 
-/** One table on its own, as a CSV file shows: the name box, the grid, and the status bar. */
+/** One table on its own, as a CSV file shows: the command bar, the grid, and the status bar. */
 export function SheetTable({ model }: { readonly model: SheetModel }) {
   const messages = useArtifactMessages()
   const locale = useLocale()
   const [status, setStatus] = useState<SheetGridStatus | null>(null)
+  const [goTo, setGoTo] = useState<{ range: CellRange; seq: number } | null>(null)
   const root = useRef<HTMLDivElement | null>(null)
   const finder = useSheetFind(root)
   const [view, setView] = useState<SheetView>(INITIAL_SHEET_VIEW)
@@ -302,79 +304,59 @@ export function SheetTable({ model }: { readonly model: SheetModel }) {
       onKeyDown={finder.onKeyDown}
       className="@container flex min-h-0 flex-1 flex-col bg-background"
     >
-      <NameBox status={status} finder={finder} />
-      <SheetGrid
-        model={model}
-        locale={locale}
-        onStatusChange={setStatus}
-        find={finder.find}
-        onFind={finder.onFound}
-        view={view}
-        onViewChange={setView}
-        className="flex-1"
+      <CommandBar
+        address={status ? rangeLabel(status.range) : ""}
+        value={status?.value}
+        onGoTo={(text) => {
+          const range = nameBoxRange(text)
+          if (range) setGoTo((current) => ({ range, seq: (current?.seq ?? 0) + 1 }))
+          return !!range
+        }}
+        tools={
+          <>
+            <CommandButton
+              label={messages.sheet.find}
+              icon={<Search aria-hidden="true" />}
+              pressed={finder.open}
+              onClick={finder.open ? finder.close : finder.show}
+            />
+            <CommandButton
+              label={messages.sheet.filterMode}
+              icon={<ListFilter aria-hidden="true" />}
+              pressed={view.autoFilter}
+              onClick={() => setView((current) => setAutoFilter(current, !current.autoFilter))}
+              showLabel
+            />
+          </>
+        }
       />
-      <StatusBar
-        model={model}
-        status={status}
-        view={view}
-        onViewChange={setView}
-        locale={locale}
-        messages={messages}
+      <div className="relative flex min-h-0 flex-1">
+        <FindPanel finder={finder} />
+        <SheetGrid
+          model={model}
+          locale={locale}
+          onStatusChange={setStatus}
+          find={finder.find}
+          onFind={finder.onFound}
+          view={view}
+          onViewChange={setView}
+          {...(goTo ? { goTo } : {})}
+          className="flex-1"
+        />
+      </div>
+      <SheetBar
+        status={
+          <StatusFigures
+            model={model}
+            status={status}
+            view={view}
+            onViewChange={setView}
+            locale={locale}
+            messages={messages}
+          />
+        }
       />
     </div>
-  )
-}
-
-/** Where an arrow, Home, or End key moves from one tab of `count`; null for any other key. */
-function tabKeyTarget(key: string, current: number, count: number): number | null {
-  if (count === 0) return null
-  switch (key) {
-    case "ArrowRight":
-      return (current + 1) % count
-    case "ArrowLeft":
-      return (current - 1 + count) % count
-    case "Home":
-      return 0
-    case "End":
-      return count - 1
-    default:
-      return null
-  }
-}
-
-function TabButton({
-  id,
-  panel,
-  selected,
-  onSelect,
-  children,
-}: {
-  readonly id: string
-  /** The panel the tabs show their content in. */
-  readonly panel: string
-  readonly selected: boolean
-  readonly onSelect: () => void
-  readonly children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      id={id}
-      aria-selected={selected}
-      aria-controls={panel}
-      // One stop in the tab order: the arrows move between the tabs.
-      tabIndex={selected ? 0 : -1}
-      onClick={onSelect}
-      className={cn(
-        "flex h-11 shrink-0 items-center gap-1.5 px-3 text-[13px] whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-        selected
-          ? "font-medium text-foreground shadow-[inset_0_-2px_0_var(--foreground)]"
-          : "text-muted-foreground hover:text-foreground"
-      )}
-    >
-      {children}
-    </button>
   )
 }
 
@@ -388,124 +370,6 @@ function ChartIcon({ type }: { readonly type: WorkbookChart["type"] }) {
           ? ChartPie
           : ChartColumn
   return <Icon className="size-3.5" aria-hidden="true" />
-}
-
-/**
- * The selection's address and the active cell's whole value, as a spreadsheet's formula bar shows
- * them.
- */
-function NameBox({
-  status,
-  finder,
-}: {
-  readonly status: SheetGridStatus | null
-  readonly finder: ReturnType<typeof useSheetFind>
-}) {
-  return (
-    <div className="flex h-10 shrink-0 items-center gap-3 overflow-hidden border-b border-border/70 px-3 text-[13px]">
-      <span className="flex h-6 min-w-14 items-center justify-center rounded-md border border-border px-2 font-mono text-xs tabular-nums">
-        {status ? rangeLabel(status.range) : "A1"}
-      </span>
-      <span className="h-4 w-px shrink-0 bg-border" aria-hidden="true" />
-      {finder.open ? (
-        <FindBar state={finder} />
-      ) : (
-        <span
-          data-sheet-value=""
-          className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap select-text [scrollbar-width:none]"
-        >
-          {status?.value}
-        </span>
-      )}
-    </div>
-  )
-}
-
-function StatusBar({
-  model,
-  status,
-  view,
-  onViewChange,
-  locale,
-  messages,
-}: {
-  readonly model: SheetModel | null
-  readonly status: SheetGridStatus | null
-  /** The reader's arrangement of the sheet: its hidden columns show here, with a way back. */
-  readonly view: SheetView
-  readonly onViewChange: SheetViewUpdate
-  readonly locale: string
-  readonly messages: ArtifactMessages
-}) {
-  if (!model) return null
-  const stats = status?.stats
-  // One numeric column reads in its own format; a wider selection as plain numbers.
-  const single = status && status.range.left === status.range.right ? status.column : undefined
-  const format = (value: number) =>
-    single?.numeric
-      ? cellFormatter(single, locale)(String(value)).text
-      : numberFormat(locale, { maximumFractionDigits: 2 }).format(value)
-  return (
-    <div className="flex min-h-9 shrink-0 flex-wrap items-center justify-between gap-x-6 gap-y-1 border-t border-border/70 px-4 py-1.5 text-xs text-muted-foreground tabular-nums">
-      <span>
-        {model.name} ·{" "}
-        {status && status.rows < model.rows.length ? (
-          <>
-            {messages.sheet.filteredRows(status.rows, model.rows.length)} ·{" "}
-            <button
-              type="button"
-              onClick={() => onViewChange((current) => ({ ...current, filters: {} }))}
-              className="rounded-sm font-medium text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              {messages.sheet.clearFilters}
-            </button>
-          </>
-        ) : (
-          messages.sheet.rows(model.rows.length)
-        )}
-        {model.frozenRows > 0 ? ` · ${messages.sheet.frozenRows(model.frozenRows)}` : ""}
-        {view.hidden.length > 0 ? (
-          <>
-            {` · ${messages.sheet.hiddenColumns(view.hidden.length)} · `}
-            <button
-              type="button"
-              onClick={() => onViewChange((current) => ({ ...current, hidden: [] }))}
-              className="rounded-sm font-medium text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              {messages.sheet.showHidden}
-            </button>
-          </>
-        ) : null}
-      </span>
-      {stats && stats.count > 1 ? (
-        <span className="flex flex-wrap gap-4">
-          {stats.numericCount > 0 ? (
-            <>
-              <Stat label={messages.sheet.sum} value={format(stats.sum)} />
-              {stats.average !== undefined ? (
-                <Stat label={messages.sheet.average} value={format(stats.average)} />
-              ) : null}
-              {stats.min !== undefined && stats.max !== undefined ? (
-                <>
-                  <Stat label={messages.sheet.min} value={format(stats.min)} />
-                  <Stat label={messages.sheet.max} value={format(stats.max)} />
-                </>
-              ) : null}
-            </>
-          ) : null}
-          <Stat label={messages.sheet.count} value={stats.count.toLocaleString(locale)} />
-        </span>
-      ) : null}
-    </div>
-  )
-}
-
-function Stat({ label, value }: { readonly label: string; readonly value: string }) {
-  return (
-    <span>
-      {label} <strong className="font-semibold text-foreground">{value}</strong>
-    </span>
-  )
 }
 
 function ChartPanel({

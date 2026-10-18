@@ -97,6 +97,7 @@ export function SheetGrid({
   onFind,
   view: viewProp,
   onViewChange,
+  goTo,
   className,
 }: {
   readonly model: SheetModel
@@ -112,6 +113,8 @@ export function SheetGrid({
   readonly imageUrl?: (path: string) => string | undefined
   /** A range to open on, selected and in view, such as the one an address named. */
   readonly selected?: CellRange
+  /** A range to go to, as the name box names one; each new `seq` goes there again. */
+  readonly goTo?: { readonly range: CellRange; readonly seq: number }
   readonly className?: string
 }) {
   const messages = useArtifactMessages().sheet
@@ -313,6 +316,28 @@ export function SheetGrid({
     setFocus(point)
     revealMatch.current(point)
   }, [matches, findIndex])
+
+  // The name box's range, kept to the cells shown, becomes the selection, in view, with focus.
+  const revealGoTo = useRef(reveal)
+  revealGoTo.current = reveal
+  const goToSeq = goTo?.seq
+  const goToRange = useRef(goTo?.range)
+  goToRange.current = goTo?.range
+  useEffect(() => {
+    const target = goToRange.current
+    if (goToSeq === undefined || !target) return
+    const point = (row: number, column: number) => ({
+      row: Math.min(row, rowCount - 1),
+      column: Math.min(column, columnCount - 1),
+    })
+    const start = point(target.top, target.left)
+    const end = point(target.bottom, target.right)
+    setAnchor(start)
+    setFocus(end)
+    revealGoTo.current(end)
+    revealGoTo.current(start)
+    gridRef.current?.focus({ preventScroll: true })
+  }, [goToSeq, rowCount, columnCount])
 
   const revealedOpening = useRef(false)
   useLayoutEffect(() => {
@@ -774,13 +799,30 @@ export function SheetGrid({
               className="sticky top-0 z-[4] order-first flex"
               style={{ width: totalWidth, height: LETTER_HEIGHT }}
             >
-              <div
+              <button
+                type="button"
+                aria-label={messages.selectAllCells}
+                title={messages.selectAllCells}
+                onClick={() => {
+                  setAnchor({ row: 0, column: 0 })
+                  setFocus({ row: rowCount - 1, column: columnCount - 1 })
+                  gridRef.current?.focus({ preventScroll: true })
+                }}
                 className={cn(
-                  "sticky left-0 z-[3] shrink-0 border-r border-b border-border",
+                  "group sticky left-0 z-[3] shrink-0 border-r border-b border-border outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
                   GUTTER
                 )}
                 style={{ width: rowNumberWidth }}
-              />
+              >
+                {/* The corner's triangle, as a spreadsheet's select-all corner has. */}
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 10 10"
+                  className="absolute right-1 bottom-1 size-2.5 fill-muted-foreground/45 transition-colors group-hover:fill-primary"
+                >
+                  <path d="M10 0V10H0Z" />
+                </svg>
+              </button>
               {fixedColumns.map((column) => letter(column, true))}
               {leadingSpace > 0 ? (
                 <div className="shrink-0" style={{ width: leadingSpace }} />

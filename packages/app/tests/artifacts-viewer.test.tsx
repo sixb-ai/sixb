@@ -308,7 +308,9 @@ describe("the viewer", () => {
     expect(html).toMatch(/aria-haspopup="menu"[^>]*aria-label="Download"/)
     expect(html).toContain("$5,560,000")
     expect(html).toContain("35.1%")
-    expect(html).toContain("Summary · 2 rows · Row 1 frozen")
+    // The sheet bar: the open sheet's tab, then the status figures.
+    expect(html).toContain(">2 rows<")
+    expect(html).toContain("Row 1 frozen")
     // The workbook's entry is not a file a reader wants; the sheet's own downloads replace it.
     expect(html).not.toContain("workbook.json")
   })
