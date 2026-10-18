@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { parseCsv, parseWorkbook, type Workbook } from "@sixb/core/artifacts"
+import { parseCsv, parseFormula, parseWorkbook, type Workbook } from "@sixb/core/artifacts"
 import { sheetModel } from "../src/artifacts/renderers/sheet/model"
-import { workbookXlsx } from "../src/artifacts/renderers/sheet/xlsx"
+import { formulaToA1, workbookXlsx } from "../src/artifacts/renderers/sheet/xlsx"
 
 const workbook = (() => {
   const parsed = parseWorkbook(
@@ -30,6 +30,19 @@ const workbook = (() => {
             Audited: "boolean",
           },
           totals: { Visits: "sum", Change: "average" },
+        },
+        {
+          name: "Margins",
+          columns: {
+            Revenue: "currency",
+            Cost: "currency",
+            Margin: { type: "percent", formula: "([@Revenue]-[@Cost])/[@Revenue]" },
+            Share: { type: "percent", formula: "[@Revenue]/SUM([Revenue])" },
+            Label: {
+              type: "text",
+              formula: 'CONCAT([@Hotel]," ",IF([@Revenue]>1000,"large","small"))',
+            },
+          },
         },
       ],
     })
@@ -59,6 +72,13 @@ const regions = sheetModel(
   parseCsv("Region,Visits,Change,Audited\nNorth,1284000,0.04,true\nSouth,962000,-0.01,FALSE\n")
 )
 
+const margins = sheetModel(
+  workbook.sheets[3] as Workbook["sheets"][number],
+  parseCsv(
+    "Hotel,Revenue,Cost,Margin,Share,Label\nLisbon,1400,910,,,\nKyoto,600,450,,,\nNew,0,10,,,\n"
+  )
+)
+
 const unzip = Bun.which("unzip")
 let directory = ""
 let file = ""
@@ -66,7 +86,7 @@ let file = ""
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), "sixb-xlsx-"))
   file = join(directory, "workbook.xlsx")
-  await writeFile(file, await workbookXlsx([summary, plan, regions]))
+  await writeFile(file, await workbookXlsx([summary, plan, regions, margins]))
 })
 afterAll(async () => {
   await rm(directory, { recursive: true, force: true })
@@ -185,5 +205,34 @@ describe.skipIf(!unzip)("a workbook as .xlsx", () => {
     )
     // Excel reads the parts of a worksheet in order: formats after the data, before the links.
     expect(sheet.indexOf("</sheetData>")).toBeLessThan(sheet.indexOf("<conditionalFormatting"))
+  })
+
+  test("writes computed cells as A1 formulas, with the values the grid shows", async () => {
+    const sheet = await run("-p", file, "xl/worksheets/sheet4.xml")
+    expect(sheet).toMatch(/<c r="D2" s="\d+"><f>\(B2-C2\)\/B2<\/f><v>0.35<\/v><\/c>/)
+    expect(sheet).toContain('<c r="D4" t="e"><f>(B4-C4)/B4</f><v>#DIV/0!</v></c>')
+    expect(sheet).toMatch(/<c r="E2" s="\d+"><f>B2\/SUM\(\$B\$2:\$B\$4\)<\/f><v>0.7<\/v><\/c>/)
+    // CONCAT is newer than the file format: Excel reads it only with its _xlfn. prefix.
+    expect(sheet).toContain(
+      '<c r="F2" t="str"><f>_xlfn.CONCAT(A2,&quot; &quot;,IF(B2&gt;1000,&quot;large&quot;,&quot;small&quot;))</f><v>Lisbon large</v></c>'
+    )
+  })
+})
+
+describe("a formula in A1 references", () => {
+  test("keeps only the parentheses Excel's precedence needs", () => {
+    const letters = new Map([
+      ["A", "B"],
+      ["B", "C"],
+    ])
+    const a1 = (formula: string) => formulaToA1(parseFormula(formula), letters, 7, 20)
+    expect(a1("[@A]-([@B]-1)")).toBe("B7-(C7-1)")
+    expect(a1("([@A]-[@B])-1")).toBe("B7-C7-1")
+    expect(a1("([@A]+[@B])*2")).toBe("(B7+C7)*2")
+    expect(a1("[@A]+[@B]*2")).toBe("B7+C7*2")
+    expect(a1("-([@A]+1)")).toBe("-(B7+1)")
+    expect(a1('[@A]&"%"')).toBe('B7&"%"')
+    expect(a1("AVERAGE([A])")).toBe("AVERAGE($B$2:$B$20)")
+    expect(a1("DAYS([@A],[@B])")).toBe("_xlfn.DAYS(B7,C7)")
   })
 })

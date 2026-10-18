@@ -7,16 +7,23 @@
         "Within SLA": { "type": "percent", "decimals": 1 },
         "Service revenue": { "type": "currency", "currency": "USD", "compact": true },
         "Parts cost": { "type": "currency", "currency": "USD", "compact": true },
-        "Quarter end": "date"
+        "Quarter end": "date",
+        "Margin": {
+          "type": "percent",
+          "decimals": 1,
+          "formula": "([@Service revenue]-[@Parts cost])/[@Service revenue]"
+        }
       },
       "descriptions": {
-        "Within SLA": "Priority calls restored inside the agreed time, of all priority calls."
+        "Within SLA": "Priority calls restored inside the agreed time, of all priority calls.",
+        "Margin": "Service revenue less parts cost, over service revenue."
       },
       "totals": {
         "Calls": "sum",
         "Within SLA": "average",
         "Service revenue": "sum",
-        "Parts cost": "sum"
+        "Parts cost": "sum",
+        "Margin": "average"
       }
     },
     {

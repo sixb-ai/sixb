@@ -88,7 +88,10 @@ export interface SheetGridStatus {
   readonly stats: RangeStats
   /** The column the active cell is in. */
   readonly column: SheetColumn | undefined
-  /** The active cell's whole value as it reads: a link's full address, a long text untruncated. */
+  /**
+   * The active cell's whole value as it reads: a link's full address, a long text untruncated, a
+   * computed cell's formula.
+   */
   readonly value: string
   /** The data rows shown: every row, or those the filters keep. */
   readonly rows: number
@@ -277,11 +280,17 @@ export function SheetGrid({
         ? (model.columns[focus.column]?.name ?? "")
         : (model.rows[order[focus.row - 1] ?? -1]?.[focus.column] ?? "")
     const cell = focus.row === 0 ? null : formatters[focus.column]?.(raw)
+    // A computed cell shows its formula, as a spreadsheet's formula bar does.
+    const formula = focus.row === 0 ? undefined : model.columns[focus.column]?.format.formula
     onStatusChange?.({
       range,
       stats: rangeStats(range, model, order, hidden),
       column: model.columns[focus.column],
-      value: cell ? (cell.href ?? cell.reference ?? cell.image ?? cell.text) : raw,
+      value: formula
+        ? `=${formula}`
+        : cell
+          ? (cell.href ?? cell.reference ?? cell.image ?? cell.text)
+          : raw,
       rows: order.length,
     })
   }, [onStatusChange, range, model, order, formatters, hidden, focus.row, focus.column])
@@ -645,7 +654,14 @@ export function SheetGrid({
       const column = segment[index] as number
       const cell = cellAt(row, column)
       if (!cell || model.columns[column]?.numeric || cell.number) continue
-      if (cell.href || cell.reference || cell.image || cell.tag || cell.check !== undefined)
+      if (
+        cell.href ||
+        cell.reference ||
+        cell.image ||
+        cell.tag ||
+        cell.error ||
+        cell.check !== undefined
+      )
         continue
       if (!cell.text.trim()) continue
       const need = textWidth(cell.text) + CELL_PADDING * 2
@@ -799,9 +815,13 @@ export function SheetGrid({
     )
   }
 
-  /** A header's hover text, its name and type then what it means, and its description. */
+  /** A header's hover text: its name and type, its formula, and what it means. */
   const headerTitle = (column: SheetColumn) => ({
-    title: [`${column.name} · ${columnTypeLabel(column, messages)}`, column.description]
+    title: [
+      `${column.name} · ${columnTypeLabel(column, messages)}`,
+      column.format.formula ? `=${column.format.formula}` : undefined,
+      column.description,
+    ]
       .filter(Boolean)
       .join("\n"),
     ...(column.description ? { description: column.description } : {}),

@@ -1,5 +1,8 @@
 import {
+  FORMULA_ERRORS,
+  type FormulaNode,
   isArtifactAddress,
+  parseFormula,
   parseSheetDate,
   parseSheetNumber,
   type SheetTotal,
@@ -105,10 +108,20 @@ function worksheet(
     )
     .join("")
   const writers = sheet.columns.map((column) => cellWriter(column, styles))
+  const letters = new Map(sheet.columns.map((column, index) => [column.name, columnLetter(index)]))
+  const lastRow = sheet.rows.length + 1
+  const formulas = sheet.columns.map((column) =>
+    column.format.formula ? parseFormula(column.format.formula) : null
+  )
   const rows = sheet.rows.map((values, rowIndex) => {
     const row = rowIndex + 2
     const cells = sheet.columns.map((column, index) => {
       const value = values[index] ?? ""
+      const formula = formulas[index]
+      if (formula) {
+        const ref = `${columnLetter(index)}${row}`
+        return computedCell(ref, formulaToA1(formula, letters, row, lastRow), value, column, styles)
+      }
       if (!value.trim()) return ""
       const ref = `${columnLetter(index)}${row}`
       if (column.format.type === "link" && /^https?:\/\//i.test(value.trim())) {
@@ -164,6 +177,106 @@ function conditionalFormats(sheet: SheetModel): string {
       return `<conditionalFormatting sqref="${sqref}"><cfRule type="${type}" priority="${priority}">${rule}</cfRule></conditionalFormatting>`
     })
     .join("")
+}
+
+/**
+ * A computed cell: its formula in A1 references, with the value the grid shows cached beside it,
+ * typed as its column is, so a reader that does not recalculate shows the same.
+ */
+function computedCell(
+  ref: string,
+  formula: string,
+  value: string,
+  column: SheetColumn,
+  styles: StyleSheet
+): string {
+  const f = `<f>${escapeXml(formula)}</f>`
+  if ((FORMULA_ERRORS as readonly string[]).includes(value)) {
+    return `<c r="${ref}" t="e">${f}<v>${value}</v></c>`
+  }
+  if (!value) return `<c r="${ref}">${f}</c>`
+  switch (column.format.type) {
+    case "number":
+    case "currency":
+    case "percent":
+      return `<c r="${ref}" s="${styles.numberFormat(numberFormatCode(column))}">${f}<v>${value}</v></c>`
+    case "date": {
+      const date = parseSheetDate(value)
+      return date
+        ? `<c r="${ref}" s="${styles.numberFormat("yyyy-mm-dd")}">${f}<v>${date.getTime() / DAY_MS + EPOCH_SERIAL}</v></c>`
+        : `<c r="${ref}">${f}</c>`
+    }
+    case "boolean":
+      return `<c r="${ref}" t="b">${f}<v>${value === "true" ? 1 : 0}</v></c>`
+    default:
+      return `<c r="${ref}" t="str">${f}<v>${escapeXml(value)}</v></c>`
+  }
+}
+
+/** Functions newer than Excel 2010, which a file names with Excel's `_xlfn.` prefix. */
+const FUTURE_FUNCTIONS = new Set(["CONCAT", "DAYS"])
+/** How tightly each operator binds, as Excel reads them, for the parentheses a formula needs. */
+const BINDING: Record<string, number> = {
+  "=": 1,
+  "<>": 1,
+  "<": 1,
+  "<=": 1,
+  ">": 1,
+  ">=": 1,
+  "&": 2,
+  "+": 3,
+  "-": 3,
+  "*": 4,
+  "/": 4,
+  "^": 5,
+}
+
+/**
+ * A formula with its column references as A1 references in this row: `[@Revenue]` is `B5`, and a
+ * whole column `[Revenue]` is its data rows, `$B$2:$B$13`. Parentheses are written where Excel's
+ * precedence needs them.
+ */
+export function formulaToA1(
+  node: FormulaNode,
+  letters: ReadonlyMap<string, string>,
+  row: number,
+  lastRow: number
+): string {
+  const write = (current: FormulaNode): string => {
+    switch (current.kind) {
+      case "number":
+        return String(current.value)
+      case "text":
+        return `"${current.value.replace(/"/g, '""')}"`
+      case "boolean":
+        return current.value ? "TRUE" : "FALSE"
+      case "ref":
+        return `${letters.get(current.column) ?? "A"}${row}`
+      case "columnRef": {
+        const letter = letters.get(current.column) ?? "A"
+        return `$${letter}$2:$${letter}$${lastRow}`
+      }
+      case "unary": {
+        const operand = write(current.operand)
+        return `${current.op}${current.operand.kind === "binary" ? `(${operand})` : operand}`
+      }
+      case "binary": {
+        const power = BINDING[current.op] ?? 0
+        // Each side keeps its own grouping: a looser operator on the left, and an equal or
+        // looser one on the right, since Excel reads left to right.
+        const side = (child: FormulaNode, right: boolean) => {
+          const text = write(child)
+          if (child.kind !== "binary") return text
+          const inner = BINDING[child.op] ?? 0
+          return inner < power || (right && inner === power) ? `(${text})` : text
+        }
+        return `${side(current.left, false)}${current.op}${side(current.right, true)}`
+      }
+      case "call":
+        return `${FUTURE_FUNCTIONS.has(current.name) ? "_xlfn." : ""}${current.name}(${current.args.map(write).join(",")})`
+    }
+  }
+  return write(node)
 }
 
 /** Excel's SUBTOTAL function for each total, in the forms that pass rows a filter hides. */

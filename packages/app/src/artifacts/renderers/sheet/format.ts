@@ -1,4 +1,5 @@
 import {
+  FORMULA_ERRORS,
   isArtifactAddress,
   parseSheetDate,
   parseSheetNumber,
@@ -23,6 +24,8 @@ export interface FormattedCell {
   readonly check?: boolean
   /** A tag cell's tone, drawn as a chip in it. */
   readonly tag?: SheetTone
+  /** A computed cell that computed to an error, such as `#DIV/0!`. */
+  readonly error?: boolean
 }
 
 /**
@@ -73,6 +76,15 @@ export function cellFormatter(
   column: SheetColumn,
   locale: string
 ): (value: string) => FormattedCell {
+  const format = typeFormatter(column, locale)
+  if (!column.format.formula) return format
+  return (value) =>
+    (FORMULA_ERRORS as readonly string[]).includes(value)
+      ? { text: value, error: true }
+      : format(value)
+}
+
+function typeFormatter(column: SheetColumn, locale: string): (value: string) => FormattedCell {
   const { format, decimals } = column
   switch (format.type) {
     case "number":

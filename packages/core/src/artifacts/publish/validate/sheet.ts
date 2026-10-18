@@ -2,8 +2,17 @@ import { posix } from "node:path"
 import type { ArtifactFile } from "../../../storage/artifacts/types"
 import { isArtifactAddress } from "../../address"
 import { CsvParseError, type CsvTable, parseCsv } from "../../csv"
+import {
+  checkFormula,
+  columnFormulaType,
+  evaluateComputedColumns,
+  FormulaCycleError,
+  formulaFitsColumn,
+  parseFormula,
+} from "../../formula"
 import { ARTIFACT_LIMITS } from "../../limits"
 import type { SheetOutline } from "../../outline"
+import type { ArtifactWarning } from "../../warnings"
 import {
   NUMERIC_COLUMN_TYPES,
   parseSheetDate,
@@ -20,8 +29,9 @@ import type { FoundReference } from "../references"
 
 /**
  * Reads a sheet: `workbook.json`, then each sheet's CSV against it. Every cell of a typed column
- * must read as its type and every chart must name columns its sheet has, so the grid formats and
- * the charts draw the same wherever the sheet is opened.
+ * must read as its type, every formula must compute its column, and every chart must name columns
+ * its sheet has, so the grid formats and the charts draw the same wherever the sheet is opened.
+ * Rows a formula computes to an error are warnings: the version publishes, and the grid shows them.
  */
 export async function validateSheet(
   blobStorage: ArtifactBlobStorage,
@@ -30,6 +40,7 @@ export async function validateSheet(
   readonly entry: string
   readonly outline: SheetOutline
   readonly references: readonly FoundReference[]
+  readonly warnings: readonly ArtifactWarning[]
 }> {
   const byPath = new Map(files.map((file) => [file.path, file]))
   const workbookFile = byPath.get(WORKBOOK_FILE)
@@ -54,8 +65,11 @@ export async function validateSheet(
 
   const tables = new Map<string, CsvTable>()
   const references: FoundReference[] = []
+  const warnings: ArtifactWarning[] = []
   for (const sheet of workbook.sheets) {
-    tables.set(sheet.name, await readSheet(blobStorage, byPath, sheet, references))
+    const table = await readSheet(blobStorage, byPath, sheet, references)
+    tables.set(sheet.name, table)
+    warnings.push(...computeSheet(sheet, table))
   }
   checkCharts(workbook, tables)
 
@@ -74,6 +88,7 @@ export async function validateSheet(
       charts: workbook.charts.map((chart) => chart.name),
     },
     references,
+    warnings,
   }
 }
 
@@ -155,9 +170,63 @@ async function readSheet(
         })
       }
     }
+    if (format.formula) {
+      checkComputedValues(path, table, index, column)
+      continue
+    }
     checkColumn(path, table, index, column, format, byPath)
   }
   return table
+}
+
+/** A computed column's values come from its formula: the CSV leaves them empty. */
+function checkComputedValues(path: string, table: CsvTable, index: number, column: string): void {
+  for (const [rowIndex, row] of table.rows.entries()) {
+    const value = row[index] ?? ""
+    if (value.trim()) {
+      throw invalidArtifact(
+        `'${path}' row ${rowIndex + 2}, column '${column}': ${JSON.stringify(value)} is in a computed column; leave its values empty, and its formula fills them.`
+      )
+    }
+  }
+}
+
+/**
+ * Checks each computed column's formula against the sheet's columns and computes them all, so a
+ * formula that can't compute refuses the version and one that computes to an error in some rows
+ * warns.
+ */
+function computeSheet(sheet: WorkbookSheet, table: CsvTable): ArtifactWarning[] {
+  const at = (column: string) => `${WORKBOOK_FILE} sheet '${sheet.name}' column '${column}'`
+  const types = new Map(
+    table.header.map((name) => [name, columnFormulaType(sheet.columns[name]?.type ?? "text")])
+  )
+  for (const [column, format] of Object.entries(sheet.columns)) {
+    if (!format.formula) continue
+    const checked = checkFormula(parseFormula(format.formula), types)
+    if ("error" in checked) throw invalidArtifact(`${at(column)} "formula": ${checked.error}.`)
+    if (!formulaFitsColumn(checked.type, format.type)) {
+      throw invalidArtifact(
+        `${at(column)} "formula" computes ${checked.type === "date" ? "a date" : checked.type === "boolean" ? "true or false" : checked.type === "text" ? "text" : "a number"}, which a ${format.type} column can't show: change its type, or the formula.`
+      )
+    }
+  }
+  let computed: ReturnType<typeof evaluateComputedColumns>
+  try {
+    computed = evaluateComputedColumns(sheet, table)
+  } catch (error) {
+    if (error instanceof FormulaCycleError) {
+      throw invalidArtifact(
+        `${WORKBOOK_FILE} sheet '${sheet.name}': ${error.message}, so none can be computed first.`
+      )
+    }
+    throw error
+  }
+  return [...computed.errors].map(([column, errors]) => ({
+    code: "sheet_formula_error",
+    part: sheet.name,
+    message: `Sheet '${sheet.name}' column '${column}' computes to ${errors.code} in ${errors.count === 1 ? "1 row" : `${errors.count} rows`}, the first row ${errors.firstRow + 2}. IFERROR gives those rows a value.`,
+  }))
 }
 
 function checkColumn(

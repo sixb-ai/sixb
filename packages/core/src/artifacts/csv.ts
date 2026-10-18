@@ -106,3 +106,13 @@ export function parseCsv(
   const [header, ...rows] = records
   return { header: header ?? [], rows }
 }
+
+/**
+ * A table as CSV, the inverse of {@link parseCsv}: a field holding a comma, a quote, or a line
+ * break is quoted, its quotes doubled; lines end in CRLF, as RFC 4180 writes them.
+ */
+export function formatCsv(header: readonly string[], rows: readonly (readonly string[])[]): string {
+  const field = (value: string) =>
+    /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+  return [header, ...rows].map((row) => `${row.map(field).join(",")}\r\n`).join("")
+}

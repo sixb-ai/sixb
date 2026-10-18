@@ -3,7 +3,8 @@
 A sheet is tabular data the reader explores: a grid with typed columns, one or more sheets, and
 charts the app draws from them. The reader sorts columns, selects a range to see its sum and
 average, copies cells, and downloads each sheet as CSV. Publish one for metrics, lists, trackers,
-and exports. When the user asked for an `.xlsx`, or needs formulas, publish a `file` instead.
+and exports. A column can compute from the others, as an Excel table's does. When the user asked for
+an `.xlsx`, or needs formulas across cells rather than columns, publish a `file` instead.
 
 ## Layout
 
@@ -105,6 +106,39 @@ Totals cover the rows the reader sees, so a filter changes them, and the first c
 total reads "Total". Describe a column whose name alone could be read two ways: how it is
 counted, what it includes, its source.
 
+## Computed columns
+
+A column with a `formula` computes each row from the others, as a column of an Excel table does.
+Name it in the CSV header and leave its values empty: the formula fills them, and the reader sees
+the formula in the formula bar.
+
+```json
+"Margin": { "type": "percent", "decimals": 1, "formula": "([@Revenue]-[@Cost])/[@Revenue]" }
+```
+
+| Write | Means |
+| --- | --- |
+| `[@Revenue]` | This row's Revenue |
+| `[@[Lead time (weeks)]]` | A name with spaces, brackets, or symbols, bracketed again |
+| `[Revenue]` | The whole column, only inside `SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNT`: `[@Revenue]/SUM([Revenue])` |
+| `"Late"`, `12.5`, `TRUE` | Text in double quotes, numbers, booleans |
+
+- Operators: `+ - * / ^`, `&` joins text, and `= <> < <= > >=` compare.
+- Functions: `IF`, `IFERROR`, `AND`, `OR`, `NOT`, `ISBLANK`, `ROUND`, `ABS`, `MIN`, `MAX`, `SUM`,
+  `AVERAGE`, `COUNT`, `LEN`, `LOWER`, `UPPER`, `CONCAT`, `YEAR`, `MONTH`, `DAYS`. Nothing that
+  changes by itself, such as `TODAY`: a version computes the same values forever.
+- It computes as Excel does, and the `.xlsx` download keeps each cell's formula: an empty cell
+  reads as 0, or as empty text with `&`. Use `IF(ISBLANK([@Cost]),"",…)` where a blank should stay
+  blank.
+- A division by zero shows `#DIV/0!` and text where a number belongs `#VALUE!`. Publishing warns
+  with the rows that do; `IFERROR([@Cost]/[@Revenue],"")` gives them a value.
+- The formula's result must fit the column's type: a number in a number, currency, or percent
+  column, a date in a date column (`[@Opened]+30`), true or false in a boolean one; anything in
+  text.
+
+Compute what follows from other columns: margins, shares, ratios, differences, days between dates,
+flags. Write values the source gives, and totals in `totals`, not in a computed column.
+
 ## Charts
 
 The app draws each chart from its sheet, in the theme's colors, beside the grid and in its own tab.
@@ -134,5 +168,5 @@ Open each CSV and check its header and a few rows. A refusal names the file, row
 ## Examples
 
 `examples/sheet/` holds two finished workbooks to start from: service metrics with two sheets,
-totals, descriptions, compact and signed numbers, a line chart, and a bar chart; and a parts
+totals, descriptions, compact and signed numbers, a computed margin, a line chart, and a bar chart; and a parts
 inventory with a frozen first column, a status tag, bars, a checkbox, dates, links, and a pie.

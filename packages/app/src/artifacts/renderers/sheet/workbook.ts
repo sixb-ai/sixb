@@ -1,5 +1,6 @@
 import {
   ARTIFACT_LIMITS,
+  type CsvTable,
   parseCsv,
   parseWorkbook,
   sheetFilePath,
@@ -66,11 +67,17 @@ export async function readWorkbookModels(
   version: ArtifactVersion,
   workbook: Workbook
 ): Promise<SheetModel[]> {
-  return Promise.all(
-    workbook.sheets.map(async (sheet) => {
-      const source = versionFileSource(version, sheetFilePath(sheet.name))
-      if (!source) throw new Error(`[SixbApp] Sheet '${sheet.name}' has no file.`)
-      return sheetModel(sheet, parseCsv(await fetchFileText(client, source)))
-    })
-  )
+  return Promise.all(workbook.sheets.map((sheet) => readSheetModel(client, version, sheet)))
+}
+
+/** One sheet, read and laid out, its computed columns filled. */
+export async function readSheetModel(
+  client: QueryClient,
+  version: ArtifactVersion,
+  sheet: WorkbookSheet
+): Promise<SheetModel> {
+  const source = versionFileSource(version, sheetFilePath(sheet.name))
+  if (!source) throw new Error(`[SixbApp] Sheet '${sheet.name}' has no file.`)
+  const table: CsvTable = parseCsv(await fetchFileText(client, source))
+  return sheetModel(sheet, table)
 }

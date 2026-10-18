@@ -225,27 +225,31 @@ export function columnTypeLabel(column: SheetColumn, messages: ArtifactMessages[
     : types[column.format.type]
 }
 
-/** A quiet mark of the column's type beside its name: `#`, its currency's sign, `%`, an icon. */
+/**
+ * A quiet mark of the column's type beside its name: `#`, its currency's sign, `%`, an icon; `fx`
+ * for a computed column, as its formula decides its values.
+ */
 function TypeGlyph({ column }: { readonly column: SheetColumn | undefined }) {
   const type = column?.format.type
-  const glyph =
-    type === "number" ? (
-      "#"
-    ) : type === "percent" ? (
-      "%"
-    ) : type === "currency" ? (
-      currencySymbol(column?.format.currency ?? "USD")
-    ) : type === "date" ? (
-      <CalendarDays className="size-3" />
-    ) : type === "link" ? (
-      <Link2 className="size-3" />
-    ) : type === "image" ? (
-      <Image className="size-3" />
-    ) : type === "boolean" ? (
-      <SquareCheck className="size-3" />
-    ) : type === "tag" ? (
-      <Tag className="size-3" />
-    ) : null
+  const glyph = column?.format.formula ? (
+    <span className="font-serif italic">fx</span>
+  ) : type === "number" ? (
+    "#"
+  ) : type === "percent" ? (
+    "%"
+  ) : type === "currency" ? (
+    currencySymbol(column?.format.currency ?? "USD")
+  ) : type === "date" ? (
+    <CalendarDays className="size-3" />
+  ) : type === "link" ? (
+    <Link2 className="size-3" />
+  ) : type === "image" ? (
+    <Image className="size-3" />
+  ) : type === "boolean" ? (
+    <SquareCheck className="size-3" />
+  ) : type === "tag" ? (
+    <Tag className="size-3" />
+  ) : null
   return glyph ? (
     <span
       className="flex shrink-0 items-center text-[11px] font-normal text-muted-foreground"
@@ -338,6 +342,14 @@ export function CellContent({
       <span className="flex min-w-0 items-center gap-2">
         {src ? <img src={src} alt="" className="size-5 shrink-0 rounded object-cover" /> : null}
         <span className="min-w-0 overflow-hidden text-muted-foreground">{cell.text}</span>
+      </span>
+    )
+  }
+  if (cell.error) {
+    // An error, centred as a spreadsheet centres one.
+    return (
+      <span className="min-w-0 flex-1 truncate text-center text-[12px] font-medium text-destructive">
+        {cell.text}
       </span>
     )
   }

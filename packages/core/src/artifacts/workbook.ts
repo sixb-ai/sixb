@@ -1,9 +1,11 @@
+import { FormulaSyntaxError, parseFormula } from "./formula/parser"
 import { ARTIFACT_LIMITS } from "./limits"
 
 /**
  * A sheet artifact is `workbook.json` and one CSV per sheet under `sheets/`. The CSV holds the
  * values; the workbook holds what CSV can't: sheet order, column types and formats, frozen rows
- * and columns, widths, descriptions and totals, and charts drawn from the sheets.
+ * and columns, widths, descriptions and totals, computed columns' formulas, and charts drawn from
+ * the sheets.
  */
 export const WORKBOOK_FILE = "workbook.json"
 
@@ -68,6 +70,8 @@ export interface SheetColumnFormat {
   readonly tones?: Readonly<Record<string, SheetTone>>
   /** How a numeric column's cells are shaded by value. */
   readonly highlight?: SheetHighlight
+  /** The formula that computes the column's every value, as an Excel table's column does. */
+  readonly formula?: string
 }
 
 export interface WorkbookSheet {
@@ -156,6 +160,8 @@ const SHEET_NAME_MAX = 60
 const DESCRIPTION_MAX = 300
 const TONES_MAX = 20
 const TAG_MAX = 60
+const FORMULA_MAX = 500
+const COMPUTED_MAX = 20
 const CHART_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/
 const CONTROL = /[\u0000-\u001f\u007f]/
 
@@ -224,6 +230,12 @@ function readSheet(value: unknown, index: number): WorkbookSheet {
   )) {
     columns[column] = readColumnFormat(format, `${sheetAt} column '${column}'`)
   }
+  const computed = Object.values(columns).filter((format) => format.formula).length
+  if (computed > COMPUTED_MAX) {
+    throw new WorkbookError(
+      `${sheetAt} computes ${computed} columns; a sheet computes at most ${COMPUTED_MAX}.`
+    )
+  }
   const widths: Record<string, number> = {}
   for (const [column, width] of Object.entries(
     record(input.widths ?? {}, `${sheetAt} "widths"`, null)
@@ -288,6 +300,7 @@ function readColumnFormat(value: unknown, at: string): SheetColumnFormat {
     "signed",
     "tones",
     "highlight",
+    "formula",
   ])
   const type = columnType(input.type, at)
   if (input.currency !== undefined) {
@@ -350,9 +363,33 @@ function readColumnFormat(value: unknown, at: string): SheetColumnFormat {
       )
     }
   }
+  let formula: string | undefined
+  if (input.formula !== undefined) {
+    if (typeof input.formula !== "string" || !input.formula.trim()) {
+      throw new WorkbookError(`${at} "formula" must be text, such as "[@Revenue]-[@Cost]".`)
+    }
+    if (input.formula.length > FORMULA_MAX) {
+      throw new WorkbookError(
+        `${at} "formula" is ${input.formula.length} characters; a formula is at most ${FORMULA_MAX}.`
+      )
+    }
+    if (type === "link" || type === "image") {
+      throw new WorkbookError(`${at} is a ${type} column, which a formula can't compute.`)
+    }
+    formula = input.formula.trim().replace(/^=/, "")
+    try {
+      parseFormula(formula)
+    } catch (error) {
+      if (error instanceof FormulaSyntaxError) {
+        throw new WorkbookError(`${at} "formula" does not read: ${error.message}`)
+      }
+      throw error
+    }
+  }
   return {
     type,
     ...(typeof input.currency === "string" ? { currency: input.currency } : {}),
+    ...(formula ? { formula } : {}),
     ...(input.compact === true ? { compact: true } : {}),
     ...(input.signed === true ? { signed: true } : {}),
     ...(tones ? { tones } : {}),
