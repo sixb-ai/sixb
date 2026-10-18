@@ -15,13 +15,14 @@ export interface FindMatches {
 /**
  * The data cells, as currently ordered, whose value holds the query as the grid shows it or as it
  * is stored, ignoring case and accents: `4,120` and `4120` both find 4120000, `cafe` finds Café.
- * The header row is not searched.
+ * The header row and hidden columns are not searched.
  */
 export function findMatches(
   model: SheetModel,
   order: readonly number[],
   formatters: readonly ((value: string) => FormattedCell)[],
-  query: string
+  query: string,
+  hidden: ReadonlySet<number> = new Set()
 ): FindMatches {
   const needle = foldText(query.trim())
   const points: CellPoint[] = []
@@ -30,6 +31,7 @@ export function findMatches(
     const values = model.rows[order[row - 1] ?? -1]
     if (!values) continue
     for (let column = 0; column < model.columns.length; column += 1) {
+      if (hidden.has(column)) continue
       const value = values[column] ?? ""
       if (!value.trim()) continue
       const found =

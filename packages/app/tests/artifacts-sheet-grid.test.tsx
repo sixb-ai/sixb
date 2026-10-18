@@ -9,6 +9,7 @@ import { artifactFileSource } from "../src/artifacts/file-source"
 import { SheetGrid, type SheetGridStatus } from "../src/artifacts/renderers/sheet/grid"
 import { sheetModel } from "../src/artifacts/renderers/sheet/model"
 import { rangeLabel } from "../src/artifacts/renderers/sheet/selection"
+import { INITIAL_SHEET_VIEW, type SheetView } from "../src/artifacts/renderers/sheet/view"
 import { Viewer } from "../src/artifacts/viewer"
 import { installDom } from "./helpers/dom"
 
@@ -93,10 +94,15 @@ function typeInto(input: HTMLElement, value: string) {
   fireEvent.keyUp(input, { key: value.at(-1) ?? "" })
 }
 
-function mount() {
+function mount(sheetView?: SheetView) {
   const statuses: SheetGridStatus[] = []
   const view = render(
-    <SheetGrid model={model} locale="en-US" onStatusChange={(status) => statuses.push(status)} />
+    <SheetGrid
+      model={model}
+      locale="en-US"
+      onStatusChange={(status) => statuses.push(status)}
+      {...(sheetView ? { view: sheetView } : {})}
+    />
   )
   const grid = view.getByRole("grid")
   const cell = (row: number, column: number) => {
@@ -336,18 +342,62 @@ describe("the sheet grid", () => {
     expect(Number(separator.getAttribute("aria-valuenow"))).toBe(before)
   })
 
-  test("sorts by a column's values, then the other way, then back to the sheet's order", async () => {
-    const { grid, cell } = mount()
-    const quarters = () => [1, 2, 3].map((row) => cell(row, 0).textContent?.trim())
-    const sort = grid.querySelector('button[aria-label="Sort by Revenue"]')
-    if (!sort) throw new Error("No sort control for Revenue.")
+  test("sorts as the reader's view says, either way, then in the sheet's order", () => {
+    const sorted = (sort: SheetView["sort"]) => {
+      const ui = render(
+        <SheetGrid model={model} locale="en-US" view={{ ...INITIAL_SHEET_VIEW, sort }} />
+      )
+      const quarters = [1, 2, 3].map((row) =>
+        ui.container.querySelector(`[data-row="${row}"][data-column="0"]`)?.textContent?.trim()
+      )
+      const header = ui.container.querySelector('[data-row="0"][data-column="1"]')
+      const result = { quarters, sort: header?.getAttribute("aria-sort") ?? null }
+      ui.unmount()
+      return result
+    }
+    expect(sorted({ column: 1, direction: "ascending" })).toEqual({
+      quarters: ["Q1 2026", "Q4 2025", "Q2 2026"],
+      sort: "ascending",
+    })
+    expect(sorted({ column: 1, direction: "descending" })).toEqual({
+      quarters: ["Q2 2026", "Q4 2025", "Q1 2026"],
+      sort: "descending",
+    })
+    expect(sorted(null)).toEqual({ quarters: ["Q4 2025", "Q1 2026", "Q2 2026"], sort: null })
+  })
 
-    await act(async () => fireEvent.click(sort))
-    expect(quarters()).toEqual(["Q1 2026", "Q4 2025", "Q2 2026"])
-    await act(async () => fireEvent.click(sort))
-    expect(quarters()).toEqual(["Q2 2026", "Q4 2025", "Q1 2026"])
-    await act(async () => fireEvent.click(sort))
-    expect(quarters()).toEqual(["Q4 2025", "Q1 2026", "Q2 2026"])
+  test("leaves a hidden column out of the layout, the arrows, the sums, and a copy", async () => {
+    // Reproduce by dropping `hidden` from rangeStats or rangeTsv, or the `visibleColumn` step in
+    // onKeyDown: the hidden Revenue still sums, copies, or takes the active cell.
+    const { grid, status, press } = mount({ ...INITIAL_SHEET_VIEW, hidden: [1] })
+    expect(grid.querySelector('[data-column="1"]')).toBeNull()
+    expect(document.querySelector('[data-row="-1"][data-column="1"]')).toBeNull()
+
+    await press("ArrowRight")
+    expect(status()).toMatchObject({ range: "C2", column: "Margin" })
+    await press("ArrowLeft", { shiftKey: true })
+    expect(status()).toMatchObject({ range: "A2:C2", count: 2, numericCount: 1, sum: 0.269 })
+    await press("c", { metaKey: true })
+    expect(copied).toEqual(["Q4 2025\t0.269"])
+  })
+
+  test("freezes the columns the reader froze", () => {
+    const { cell } = mount({ ...INITIAL_SHEET_VIEW, frozenColumns: 2 })
+    expect(cell(1, 0).className).toContain("sticky")
+    expect(cell(1, 1).className).toContain("sticky")
+    expect(cell(1, 2).className).not.toContain("sticky")
+  })
+
+  test("leaves the keys pressed on a column's menu to the menu", async () => {
+    // Reproduce by dropping the target check at the top of onKeyDown: ArrowDown on the menu's
+    // button also moves the active cell to A3.
+    const { status } = mount()
+    const trigger = document.querySelector('button[aria-label="Revenue column options"]')
+    if (!trigger) throw new Error("No menu for Revenue.")
+    await act(async () => {
+      fireEvent.keyDown(trigger, { key: "ArrowDown" })
+    })
+    expect(status().range).toBe("A2")
   })
 })
 
@@ -511,6 +561,25 @@ describe("a sheet artifact", () => {
     })
     expect(ui.queryByRole("search")).toBeNull()
     expect(document.activeElement === ui.getByRole("grid")).toBe(true)
+  })
+
+  test("keeps each sheet's columns as the reader left them across its tabs", async () => {
+    // Reproduce by not passing `view` to SheetGrid in WorkbookView: Summary's widened column is
+    // back to its first width when the reader returns to it.
+    const ui = render(<ArtifactViewer cache={sheetCache()} artifactId={NUMBERS} />)
+    const width = () =>
+      Number(ui.getByRole("separator", { name: "Resize Quarter" }).getAttribute("aria-valuenow"))
+    const first = width()
+    await act(async () => {
+      fireEvent.keyDown(ui.getByRole("separator", { name: "Resize Quarter" }), {
+        key: "ArrowRight",
+      })
+    })
+    expect(width()).toBe(first + 16)
+
+    await act(async () => fireEvent.click(ui.getByRole("tab", { name: "Regions" })))
+    await act(async () => fireEvent.click(ui.getByRole("tab", { name: "Summary" })))
+    expect(width()).toBe(first + 16)
   })
 
   test("starts afresh on another artifact, though the same renderer shows it", async () => {

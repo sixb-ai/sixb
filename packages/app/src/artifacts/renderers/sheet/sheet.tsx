@@ -26,6 +26,7 @@ import { cellFormatter, numberFormat } from "./format"
 import { SheetGrid, type SheetGridStatus } from "./grid"
 import type { SheetColumn, SheetModel } from "./model"
 import { rangeLabel } from "./selection"
+import { INITIAL_SHEET_VIEW, type SheetView, type SheetViewUpdate, useSheetViews } from "./view"
 import { useSheetModel, useWorkbook } from "./workbook"
 
 const SheetChart = lazy(() => import("./chart"))
@@ -98,6 +99,9 @@ function WorkbookView({
   const [status, setStatus] = useState<SheetGridStatus | null>(null)
   const root = useRef<HTMLDivElement | null>(null)
   const finder = useSheetFind(root)
+  const views = useSheetViews()
+  const view = views.viewOf(sheetName)
+  const updateView = views.updateOf(sheetName)
   const sheetCharts = workbook.charts.filter((entry) => entry.sheet === sheetName)
   const theme = useArtifactThemeAttributes(version)
   const tabs: readonly (Tab & { readonly label: ReactNode })[] = [
@@ -228,6 +232,8 @@ function WorkbookView({
                 onStatusChange={setStatus}
                 find={finder.find}
                 onFind={finder.onFound}
+                view={view}
+                onViewChange={updateView}
                 imageUrl={(path) => versionImageSource(version, path)?.inlineUrl}
                 className="flex-1"
               />
@@ -256,6 +262,8 @@ function WorkbookView({
         <StatusBar
           model={model}
           status={tab.kind === "sheet" ? status : null}
+          view={tab.kind === "sheet" ? view : INITIAL_SHEET_VIEW}
+          onViewChange={updateView}
           locale={locale}
           messages={messages}
         />
@@ -271,6 +279,7 @@ export function SheetTable({ model }: { readonly model: SheetModel }) {
   const [status, setStatus] = useState<SheetGridStatus | null>(null)
   const root = useRef<HTMLDivElement | null>(null)
   const finder = useSheetFind(root)
+  const [view, setView] = useState<SheetView>(INITIAL_SHEET_VIEW)
   return (
     <div
       ref={root}
@@ -284,9 +293,18 @@ export function SheetTable({ model }: { readonly model: SheetModel }) {
         onStatusChange={setStatus}
         find={finder.find}
         onFind={finder.onFound}
+        view={view}
+        onViewChange={setView}
         className="flex-1"
       />
-      <StatusBar model={model} status={status} locale={locale} messages={messages} />
+      <StatusBar
+        model={model}
+        status={status}
+        view={view}
+        onViewChange={setView}
+        locale={locale}
+        messages={messages}
+      />
     </div>
   )
 }
@@ -422,11 +440,16 @@ function typeLabel(column: SheetColumn, messages: ArtifactMessages): string {
 function StatusBar({
   model,
   status,
+  view,
+  onViewChange,
   locale,
   messages,
 }: {
   readonly model: SheetModel | null
   readonly status: SheetGridStatus | null
+  /** The reader's arrangement of the sheet: its hidden columns show here, with a way back. */
+  readonly view: SheetView
+  readonly onViewChange: SheetViewUpdate
   readonly locale: string
   readonly messages: ArtifactMessages
 }) {
@@ -443,6 +466,18 @@ function StatusBar({
       <span>
         {model.name} · {messages.sheet.rows(model.rows.length)}
         {model.frozenRows > 0 ? ` · ${messages.sheet.frozenRows(model.frozenRows)}` : ""}
+        {view.hidden.length > 0 ? (
+          <>
+            {` · ${messages.sheet.hiddenColumns(view.hidden.length)} · `}
+            <button
+              type="button"
+              onClick={() => onViewChange((current) => ({ ...current, hidden: [] }))}
+              className="rounded-sm font-medium text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {messages.sheet.showHidden}
+            </button>
+          </>
+        ) : null}
       </span>
       {stats && stats.count > 1 ? (
         <span className="flex flex-wrap gap-4">
