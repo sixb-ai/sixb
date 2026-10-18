@@ -57,11 +57,15 @@ export interface RangeStats {
   readonly max?: number
 }
 
-/** What a spreadsheet's status bar says about a selection. Header cells are labels, not values. */
+/**
+ * What a spreadsheet's status bar says about a selection. Header cells are labels, not values, and
+ * hidden columns are left out.
+ */
 export function rangeStats(
   range: CellRange,
   model: SheetModel,
-  order: readonly number[]
+  order: readonly number[],
+  hidden: ReadonlySet<number> = NONE_HIDDEN
 ): RangeStats {
   let count = 0
   let numericCount = 0
@@ -72,6 +76,7 @@ export function rangeStats(
     const values = model.rows[order[row - 1] ?? -1]
     if (!values) continue
     for (let column = range.left; column <= range.right; column += 1) {
+      if (hidden.has(column)) continue
       const value = values[column] ?? ""
       if (!value.trim()) continue
       count += 1
@@ -92,8 +97,13 @@ export function rangeStats(
   }
 }
 
-/** The selection as tab-separated values, the shape every spreadsheet pastes. */
-export function rangeTsv(range: CellRange, model: SheetModel, order: readonly number[]): string {
+/** The selection as tab-separated values, the shape every spreadsheet pastes, hidden columns left out. */
+export function rangeTsv(
+  range: CellRange,
+  model: SheetModel,
+  order: readonly number[],
+  hidden: ReadonlySet<number> = NONE_HIDDEN
+): string {
   const lines: string[] = []
   for (let row = range.top; row <= range.bottom; row += 1) {
     const values =
@@ -102,6 +112,7 @@ export function rangeTsv(range: CellRange, model: SheetModel, order: readonly nu
     lines.push(
       values
         .slice(range.left, range.right + 1)
+        .filter((_, index) => !hidden.has(range.left + index))
         .map((value) => value.replace(/[\t\r\n]+/g, " "))
         .join("\t")
     )
@@ -117,7 +128,8 @@ export function rangeHtml(
   range: CellRange,
   model: SheetModel,
   order: readonly number[],
-  formatters: readonly ((value: string) => FormattedCell)[]
+  formatters: readonly ((value: string) => FormattedCell)[],
+  hidden: ReadonlySet<number> = NONE_HIDDEN
 ): string {
   const rows: string[] = []
   for (let row = range.top; row <= range.bottom; row += 1) {
@@ -125,6 +137,7 @@ export function rangeHtml(
     if (row > 0 && !values) continue
     const cells: string[] = []
     for (let column = range.left; column <= range.right; column += 1) {
+      if (hidden.has(column)) continue
       if (!values) {
         cells.push(`<th>${escapeHtml(model.columns[column]?.name ?? "")}</th>`)
         continue
@@ -139,6 +152,8 @@ export function rangeHtml(
   }
   return `<table>${rows.join("")}</table>`
 }
+
+const NONE_HIDDEN: ReadonlySet<number> = new Set()
 
 function escapeHtml(text: string): string {
   return text

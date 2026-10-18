@@ -20,6 +20,11 @@ import {
   sortedOrder,
 } from "../src/artifacts/renderers/sheet/selection"
 import {
+  hideColumn,
+  INITIAL_SHEET_VIEW,
+  visibleColumn,
+} from "../src/artifacts/renderers/sheet/view"
+import {
   prefixOffsets,
   visibleRowSpan,
   visibleSpan,
@@ -256,6 +261,11 @@ describe("finding in a sheet", () => {
     ])
   })
 
+  test("passes over hidden columns", () => {
+    const points = findMatches(model, order, formatters, "q4", new Set([5])).points
+    expect(points).toEqual([{ row: 1, column: 0 }])
+  })
+
   test("follows the sheet's current order", () => {
     expect(found("q4", [3, 2, 1, 0])).toEqual(["A5", "F5"])
   })
@@ -312,6 +322,23 @@ describe("fitting a column", () => {
       return text.length
     })
     expect(measured).toBeLessThanOrEqual(2_001)
+  })
+})
+
+describe("a reader's view of a sheet", () => {
+  test("keeps its hidden columns in order, once each", () => {
+    const view = hideColumn(hideColumn(hideColumn(INITIAL_SHEET_VIEW, 4), 1), 4)
+    expect(view.hidden).toEqual([1, 4])
+  })
+
+  test("moves past hidden columns the way a move went, turning back at the edge", () => {
+    const hidden = new Set([0, 2, 3])
+    // Right from B lands past C and D on E; left from E, back on B.
+    expect(visibleColumn(2, 1, 6, hidden)).toBe(4)
+    expect(visibleColumn(3, 4, 6, hidden)).toBe(1)
+    // Home, to a hidden A: turn back to the first shown.
+    expect(visibleColumn(0, 4, 6, hidden)).toBe(1)
+    expect(visibleColumn(5, 1, 6, hidden)).toBe(5)
   })
 })
 

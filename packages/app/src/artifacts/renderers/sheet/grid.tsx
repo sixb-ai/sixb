@@ -1,5 +1,5 @@
 import { cn } from "@sixb/ui/lib/utils"
-import { ArrowDown, ArrowUp, ArrowUpDown, CalendarDays, Image, Link2 } from "lucide-react"
+import { ArrowDown, ArrowUp, CalendarDays, Image, Link2 } from "lucide-react"
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -15,6 +15,7 @@ import {
 } from "react"
 import { useArtifactMessages } from "../../messages"
 import { ArtifactAddressLabel, ArtifactLink } from "../../references/references"
+import { ColumnMenu } from "./column-menu"
 import { findMatches } from "./find"
 import { modulo, type SheetFind, type SheetFindCount } from "./find-bar"
 import { elementTextMeasure, fitWidth, type TextMeasure } from "./fit"
@@ -35,6 +36,13 @@ import {
   type SortDirection,
   sortedOrder,
 } from "./selection"
+import {
+  hideColumn,
+  INITIAL_SHEET_VIEW,
+  type SheetView,
+  type SheetViewUpdate,
+  visibleColumn,
+} from "./view"
 import { prefixOffsets, visibleRowSpan, visibleSpan } from "./virtual"
 
 const ROW_HEIGHT = 32
@@ -57,9 +65,9 @@ export interface SheetGridStatus {
 
 /**
  * A read-only spreadsheet grid: column letters and row numbers, the header row and any frozen rows
- * and columns kept in view, columns that resize, fit, and sort, and a selection of cells, rows, or
- * columns by pointer, Shift, and keyboard that copies as TSV and as a table. Only the cells in view
- * are drawn, so a sheet of 100,000 rows scrolls like a short one.
+ * and columns kept in view, a menu on each column that sorts, fits, freezes, and hides it, and a
+ * selection of cells, rows, or columns by pointer, Shift, and keyboard that copies as TSV and as a
+ * table. Only the cells in view are drawn, so a sheet of 100,000 rows scrolls like a short one.
  */
 export function SheetGrid({
   model,
@@ -69,10 +77,15 @@ export function SheetGrid({
   selected,
   find,
   onFind,
+  view: viewProp,
+  onViewChange,
   className,
 }: {
   readonly model: SheetModel
   readonly locale: string
+  /** How the reader arranged the sheet; without it, the grid keeps its own. */
+  readonly view?: SheetView
+  readonly onViewChange?: SheetViewUpdate
   readonly onStatusChange?: (status: SheetGridStatus) => void
   /** A search: its matches are marked, and the current one is selected and brought into view. */
   readonly find?: SheetFind
@@ -89,8 +102,19 @@ export function SheetGrid({
   const idPrefix = useId()
   const cellId = (row: number, column: number) => `${idPrefix}-${row}-${column}`
   const [viewport, setViewport] = useState({ top: 0, left: 0, width: 960, height: 640 })
-  const [widths, setWidths] = useState(() => model.columns.map((column) => column.width))
-  const [sort, setSort] = useState<{ column: number; direction: SortDirection } | null>(null)
+  const [ownView, setOwnView] = useState<SheetView>(INITIAL_SHEET_VIEW)
+  const view = viewProp ?? ownView
+  const updateView: SheetViewUpdate = onViewChange ?? setOwnView
+  const { sort } = view
+  const hidden = useMemo(() => new Set(view.hidden), [view.hidden])
+  // A hidden column takes no width, so the layout's offsets pass over it.
+  const widths = useMemo(
+    () =>
+      model.columns.map((column, index) =>
+        hidden.has(index) ? 0 : (view.widths[index] ?? column.width)
+      ),
+    [model, hidden, view.widths]
+  )
   // Row 0 is the header row, as in an address; the range is kept to the cells the sheet has.
   const opening = useMemo(() => {
     if (!selected) return null
@@ -119,8 +143,8 @@ export function SheetGrid({
   const findQuery = find?.query ?? ""
   const findIndex = find?.index ?? 0
   const matches = useMemo(
-    () => findMatches(model, order, formatters, findQuery),
-    [model, order, formatters, findQuery]
+    () => findMatches(model, order, formatters, findQuery, hidden),
+    [model, order, formatters, findQuery, hidden]
   )
   const matched = useMemo(
     () => new Set(matches.points.map((point) => `${point.row}:${point.column}`)),
@@ -130,7 +154,7 @@ export function SheetGrid({
   // Layout, in content pixels.
   const rowNumberWidth = Math.max(44, String(rowCount).length * 8 + 24)
   const offsets = useMemo(() => prefixOffsets(widths), [widths])
-  const frozenColumns = model.frozenColumns
+  const frozenColumns = Math.min(view.frozenColumns ?? model.frozenColumns, columnCount)
   const frozenRows = Math.min(model.frozenRows, rowCount)
   const frozenWidth = offsets[frozenColumns] ?? 0
   const totalWidth = rowNumberWidth + (offsets.at(-1) ?? 0)
@@ -145,8 +169,12 @@ export function SheetGrid({
   )
   const firstColumn = Math.max(columns.first, frozenColumns)
   const scrollingColumns: number[] = []
-  for (let column = firstColumn; column <= columns.last; column += 1) scrollingColumns.push(column)
-  const fixedColumns = Array.from({ length: frozenColumns }, (_, index) => index)
+  for (let column = firstColumn; column <= columns.last; column += 1) {
+    if (!hidden.has(column)) scrollingColumns.push(column)
+  }
+  const fixedColumns = Array.from({ length: frozenColumns }, (_, index) => index).filter(
+    (column) => !hidden.has(column)
+  )
   const leadingSpace = (offsets[firstColumn] ?? 0) - frozenWidth
   const rows = visibleRowSpan(
     ROW_HEIGHT,
@@ -194,11 +222,11 @@ export function SheetGrid({
     const cell = focus.row === 0 ? null : formatters[focus.column]?.(raw)
     onStatusChange?.({
       range,
-      stats: rangeStats(range, model, order),
+      stats: rangeStats(range, model, order, hidden),
       column: model.columns[focus.column],
       value: cell ? (cell.href ?? cell.reference ?? cell.image ?? cell.text) : raw,
     })
-  }, [onStatusChange, range, model, order, formatters, focus.row, focus.column])
+  }, [onStatusChange, range, model, order, formatters, hidden, focus.row, focus.column])
 
   useEffect(() => {
     const stop = () => {
@@ -319,7 +347,7 @@ export function SheetGrid({
 
   /** The selection on the clipboard as TSV, and as a table where the browser takes HTML. */
   const copy = async () => {
-    const text = rangeTsv(range, model, order)
+    const text = rangeTsv(range, model, order, hidden)
     try {
       if (typeof ClipboardItem !== "function" || !navigator.clipboard.write) {
         throw new Error("No rich clipboard.")
@@ -327,7 +355,7 @@ export function SheetGrid({
       await navigator.clipboard.write([
         new ClipboardItem({
           "text/plain": new Blob([text], { type: "text/plain" }),
-          "text/html": new Blob([rangeHtml(range, model, order, formatters)], {
+          "text/html": new Blob([rangeHtml(range, model, order, formatters, hidden)], {
             type: "text/html",
           }),
         }),
@@ -342,6 +370,8 @@ export function SheetGrid({
   }
 
   const onKeyDown = async (event: KeyboardEvent<HTMLDivElement>) => {
+    // Keys pressed on a control inside the grid, such as a column's menu, are that control's.
+    if (event.target !== event.currentTarget) return
     const command = event.metaKey || event.ctrlKey
     if (command && event.key.toLowerCase() === "a") {
       event.preventDefault()
@@ -380,14 +410,22 @@ export function SheetGrid({
     }
     if (!next) return
     event.preventDefault()
+    next = { ...next, column: visibleColumn(next.column, focus.column, columnCount, hidden) }
     select(next, event.shiftKey)
     reveal(next)
   }
 
   const setWidth = (column: number, width: number) => {
     const clamped = Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, width))
-    setWidths((current) => current.map((value, index) => (index === column ? clamped : value)))
+    updateView((current) => ({ ...current, widths: { ...current.widths, [column]: clamped } }))
   }
+
+  /** Back to the width the column opened at: the workbook's, or one that fits its values. */
+  const resetWidth = (column: number) =>
+    updateView((current) => {
+      const { [column]: _, ...widths } = current.widths
+      return { ...current, widths }
+    })
 
   const resize = (column: number, event: PointerEvent<HTMLSpanElement>) => {
     event.preventDefault()
@@ -420,19 +458,25 @@ export function SheetGrid({
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       setWidth(column, width + (event.key === "ArrowRight" ? RESIZE_STEP : -RESIZE_STEP))
     } else if (event.key === "Enter") {
-      setWidth(column, model.columns[column]?.width ?? width)
+      resetWidth(column)
     } else return
     event.preventDefault()
   }
 
-  const cycleSort = (column: number) =>
-    setSort((current) =>
-      current?.column !== column
-        ? { column, direction: "ascending" }
-        : current.direction === "ascending"
-          ? { column, direction: "descending" }
-          : null
-    )
+  const sortBy = (column: number, direction: SortDirection | null) =>
+    updateView((current) => ({ ...current, sort: direction ? { column, direction } : null }))
+
+  /** Whether freezing up to a column leaves most of the grid's width to scroll. */
+  const canFreeze = (column: number) =>
+    rowNumberWidth + (offsets[column + 1] ?? 0) <= viewport.width * FROZEN_SHARE
+
+  const hide = (column: number) => {
+    updateView((current) => hideColumn(current, column))
+    // The active cell leaves the column it was in for the nearest one still shown.
+    const shown = new Set([...hidden, column])
+    const next = { ...focus, column: visibleColumn(column, column - 1, columnCount, shown) }
+    if (focus.column === column) select(next, false)
+  }
 
   const valueAt = (row: number, column: number): string =>
     row === 0
@@ -461,6 +505,7 @@ export function SheetGrid({
           lastFixed={fixed && column === frozenColumns - 1}
           selected={inRange(range, row, column)}
           active={row === focus.row && column === focus.column}
+          sort={header && sort?.column === column ? sort.direction : undefined}
           matched={matched.has(`${row}:${column}`)}
           style={style}
         >
@@ -468,8 +513,26 @@ export function SheetGrid({
             <HeaderContent
               column={model.columns[column]}
               sort={sort?.column === column ? sort.direction : null}
-              onSort={() => cycleSort(column)}
-              label={messages.sort(model.columns[column]?.name ?? "")}
+              menu={
+                <ColumnMenu
+                  name={model.columns[column]?.name ?? ""}
+                  sort={sort?.column === column ? sort.direction : null}
+                  onSort={(direction) => sortBy(column, direction)}
+                  onFit={() => setWidth(column, fit(column))}
+                  frozen={column < frozenColumns}
+                  onFreeze={
+                    canFreeze(column)
+                      ? () => updateView((current) => ({ ...current, frozenColumns: column + 1 }))
+                      : undefined
+                  }
+                  onUnfreeze={
+                    frozenColumns > 0
+                      ? () => updateView((current) => ({ ...current, frozenColumns: 0 }))
+                      : undefined
+                  }
+                  onHide={hidden.size < columnCount - 1 ? () => hide(column) : undefined}
+                />
+              }
             />
           ) : (
             <CellContent
@@ -628,6 +691,9 @@ export function SheetGrid({
 // surfaces have no reliable hue, and an oklch mix can fall back to hue 0 and tint them pink.
 const GUTTER = "bg-[color-mix(in_oklab,var(--muted)_60%,var(--background))]"
 
+/** The most of the grid's width frozen columns may take, so the rest still scrolls. */
+const FROZEN_SHARE = 0.6
+
 const MOVE_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"])
 
 function cellPoint(element: HTMLElement): CellPoint | null {
@@ -659,6 +725,7 @@ function GridCell({
   selected,
   active,
   matched,
+  sort,
   style,
   children,
 }: {
@@ -672,6 +739,8 @@ function GridCell({
   readonly active: boolean
   /** It holds what the find bar searches for. */
   readonly matched: boolean
+  /** How the sheet is sorted by this column, for a header cell. */
+  readonly sort?: SortDirection
   readonly style: CSSProperties
   readonly children: ReactNode
 }) {
@@ -685,6 +754,7 @@ function GridCell({
       // Columns are drawn only in view, so each says where it is; the row numbers come first.
       aria-colindex={column + 2}
       aria-selected={selected}
+      aria-sort={sort}
       className={cn(
         "flex shrink-0 items-center overflow-hidden border-r border-b border-border/70 px-2.5 whitespace-nowrap",
         header ? "bg-background font-semibold" : "bg-background",
@@ -711,15 +781,13 @@ function GridCell({
 function HeaderContent({
   column,
   sort,
-  onSort,
-  label,
+  menu,
 }: {
   readonly column: SheetColumn | undefined
   readonly sort: SortDirection | null
-  readonly onSort: () => void
-  readonly label: string
+  readonly menu: ReactNode
 }) {
-  const Icon = sort === "ascending" ? ArrowUp : sort === "descending" ? ArrowDown : ArrowUpDown
+  const Icon = sort === "ascending" ? ArrowUp : sort === "descending" ? ArrowDown : null
   return (
     <span
       className={cn(
@@ -729,21 +797,9 @@ function HeaderContent({
     >
       <span className="min-w-0 truncate">{column?.name}</span>
       <TypeGlyph column={column} />
+      {Icon ? <Icon className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" /> : null}
       <span className="flex-1" />
-      <button
-        type="button"
-        aria-label={label}
-        aria-pressed={sort !== null}
-        className={cn(
-          "flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-muted hover:text-foreground",
-          sort
-            ? "opacity-100"
-            : "opacity-0 focus-visible:opacity-100 [[role=columnheader]:hover_&]:opacity-100"
-        )}
-        onClick={onSort}
-      >
-        <Icon className="size-3" aria-hidden="true" />
-      </button>
+      {menu}
     </span>
   )
 }

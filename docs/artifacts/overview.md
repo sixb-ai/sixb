@@ -120,7 +120,9 @@ Publishing reads every typed cell and every chart against its sheet and refuses 
 the file, row, and column to fix. A sheet holds at most 200 columns and 100,000 rows, and a
 workbook 20 sheets and 10 charts.
 
-Readers sort columns, fit a column to its values by double-clicking its edge, select cells, rows,
+Each column's menu sorts by it, fits it to its values, freezes the columns up to it, or hides it;
+these arrange the reader's view and change nothing in the artifact. Readers fit a column by
+double-clicking its edge too, select cells, rows,
 or columns to see their sum, average, min, max, and count, read a cell's whole value above the
 grid, find values with ⌘F or Ctrl+F, copy cells as a table that pastes into other spreadsheets, and
 download each sheet as CSV. A CSV or TSV `file` artifact opens in the same grid.
