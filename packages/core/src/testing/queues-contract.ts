@@ -307,7 +307,8 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           const claimed = await claiming
 
           expect(claimed).toHaveLength(1)
-          expect(Date.now()).toBeGreaterThanOrEqual(Date.parse(availableAt))
+          // claimedAt, not Date.now(): a claim that returned at once still settles after the sleep.
+          expect(Date.parse(claimed[0]!.claimedAt)).toBeGreaterThanOrEqual(Date.parse(availableAt))
         })
       })
 

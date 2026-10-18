@@ -247,6 +247,10 @@ export function runFileUploadSessionStorageContractSuite<TStorage extends FileUp
         expect((await storage.getForPrincipal("upload_finished", principal)).status).toBe(
           "completed"
         )
+        // Removal proof: shorten the terminal TTL in fileUploadSessionReapAt to a second.
+        expect(
+          await storage.cleanupExpired(later(DEFAULT_FILE_UPLOAD_TERMINAL_SESSION_TTL_MS - 60_000))
+        ).toBe(0)
 
         expect(
           await storage.cleanupExpired(later(DEFAULT_FILE_UPLOAD_TERMINAL_SESSION_TTL_MS + 60_000))

@@ -1483,5 +1483,27 @@ describe("ontology materializer edits", () => {
         },
       },
     })
+
+    // Kind order, not operation order: an object's deletion precedes the deletion of its links.
+    // Removal proof: move "object.deleted" last in ONTOLOGY_MATERIALIZATION_EVENT_KIND_ORDER.
+    const deleted = await materializer.edits.commit(
+      atomic("event-delete", [{ id: "delete", kind: "object.delete", ref: ref("a") }])
+    )
+    const deletions = (
+      await storage.ontology.outbox.claim({
+        projectId: "project",
+        now: "2027-01-03T00:00:00.000Z",
+        limit: 10,
+        leaseId: "delete-lease",
+        leaseExpiresAt: "2027-01-03T01:00:00.000Z",
+      })
+    )
+      .map((row) => row.envelope)
+      .filter((event) => event.commitId === deleted.commitId)
+      .sort((left, right) => left.commitOrdinal - right.commitOrdinal)
+    expect(deletions.map((event) => [event.commitOrdinal, event.type])).toEqual([
+      [0, "object.deleted"],
+      [1, "link.deleted"],
+    ])
   })
 })

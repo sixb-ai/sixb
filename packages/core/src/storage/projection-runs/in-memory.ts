@@ -74,8 +74,6 @@ function compareRuns(a: ProjectionRunRecord, b: ProjectionRunRecord, order: "asc
 
 export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
   private readonly rows = new Map<string, StoredProjectionRunRecord>()
-  /** Durable per-run history prevents a reclaimed execution token from becoming valid again. */
-  private readonly executionTokensByRun = new Map<string, Set<string>>()
   private readonly runRootOperation: RunRootOperation
 
   constructor(input: {
@@ -89,19 +87,12 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
   private readonly executions: ExecutionStorage
 
   snapshot(): InMemoryProjectionRunStorageSnapshot {
-    return structuredClone({
-      rows: this.rows,
-      executionTokensByRun: this.executionTokensByRun,
-    })
+    return structuredClone({ rows: this.rows })
   }
 
   restore(snapshot: InMemoryProjectionRunStorageSnapshot): void {
     this.rows.clear()
-    this.executionTokensByRun.clear()
     for (const [key, record] of structuredClone(snapshot.rows)) this.rows.set(key, record)
-    for (const [key, tokens] of structuredClone(snapshot.executionTokensByRun)) {
-      this.executionTokensByRun.set(key, tokens)
-    }
   }
 
   async queue(input: QueueProjectionRunInput): Promise<ProjectionRunRecord> {
@@ -149,12 +140,12 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
       const existing = this.rows.get(key)
       if (!existing) throw projectionRunNotFound(input.projectId, input.id)
       const attempt = planProjectionRunReclaim(existing, input).attempt
-      const executionToken = this.issueExecutionToken(key, input.id, existing.executionToken)
       const record: StoredProjectionRunRecord = {
         ...existing,
         status: "running",
         attempt,
-        executionToken,
+        // A fresh token per claim fences every earlier execution of this run.
+        executionToken: randomUUID(),
         startedAt: existing.startedAt ?? new Date(input.startedAt ?? new Date()),
         finishedAt: undefined,
       }
@@ -380,25 +371,6 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
     }
   }
 
-  private issueExecutionToken(
-    key: string,
-    runId: string,
-    currentToken: string | undefined
-  ): string {
-    const executionToken = randomUUID()
-    assertProjectionRunNonEmpty(executionToken, "executionToken")
-    const usedTokens = this.executionTokensByRun.get(key) ?? new Set<string>()
-    if (currentToken) usedTokens.add(currentToken)
-    if (usedTokens.has(executionToken)) {
-      throw new ProjectionRunError(
-        `[Sixb] Projection run '${runId}' execution token was already used.`
-      )
-    }
-    usedTokens.add(executionToken)
-    this.executionTokensByRun.set(key, usedTokens)
-    return executionToken
-  }
-
   private requireExecution(
     input: LockProjectionRunForMaterializationInput
   ): StoredProjectionRunRecord & { readonly executionToken: string } {
@@ -428,5 +400,4 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
 
 export interface InMemoryProjectionRunStorageSnapshot {
   readonly rows: Map<string, StoredProjectionRunRecord>
-  readonly executionTokensByRun: Map<string, Set<string>>
 }

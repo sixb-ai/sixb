@@ -206,6 +206,16 @@ describe("createSixb models", () => {
     })
   })
 
+  // Removal proof: let getAgent() describe the Agent when no language model is configured.
+  test("leaves the catalog absent when models are not configured", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    const sixb = await createSixb({ projectRoot, ontologies: [Room], ...createTestRuntimeDeps() })
+
+    expect(sixb.definitions.models).toBeUndefined()
+    expect(createTestSixb(sixb).agent.get()).toBeNull()
+  })
+
   test("rejects retired agents configuration even from JavaScript", async () => {
     const projectRoot = await createTempProjectRoot()
     await expect(

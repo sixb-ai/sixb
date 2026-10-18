@@ -72,4 +72,25 @@ describe("dispatchQueuedAgentRuns", () => {
 
     expect(result).toEqual({ scanned: 0, dispatched: [], failures: [] })
   })
+
+  // Removal proof: rethrow from the enqueue catch in dispatchQueuedAgentRuns.
+  test("reports publication failures without changing the durable queued run", async () => {
+    const storage = new InMemoryStorage()
+    const queues = new InMemoryQueues()
+    const run = await createQueuedRun(storage)
+    queues.agents.enqueue = () => Promise.reject(new Error("queue unavailable"))
+
+    const result = await dispatchQueuedAgentRuns({
+      projectId: PROJECT_ID,
+      storage: storage.agents,
+      queue: queues.agents,
+    })
+
+    expect(result.dispatched).toEqual([])
+    expect(result.failures).toHaveLength(1)
+    expect(await storage.agents.runs.getById({ projectId: PROJECT_ID, id: run.id })).toMatchObject({
+      status: "queued",
+      attempt: 0,
+    })
+  })
 })
