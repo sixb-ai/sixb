@@ -1,11 +1,11 @@
 import type { FrameEvent } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
-import { useCallback, useMemo } from "react"
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { ArtifactFrame } from "../frame"
 import { useArtifactMessages } from "../messages"
-import type { ArtifactVersion } from "../queries"
+import { type ArtifactVersion, useArtifactTheme } from "../queries"
 import { useOpenArtifactAddress } from "../references/references"
-import { useArtifactThemeAttributes } from "../theme"
+import { artifactThemeAttributes, useArtifactThemeAttributes } from "../theme"
 import { ViewerLoading, ViewerNotice } from "./notice"
 
 /**
@@ -71,5 +71,50 @@ export function PageFace({ version }: { readonly version: ArtifactVersion }) {
         ))}
       </span>
     </span>
+  )
+}
+
+/** The width a page's card draws it at before scaling it down: a laptop's. */
+const PAGE_WIDTH = 1280
+
+/**
+ * A page's top, live in a frame laid out at a laptop's width and scaled down to the card, in the
+ * page's own theme. It fades in over the page's face, which stays if it never loads.
+ */
+export function PageScreen({ version }: { readonly version: ArtifactVersion }) {
+  const theme = artifactThemeAttributes(useArtifactTheme(version))
+  const box = useRef<HTMLDivElement | null>(null)
+  const [scale, setScale] = useState(0)
+  useLayoutEffect(() => {
+    const element = box.current
+    if (!element) return
+    const measure = () => setScale(element.clientWidth / PAGE_WIDTH)
+    measure()
+    if (typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  return (
+    <div
+      ref={box}
+      className={cn("absolute inset-0 overflow-hidden bg-background", theme.className)}
+      style={theme.style}
+    >
+      <PageFace version={version} />
+      {scale > 0 ? (
+        <div
+          className="absolute top-0 left-0 origin-top-left"
+          style={{ width: PAGE_WIDTH, height: `${100 / scale}%`, transform: `scale(${scale})` }}
+        >
+          <ArtifactFrame
+            version={version}
+            title={version.title}
+            decorative
+            className="absolute inset-0"
+          />
+        </div>
+      ) : null}
+    </div>
   )
 }

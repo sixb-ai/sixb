@@ -4,7 +4,8 @@
  * itself: the protocol string and the keys repeat what `protocol.ts` declares, and a test holds
  * the two together. Its tag names the layout, `data-sixb-layout`.
  *
- * In every layout it applies the theme the app sends, answers the app's requests, and tells the
+ * In every layout it applies the theme the app sends, then fires `sixb:theme` on the window for
+ * what draws its own colors; answers the app's requests; and tells the
  * app about links to other artifacts. A deck it also lays out: every `section.slide` is a 1280×720
  * slide, shown one at a time scaled to fit, or all at once in a grid. The URL's fragment can open
  * it at a slide, and with `sixb-fill` show that slide alone filling the frame, as a thumbnail or an
@@ -131,6 +132,11 @@ export function frameRuntime(): void {
         }
         style.textContent = `@layer sixb-theme { :root { ${declarations.join(" ")} color-scheme: ${params.dark === true ? "dark" : "light"}; } }`
         root.classList.toggle("dark", params.dark === true)
+        // What draws on a canvas, as a chart library does, reads its colors once: it redraws on
+        // this, which comes after the page has loaded.
+        window.dispatchEvent(
+          new CustomEvent("sixb:theme", { detail: { dark: params.dark === true } })
+        )
         return
       }
       case "goto":

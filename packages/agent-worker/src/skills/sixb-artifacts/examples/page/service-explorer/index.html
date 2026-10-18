@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Service levels, 2026</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <style>
+    :root { --over: #c2410c; --ok: #15803d; }
+    html.dark { --over: #fb923c; --ok: #4ade80; }
+
+    .head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 32px; margin-bottom: 20px; }
+    .head .lede { margin-bottom: 0; }
+
+    /* Segmented controls and chips: radios drawn as buttons. */
+    .segmented { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: var(--muted); }
+    .segmented label, .chips label { position: relative; margin: 0; }
+    .segmented input, .chips input { position: absolute; opacity: 0; pointer-events: none; }
+    .segmented span { display: block; padding: 6px 14px; border-radius: 7px; font-size: 13px; font-weight: 550; line-height: 18px; color: var(--muted-foreground); white-space: nowrap; cursor: pointer; }
+    .segmented input:checked + span { background: var(--card); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 0 0 1px var(--border); }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 24px; }
+    .chips span { display: inline-flex; align-items: center; min-height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); font-size: 13px; font-weight: 500; cursor: pointer; }
+    .chips input:checked + span { border-color: var(--foreground); background: var(--foreground); color: var(--background); }
+    :is(.segmented, .chips) input:focus-visible + span { outline: 2px solid var(--foreground); outline-offset: 1px; }
+
+    .stat .value small { margin-left: 4px; font-size: 15px; font-weight: 500; color: var(--muted-foreground); letter-spacing: 0; }
+    .delta.over { color: var(--over); }
+    .delta.ok { color: var(--ok); }
+
+    .card-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; margin-bottom: 4px; }
+    .card-head h3 { margin: 0; }
+    .card-head p { margin: 0; font-size: 13px; color: var(--muted-foreground); }
+
+    /* The calendar keeps its cells legible, scrolling sideways on a phone. */
+    .scroll-x { overflow-x: auto; }
+    #calendar { min-width: 760px; height: 228px; }
+    #trend { height: 300px; }
+    #causes { height: 330px; }
+
+    .pair { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; margin-bottom: 16px; }
+    .pair.even { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .pair > .card { margin: 0; }
+    @media (max-width: 860px) { .pair, .pair.even { grid-template-columns: minmax(0, 1fr); } }
+
+    /* The day picked on the calendar or in the table. */
+    .day-date { margin: 2px 0 14px; font-size: 13px; color: var(--muted-foreground); }
+    .day-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
+    .day-figures div { font-size: 12px; color: var(--muted-foreground); }
+    .day-figures b { display: block; margin-top: 2px; font-size: 20px; font-weight: 650; color: var(--foreground); font-variant-numeric: tabular-nums; }
+    .bars { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+    .bars li { display: grid; grid-template-columns: 84px minmax(0, 1fr) 52px; align-items: center; gap: 10px; margin: 0; font-size: 13px; }
+    .bars .track { display: block; height: 8px; border-radius: 999px; background: var(--muted); overflow: hidden; }
+    .bars .fill { display: block; height: 100%; border-radius: inherit; background: var(--foreground); }
+    .bars .fill.over { background: var(--over); }
+    .bars .figure { text-align: right; font-variant-numeric: tabular-nums; }
+
+    th button { all: unset; display: inline-flex; align-items: center; gap: 4px; min-height: 24px; cursor: pointer; }
+    th button:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; border-radius: 4px; }
+    th button::after { content: "↕"; opacity: 0.35; }
+    th[aria-sort="ascending"] button::after { content: "↑"; opacity: 1; }
+    th[aria-sort="descending"] button::after { content: "↓"; opacity: 1; }
+    tbody tr { cursor: pointer; }
+    tbody tr:hover td, tbody tr[aria-selected="true"] td { background: var(--muted); }
+    td:first-child { white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="head">
+      <div>
+        <p class="eyebrow">January to September 2026 · Field service</p>
+        <h1>Service levels</h1>
+        <p class="lede" id="lede">–</p>
+      </div>
+      <div class="segmented" role="radiogroup" aria-label="Measure">
+        <label><input type="radio" name="metric" value="sla" checked><span>Within SLA</span></label>
+        <label><input type="radio" name="metric" value="calls"><span>Calls</span></label>
+        <label><input type="radio" name="metric" value="restore"><span>Time to restore</span></label>
+      </div>
+    </header>
+
+    <div class="chips" role="radiogroup" aria-label="Region" id="regions"></div>
+
+    <div class="grid">
+      <div class="card stat"><div class="label">Within SLA</div><div class="value" id="sla">–</div><div class="delta" id="sla-note">–</div></div>
+      <div class="card stat"><div class="label">Calls</div><div class="value" id="calls">–</div><div class="delta" id="calls-note">–</div></div>
+      <div class="card stat"><div class="label">Average time to restore</div><div class="value" id="restore">–</div><div class="delta" id="restore-note">–</div></div>
+      <div class="card stat"><div class="label">Days under target</div><div class="value" id="under">–</div><div class="delta" id="under-note">–</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3 id="calendar-title">Every day</h3><p>Click a day for its regions.</p></div>
+      <div class="scroll-x"><div id="calendar" role="img" aria-label="Each day of 2026 so far, shaded by the chosen measure"></div></div>
+    </div>
+
+    <div class="pair">
+      <div class="card">
+        <div class="card-head"><h3 id="trend-title">Trend</h3><p>Drag the handles to zoom.</p></div>
+        <div id="trend" role="img" aria-label="The chosen measure by day, with its 7-day average"></div>
+      </div>
+      <div class="card">
+        <h3>The day</h3>
+        <p class="day-date" id="day-date">–</p>
+        <div class="day-figures">
+          <div>Calls<b id="day-calls">–</b></div>
+          <div>Within SLA<b id="day-sla">–</b></div>
+          <div>Restore<b id="day-restore">–</b></div>
+        </div>
+        <ul class="bars" id="day-regions"></ul>
+      </div>
+    </div>
+
+    <div class="pair even">
+      <div class="card">
+        <div class="card-head"><h3>What caused the calls</h3><p id="causes-note">–</p></div>
+        <div id="causes" role="img" aria-label="Calls by cause"></div>
+      </div>
+      <div class="card">
+        <h3>Hardest days</h3>
+        <div class="table-scroll">
+          <table>
+            <thead><tr>
+              <th data-key="date"><button type="button">Day</button></th>
+              <th class="num" data-key="calls"><button type="button">Calls</button></th>
+              <th class="num" data-key="sla" aria-sort="ascending"><button type="button">Within SLA</button></th>
+              <th class="num" data-key="restore"><button type="button">Restore</button></th>
+            </tr></thead>
+            <tbody id="hardest"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <p class="note">Source: field service records, January 1 to September 30, 2026. Within SLA is the share of calls restored inside the region's agreed time; the target is 90%.</p>
+  </main>
+
+  <script>
+    const number = new Intl.NumberFormat("en-US")
+    const percent = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 1 })
+    const whole = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 })
+    const longDay = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })
+    const shortDay = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })
+    const field = (id) => document.getElementById(id)
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches
+    const METRICS = {
+      sla: { title: "Within SLA", format: (value) => whole.format(value) },
+      calls: { title: "Calls", format: (value) => number.format(Math.round(value)) },
+      restore: { title: "Time to restore", format: (value) => duration(value) },
+    }
+    const state = { region: "", metric: "sla", day: 0, sort: { key: "sla", ascending: true } }
+    const charts = {}
+    let data = null
+
+    function duration(minutes) {
+      const rounded = Math.round(minutes)
+      return rounded < 60 ? `${rounded} m` : `${Math.floor(rounded / 60)} h ${String(rounded % 60).padStart(2, "0")} m`
+    }
+    const iso = (day) => new Date(Date.parse(data.start) + day * 86_400_000).toISOString().slice(0, 10)
+    const date = (day) => new Date(Date.parse(data.start) + day * 86_400_000)
+
+    function palette() {
+      const style = getComputedStyle(document.documentElement)
+      const read = (name) => style.getPropertyValue(name).trim()
+      return {
+        foreground: read("--foreground"),
+        muted: read("--muted-foreground"),
+        surface: read("--muted"),
+        border: read("--border"),
+        card: read("--card"),
+        over: read("--over"),
+        font: read("--font-sans"),
+        series: [1, 2, 3, 4, 5].map((index) => read(`--chart-${index}`)),
+      }
+    }
+
+    /** Each day's calls, calls within SLA, and restore minutes, for the chosen regions. */
+    function days(regions) {
+      return Array.from({ length: data.days }, (_, day) => {
+        const calls = regions.reduce((sum, region) => sum + region.calls[day], 0)
+        const within = regions.reduce((sum, region) => sum + region.within[day], 0)
+        const minutes = regions.reduce((sum, region) => sum + region.restore[day] * region.calls[day], 0)
+        return { day, calls, within, sla: within / calls, restore: minutes / calls }
+      })
+    }
+
+    function chosen() {
+      return data.regions.filter((region) => !state.region || region.region === state.region)
+    }
+
+    function render() {
+      const regions = chosen()
+      const series = days(regions)
+      const calls = series.reduce((sum, day) => sum + day.calls, 0)
+      const within = series.reduce((sum, day) => sum + day.within, 0)
+      const restore = series.reduce((sum, day) => sum + day.restore * day.calls, 0) / calls
+      const under = series.filter((day) => day.sla < data.target)
+      const quarter = (index) => series.filter((day) => Math.floor(date(day.day).getUTCMonth() / 3) === index)
+      const share = (part) => part.reduce((sum, day) => sum + day.within, 0) / part.reduce((sum, day) => sum + day.calls, 0)
+      const change = share(quarter(2)) - share(quarter(0))
+
+      field("lede").textContent = `${state.region ? `In ${state.region}` : "Across all regions"}, ${percent.format(within / calls)} of ${number.format(calls)} calls were restored within SLA: ${change >= 0 ? "up" : "down"} ${Math.abs(change * 100).toFixed(1)} points from Q1 to Q3.`
+      field("sla").textContent = percent.format(within / calls)
+      field("sla-note").textContent = `${within / calls >= data.target ? "Above" : "Under"} the ${whole.format(data.target)} target`
+      field("sla-note").className = `delta ${within / calls >= data.target ? "ok" : "over"}`
+      field("calls").textContent = number.format(calls)
+      field("calls-note").textContent = `${number.format(Math.round(calls / series.length))} a day on average`
+      field("restore").textContent = duration(restore)
+      field("restore-note").textContent = `${duration(Math.max(...series.map((day) => day.restore)))} on the slowest day`
+      field("under").innerHTML = `${under.length}<small>of ${series.length}</small>`
+      field("under-note").textContent = under.length ? `Most in ${mostIn(under)}` : "None this year"
+
+      if (!state.day) state.day = series.reduce((worst, day) => (day.sla < worst.sla ? day : worst)).day
+      drawCalendar(series)
+      drawTrend(series)
+      drawCauses(regions)
+      drawDay()
+      drawTable(series)
+    }
+
+    function mostIn(list) {
+      const months = new Map()
+      for (const day of list) {
+        const month = date(day.day).toLocaleString("en-US", { month: "long", timeZone: "UTC" })
+        months.set(month, (months.get(month) ?? 0) + 1)
+      }
+      return [...months].sort((a, b) => b[1] - a[1])[0][0]
+    }
+
+    function chart(id) {
+      if (!window.echarts) {
+        field(id).textContent = "Charts need cdn.jsdelivr.net, which this page could not reach."
+        return null
+      }
+      charts[id] ??= echarts.init(field(id))
+      return charts[id]
+    }
+
+    const base = (p) => ({
+      animation: !reduced,
+      textStyle: { fontFamily: p.font },
+      tooltip: {
+        backgroundColor: p.card,
+        borderColor: p.border,
+        textStyle: { color: p.foreground, fontFamily: p.font, fontSize: 13 },
+      },
+    })
+
+    function drawCalendar(series) {
+      const view = chart("calendar")
+      if (!view) return
+      const p = palette()
+      const metric = state.metric
+      field("calendar-title").textContent = `${METRICS[metric].title}, every day`
+      const values = series.map((day) => day[metric])
+      // Within SLA reads best as bands around the target; calls and time to restore as a ramp.
+      const visualMap =
+        metric === "sla"
+          ? {
+              type: "piecewise",
+              pieces: [
+                { min: 0.95, label: "95% and up", color: p.series[4] },
+                { min: 0.9, max: 0.95, label: "90–95%", color: p.series[3] },
+                { min: 0.85, max: 0.9, label: "85–90%", color: p.series[2] },
+                { max: 0.85, label: "Under 85%", color: p.over },
+              ],
+            }
+          : {
+              type: "continuous",
+              min: Math.min(...values),
+              max: Math.max(...values),
+              inRange: { color: [p.surface, p.series[3], p.series[0]] },
+              text: [METRICS[metric].format(Math.max(...values)), METRICS[metric].format(Math.min(...values))],
+              itemWidth: 10,
+              itemHeight: 120,
+            }
+      view.setOption(
+        {
+          ...base(p),
+          tooltip: { ...base(p).tooltip, formatter: ({ value }) => `${shortDay.format(new Date(value[0]))}<br><b>${METRICS[metric].format(value[1])}</b>` },
+          visualMap: {
+            ...visualMap,
+            orient: "horizontal",
+            left: 36,
+            bottom: 0,
+            textStyle: { color: p.muted, fontSize: 12 },
+            itemGap: 14,
+          },
+          calendar: {
+            range: [iso(0), iso(data.days - 1)],
+            top: 26,
+            left: 36,
+            right: 8,
+            cellSize: ["auto", 18],
+            splitLine: { show: false },
+            itemStyle: { color: p.card, borderColor: p.card, borderWidth: 3 },
+            dayLabel: { firstDay: 1, nameMap: ["S", "M", "T", "W", "T", "F", "S"], color: p.muted, fontSize: 12 },
+            monthLabel: { color: p.muted, fontSize: 12 },
+            yearLabel: { show: false },
+          },
+          series: [
+            {
+              type: "heatmap",
+              coordinateSystem: "calendar",
+              data: series.map((day) => [iso(day.day), day[metric]]),
+              itemStyle: { borderRadius: 3 },
+              emphasis: { itemStyle: { borderColor: p.foreground, borderWidth: 1.5 } },
+            },
+            {
+              // The day picked, ringed.
+              type: "scatter",
+              coordinateSystem: "calendar",
+              symbol: "roundRect",
+              symbolSize: 16,
+              silent: true,
+              itemStyle: { color: "rgba(0, 0, 0, 0)", borderColor: p.foreground, borderWidth: 2 },
+              data: [[iso(state.day), 1]],
+            },
+          ],
+        },
+        true
+      )
+    }
+
+    function drawTrend(series) {
+      const view = chart("trend")
+      if (!view) return
+      const p = palette()
+      const metric = state.metric
+      field("trend-title").textContent = `${METRICS[metric].title}, with its 7-day average`
+      const values = series.map((day) => day[metric])
+      const average = values.map((_, index) => {
+        const window = values.slice(Math.max(0, index - 6), index + 1)
+        return window.reduce((sum, value) => sum + value, 0) / window.length
+      })
+      const dates = series.map((day) => iso(day.day))
+      view.setOption(
+        {
+          ...base(p),
+          tooltip: { ...base(p).tooltip, trigger: "axis", valueFormatter: (value) => METRICS[metric].format(value) },
+          grid: { left: 4, right: 12, top: 12, bottom: 56, containLabel: true },
+          xAxis: {
+            type: "category",
+            data: dates,
+            axisTick: { show: false },
+            axisLine: { lineStyle: { color: p.border } },
+            axisLabel: { color: p.muted, fontSize: 12, formatter: (value) => new Date(value).toLocaleString("en-US", { month: "short", timeZone: "UTC" }), interval: (index) => date(index).getUTCDate() === 1 },
+          },
+          yAxis: {
+            type: "value",
+            scale: true,
+            splitLine: { lineStyle: { color: p.border } },
+            axisLabel: { color: p.muted, fontSize: 12, formatter: (value) => METRICS[metric].format(value) },
+          },
+          dataZoom: [
+            { type: "inside", start: 55, end: 100 },
+            {
+              type: "slider",
+              start: 55,
+              end: 100,
+              height: 26,
+              bottom: 8,
+              borderColor: p.border,
+              backgroundColor: p.surface,
+              fillerColor: "rgba(127, 127, 127, 0.12)",
+              dataBackground: { lineStyle: { color: p.series[3] }, areaStyle: { color: p.border } },
+              selectedDataBackground: { lineStyle: { color: p.series[1] }, areaStyle: { color: p.series[4] } },
+              handleStyle: { color: p.card, borderColor: p.series[2] },
+              moveHandleStyle: { color: p.series[3] },
+              textStyle: { color: p.muted, fontSize: 12 },
+              labelFormatter: (index) => shortDay.format(date(index)),
+            },
+          ],
+          series: [
+            { name: "Daily", type: "line", data: values, symbol: "none", lineStyle: { color: p.series[3], width: 1 } },
+            {
+              name: "7-day average",
+              type: "line",
+              data: average,
+              symbol: "none",
+              smooth: true,
+              lineStyle: { color: p.foreground, width: 2.5 },
+              markLine:
+                metric === "sla"
+                  ? {
+                      silent: true,
+                      symbol: "none",
+                      lineStyle: { color: p.over, type: [6, 4], width: 1.5 },
+                      label: { formatter: "Target", color: p.over, fontSize: 12, position: "insideEndTop" },
+                      data: [{ yAxis: data.target }],
+                    }
+                  : undefined,
+            },
+            {
+              // The day picked, on the line.
+              type: "scatter",
+              data: [[iso(state.day), values[state.day]]],
+              symbolSize: 10,
+              itemStyle: { color: p.card, borderColor: p.foreground, borderWidth: 2.5 },
+              silent: true,
+              z: 10,
+            },
+          ],
+        },
+        true
+      )
+    }
+
+    function drawCauses(regions) {
+      const view = chart("causes")
+      if (!view) return
+      const p = palette()
+      const totals = data.causes.map((cause, index) => ({
+        cause,
+        calls: regions.reduce((sum, region) => sum + region.causes[index], 0),
+      }))
+      const all = totals.reduce((sum, item) => sum + item.calls, 0)
+      totals.sort((a, b) => a.calls - b.calls)
+      field("causes-note").textContent = state.region || "All regions"
+      view.setOption(
+        {
+          ...base(p),
+          tooltip: { ...base(p).tooltip, trigger: "axis", axisPointer: { type: "none" }, valueFormatter: (value) => `${number.format(value)} calls` },
+          grid: { left: 4, right: 56, top: 8, bottom: 0, containLabel: true },
+          xAxis: { type: "value", show: false },
+          yAxis: {
+            type: "category",
+            data: totals.map((item) => item.cause),
+            axisTick: { show: false },
+            axisLine: { show: false },
+            axisLabel: { color: p.foreground, fontSize: 13 },
+          },
+          series: [
+            {
+              type: "bar",
+              data: totals.map((item, index) => ({
+                value: item.calls,
+                itemStyle: { color: index === totals.length - 1 ? p.foreground : p.series[3], borderRadius: [0, 4, 4, 0] },
+              })),
+              barWidth: 16,
+              showBackground: true,
+              backgroundStyle: { color: p.surface, borderRadius: [0, 4, 4, 0] },
+              label: { show: true, position: "right", color: p.muted, fontSize: 12, formatter: ({ value }) => whole.format(value / all) },
+            },
+          ],
+        },
+        true
+      )
+    }
+
+    function drawDay() {
+      const day = state.day
+      const regions = chosen()
+      const calls = regions.reduce((sum, region) => sum + region.calls[day], 0)
+      const within = regions.reduce((sum, region) => sum + region.within[day], 0)
+      const restore = regions.reduce((sum, region) => sum + region.restore[day] * region.calls[day], 0) / calls
+      field("day-date").textContent = longDay.format(date(day))
+      field("day-calls").textContent = number.format(calls)
+      field("day-sla").textContent = whole.format(within / calls)
+      field("day-restore").textContent = duration(restore)
+      // Every region that day, so a region chosen above is seen beside the others.
+      const rows = data.regions.map((region) => ({
+        region: region.region,
+        sla: region.within[day] / region.calls[day],
+        calls: region.calls[day],
+        restore: region.restore[day],
+      }))
+      const metric = state.metric
+      const top = Math.max(...rows.map((row) => row[metric]))
+      field("day-regions").replaceChildren(
+        ...rows.map((row) => {
+          const item = document.createElement("li")
+          const width = metric === "sla" ? row.sla * 100 : (row[metric] / top) * 100
+          const over = metric === "sla" && row.sla < data.target
+          item.innerHTML = `<span></span><span class="track"><span class="fill${over ? " over" : ""}" style="width: ${width.toFixed(1)}%"></span></span><span class="figure"></span>`
+          item.firstChild.textContent = row.region
+          item.lastChild.textContent = METRICS[metric].format(row[metric])
+          if (state.region && row.region !== state.region) item.style.opacity = "0.45"
+          return item
+        })
+      )
+    }
+
+    function drawTable(series) {
+      const { key, ascending } = state.sort
+      const worst = [...series].sort((a, b) => a.sla - b.sla).slice(0, 8)
+      worst.sort((a, b) => (key === "date" ? a.day - b.day : a[key] - b[key]) * (ascending ? 1 : -1))
+      for (const header of document.querySelectorAll("th[data-key]")) {
+        if (header.dataset.key === key) header.setAttribute("aria-sort", ascending ? "ascending" : "descending")
+        else header.removeAttribute("aria-sort")
+      }
+      field("hardest").replaceChildren(
+        ...worst.map((day) => {
+          const row = document.createElement("tr")
+          row.setAttribute("aria-selected", String(day.day === state.day))
+          row.innerHTML = `<td></td><td class="num">${number.format(day.calls)}</td><td class="num">${percent.format(day.sla)}</td><td class="num">${duration(day.restore)}</td>`
+          row.cells[0].textContent = shortDay.format(date(day.day))
+          row.addEventListener("click", () => pick(day.day))
+          return row
+        })
+      )
+    }
+
+    function pick(day) {
+      state.day = day
+      render()
+    }
+
+    for (const input of document.querySelectorAll('input[name="metric"]')) {
+      input.addEventListener("change", () => {
+        state.metric = input.value
+        render()
+      })
+    }
+    for (const header of document.querySelectorAll("th[data-key]")) {
+      header.querySelector("button").addEventListener("click", () => {
+        const key = header.dataset.key
+        state.sort = { key, ascending: state.sort.key === key ? !state.sort.ascending : key !== "calls" && key !== "restore" }
+        render()
+      })
+    }
+    // Charts on a canvas keep the colors they were drawn in: draw them again in the new theme.
+    addEventListener("sixb:theme", () => data && render())
+    new ResizeObserver(() => Object.values(charts).forEach((view) => view.resize())).observe(document.querySelector("main"))
+
+    fetch("data/service.json")
+      .then((response) => response.json())
+      .then((service) => {
+        data = service
+        field("regions").replaceChildren(
+          ...["", ...data.regions.map((region) => region.region)].map((name) => {
+            const chip = document.createElement("label")
+            chip.innerHTML = `<input type="radio" name="region"><span></span>`
+            const input = chip.querySelector("input")
+            input.value = name
+            input.checked = name === state.region
+            input.addEventListener("change", () => {
+              state.region = name
+              state.day = 0
+              render()
+            })
+            chip.querySelector("span").textContent = name || "All regions"
+            return chip
+          })
+        )
+        render()
+        charts.calendar?.on("click", ({ value }) => pick(Math.round((Date.parse(value[0]) - Date.parse(data.start)) / 86_400_000)))
+      })
+  </script>
+</body>
+</html>

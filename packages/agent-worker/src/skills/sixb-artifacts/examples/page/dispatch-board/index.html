@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Harbor dispatch board</title>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+  <style>
+    :root { --over: #c2410c; --ok: #15803d; --urgent: #b91c1c; }
+    html.dark { --over: #fb923c; --ok: #4ade80; --urgent: #f87171; }
+
+    main { max-width: 1440px; }
+    .head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 32px; margin-bottom: 20px; }
+    .head .lede { margin-bottom: 0; }
+
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+    .toolbar input[type="search"] { width: 260px; max-width: 100%; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chips label { position: relative; margin: 0; }
+    .chips input { position: absolute; opacity: 0; pointer-events: none; }
+    .chips span { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); font-size: 13px; font-weight: 500; cursor: pointer; }
+    .chips input:checked + span { border-color: var(--foreground); background: var(--foreground); color: var(--background); }
+    .chips input:focus-visible + span { outline: 2px solid var(--foreground); outline-offset: 1px; }
+
+    .summary { display: flex; flex-wrap: wrap; gap: 8px 28px; margin-bottom: 20px; font-size: 13px; color: var(--muted-foreground); }
+    .summary b { margin-right: 4px; font-size: 20px; font-weight: 650; color: var(--foreground); font-variant-numeric: tabular-nums; }
+    .summary .alert b { color: var(--urgent); }
+
+    /* The board: a column per crew, scrolling sideways when they don't fit. */
+    .board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(212px, 1fr); gap: 10px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 16px; scroll-snap-type: x mandatory; }
+    .column { display: flex; flex-direction: column; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: calc(var(--radius) + 4px); background: var(--muted); scroll-snap-align: start; }
+    .column.waiting { background: transparent; border-style: dashed; }
+    .column h3 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0; font-size: 15px; }
+    .column h3 small { font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
+    .crew { margin: 2px 0 10px; font-size: 12px; color: var(--muted-foreground); }
+    .meter { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
+    .meter .track { flex: 1; height: 6px; border-radius: 999px; background: var(--border); overflow: hidden; }
+    .meter .fill { display: block; height: 100%; border-radius: inherit; background: var(--foreground); transition: width 0.2s; }
+    .meter.full .fill { background: var(--ok); }
+    .meter.over .fill { background: var(--over); }
+    .meter.over { color: var(--over); font-weight: 600; }
+
+    .cards { display: grid; align-content: start; gap: 8px; flex: 1; min-height: 120px; margin: 0; padding: 0; list-style: none; }
+    .order { margin: 0; padding: 11px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); box-shadow: 0 1px 2px rgb(0 0 0 / 0.05); cursor: grab; transition: box-shadow 0.15s, border-color 0.15s; }
+    .order:hover { border-color: color-mix(in oklab, var(--foreground) 25%, var(--border)); box-shadow: 0 2px 8px rgb(0 0 0 / 0.08); }
+    .order.ghost { opacity: 0.35; }
+    .order.dragging { cursor: grabbing; box-shadow: 0 12px 28px rgb(0 0 0 / 0.18); transform: rotate(1.5deg); }
+    .order.hidden { display: none; }
+    .order-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; font-size: 12px; color: var(--muted-foreground); }
+    .order-top code { padding: 0; background: none; font-size: 12px; }
+    .priority { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--foreground); }
+    .priority::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); }
+    .priority.p1 { color: var(--urgent); }
+    .priority.p1::before { background: var(--urgent); }
+    .priority.p2::before { background: var(--foreground); }
+    .order-title { margin: 0 0 2px; font-size: 14px; font-weight: 600; line-height: 1.35; }
+    .order-where { margin: 0 0 10px; font-size: 13px; color: var(--muted-foreground); }
+    .order-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+    .order-foot .tag { margin-left: auto; font-weight: 500; }
+    .mismatch { margin: 8px 0 0; font-size: 12px; font-weight: 600; color: var(--over); }
+    .empty { display: grid; place-items: center; min-height: 96px; border: 1px dashed var(--border); border-radius: var(--radius); font-size: 13px; color: var(--muted-foreground); }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="head">
+      <div>
+        <p class="eyebrow" id="eyebrow">–</p>
+        <h1>Dispatch board</h1>
+        <p class="lede" id="lede">–</p>
+      </div>
+      <div class="row">
+        <button type="button" class="secondary" id="reset">Reset</button>
+        <button type="button" id="auto">Auto-assign waiting work</button>
+      </div>
+    </header>
+
+    <div class="summary" id="summary"></div>
+
+    <div class="toolbar">
+      <div class="chips" role="radiogroup" aria-label="Priority">
+        <label><input type="radio" name="priority" value="" checked><span>All</span></label>
+        <label><input type="radio" name="priority" value="P1"><span>P1 urgent</span></label>
+        <label><input type="radio" name="priority" value="P2"><span>P2</span></label>
+        <label><input type="radio" name="priority" value="P3"><span>P3</span></label>
+      </div>
+      <input type="search" id="search" placeholder="Find an order, job, or street" aria-label="Find an order">
+    </div>
+
+    <div class="board" id="board"></div>
+
+    <p class="note">Drag a work order onto a crew to assign it. A crew works an 8-hour shift; travel is in each order's hours. Assignments last while this page is open.</p>
+  </main>
+
+  <script>
+    const PRIORITY = { P1: 0, P2: 1, P3: 2 }
+    const hours = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 })
+    const field = (id) => document.getElementById(id)
+    let data = null
+    let start = null
+    const lists = []
+
+    const crewOf = (id) => data.crews.find((crew) => crew.id === id)
+    const booked = (crew) => data.orders.filter((order) => order.crew === crew.id).reduce((sum, order) => sum + order.hours, 0)
+    const byUrgency = (a, b) => PRIORITY[a.priority] - PRIORITY[b.priority] || a.due.localeCompare(b.due)
+
+    function card(order) {
+      const item = document.createElement("li")
+      item.className = "order"
+      item.dataset.id = order.id
+      item.innerHTML = `
+        <div class="order-top"><code></code><span class="priority ${order.priority.toLowerCase()}">${order.priority}</span></div>
+        <p class="order-title"></p>
+        <p class="order-where"></p>
+        <div class="order-foot"><span>${hours.format(order.hours)} h</span><span>Due ${order.due}</span><span class="tag"></span></div>`
+      item.querySelector("code").textContent = order.id
+      item.querySelector(".order-title").textContent = order.title
+      item.querySelector(".order-where").textContent = order.address
+      item.querySelector(".tag").textContent = order.skill
+      const crew = order.crew && crewOf(order.crew)
+      if (crew && !crew.skills.includes(order.skill)) {
+        const warning = document.createElement("p")
+        warning.className = "mismatch"
+        warning.textContent = `${crew.name} has no ${order.skill.toLowerCase()} skill`
+        item.append(warning)
+      }
+      return item
+    }
+
+    function column(crew) {
+      const section = document.createElement("section")
+      section.className = `column${crew ? "" : " waiting"}`
+      const orders = data.orders.filter((order) => order.crew === (crew?.id ?? null)).sort(byUrgency)
+      if (crew) {
+        const total = booked(crew)
+        const state = total > data.shiftHours ? "over" : total >= data.shiftHours - 0.5 ? "full" : ""
+        section.innerHTML = `
+          <h3><span></span><small>${orders.length} ${orders.length === 1 ? "order" : "orders"}</small></h3>
+          <p class="crew"></p>
+          <div class="meter ${state}"><span class="track"><span class="fill" style="width: ${Math.min(100, (total / data.shiftHours) * 100)}%"></span></span><span>${hours.format(total)} / ${data.shiftHours} h</span></div>`
+        section.querySelector("h3 span").textContent = crew.name
+        section.querySelector(".crew").textContent = `${crew.lead} · ${crew.skills.join(", ")}`
+      } else {
+        section.innerHTML = `<h3><span>Waiting</span><small>${orders.length} ${orders.length === 1 ? "order" : "orders"}</small></h3><p class="crew">Not yet on a crew</p><div class="meter"><span>${hours.format(orders.reduce((sum, order) => sum + order.hours, 0))} h of work</span></div>`
+      }
+      const list = document.createElement("ul")
+      list.className = "cards"
+      list.dataset.crew = crew?.id ?? ""
+      list.append(...orders.map(card))
+      if (!orders.length) {
+        const empty = document.createElement("li")
+        empty.className = "empty"
+        empty.textContent = crew ? "Drop work here" : "Everything is assigned"
+        list.append(empty)
+      }
+      section.append(list)
+      return section
+    }
+
+    function render() {
+      for (const list of lists.splice(0)) list.destroy()
+      field("board").replaceChildren(column(null), ...data.crews.map(column))
+      for (const list of document.querySelectorAll(".cards")) {
+        lists.push(
+          Sortable.create(list, {
+            group: "orders",
+            draggable: ".order",
+            animation: 160,
+            ghostClass: "ghost",
+            dragClass: "dragging",
+            forceFallback: true,
+            onEnd: (event) => {
+              const order = data.orders.find((item) => item.id === event.item.dataset.id)
+              order.crew = event.to.dataset.crew || null
+              render()
+            },
+          })
+        )
+      }
+      filter()
+      summarize()
+    }
+
+    function summarize() {
+      const waiting = data.orders.filter((order) => !order.crew)
+      const urgent = waiting.filter((order) => order.priority === "P1")
+      const over = data.crews.filter((crew) => booked(crew) > data.shiftHours)
+      const capacity = data.crews.length * data.shiftHours
+      const total = data.crews.reduce((sum, crew) => sum + booked(crew), 0)
+      field("lede").textContent = waiting.length
+        ? `${data.orders.length - waiting.length} of ${data.orders.length} work orders are on a crew; ${urgent.length ? `${urgent.length} urgent ${urgent.length === 1 ? "one is" : "ones are"} still waiting.` : "none of the waiting ones is urgent."}`
+        : `All ${data.orders.length} work orders are on a crew${over.length ? `, but ${over.map((crew) => crew.name).join(" and ")} ${over.length === 1 ? "is" : "are"} over a shift.` : ", within every shift."}`
+      field("summary").innerHTML = `
+        <span><b>${data.orders.length - waiting.length}</b>assigned</span>
+        <span class="${urgent.length ? "alert" : ""}"><b>${waiting.length}</b>waiting${urgent.length ? `, ${urgent.length} urgent` : ""}</span>
+        <span><b>${Math.round((total / capacity) * 100)}%</b>of crew hours booked</span>
+        <span class="${over.length ? "alert" : ""}"><b>${over.length}</b>${over.length === 1 ? "crew" : "crews"} over a shift</span>`
+    }
+
+    function filter() {
+      const priority = document.querySelector('input[name="priority"]:checked').value
+      const query = field("search").value.trim().toLowerCase()
+      for (const item of document.querySelectorAll(".order")) {
+        const order = data.orders.find((entry) => entry.id === item.dataset.id)
+        const text = `${order.id} ${order.title} ${order.address} ${order.skill}`.toLowerCase()
+        item.classList.toggle("hidden", (priority && order.priority !== priority) || (query && !text.includes(query)))
+      }
+    }
+
+    /** Puts each waiting order, most urgent first, on the crew with the skill and the most time left. */
+    function autoAssign() {
+      for (const order of data.orders.filter((item) => !item.crew).sort(byUrgency)) {
+        const crew = data.crews
+          .filter((candidate) => candidate.skills.includes(order.skill))
+          .map((candidate) => ({ candidate, left: data.shiftHours - booked(candidate) }))
+          .filter(({ left }) => left >= order.hours)
+          .sort((a, b) => b.left - a.left)[0]
+        if (crew) order.crew = crew.candidate.id
+      }
+      render()
+    }
+
+    for (const input of document.querySelectorAll('input[name="priority"]')) input.addEventListener("change", filter)
+    field("search").addEventListener("input", filter)
+    field("auto").addEventListener("click", autoAssign)
+    field("reset").addEventListener("click", () => {
+      data.orders = structuredClone(start)
+      render()
+    })
+
+    fetch("data/dispatch.json")
+      .then((response) => response.json())
+      .then((dispatch) => {
+        data = dispatch
+        start = structuredClone(dispatch.orders)
+        const day = new Date(`${data.date}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })
+        field("eyebrow").textContent = `${data.region} · ${day}`
+        if (!window.Sortable) {
+          field("lede").textContent = "Dragging needs cdn.jsdelivr.net, which this page could not reach."
+          return
+        }
+        render()
+      })
+  </script>
+</body>
+</html>

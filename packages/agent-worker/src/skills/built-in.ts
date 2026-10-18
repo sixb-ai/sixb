@@ -10,16 +10,22 @@ import operationsReview from "./sixb-artifacts/examples/document/operations-revi
 import restorationsFigure from "./sixb-artifacts/examples/document/operations-review/figures/restorations.svg" with {
   type: "text",
 }
-import fleetPlannerRegions from "./sixb-artifacts/examples/page/fleet-planner/data/regions.json" with {
+import dispatchBoardData from "./sixb-artifacts/examples/page/dispatch-board/data/dispatch.json" with {
+  type: "text",
+}
+import dispatchBoardPage from "./sixb-artifacts/examples/page/dispatch-board/index.html" with {
+  type: "text",
+}
+import fleetPlannerData from "./sixb-artifacts/examples/page/fleet-planner/data/plan.json" with {
   type: "text",
 }
 import fleetPlannerPage from "./sixb-artifacts/examples/page/fleet-planner/index.html" with {
   type: "text",
 }
-import slaDashboardService from "./sixb-artifacts/examples/page/sla-dashboard/data/service.json" with {
+import serviceExplorerData from "./sixb-artifacts/examples/page/service-explorer/data/service.json" with {
   type: "text",
 }
-import slaDashboardPage from "./sixb-artifacts/examples/page/sla-dashboard/index.html" with {
+import serviceExplorerPage from "./sixb-artifacts/examples/page/service-explorer/index.html" with {
   type: "text",
 }
 import partsInventory from "./sixb-artifacts/examples/sheet/parts-inventory/sheets/Inventory.csv" with {
@@ -78,9 +84,11 @@ export const BUILT_IN_SKILLS: readonly AgentSkillDefinition[] = Object.freeze([
     "examples/sheet/parts-inventory/sheets/Spend.csv": partsSpend,
     "page.md": pageGuide,
     "examples/page/fleet-planner/index.html": text(fleetPlannerPage),
-    "examples/page/fleet-planner/data/regions.json": text(fleetPlannerRegions),
-    "examples/page/sla-dashboard/index.html": text(slaDashboardPage),
-    "examples/page/sla-dashboard/data/service.json": text(slaDashboardService),
+    "examples/page/fleet-planner/data/plan.json": text(fleetPlannerData),
+    "examples/page/service-explorer/index.html": text(serviceExplorerPage),
+    "examples/page/service-explorer/data/service.json": text(serviceExplorerData),
+    "examples/page/dispatch-board/index.html": text(dispatchBoardPage),
+    "examples/page/dispatch-board/data/dispatch.json": text(dispatchBoardData),
   }),
 ])
 

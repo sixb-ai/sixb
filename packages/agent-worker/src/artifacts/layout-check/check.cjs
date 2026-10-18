@@ -147,7 +147,12 @@ async function main() {
   let step = noun
   let stalled = false
   try {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })
+    // Reduced motion, so what animates in is measured and shown where it lands.
+    const page = await browser.newPage({
+      viewport: { width: 1280, height: 720 },
+      deviceScaleFactor: 1,
+      reducedMotion: "reduce",
+    })
     const { errors, problems, screenshots } = found
     page.on("pageerror", (error) => errors.push(error.message))
     // A file that fails names itself; Chromium's console line for it does not.
@@ -169,6 +174,13 @@ async function main() {
       await page
         .goto(url, { waitUntil: "load", timeout: 15_000 })
         .catch((error) => errors.push(`${noun} did not finish loading: ${error.message}`))
+      // Each theme is measured as it settles, not on its way there.
+      await within(
+        step,
+        page.addStyleTag({
+          content: "*, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; }",
+        })
+      ).catch(() => {})
       await within(`${noun}'s fonts`, page.evaluate(() => document.fonts?.ready)).catch(() => {})
     }
     const settle = () =>

@@ -240,14 +240,20 @@ export function layoutProbe(scope: number | "page"): LayoutProblem[] {
     1,
   ]
   /**
-   * The solid color painted under an element's text, or null over an image or a gradient: every
+   * The solid color painted under an element's text, or null over an image or a gradient, or out
+   * of the window: every
    * box under its center, top to bottom, its own and its ancestors' and any it overlaps, until an
    * opaque one.
    */
   const background = (element: Element): [number, number, number, number] | null => {
     const layers: [number, number, number, number][] = []
     const rect = element.getBoundingClientRect()
-    const stack = document.elementsFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+    const x = rect.left + rect.width / 2
+    const y = rect.top + rect.height / 2
+    // Out of the window, as a wide table's far cells are in the box it scrolls in, nothing is
+    // under the point to measure.
+    if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return null
+    const stack = document.elementsFromPoint(x, y)
     // An SVG's text is not hit between its glyphs: then everything under the point counts.
     const start = Math.max(0, stack.indexOf(element))
     const under = stack.slice(start)

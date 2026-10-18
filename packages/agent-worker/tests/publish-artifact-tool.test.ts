@@ -453,7 +453,8 @@ describe("the sixb-artifacts skill's examples", () => {
       "examples/sheet/service-metrics",
       "examples/sheet/parts-inventory",
       "examples/page/fleet-planner",
-      "examples/page/sla-dashboard",
+      "examples/page/service-explorer",
+      "examples/page/dispatch-board",
     ])
     // slides.md says the decks use its layouts and classes alone; a legend's swatch is one.
     const decks = examples.filter(
