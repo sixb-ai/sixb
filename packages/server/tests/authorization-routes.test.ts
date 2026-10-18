@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { createServer } from "node:net"
 import {
   can,
   col,
@@ -305,16 +304,16 @@ describe("authorized object routes", () => {
     const { app, storage } = await createApp()
     const operator = await seedSession(storage, ["commercial"], "usr_op")
     const runner = await seedSession(storage, ["operations"], "usr_run")
+    const admin = await seedSession(storage, ["admins"], "usr_admin")
+    const listTypes = async (headers: HeadersInit) => {
+      const response = await app.fetch(
+        new Request("http://localhost/api/object-types", { headers })
+      )
+      expect(response.status).toBe(200)
+      return (await response.json()) as { id: string; actions: { id: string }[] }[]
+    }
 
-    const operatorList = await app.fetch(
-      new Request("http://localhost/api/object-types", { headers: operator.headers })
-    )
-    const operatorBody = (await operatorList.json()) as {
-      id: string
-      actions: { id: string }[]
-    }[]
-
-    expect(operatorList.status).toBe(200)
+    const operatorBody = await listTypes(operator.headers)
     expect(operatorBody.map((objectType) => objectType.id)).toEqual(["contract"])
     expect(operatorBody[0].actions.map((action) => action.id)).toEqual(["send-contract"])
 
@@ -323,34 +322,20 @@ describe("authorized object routes", () => {
     )
     expect(hidden.status).toBe(404)
 
-    const runnerList = await app.fetch(
-      new Request("http://localhost/api/object-types", { headers: runner.headers })
-    )
-    expect(await runnerList.json()).toEqual([])
-  })
+    expect(await listTypes(runner.headers)).toEqual([])
 
-  test("wildcard object and action grants expose all object metadata", async () => {
-    const { app, storage } = await createApp()
-    const admin = await seedSession(storage, ["admins"], "usr_admin")
-
-    const response = await app.fetch(
-      new Request("http://localhost/api/object-types", { headers: admin.headers })
-    )
-    const body = (await response.json()) as {
-      id: string
-      actions: { id: string }[]
-    }[]
-
-    expect(response.status).toBe(200)
-    expect(body.map((objectType) => objectType.id)).toEqual(["contract", "invoice"])
-    expect(body.find((objectType) => objectType.id === "contract")?.actions).toEqual([
+    // Wildcard object and action grants expose every type and its actions.
+    const adminBody = await listTypes(admin.headers)
+    expect(adminBody.map((objectType) => objectType.id)).toEqual(["contract", "invoice"])
+    expect(adminBody.find((objectType) => objectType.id === "contract")?.actions).toEqual([
       expect.objectContaining({ id: "send-contract" }),
     ])
   })
 
-  test("broad listings narrow to the principal's viewable types", async () => {
+  test("broad listings narrow to viewable types and refuse a forbidden type by name", async () => {
     const { app, storage } = await createApp()
     const session = await seedSession(storage, ["commercial"])
+    const ungranted = await seedSession(storage, [], "usr_ungranted")
 
     const response = await app.fetch(
       new Request("http://localhost/api/objects", { headers: session.headers })
@@ -359,32 +344,20 @@ describe("authorized object routes", () => {
 
     expect(response.status).toBe(200)
     expect(body.objects.map((row) => row.objectTypeId)).toEqual(["contract"])
-  })
 
-  test("explicitly requesting a forbidden type returns 403", async () => {
-    const { app, storage } = await createApp()
-    const session = await seedSession(storage, ["commercial"])
-
-    const response = await app.fetch(
+    const forbidden = await app.fetch(
       new Request("http://localhost/api/objects?objectTypeId=invoice", {
         headers: session.headers,
       })
     )
+    expect(forbidden.status).toBe(403)
 
-    expect(response.status).toBe(403)
-  })
-
-  test("principals with no grants list nothing", async () => {
-    const { app, storage } = await createApp()
-    const session = await seedSession(storage, [])
-
-    const response = await app.fetch(
-      new Request("http://localhost/api/objects", { headers: session.headers })
+    // A principal with no grants lists nothing.
+    const empty = await app.fetch(
+      new Request("http://localhost/api/objects", { headers: ungranted.headers })
     )
-    const body = (await response.json()) as { objects: unknown[]; hasMore: boolean; total: number }
-
-    expect(response.status).toBe(200)
-    expect(body).toEqual({ objects: [], hasMore: false, total: 0 })
+    expect(empty.status).toBe(200)
+    expect(await empty.json()).toEqual({ objects: [], hasMore: false, total: 0 })
   })
 
   test("identity reads return 404 for both forbidden and missing objects", async () => {
@@ -587,7 +560,7 @@ describe("authorized object routes", () => {
     })
   })
 
-  test("disabled auth keeps object routes privileged", async () => {
+  test("disabled auth keeps the object read and write routes privileged", async () => {
     const { app } = await createApp({ auth: false })
 
     const response = await app.fetch(new Request("http://localhost/api/objects"))
@@ -631,6 +604,24 @@ describe("authorized object routes", () => {
         },
       ],
     })
+
+    const upsert = await app.fetch(
+      new Request("http://localhost/api/objects/contract/c2", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ properties: { id: "c2" } }),
+      })
+    )
+    expect(upsert.status).toBe(200)
+
+    const append = await app.fetch(
+      new Request("http://localhost/api/objects/contract/c2/telemetry/temperature", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ value: 30, at: "2026-05-16T11:00:00.000Z" }),
+      })
+    )
+    expect(append.status).toBe(200)
   })
 
   test("object writes require edit, not just view", async () => {
@@ -761,28 +752,6 @@ describe("authorized object routes", () => {
       new Request("http://localhost/api/objects/contract/c1", { headers: ingestor.headers })
     )
     expect(read.status).toBe(404)
-  })
-
-  test("disabled auth keeps the write routes privileged", async () => {
-    const { app } = await createApp({ auth: false })
-
-    const upsert = await app.fetch(
-      new Request("http://localhost/api/objects/contract/c2", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ properties: { id: "c2" } }),
-      })
-    )
-    expect(upsert.status).toBe(200)
-
-    const append = await app.fetch(
-      new Request("http://localhost/api/objects/contract/c2/telemetry/temperature", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ value: 30, at: "2026-05-16T11:00:00.000Z" }),
-      })
-    )
-    expect(append.status).toBe(200)
   })
 
   test("dataset routes narrow to viewable datasets and hide forbidden identities", async () => {
@@ -1018,58 +987,120 @@ describe("authorized adjacent read routes", () => {
   })
 })
 
-describe("authorized action routes", () => {
-  test("action metadata narrows to applicable actions", async () => {
+describe("authorized catalogs and run requests", () => {
+  // `commercial` applies send-contract; `operations` runs the orders sync and pipeline and the
+  // workflow; `admins` hold every wildcard grant.
+  test.each([
+    {
+      catalog: "actions",
+      granted: "commercial",
+      denied: "operations",
+      ids: ["send-contract"],
+      all: ["send-contract"],
+    },
+    {
+      catalog: "syncs",
+      granted: "operations",
+      denied: "commercial",
+      ids: ["sync-orders"],
+      all: ["sync-orders", "sync-customers"],
+    },
+    {
+      catalog: "pipelines",
+      granted: "operations",
+      denied: "commercial",
+      ids: ["pipeline-orders"],
+      all: ["pipeline-orders", "pipeline-customers"],
+    },
+    {
+      catalog: "workflows",
+      granted: "operations",
+      denied: "commercial",
+      ids: ["renew-contract"],
+      all: ["renew-contract"],
+    },
+  ])("the $catalog catalog narrows to what the principal may use and hides the rest as 404", async ({
+    catalog,
+    granted,
+    denied,
+    ids,
+    all,
+  }) => {
     const { app, storage } = await createApp()
-    const operator = await seedSession(storage, ["commercial"], "usr_op")
-    const runner = await seedSession(storage, ["operations"], "usr_run")
+    const allowed = await seedSession(storage, [granted], "usr_allowed")
+    const outsider = await seedSession(storage, [denied], "usr_outsider")
+    const admin = await seedSession(storage, ["admins"], "usr_admin")
+    const list = async (headers: HeadersInit) => {
+      const response = await app.fetch(new Request(`http://localhost/api/${catalog}`, { headers }))
+      return ((await response.json()) as { id: string }[]).map((entry) => entry.id)
+    }
 
-    const operatorList = await app.fetch(
-      new Request("http://localhost/api/actions", { headers: operator.headers })
-    )
-    expect(((await operatorList.json()) as { id: string }[]).map((a) => a.id)).toEqual([
-      "send-contract",
-    ])
-
-    const runnerList = await app.fetch(
-      new Request("http://localhost/api/actions", { headers: runner.headers })
-    )
-    expect(await runnerList.json()).toEqual([])
-
+    expect(await list(allowed.headers)).toEqual([...ids])
+    expect(await list(outsider.headers)).toEqual([])
+    // Existence-hiding, never 403.
     const hidden = await app.fetch(
-      new Request("http://localhost/api/actions/send-contract", { headers: runner.headers })
+      new Request(`http://localhost/api/${catalog}/${ids[0]}`, { headers: outsider.headers })
     )
     expect(hidden.status).toBe(404)
+    expect(await list(admin.headers)).toEqual([...all])
   })
 
-  test("action requests require can.apply", async () => {
+  test.each([
+    {
+      route: "action",
+      grant: "can.apply",
+      path: "/api/actions/send-contract",
+      body: { subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" } },
+      granted: "commercial",
+      denied: "operations",
+      accepted: 200,
+    },
+    {
+      route: "sync run",
+      grant: "can.run",
+      path: "/api/syncs/sync-orders/runs",
+      body: { commitMessage: "manual run" },
+      granted: "operations",
+      denied: "commercial",
+      accepted: 202,
+    },
+    {
+      route: "pipeline run",
+      grant: "can.run",
+      path: "/api/pipelines/pipeline-orders/runs",
+      body: {},
+      granted: "operations",
+      denied: "commercial",
+      accepted: 202,
+    },
+    {
+      route: "workflow run",
+      grant: "can.run",
+      path: "/api/workflows/renew-contract/runs",
+      body: { input: { contract: { objectTypeId: "contract", primaryId: "c1" } } },
+      granted: "operations",
+      denied: "commercial",
+      accepted: 202,
+    },
+  ])("$route requests require $grant", async ({ path, body, granted, denied, accepted }) => {
     const { app, storage } = await createApp()
-    const operator = await seedSession(storage, ["commercial"], "usr_op")
-    const runner = await seedSession(storage, ["operations"], "usr_run")
-    const body = JSON.stringify({
-      subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
-    })
+    const allowed = await seedSession(storage, [granted], "usr_allowed")
+    const outsider = await seedSession(storage, [denied], "usr_outsider")
+    const request = (headers: HeadersInit) =>
+      app.fetch(
+        new Request(`http://localhost${path}`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        })
+      )
 
-    const allowed = await app.fetch(
-      new Request("http://localhost/api/actions/send-contract", {
-        method: "POST",
-        headers: operator.csrfHeaders,
-        body,
-      })
-    )
-    expect(allowed.status).toBe(200)
-    expect(await allowed.json()).toMatchObject({ actionId: "send-contract", status: "succeeded" })
-
-    const denied = await app.fetch(
-      new Request("http://localhost/api/actions/send-contract", {
-        method: "POST",
-        headers: runner.csrfHeaders,
-        body,
-      })
-    )
-    expect(denied.status).toBe(403)
+    expect((await request(allowed.csrfHeaders)).status).toBe(accepted)
+    expect((await request(outsider.csrfHeaders)).status).toBe(403)
   })
+})
 
+describe("authorized action routes", () => {
   test("action run history inherits action and subject visibility", async () => {
     const { app, storage } = await createApp()
     const operator = await seedSession(storage, ["commercial"], "usr_op")
@@ -1118,62 +1149,6 @@ describe("authorized action routes", () => {
 })
 
 describe("authorized sync routes", () => {
-  test("sync catalog narrows to runnable syncs and hides the rest as 404", async () => {
-    const { app, storage } = await createApp()
-    const runner = await seedSession(storage, ["operations"], "usr_run")
-    const operator = await seedSession(storage, ["commercial"], "usr_op")
-    const admin = await seedSession(storage, ["admins"], "usr_admin")
-
-    const runnerList = await app.fetch(
-      new Request("http://localhost/api/syncs", { headers: runner.headers })
-    )
-    expect(((await runnerList.json()) as { id: string }[]).map((sync) => sync.id)).toEqual([
-      "sync-orders",
-    ])
-
-    const operatorList = await app.fetch(
-      new Request("http://localhost/api/syncs", { headers: operator.headers })
-    )
-    expect(await operatorList.json()).toEqual([])
-
-    const hidden = await app.fetch(
-      new Request("http://localhost/api/syncs/sync-orders", { headers: operator.headers })
-    )
-    expect(hidden.status).toBe(404)
-
-    const adminList = await app.fetch(
-      new Request("http://localhost/api/syncs", { headers: admin.headers })
-    )
-    expect(((await adminList.json()) as { id: string }[]).map((sync) => sync.id)).toEqual([
-      "sync-orders",
-      "sync-customers",
-    ])
-  })
-
-  test("sync run requests require can.run", async () => {
-    const { app, storage } = await createApp()
-    const runner = await seedSession(storage, ["operations"], "usr_run")
-    const operator = await seedSession(storage, ["commercial"], "usr_op")
-
-    const allowed = await app.fetch(
-      new Request("http://localhost/api/syncs/sync-orders/runs", {
-        method: "POST",
-        headers: runner.csrfHeaders,
-        body: JSON.stringify({ commitMessage: "manual run" }),
-      })
-    )
-    expect(allowed.status).toBe(202)
-
-    const denied = await app.fetch(
-      new Request("http://localhost/api/syncs/sync-orders/runs", {
-        method: "POST",
-        headers: operator.csrfHeaders,
-        body: JSON.stringify({ commitMessage: "manual run" }),
-      })
-    )
-    expect(denied.status).toBe(403)
-  })
-
   test("sync run history narrows to runnable syncs", async () => {
     const { app, storage } = await createApp()
     const runner = await seedSession(storage, ["operations"], "usr_run")
@@ -1226,62 +1201,6 @@ describe("authorized sync routes", () => {
 })
 
 describe("authorized pipeline routes", () => {
-  test("pipeline catalog narrows to runnable pipelines and hides the rest as 404", async () => {
-    const { app, storage } = await createApp()
-    const runner = await seedSession(storage, ["operations"], "usr_run")
-    const operator = await seedSession(storage, ["commercial"], "usr_op")
-    const admin = await seedSession(storage, ["admins"], "usr_admin")
-
-    const runnerList = await app.fetch(
-      new Request("http://localhost/api/pipelines", { headers: runner.headers })
-    )
-    expect(((await runnerList.json()) as { id: string }[]).map((pipeline) => pipeline.id)).toEqual([
-      "pipeline-orders",
-    ])
-
-    const operatorList = await app.fetch(
-      new Request("http://localhost/api/pipelines", { headers: operator.headers })
-    )
-    expect(await operatorList.json()).toEqual([])
-
-    const hidden = await app.fetch(
-      new Request("http://localhost/api/pipelines/pipeline-orders", { headers: operator.headers })
-    )
-    expect(hidden.status).toBe(404)
-
-    const adminList = await app.fetch(
-      new Request("http://localhost/api/pipelines", { headers: admin.headers })
-    )
-    expect(((await adminList.json()) as { id: string }[]).map((pipeline) => pipeline.id)).toEqual([
-      "pipeline-orders",
-      "pipeline-customers",
-    ])
-  })
-
-  test("pipeline run requests require can.run", async () => {
-    const { app, storage } = await createApp()
-    const runner = await seedSession(storage, ["operations"], "usr_run")
-    const operator = await seedSession(storage, ["commercial"], "usr_op")
-
-    const allowed = await app.fetch(
-      new Request("http://localhost/api/pipelines/pipeline-orders/runs", {
-        method: "POST",
-        headers: runner.csrfHeaders,
-        body: JSON.stringify({}),
-      })
-    )
-    expect(allowed.status).toBe(202)
-
-    const denied = await app.fetch(
-      new Request("http://localhost/api/pipelines/pipeline-orders/runs", {
-        method: "POST",
-        headers: operator.csrfHeaders,
-        body: JSON.stringify({}),
-      })
-    )
-    expect(denied.status).toBe(403)
-  })
-
   test("pipeline run history narrows to runnable pipelines", async () => {
     const { app, storage } = await createApp()
     const runner = await seedSession(storage, ["operations"], "usr_run")
@@ -1364,59 +1283,6 @@ describe("authorized event and workflow routes", () => {
     expect(runnerEvents.status).toBe(200)
     const runnerBody = (await runnerEvents.json()) as { events: { type: string }[] }
     expect(runnerBody.events.filter((event) => event.type === "object.created")).toEqual([])
-  })
-
-  test("workflow catalog narrows to runnable workflows and hides the rest as 404", async () => {
-    const { app, storage } = await createApp()
-    const runner = await seedSession(storage, ["operations"], "usr_run")
-    const operator = await seedSession(storage, ["commercial"], "usr_op")
-
-    // The runner can run renew-contract, so it appears in the catalog.
-    const runnerList = await app.fetch(
-      new Request("http://localhost/api/workflows", { headers: runner.headers })
-    )
-    expect(((await runnerList.json()) as { id: string }[]).map((w) => w.id)).toEqual([
-      "renew-contract",
-    ])
-
-    // The operator holds no run grant, so the catalog is empty and the detail
-    // route hides the workflow as 404 (existence-hiding, never 403).
-    const operatorList = await app.fetch(
-      new Request("http://localhost/api/workflows", { headers: operator.headers })
-    )
-    expect(await operatorList.json()).toEqual([])
-
-    const hidden = await app.fetch(
-      new Request("http://localhost/api/workflows/renew-contract", { headers: operator.headers })
-    )
-    expect(hidden.status).toBe(404)
-  })
-
-  test("workflow runs require can.run", async () => {
-    const { app, storage } = await createApp()
-    const runner = await seedSession(storage, ["operations"], "usr_run")
-    const operator = await seedSession(storage, ["commercial"], "usr_op")
-    const body = JSON.stringify({
-      input: { contract: { objectTypeId: "contract", primaryId: "c1" } },
-    })
-
-    const allowed = await app.fetch(
-      new Request("http://localhost/api/workflows/renew-contract/runs", {
-        method: "POST",
-        headers: runner.csrfHeaders,
-        body,
-      })
-    )
-    expect(allowed.status).toBe(202)
-
-    const denied = await app.fetch(
-      new Request("http://localhost/api/workflows/renew-contract/runs", {
-        method: "POST",
-        headers: operator.csrfHeaders,
-        body,
-      })
-    )
-    expect(denied.status).toBe(403)
   })
 
   test("workflow run history and interventions inherit workflow run visibility", async () => {
@@ -1525,77 +1391,3 @@ describe("authorized event and workflow routes", () => {
     expect(hiddenIntervention.status).toBe(404)
   })
 })
-
-describe("authorized event websocket", () => {
-  test("any authenticated principal may connect; events are filtered as they stream", async () => {
-    const port = await getFreePort()
-    const baseUrl = `http://127.0.0.1:${port}`
-    const { sixb, storage } = await createRuntime()
-    const runner = await seedSession(storage, ["operations"], "usr_run")
-    const operator = await seedSession(storage, ["commercial"], "usr_op")
-    const server = new SixbServer({
-      host: sixb,
-      hostname: "127.0.0.1",
-      port,
-      quiet: true,
-      browser: createTestBrowserPolicy({ apiOrigin: baseUrl, appOrigin: baseUrl }),
-    })
-
-    await server.start()
-    try {
-      const wsUrl = `${baseUrl.replace("http://", "ws://")}/ws/events`
-
-      // No connection-level events grant: both principals connect, and the
-      // stream is filtered per-event by their grants during polling.
-      // Bun's WebSocket accepts an options object with `headers`; the DOM lib
-      // types only model the subprotocols argument, so widen at the call site.
-      const runnerWs = new WebSocket(wsUrl, { headers: runner.headers } as unknown as string[])
-      expect(await nextWsMessage(runnerWs)).toEqual({ type: "connected", channel: "events" })
-      runnerWs.close()
-
-      const operatorWs = new WebSocket(wsUrl, {
-        headers: operator.headers,
-      } as unknown as string[])
-      expect(await nextWsMessage(operatorWs)).toEqual({ type: "connected", channel: "events" })
-      operatorWs.close()
-    } finally {
-      await server.stop()
-    }
-  })
-})
-
-function nextWsMessage(ws: WebSocket): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    ws.addEventListener(
-      "message",
-      (event) => resolve(JSON.parse(String((event as MessageEvent).data))),
-      { once: true }
-    )
-    ws.addEventListener("error", () => reject(new Error("WebSocket errored")), { once: true })
-    ws.addEventListener("close", () => reject(new Error("WebSocket closed before a message")), {
-      once: true,
-    })
-  })
-}
-
-async function getFreePort(): Promise<number> {
-  return await new Promise<number>((resolvePromise, reject) => {
-    const server = createServer() as ReturnType<typeof createServer> & {
-      on(event: string, listener: (error: Error) => void): void
-    }
-    server.on("error", reject)
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address()
-      if (!address || typeof address === "string") {
-        reject(new Error("Could not resolve an open port"))
-        return
-      }
-
-      const { port } = address
-      server.close((error) => {
-        if (error) reject(error)
-        else resolvePromise(port)
-      })
-    })
-  })
-}

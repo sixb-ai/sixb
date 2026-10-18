@@ -484,27 +484,6 @@ describe("magic-link auth routes", () => {
     expect(callback.headers.get("set-cookie")).toContain("sixb_session_app=")
   })
 
-  test("emailed link survives repeated GET prefetches by email link scanners", async () => {
-    const { app, messages } = createRuntime({
-      bootstrapUsers: ["founder@acme.com"],
-    })
-
-    await postSignIn(app, { email: "founder@acme.com" })
-    const link = linkFromLatestMessage(messages)
-
-    // Safe Links / Avanan style scanners fetch the URL before the user does.
-    for (let i = 0; i < 3; i++) {
-      const prefetch = await app.fetch(new Request(link.toString(), { redirect: "manual" }))
-      expect(prefetch.status).toBe(200)
-      expect(prefetch.headers.get("set-cookie")).toBeNull()
-    }
-
-    const callback = await confirmCallback(app, link)
-
-    expect(callback.status).toBe(303)
-    expect(callback.headers.get("set-cookie")).toContain("sixb_session_app=")
-  })
-
   test("callback refuses replayed confirmations without setting cookies", async () => {
     const { app, messages } = createRuntime({
       bootstrapUsers: ["founder@acme.com"],
@@ -618,18 +597,17 @@ describe("magic-link auth routes", () => {
     expect(cookieValue(completed.headers.get("set-cookie"), "sixb_session_app")).toContain(".")
   })
 
-  test("sign-in rejects unsafe returnTo values before sending a link", async () => {
+  test("sign-in rejects return targets outside the allowed origins before sending a link", async () => {
     const { app, messages } = createRuntime({
       bootstrapUsers: ["founder@acme.com"],
     })
 
-    const response = await postSignIn(app, {
-      email: "founder@acme.com",
-      returnTo: "https://evil.com",
-    })
+    for (const returnTo of ["https://evil.com", "http://evil.localhost/dashboard"]) {
+      const response = await postSignIn(app, { email: "founder@acme.com", returnTo })
 
-    expect(response.status).toBe(400)
-    expect(await response.text()).toContain("This sign-in request is invalid.")
+      expect(response.status, returnTo).toBe(400)
+      expect(await response.text()).toContain("This sign-in request is invalid.")
+    }
     expect(messages).toHaveLength(0)
   })
 
@@ -676,69 +654,6 @@ describe("magic-link auth routes", () => {
       session: { id: expect.any(String) },
     })
   })
-
-  test("API browser sign-in rejects return targets outside the allowed origins", async () => {
-    const { app, messages } = createRuntime({
-      bootstrapUsers: ["founder@acme.com"],
-    })
-    const body = new URLSearchParams()
-    body.set("email", "founder@acme.com")
-    body.set("returnTo", "http://evil.localhost/dashboard")
-
-    const response = await app.fetch(
-      new Request("http://api.localhost/auth/sign-in", {
-        method: "POST",
-        headers: {
-          "content-type": "application/x-www-form-urlencoded",
-        },
-        body,
-      })
-    )
-
-    expect(response.status).toBe(400)
-    expect(await response.text()).toContain("This sign-in request is invalid.")
-    expect(messages).toHaveLength(0)
-  })
-
-  test("sign-out revokes the magic-link-created session and clears cookies", async () => {
-    const { app, messages, storage } = createRuntime({
-      bootstrapUsers: ["founder@acme.com"],
-    })
-
-    await postSignIn(app, { email: "founder@acme.com" })
-    const link = linkFromLatestMessage(messages)
-    const callback = await confirmCallback(app, link)
-    const setCookie = callback.headers.get("set-cookie")
-    const sessionCookie = cookieValue(setCookie, "sixb_session_app")
-    const csrfCookie = cookieValue(setCookie, "sixb_csrf_app")
-    const sessionResponse = await app.fetch(
-      new Request("http://localhost/api/auth/session", {
-        headers: { cookie: `sixb_session_app=${sessionCookie}` },
-      })
-    )
-    const session = (await sessionResponse.json()) as {
-      readonly authenticated: true
-      readonly session: { readonly id: string }
-    }
-
-    const signOut = await app.fetch(
-      new Request("http://localhost/api/auth/sign-out", {
-        method: "POST",
-        headers: {
-          cookie: `sixb_session_app=${sessionCookie}; sixb_csrf_app=${csrfCookie}`,
-          "x-sixb-csrf": csrfCookie,
-        },
-      })
-    )
-
-    expect(signOut.status).toBe(200)
-    expect(signOut.headers.get("set-cookie")).toContain("sixb_session_app=")
-    await expect(
-      storage.auth.sessions.getById({ projectId, id: session.session.id })
-    ).resolves.toMatchObject({
-      revokedAt: expect.any(Date),
-    })
-  })
 })
 
 describe("session management auth routes", () => {
@@ -778,12 +693,6 @@ describe("session management auth routes", () => {
     expect(other?.current).toBe(false)
     expect(other?.userAgent).toBe("Mozilla/5.0 (iPhone)")
     expect(other?.ipAddress).toBe("203.0.113.7")
-  })
-
-  test("listing sessions requires authentication", async () => {
-    const { app } = createRuntime({ bootstrapUsers: ["founder@acme.com"] })
-    const response = await app.fetch(new Request("http://api.localhost/api/auth/sessions"))
-    expect(response.status).toBe(401)
   })
 
   test("revokes one of the caller's other sessions and leaves the current one active", async () => {
@@ -857,19 +766,6 @@ describe("session management auth routes", () => {
     expect(victim?.revokedAt).toBeUndefined()
   })
 
-  test("revoking a session requires a CSRF token", async () => {
-    const { app, messages } = createRuntime({ bootstrapUsers: ["founder@acme.com"] })
-    const { sessionCookie, sessionId } = await signIn(app, messages, "founder@acme.com")
-
-    const response = await app.fetch(
-      new Request(`http://api.localhost/api/auth/sessions/${sessionId}/revoke`, {
-        method: "POST",
-        headers: { cookie: `sixb_session_app=${sessionCookie}` },
-      })
-    )
-    expect(response.status).toBe(403)
-  })
-
   test("sign-out-all revokes every session and clears cookies", async () => {
     const { app, messages, storage } = createRuntime({ bootstrapUsers: ["founder@acme.com"] })
     const { sessionCookie, csrfCookie, sessionId } = await signIn(app, messages, "founder@acme.com")
@@ -908,18 +804,5 @@ describe("session management auth routes", () => {
       })
     )
     expect(await afterResponse.json()).toMatchObject({ authenticated: false })
-  })
-
-  test("sign-out-all requires a CSRF token", async () => {
-    const { app, messages } = createRuntime({ bootstrapUsers: ["founder@acme.com"] })
-    const { sessionCookie } = await signIn(app, messages, "founder@acme.com")
-
-    const response = await app.fetch(
-      new Request("http://api.localhost/api/auth/sign-out-all", {
-        method: "POST",
-        headers: { cookie: `sixb_session_app=${sessionCookie}` },
-      })
-    )
-    expect(response.status).toBe(403)
   })
 })

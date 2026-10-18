@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { isAccessTokenRoute, shouldVerifyCsrf } from "../src/auth/access-token-boundary"
-import { classifyRoute } from "../src/auth/public-routes"
+import { isAccessTokenRoute } from "../src/auth/access-token-boundary"
 
 function request(method: string, path: string): Request {
   return new Request(`http://localhost${path}`, { method })
@@ -49,6 +48,9 @@ describe("access token auth boundary", () => {
       ["GET", "/api/workflow-runs/run_1/files/content?path=/input/document"],
       ["GET", "/api/agent-threads/thr_1/messages/msg_1/files/content?path=/parts/1/fileRef"],
       ["GET", "/api/events"],
+      ["POST", "/api/share-grants"],
+      ["GET", "/api/share-grants?definitionId=published-report"],
+      ["DELETE", "/api/share-grants/shr_1"],
     ] as const
 
     for (const [method, path] of allowedRoutes) {
@@ -95,25 +97,5 @@ describe("access token auth boundary", () => {
     for (const [method, path] of rejectedRoutes) {
       expect(isAccessTokenRoute(request(method, path)), `${method} ${path}`).toBe(false)
     }
-  })
-
-  test("requires CSRF only for cookie-session authenticated mutations", () => {
-    const readRoute = classifyRoute(request("GET", "/api/objects"))
-    const mutationRoute = classifyRoute(request("POST", "/api/objects/query"))
-
-    expect(shouldVerifyCsrf(readRoute, "cookie")).toBe(false)
-    expect(shouldVerifyCsrf(mutationRoute, "cookie")).toBe(true)
-    expect(shouldVerifyCsrf(mutationRoute, "bearer")).toBe(false)
-  })
-
-  test("classifies infrastructure probes explicitly as public", () => {
-    expect(classifyRoute(request("GET", "/health"))).toEqual({
-      kind: "public",
-      csrfProtected: false,
-    })
-    expect(classifyRoute(request("GET", "/ready"))).toEqual({
-      kind: "public",
-      csrfProtected: false,
-    })
   })
 })

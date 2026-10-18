@@ -243,84 +243,6 @@ describe("access token management routes", () => {
     })
   })
 
-  test("lets personal access tokens manage service accounts but not create their tokens", async () => {
-    const { app, storage } = createRuntime()
-    const session = await seedSession(storage)
-    const credential = await seedPersonalAccessToken(storage)
-    const bearerHeaders = { authorization: `Bearer ${credential.tokenValue}` }
-
-    const createAccountResponse = await app.fetch(
-      jsonRequest("/api/auth/service-accounts", "POST", bearerHeaders, {
-        id: "svc_cli",
-        name: "CLI Service",
-        description: "CLI managed service account",
-        groupIds: ["agents"],
-      })
-    )
-    expect(createAccountResponse.status).toBe(201)
-    await expect(createAccountResponse.json()).resolves.toMatchObject({
-      serviceAccount: {
-        id: "svc_cli",
-        name: "CLI Service",
-        status: "active",
-        groupIds: ["agents"],
-      },
-    })
-
-    const mintResponse = await app.fetch(
-      jsonRequest("/api/auth/service-accounts/svc_cli/access-tokens", "POST", bearerHeaders, {
-        name: "Sandbox token",
-        expiresAt: "2099-01-01T00:00:00.000Z",
-      })
-    )
-    expect(mintResponse.status).toBe(403)
-    await expect(mintResponse.json()).resolves.toEqual({
-      error: "Access tokens cannot authenticate this route",
-    })
-
-    const createTokenResponse = await app.fetch(
-      jsonRequest("/api/auth/service-accounts/svc_cli/access-tokens", "POST", session.headers, {
-        name: "Sandbox token",
-        expiresAt: "2099-01-01T00:00:00.000Z",
-        groupIds: ["agents"],
-      })
-    )
-    expect(createTokenResponse.status).toBe(201)
-    const createdToken = (await createTokenResponse.json()) as {
-      accessToken: { readonly id: string }
-    }
-
-    const listTokensResponse = await app.fetch(
-      jsonRequest("/api/auth/service-accounts/svc_cli/access-tokens", "GET", bearerHeaders)
-    )
-    expect(listTokensResponse.status).toBe(200)
-    await expect(listTokensResponse.json()).resolves.toMatchObject({
-      accessTokens: [
-        { id: createdToken.accessToken.id, subject: { type: "serviceAccount", id: "svc_cli" } },
-      ],
-    })
-
-    const revokeTokenResponse = await app.fetch(
-      jsonRequest(
-        `/api/auth/service-accounts/svc_cli/access-tokens/${createdToken.accessToken.id}/revoke`,
-        "POST",
-        bearerHeaders
-      )
-    )
-    expect(revokeTokenResponse.status).toBe(200)
-    await expect(revokeTokenResponse.json()).resolves.toMatchObject({
-      accessToken: { id: createdToken.accessToken.id, status: "revoked" },
-    })
-
-    const disableResponse = await app.fetch(
-      jsonRequest("/api/auth/service-accounts/svc_cli/disable", "POST", bearerHeaders)
-    )
-    expect(disableResponse.status).toBe(200)
-    await expect(disableResponse.json()).resolves.toMatchObject({
-      serviceAccount: { id: "svc_cli", status: "suspended" },
-    })
-  })
-
   test("does not let service-account tokens manage credentials", async () => {
     const { app, storage } = createRuntime()
     const session = await seedSession(storage)
@@ -360,12 +282,15 @@ describe("access token management routes", () => {
     })
   })
 
+  // A personal access token manages service accounts, but minting their credentials takes a session.
   test("creates, disables, and manages service-account tokens", async () => {
     const { app, storage } = createRuntime()
     const session = await seedSession(storage)
+    const credential = await seedPersonalAccessToken(storage)
+    const bearerHeaders = { authorization: `Bearer ${credential.tokenValue}` }
 
     const createAccountResponse = await app.fetch(
-      jsonRequest("/api/auth/service-accounts", "POST", session.headers, {
+      jsonRequest("/api/auth/service-accounts", "POST", bearerHeaders, {
         id: "svc_agents",
         name: "Agents",
         description: "Sandbox agents",
@@ -380,6 +305,17 @@ describe("access token management routes", () => {
         status: "active",
         groupIds: ["agents"],
       },
+    })
+
+    const mintResponse = await app.fetch(
+      jsonRequest("/api/auth/service-accounts/svc_agents/access-tokens", "POST", bearerHeaders, {
+        name: "Sandbox token",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      })
+    )
+    expect(mintResponse.status).toBe(403)
+    await expect(mintResponse.json()).resolves.toEqual({
+      error: "Access tokens cannot authenticate this route",
     })
 
     const createTokenResponse = await app.fetch(
@@ -398,7 +334,7 @@ describe("access token management routes", () => {
     expect(createdToken.accessToken.groupIds).toEqual(["agents"])
 
     const listTokensResponse = await app.fetch(
-      jsonRequest("/api/auth/service-accounts/svc_agents/access-tokens", "GET", session.headers)
+      jsonRequest("/api/auth/service-accounts/svc_agents/access-tokens", "GET", bearerHeaders)
     )
     expect(listTokensResponse.status).toBe(200)
     await expect(listTokensResponse.json()).resolves.toMatchObject({
@@ -411,7 +347,7 @@ describe("access token management routes", () => {
       jsonRequest(
         `/api/auth/service-accounts/svc_agents/access-tokens/${createdToken.accessToken.id}/revoke`,
         "POST",
-        session.headers
+        bearerHeaders
       )
     )
     expect(revokeTokenResponse.status).toBe(200)
@@ -420,7 +356,7 @@ describe("access token management routes", () => {
     })
 
     const disableResponse = await app.fetch(
-      jsonRequest("/api/auth/service-accounts/svc_agents/disable", "POST", session.headers)
+      jsonRequest("/api/auth/service-accounts/svc_agents/disable", "POST", bearerHeaders)
     )
     expect(disableResponse.status).toBe(200)
     // Disabling preserves fields the request did not touch (e.g. description).

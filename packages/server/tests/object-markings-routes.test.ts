@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { createServer } from "node:net"
 import {
   can,
   defineGroup,
@@ -17,7 +16,7 @@ import {
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
-import { createTestBrowserPolicy } from "./helpers"
+import { createTestBrowserPolicy, getFreePort } from "./helpers"
 
 const projectId = "object-markings-tests"
 const financial = defineMarking("financial")
@@ -274,26 +273,4 @@ function wsMessages(ws: WebSocket) {
       return received.shift()
     },
   }
-}
-
-async function getFreePort(): Promise<number> {
-  return await new Promise<number>((resolvePromise, reject) => {
-    const server = createServer() as ReturnType<typeof createServer> & {
-      on(event: string, listener: (error: Error) => void): void
-    }
-    server.on("error", reject)
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address()
-      if (!address || typeof address === "string") {
-        reject(new Error("Could not resolve an open port"))
-        return
-      }
-
-      const { port } = address
-      server.close((error) => {
-        if (error) reject(error)
-        else resolvePromise(port)
-      })
-    })
-  })
 }

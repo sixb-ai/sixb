@@ -1,5 +1,4 @@
-import { describe, expect, setSystemTime, test } from "bun:test"
-import { createServer } from "node:net"
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test"
 import {
   type AuthCookieOptions,
   type AuthSessionOptions,
@@ -24,7 +23,7 @@ import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../src/auth/csrf"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "../src/routes/files"
 import { createSixbApi, MAX_WEBSOCKET_MESSAGE_BYTES, SixbServer } from "../src/server"
 import { DEFAULT_REQUEST_BODY_LIMIT_BYTES } from "../src/utils/request-body"
-import { createTestBrowserPolicy } from "./helpers"
+import { createTestBrowserPolicy, getFreePort } from "./helpers"
 
 const securityAdmins = defineGroup("security-admins")
 
@@ -42,35 +41,13 @@ const Device = defineObjectType({
   ],
 })
 
-// The CSRF and origin tests below drive `PUT /api/objects/device/:id` because it is a mutation, not
-// because they care about authorization. It enforces `edit:object` now, so they seed the grant to
-// keep asserting the status the guard produces rather than the one the write grant would.
+// The origin tests below drive `PUT /api/objects/device/:id` because it is a mutation, not because
+// they care about authorization. It enforces `edit:object` now, so they seed the grant to keep
+// asserting the status the guard produces rather than the one the write grant would.
 const deviceWriter = defineRole("device.writer", {
   grantedTo: [securityAdmins],
   grants: [can.view(Device), can.edit(Device)],
 })
-
-async function getFreePort(): Promise<number> {
-  return await new Promise<number>((resolvePromise, reject) => {
-    const server = createServer() as ReturnType<typeof createServer> & {
-      on(event: string, listener: (error: Error) => void): void
-    }
-    server.on("error", reject)
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address()
-      if (!address || typeof address === "string") {
-        reject(new Error("Could not resolve an open port"))
-        return
-      }
-
-      const { port } = address
-      server.close((error) => {
-        if (error) reject(error)
-        else resolvePromise(port)
-      })
-    })
-  })
-}
 
 function createRuntime(
   options: {
@@ -121,6 +98,34 @@ function createRuntime(
   })
 
   return { sixb, storage }
+}
+
+function createApp(sixb: SixbHost) {
+  return createSixbApi(
+    new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+  )
+}
+
+/** Serves `sixb` on a loopback port through the real Bun server, with its body and socket limits. */
+async function withServer(
+  sixb: SixbHost,
+  run: (server: { readonly baseUrl: string; readonly port: number }) => Promise<void>
+): Promise<void> {
+  const port = await getFreePort()
+  const baseUrl = `http://127.0.0.1:${port}`
+  const server = new SixbServer({
+    host: sixb,
+    hostname: "127.0.0.1",
+    port,
+    quiet: true,
+    browser: createTestBrowserPolicy({ apiOrigin: baseUrl }),
+  })
+  await server.start()
+  try {
+    await run({ baseUrl, port })
+  } finally {
+    await server.stop()
+  }
 }
 
 async function seedSession(
@@ -191,23 +196,9 @@ async function seedAccessToken(storage: InMemoryStorage) {
 }
 
 describe("server auth guard", () => {
-  test("leaves routes open when auth is not configured outside production", async () => {
-    const { sixb } = createRuntime()
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
-
-    const response = await app.fetch(new Request("http://localhost/api/project"))
-
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ id: "test-project", locale: "en", timeZone: "UTC" })
-  })
-
   test("tells a browser shell that the project runs without auth", async () => {
     const { sixb } = createRuntime()
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
+    const app = createApp(sixb)
 
     const response = await app.fetch(new Request("http://localhost/api/auth/session"))
 
@@ -222,11 +213,7 @@ describe("server auth guard", () => {
 
     try {
       const { sixb } = createRuntime()
-      expect(() =>
-        createSixbApi(
-          new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-        )
-      ).toThrow("Auth is required in production")
+      expect(() => createApp(sixb)).toThrow("Auth is required in production")
     } finally {
       if (previous === undefined) {
         delete process.env.NODE_ENV
@@ -236,23 +223,61 @@ describe("server auth guard", () => {
     }
   })
 
+  // The guard owns this denial for every API route. The rows beyond the project are the
+  // auth-management reads, which sit next to the public `/api/auth/session`.
   test("protects API routes with generic JSON 401", async () => {
     const { sixb } = createRuntime({ auth: true })
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
+    const app = createApp(sixb)
 
-    const response = await app.fetch(new Request("http://localhost/api/project"))
+    for (const path of [
+      "/api/project",
+      "/api/auth/sessions",
+      "/api/auth/members",
+      "/api/auth/invitation-options",
+    ]) {
+      const response = await app.fetch(new Request(`http://localhost${path}`))
 
-    expect(response.status).toBe(401)
-    expect(await response.json()).toEqual({ error: "Authentication required" })
+      expect(response.status, path).toBe(401)
+      expect(await response.json()).toEqual({ error: "Authentication required" })
+    }
+  })
+
+  // The guard owns both denials for every API mutation, before any route runs. The rows are the
+  // object write and the auth-management mutations a forged cross-site request would aim at.
+  test("requires authentication, then CSRF, for mutations", async () => {
+    const { sixb, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage)
+    const app = createApp(sixb)
+    const mutations = [
+      ["PUT", "/api/objects/device/fan-1", { properties: { name: "Fan" } }],
+      ["POST", "/api/auth/invitations", { email: "ben@acme.com", groupIds: [] }],
+      ["PATCH", "/api/auth/members/usr_2/groups", { groupIds: [] }],
+      ["POST", "/api/auth/members/usr_2/suspend", undefined],
+      ["POST", "/api/auth/sessions/ses_1/revoke", undefined],
+      ["POST", "/api/auth/sign-out-all", undefined],
+    ] as const
+
+    for (const [method, path, body] of mutations) {
+      const send = (cookie?: string) =>
+        app.fetch(
+          new Request(`http://localhost${path}`, {
+            method,
+            headers: {
+              ...(body ? { "content-type": "application/json" } : {}),
+              ...(cookie ? { cookie } : {}),
+            },
+            body: body ? JSON.stringify(body) : undefined,
+          })
+        )
+
+      expect((await send()).status, `${method} ${path} anonymously`).toBe(401)
+      expect((await send(seeded.cookie)).status, `${method} ${path} without CSRF`).toBe(403)
+    }
   })
 
   test("protects a route registered outside the known prefixes", async () => {
     const { sixb } = createRuntime({ auth: true })
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    ).get("/internal/metrics", () => "secret")
+    const app = createApp(sixb).get("/internal/metrics", () => "secret")
 
     // This is the case the classifier's default actually governs. An *unregistered*
     // path 404s before the lifecycle hooks run, so it was never exposed; the trap was
@@ -268,9 +293,7 @@ describe("server auth guard", () => {
   test("accepts bearer tokens only on the access token route boundary", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const credential = await seedAccessToken(storage)
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
+    const app = createApp(sixb)
     const headers = {
       authorization: `Bearer ${credential.tokenValue}`,
       "x-sixb-session-activity": "1",
@@ -321,9 +344,7 @@ describe("server auth guard", () => {
   test("returns a safe session shape", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
+    const app = createApp(sixb)
 
     const response = await app.fetch(
       new Request("http://localhost/api/auth/session", {
@@ -352,9 +373,7 @@ describe("server auth guard", () => {
   test("signs a device in as a bearer session that refreshes and signs out", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
+    const app = createApp(sixb)
 
     const started = await app.fetch(
       new Request("http://localhost/api/auth/device-authorizations", {
@@ -623,20 +642,10 @@ describe("server auth guard", () => {
 
   test("limits device authorizations per client address behind a trusted proxy", async () => {
     const { sixb } = createRuntime({ auth: true })
-    const port = await getFreePort()
-    const server = new SixbServer({
-      host: sixb,
-      hostname: "127.0.0.1",
-      port,
-      quiet: true,
-      browser: createTestBrowserPolicy({ apiOrigin: `http://127.0.0.1:${port}` }),
-    })
-    await server.start()
-
-    try {
+    await withServer(sixb, async ({ baseUrl }) => {
       // The test connects from loopback, a trusted proxy, so the appended entry is the client.
       const start = (forwardedFor: string) =>
-        fetch(`http://127.0.0.1:${port}/api/auth/device-authorizations`, {
+        fetch(`${baseUrl}/api/auth/device-authorizations`, {
           method: "POST",
           headers: { "content-type": "application/json", "x-forwarded-for": forwardedFor },
           body: JSON.stringify({ clientName: "sixb CLI on alex-mbp" }),
@@ -647,18 +656,14 @@ describe("server auth guard", () => {
       }
       expect((await start("203.0.113.7")).status).toBe(429)
       expect((await start("203.0.113.8")).status).toBe(201)
-    } finally {
-      await server.stop()
-    }
+    })
   })
 
   // Reproduce: drop the try/catch around approve/deny in POST /auth/device and this returns 500.
   test("renders the expired page when a device authorization was already decided", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
+    const app = createApp(sixb)
     const started = await app.fetch(
       new Request("http://localhost/api/auth/device-authorizations", {
         method: "POST",
@@ -685,222 +690,12 @@ describe("server auth guard", () => {
     expect(await late.text()).toContain("This authorization has expired")
   })
 
-  test("renews session and CSRF cookies on foreground protected requests", async () => {
-    const now = new Date("2026-07-01T10:00:00.000Z")
-    setSystemTime(now)
-    try {
-      const { sixb, storage } = createRuntime({
-        auth: true,
-        session: {
-          idleTimeoutMs: 30 * 60_000,
-          renewalWindowMs: 10 * 60_000,
-          cacheTtlMs: 0,
-        },
-      })
-      const seeded = await seedSession(storage, {
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 5 * 60_000),
-      })
-      const app = createSixbApi(
-        new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-      )
-
-      const response = await app.fetch(
-        new Request("http://api.localhost/api/project", {
-          headers: {
-            origin: "http://app.localhost",
-            cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
-            "x-sixb-session-activity": "1",
-          },
-        })
-      )
-
-      expect(response.status).toBe(200)
-      const cookies = getSetCookies(response)
-      expect(cookies).toHaveLength(2)
-      expect(cookies[0]).toContain(`sixb_session_app=${seeded.credential.cookieValue}`)
-      expect(cookies[1]).toContain("sixb_csrf_app=csrf_1")
-      expect(response.headers.get(CSRF_TOKEN_RESPONSE_HEADER_NAME)).toBe("csrf_1")
-      expect(response.headers.get("access-control-expose-headers")).toContain(
-        CSRF_TOKEN_RESPONSE_HEADER_NAME
-      )
-      for (const cookie of cookies) {
-        expect(cookie).toContain("Max-Age=1800")
-        expect(cookie).toContain("Expires=Wed, 01 Jul 2026 10:30:00 GMT")
-      }
-      await expect(
-        storage.auth.sessions.getById({ projectId: "test-project", id: "ses_1" })
-      ).resolves.toMatchObject({ expiresAt: new Date("2026-07-01T10:30:00.000Z") })
-    } finally {
-      setSystemTime()
-    }
-  })
-
-  test("repairs a missing CSRF cookie during session renewal", async () => {
-    const now = new Date("2026-07-01T10:00:00.000Z")
-    setSystemTime(now)
-    try {
-      const { sixb, storage } = createRuntime({
-        auth: true,
-        session: {
-          idleTimeoutMs: 30 * 60_000,
-          renewalWindowMs: 10 * 60_000,
-          cacheTtlMs: 0,
-        },
-      })
-      const seeded = await seedSession(storage, {
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 5 * 60_000),
-      })
-      const app = createSixbApi(
-        new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-      )
-
-      const response = await app.fetch(
-        new Request("http://localhost/api/project", {
-          headers: {
-            cookie: seeded.cookie,
-            "x-sixb-session-activity": "1",
-          },
-        })
-      )
-
-      expect(response.status).toBe(200)
-      const csrfCookie = getSetCookies(response).find((cookie) =>
-        cookie.startsWith("sixb_csrf_app=")
-      )
-      const csrfToken = csrfCookie?.match(/^sixb_csrf_app=([^;]+)/)?.[1]
-      if (!csrfToken) throw new Error("Expected the renewed CSRF cookie to contain a token")
-      expect(response.headers.get(CSRF_TOKEN_RESPONSE_HEADER_NAME)).toBe(csrfToken)
-    } finally {
-      setSystemTime()
-    }
-  })
-
-  test("does not renew cookies without foreground activity", async () => {
-    const now = new Date("2026-07-01T10:00:00.000Z")
-    setSystemTime(now)
-    try {
-      const { sixb, storage } = createRuntime({
-        auth: true,
-        session: {
-          idleTimeoutMs: 30 * 60_000,
-          renewalWindowMs: 10 * 60_000,
-          cacheTtlMs: 0,
-        },
-      })
-      const seeded = await seedSession(storage, {
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 5 * 60_000),
-      })
-      const app = createSixbApi(
-        new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-      )
-
-      const response = await app.fetch(
-        new Request("http://localhost/api/project", {
-          headers: { cookie: `${seeded.cookie}; ${seeded.csrfCookie}` },
-        })
-      )
-
-      expect(response.status).toBe(200)
-      expect(getSetCookies(response)).toEqual([])
-    } finally {
-      setSystemTime()
-    }
-  })
-
-  test("renews cookies from the public session endpoint without duplicating CSRF", async () => {
-    const now = new Date("2026-07-01T10:00:00.000Z")
-    setSystemTime(now)
-    try {
-      const { sixb, storage } = createRuntime({
-        auth: true,
-        cookies: { csrfHttpOnly: true },
-        session: {
-          idleTimeoutMs: 30 * 60_000,
-          renewalWindowMs: 10 * 60_000,
-          cacheTtlMs: 0,
-        },
-      })
-      const seeded = await seedSession(storage, {
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 5 * 60_000),
-      })
-      const app = createSixbApi(
-        new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-      )
-
-      const response = await app.fetch(
-        new Request("http://localhost/api/auth/session", {
-          headers: {
-            origin: "http://app.localhost",
-            cookie: seeded.cookie,
-            "x-sixb-session-activity": "1",
-          },
-        })
-      )
-
-      expect(response.status).toBe(200)
-      const body = (await response.json()) as { readonly csrfToken: string }
-      const { csrfToken } = body
-      expect(body).toMatchObject({
-        authenticated: true,
-        csrfToken: expect.any(String),
-        session: { expiresAt: "2026-07-01T10:30:00.000Z" },
-      })
-      const cookies = getSetCookies(response)
-      expect(cookies).toHaveLength(2)
-      expect(cookies[0]).toContain(`sixb_session_app=${seeded.credential.cookieValue}`)
-      expect(cookies[1]).toContain(`sixb_csrf_app=${csrfToken}`)
-      expect(cookies[1]).toContain("HttpOnly")
-      expect(response.headers.get(CSRF_TOKEN_RESPONSE_HEADER_NAME)).toBe(csrfToken)
-    } finally {
-      setSystemTime()
-    }
-  })
-
   // Atlas's cookie had the bare name. Reproduce: make the default session cookie `sixb_session` and
   // the old cookie signs in.
-  test("resolves sessions from the app's cookie, never Atlas's old one", async () => {
+  test("resolves API browser sessions from the allowed origin and the app's cookie only", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
-
-    const accepted = await app.fetch(
-      new Request("http://api.localhost/api/auth/session", {
-        headers: { origin: "http://app.localhost", cookie: seeded.cookie },
-      })
-    )
-    const adminCookie = await app.fetch(
-      new Request("http://api.localhost/api/project", {
-        headers: {
-          origin: "http://app.localhost",
-          cookie: `sixb_session=${seeded.credential.cookieValue}`,
-        },
-      })
-    )
-
-    expect(accepted.status).toBe(200)
-    expect(await accepted.json()).toMatchObject({
-      authenticated: true,
-      session: { id: "ses_1" },
-    })
-    expect(adminCookie.status).toBe(401)
-  })
-
-  test("resolves API browser sessions from the allowed origin", async () => {
-    const { sixb, storage } = createRuntime({ auth: true })
-    const seeded = await seedSession(storage)
-    const app = createSixbApi(
-      new SixbServer({
-        host: sixb,
-        quiet: true,
-        browser: createTestBrowserPolicy(),
-      })
-    )
+    const app = createApp(sixb)
 
     const accepted = await app.fetch(
       new Request("http://api.localhost/api/auth/session", {
@@ -933,13 +728,7 @@ describe("server auth guard", () => {
 
   test("rejects API browser requests from unknown origins", async () => {
     const { sixb } = createRuntime({ auth: true })
-    const app = createSixbApi(
-      new SixbServer({
-        host: sixb,
-        quiet: true,
-        browser: createTestBrowserPolicy(),
-      })
-    )
+    const app = createApp(sixb)
 
     const response = await app.fetch(
       new Request("http://api.localhost/api/auth/session", {
@@ -954,13 +743,7 @@ describe("server auth guard", () => {
 
   test("handles API browser preflights with an exact origin allowlist", async () => {
     const { sixb } = createRuntime({ auth: true })
-    const app = createSixbApi(
-      new SixbServer({
-        host: sixb,
-        quiet: true,
-        browser: createTestBrowserPolicy(),
-      })
-    )
+    const app = createApp(sixb)
 
     const allowed = await app.fetch(
       new Request("http://api.localhost/api/objects/device/fan-1", {
@@ -992,124 +775,35 @@ describe("server auth guard", () => {
     expect(rejected.status).toBe(403)
   })
 
-  test("accepts CSRF-protected API mutations from the allowed origin", async () => {
+  // The API's own origin is where its docs page sends mutations from.
+  test("accepts CSRF-protected API mutations from the app origin and the API's own", async () => {
     const { sixb, storage } = createRuntime({ auth: true, roles: [deviceWriter] })
     const seeded = await seedSession(storage)
-    const app = createSixbApi(
-      new SixbServer({
-        host: sixb,
-        quiet: true,
-        browser: createTestBrowserPolicy(),
-      })
-    )
+    const app = createApp(sixb)
 
-    const response = await app.fetch(
-      new Request("http://api.localhost/api/objects/device/fan-1", {
-        method: "PUT",
-        headers: {
-          origin: "http://app.localhost",
-          "content-type": "application/json",
-          cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
-          ...seeded.csrfHeader,
-        },
-        body: JSON.stringify({ properties: { name: "Fan" } }),
-      })
-    )
-
-    expect(response.status).toBe(200)
-    expect(response.headers.get("access-control-allow-origin")).toBe("http://app.localhost")
-  })
-
-  test("requires CSRF only after authentication for mutations", async () => {
-    const { sixb, storage } = createRuntime({ auth: true, roles: [deviceWriter] })
-    const seeded = await seedSession(storage)
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
-    const body = JSON.stringify({ properties: { name: "Fan" } })
-
-    const unauthenticated = await app.fetch(
-      new Request("http://localhost/api/objects/device/fan-1", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body,
-      })
-    )
-    const missingCsrf = await app.fetch(
-      new Request("http://localhost/api/objects/device/fan-1", {
-        method: "PUT",
-        headers: {
-          "content-type": "application/json",
-          cookie: seeded.cookie,
-        },
-        body,
-      })
-    )
-    const accepted = await app.fetch(
-      new Request("http://localhost/api/objects/device/fan-1", {
-        method: "PUT",
-        headers: {
-          "content-type": "application/json",
-          cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
-          ...seeded.csrfHeader,
-        },
-        body,
-      })
-    )
-
-    expect(unauthenticated.status).toBe(401)
-    expect(missingCsrf.status).toBe(403)
-    expect(accepted.status).toBe(200)
-  })
-
-  test("does not emit renewal cookies for a denied mutation", async () => {
-    const now = new Date("2026-07-01T10:00:00.000Z")
-    setSystemTime(now)
-    try {
-      const { sixb, storage } = createRuntime({
-        auth: true,
-        session: {
-          idleTimeoutMs: 30 * 60_000,
-          renewalWindowMs: 10 * 60_000,
-          cacheTtlMs: 0,
-        },
-      })
-      const seeded = await seedSession(storage, {
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + 5 * 60_000),
-      })
-      const app = createSixbApi(
-        new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-      )
-
+    for (const origin of ["http://app.localhost", "http://api.localhost"]) {
       const response = await app.fetch(
-        new Request("http://localhost/api/objects/device/fan-1", {
+        new Request("http://api.localhost/api/objects/device/fan-1", {
           method: "PUT",
           headers: {
+            origin,
             "content-type": "application/json",
-            cookie: seeded.cookie,
-            "x-sixb-session-activity": "1",
+            cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
+            ...seeded.csrfHeader,
           },
           body: JSON.stringify({ properties: { name: "Fan" } }),
         })
       )
 
-      expect(response.status).toBe(403)
-      expect(getSetCookies(response)).toEqual([])
-      await expect(
-        storage.auth.sessions.getById({ projectId: "test-project", id: "ses_1" })
-      ).resolves.toMatchObject({ expiresAt: new Date("2026-07-01T10:05:00.000Z") })
-    } finally {
-      setSystemTime()
+      expect(response.status, origin).toBe(200)
+      expect(response.headers.get("access-control-allow-origin")).toBe(origin)
     }
   })
 
   test("sign-out revokes the session and clears cookies", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
+    const app = createApp(sixb)
 
     const response = await app.fetch(
       new Request("http://localhost/api/auth/sign-out", {
@@ -1136,9 +830,7 @@ describe("server auth guard", () => {
 
   test("keeps webhooks public while connector verification remains authoritative", async () => {
     const { sixb } = createRuntime({ auth: true, connector: true })
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
+    const app = createApp(sixb)
 
     const response = await app.fetch(
       new Request("http://localhost/api/webhooks/github/events", {
@@ -1152,140 +844,39 @@ describe("server auth guard", () => {
     expect(await response.json()).toEqual({ error: "Webhook verification failed" })
   })
 
-  test("rejects WebSocket route access before subscription handling", async () => {
-    const { sixb } = createRuntime({ auth: true })
-    const port = await getFreePort()
-    const server = new SixbServer({
-      host: sixb,
-      hostname: "127.0.0.1",
-      port,
-      quiet: true,
-      browser: createTestBrowserPolicy({ apiOrigin: `http://127.0.0.1:${port}` }),
-    })
-
-    await server.start()
-
-    try {
-      await expect(connectWebSocket(`ws://127.0.0.1:${port}/ws/events`)).rejects.toThrow()
-    } finally {
-      await server.stop()
-    }
-  })
-
-  test("accepts WebSocket connections from allowed origins with the app's cookie", async () => {
+  // The upgrade is authenticated before subscription handling, from an allowed browser origin with
+  // the app's cookie or with a native session's bearer token. An access token is not a session.
+  test("authenticates WebSocket upgrades before subscription handling", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
-    const port = await getFreePort()
-    const apiOrigin = `http://127.0.0.1:${port}`
-    const server = new SixbServer({
-      host: sixb,
-      hostname: "127.0.0.1",
-      port,
-      quiet: true,
-      browser: createTestBrowserPolicy({ apiOrigin }),
-    })
+    const nativeSession = await signInDevice(createApp(sixb), seeded)
+    const personalToken = await seedAccessToken(storage)
 
-    await server.start()
+    await withServer(sixb, async ({ port }) => {
+      const connect = (headers?: Record<string, string>) =>
+        connectWebSocket(`ws://127.0.0.1:${port}/ws/events`, headers).then(
+          () => "open",
+          () => "refused"
+        )
+      const appCookie = { origin: "http://app.localhost", cookie: seeded.cookie }
 
-    try {
-      await expect(
-        connectWebSocket(`ws://127.0.0.1:${port}/ws/events`, {
-          origin: "http://app.localhost",
-          cookie: seeded.cookie,
-        })
-      ).resolves.toBeUndefined()
-
-      await expect(
-        connectWebSocket(`ws://127.0.0.1:${port}/ws/events`, {
+      expect(await connect()).toBe("refused")
+      expect(await connect(appCookie)).toBe("open")
+      expect(
+        await connect({
           origin: "http://app.localhost",
           cookie: `sixb_session=${seeded.credential.cookieValue}`,
         })
-      ).rejects.toThrow()
-    } finally {
-      await server.stop()
-    }
-  })
-
-  test("accepts a native session's bearer token on WebSockets, but not an access token", async () => {
-    const { sixb, storage } = createRuntime({ auth: true })
-    const seeded = await seedSession(storage)
-    const accessToken = await signInDevice(
-      createSixbApi(
-        new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-      ),
-      seeded
-    )
-    const personalToken = await seedAccessToken(storage)
-    const port = await getFreePort()
-    const server = new SixbServer({
-      host: sixb,
-      hostname: "127.0.0.1",
-      port,
-      quiet: true,
-      browser: createTestBrowserPolicy({ apiOrigin: `http://127.0.0.1:${port}` }),
+      ).toBe("refused")
+      expect(await connect({ ...appCookie, origin: "http://evil.localhost" })).toBe("refused")
+      expect(await connect({ authorization: `Bearer ${nativeSession}` })).toBe("open")
+      expect(await connect({ authorization: `Bearer ${personalToken.tokenValue}` })).toBe("refused")
     })
-
-    await server.start()
-
-    try {
-      await expect(
-        connectWebSocket(`ws://127.0.0.1:${port}/ws/events`, {
-          authorization: `Bearer ${accessToken}`,
-        })
-      ).resolves.toBeUndefined()
-
-      await expect(
-        connectWebSocket(`ws://127.0.0.1:${port}/ws/events`, {
-          authorization: `Bearer ${personalToken.tokenValue}`,
-        })
-      ).rejects.toThrow()
-    } finally {
-      await server.stop()
-    }
-  })
-
-  test("rejects WebSocket connections from unknown browser origins", async () => {
-    const { sixb, storage } = createRuntime({ auth: true })
-    const seeded = await seedSession(storage)
-    const port = await getFreePort()
-    const apiOrigin = `http://127.0.0.1:${port}`
-    const server = new SixbServer({
-      host: sixb,
-      hostname: "127.0.0.1",
-      port,
-      quiet: true,
-      browser: createTestBrowserPolicy({ apiOrigin }),
-    })
-
-    await server.start()
-
-    try {
-      await expect(
-        connectWebSocket(`ws://127.0.0.1:${port}/ws/events`, {
-          origin: "http://evil.localhost",
-          cookie: seeded.cookie,
-        })
-      ).rejects.toThrow()
-    } finally {
-      await server.stop()
-    }
   })
 
   test("does not serve an app shell or assets from the API server", async () => {
     const { sixb } = createRuntime({ auth: true })
-    const port = await getFreePort()
-    const server = new SixbServer({
-      host: sixb,
-      hostname: "127.0.0.1",
-      port,
-      quiet: true,
-      browser: createTestBrowserPolicy({ apiOrigin: `http://127.0.0.1:${port}` }),
-    })
-
-    await server.start()
-
-    try {
-      const baseUrl = `http://127.0.0.1:${port}`
+    await withServer(sixb, async ({ baseUrl }) => {
       const staticResponse = await fetch(`${baseUrl}/favicon.svg`)
       const fallbackIconResponse = await fetch(`${baseUrl}/favicon.ico`)
       const htmlResponse = await fetch(`${baseUrl}/dashboard/devices`, {
@@ -1295,20 +886,12 @@ describe("server auth guard", () => {
       expect(staticResponse.status).toBe(404)
       expect(fallbackIconResponse.status).toBe(404)
       expect(htmlResponse.status).toBe(404)
-    } finally {
-      await server.stop()
-    }
+    })
   })
 
   test("redirects API-owned HTML routes with API-origin auth context", async () => {
     const { sixb } = createRuntime({ auth: true })
-    const app = createSixbApi(
-      new SixbServer({
-        host: sixb,
-        quiet: true,
-        browser: createTestBrowserPolicy(),
-      })
-    )
+    const app = createApp(sixb)
 
     const response = await app.fetch(
       new Request("http://api.localhost/docs", {
@@ -1346,60 +929,151 @@ describe("server auth guard", () => {
     // Sign-in accepts it; this test's strategy has no page to show, rather than refusing it (400).
     expect((await app.fetch(new Request(location))).status).toBe(501)
   })
+})
 
-  test("allows API-owned docs mutations with the API-origin session and CSRF token", async () => {
-    const { sixb, storage } = createRuntime({ auth: true, roles: [deviceWriter] })
-    const seeded = await seedSession(storage)
-    const app = createSixbApi(
-      new SixbServer({
-        host: sixb,
-        quiet: true,
-        browser: createTestBrowserPolicy(),
+// A session that expires in five minutes sits inside the ten-minute renewal window of its 30-minute
+// idle timeout. The clock is fixed so the renewed expiry is exact.
+describe("session renewal", () => {
+  const now = new Date("2026-07-01T10:00:00.000Z")
+
+  beforeEach(() => setSystemTime(now))
+  afterEach(() => setSystemTime())
+
+  async function createExpiringSession(options: { readonly cookies?: AuthCookieOptions } = {}) {
+    const { sixb, storage } = createRuntime({
+      auth: true,
+      cookies: options.cookies,
+      session: {
+        idleTimeoutMs: 30 * 60_000,
+        renewalWindowMs: 10 * 60_000,
+        cacheTtlMs: 0,
+      },
+    })
+    const seeded = await seedSession(storage, {
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + 5 * 60_000),
+    })
+    return { app: createApp(sixb), seeded, storage }
+  }
+
+  test("renews session and CSRF cookies on foreground protected requests", async () => {
+    const { app, seeded, storage } = await createExpiringSession()
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/project", {
+        headers: {
+          origin: "http://app.localhost",
+          cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
+          "x-sixb-session-activity": "1",
+        },
       })
     )
 
+    expect(response.status).toBe(200)
+    const cookies = getSetCookies(response)
+    expect(cookies).toHaveLength(2)
+    expect(cookies[0]).toContain(`sixb_session_app=${seeded.credential.cookieValue}`)
+    expect(cookies[1]).toContain("sixb_csrf_app=csrf_1")
+    expect(response.headers.get(CSRF_TOKEN_RESPONSE_HEADER_NAME)).toBe("csrf_1")
+    expect(response.headers.get("access-control-expose-headers")).toContain(
+      CSRF_TOKEN_RESPONSE_HEADER_NAME
+    )
+    for (const cookie of cookies) {
+      expect(cookie).toContain("Max-Age=1800")
+      expect(cookie).toContain("Expires=Wed, 01 Jul 2026 10:30:00 GMT")
+    }
+    await expect(
+      storage.auth.sessions.getById({ projectId: "test-project", id: "ses_1" })
+    ).resolves.toMatchObject({ expiresAt: new Date("2026-07-01T10:30:00.000Z") })
+  })
+
+  test("repairs a missing CSRF cookie during session renewal", async () => {
+    const { app, seeded } = await createExpiringSession()
+
     const response = await app.fetch(
-      new Request("http://api.localhost/api/objects/device/fan-1", {
+      new Request("http://localhost/api/project", {
+        headers: {
+          cookie: seeded.cookie,
+          "x-sixb-session-activity": "1",
+        },
+      })
+    )
+
+    expect(response.status).toBe(200)
+    const csrfCookie = getSetCookies(response).find((cookie) => cookie.startsWith("sixb_csrf_app="))
+    const csrfToken = csrfCookie?.match(/^sixb_csrf_app=([^;]+)/)?.[1]
+    if (!csrfToken) throw new Error("Expected the renewed CSRF cookie to contain a token")
+    expect(response.headers.get(CSRF_TOKEN_RESPONSE_HEADER_NAME)).toBe(csrfToken)
+  })
+
+  test("does not renew cookies without foreground activity", async () => {
+    const { app, seeded } = await createExpiringSession()
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/project", {
+        headers: { cookie: `${seeded.cookie}; ${seeded.csrfCookie}` },
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(getSetCookies(response)).toEqual([])
+  })
+
+  test("renews cookies from the public session endpoint without duplicating CSRF", async () => {
+    const { app, seeded } = await createExpiringSession({ cookies: { csrfHttpOnly: true } })
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/auth/session", {
+        headers: {
+          origin: "http://app.localhost",
+          cookie: seeded.cookie,
+          "x-sixb-session-activity": "1",
+        },
+      })
+    )
+
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as { readonly csrfToken: string }
+    const { csrfToken } = body
+    expect(body).toMatchObject({
+      authenticated: true,
+      csrfToken: expect.any(String),
+      session: { expiresAt: "2026-07-01T10:30:00.000Z" },
+    })
+    const cookies = getSetCookies(response)
+    expect(cookies).toHaveLength(2)
+    expect(cookies[0]).toContain(`sixb_session_app=${seeded.credential.cookieValue}`)
+    expect(cookies[1]).toContain(`sixb_csrf_app=${csrfToken}`)
+    expect(cookies[1]).toContain("HttpOnly")
+    expect(response.headers.get(CSRF_TOKEN_RESPONSE_HEADER_NAME)).toBe(csrfToken)
+  })
+
+  test("does not emit renewal cookies for a denied mutation", async () => {
+    const { app, seeded, storage } = await createExpiringSession()
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/objects/device/fan-1", {
         method: "PUT",
         headers: {
-          origin: "http://api.localhost",
           "content-type": "application/json",
-          cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
-          ...seeded.csrfHeader,
+          cookie: seeded.cookie,
+          "x-sixb-session-activity": "1",
         },
         body: JSON.stringify({ properties: { name: "Fan" } }),
       })
     )
 
-    expect(response.status).toBe(200)
-    expect(response.headers.get("access-control-allow-origin")).toBe("http://api.localhost")
+    expect(response.status).toBe(403)
+    expect(getSetCookies(response)).toEqual([])
+    await expect(
+      storage.auth.sessions.getById({ projectId: "test-project", id: "ses_1" })
+    ).resolves.toMatchObject({ expiresAt: new Date("2026-07-01T10:05:00.000Z") })
   })
 })
 
 // Elysia parses a request body before the auth guard runs, so these limits are what bound an
 // anonymous caller. Each test names the change that shows its guard is load-bearing.
 describe("request body limits", () => {
-  async function withServer(
-    sixb: SixbHost,
-    run: (server: { readonly baseUrl: string; readonly port: number }) => Promise<void>
-  ): Promise<void> {
-    const port = await getFreePort()
-    const baseUrl = `http://127.0.0.1:${port}`
-    const server = new SixbServer({
-      host: sixb,
-      hostname: "127.0.0.1",
-      port,
-      quiet: true,
-      browser: createTestBrowserPolicy({ apiOrigin: baseUrl }),
-    })
-    await server.start()
-    try {
-      await run({ baseUrl, port })
-    } finally {
-      await server.stop()
-    }
-  }
-
   // To check, drop `limitRequestBody` from `startApiServer`: the declared body reaches the guard
   // (401) and the chunked one is read until Bun's own limit.
   test("caps an anonymous JSON body before the auth guard runs", async () => {
@@ -1473,9 +1147,7 @@ describe("request body limits", () => {
   // anonymous request gets a 413 instead of a 401.
   test("reads upload bodies only after authenticating the caller", async () => {
     const { sixb } = createRuntime({ auth: true })
-    const app = createSixbApi(
-      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
-    )
+    const app = createApp(sixb)
     const oversized = (method: string, path: string) =>
       app.fetch(
         new Request(`http://localhost${path}`, {
