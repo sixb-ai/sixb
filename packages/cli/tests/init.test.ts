@@ -2,27 +2,21 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import {
+  type CompletedCliProcess,
+  FAST_CLI_TIMEOUT_MS,
+  runCliToCompletion,
+} from "./shared/cli-process"
 
-function runInit(targetDir: string): {
-  exitCode: number
-  stdout: string
-  stderr: string
-} {
+function runInit(targetDir: string): Promise<CompletedCliProcess> {
   const repoRoot = resolve(import.meta.dir, "..", "..", "..")
   const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
 
-  const result = Bun.spawnSync({
+  return runCliToCompletion({
     cmd: ["bun", cliEntry, "init", targetDir],
     cwd: repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
+    timeoutMs: FAST_CLI_TIMEOUT_MS,
   })
-
-  return {
-    exitCode: result.exitCode,
-    stdout: Buffer.from(result.stdout).toString("utf-8"),
-    stderr: Buffer.from(result.stderr).toString("utf-8"),
-  }
 }
 
 describe("sixb init", () => {
@@ -42,7 +36,7 @@ describe("sixb init", () => {
     tempDirs.push(tempDir)
 
     const targetDir = join(tempDir, "starter")
-    const result = runInit(targetDir)
+    const result = await runInit(targetDir)
 
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe("")
