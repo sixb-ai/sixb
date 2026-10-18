@@ -50,4 +50,42 @@ guard("VercelSandbox (live)", () => {
       await sandbox.destroy()
     }
   }, 180_000)
+
+  // The simulated transport in the other suites proves what Sixb sends, not what the firewall
+  // does with it. This echo shows the guest's own Authorization header replaced by the injected
+  // one, and Host forced to the credential's domain.
+  test("injects the credential in place of the guest's Authorization header", async () => {
+    const origin = "https://postman-echo.com"
+    const sandbox = await new VercelSandboxFactory({ sessionTimeoutMs: 5 * 60_000 }).create({
+      network: { mode: "restricted", allow: [{ name: "echo", origin }] },
+      requestCredentials: [
+        {
+          origin,
+          path: "/headers",
+          method: "GET",
+          headers: { Authorization: "Bearer sixb-live-injected" },
+        },
+      ],
+    })
+
+    try {
+      const result = await sandbox.runCommand("curl", [
+        "--silent",
+        "--show-error",
+        "--fail",
+        "--header",
+        "Authorization: token placeholder",
+        `${origin}/headers`,
+      ])
+      expect(result.exitCode).toBe(0)
+
+      const echoed: unknown = JSON.parse(result.stdout)
+      expect(echoed).toMatchObject({
+        headers: { authorization: "Bearer sixb-live-injected", host: "postman-echo.com" },
+      })
+      expect(result.stdout).not.toContain("placeholder")
+    } finally {
+      await sandbox.destroy()
+    }
+  }, 180_000)
 })
