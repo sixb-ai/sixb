@@ -10,7 +10,7 @@ import {
   principalsEqual,
   type Storage,
 } from "@sixb/core"
-import { ARTIFACT_KINDS } from "@sixb/core/artifacts"
+import { ARTIFACT_KINDS, ARTIFACT_THEME_FILE, parseArtifactTheme } from "@sixb/core/artifacts"
 import { SLIDES_ENTRY } from "@sixb/core/internal/artifacts/frames"
 import {
   ARTIFACT_LIMITS,
@@ -282,6 +282,9 @@ async function publish(
   const deck =
     kind === "slides" ? sources.find((source) => source.path === SLIDES_ENTRY) : undefined
   const deckEntry = contents.find((file) => file.path === SLIDES_ENTRY)
+  const themeFile = contents.find((file) => file.path === ARTIFACT_THEME_FILE)
+  // Publishing has read it already: a version with a theme.json it refused is not here.
+  const theme = themeFile ? parseArtifactTheme(new TextDecoder().decode(themeFile.bytes)) : null
   let check: LayoutCheck | undefined
   if (deck && deckEntry) {
     try {
@@ -291,6 +294,7 @@ async function publish(
         files: contents.map((file) => file.path),
         entry: deckEntry.bytes,
         name: `${published.artifact.id}-v${published.version.version}`,
+        ...(theme && "theme" in theme ? { theme: theme.theme } : {}),
         signal,
       })
     } catch (error) {
@@ -443,7 +447,7 @@ function publishSummary(output: JsonValue, tool: PublishToolName): string {
     } else if (screenshots.length > 0) {
       const directory = posix.dirname(screenshots[0] ?? "")
       lines.push(
-        `Layout check: each slide as the reader sees it in light mode is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with view_file, fix what the warnings name, and publish the next version.`
+        `Layout check: each slide as the reader sees it, in light mode or the mode its theme.json pins, is ${directory}/slide-NN.png (${screenshots.length} slides). Open them with view_file, fix what the warnings name, and publish the next version.`
       )
     }
   }

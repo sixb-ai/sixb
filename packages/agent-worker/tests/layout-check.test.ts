@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { ArtifactTheme } from "@sixb/core/artifacts"
 import type { CommandResult, RunCommandOptions } from "@sixb/core/sandboxes"
 import { checkDeckLayout, layoutWarnings } from "../src/artifacts/layout-check/layout-check"
 import { LocalBashSandbox } from "./helpers"
@@ -100,7 +101,11 @@ describe("the layout check", () => {
   }
   const check = (
     handle: { sandbox: LocalBashSandbox; env?: Record<string, string> },
-    options: { readonly name?: string; readonly timeoutMs?: number } = {}
+    options: {
+      readonly name?: string
+      readonly timeoutMs?: number
+      readonly theme?: ArtifactTheme
+    } = {}
   ) =>
     checkDeckLayout({
       handle,
@@ -110,6 +115,7 @@ describe("the layout check", () => {
       name: options.name ?? "art_0000000000-v1",
       signal: new AbortController().signal,
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      ...(options.theme === undefined ? {} : { theme: options.theme }),
     })
 
   test("installs the kit, the runtime, and the probe, and serves the entry with them", async () => {
@@ -154,9 +160,24 @@ describe("the layout check", () => {
       "img/chart.png",
     ])
 
+    // A deck is measured in both of Sixb's themes, unless its theme.json pins one, and with its
+    // tokens, as the reader's frame shows it. Reproduce by measuring every deck in Sixb's themes
+    // alone: the second, light with its own foreground, is measured in dark and in Sixb's ink.
+    const themes = (name: string) =>
+      JSON.parse(readFileSync(join(root, ".sixb/agent/checks", name, "themes.json"), "utf8"))
+    expect(Object.keys(themes("art_0000000000-v1"))).toEqual(["light", "dark"])
+
     // The library is written once for the run's sandbox; each check writes its own entry.
-    await check(handle, { name: "art_0000000000-v2" })
-    expect(written.filter((path) => path.startsWith(library))).toHaveLength(5)
+    await check(handle, {
+      name: "art_0000000000-v2",
+      theme: { mode: "light", tokens: { "--foreground": "#2b2b2b" } },
+    })
+    expect(Object.keys(themes("art_0000000000-v2"))).toEqual(["light"])
+    expect(themes("art_0000000000-v2").light).toMatchObject({
+      dark: false,
+      tokens: { "--foreground": "#2b2b2b", "--background": "#fafafa" },
+    })
+    expect(written.filter((path) => path.startsWith(library))).toHaveLength(4)
     expect(written.filter((path) => path.endsWith("/entry.html"))).toHaveLength(2)
   })
 

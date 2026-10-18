@@ -23,7 +23,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { chartData } from "./chart-data"
+import { chartData, latestValue } from "./chart-data"
 import { cellFormatter, compactFormatter } from "./format"
 import type { SheetModel } from "./model"
 
@@ -69,8 +69,9 @@ export default memo(function SheetChart({
   const several = data.series.length > 1
   // Straight segments between the values there are; a few points also show as dots.
   const dots = data.rows.length <= 24
-  // Stacked series are labelled once, at the top of the stack.
+  // Stacked series are labelled once, with their total, at the top of the stack.
   const labelled = chart.stacked ? data.series.at(-1) : first
+  const latest = latestValue(data, Boolean(chart.stacked))
 
   const tooltip = (
     <ChartTooltip
@@ -104,7 +105,7 @@ export default memo(function SheetChart({
           width?: number | string
           value?: unknown
         }
-        if (index !== lastIndex || typeof value !== "number") return null
+        if (index !== lastIndex || typeof value !== "number" || latest === null) return null
         const left = Number(x ?? 0) + Number(width ?? 0) / 2
         return (
           <text
@@ -113,7 +114,7 @@ export default memo(function SheetChart({
             textAnchor="middle"
             className="fill-foreground text-[11px] font-semibold tabular-nums"
           >
-            {axis(value)}
+            {axis(latest)}
           </text>
         )
       }}

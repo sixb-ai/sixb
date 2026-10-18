@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { parseCsv, parseWorkbook, type Workbook } from "@sixb/core/artifacts"
-import { chartData, MAX_CHART_POINTS } from "../src/artifacts/renderers/sheet/chart-data"
+import {
+  chartData,
+  latestValue,
+  MAX_CHART_POINTS,
+} from "../src/artifacts/renderers/sheet/chart-data"
 import { cellFormatter, compactFormatter } from "../src/artifacts/renderers/sheet/format"
 import { fileSheetModel, sheetModel } from "../src/artifacts/renderers/sheet/model"
 import {
@@ -245,5 +249,19 @@ describe("a chart's data", () => {
     expect(data?.rows.at(-1)?.x).toBe("Day 100000")
     // A pie keeps every row: publishing caps its slices.
     expect(chartData({ ...chart, type: "pie" }, long)?.rows.length).toBe(100_000)
+  })
+
+  test("labels its last point with the first series, or with a stack's total", () => {
+    // The label of a stacked chart sits on top of the stack. Reproduce by labelling the top
+    // series' own value: Q3's stack of 5,560,000 and 1,410.6 reads as 1,410.6.
+    const chart = workbook.charts[0]
+    if (!chart) throw new Error("Expected a chart.")
+    const data = chartData(chart, model)
+    if (!data) throw new Error("Expected chart data.")
+    expect(latestValue(data, false)).toBe(5_560_000)
+    expect(latestValue(data, true)).toBe(5_561_410.6)
+    // A gap in the last row is left out of the total, and a row of gaps has no label.
+    expect(latestValue({ ...data, rows: [{ x: "Q4 2026", s0: null, s1: 12 }] }, true)).toBe(12)
+    expect(latestValue({ ...data, rows: [{ x: "Q4 2026", s0: null, s1: null }] }, true)).toBeNull()
   })
 })

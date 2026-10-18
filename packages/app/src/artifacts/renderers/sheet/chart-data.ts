@@ -53,6 +53,18 @@ export function chartData(chart: WorkbookChart, model: SheetModel): ChartData | 
   }
 }
 
+/**
+ * The value a chart labels at its last point: the first series', or a stack's total, since the
+ * label sits on top of the stack. Null when that point has no value.
+ */
+export function latestValue(data: ChartData, stacked: boolean): number | null {
+  const row = data.rows.at(-1)
+  const values = (stacked ? data.series : data.series.slice(0, 1))
+    .map((series) => row?.[series.key])
+    .filter((value): value is number => typeof value === "number")
+  return values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0)
+}
+
 /** At most `count` items, evenly spaced, the first and the last among them. */
 function sampled<Item>(items: readonly Item[], count: number): readonly Item[] {
   if (items.length <= count) return items
