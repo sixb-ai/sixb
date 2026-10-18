@@ -9,8 +9,8 @@ import type { AgentSandboxFileRegistry } from "../sandbox-file-registry"
 import { readSandboxFile, resolveSandboxPath, SandboxFileError } from "../sandbox-files"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 import type { AgentToolModelOutput } from "./result-output"
+import { AGENT_FILE_MAX_BYTES } from "./tool-files"
 
-const VIEW_FILE_MAX_BYTES = 25 * 1024 * 1024
 const VIEW_FILE_TIMEOUT_MS = 30_000
 
 export const VIEW_FILE_TOOL_SPEC = {
@@ -65,7 +65,7 @@ export function createViewFileTool(input: {
       } else {
         const bytes = await readSandboxFile(handle, {
           path: absolutePath,
-          maxBytes: VIEW_FILE_MAX_BYTES,
+          maxBytes: AGENT_FILE_MAX_BYTES,
           signal,
           timeoutMs: VIEW_FILE_TIMEOUT_MS,
         }).catch((error: unknown) => {

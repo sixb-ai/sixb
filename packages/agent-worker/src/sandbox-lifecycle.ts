@@ -12,7 +12,11 @@ import { SandboxStateUnavailableError, sandboxProjectDirectory } from "@sixb/cor
 import type { AgentThreadRecord, ConversationAgentRunRecord } from "@sixb/core/storage"
 import { waitForAbort } from "./abort"
 import type { AgentWorkspacePromptContext } from "./agent-prompt"
-import { AgentEnvironmentSaveError, AgentExecutionLostError } from "./errors"
+import {
+  AgentEnvironmentSaveError,
+  AgentExecutionLostError,
+  assertRunExecutionOwned,
+} from "./errors"
 import type { AgentExecutionContext } from "./types"
 import { WorkspaceAuthSession } from "./workspace-auth"
 import { workspaceRunFilesScript } from "./workspace-files"
@@ -358,16 +362,13 @@ class ThreadSandboxSession {
     })
   }
 
-  private async assertOwner(): Promise<void> {
+  private assertOwner(): Promise<void> {
     const { context, run } = this.input
-    const current = await context.storage.agents.runs.getById({ projectId: context.id, id: run.id })
-    if (
-      current?.status !== "running" ||
-      current.execution?.token !== this.executionToken ||
-      current.execution.queueLeaseExpiresAt.getTime() <= Date.now()
-    ) {
-      throw new AgentExecutionLostError(run.id)
-    }
+    return assertRunExecutionOwned(context.storage, {
+      projectId: context.id,
+      id: run.id,
+      executionToken: this.executionToken,
+    })
   }
 
   private async assertCanContinue(): Promise<void> {

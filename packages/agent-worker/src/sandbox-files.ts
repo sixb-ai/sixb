@@ -33,12 +33,12 @@ export interface SandboxFileEntry {
 }
 
 export interface SandboxFileListing {
+  /** False when nothing is at the path, or it is not a directory: then nothing is listed. */
+  readonly directory: boolean
   /** Regular files under the directory, sorted by path. Symbolic links are never listed. */
   readonly files: readonly SandboxFileEntry[]
   /** True when the directory held more than `maxFiles` files; only the first ones are listed. */
   readonly truncated: boolean
-  /** Lines of the script's output that did not parse as an entry and were skipped. */
-  readonly malformed: number
 }
 
 interface SandboxCommandOptions {
@@ -70,7 +70,10 @@ export function resolveSandboxPath(workingDirectory: string, requestedPath: stri
   return absolutePath
 }
 
-/** List the regular files under `directory`, up to `maxFiles`. A missing directory lists nothing. */
+/**
+ * List the regular files under `directory`, up to `maxFiles`. A missing directory lists nothing;
+ * output that does not parse throws, since a listing that skips a line drops a file silently.
+ */
 export async function listSandboxFiles(
   handle: AgentSandboxHandle,
   input: SandboxCommandOptions & {
@@ -90,31 +93,31 @@ export async function listSandboxFiles(
   }
 
   const files: SandboxFileEntry[] = []
+  let directory = false
   let truncated = false
-  let malformed = 0
   for (const line of result.stdout.split("\n")) {
     if (!line.trim()) continue
+    if (line === "DIRECTORY") {
+      directory = true
+      continue
+    }
     if (line === "LIMIT") {
       truncated = true
       continue
     }
-    const [sizeSource, relativePathBase64] = line.split("\t")
-    const sizeBytes = Number(sizeSource)
+    const [sizeSource = "", relativePathBase64] = line.split("\t")
     const relativePath = relativePathBase64 ? decodeBase64Text(relativePathBase64) : null
-    if (
-      !Number.isInteger(sizeBytes) ||
-      sizeBytes < 0 ||
-      !relativePath ||
-      !isSafeRelativePath(relativePath)
-    ) {
-      malformed += 1
-      continue
+    if (!/^\d+$/.test(sizeSource) || !relativePath || !isSafeRelativePath(relativePath)) {
+      throw new SandboxFileError(
+        "failed",
+        `directory could not be listed (an entry did not parse: ${JSON.stringify(line.slice(0, 200))})`
+      )
     }
-    files.push({ relativePath, sizeBytes })
+    files.push({ relativePath, sizeBytes: Number(sizeSource) })
   }
 
   files.sort((left, right) => left.relativePath.localeCompare(right.relativePath))
-  return { files, truncated, malformed }
+  return { directory, files, truncated }
 }
 
 /**
@@ -208,6 +211,7 @@ limit="\${SIXB_LIST_MAX_FILES:?}"
 if [ ! -d "$dir" ]; then
   exit 0
 fi
+printf 'DIRECTORY\\n'
 count=0
 find "$dir" -type f -print0 | while IFS= read -r -d '' path; do
   count=$((count + 1))

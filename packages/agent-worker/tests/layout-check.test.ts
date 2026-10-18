@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { CommandResult, RunCommandOptions } from "@sixb/core/sandboxes"
@@ -86,23 +86,34 @@ describe("the layout check", () => {
   function sandbox(answer: Partial<CommandResult>) {
     const local = new LocalBashSandbox(root)
     const commands: { args: readonly string[]; options: RunCommandOptions }[] = []
+    const written: string[] = []
+    const writeFiles = local.writeFiles.bind(local)
+    local.writeFiles = async (files) => {
+      written.push(...files.map((file) => file.path))
+      await writeFiles(files)
+    }
     local.runCommand = async (_command, args = [], options = {}) => {
       commands.push({ args, options })
       return { exitCode: 0, stdout: "", stderr: "", durationMs: 1, ...answer }
     }
-    return { handle: { sandbox: local }, commands }
+    return { handle: { sandbox: local }, commands, written }
   }
-  const check = (handle: { sandbox: LocalBashSandbox }) =>
+  const check = (
+    handle: { sandbox: LocalBashSandbox; env?: Record<string, string> },
+    options: { readonly name?: string; readonly timeoutMs?: number } = {}
+  ) =>
     checkDeckLayout({
       handle,
       directory: join(root, "deck"),
+      files: ["index.html", "img/chart.png"],
       entry: new TextEncoder().encode("<!doctype html><html><head></head><body></body></html>"),
-      name: "art_0000000000-v1",
+      name: options.name ?? "art_0000000000-v1",
       signal: new AbortController().signal,
+      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
     })
 
   test("installs the kit, the runtime, and the probe, and serves the entry with them", async () => {
-    const { handle, commands } = sandbox({
+    const { handle, commands, written } = sandbox({
       stdout: JSON.stringify({
         slides: 1,
         problems: [problem({})],
@@ -135,7 +146,97 @@ describe("the layout check", () => {
       '<head><link rel="stylesheet" href="__sixb/kit.css"><script src="__sixb/runtime.js"></script>'
     )
     expect(commands[0]?.options.env).toMatchObject({ SIXB_CHECK_DECK: join(root, "deck") })
+    // It serves the files the version publishes, and no others from the deck's directory.
+    // Reproduce by serving the whole directory: work/q3/img/ loads for a publish of index.html.
+    const output = join(root, ".sixb/agent/checks/art_0000000000-v1")
+    expect(JSON.parse(readFileSync(join(output, "files.json"), "utf8"))).toEqual([
+      "index.html",
+      "img/chart.png",
+    ])
+
+    // The library is written once for the run's sandbox; each check writes its own entry.
+    await check(handle, { name: "art_0000000000-v2" })
+    expect(written.filter((path) => path.startsWith(library))).toHaveLength(5)
+    expect(written.filter((path) => path.endsWith("/entry.html"))).toHaveLength(2)
   })
+
+  test("keeps what a check reported, however its command ended", async () => {
+    const report = {
+      slides: 4,
+      problems: [problem({ slide: 2 })],
+      errors: [],
+      screenshots: [join(root, ".sixb/agent/checks/art_0000000000-v1/slide-01.png")],
+      stopped: "slide 3 in light mode did not respond within 10 seconds",
+    }
+    // The check printed its report, then outlived the timeout on its way out. Reproduce by
+    // looking at `timedOut` before the report: the check reads as skipped.
+    const result = await check(
+      sandbox({ exitCode: 137, timedOut: true, stdout: JSON.stringify(report) }).handle
+    )
+    expect(result).toEqual({
+      status: "checked",
+      screenshots: [".sixb/agent/checks/art_0000000000-v1/slide-01.png"],
+      warnings: [
+        {
+          code: "layout_small_text",
+          part: "2",
+          message: "Slide 2: p.eyebrow “Q3 2026” is 16px; nothing on a slide may be under 18px.",
+        },
+        {
+          code: "layout_incomplete",
+          message:
+            "The check stopped early: slide 3 in light mode did not respond within 10 seconds. Slides it did not reach were not checked.",
+        },
+      ],
+    })
+  })
+
+  test.skipIf(!Bun.which("node"))(
+    "stops at its deadline when the page stops answering, and reports what it found",
+    async () => {
+      // A Playwright whose page answers for the first slide and never again, like a deck whose
+      // script never yields, and whose browser connection keeps node alive as Chromium's does.
+      // Reproduce by removing check.cjs's deadline: nothing is reported until the command's
+      // timeout kills node, and the check reads as skipped, with the browser left running.
+      const playwright = join(root, "fake-playwright.cjs")
+      writeFileSync(
+        playwright,
+        `const { writeFileSync } = require("node:fs")
+exports.chromium = {
+  async launch() {
+    const connection = setInterval(() => {}, 1000)
+    const page = {
+      on() {},
+      async goto() {},
+      async evaluate(fn) {
+        if (typeof fn === "string") return []
+        return String(fn).includes(".length") ? 2 : undefined
+      },
+      waitForFunction: (_fn, slide) => (slide === 1 ? Promise.resolve() : new Promise(() => {})),
+      async screenshot({ path }) {
+        writeFileSync(path, "png")
+      },
+    }
+    return { newPage: async () => page, close: async () => clearInterval(connection) }
+  },
+}
+`
+      )
+      const handle = { sandbox: new LocalBashSandbox(root), env: { SIXB_PLAYWRIGHT: playwright } }
+      expect(await check(handle, { timeoutMs: 3_000 })).toEqual({
+        status: "checked",
+        screenshots: [".sixb/agent/checks/art_0000000000-v1/slide-01.png"],
+        warnings: [
+          {
+            code: "layout_incomplete",
+            message:
+              "The check stopped early: the check took longer than 3 seconds. Slides it did not reach were not checked.",
+          },
+        ],
+      })
+    },
+    10_000
+  )
 
   test("says it did not run without a browser, or when it fails, and never refuses", async () => {
     expect(await check(sandbox({ stdout: '{"skipped":"no_browser"}\n' }).handle)).toEqual({

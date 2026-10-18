@@ -1,4 +1,4 @@
-import { AgentToolPublicError } from "@sixb/core"
+import { AgentToolPublicError, type Storage } from "@sixb/core"
 import type { AgentCompactionFailureCode } from "@sixb/core/agents/streams"
 
 /** Failed preservation is a failure even when the run was also cancelled. */
@@ -29,6 +29,25 @@ export class AgentExecutionLostError extends Error {
   readonly name = "AgentExecutionLostError"
   constructor(readonly runId: string) {
     super(`[SixbAgentWorker] Lost execution ownership of agent run '${runId}'.`)
+  }
+}
+
+/**
+ * Throws {@link AgentExecutionLostError} unless the conversation run is still running under this
+ * delivery's execution token, within its queue lease. `storage` may be a transaction, so the check
+ * and the write it guards commit together.
+ */
+export async function assertRunExecutionOwned(
+  storage: Storage,
+  run: { readonly projectId: string; readonly id: string; readonly executionToken: string }
+): Promise<void> {
+  const current = await storage.agents?.runs.getById({ projectId: run.projectId, id: run.id })
+  if (
+    current?.status !== "running" ||
+    current.execution?.token !== run.executionToken ||
+    current.execution.queueLeaseExpiresAt.getTime() <= Date.now()
+  ) {
+    throw new AgentExecutionLostError(run.id)
   }
 }
 

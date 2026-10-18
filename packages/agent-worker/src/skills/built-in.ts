@@ -42,8 +42,8 @@ import slidesGuide from "./sixb-artifacts/slides.md" with { type: "text" }
 
 /**
  * Skills the worker ships, in every conversation's catalog. They describe formats the publisher
- * validates and the app renders, so they change with them. A project skill with the same name
- * replaces the built-in one.
+ * validates and the app renders, so they change with them. Their names start with `sixb-`, which
+ * skill discovery refuses for a project's skills, so none collides with one.
  */
 export const BUILT_IN_SKILLS: readonly AgentSkillDefinition[] = Object.freeze([
   builtInSkill(skillMarkdown, {
@@ -66,15 +66,11 @@ export const BUILT_IN_SKILLS: readonly AgentSkillDefinition[] = Object.freeze([
   }),
 ])
 
-/** The project's skills, then each built-in skill the project does not replace. */
+/** The project's skills, then the built-in ones. */
 export function withBuiltInSkills(
   projectSkills: readonly AgentSkillDefinition[]
 ): readonly AgentSkillDefinition[] {
-  const names = new Set(projectSkills.map((skill) => skill.name))
-  return Object.freeze([
-    ...projectSkills,
-    ...BUILT_IN_SKILLS.filter((skill) => !names.has(skill.name)),
-  ])
+  return Object.freeze([...projectSkills, ...BUILT_IN_SKILLS])
 }
 
 /**

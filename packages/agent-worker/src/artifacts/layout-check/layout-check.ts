@@ -1,4 +1,5 @@
 import { posix } from "node:path"
+import type { Sandbox } from "@sixb/core"
 import {
   FRAME_ASSETS,
   FRAME_DEFAULT_THEMES,
@@ -14,6 +15,11 @@ const LIBRARY = ".sixb/agent/lib/layout-check"
 const CHECKS = ".sixb/agent/checks"
 /** Chromium's start, a deck's fonts, and two passes over up to 100 slides. */
 const CHECK_TIMEOUT_MS = 120_000
+/**
+ * Sandboxes the check's library is written in. `.sixb/agent` lasts the run, and each run has its
+ * own sandbox object, a lasting sandbox's included, so the library is written once per run.
+ */
+const installed = new WeakSet<Sandbox>()
 
 /** What the layout check found, for the publish tool to report beside the version. */
 export type LayoutCheck =
@@ -37,6 +43,8 @@ interface CheckReport {
   readonly problems?: readonly CheckedProblem[]
   readonly errors?: readonly string[]
   readonly screenshots?: readonly string[]
+  /** Why the check stopped before it finished; what it found until then is above. */
+  readonly stopped?: string
   readonly skipped?: string
   readonly detail?: string
   readonly failed?: string
@@ -52,12 +60,17 @@ export async function checkDeckLayout(input: {
   readonly handle: AgentSandboxHandle
   /** The deck's directory in the sandbox. */
   readonly directory: string
+  /** The paths the version publishes, relative to the directory: the check serves no others. */
+  readonly files: readonly string[]
   readonly entry: Uint8Array
   /** Names the check's directory, so each version's screenshots stay apart. */
   readonly name: string
   readonly signal: AbortSignal
+  /** Test seam; production allows 120 seconds. */
+  readonly timeoutMs?: number
 }): Promise<LayoutCheck> {
   const { sandbox } = input.handle
+  const timeoutMs = input.timeoutMs ?? CHECK_TIMEOUT_MS
   const library = posix.join(sandbox.workingDirectory, LIBRARY)
   const output = posix.join(sandbox.workingDirectory, CHECKS, input.name)
   // The sandbox has no way to the API: what the deck shows from other artifacts is a placeholder.
@@ -65,18 +78,30 @@ export async function checkDeckLayout(input: {
     await rewriteFrameReferences(new TextDecoder().decode(input.entry), [])
   )
   await sandbox.writeFiles([
-    { path: posix.join(library, "check.cjs"), contents: checkScript },
-    { path: posix.join(library, "kit.css"), contents: asset("__sixb/kit.css") },
-    { path: posix.join(library, "runtime.js"), contents: asset("__sixb/runtime.js") },
-    { path: posix.join(library, "probe.js"), contents: `(${layoutProbe.toString()})` },
-    { path: posix.join(library, "themes.json"), contents: JSON.stringify(FRAME_DEFAULT_THEMES) },
+    ...(installed.has(sandbox)
+      ? []
+      : [
+          { path: posix.join(library, "check.cjs"), contents: checkScript },
+          { path: posix.join(library, "kit.css"), contents: asset("__sixb/kit.css") },
+          { path: posix.join(library, "runtime.js"), contents: asset("__sixb/runtime.js") },
+          { path: posix.join(library, "probe.js"), contents: `(${layoutProbe.toString()})` },
+          {
+            path: posix.join(library, "themes.json"),
+            contents: JSON.stringify(FRAME_DEFAULT_THEMES),
+          },
+        ]),
     { path: posix.join(output, "entry.html"), contents: entry },
+    { path: posix.join(output, "files.json"), contents: JSON.stringify(input.files) },
   ])
+  installed.add(sandbox)
+  // The check stops itself first, so it reports what it found and closes its browser, which a
+  // node killed at the timeout leaves running.
+  const deadlineMs = Math.floor((timeoutMs * 5) / 6)
   const result = await sandbox.runCommand(
     "bash",
     [
       "-lc",
-      'command -v node >/dev/null 2>&1 || { echo \'{"skipped":"no_node"}\'; exit 0; }; exec node "$SIXB_CHECK/check.cjs" "$SIXB_CHECK_DECK" "$SIXB_CHECK_OUT" "$SIXB_CHECK"',
+      'command -v node >/dev/null 2>&1 || { echo \'{"skipped":"no_node"}\'; exit 0; }; exec node "$SIXB_CHECK/check.cjs" "$SIXB_CHECK_DECK" "$SIXB_CHECK_OUT" "$SIXB_CHECK" "$SIXB_CHECK_DEADLINE_MS"',
     ],
     {
       env: {
@@ -84,22 +109,17 @@ export async function checkDeckLayout(input: {
         SIXB_CHECK: library,
         SIXB_CHECK_DECK: input.directory,
         SIXB_CHECK_OUT: output,
+        SIXB_CHECK_DEADLINE_MS: String(deadlineMs),
       },
-      timeout: CHECK_TIMEOUT_MS,
+      timeout: timeoutMs,
       signal: input.signal,
     }
   )
   input.signal.throwIfAborted()
-  if (result.timedOut) {
-    return { status: "skipped", reason: `it took longer than ${CHECK_TIMEOUT_MS / 1000} seconds` }
-  }
+  // A report counts however the command ended: a check that printed one and then hung on its way
+  // out still found what it found.
   const report = parseReport(result.stdout)
-  if (!report || report.failed || result.exitCode !== 0) {
-    const detail = report?.failed ?? result.stderr.trim()
-    console.warn(`[SixbAgentWorker] The layout check failed: ${detail.slice(0, 500)}`)
-    return { status: "skipped", reason: "the check failed in the sandbox" }
-  }
-  if (report.skipped) {
+  if (report?.skipped) {
     return {
       status: "skipped",
       reason:
@@ -107,6 +127,14 @@ export async function checkDeckLayout(input: {
           ? "the sandbox has no Node.js"
           : "the sandbox has no headless browser (the agent image has one)",
     }
+  }
+  if (!report || report.failed || report.slides === undefined) {
+    if (result.timedOut) {
+      return { status: "skipped", reason: `it took longer than ${timeoutMs / 1000} seconds` }
+    }
+    const detail = report?.failed ?? result.stderr.trim()
+    console.warn(`[SixbAgentWorker] The layout check failed: ${detail.slice(0, 500)}`)
+    return { status: "skipped", reason: "the check failed in the sandbox" }
   }
   const relative = (path: string) => posix.relative(sandbox.workingDirectory, path)
   const screenshots = (report.screenshots ?? []).map(relative)
@@ -119,6 +147,14 @@ export async function checkDeckLayout(input: {
         code: "layout_load_error",
         message: `While the deck loaded: ${error.slice(0, 200)}.`,
       })),
+      ...(report.stopped === undefined
+        ? []
+        : [
+            {
+              code: "layout_incomplete",
+              message: `The check stopped early: ${report.stopped.slice(0, 200)}. Slides it did not reach were not checked.`,
+            },
+          ]),
     ],
   }
 }
