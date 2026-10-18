@@ -1,6 +1,7 @@
 import { cn } from "@sixb/ui/lib/utils"
 import { ArrowDown, ArrowUp, CalendarDays, Image, Link2 } from "lucide-react"
 import type { CSSProperties, ReactNode } from "react"
+import type { ArtifactMessages } from "../../messages"
 import { ArtifactAddressLabel, ArtifactLink } from "../../references/references"
 import { currencySymbol, type FormattedCell } from "./format"
 import type { SheetColumn } from "./model"
@@ -30,6 +31,7 @@ export function GridCell({
   active,
   matched,
   sort,
+  title,
   style,
   children,
 }: {
@@ -45,6 +47,8 @@ export function GridCell({
   readonly matched: boolean
   /** How the sheet is sorted by this column, for a header cell. */
   readonly sort?: SortDirection
+  /** What a header's column holds, shown on hover. */
+  readonly title?: string
   readonly style: CSSProperties
   readonly children: ReactNode
 }) {
@@ -59,10 +63,11 @@ export function GridCell({
       aria-colindex={column + 2}
       aria-selected={selected}
       aria-sort={sort}
+      title={title}
       className={cn(
         "flex shrink-0 items-center overflow-hidden border-r border-b border-border/70 px-2.5 whitespace-nowrap",
         header ? "bg-background font-semibold" : "bg-background",
-        fixed && "sticky z-[1]",
+        fixed ? "sticky z-[1]" : "relative",
         lastFixed && "shadow-[1px_0_0_var(--border)]",
         selected &&
           !active &&
@@ -82,33 +87,47 @@ export function GridCell({
   )
 }
 
+/**
+ * A header cell's content: the column's name whole, its type's mark, and the sort arrow. In filter
+ * mode the filter button sits over the cell's right edge, and the name keeps clear of it.
+ */
 export function HeaderContent({
   column,
   sort,
-  filter,
-  menu,
+  filterButton,
 }: {
   readonly column: SheetColumn | undefined
   readonly sort: SortDirection | null
-  readonly filter: ReactNode
-  readonly menu: ReactNode
+  readonly filterButton?: ReactNode
 }) {
-  const Icon = sort === "ascending" ? ArrowUp : sort === "descending" ? ArrowDown : null
+  // The filter button shows the sort in filter mode.
+  const Icon = filterButton || !sort ? null : sort === "ascending" ? ArrowUp : ArrowDown
   return (
-    <span
-      className={cn(
-        "flex min-w-0 flex-1 items-center gap-1.5",
-        column?.numeric && "flex-row-reverse"
-      )}
-    >
-      <span className="min-w-0 truncate">{column?.name}</span>
-      <TypeGlyph column={column} />
-      {Icon ? <Icon className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" /> : null}
-      <span className="flex-1" />
-      {filter}
-      {menu}
-    </span>
+    <>
+      <span
+        className={cn(
+          "flex min-w-0 flex-1 items-center gap-1.5",
+          column?.numeric && "flex-row-reverse",
+          filterButton && "pr-5"
+        )}
+      >
+        <span className="min-w-0 truncate">{column?.name}</span>
+        <TypeGlyph column={column} />
+        {Icon ? (
+          <Icon className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+        ) : null}
+      </span>
+      {filterButton}
+    </>
   )
+}
+
+/** A column's type in words: `Currency · USD`, `Percent`, `Text`. */
+export function columnTypeLabel(column: SheetColumn, messages: ArtifactMessages["sheet"]): string {
+  const { types } = messages
+  return column.format.type === "currency"
+    ? types.currency(column.format.currency ?? "USD")
+    : types[column.format.type]
 }
 
 /** A quiet mark of the column's type beside its name: `#`, its currency's sign, `%`, an icon. */
