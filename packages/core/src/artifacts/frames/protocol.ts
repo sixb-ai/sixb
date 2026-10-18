@@ -1,3 +1,4 @@
+import { ARTIFACT_LIMITS } from "../limits"
 import { ARTIFACT_THEME_TOKENS } from "../theme"
 
 /**
@@ -108,3 +109,66 @@ export const DECK_KEYS = [
  * artifact's theme may set.
  */
 export const FRAME_THEME_TOKENS = ARTIFACT_THEME_TOKENS
+
+/**
+ * A message from a frame as an event, or null when it is not one this protocol sends. A deck runs
+ * its own scripts, so anything it posts is checked for the shape the app relies on: whole slide
+ * numbers, a key the app handles, finite boxes, and no more embeds than a version may record.
+ */
+export function parseFrameEvent(data: unknown): FrameEvent | null {
+  if (!isRecord(data) || data.protocol !== FRAME_PROTOCOL || !isRecord(data.params)) return null
+  const { params } = data
+  switch (data.event) {
+    case "ready":
+      return isCount(params.slides) ? event("ready", { slides: params.slides }) : null
+    case "select":
+      return isCount(params.slide) && params.slide > 0
+        ? event("select", { slide: params.slide })
+        : null
+    case "key":
+      return typeof params.key === "string" && (DECK_KEYS as readonly string[]).includes(params.key)
+        ? event("key", { key: params.key })
+        : null
+    case "open":
+      return isAddress(params.address) ? event("open", { address: params.address }) : null
+    case "embeds": {
+      const { embeds } = params
+      if (!Array.isArray(embeds) || embeds.length > ARTIFACT_LIMITS.maxReferences) return null
+      const parsed: FrameEmbed[] = []
+      for (const embed of embeds) {
+        if (!isRecord(embed) || !isAddress(embed.address) || !isRecord(embed.rect)) return null
+        const { x, y, width, height } = embed.rect
+        if (![x, y, width, height, embed.scale].every(Number.isFinite)) return null
+        if (Number(width) < 0 || Number(height) < 0 || Number(embed.scale) <= 0) return null
+        parsed.push({
+          address: embed.address,
+          rect: { x: Number(x), y: Number(y), width: Number(width), height: Number(height) },
+          scale: Number(embed.scale),
+        })
+      }
+      return event("embeds", { embeds: parsed })
+    }
+    default:
+      return null
+  }
+}
+
+function event<Name extends FrameEvent["event"]>(
+  name: Name,
+  params: Extract<FrameEvent, { event: Name }>["params"]
+): FrameEvent {
+  return { protocol: FRAME_PROTOCOL, event: name, params } as FrameEvent
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function isCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0
+}
+
+/** Long enough for any address a version can record; the app resolves it before using it. */
+function isAddress(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 2048
+}
