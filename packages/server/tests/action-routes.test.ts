@@ -18,7 +18,7 @@ import { decorateOperationScopedMethodForTesting } from "@sixb/core/internal/sto
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
-import { createTestBrowserPolicy, getFreePort } from "./helpers"
+import { createTestBrowserPolicy } from "./helpers"
 
 const Device = defineObjectType({
   id: "device",
@@ -50,18 +50,16 @@ async function withActionServer(
       reports.push(context)
     },
   })
-  const port = await getFreePort()
-  const baseUrl = `http://127.0.0.1:${port}`
   const server = new SixbServer({
     host,
     hostname: "127.0.0.1",
-    port,
+    port: 0,
     quiet: true,
-    browser: createTestBrowserPolicy({ apiOrigin: baseUrl, appOrigin: baseUrl }),
+    browser: createTestBrowserPolicy(),
   })
   await server.start()
   try {
-    await run({ baseUrl, host, storage, reports })
+    await run({ baseUrl: `http://127.0.0.1:${server.getPort()}`, host, storage, reports })
   } finally {
     await server.stop()
   }

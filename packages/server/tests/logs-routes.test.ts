@@ -23,7 +23,7 @@ import { Elysia } from "elysia"
 import { registerLogRoutes } from "../src/routes/logs"
 import { parseLogSubscriptionMessage } from "../src/routes/ws/logs"
 import { SixbServer } from "../src/server"
-import { createTestBrowserPolicy, getFreePort, nextWsMessage } from "./helpers"
+import { createTestBrowserPolicy, nextWsMessage } from "./helpers"
 
 describe("parseLogSubscriptionMessage", () => {
   test("accepts scoped subscribes and unsubscribes, and rejects invalid messages", () => {
@@ -265,20 +265,18 @@ async function withServer(
   run: (context: { baseUrl: string; sixb: SixbHost; server: SixbServer }) => Promise<void>,
   options: { readonly broker?: InMemoryBroker } = {}
 ): Promise<void> {
-  const port = await getFreePort()
-  const baseUrl = `http://127.0.0.1:${port}`
   const sixb = createTestSixb(options.broker)
   const server = new SixbServer({
     host: sixb,
     hostname: "127.0.0.1",
-    port,
+    port: 0,
     quiet: true,
-    browser: createTestBrowserPolicy({ apiOrigin: baseUrl, appOrigin: baseUrl }),
+    browser: createTestBrowserPolicy(),
   })
 
   await server.start()
   try {
-    await run({ baseUrl, sixb, server })
+    await run({ baseUrl: `http://127.0.0.1:${server.getPort()}`, sixb, server })
   } finally {
     await server.stop()
   }
@@ -323,8 +321,6 @@ async function withAuthenticatedServer(
     readonly deniedHeaders: Record<string, string>
   }) => Promise<void>
 ): Promise<void> {
-  const port = await getFreePort()
-  const baseUrl = `http://127.0.0.1:${port}`
   const storage = new InMemoryStorage()
   const sixb = createTestSixb(new InMemoryBroker(), { storage, auth: true })
   const allowedHeaders = await seedLogSession(storage, "allowed", ["logs-viewers"])
@@ -332,14 +328,14 @@ async function withAuthenticatedServer(
   const server = new SixbServer({
     host: sixb,
     hostname: "127.0.0.1",
-    port,
+    port: 0,
     quiet: true,
-    browser: createTestBrowserPolicy({ apiOrigin: baseUrl, appOrigin: baseUrl }),
+    browser: createTestBrowserPolicy(),
   })
 
   await server.start()
   try {
-    await run({ baseUrl, allowedHeaders, deniedHeaders })
+    await run({ baseUrl: `http://127.0.0.1:${server.getPort()}`, allowedHeaders, deniedHeaders })
   } finally {
     await server.stop()
   }

@@ -55,7 +55,10 @@ export function createTestBrowserPolicy(
   }
 }
 
-/** A port that was free when asked, for a server the test starts on it. */
+/**
+ * A port that was free when asked, for a test that needs the server's origin before it starts.
+ * Otherwise start the server on port 0 and read `getPort()`.
+ */
 export async function getFreePort(): Promise<number> {
   return await new Promise<number>((resolvePromise, reject) => {
     const listener = createServer()

@@ -40,7 +40,7 @@ import {
 } from "@sixb/core/testing"
 import { SqliteStorage } from "@sixb/sqlite"
 import { SixbServer } from "../src/server"
-import { createTestBrowserPolicy, getFreePort } from "./helpers"
+import { createTestBrowserPolicy } from "./helpers"
 
 function createSixbInstance(options: SixbHostOptions): SixbHost {
   return new SixbHost(options)
@@ -522,21 +522,18 @@ describe("SixbServer HTTP contract", () => {
       },
     })
 
-    const port = await getFreePort()
-    const baseUrl = `http://127.0.0.1:${port}`
-
     const server = new SixbServer({
       host: sixb,
       hostname: "127.0.0.1",
-      port,
+      port: 0,
       quiet: true,
-      browser: createTestBrowserPolicy({ apiOrigin: baseUrl, appOrigin: baseUrl }),
+      browser: createTestBrowserPolicy(),
     })
 
     await server.start()
 
     try {
-      await run({ baseUrl, events: sixb.events, sixb })
+      await run({ baseUrl: `http://127.0.0.1:${server.getPort()}`, events: sixb.events, sixb })
     } finally {
       await server.stop()
     }

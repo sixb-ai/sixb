@@ -64,6 +64,7 @@ export interface CustomAppStartOptions {
 
 export interface CustomAppServer {
   host: string
+  /** The port it listens on: the one it bound when asked for port 0. */
   port: number
   url: string
   stop(): Promise<void>
@@ -456,7 +457,8 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       }
 
       server = Bun.serve(serveOptions(htmlBundle))
-      internalOrigin = devServerInternalOrigin(host, server.port ?? port)
+      const boundPort = server.port ?? port
+      internalOrigin = devServerInternalOrigin(host, boundPort)
 
       // .ts/.tsx edits can change Tailwind's scanned classes and .css edits
       // change the stylesheet source, so both regenerate the entry and
@@ -514,8 +516,8 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
       return {
         host,
-        port,
-        url: `http://${displayHost}:${port}`,
+        port: boundPort,
+        url: `http://${displayHost}:${boundPort}`,
         watchesSources: watcher !== null,
         async stop() {
           stopping = true
@@ -672,11 +674,12 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       })
 
       const displayHost = host === "0.0.0.0" ? "localhost" : host
+      const boundPort = server.port ?? port
 
       return {
         host,
-        port,
-        url: `http://${displayHost}:${port}`,
+        port: boundPort,
+        url: `http://${displayHost}:${boundPort}`,
         async stop() {
           server.stop(true)
         },

@@ -126,8 +126,9 @@ export class SixbServer {
     return this.hostRuntime
   }
 
+  /** The port the server listens on once started, so `port: 0` reports the one it bound. */
   getPort(): number {
-    return this.port
+    return this.bunServer?.port ?? this.port
   }
 
   resolveAuthContext(request: Request): RequestAuthContext {
@@ -199,7 +200,7 @@ export class SixbServer {
     }
 
     if (!this.quiet) {
-      const base = `http://${this.hostname}:${this.port}`
+      const base = `http://${this.hostname}:${this.getPort()}`
       console.log(`Sixb server running at ${base}`)
       console.log(`OpenAPI docs at ${base}/docs`)
     }

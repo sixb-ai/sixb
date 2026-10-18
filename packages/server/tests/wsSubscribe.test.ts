@@ -12,7 +12,7 @@ import { BrokerCursorExpiredError } from "@sixb/core/broker"
 import type { DomainEventService, StableEventEnvelope } from "@sixb/core/internal/events"
 import { parseSubscriptionMessage } from "../src/routes/ws/events"
 import { SixbServer } from "../src/server"
-import { createTestBrowserPolicy, getFreePort, nextWsMessage } from "./helpers"
+import { createTestBrowserPolicy, nextWsMessage } from "./helpers"
 
 const WORKFLOW_EVENT_TYPES = [
   "workflow.run.queued",
@@ -349,8 +349,6 @@ async function withWsServer(
   run: (context: { baseUrl: string; sixb: SixbHost }) => Promise<void>,
   options: { readonly broker?: InMemoryBroker } = {}
 ): Promise<void> {
-  const port = await getFreePort()
-  const baseUrl = `http://127.0.0.1:${port}`
   const sixb = createSixbInstance({
     id: "ws-test-project",
     ontology: [],
@@ -363,14 +361,14 @@ async function withWsServer(
   const server = new SixbServer({
     host: sixb,
     hostname: "127.0.0.1",
-    port,
+    port: 0,
     quiet: true,
-    browser: createTestBrowserPolicy({ apiOrigin: baseUrl, appOrigin: baseUrl }),
+    browser: createTestBrowserPolicy(),
   })
 
   await server.start()
   try {
-    await run({ baseUrl, sixb })
+    await run({ baseUrl: `http://127.0.0.1:${server.getPort()}`, sixb })
   } finally {
     await server.stop()
   }
