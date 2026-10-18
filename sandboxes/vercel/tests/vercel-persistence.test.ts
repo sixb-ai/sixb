@@ -85,7 +85,7 @@ describe("Vercel named persistence", () => {
           },
         ],
       })
-    ).rejects.toThrow("credential injection target")
+    ).rejects.toThrow("Invalid request credential: the sandbox network allows no domain")
     expect(f.requests).toHaveLength(0)
   })
 
@@ -354,6 +354,8 @@ describe("Vercel named persistence", () => {
     expect(JSON.stringify(injection.body)).toContain("opaque-secret")
     expect(JSON.stringify(injection.body)).toContain("/acme/repo.git/git-upload-pack")
     expect(JSON.stringify(injection.body)).toContain("POST")
+    // The SDK sends the pinned Host as it sends Authorization.
+    expect(JSON.stringify(injection.body)).toContain('"Host":"github.com"')
     expect(
       JSON.stringify(f.requests.find((r) => r.path.split("?")[0] === "/v2/sandboxes")?.body)
     ).not.toContain("opaque-secret")

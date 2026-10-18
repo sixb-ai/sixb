@@ -583,6 +583,7 @@ export type {
   SandboxNetworkPolicy,
   SandboxNetworkTarget,
   SandboxRequestCredential,
+  SandboxRequestMethod,
   SandboxSessionOptions,
   SandboxStatus,
 } from "./sandboxes"

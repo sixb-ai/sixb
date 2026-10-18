@@ -78,13 +78,32 @@ export interface SandboxNetworkTarget {
   readonly origin: string
 }
 
-/** Host-only credentials injected outside the guest into one exact HTTPS request target.
- * This selects authenticated requests, not the sandbox's general egress allowlist.
+/** HTTP methods a request credential can be injected into. HEAD and OPTIONS never are. */
+export type SandboxRequestMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+
+/**
+ * Host-only credentials injected outside the guest into matching HTTPS requests.
+ *
+ * A credential selects which requests receive its Authorization header. It does not decide what
+ * the guest can reach, which is the network policy, nor which resources the token can act on:
+ * the token's own permissions are the boundary, so issue it with the narrowest scope that works.
+ *
+ * Providers apply the same rules so that a credential means the same thing everywhere:
+ * - `origin` is one `https://` domain: no port, path, user info, IP address or loopback host.
+ * - A path is matched case-sensitively against the raw request path. It starts with a single
+ *   "/" and is printable ASCII without spaces, control characters, "?", "#", "%", "\\", or "."
+ *   and ".." segments. A prefix also ends with "/", so it stops at a segment boundary.
+ * - Two credentials must not match the same request: one credential per request, so providers
+ *   reject the overlap instead of picking one.
+ * - Only Authorization can be set, and the provider forces the request's Host header to
+ *   `origin`'s domain.
  */
 export interface SandboxRequestCredential {
   readonly origin: string
-  readonly path: string
-  readonly method: "GET" | "POST"
+  /** One exact path, or every path under `prefix`. */
+  readonly path: string | { readonly prefix: string }
+  /** One method, or a non-empty list of distinct methods. */
+  readonly method: SandboxRequestMethod | readonly SandboxRequestMethod[]
   readonly headers: { readonly Authorization: string }
 }
 

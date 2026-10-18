@@ -71,7 +71,7 @@ describe("Vercel ephemeral request credentials", () => {
         network: { mode: "none" },
         requestCredentials: [credential("blocked-secret")],
       })
-    ).rejects.toThrow("credential injection target")
+    ).rejects.toThrow("Invalid request credential: the sandbox network allows no domain")
 
     expect(f.requests).toHaveLength(0)
   })

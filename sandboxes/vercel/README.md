@@ -184,8 +184,23 @@ new VercelSandboxFactory({
 ## Credential injection
 
 Ephemeral and persistent sandboxes support `sandbox.setRequestCredentials()`: replace host-side
-Authorization injection for exact HTTPS paths and GET/POST methods, or pass `[]` to remove it.
-`create({ requestCredentials })` applies the initial credentials before the source clone and setup.
+Authorization injection, or pass `[]` to remove it. `create({ requestCredentials })` applies the
+initial credentials before the source clone and setup.
+
+Each credential selects one exact HTTPS path or every path under a prefix ending in `/`, for the
+methods it lists: GET, POST, PUT, PATCH or DELETE. HEAD and OPTIONS requests are never injected.
+
+- Paths match the raw request path, case-sensitively. They must be printable ASCII without
+  spaces, control characters, `?`, `#`, `%`, `\`, or `.` and `..` segments.
+- Two credentials that could match the same request are rejected: the firewall would apply only
+  the first.
+- Every injected request gets its Host header set to the credential's domain, so a connection
+  opened to that domain cannot hand the credential to another site on the same server.
+
+A prefix scopes which requests receive the credential. It does not decide what the guest can
+reach, which is the network policy, nor what the token can do: every request under the prefix
+carries it, so the token's own permissions are the boundary. Issue the narrowest token that works.
+
 Injection never widens the egress allowlist, changes sandbox defaults or writes secrets inside the
 VM: secrets are sent only as the current session's network policy, never at sandbox creation.
 Renewal targets that session and rejects once the handle is stopped; it never resumes a new VM.
@@ -208,6 +223,16 @@ SIXB_VERCEL_SANDBOX_INTEGRATION=1 bun --filter @sixb/sandboxes-vercel test
 ```
 
 Persistence and credential injection tests use the installed SDK with a simulated transport: they
-make no Vercel requests and incur no Vercel usage. There is no live persistence or injection test.
-These tests verify the adapter's behavior, not actual file preservation or header injection by the
-Vercel service.
+make no Vercel requests and incur no Vercel usage. They verify the adapter's behavior, not actual
+file preservation or header injection by the Vercel service. There is no live persistence test.
+
+One live test checks injection end to end. It sends a request from the guest to
+`https://postman-echo.com/headers` with its own `Authorization: token placeholder` header and
+expects the echo to show only the injected value, with Host set to the credential's domain. It
+runs with the other live tests, authenticated through OIDC as described in [Setup](#setup) (run
+`vercel link` and `vercel env pull` first), and needs postman-echo.com to be up. To run it alone:
+
+```bash
+SIXB_VERCEL_SANDBOX_INTEGRATION=1 bun test sandboxes/vercel/tests/vercel-integration.test.ts \
+  --test-name-pattern "injects the credential"
+```
