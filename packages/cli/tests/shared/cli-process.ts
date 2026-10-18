@@ -1,4 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs"
 import { readFile } from "node:fs/promises"
+import { join } from "node:path"
 
 export interface CompletedCliProcess {
   readonly command: readonly string[]
@@ -6,6 +8,13 @@ export interface CompletedCliProcess {
   readonly stdout: string
   readonly stderr: string
 }
+
+/**
+ * Bound for a command that fails fast or finishes at once, under `bun test`'s default 5s test
+ * timeout. These take well under a second; the bound sits below the runner's so this helper, not
+ * the runner, kills a stuck child and reports where it was waiting.
+ */
+export const FAST_CLI_TIMEOUT_MS = 4_000
 
 export async function runCliToCompletion(options: {
   readonly cmd: readonly string[]
@@ -31,8 +40,11 @@ export async function runCliToCompletion(options: {
   }
 
   let timedOut = false
+  let waitState = ""
   const timeout = setTimeout(() => {
     timedOut = true
+    // Read before the kill: once the child is gone, nothing says where it was stuck.
+    waitState = threadWaitState(proc.pid)
     proc.kill("SIGKILL")
   }, timeoutMs)
 
@@ -45,7 +57,7 @@ export async function runCliToCompletion(options: {
     const result = { command, exitCode, stdout, stderr }
 
     if (timedOut) {
-      throw processFailure(result, `timed out after ${timeoutMs}ms`)
+      throw processFailure(result, `timed out after ${timeoutMs}ms`, waitState)
     }
 
     return result
@@ -64,12 +76,49 @@ export function assertCliSucceeded(result: CompletedCliProcess): void {
   }
 }
 
-function processFailure(result: CompletedCliProcess, reason: string): Error {
+function processFailure(result: CompletedCliProcess, reason: string, waitState?: string): Error {
   return new Error(
     `[cli-process] Command ${reason}: ${result.command.join(" ")}\n` +
       `stdout:\n${result.stdout.slice(-2_000)}\n` +
-      `stderr:\n${result.stderr.slice(-2_000)}`
+      `stderr:\n${result.stderr.slice(-2_000)}` +
+      (waitState ? `\nthreads:\n${waitState}` : "")
   )
+}
+
+/**
+ * Where each thread of a stuck child was waiting, from `/proc`, like `scripts/ci-guard.ts`. A
+ * child that already printed its output and sits in `futex` hung on exit; one that printed nothing
+ * hung starting up. Linux only: elsewhere it says so.
+ */
+function threadWaitState(pid: number): string {
+  const taskDir = `/proc/${pid}/task`
+  let tids: string[]
+  try {
+    tids = readdirSync(taskDir)
+  } catch {
+    return "  (unavailable: /proc is Linux-only)"
+  }
+
+  return tids
+    .map((tid) => {
+      const name = readProcFile(join(taskDir, tid, "comm"))
+      // The state letter follows the parenthesised thread name in `stat`.
+      const state = readProcFile(join(taskDir, tid, "stat"))
+        .split(") ")
+        .at(-1)
+        ?.split(" ")[0]
+      const wchan = readProcFile(join(taskDir, tid, "wchan"))
+      return `  tid ${tid} [${state}] ${name} wchan=${wchan}`
+    })
+    .join("\n")
+}
+
+function readProcFile(path: string): string {
+  try {
+    return readFileSync(path, "utf8").trim()
+  } catch {
+    return "?"
+  }
 }
 
 export async function readLogEntries(logPath: string): Promise<Array<Record<string, unknown>>> {
