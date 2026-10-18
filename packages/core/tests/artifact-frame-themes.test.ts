@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { FRAME_DEFAULT_THEMES, FRAME_KIT_CSS } from "../src/artifacts/frames/kit"
+import { FRAME_DECK_CSS, FRAME_DEFAULT_THEMES } from "../src/artifacts/frames/kit"
 import { ARTIFACT_THEME_TOKENS } from "../src/artifacts/theme"
 
 const GLOBALS_CSS = join(import.meta.dir, "../../ui/src/styles/globals.css")
@@ -46,7 +46,7 @@ describe("a frame's default themes", () => {
 
   test("start the kit in the light one", () => {
     // Reproduce by writing the kit's :root defaults out by hand again, as they once differed.
-    const root = /:root \{([^}]*)\}/.exec(FRAME_KIT_CSS)?.[1] ?? ""
+    const root = /:root \{([^}]*)\}/.exec(FRAME_DECK_CSS)?.[1] ?? ""
     for (const [token, value] of Object.entries(FRAME_DEFAULT_THEMES.light.tokens)) {
       expect(root, token).toContain(`${token}: ${value};`)
     }

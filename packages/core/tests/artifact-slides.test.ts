@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import type { ArtifactFile } from "../src"
 import { ArtifactRequestError, SixbHost } from "../src"
+import { injectFrameAssets } from "../src/artifacts/frames/assets"
+import { frameEntries, frameLayout } from "../src/artifacts/frames/entries"
 import {
   DECK_KEYS,
   FRAME_PROTOCOL,
@@ -156,6 +158,28 @@ describe("the frame runtime", () => {
     // It names nothing outside itself: its source runs on its own.
     expect(() => new Function(`return (${source})`)()).not.toThrow()
   })
+
+  test("reads its layout from the tag the frame injects it with", () => {
+    // Reproduce by renaming the attribute on either side: every page lays out as a deck.
+    expect(frameRuntime.toString()).toContain('"data-sixb-layout"')
+    expect(injectFrameAssets("<head></head>", "deck")).toContain(
+      '<link rel="stylesheet" href="__sixb/deck.css"><script src="__sixb/runtime.js" data-sixb-layout="deck">'
+    )
+  })
+})
+
+describe("frames", () => {
+  test("open the kinds with a layout, serving their entry as a page", () => {
+    expect(frameLayout("slides")).toBe("deck")
+    expect(["document", "sheet", "file"].map((kind) => frameLayout(kind as "file"))).toEqual([
+      null,
+      null,
+      null,
+    ])
+    const outline = { kind: "slides" as const }
+    expect(frameEntries({ entry: "index.html", outline })).toEqual(["index.html"])
+    expect(frameEntries({ entry: "document.md", outline: { kind: "document" } })).toEqual([])
+  })
 })
 
 describe("a frame's events", () => {
@@ -169,6 +193,8 @@ describe("a frame's events", () => {
       event: "ready",
       params: { slides: 3 },
     })
+    // A frame that is no deck has no slides to count.
+    expect(event("ready", {})?.params).toEqual({})
     expect(event("select", { slide: 2 })?.params).toEqual({ slide: 2 })
     expect(event("key", { key: "ArrowRight" })?.params).toEqual({ key: "ArrowRight" })
     expect(event("open", { address: "artifact:art_0123456789" })?.params).toEqual({

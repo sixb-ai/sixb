@@ -64,12 +64,12 @@ export const FRAME_DEFAULT_THEMES = {
 const LIGHT = FRAME_DEFAULT_THEMES.light.tokens
 
 /**
- * The kit the frame injects into a deck: the stage that shows one slide or all of them, the slide
- * type scale, the layouts a slide picks by class, the slide chrome, and a few components. It reads
- * the app's theme tokens, which the app sends into the frame, with the light defaults until they
- * arrive. Everything sits in cascade layers, so the deck's own CSS, unlayered, always wins.
+ * What every frame's kit starts from: the theme's tokens, with the light defaults until the app's
+ * arrive, and the document's base. The rules a layout adds sit in the same layer, and everything
+ * sits in cascade layers, so an artifact's own CSS, unlayered, always wins.
  */
-export const FRAME_KIT_CSS = `
+function kit(rules: string): string {
+  return `
 @layer sixb-kit, sixb-theme;
 
 @layer sixb-kit {
@@ -77,6 +77,25 @@ export const FRAME_KIT_CSS = `
 ${Object.entries(LIGHT)
   .map(([name, value]) => `    ${name}: ${value};`)
   .join("\n")}
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+${rules}}
+`
+}
+
+/**
+ * A deck's kit: the stage that shows one slide or all of them, the slide type scale, the layouts a
+ * slide picks by class, the slide chrome, and a few components.
+ */
+export const FRAME_DECK_CSS = kit(`  :root {
     --sixb-scale: 1;
     --sixb-overview-scale: 0.25;
     --sixb-columns: 4;
@@ -84,15 +103,7 @@ ${Object.entries(LIGHT)
     --sixb-stage-border: ${LIGHT["--border"]};
     --sixb-stage-foreground: ${LIGHT["--foreground"]};
   }
-
-  *, *::before, *::after { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
-  body {
-    background: var(--muted);
-    color: var(--foreground);
-    font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
-  }
+  body { background: var(--muted); }
 
   /*
    * The stage: a slide's size and scale, which slides show, and the stage around them, in the
@@ -388,5 +399,4 @@ ${Object.entries(LIGHT)
     font-size: 18px;
     font-weight: 600;
   }
-}
-`
+`)

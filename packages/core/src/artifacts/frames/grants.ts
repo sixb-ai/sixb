@@ -6,6 +6,7 @@ import type {
 } from "../../storage/artifacts/types"
 import { parseArtifactAddress } from "../address"
 import { ArtifactRequestError } from "../errors"
+import { frameLayout } from "./entries"
 
 /** Path prefix of the route that serves a version's files to its frame. */
 export const ARTIFACT_FRAME_ROUTE_PREFIX = "/api/artifact-frames/"
@@ -27,10 +28,10 @@ type ReadArtifactVersion = (
 ) => Promise<ArtifactVersionRecord | null>
 
 /**
- * Issues a link that serves a deck's version to a sandboxed frame, with the files it embeds from
- * other artifacts that `read` finds. The token in the link is the credential: only its hash is
- * stored. Whoever asks must already have been allowed to read the version, and `read` reads as
- * them. Only a deck opens in a frame, since the frame serves its entry as a page.
+ * Issues a link that serves a version to a sandboxed frame, with the files it embeds from other
+ * artifacts that `read` finds. The token in the link is the credential: only its hash is stored.
+ * Whoever asks must already have been allowed to read the version, and `read` reads as them. Only
+ * a kind with a frame layout opens in one, since the frame serves its entry as a page.
  */
 export async function createArtifactFrame(input: {
   readonly projectId: string
@@ -40,10 +41,10 @@ export async function createArtifactFrame(input: {
   readonly now?: Date
 }): Promise<ArtifactFrame> {
   const { version } = input
-  if (version.outline.kind !== "slides") {
+  if (!frameLayout(version.outline.kind)) {
     throw new ArtifactRequestError(
       "artifact_kind_mismatch",
-      `[Sixb] Only a deck opens in a frame; '${version.artifactId}' is a ${version.outline.kind}. Read its files instead.`
+      `[Sixb] '${version.artifactId}' is a ${version.outline.kind}, which does not open in a frame. Read its files instead.`
     )
   }
   const createdAt = input.now ?? new Date()
@@ -93,8 +94,8 @@ async function frameTargets(
 }
 
 /**
- * What a frame link serves: its deck's version, and what it may show from other artifacts; `null`
- * once the link is unknown, expired, or its version gone, and for a version that is not a deck.
+ * What a frame link serves: its version, and what it may show from other artifacts; `null` once
+ * the link is unknown, expired, or its version gone, and for a kind that does not open in a frame.
  */
 export async function resolveArtifactFrame(input: {
   readonly projectId: string
@@ -116,7 +117,7 @@ export async function resolveArtifactFrame(input: {
     artifactId: grant.artifactId,
     version: grant.version,
   })
-  return version?.outline.kind === "slides" ? { version, targets: grant.targets } : null
+  return version && frameLayout(version.outline.kind) ? { version, targets: grant.targets } : null
 }
 
 function hashToken(token: string): string {

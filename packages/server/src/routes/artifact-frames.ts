@@ -4,6 +4,8 @@ import {
   ARTIFACT_FRAME_ROUTE_PREFIX,
   FRAME_ASSETS,
   FRAME_REFERENCE_PREFIX,
+  frameEntries,
+  frameLayout,
   injectFrameAssets,
   resolveArtifactFrame,
   rewriteFrameReferences,
@@ -20,9 +22,9 @@ interface FrameContext {
 }
 
 /**
- * Serves a deck's files to its sandboxed frame, under the token a frame link carries: the token
- * is the credential, so the route is public. The entry gets the kit and the runtime, and the kit
- * and runtime are served beside the files. Hidden from OpenAPI: clients receive frame links, they
+ * Serves a version's files to its sandboxed frame, under the token a frame link carries: the token
+ * is the credential, so the route is public. Each entry gets its layout's kit and the runtime,
+ * which are served beside the files. Hidden from OpenAPI: clients receive frame links, they
  * never build them.
  */
 export function registerArtifactFrameRoutes(
@@ -64,7 +66,7 @@ async function frameResponse(
 
   const storage = host.storage.artifacts
   if (!storage) return notFound()
-  // An unknown or expired token, a deleted version, and one that is no deck all answer one 404.
+  // An unknown or expired token, a deleted version, and a kind with no frame all answer one 404.
   const frame = await resolveArtifactFrame({
     projectId: host.id,
     storage,
@@ -82,7 +84,7 @@ async function frameResponse(
   }
   let lent = false
   if (path?.startsWith(FRAME_REFERENCE_PREFIX)) {
-    // A file another artifact lends the deck: only one its frame was issued with, at that version.
+    // A file another artifact lends this one: only one its frame was issued with, at that version.
     const match = /^([^/@]+)@(\d+)\/(.+)$/.exec(path.slice(FRAME_REFERENCE_PREFIX.length))
     const target = frame.targets.find(
       (candidate) =>
@@ -105,14 +107,17 @@ async function frameResponse(
   const file = version.files.find((candidate) => candidate.path === path)
   if (!file) return notFound()
 
-  if (!lent && file.path === version.entry) {
+  const layout = frameLayout(version.outline.kind)
+  if (!lent && layout && frameEntries(version).includes(file.path)) {
     const opened = await openFileRef(host.blobStorage, file.file)
     if (!opened) return notFound()
     headers.set("content-type", "text/html; charset=utf-8")
     headers.set("cache-control", "private, no-cache")
     if (options.head) return new Response(null, { headers })
     const text = await new Response(opened.body).text()
-    return new Response(injectFrameAssets(rewriteFrameReferences(text, frame.targets)), { headers })
+    return new Response(injectFrameAssets(rewriteFrameReferences(text, frame.targets), layout), {
+      headers,
+    })
   }
 
   const response = await createFileContentResponse({

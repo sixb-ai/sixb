@@ -143,13 +143,13 @@ describe("the layout check", () => {
       ],
     })
     const library = join(root, ".sixb/agent/lib/layout-check")
-    expect(readFileSync(join(library, "kit.css"), "utf8")).toContain("@layer sixb-kit")
+    expect(readFileSync(join(library, "deck.css"), "utf8")).toContain("@layer sixb-kit")
     expect(readFileSync(join(library, "runtime.js"), "utf8")).toContain("sixb-frame/1")
     expect(readFileSync(join(library, "probe.js"), "utf8")).toStartWith("(function layoutProbe")
     expect(
       readFileSync(join(root, ".sixb/agent/checks/art_0000000000-v1/entry.html"), "utf8")
     ).toContain(
-      '<head><link rel="stylesheet" href="__sixb/kit.css"><script src="__sixb/runtime.js"></script>'
+      '<head><link rel="stylesheet" href="__sixb/deck.css"><script src="__sixb/runtime.js" data-sixb-layout="deck"></script>'
     )
     expect(commands[0]?.options.env).toMatchObject({ SIXB_CHECK_DECK: join(root, "deck") })
     // It serves the files the version publishes, and no others from the deck's directory.

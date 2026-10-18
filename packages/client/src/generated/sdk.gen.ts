@@ -2808,9 +2808,9 @@ export const publishArtifactVersion = <ThrowOnError extends boolean = false>(
   })
 
 /**
- * Open a deck's version in a frame
+ * Open a version in a frame
  *
- * A short-lived path that serves a slides version's files to a sandboxed frame. It expires within an hour. Any other kind is refused with 409 artifact_kind_mismatch.
+ * A short-lived path that serves the files of a version that opens in a sandboxed frame, as slides do. It expires within an hour. A kind that does not open in a frame is refused with 409 artifact_kind_mismatch.
  */
 export const createArtifactFrame = <ThrowOnError extends boolean = false>(
   options: Options<CreateArtifactFrameData, ThrowOnError>

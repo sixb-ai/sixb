@@ -1,13 +1,14 @@
 /**
- * The runtime the frame injects into a deck before anything else in its `<head>`. It is served as
- * this function's own source, `(${frameRuntime})()`, so it imports nothing and names nothing
- * outside itself: the protocol string and the keys repeat what `protocol.ts` declares, and a test
- * holds the two together.
+ * The runtime the frame injects before anything else in an entry's `<head>`. It is served as this
+ * function's own source, `(${frameRuntime})()`, so it imports nothing and names nothing outside
+ * itself: the protocol string and the keys repeat what `protocol.ts` declares, and a test holds
+ * the two together. Its tag names the layout, `data-sixb-layout`.
  *
- * It lays the deck out: every `section.slide` is a 1280×720 slide, shown one at a time scaled to
- * fit, or all at once in a grid. The URL's fragment can open it at a slide, and with `sixb-fill`
- * show that slide alone filling the frame, as a thumbnail or an embed does. It applies the theme the app sends, answers the app's requests,
- * and tells the app about keys, picks in the overview, and links to other artifacts.
+ * In every layout it applies the theme the app sends, answers the app's requests, and tells the
+ * app about links to other artifacts. A deck it also lays out: every `section.slide` is a 1280×720
+ * slide, shown one at a time scaled to fit, or all at once in a grid. The URL's fragment can open
+ * it at a slide, and with `sixb-fill` show that slide alone filling the frame, as a thumbnail or an
+ * embed does; it tells the app about keys and picks in the overview. A page scrolls as it is.
  */
 export function frameRuntime(): void {
   const PROTOCOL = "sixb-frame/1"
@@ -26,9 +27,12 @@ export function frameRuntime(): void {
     "Escape",
   ]
   const root = document.documentElement
+  const deck = document.currentScript?.getAttribute("data-sixb-layout") !== "page"
   const start = new URLSearchParams(window.location.hash.slice(1))
-  root.classList.add("sixb-deck")
-  root.dataset.mode = start.has("sixb-fill") ? "fill" : "slide"
+  if (deck) {
+    root.classList.add("sixb-deck")
+    root.dataset.mode = start.has("sixb-fill") ? "fill" : "slide"
+  }
   let current = Number(start.get("sixb-slide")) || 1
 
   const slides = (): HTMLElement[] =>
@@ -66,7 +70,7 @@ export function frameRuntime(): void {
   let reported = ""
   let reporting = false
   const reportEmbeds = () => {
-    if (reporting || root.dataset.mode === "fill") return
+    if (!deck || reporting || root.dataset.mode === "fill") return
     reporting = true
     requestAnimationFrame(() => {
       reporting = false
@@ -130,9 +134,11 @@ export function frameRuntime(): void {
         return
       }
       case "goto":
+        if (!deck) throw new Error("Only a deck has slides.")
         show(Number(params.slide))
         return
       case "mode":
+        if (!deck) throw new Error("Only a deck has modes.")
         if (root.dataset.mode === "fill") return
         root.dataset.mode =
           params.mode === "overview" || params.mode === "present" ? params.mode : "slide"
@@ -159,8 +165,9 @@ export function frameRuntime(): void {
     }
   })
 
+  // A deck's keys move it wherever focus is; a page's keys are its own.
   window.addEventListener("keydown", (event) => {
-    if (event.metaKey || event.ctrlKey || event.altKey) return
+    if (!deck || event.metaKey || event.ctrlKey || event.altKey) return
     const target = event.target as HTMLElement | null
     if (target?.closest("input, textarea, select, [contenteditable]")) return
     if (!KEYS.includes(event.key)) return
@@ -183,17 +190,22 @@ export function frameRuntime(): void {
       }
       return
     }
-    if (root.dataset.mode !== "overview") return
+    if (!deck || root.dataset.mode !== "overview") return
     const slide = target?.closest<HTMLElement>("section.slide")
     if (!slide) return
     post({ event: "select", params: { slide: slides().indexOf(slide) + 1 } })
   })
 
   window.addEventListener("resize", () => {
+    if (!deck) return
     fit()
     reportEmbeds()
   })
   const ready = () => {
+    if (!deck) {
+      post({ event: "ready", params: {} })
+      return
+    }
     slides().forEach((element, index) => {
       element.dataset.number = String(index + 1)
     })

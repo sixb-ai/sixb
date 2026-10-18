@@ -2,9 +2,9 @@ import { ARTIFACT_LIMITS } from "../limits"
 import { ARTIFACT_THEME_TOKENS } from "../theme"
 
 /**
- * Messages between the app and a deck in its sandboxed frame. The app asks; the frame answers
- * each request by its id, and tells the app what happened inside it as events. Later abilities
- * are new methods and events, not a new protocol.
+ * Messages between the app and an artifact in its sandboxed frame: a deck, or a page. The app
+ * asks; the frame answers each request by its id, and tells the app what happened inside it as
+ * events. Later abilities are new methods and events, not a new protocol.
  */
 export const FRAME_PROTOCOL = "sixb-frame/1"
 
@@ -57,7 +57,8 @@ export interface FrameResponse {
 
 /** What happened inside the frame. */
 export type FrameEvent =
-  | FrameEventOf<"ready", { readonly slides: number }>
+  /** The frame has laid out its entry: a deck says how many slides it has. */
+  | FrameEventOf<"ready", { readonly slides?: number }>
   /** The reader picked a slide in the overview. */
   | FrameEventOf<"select", { readonly slide: number }>
   /** A key the app handles, pressed while the frame had focus. */
@@ -120,6 +121,7 @@ export function parseFrameEvent(data: unknown): FrameEvent | null {
   const { params } = data
   switch (data.event) {
     case "ready":
+      if (params.slides === undefined) return event("ready", {})
       return isCount(params.slides) ? event("ready", { slides: params.slides }) : null
     case "select":
       return isCount(params.slide) && params.slide > 0

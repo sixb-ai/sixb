@@ -168,14 +168,14 @@ describe("a deck's frame", () => {
     expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8")
     const html = await response.text()
     expect(html).toContain(
-      '<head><link rel="stylesheet" href="__sixb/kit.css"><script src="__sixb/runtime.js"></script><title>'
+      '<head><link rel="stylesheet" href="__sixb/deck.css"><script src="__sixb/runtime.js" data-sixb-layout="deck"></script><title>'
     )
     expect(html.match(/__sixb\/runtime\.js/g)).toHaveLength(1)
 
     const runtime = await app.fetch(new Request(url(`${frame.path}__sixb/runtime.js`)))
     expect(runtime.headers.get("content-type")).toBe("text/javascript; charset=utf-8")
     expect(await runtime.text()).toContain("sixb-frame/1")
-    const kit = await app.fetch(new Request(url(`${frame.path}__sixb/kit.css`)))
+    const kit = await app.fetch(new Request(url(`${frame.path}__sixb/deck.css`)))
     expect(await kit.text()).toContain("@layer sixb-kit")
   })
 
@@ -237,7 +237,7 @@ describe("a deck's frame", () => {
     // delete keeping the grants): the route then fails on the missing version, a 500.
     const fixture = await deck()
     await remove(fixture, fixture.alice, fixture.published.artifact.id)
-    for (const path of ["index.html", "deck.css", "__sixb/kit.css"]) {
+    for (const path of ["index.html", "deck.css", "__sixb/deck.css"]) {
       const response = await fixture.app.fetch(new Request(url(`${fixture.frame.path}${path}`)))
       expect(response.status, path).toBe(404)
       expectFrameHeaders(response, path)
@@ -353,7 +353,7 @@ describe("a frame for anything but a deck", () => {
     const minted = await mint(fixture, alice, notes.artifact.id)
     expect(minted.status).toBe(409)
     expect(await minted.json()).toEqual({
-      error: `[Sixb] Only a deck opens in a frame; '${notes.artifact.id}' is a document. Read its files instead.`,
+      error: `[Sixb] '${notes.artifact.id}' is a document, which does not open in a frame. Read its files instead.`,
       code: "artifact_kind_mismatch",
     })
 
@@ -499,18 +499,18 @@ describe("a deck's images from other artifacts", () => {
 })
 
 describe("injecting the kit and the runtime", () => {
-  const tag = '<link rel="stylesheet" href="__sixb/kit.css">'
+  const tag = '<link rel="stylesheet" href="__sixb/deck.css">'
 
   test("goes in the head, else the html element, else after the doctype", () => {
-    expect(injectFrameAssets("<html><head><meta charset=utf-8></head></html>")).toStartWith(
+    expect(injectFrameAssets("<html><head><meta charset=utf-8></head></html>", "deck")).toStartWith(
       `<html><head>${tag}`
     )
-    expect(injectFrameAssets('<html lang="en"><body></body></html>')).toStartWith(
+    expect(injectFrameAssets('<html lang="en"><body></body></html>', "deck")).toStartWith(
       `<html lang="en">${tag}`
     )
-    expect(injectFrameAssets("<!DOCTYPE html>\n<section class=slide></section>")).toStartWith(
-      `<!DOCTYPE html>${tag}`
-    )
+    expect(
+      injectFrameAssets("<!DOCTYPE html>\n<section class=slide></section>", "deck")
+    ).toStartWith(`<!DOCTYPE html>${tag}`)
   })
 
   test("finds the head and the html element as elements, not as text in a comment or a script", () => {
@@ -524,7 +524,7 @@ describe("injecting the kit and the runtime", () => {
         `<!doctype html>${tag}`,
       ],
     ] as const) {
-      const injected = injectFrameAssets(html)
+      const injected = injectFrameAssets(html, "deck")
       expect(injected, html).toStartWith(start)
       expect(injected.match(/__sixb\/runtime\.js/g), html).toHaveLength(1)
     }
