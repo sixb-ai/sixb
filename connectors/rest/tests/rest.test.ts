@@ -23,6 +23,7 @@ describe("rest connector", () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch
+    jest.useRealTimers()
   })
 
   test("creates a rest adapter that forwards webhook definitions", () => {
@@ -140,27 +141,39 @@ describe("rest connector", () => {
     expect(attempts).toBe(4)
   })
 
-  test("spaces concurrent requests when minDelayMs is configured", async () => {
+  test("spaces requests by minDelayMs from when each is sent, even while headers resolve", async () => {
+    // Regression check: stamp the next slot when the scheduler hands it out instead of at dispatch.
+    // The first request then reaches fetch 15ms late and the second follows it 5ms later.
+    jest.useFakeTimers()
     const starts: number[] = []
     mockFetch(() => {
-      starts.push(Date.now())
+      starts.push(performance.now())
       return Promise.resolve(new Response("ok", { status: 200 }))
     })
-
+    let resolutions = 0
     const client = await rest({
       baseUrl: "https://api.example.com",
       minDelayMs: 20,
+      headers: async () => {
+        if (resolutions++ === 0) await new Promise((resolve) => setTimeout(resolve, 15))
+        return {}
+      },
     }).connect({
       projectId: "demo",
       connectorId: "hubspot",
       signal: new AbortController().signal,
     })
 
-    await Promise.all([client.get("/one"), client.get("/two"), client.get("/three")])
+    const requests = Promise.all([client.get("/one"), client.get("/two"), client.get("/three")])
+    for (let step = 0; step < 20 && starts.length < 3; step++) {
+      await flush()
+      jest.advanceTimersByTime(5)
+    }
+    await requests
 
     expect(starts).toHaveLength(3)
-    expect((starts[1] ?? 0) - (starts[0] ?? 0)).toBeGreaterThanOrEqual(15)
-    expect((starts[2] ?? 0) - (starts[1] ?? 0)).toBeGreaterThanOrEqual(15)
+    expect((starts[1] ?? 0) - (starts[0] ?? 0)).toBeGreaterThanOrEqual(20)
+    expect((starts[2] ?? 0) - (starts[1] ?? 0)).toBeGreaterThanOrEqual(20)
   })
 
   test("serializes json bodies for post requests", async () => {

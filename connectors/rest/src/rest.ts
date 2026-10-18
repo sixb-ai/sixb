@@ -68,18 +68,22 @@ function createRestClient(options: RestConnectorOptions, context: ConnectorConte
       let response: Response | null = null
       let error: unknown = null
 
+      let dispatch: (() => void) | undefined
       try {
         // The queue reserves a distinct start slot for every initial request and retry.
-        await schedule(requestSignal)
+        dispatch = await schedule(requestSignal)
         const resolvedInit = await resolveRequestInit(
           baseRequestContext.init,
           options.headers,
           options.timeoutMs,
           baseRequestContext
         )
+        dispatch()
         response = await fetch(new URL(path, options.baseUrl), resolvedInit)
       } catch (caughtError) {
         error = caughtError
+      } finally {
+        dispatch?.()
       }
 
       const retryContext: RestRetryContext = {
@@ -237,24 +241,47 @@ function combineSignals(
   return AbortSignal.any([contextSignal, requestSignal])
 }
 
-function createRequestScheduler(minDelayMs: number): (signal: AbortSignal) => Promise<void> {
+/**
+ * Grants each request its start slot and resolves with the function the request calls when it hands
+ * itself to `fetch` (idempotent). Spacing counts from that moment, so the next slot opens only once
+ * this request has been sent or has given up: resolving headers in between cannot shorten the gap.
+ */
+function createRequestScheduler(minDelayMs: number): (signal: AbortSignal) => Promise<() => void> {
   assertMinDelay(minDelayMs)
   if (minDelayMs === 0) {
-    return (signal) => (signal.aborted ? Promise.reject(abortReason(signal)) : Promise.resolve())
+    return (signal) =>
+      signal.aborted ? Promise.reject(abortReason(signal)) : Promise.resolve(() => {})
   }
 
   let nextAvailableAt = 0
   let queue = Promise.resolve()
 
   return (signal) => {
-    const scheduled = queue.then(async () => {
-      await sleepUntil(nextAvailableAt, signal)
-      nextAvailableAt = performance.now() + minDelayMs
+    let release!: () => void
+    const released = new Promise<void>((resolve) => {
+      release = resolve
     })
-    queue = scheduled.catch(() => undefined)
+    let dispatched = false
+    const dispatch = () => {
+      if (dispatched) return
+      dispatched = true
+      nextAvailableAt = performance.now() + minDelayMs
+      release()
+    }
+    const slot = queue.then(() => sleepUntil(nextAvailableAt, signal))
+    queue = slot.then(
+      () => released,
+      () => undefined
+    )
     // A request can sit behind another request's pacing slot. Reject its caller immediately when
     // aborted; the queued task will later observe the same signal and release the queue cleanly.
-    return abortable(scheduled, signal)
+    const granted = abortable(
+      slot.then(() => dispatch),
+      signal
+    )
+    // A caller that gave up as its slot opened never dispatches; release the queue for it.
+    granted.catch(() => slot.then(release, () => undefined))
+    return granted
   }
 }
 
