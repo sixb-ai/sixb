@@ -389,7 +389,8 @@ describe("rest reliability contract", () => {
   })
 
   test("an abort interrupts retry backoff", async () => {
-    // Guard check: drop the abort listener in rest.ts sleep(); this test then times out.
+    // Guard check: drop the abort listener in rest.ts sleep(); the request then stays pending.
+    jest.useFakeTimers()
     const controller = new AbortController()
     let attempts = 0
     mockFetch(() => {
@@ -406,15 +407,27 @@ describe("rest reliability contract", () => {
     })
 
     const request = client.get("/items")
-    await flush()
+    let settled = false
+    request
+      .catch(() => {})
+      .finally(() => {
+        settled = true
+      })
+    // Abort only once the backoff timer is armed, so the listener (not the pre-check) must act.
+    for (let turn = 0; turn < 20 && jest.getTimerCount() === 0; turn++) await flush()
+    expect(jest.getTimerCount()).toBe(1)
     controller.abort(new DOMException("cancelled", "AbortError"))
+    await flush()
 
-    const error = await request.catch((caught: unknown) => caught)
-    expect(error).toMatchObject({ name: "AbortError", message: "cancelled" })
+    expect(settled).toBe(true)
+    expect(await request.catch((caught: unknown) => caught)).toMatchObject({
+      name: "AbortError",
+      message: "cancelled",
+    })
     expect(attempts).toBe(1)
   })
 
-  test("rejects an aborted request while it is queued behind another pacing slot", async () => {
+  test("an aborted request, queued or already aborted, leaves the pacing queue usable", async () => {
     jest.useFakeTimers()
     const controller = new AbortController()
     let attempts = 0
@@ -439,14 +452,63 @@ describe("rest reliability contract", () => {
       queuedSettled = true
     })
     controller.abort(new DOMException("cancelled", "AbortError"))
+    // A request whose signal is already aborted rejects without leaving a rejection unhandled.
+    const preAborted = client
+      .get("/four", { signal: controller.signal })
+      .catch((error: unknown) => error)
     await flush()
 
     // Rejected while /two still holds its pacing slot: no fake time has passed.
     expect(queuedSettled).toBe(true)
     expect(await queued.catch((error: unknown) => error)).toMatchObject({ message: "cancelled" })
+    expect(await preAborted).toMatchObject({ message: "cancelled" })
     jest.advanceTimersByTime(200)
     await blocker
-    expect(attempts).toBe(2)
+    const after = client.get("/five")
+    await flush()
+    jest.advanceTimersByTime(200)
+    expect((await after).status).toBe(200)
+    expect(attempts).toBe(3)
+  })
+
+  test("a header resolver that fails or hangs holds no other request back", async () => {
+    // Regression check: take the pacing slot before resolving headers and hold it until the
+    // request is sent. The failed resolution then wedges the queue and the hung one stalls /ok.
+    jest.useFakeTimers()
+    const sent: string[] = []
+    mockFetch((input) => {
+      sent.push(new URL(String(input)).pathname)
+      return Promise.resolve(new Response("ok"))
+    })
+    const client = await rest({
+      baseUrl: "https://api.example.com",
+      minDelayMs: 10,
+      headers: (context) => {
+        if (context.path === "/broken") throw new Error("token store down")
+        if (context.path === "/hung") return new Promise<HeadersInit>(() => {})
+        return {}
+      },
+    }).connect({
+      projectId: "demo",
+      connectorId: "contract",
+      signal: new AbortController().signal,
+    })
+
+    const broken = await client.get("/broken").catch((error: unknown) => error)
+    expect(broken).toMatchObject({ message: "token store down" })
+    void client.get("/hung")
+    const ok = client.get("/ok")
+    let settled = false
+    ok.finally(() => {
+      settled = true
+    })
+    for (let step = 0; step < 10 && !settled; step++) {
+      await flush()
+      jest.advanceTimersByTime(10)
+    }
+
+    expect(settled).toBe(true)
+    expect(sent).toEqual(["/ok"])
   })
 
   test("resolves dynamic headers for every attempt", async () => {
