@@ -37,9 +37,9 @@ export interface UserMenuItemProps {
 }
 
 /**
- * The signed-in person, the built-in sections they may open, such as Data and Settings, theme
- * switching and sign-out, at the foot of any sidebar. With sign-in off it is the way into the
- * sections.
+ * The signed-in person, Artifacts and the built-in sections they may open, such as Data and
+ * Settings, theme switching and sign-out, at the foot of any sidebar. With sign-in off it is the
+ * way into the sections.
  */
 function UserMenuRoot({ children }: UserMenuProps) {
   const user = useCurrentUser()
@@ -106,12 +106,8 @@ function UserMenuRoot({ children }: UserMenuProps) {
               </>
             ) : null}
 
-            {items ? (
-              <>
-                {items}
-                {themeControls ? <DropdownMenuSeparator /> : null}
-              </>
-            ) : null}
+            {items}
+            {themeControls ? <DropdownMenuSeparator /> : null}
 
             {themeControls ? (
               // One row: a click on an option picks it, and with the row focused the arrow keys
