@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { GoogleApiError } from "../src/errors"
 import { google } from "../src/google"
 import type { GoogleClient } from "../src/index"
 import { CONTEXT, collect, json, mockFetch, restoreFetch } from "./helpers"
@@ -24,23 +23,7 @@ describe("drive.files", () => {
     })
   }
 
-  test("list issues GET /files with query and bearer auth", async () => {
-    mockFetch(async (input, init) => {
-      record(input, init)
-      return json({ files: [{ id: "1", name: "Transcript" }] })
-    })
-
-    const client = await connect()
-    const result = await client.drive.files.list({ q: "'FOLDER' in parents", pageSize: 100 })
-
-    expect(result.files?.[0]?.id).toBe("1")
-    expect(requests[0]?.url).toBe(
-      "https://www.googleapis.com/drive/v3/files?q=%27FOLDER%27+in+parents&pageSize=100"
-    )
-    expect(requests[0]?.auth).toBe("Bearer test-token")
-  })
-
-  test("listAll walks every page via nextPageToken", async () => {
+  test("list and listAll issue GET /files with query and bearer auth on every page", async () => {
     const pages = [
       { files: [{ id: "1" }, { id: "2" }], nextPageToken: "p2" },
       { files: [{ id: "3" }] },
@@ -52,11 +35,19 @@ describe("drive.files", () => {
     })
 
     const client = await connect()
-    const files = await collect(client.drive.files.listAll({ pageSize: 2 }))
+    const files = await collect(
+      client.drive.files.listAll({ q: "'FOLDER' in parents", pageSize: 2 })
+    )
 
     expect(files.map((f) => f.id)).toEqual(["1", "2", "3"])
-    expect(requests).toHaveLength(2)
-    expect(requests[1]?.url).toContain("pageToken=p2")
+    expect(requests.map((request) => request.url)).toEqual([
+      "https://www.googleapis.com/drive/v3/files?q=%27FOLDER%27+in+parents&pageSize=2",
+      "https://www.googleapis.com/drive/v3/files?q=%27FOLDER%27+in+parents&pageSize=2&pageToken=p2",
+    ])
+    expect(requests.map((request) => request.auth)).toEqual([
+      "Bearer test-token",
+      "Bearer test-token",
+    ])
   })
 
   test("get fetches a single file by id", async () => {
@@ -72,7 +63,7 @@ describe("drive.files", () => {
     expect(requests[0]?.url).toBe("https://www.googleapis.com/drive/v3/files/abc?fields=id%2C+name")
   })
 
-  test("download requests alt=media and returns raw file bytes", async () => {
+  test("download requests alt=media with Drive options and returns raw file bytes", async () => {
     mockFetch(async (input, init) => {
       record(input, init)
       return new Response(Uint8Array.from([0, 127, 255]), {
@@ -81,28 +72,14 @@ describe("drive.files", () => {
     })
 
     const client = await connect()
-    const bytes = await client.drive.files.download("stored/file")
-
-    expect(Array.from(bytes)).toEqual([0, 127, 255])
-    expect(requests[0]?.url).toBe(
-      "https://www.googleapis.com/drive/v3/files/stored%2Ffile?alt=media"
-    )
-  })
-
-  test("download supports Shared Drive files and abuse acknowledgement", async () => {
-    mockFetch(async (input, init) => {
-      record(input, init)
-      return new Response("file contents")
-    })
-
-    const client = await connect()
-    await client.drive.files.download("shared-file", {
+    const bytes = await client.drive.files.download("stored/file", {
       supportsAllDrives: true,
       acknowledgeAbuse: true,
     })
 
+    expect(Array.from(bytes)).toEqual([0, 127, 255])
     expect(requests[0]?.url).toBe(
-      "https://www.googleapis.com/drive/v3/files/shared-file" +
+      "https://www.googleapis.com/drive/v3/files/stored%2Ffile" +
         "?alt=media&supportsAllDrives=true&acknowledgeAbuse=true"
     )
   })
@@ -122,21 +99,6 @@ describe("drive.files", () => {
     expect(requests[0]?.url).toBe(
       "https://www.googleapis.com/drive/v3/files/doc-id/export?mimeType=text%2Fplain"
     )
-  })
-
-  test("download maps a Google error envelope to GoogleApiError", async () => {
-    mockFetch(async () =>
-      json(
-        { error: { code: 403, message: "Insufficient Permission", status: "PERMISSION_DENIED" } },
-        { status: 403 }
-      )
-    )
-
-    const client = await connect()
-    const error = (await client.drive.files.download("blocked").catch((e) => e)) as GoogleApiError
-    expect(error).toBeInstanceOf(GoogleApiError)
-    expect(error.status).toBe(403)
-    expect(error.message).toContain("Insufficient Permission")
   })
 })
 

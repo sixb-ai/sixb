@@ -166,7 +166,8 @@ describe("Microsoft application authentication", () => {
         signal.addEventListener("abort", () => reject(signal.reason), { once: true })
       })
     })
-    const client = await connect({ auth, timeoutMs: 20 })
+    // The smallest valid timeout: the exchange never answers, so only the timeout can end it.
+    const client = await connect({ auth, timeoutMs: 1 })
     await expect(client.sites.get("site")).rejects.toBeInstanceOf(MicrosoftAuthError)
   })
 

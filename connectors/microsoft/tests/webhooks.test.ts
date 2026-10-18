@@ -103,13 +103,28 @@ describe("Microsoft webhooks through Sixb", () => {
           clientState: "secret",
           lifecycleEvent: "missed",
         },
+        // Basic SharePoint notifications carry no resourceData and share the same receiver.
+        {
+          ...notification,
+          changeType: "updated",
+          resource: "drives/drive-id/root",
+          resourceData: undefined,
+        },
       ],
     })
     expect(response.status).toBe(202)
-    expect(received.map((c) => c.event.kind)).toEqual(["change", "lifecycle"])
+    expect(received.map((c) => c.event.kind)).toEqual(["change", "lifecycle", "change"])
     expect(received[0].event).toMatchObject({ changeType: "created", resourceData: { id: "m" } })
     expect(received[1].event).toMatchObject({ subscriptionId: "other", lifecycleEvent: "missed" })
     expect(received[0].event).not.toHaveProperty("clientState")
+    expect(received[2].event).toEqual({
+      kind: "change",
+      subscriptionId: notification.subscriptionId,
+      tenantId: notification.tenantId,
+      subscriptionExpirationDateTime: notification.subscriptionExpirationDateTime,
+      changeType: "updated",
+      resource: "drives/drive-id/root",
+    })
     expect((await received[0].client()).mail).toBeDefined()
     expect(received[0].sixb.execution.id).toBeTruthy()
     const runs = await storage.webhookRuns.list({
@@ -131,34 +146,6 @@ describe("Microsoft webhooks through Sixb", () => {
     expect(response.status).toBe(401)
     expect(received).toHaveLength(0)
     expect((await storage.webhookRuns.list({ projectId: "mail-test" })).total).toBe(0)
-  })
-
-  test("dispatches basic SharePoint notifications through the same receiver", async () => {
-    const received: MicrosoftWebhookEvent[] = []
-    const { deliver } = runtime(({ event }) => {
-      received.push(event)
-    })
-    const response = await deliver({
-      value: [
-        {
-          ...notification,
-          changeType: "updated",
-          resource: "drives/drive-id/root",
-          resourceData: undefined,
-        },
-      ],
-    })
-    expect(response.status).toBe(202)
-    expect(received).toEqual([
-      {
-        kind: "change",
-        subscriptionId: notification.subscriptionId,
-        tenantId: notification.tenantId,
-        subscriptionExpirationDateTime: notification.subscriptionExpirationDateTime,
-        changeType: "updated",
-        resource: "drives/drive-id/root",
-      },
-    ])
   })
 
   test("rejects malformed notifications and missing secrets", async () => {
@@ -183,19 +170,11 @@ describe("Microsoft webhooks through Sixb", () => {
     })
     expect((await deliver({ value: [notification] })).status).toBe(500)
     expect((await deliver({ value: [notification] })).status).toBe(202)
-    expect(attempts).toBe(2)
+    // Graph has no delivery ID: a later identical update to the same resource is dispatched too.
+    expect((await deliver({ value: [notification] })).status).toBe(202)
+    expect(attempts).toBe(3)
     const runs = await storage.webhookRuns.list({ projectId: "mail-test" })
-    expect(runs.runs.map((r) => r.status).sort()).toEqual(["failed", "succeeded"])
-  })
-
-  test("does not deduplicate distinct updates to the same resource", async () => {
-    let calls = 0
-    const { deliver } = runtime(() => {
-      calls++
-    })
-    await deliver({ value: [{ ...notification, changeType: "updated" }] })
-    await deliver({ value: [{ ...notification, changeType: "updated" }] })
-    expect(calls).toBe(2)
+    expect(runs.runs.map((r) => r.status).sort()).toEqual(["failed", "succeeded", "succeeded"])
   })
 
   test("registers the inbound route only when onEvent is configured", () => {

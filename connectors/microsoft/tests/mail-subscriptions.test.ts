@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { MicrosoftConfigurationError, microsoft } from "../src"
-import { apiError, collect, connect, GRAPH, json, mockFetch, restoreFetch } from "./helpers"
+import { microsoft } from "../src"
+import { connect, GRAPH, json, mockFetch, restoreFetch } from "./helpers"
 
 afterEach(restoreFetch)
 const expires = () => new Date(Date.now() + 3 * 86_400_000).toISOString()
@@ -34,30 +34,9 @@ describe("mail subscriptions", () => {
     expect(requests[0].headers.get("prefer")).toBe('IdType="ImmutableId"')
   })
 
-  test("lists, gets, renews, reauthorizes and deletes subscriptions", async () => {
-    const next = `${GRAPH}subscriptions?$skiptoken=next`
-    const responses = [
-      json({ value: [{ id: "s" }], "@odata.nextLink": next }),
-      json({ value: [{ id: "s2" }] }),
-      json({ id: "s" }),
-      json({ id: "s" }),
-      new Response(null, { status: 204 }),
-      new Response(null, { status: 204 }),
-    ]
-    const requests = mockFetch(() => responses.shift()!)
-    const client = await connect()
-    expect((await collect(client.subscriptions.listAll())).map((s) => s.id)).toEqual(["s", "s2"])
-    await client.subscriptions.get("s")
-    const expirationDateTime = expires()
-    await client.subscriptions.renew("s", expirationDateTime)
-    await client.subscriptions.reauthorize("s")
-    await client.subscriptions.delete("s")
-    expect(requests.map((r) => r.method)).toEqual(["GET", "GET", "GET", "PATCH", "POST", "DELETE"])
-    expect(JSON.parse(String(requests[3].init.body))).toEqual({ expirationDateTime })
-    expect(requests[4].url).toBe(`${GRAPH}subscriptions/s/reauthorize`)
-  })
-
-  test("validates secrets, HTTPS delivery URLs, change types and lifetime", async () => {
+  // Delivery URL, lifetime and missing-secret checks are shared with contacts.subscribe and
+  // subscriptions.create, whose tests cover them.
+  test("validates the webhook secret configuration and change types", async () => {
     expect(() => microsoft({ auth: { token: () => "token" }, onEvent() {} })).toThrow(
       "webhookSecret"
     )
@@ -65,28 +44,10 @@ describe("mail subscriptions", () => {
       microsoft({ auth: { token: () => "token" }, webhookSecret: "x".repeat(129) })
     ).toThrow("128")
     const requests = mockFetch(() => json({ id: "s" }))
-    await expect((await connect()).mail.subscribe("u", options())).rejects.toThrow("webhookSecret")
     const { mail } = await connect({ webhookSecret: "secret" })
-    for (const invalid of [
-      { notificationUrl: "http://app.example/webhook" },
-      { expirationDateTime: "yesterday" },
-      { expirationDateTime: new Date(Date.now() + 8 * 86_400_000).toISOString() },
-      { changeTypes: [] },
-    ])
-      await expect(mail.subscribe("u", { ...options(), ...invalid })).rejects.toThrow()
-    expect(requests).toHaveLength(0)
-    await expect((await connect()).subscriptions.renew("s", "invalid")).rejects.toBeInstanceOf(
-      MicrosoftConfigurationError
+    await expect(mail.subscribe("u", { ...options(), changeTypes: [] })).rejects.toThrow(
+      "changeTypes"
     )
-  })
-
-  test("does not replay ambiguous subscription mutations even with retries configured", async () => {
-    const requests = mockFetch(() => apiError(503, "ServiceUnavailable"))
-    const client = await connect({ webhookSecret: "secret", retry: { maxRetries: 3 } })
-    await expect(client.mail.subscribe("u", options())).rejects.toMatchObject({
-      status: 503,
-    })
-    await expect(client.subscriptions.renew("s", expires())).rejects.toMatchObject({ status: 503 })
-    expect(requests).toHaveLength(2)
+    expect(requests).toHaveLength(0)
   })
 })

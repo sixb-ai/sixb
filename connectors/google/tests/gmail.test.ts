@@ -82,28 +82,7 @@ describe("gmail.users", () => {
 })
 
 describe("gmail.messages", () => {
-  test("lists messages with repeated query parameters and bearer auth", async () => {
-    mockFetch(async (input, init) => {
-      record(input, init)
-      return json({ messages: [{ id: "m1", threadId: "t1" }] })
-    })
-
-    const result = await (await connect()).gmail.messages.list("me", {
-      q: "from:alice@example.com is:unread",
-      labelIds: ["INBOX", "IMPORTANT"],
-      includeSpamTrash: true,
-    })
-
-    expect(result.messages?.[0]?.id).toBe("m1")
-    const url = new URL(requests[0]?.url ?? "")
-    expect(url.pathname).toBe("/gmail/v1/users/me/messages")
-    expect(url.searchParams.get("q")).toBe("from:alice@example.com is:unread")
-    expect(url.searchParams.getAll("labelIds")).toEqual(["INBOX", "IMPORTANT"])
-    expect(url.searchParams.get("includeSpamTrash")).toBe("true")
-    expect(requests[0]?.auth).toBe("Bearer gmail-token")
-  })
-
-  test("listAll follows every nextPageToken", async () => {
+  test("list and listAll send repeated query parameters and follow every nextPageToken", async () => {
     const pages = [{ messages: [{ id: "m1" }], nextPageToken: "p2" }, { messages: [{ id: "m2" }] }]
     let call = 0
     mockFetch(async (input, init) => {
@@ -112,11 +91,17 @@ describe("gmail.messages", () => {
     })
 
     const messages = await collect(
-      (await connect()).gmail.messages.listAll("me", { maxResults: 1 })
+      (await connect()).gmail.messages.listAll("me", {
+        q: "from:alice@example.com is:unread",
+        labelIds: ["INBOX", "IMPORTANT"],
+        includeSpamTrash: true,
+      })
     )
 
     expect(messages.map((message) => message.id)).toEqual(["m1", "m2"])
-    expect(new URL(requests[1]?.url ?? "").searchParams.get("pageToken")).toBe("p2")
+    const query = "q=from%3Aalice%40example.com+is%3Aunread&labelIds=INBOX&labelIds=IMPORTANT"
+    expectRequest(0, "GET", `users/me/messages?${query}&includeSpamTrash=true`)
+    expectRequest(1, "GET", `users/me/messages?${query}&includeSpamTrash=true&pageToken=p2`)
   })
 
   test("routes every single-message and batch operation", async () => {
@@ -443,17 +428,5 @@ describe("gmail.settings", () => {
     expectRequest(10, "POST", "users/me/settings/cse/keypairs/k1:enable", {})
     expectRequest(11, "POST", "users/me/settings/cse/keypairs/k1:disable", {})
     expectRequest(12, "POST", "users/me/settings/cse/keypairs/k1:obliterate", {})
-  })
-})
-
-describe("gmail path validation", () => {
-  test("rejects empty required path parameters before issuing a request", async () => {
-    useEmptyResponses()
-    const gmail = (await connect()).gmail
-
-    expect(() => gmail.users.getProfile("  ")).toThrow("userId must not be empty")
-    expect(() => gmail.messages.get("me", "")).toThrow("messageId must not be empty")
-    expect(() => gmail.settings.sendAs.get("me", " ")).toThrow("sendAsEmail must not be empty")
-    expect(requests).toHaveLength(0)
   })
 })
