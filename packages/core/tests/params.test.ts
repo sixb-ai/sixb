@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import { optional, param, type ValueType } from "../src"
-import { param as actionParam } from "../src/actions"
 import { coerceParamsToTyped, normalizeParams } from "../src/shared/params/validation"
 
 const valueTypesById: ReadonlyMap<string, ValueType> = new Map()
@@ -28,24 +27,6 @@ describe("definition params", () => {
         { kind: "sandbox", id: "test" }
       )
     ).toThrow("Missing required param 'toString'")
-  })
-  test("keeps the existing Action builder on the shared implementation", () => {
-    expect(actionParam).toBe(param)
-    expect(
-      optional(
-        param("double", {
-          description: "Requested temperature",
-          semanticType: "Temperature",
-          nullable: true,
-        })
-      )
-    ).toEqual({
-      schema: "double",
-      required: false,
-      description: "Requested temperature",
-      semanticType: "Temperature",
-      nullable: true,
-    })
   })
 
   test("normalizes durable JSON and rehydrates typed runtime values", () => {

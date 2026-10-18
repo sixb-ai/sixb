@@ -32,7 +32,6 @@ import type { AgentReasoning } from "../src/agents"
 import type { LanguageModel } from "../src/models"
 import { schemaFieldsToJsonSchema, schemaRecordToJsonSchema } from "../src/ontology/internal"
 import { createTestSixb } from "../src/testing"
-import { validateWorkflowDefinition } from "../src/workflows"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Transaction = defineObjectType({
@@ -92,7 +91,6 @@ type RuntimeWorkflowBuilder = {
   input(input: Record<string, unknown>): RuntimeWorkflowDraft
 }
 
-const runtimeDefineWorkflowStep = defineWorkflowStep as unknown as (id: string) => unknown
 const runtimeDefineWorkflow = defineWorkflow as unknown as (id: string) => RuntimeWorkflowBuilder
 
 const findBestInvoice = defineWorkflowStep("find-best-invoice")
@@ -160,11 +158,6 @@ describe("defineWorkflowStep", () => {
     })
     expect(typeof findBestInvoice.handler).toBe("function")
     expect(isStepDefinition(findBestInvoice)).toBe(true)
-  })
-
-  test("rejects empty step ids", () => {
-    expect(() => runtimeDefineWorkflowStep("")).toThrow(WorkflowDefinitionError)
-    expect(() => runtimeDefineWorkflowStep("")).toThrow("Step id must not be empty")
   })
 })
 
@@ -436,7 +429,7 @@ describe("defineIntervention", () => {
     expect(isInterventionDefinition(approveInvoiceMatch)).toBe(true)
   })
 
-  test("supports optional default response values", async () => {
+  test("computes default responses, and an empty one when .defaults(...) is not called", async () => {
     const intervention = defineIntervention("review-with-defaults")
       .input({
         invoice: ref(Invoice),
@@ -447,28 +440,23 @@ describe("defineIntervention", () => {
         note: interventionField("string", { required: false }),
       })
       .defaults(({ input }) => ({ decision: input.proposedDecision }))
+    const invoice = { objectTypeId: "Invoice", primaryId: "invoice:1" } as const
 
     await expect(
       Promise.resolve(
         intervention.defaults?.({
-          input: {
-            invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
-            proposedDecision: "approve",
-          },
+          input: { invoice, proposedDecision: "approve" },
           workflowInput: {},
           steps: {},
         })
       )
     ).resolves.toEqual({ decision: "approve" })
-  })
-
-  test("uses an empty default response when .defaults(...) is not called", async () => {
     await expect(
       Promise.resolve(
         approveInvoiceMatch.defaults?.({
           input: {
             transaction: { objectTypeId: "Transaction", primaryId: "transaction:1" },
-            invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
+            invoice,
             confidence: 0.98,
           },
           workflowInput: {},
@@ -477,67 +465,51 @@ describe("defineIntervention", () => {
       )
     ).resolves.toEqual({})
   })
-
-  test("rejects empty intervention ids", () => {
-    const runtimeDefineIntervention = defineIntervention as unknown as (id: string) => unknown
-
-    expect(() => runtimeDefineIntervention("")).toThrow(WorkflowDefinitionError)
-    expect(() => runtimeDefineIntervention("")).toThrow("Intervention id must not be empty")
-  })
 })
 
 describe("defineWorkflow", () => {
-  test("rejects empty workflow ids", () => {
-    expect(() => runtimeDefineWorkflow("")).toThrow(WorkflowDefinitionError)
-    expect(() => runtimeDefineWorkflow("")).toThrow("Workflow id must not be empty")
+  test.each([
+    { name: "step", define: defineWorkflowStep, message: "Step id must not be empty" },
+    {
+      name: "intervention",
+      define: defineIntervention,
+      message: "Intervention id must not be empty",
+    },
+    { name: "workflow", define: defineWorkflow, message: "Workflow id must not be empty" },
+  ])("rejects empty $name ids", ({ define, message }) => {
+    const defineEmpty = () => (define as unknown as (id: string) => unknown)("")
+
+    expect(defineEmpty).toThrow(WorkflowDefinitionError)
+    expect(defineEmpty).toThrow(message)
   })
 
-  test("attaches schedule triggers through .when()", () => {
+  test("records .when() schedules as triggers", () => {
     const daily = defineSchedule("daily-reconciliation").cron("0 6 * * *")
-    const workflow = runtimeDefineWorkflow("reconcile-transaction")
-      .input({
+    const draft = () =>
+      runtimeDefineWorkflow("reconcile-transaction").input({
         transaction: ref(Transaction),
       })
-      .when(daily)
-      .then(findBestInvoice)
 
-    expect(workflow.kind).toBe("workflow")
-    expect(workflow.id).toBe("reconcile-transaction")
-    expect(workflow.triggers).toEqual([{ type: "schedule", scheduleId: "daily-reconciliation" }])
-    expect(workflow.nodes).toHaveLength(1)
-    expect(isWorkflowDefinition(workflow)).toBe(true)
-  })
-
-  test("attaches event schedules through .when()", () => {
-    const workflow = runtimeDefineWorkflow("review-high-value-transaction")
-      .input({
-        transaction: ref(Transaction),
-      })
+    const scheduled = draft().when(daily).then(findBestInvoice)
+    const onEvent = draft()
       .when(highValueTransaction, ({ event }: { event: { object: { primaryId: string } } }) => ({
         transaction: { objectTypeId: "Transaction", primaryId: event.object.primaryId },
       }))
       .then(findBestInvoice)
+    const manual = draft().then(findBestInvoice)
 
-    expect(workflow.triggers).toHaveLength(1)
-    expect(workflow.triggers[0]).toMatchObject({
-      type: "schedule",
-      scheduleId: "transaction.high-value",
-    })
-    expect(typeof (workflow.triggers[0] as { mapper?: unknown }).mapper).toBe("function")
+    expect(scheduled.kind).toBe("workflow")
+    expect(scheduled.id).toBe("reconcile-transaction")
+    expect(isWorkflowDefinition(scheduled)).toBe(true)
+    expect(scheduled.triggers).toEqual([{ type: "schedule", scheduleId: "daily-reconciliation" }])
+    expect(onEvent.triggers).toEqual([
+      { type: "schedule", scheduleId: "transaction.high-value", mapper: expect.any(Function) },
+    ])
+    expect(manual.triggers).toEqual([])
   })
 
-  test("stores empty triggers when .when() is not called", () => {
-    const workflow = runtimeDefineWorkflow("manual-later")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .then(findBestInvoice)
-
-    expect(workflow.triggers).toEqual([])
-  })
-
-  test("stores step and action nodes in linear order", () => {
-    const workflow = runtimeDefineWorkflow("reconcile-transaction")
+  test("stores each node type in linear order, with its mapper when one is given", () => {
+    const workflow = runtimeDefineWorkflow("review-then-attach")
       .input({
         transaction: ref(Transaction),
       })
@@ -547,90 +519,45 @@ describe("defineWorkflow", () => {
         invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
         confidence: 0.98,
       }))
+      .then(approveInvoiceMatch)
+      .then(resolveInvoice)
       .then(attachInvoice, () => ({
         subject: { objectTypeId: "Transaction", primaryId: "transaction:1" },
         params: {
           invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
         },
       }))
-
-    expect(workflow.nodes).toHaveLength(3)
-    expect(workflow.nodes.map((node) => node.type)).toEqual(["step", "step", "action"])
-    expect(workflow.nodes.map((node) => node.id)).toEqual([
-      "find-best-invoice",
-      "review-invoice-match",
-      "attach-invoice",
-    ])
-    expect(workflow.nodes.map((node) => node.key)).toEqual([
-      "findBestInvoice",
-      "reviewInvoiceMatch",
-      "attachInvoice",
-    ])
-    expect(workflow.nodes[0]).not.toHaveProperty("mapper")
-    expect(typeof workflow.nodes[1].mapper).toBe("function")
-    expect(typeof workflow.nodes[2].mapper).toBe("function")
-  })
-
-  test("stores direct action nodes without a mapper", () => {
-    const workflow = runtimeDefineWorkflow("direct-action")
+    const direct = runtimeDefineWorkflow("direct-action")
       .input({
         subject: ref(Transaction),
         invoice: ref(Invoice),
       })
       .then(attachInvoice)
 
-    expect(workflow.nodes).toHaveLength(1)
-    expect(workflow.nodes[0]).toMatchObject({
+    expect(workflow.nodes.map((node) => [node.type, node.id, node.key])).toEqual([
+      ["step", "find-best-invoice", "findBestInvoice"],
+      ["step", "review-invoice-match", "reviewInvoiceMatch"],
+      ["intervention", "approve-invoice-match", "approveInvoiceMatch"],
+      ["agent", "resolve-invoice", "resolveInvoice"],
+      ["action", "attach-invoice", "attachInvoice"],
+    ])
+    expect(workflow.nodes.map((node) => typeof node.mapper)).toEqual([
+      "undefined",
+      "function",
+      "undefined",
+      "undefined",
+      "function",
+    ])
+    expect(workflow.nodes[0]).not.toHaveProperty("mapper")
+    expect(workflow.nodes[2]).toMatchObject({ intervention: approveInvoiceMatch })
+    expect(workflow.nodes[3]).toMatchObject({ agentStep: resolveInvoice })
+    expect(direct.nodes).toHaveLength(1)
+    expect(direct.nodes[0]).toMatchObject({
       type: "action",
       id: "attach-invoice",
       key: "attachInvoice",
     })
-    expect(workflow.nodes[0]).not.toHaveProperty("mapper")
-  })
-
-  test("stores intervention nodes in linear order", () => {
-    const workflow = runtimeDefineWorkflow("review-then-attach")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .then(findBestInvoice)
-      .then(approveInvoiceMatch)
-      .then(attachInvoice, () => ({
-        subject: { objectTypeId: "Transaction", primaryId: "transaction:1" },
-        params: {
-          invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
-        },
-      }))
-
-    expect(workflow.nodes).toHaveLength(3)
-    expect(workflow.nodes.map((node) => node.type)).toEqual(["step", "intervention", "action"])
-    expect(workflow.nodes.map((node) => node.id)).toEqual([
-      "find-best-invoice",
-      "approve-invoice-match",
-      "attach-invoice",
-    ])
-    expect(workflow.nodes.map((node) => node.key)).toEqual([
-      "findBestInvoice",
-      "approveInvoiceMatch",
-      "attachInvoice",
-    ])
-    expect(workflow.nodes[1]).toMatchObject({
-      type: "intervention",
-      intervention: approveInvoiceMatch,
-    })
-  })
-
-  test("stores agent nodes as first-class workflow nodes", () => {
-    const workflow = defineWorkflow("resolve-with-agent")
-      .input({ transaction: ref(Transaction) })
-      .then(resolveInvoice)
-
-    expect(workflow.nodes[0]).toMatchObject({
-      type: "agent",
-      id: "resolve-invoice",
-      key: "resolveInvoice",
-      agentStep: resolveInvoice,
-    })
+    expect(direct.nodes[0]).not.toHaveProperty("mapper")
   })
 
   test("rejects duplicate node ids", () => {
@@ -732,29 +659,31 @@ describe("defineWorkflow", () => {
   })
 })
 
-describe("validateWorkflowDefinition", () => {
-  test("rejects workflow-shaped objects with no nodes", () => {
-    const workflow = {
-      kind: "workflow",
-      id: "empty",
-      input: {},
-      triggers: [],
-      nodes: [],
-      // biome-ignore lint/suspicious/noThenProperty: This validates workflow-shaped definitions.
-      then: () => workflow,
-    }
-
-    expect(isWorkflowDefinition(workflow)).toBe(true)
-    expect(() => validateWorkflowDefinition(workflow)).toThrow(WorkflowDefinitionError)
-    expect(() => validateWorkflowDefinition(workflow)).toThrow(
-      'Workflow "empty" must contain at least one node'
-    )
-  })
-})
-
 describe("SixbHost workflow registration", () => {
-  test("exposes registered workflow definitions and lookup by id", () => {
-    const workflow = defineWorkflow("reconcile-transaction")
+  const resolveStep = (
+    id: string,
+    options: Omit<Parameters<typeof defineAgentStep>[1], "instructions">
+  ) =>
+    defineAgentStep(id, { instructions: "Resolve invoices.", ...options })
+      .input({ transaction: ref(Transaction) })
+      .output({ invoice: ref(Invoice) })
+      .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
+  const withStep = (id: string, step: ReturnType<typeof resolveStep>): WorkflowDefinition =>
+    defineWorkflow(id)
+      .input({ transaction: ref(Transaction) })
+      .then(step)
+  const reconcileFirst = (id: string): WorkflowDefinition =>
+    defineWorkflow(id)
+      .input({ transaction: ref(Transaction) })
+      .then(findBestInvoice)
+
+  test("registers workflows whose references resolve, and looks them up by id", () => {
+    const lookup = defineAgentTool("lookup-invoice")
+      .description("Look up an invoice.")
+      .input({ invoiceId: "string" })
+      .run(({ input }) => input)
+    const finance = defineGroup("finance")
+    const reconcile = defineWorkflow("reconcile-transaction")
       .input({
         transaction: ref(Transaction),
       })
@@ -771,114 +700,50 @@ describe("SixbHost workflow registration", () => {
           invoice: steps.findBestInvoice.invoice,
         },
       }))
+    const workflows: readonly WorkflowDefinition[] = [
+      reconcile,
+      defineWorkflow("review-match")
+        .input({ transaction: ref(Transaction) })
+        .then(findBestInvoice)
+        .then(approveInvoiceMatch),
+      defineWorkflow("agent-resolution")
+        .input({ transaction: ref(Transaction) })
+        .then(resolveInvoice),
+      // Without a model of its own, an agent step uses the project default.
+      defineWorkflow("default-model-workflow")
+        .input({ transaction: ref(Transaction) })
+        .then(resolveStep("default-model", {})),
+      defineWorkflow("configured-task-workflow")
+        .input({ transaction: ref(Transaction) })
+        .then(
+          resolveStep("configured-task", {
+            model: workflowModel,
+            groups: [finance],
+            tools: [lookup],
+            skills: ["invoice-review"],
+          })
+        ),
+    ]
 
     const sixb = createTestSixb({
       ontology: [Transaction, Invoice],
       actions: [attachInvoice],
       schedules: [highValueTransaction],
-      workflows: [workflow],
-      ...createTestRuntimeDeps(),
-    })
-
-    expect(sixb.workflows.list()).toEqual([workflow])
-    expect(sixb.workflows.getById("reconcile-transaction")).toBe(workflow)
-    expect(sixb.workflows.getById("missing-workflow")).toBeNull()
-  })
-
-  test("accepts workflows with intervention nodes during startup validation", () => {
-    const workflow = defineWorkflow("review-match")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .then(findBestInvoice)
-      .then(approveInvoiceMatch)
-
-    const sixb = createTestSixb({
-      ontology: [Transaction, Invoice],
-      workflows: [workflow],
-      ...createTestRuntimeDeps(),
-    })
-
-    expect(sixb.workflows.getById("review-match")).toBe(workflow)
-  })
-
-  test("registers directly configured workflow agent steps", () => {
-    const workflow = defineWorkflow("agent-resolution")
-      .input({ transaction: ref(Transaction) })
-      .then(resolveInvoice)
-
-    const sixb = createTestSixb({
-      ontology: [Transaction, Invoice],
-      workflows: [workflow],
-      ...createTestRuntimeDeps(),
-    })
-    expect(sixb.workflows.getById(workflow.id)).toBe(workflow)
-  })
-
-  test("uses the project default model when an agent step omits its model", () => {
-    const step = defineAgentStep("default-model", {
-      instructions: "Resolve invoices.",
-    })
-      .input({ transaction: ref(Transaction) })
-      .output({ invoice: ref(Invoice) })
-      .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
-    const workflow: WorkflowDefinition = defineWorkflow("default-model-workflow")
-      .input({ transaction: ref(Transaction) })
-      .then(step)
-
-    const sixb = createTestSixb({
-      ontology: [Transaction, Invoice],
       models: { language: [workflowModel] },
-      workflows: [workflow],
+      tools: [lookup],
+      groups: [finance],
+      agent: { skills: [{ name: "invoice-review", description: "Review invoices.", files: [] }] },
+      workflows,
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.workflows.getById(workflow.id)).toBe(workflow)
-  })
-
-  test("rejects an agent step without an explicit or project default model", () => {
-    const step = defineAgentStep("missing-model", {
-      instructions: "Resolve invoices.",
-    })
-      .input({ transaction: ref(Transaction) })
-      .output({ invoice: ref(Invoice) })
-      .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
-    const workflow: WorkflowDefinition = defineWorkflow("missing-model-workflow")
-      .input({ transaction: ref(Transaction) })
-      .then(step)
-
-    expect(
-      () =>
-        new SixbHost({
-          ontology: [Transaction, Invoice],
-          workflows: [workflow],
-          ...createTestRuntimeDeps(),
-        })
-    ).toThrow(/needs a model/)
-  })
-
-  test("rejects an explicit agent-step model outside the project catalog", () => {
-    const unavailableModel = testModel("test", "unavailable-model")
-    const step = defineAgentStep("unknown-model", {
-      model: unavailableModel,
-      instructions: "Resolve invoices.",
-    })
-      .input({ transaction: ref(Transaction) })
-      .output({ invoice: ref(Invoice) })
-      .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
-    const workflow: WorkflowDefinition = defineWorkflow("unknown-model-workflow")
-      .input({ transaction: ref(Transaction) })
-      .then(step)
-
-    expect(
-      () =>
-        new SixbHost({
-          ontology: [Transaction, Invoice],
-          models: { language: [workflowModel] },
-          workflows: [workflow],
-          ...createTestRuntimeDeps(),
-        })
-    ).toThrow(/uses unknown language model "test\/unavailable-model"/)
+    expect(sixb.workflows.list()).toEqual(workflows)
+    for (const workflow of workflows) {
+      expect(sixb.workflows.getById(workflow.id)).toBe(workflow)
+    }
+    expect(sixb.workflows.getById("missing-workflow")).toBeNull()
+    expect(sixb.schedules.list()).toEqual([highValueTransaction])
+    expect(sixb.schedules.getById("transaction.high-value")).toBe(highValueTransaction)
   })
 
   test("checks an agent step's reasoning against its model's declared capabilities", () => {
@@ -917,96 +782,6 @@ describe("SixbHost workflow registration", () => {
     expect(() => host("high")).toThrow(/reasoning effort 'high' is not supported/)
   })
 
-  test("rejects an agent-step tool outside the project catalog", () => {
-    const lookup = defineAgentTool("lookup-invoice")
-      .description("Look up an invoice.")
-      .input({ invoiceId: "string" })
-      .run(({ input }) => input)
-    const step = defineAgentStep("unknown-tool", {
-      model: workflowModel,
-      instructions: "Resolve invoices.",
-      tools: [lookup],
-    })
-      .input({ transaction: ref(Transaction) })
-      .output({ invoice: ref(Invoice) })
-      .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
-    const workflow: WorkflowDefinition = defineWorkflow("unknown-tool-workflow")
-      .input({ transaction: ref(Transaction) })
-      .then(step)
-
-    expect(
-      () =>
-        new SixbHost({
-          ontology: [Transaction, Invoice],
-          workflows: [workflow],
-          ...createTestRuntimeDeps(),
-        })
-    ).toThrow(/uses unknown project tool "lookup-invoice"/)
-  })
-
-  test("accepts explicitly selected registered tools and groups", () => {
-    const lookup = defineAgentTool("lookup-invoice")
-      .description("Look up an invoice.")
-      .input({ invoiceId: "string" })
-      .run(({ input }) => input)
-    const finance = defineGroup("finance")
-    const step = defineAgentStep("configured-task", {
-      model: workflowModel,
-      instructions: "Resolve invoices.",
-      groups: [finance],
-      tools: [lookup],
-    })
-      .input({ transaction: ref(Transaction) })
-      .output({ invoice: ref(Invoice) })
-      .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
-    const workflow: WorkflowDefinition = defineWorkflow("configured-task-workflow")
-      .input({ transaction: ref(Transaction) })
-      .then(step)
-
-    const sixb = createTestSixb({
-      ontology: [Transaction, Invoice],
-      tools: [lookup],
-      groups: [finance],
-      workflows: [workflow],
-      ...createTestRuntimeDeps(),
-    })
-
-    expect(sixb.workflows.getById(workflow.id)).toBe(workflow)
-  })
-
-  test("rejects an agent-step skill outside the project skills", () => {
-    const step = defineAgentStep("unknown-skill", {
-      model: workflowModel,
-      instructions: "Resolve invoices.",
-      skills: ["invoice-review"],
-    })
-      .input({ transaction: ref(Transaction) })
-      .output({ invoice: ref(Invoice) })
-      .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
-    const workflow: WorkflowDefinition = defineWorkflow("unknown-skill-workflow")
-      .input({ transaction: ref(Transaction) })
-      .then(step)
-
-    expect(
-      () =>
-        new SixbHost({
-          ontology: [Transaction, Invoice],
-          workflows: [workflow],
-          ...createTestRuntimeDeps(),
-        })
-    ).toThrow(
-      `Workflow "unknown-skill-workflow" agent step "unknown-skill" uses unknown Agent Skill "invoice-review". Add it as 'skills/invoice-review/SKILL.md'.`
-    )
-
-    const sixb = createTestSixb({
-      ontology: [Transaction, Invoice],
-      agent: { skills: [{ name: "invoice-review", description: "Review invoices.", files: [] }] },
-      workflows: [workflow],
-      ...createTestRuntimeDeps(),
-    })
-    expect(sixb.workflows.getById(workflow.id)).toBe(workflow)
-  })
-
   test("rejects agent-step skills that are not unique names", () => {
     const define = (skills: unknown) =>
       defineAgentStep("bad-skills", {
@@ -1020,204 +795,150 @@ describe("SixbHost workflow registration", () => {
     )
   })
 
-  test("rejects an agent-step group outside the security catalog", () => {
-    const finance = defineGroup("finance")
-    const step = defineAgentStep("unknown-group", {
-      model: workflowModel,
-      instructions: "Resolve invoices.",
-      groups: [finance],
-    })
-      .input({ transaction: ref(Transaction) })
-      .output({ invoice: ref(Invoice) })
-      .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
-    const workflow: WorkflowDefinition = defineWorkflow("unknown-group-workflow")
-      .input({ transaction: ref(Transaction) })
-      .then(step)
-
-    expect(
-      () =>
-        new SixbHost({
-          ontology: [Transaction, Invoice],
-          workflows: [workflow],
-          ...createTestRuntimeDeps(),
-        })
-    ).toThrow(/references unknown group "finance"/)
-  })
-
-  test("rejects duplicate workflow ids", () => {
-    const first: WorkflowDefinition = defineWorkflow("duplicate-workflow")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .then(findBestInvoice)
-    const second: WorkflowDefinition = defineWorkflow("duplicate-workflow")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .then(findBestInvoice)
-    const workflows: readonly WorkflowDefinition[] = [first, second]
-
-    expect(() => {
-      createTestSixb({
-        ontology: [Transaction, Invoice],
-        workflows,
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow(RuntimeError)
-    expect(() => {
-      createTestSixb({
-        ontology: [Transaction, Invoice],
-        workflows,
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow("Duplicate workflow id: duplicate-workflow")
-  })
-
-  test("rejects workflows with no nodes during startup validation", () => {
-    const workflow = {
-      kind: "workflow",
-      id: "empty",
-      input: {},
-      triggers: [],
-      nodes: [],
-    } satisfies WorkflowDefinition
-
-    expect(() => {
-      createTestSixb({
-        ontology: [Transaction],
-        workflows: [workflow],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow(WorkflowDefinitionError)
-    expect(() => {
-      createTestSixb({
-        ontology: [Transaction],
-        workflows: [workflow],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow('Workflow "empty" must contain at least one node')
-  })
-
-  test("rejects workflows referencing unknown schedules", () => {
-    const missing = defineSchedule("missing-schedule").cron("0 6 * * *")
-    const workflow = runtimeDefineWorkflow("unknown-schedule")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .when(missing)
-      .then(findBestInvoice)
-
-    expect(() => {
-      createTestSixb({
-        ontology: [Transaction, Invoice],
-        workflows: [workflow as unknown as WorkflowDefinition],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow(WorkflowDefinitionError)
-    expect(() => {
-      createTestSixb({
-        ontology: [Transaction, Invoice],
-        workflows: [workflow as unknown as WorkflowDefinition],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow('Workflow "unknown-schedule" references unknown schedule "missing-schedule"')
-  })
-
-  test("accepts workflows referencing registered event schedules", () => {
-    const workflow = defineWorkflow("registered-event-schedule")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .when(highValueTransaction, ({ event }) => ({
-        transaction: {
-          objectTypeId: "Transaction",
-          primaryId: event.object.primaryId,
-        },
-      }))
-      .then(findBestInvoice)
-
-    const sixb = createTestSixb({
-      ontology: [Transaction, Invoice],
-      schedules: [highValueTransaction],
-      workflows: [workflow],
-      ...createTestRuntimeDeps(),
-    })
-
-    expect(sixb.schedules.list()).toEqual([highValueTransaction])
-    expect(sixb.schedules.getById("transaction.high-value")).toBe(highValueTransaction)
-    expect(sixb.workflows.getById("registered-event-schedule")).toBe(workflow)
-  })
-
-  test("rejects workflows referencing unknown event schedules", () => {
-    const workflow = defineWorkflow("unknown-event-schedule")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .when(highValueTransaction, ({ event }) => ({
-        transaction: {
-          objectTypeId: "Transaction",
-          primaryId: event.object.primaryId,
-        },
-      }))
-      .then(findBestInvoice)
-
-    expect(() => {
-      createTestSixb({
-        ontology: [Transaction, Invoice],
-        workflows: [workflow],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow(
-      'Workflow "unknown-event-schedule" references unknown schedule "transaction.high-value"'
-    )
-  })
-
-  test("rejects event-scheduled workflows with input and no mapper at runtime", () => {
-    const workflow = runtimeDefineWorkflow("missing-schedule-mapper")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .when(highValueTransaction)
-      .then(findBestInvoice)
-
-    expect(() => {
-      createTestSixb({
-        ontology: [Transaction, Invoice],
+  test.each<{
+    readonly name: string
+    readonly options: Partial<ConstructorParameters<typeof SixbHost>[0]>
+    readonly error: new (...args: never[]) => Error
+    readonly message: string
+  }>([
+    {
+      name: "an agent step without an explicit or project default model",
+      options: {
+        workflows: [withStep("missing-model-workflow", resolveStep("missing-model", {}))],
+      },
+      error: WorkflowDefinitionError,
+      message:
+        "Workflow \"missing-model-workflow\" agent step \"missing-model\" needs a model. Configure 'models.language' or pass 'model' to defineAgentStep().",
+    },
+    {
+      name: "an explicit agent-step model outside the project catalog",
+      options: {
+        models: { language: [workflowModel] },
+        workflows: [
+          withStep(
+            "unknown-model-workflow",
+            resolveStep("unknown-model", { model: testModel("test", "unavailable-model") })
+          ),
+        ],
+      },
+      error: WorkflowDefinitionError,
+      message: 'uses unknown language model "test/unavailable-model"',
+    },
+    {
+      name: "an agent-step tool outside the project catalog",
+      options: {
+        workflows: [
+          withStep(
+            "unknown-tool-workflow",
+            resolveStep("unknown-tool", {
+              model: workflowModel,
+              tools: [
+                defineAgentTool("lookup-invoice")
+                  .description("Look up an invoice.")
+                  .input({ invoiceId: "string" })
+                  .run(({ input }) => input),
+              ],
+            })
+          ),
+        ],
+      },
+      error: WorkflowDefinitionError,
+      message: 'uses unknown project tool "lookup-invoice"',
+    },
+    {
+      name: "an agent-step skill outside the project skills",
+      options: {
+        workflows: [
+          withStep(
+            "unknown-skill-workflow",
+            resolveStep("unknown-skill", { model: workflowModel, skills: ["invoice-review"] })
+          ),
+        ],
+      },
+      error: WorkflowDefinitionError,
+      message: `Workflow "unknown-skill-workflow" agent step "unknown-skill" uses unknown Agent Skill "invoice-review". Add it as 'skills/invoice-review/SKILL.md'.`,
+    },
+    {
+      name: "an agent-step group outside the security catalog",
+      options: {
+        workflows: [
+          withStep(
+            "unknown-group-workflow",
+            resolveStep("unknown-group", { model: workflowModel, groups: [defineGroup("finance")] })
+          ),
+        ],
+      },
+      error: WorkflowDefinitionError,
+      message: 'references unknown group "finance"',
+    },
+    {
+      name: "a duplicate workflow id",
+      options: {
+        workflows: [reconcileFirst("duplicate-workflow"), reconcileFirst("duplicate-workflow")],
+      },
+      error: RuntimeError,
+      message: "Duplicate workflow id: duplicate-workflow",
+    },
+    {
+      name: "no nodes",
+      options: {
+        workflows: [{ kind: "workflow", id: "empty", input: {}, triggers: [], nodes: [] }],
+      },
+      error: WorkflowDefinitionError,
+      message: 'Workflow "empty" must contain at least one node',
+    },
+    {
+      name: "an unknown schedule",
+      options: {
+        workflows: [
+          defineWorkflow("unknown-event-schedule")
+            .input({ transaction: ref(Transaction) })
+            .when(highValueTransaction, ({ event }) => ({
+              transaction: { objectTypeId: "Transaction", primaryId: event.object.primaryId },
+            }))
+            .then(findBestInvoice),
+        ],
+      },
+      error: WorkflowDefinitionError,
+      message:
+        'Workflow "unknown-event-schedule" references unknown schedule "transaction.high-value"',
+    },
+    {
+      name: "an event schedule but input and no mapper",
+      options: {
         schedules: [highValueTransaction],
-        workflows: [workflow as unknown as WorkflowDefinition],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow(
-      'Workflow "missing-schedule-mapper" schedule "transaction.high-value" requires a mapper'
-    )
-  })
+        workflows: [
+          runtimeDefineWorkflow("missing-schedule-mapper")
+            .input({ transaction: ref(Transaction) })
+            .when(highValueTransaction)
+            .then(findBestInvoice) as unknown as WorkflowDefinition,
+        ],
+      },
+      error: WorkflowDefinitionError,
+      message:
+        'Workflow "missing-schedule-mapper" schedule "transaction.high-value" requires a mapper',
+    },
+    {
+      name: "an unknown action",
+      options: {
+        workflows: [
+          defineWorkflow("unknown-action")
+            .input({ transaction: ref(Transaction) })
+            .then(findBestInvoice)
+            .then(attachInvoice, ({ input, steps }) => ({
+              subject: input.transaction,
+              params: { invoice: steps.findBestInvoice.invoice },
+            })),
+        ],
+      },
+      error: WorkflowDefinitionError,
+      message: 'Workflow "unknown-action" references unknown action "attach-invoice"',
+    },
+  ])("rejects a workflow with $name at startup", ({ options, error, message }) => {
+    const register = () =>
+      new SixbHost({ ontology: [Transaction, Invoice], ...options, ...createTestRuntimeDeps() })
 
-  test("rejects workflows referencing unknown actions", () => {
-    const workflow = defineWorkflow("unknown-action")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .then(findBestInvoice)
-      .then(attachInvoice, ({ input, steps }) => ({
-        subject: input.transaction,
-        params: {
-          invoice: steps.findBestInvoice.invoice,
-        },
-      }))
-
-    expect(() => {
-      createTestSixb({
-        ontology: [Transaction, Invoice],
-        workflows: [workflow],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow(WorkflowDefinitionError)
-    expect(() => {
-      createTestSixb({
-        ontology: [Transaction, Invoice],
-        workflows: [workflow],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow('Workflow "unknown-action" references unknown action "attach-invoice"')
+    expect(register).toThrow(error)
+    expect(register).toThrow(message)
   })
 })

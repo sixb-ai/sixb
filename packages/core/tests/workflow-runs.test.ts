@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "../src"
 import {
   type AgentRunFailureCode,
-  InMemoryWorkflowRunStorage,
   type QueueWorkflowRunInput,
   type SixbFailure,
   type StartWorkflowRunInput,
@@ -79,46 +78,6 @@ function agentFailure(
 }
 
 describe("InMemoryWorkflowRunStorage", () => {
-  test("starts and finishes a successful workflow run", async () => {
-    const storage = createWorkflowRunStorage()
-    const startedAt = new Date("2026-05-08T10:00:00.000Z")
-    const finishedAt = new Date("2026-05-08T10:00:04.500Z")
-
-    const started = await storage.start({
-      id: "wf-run-1",
-      projectId: "my-app",
-      workflowId: "reconcile-transaction",
-      input: {
-        transaction: { objectTypeId: "Transaction", primaryId: "txn_123" },
-      },
-      startedAt,
-    })
-
-    ;(started.input as { transaction: { primaryId: string } }).transaction.primaryId = "mutated"
-
-    const finished = await storage.finish({
-      id: "wf-run-1",
-      projectId: "my-app",
-      status: "succeeded",
-      output: { reconciled: true },
-      finishedAt,
-    })
-
-    const stored = await storage.getById({
-      projectId: "my-app",
-      id: "wf-run-1",
-    })
-
-    expect(finished.status).toBe("succeeded")
-    expect(finished.output).toEqual({ reconciled: true })
-    expect(finished.error).toBeUndefined()
-    expect(stored?.input).toEqual({
-      transaction: { objectTypeId: "Transaction", primaryId: "txn_123" },
-    })
-    expect(stored?.startedAt.toISOString()).toBe(startedAt.toISOString())
-    expect(stored?.finishedAt?.toISOString()).toBe(finishedAt.toISOString())
-  })
-
   test("requires a queued run linked to its matching workflow execution", async () => {
     const root = new InMemoryStorage()
     const storage = root.workflowRuns!
@@ -212,32 +171,49 @@ describe("InMemoryWorkflowRunStorage", () => {
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1)
   })
 
-  test("queues workflow runs before transitioning them to running", async () => {
+  test("queues, starts and finishes workflow runs, keeping their stored input apart", async () => {
     const storage = createWorkflowRunStorage()
     const queuedAt = new Date("2026-05-08T09:59:00.000Z")
     const startedAt = new Date("2026-05-08T10:00:00.000Z")
+    const finishedAt = new Date("2026-05-08T10:00:04.500Z")
 
     const queued = await storage.queue({
       id: "wf-run-queued",
       projectId: "my-app",
       workflowId: "reconcile-transaction",
-      input: { transactionId: "txn_123" },
+      input: { transaction: { objectTypeId: "Transaction", primaryId: "txn_123" } },
       queuedAt,
     })
 
     const running = await storage.start({
       id: "wf-run-queued",
       projectId: "my-app",
-      workflowId: "reconcile-transaction",
-      input: { transactionId: "txn_123" },
       startedAt,
     })
+    ;(running.input as { transaction: { primaryId: string } }).transaction.primaryId = "mutated"
 
     expect(queued.status).toBe("queued")
     expect(queued.queuedAt?.toISOString()).toBe(queuedAt.toISOString())
     expect(running.status).toBe("running")
     expect(running.queuedAt?.toISOString()).toBe(queuedAt.toISOString())
     expect(running.startedAt.toISOString()).toBe(startedAt.toISOString())
+
+    const succeeded = await storage.finish({
+      id: "wf-run-queued",
+      projectId: "my-app",
+      status: "succeeded",
+      output: { reconciled: true },
+      finishedAt,
+    })
+    const stored = await storage.getById({ projectId: "my-app", id: "wf-run-queued" })
+
+    expect(succeeded.status).toBe("succeeded")
+    expect(succeeded.output).toEqual({ reconciled: true })
+    expect(succeeded.error).toBeUndefined()
+    expect(stored?.input).toEqual({
+      transaction: { objectTypeId: "Transaction", primaryId: "txn_123" },
+    })
+    expect(stored?.finishedAt?.toISOString()).toBe(finishedAt.toISOString())
 
     const failed = await storage.queue({
       id: "wf-run-failed-before-start",
@@ -753,11 +729,6 @@ describe("InMemoryWorkflowRunStorage", () => {
         error: failure("Too late"),
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
-  })
-
-  test("InMemoryStorage includes workflow run storage", () => {
-    const storage = new InMemoryStorage()
-    expect(storage.workflowRuns).toBeInstanceOf(InMemoryWorkflowRunStorage)
   })
 
   test("fences stale workflow deliveries after reclaim", async () => {

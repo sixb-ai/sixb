@@ -25,8 +25,6 @@ export interface ExecuteActionRunInput {
   readonly execution: ExecutionRecord
   /** Cancels the run before its irreversible boundary. */
   readonly signal?: AbortSignal
-  /** Test-only override of the 30-second deadlines of the run and of its effects. */
-  readonly timeoutMs?: number
 }
 
 /**
@@ -54,7 +52,6 @@ export async function executeActionRun(
     actionId: run.actionId,
     runId: run.id,
     caller: input.signal,
-    timeoutMs: input.timeoutMs,
   })
 
   try {

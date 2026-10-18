@@ -18,8 +18,6 @@ export interface ActionRunSignalsInput {
   readonly runId: string
   /** The caller's cancellation. It applies before the boundary only. */
   readonly caller?: AbortSignal
-  /** Test-only override of {@link ACTION_TIMEOUT_MS}. */
-  readonly timeoutMs?: number
 }
 
 /**
@@ -89,22 +87,18 @@ export class ActionDeadline {
   readonly signal: AbortSignal
   private readonly timer: ReturnType<typeof setTimeout>
 
-  constructor(
-    input: Pick<ActionRunSignalsInput, "actionId" | "runId" | "timeoutMs">,
-    scope: "run" | "effects"
-  ) {
+  constructor(input: Pick<ActionRunSignalsInput, "actionId" | "runId">, scope: "run" | "effects") {
     const controller = new AbortController()
-    const timeoutMs = input.timeoutMs ?? ACTION_TIMEOUT_MS
     this.signal = controller.signal
     this.timer = setTimeout(() => {
       controller.abort(
         createSixbError(
           "action.timeout",
-          `[Sixb] Action run '${input.runId}' exceeded its ${timeoutMs} ms ${scope} deadline.`,
+          `[Sixb] Action run '${input.runId}' exceeded its ${ACTION_TIMEOUT_MS} ms ${scope} deadline.`,
           { details: { actionId: input.actionId, runId: input.runId } }
         )
       )
-    }, timeoutMs)
+    }, ACTION_TIMEOUT_MS)
   }
 
   /** Release the deadline timer. */
