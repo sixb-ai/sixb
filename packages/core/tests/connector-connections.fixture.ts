@@ -74,12 +74,12 @@ export function createHarness(options: HarnessOptions = {}) {
   let revokeError: Error | undefined
   let revokeAfterEffectError: Error | undefined
   let omitRefreshMetadata = false
-  let authorizationUrlGate: Promise<void> | undefined
-  let exchangeGate: Promise<void> | undefined
-  let discoverGate: Promise<void> | undefined
-  let refreshGate: Promise<void> | undefined
-  let revokeGate: Promise<void> | undefined
-  let connectGate: Promise<void> | undefined
+  let authorizationUrlGate: PromiseLike<void> | undefined
+  let exchangeGate: PromiseLike<void> | undefined
+  let discoverGate: PromiseLike<void> | undefined
+  let refreshGate: PromiseLike<void> | undefined
+  let revokeGate: PromiseLike<void> | undefined
+  let connectGate: PromiseLike<void> | undefined
   let providerRevoked = false
   const exchangedVerifiers: (string | undefined)[] = []
   const refreshInputs: ConnectorOAuthCredentials[] = []
@@ -198,6 +198,17 @@ export function createHarness(options: HarnessOptions = {}) {
     process,
     ready,
     service,
+    /** A second service instance over the same storage, protector and clock. */
+    peer(
+      peerOptions: Omit<ConnectorServiceOptions, "storage" | "credentialProtector" | "now"> = {}
+    ) {
+      return new ConnectorService("project", [connector], {
+        storage,
+        credentialProtector: protector,
+        now: () => new Date(now),
+        ...peerOptions,
+      })
+    },
     setNow(value: Date) {
       now = new Date(value)
     },
@@ -213,22 +224,22 @@ export function createHarness(options: HarnessOptions = {}) {
     setRevokeAfterEffectError(value: Error | undefined) {
       revokeAfterEffectError = value
     },
-    setExchangeGate(value: Promise<void> | undefined) {
+    setExchangeGate(value: PromiseLike<void> | undefined) {
       exchangeGate = value
     },
-    setAuthorizationUrlGate(value: Promise<void> | undefined) {
+    setAuthorizationUrlGate(value: PromiseLike<void> | undefined) {
       authorizationUrlGate = value
     },
-    setDiscoverGate(value: Promise<void> | undefined) {
+    setDiscoverGate(value: PromiseLike<void> | undefined) {
       discoverGate = value
     },
-    setRefreshGate(value: Promise<void> | undefined) {
+    setRefreshGate(value: PromiseLike<void> | undefined) {
       refreshGate = value
     },
-    setRevokeGate(value: Promise<void> | undefined) {
+    setRevokeGate(value: PromiseLike<void> | undefined) {
       revokeGate = value
     },
-    setConnectGate(value: Promise<void> | undefined) {
+    setConnectGate(value: PromiseLike<void> | undefined) {
       connectGate = value
     },
     now: () => new Date(now),
@@ -363,16 +374,47 @@ export function listAuthorizationConnections(
   })
 }
 
-export async function waitForCredentialMutation(
-  storage: ConnectorConnectionStorage,
-  authorizationId: string
-) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const authorization = await getAuthorization(storage, authorizationId)
-    if (authorization?.credentialMutation) return authorization.credentialMutation
-    await Bun.sleep(1)
+/** Authorizes once and connects `account-a` to the `social` slot. */
+export async function connectAccount(harness: ReturnType<typeof createHarness>) {
+  const { authorizationId } = await authorize(harness)
+  const connection = await harness.process.selectAccount(
+    managementCommand(),
+    harness.connector.id,
+    {
+      authorizationId,
+      accountId: "account-a",
+      owner: projectOwner,
+      slot: "social",
+    }
+  )
+  return { authorizationId, connection }
+}
+
+/**
+ * Parks a fake provider call until `release()`. `entered` resolves once a call reaches the gate, so a
+ * test can act while the call is in flight instead of sleeping.
+ */
+export function createGate() {
+  let release!: () => void
+  let enter!: () => void
+  const released = new Promise<void>((resolve) => (release = resolve))
+  const entered = new Promise<void>((resolve) => (enter = resolve))
+  const wait: PromiseLike<void> = {
+    // biome-ignore lint/suspicious/noThenProperty: awaiting the gate is how a call reports entry.
+    then(onFulfilled, onRejected) {
+      enter()
+      return released.then(onFulfilled, onRejected)
+    },
   }
-  throw new Error("Expected the connector credential mutation to start.")
+  return { wait, entered, release }
+}
+
+/**
+ * Runs every pending microtask. In-memory connector flows only yield on microtasks and timers, so
+ * after this every concurrent operation is parked on a gate or a (fake) timer.
+ */
+export function settle(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
 }
 
 export function requireConnectionProcess(service: ConnectorService): ConnectorConnectionProcess {
@@ -381,7 +423,7 @@ export function requireConnectionProcess(service: ConnectorService): ConnectorCo
   return process
 }
 
-export function afterReady(
+function afterReady(
   process: ConnectorConnectionProcess,
   ready: Promise<void>
 ): ConnectorConnectionProcess {

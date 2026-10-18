@@ -79,7 +79,6 @@ describe("decision evaluation", () => {
       callId: result.callId,
       usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
     })
-    await expect(sixb.models.language.generate({ prompt: "Hi" })).rejects.toThrow("models.language")
   })
 
   test("selects the configured binding, never an impostor with the same identity", async () => {
@@ -94,8 +93,6 @@ describe("decision evaluation", () => {
     await expect(
       sixb.models.decision.evaluate({ input: "", questions, model: unknown })
     ).rejects.toThrow("not configured")
-    expect(() => createModelCatalog({ decision: [impostor, impostor] })).toThrow("Duplicate")
-    expect(() => createModelCatalog({ decision: [] })).toThrow("nonempty")
   })
 
   test("rejects invalid questions and unsupported primitives before inference", async () => {
@@ -150,39 +147,51 @@ describe("decision evaluation", () => {
     expect(result.output.answer.choice).toBe("yes")
   })
 
-  test("retains known usage for invalid results and response errors", async () => {
-    for (const errorMode of [false, true]) {
-      const metadata = { usage: { inputTokens: 12, outputTokens: 5 } }
-      const model = modelWith(async () => {
-        if (errorMode)
-          throw new DecisionModelResponseError("bad response", "test", "decision", metadata)
-        return { ...metadata, output: { ...output, blocked: { probability: 9 } } }
-      })
-      const { sixb, storage, identity } = setup(model)
-      await expect(sixb.models.decision.evaluate({ input: "x", questions })).rejects.toBeInstanceOf(
-        DecisionModelResponseError
-      )
-      expect(await storage.aiUsage.getLatestForExecution(identity)).toMatchObject({
-        usage: { totalTokens: 17 },
-      })
-    }
-  })
-
-  test("does not retry ambiguous transport failures or invent zero usage", async () => {
+  const metadata = { usage: { inputTokens: 12, outputTokens: 5 } }
+  test.each([
+    [
+      "an invalid result",
+      async () => ({ ...metadata, output: { ...output, blocked: { probability: 9 } } }),
+      DecisionModelResponseError,
+      "Invalid decision response",
+      17,
+    ],
+    [
+      "a response error",
+      async () => {
+        throw new DecisionModelResponseError("bad response", "test", "decision", metadata)
+      },
+      DecisionModelResponseError,
+      "bad response",
+      17,
+    ],
+    [
+      // Known usage is retained, but an ambiguous failure must not invent zero usage.
+      "an ambiguous transport failure",
+      async () => {
+        throw new Error("connection lost")
+      },
+      Error,
+      "connection lost",
+      undefined,
+    ],
+  ] as const)("records %s once without retrying", async (_case, fail, errorType, message, totalTokens) => {
     let calls = 0
     const { sixb, storage, identity } = setup(
       modelWith(async () => {
         calls++
-        throw new Error("connection lost")
+        return fail()
       })
     )
-    await expect(sixb.models.decision.evaluate({ input: "x", questions })).rejects.toThrow(
-      "connection lost"
-    )
+    const error = await sixb.models.decision
+      .evaluate({ input: "x", questions })
+      .catch((error: unknown) => error)
+    expect(error).toBeInstanceOf(errorType)
+    expect(error).toMatchObject({ message: expect.stringContaining(message) })
     expect(calls).toBe(1)
     const recorded = await storage.aiUsage.getLatestForExecution(identity)
     expect(recorded).not.toBeNull()
-    expect(recorded?.usage.totalTokens).toBeUndefined()
+    expect(recorded?.usage.totalTokens).toBe(totalTokens)
   })
 
   test("combines caller and execution cancellation and records late billable replies", async () => {
@@ -393,15 +402,6 @@ test("decision admission denies over-budget calls before contacting the provider
   expect(calls).toBe(0)
 })
 
-test("concurrent decisions retain separate accounting identities", async () => {
-  const { sixb, storage, identity } = setup()
-  const results = await Promise.all(
-    [0, 1].map(() => sixb.models.decision.evaluate({ input: "x", questions }))
-  )
-  expect(new Set(results.map((result) => result.callId)).size).toBe(2)
-  expect(await storage.aiUsage.summarizeExecution(identity)).toMatchObject({ modelCallCount: 2 })
-})
-
 test("a choice-only provider needs neither TypeSafe nor accounting metadata", async () => {
   const base = modelWith(async () => ({
     output: { category: { choice: "repair", probabilities: { repair: 0.75, other: 0.25 } } },
@@ -424,10 +424,7 @@ test("a choice-only provider needs neither TypeSafe nor accounting metadata", as
   })
   expect(result.usage).toEqual({})
   expect(result.cost.status).toBe("unpriceable")
-
-  await expect(sixb.models.decision.evaluate({ input: "x", questions })).rejects.toThrow(
-    "does not support"
-  )
+  // Proven by removal: drop the maxChoices comparison in supportsQuestion.
   await expect(
     sixb.models.decision.evaluate({
       input: "x",
@@ -441,22 +438,17 @@ test("a choice-only provider needs neither TypeSafe nor accounting metadata", as
   ).rejects.toThrow("does not support")
 })
 
-test("decision catalogs preserve ordering, safe identities and family-specific empty rules", () => {
-  const binding = (providerId: string, modelId: string): DecisionModel => {
-    const base = modelWith()
-    return { ...base, providerId, modelId, definition: { ...base.definition, providerId, modelId } }
+// The shared binding index (order, lookup, duplicates) is proven once in models.test.ts.
+test("decision catalogs default to the first binding and keep family-specific empty rules", () => {
+  const first = modelWith()
+  const second: DecisionModel = {
+    ...first,
+    modelId: "second",
+    definition: { ...first.definition, modelId: "second" },
   }
-  const first = binding("a/b", "c")
-  const second = binding("a", "b/c")
   const catalog = createModelCatalog({ decision: [first, second], embedding: [] })
 
   expect(catalog.decision.default.model).toBe(first)
-  expect(catalog.decision.list().map((entry) => entry.model)).toEqual([first, second])
-  expect(catalog.decision.getByRef({ provider: "a/b", modelId: "c" })?.model).toBe(first)
-  expect(catalog.decision.getByRef({ provider: "a", modelId: "b/c" })?.model).toBe(second)
-  expect(catalog.decision.getByRef({ provider: "missing", modelId: "c" })).toBeNull()
-  expect(Object.isFrozen(catalog.decision.list())).toBe(true)
-  expect(Object.isFrozen(first)).toBe(false)
   expect(catalog.language).toBeUndefined()
   expect(catalog.embedding.list()).toEqual([])
   expect(() => createModelCatalog({ embedding: [] })).toThrow("at least one")

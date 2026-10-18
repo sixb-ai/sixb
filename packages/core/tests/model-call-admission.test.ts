@@ -7,50 +7,33 @@ import {
 } from "../src/models/execution/model-call-admission"
 
 describe("AI model-call admission estimates", () => {
-  test("produces the same estimate for the same prepared text request", () => {
-    const request = {
-      prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
-      tools: [{ name: "search", inputSchema: { type: "object" } }],
-      responseFormat: undefined,
-    }
-
-    const first = estimateAiModelCallInputTokens(request)
-    const second = estimateAiModelCallInputTokens(structuredClone(request))
-
-    expect(first).toEqual(second)
-    expect(first).toMatchObject({
-      status: "estimated",
-      method: "utf8BytesDividedByFour",
-    })
-    if (first.status === "estimated") expect(first.tokens).toBeGreaterThan(0)
-  })
-
-  test("reports non-text model inputs as unavailable", () => {
-    expect(
-      estimateAiModelCallInputTokens({
-        prompt: [
-          {
-            role: "user",
-            content: [{ type: "file", mediaType: "image/png", data: "base64" }],
-          },
-        ],
-        tools: undefined,
-        responseFormat: undefined,
-      })
-    ).toEqual({ status: "unavailable", reason: "nonTextInput" })
-  })
-
-  test("uses one internal output allowance without exposing a required setting", () => {
+  test("estimates a text request from its UTF-8 bytes and adds the internal output allowance", () => {
+    // The prepared request serializes to 68 characters but 72 UTF-8 bytes.
     const estimate = estimateAiModelCallInputTokens({
-      prompt: [{ role: "user", content: "hello" }],
+      prompt: [{ role: "user", content: [{ type: "text", text: "日本" }] }],
       tools: undefined,
       responseFormat: undefined,
     })
     const allowance = aiModelCallOutputTokenAllowance(undefined)
 
+    expect(estimate).toEqual({ status: "estimated", tokens: 18, method: "utf8BytesDividedByFour" })
     expect(allowance).toBe(AI_MODEL_CALL_OUTPUT_TOKEN_ALLOWANCE)
-    expect(estimatedAiModelCallTotalTokens(estimate, allowance)).toBe(
-      estimate.status === "estimated" ? estimate.tokens + allowance : undefined
-    )
+    expect(estimatedAiModelCallTotalTokens(estimate, allowance)).toBe(18 + 4_096)
+  })
+
+  test("reports non-text model inputs as unavailable instead of free", () => {
+    const estimate = estimateAiModelCallInputTokens({
+      prompt: [
+        {
+          role: "user",
+          content: [{ type: "file", mediaType: "image/png", data: "base64" }],
+        },
+      ],
+      tools: undefined,
+      responseFormat: undefined,
+    })
+
+    expect(estimate).toEqual({ status: "unavailable", reason: "nonTextInput" })
+    expect(estimatedAiModelCallTotalTokens(estimate, 4_096)).toBeUndefined()
   })
 })

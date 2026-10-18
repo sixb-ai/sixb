@@ -60,8 +60,13 @@ function validateToolInput(input: unknown): void {
 }
 
 describe("defineAgentTool", () => {
-  test("builds an immutable definition with snapshotted input and output", async () => {
-    const inputSchema = { query: "string", limit: "integer" } as const
+  test("builds an immutable definition with deeply snapshotted input and output", async () => {
+    const modes = ["quick", "deep"]
+    const inputSchema = {
+      query: "string",
+      limit: "integer",
+      mode: { type: "enum" as const, valueType: "string" as const, values: modes },
+    } as const
     const handlerResult = { results: ["sixb"], limit: 3 }
     const searchKnowledge = defineAgentTool("search_knowledge")
       .description("Search project knowledge.")
@@ -69,13 +74,19 @@ describe("defineAgentTool", () => {
       .run(() => handlerResult)
 
     ;(inputSchema as { query: string }).query = "boolean"
+    modes.push("mutated")
 
     expect(searchKnowledge.kind).toBe("agentTool")
     expect(searchKnowledge.name).toBe("search_knowledge")
     expect(searchKnowledge.description).toBe("Search project knowledge.")
-    expect(searchKnowledge.input).toEqual({ query: "string", limit: "integer" })
+    expect(searchKnowledge.input).toEqual({
+      query: "string",
+      limit: "integer",
+      mode: { type: "enum", valueType: "string", values: ["quick", "deep"] },
+    })
     expect(Object.isFrozen(searchKnowledge)).toBe(true)
     expect(Object.isFrozen(searchKnowledge.input)).toBe(true)
+    expect(Object.isFrozen(searchKnowledge.input.mode.values)).toBe(true)
 
     const result = await searchKnowledge.handler({
       input: { query: "sixb", limit: 3 },
@@ -167,23 +178,6 @@ describe("defineAgentTool", () => {
       toolName: "unsupported_content_field",
       reason: "result.content[0].ignored is not supported",
     })
-  })
-
-  test("deeply snapshots and freezes nested input schemas", () => {
-    const values = ["quick", "deep"]
-    const input = {
-      mode: { type: "enum" as const, valueType: "string" as const, values },
-    }
-    const tool = defineAgentTool("search_mode")
-      .description("Select a search mode.")
-      .input(input)
-      .run(() => null)
-
-    values.push("mutated")
-
-    expect(tool.input.mode.values).toEqual(["quick", "deep"])
-    expect(Object.isFrozen(tool.input.mode)).toBe(true)
-    expect(Object.isFrozen(tool.input.mode.values)).toBe(true)
   })
 
   test("rejects invalid and reserved names", () => {

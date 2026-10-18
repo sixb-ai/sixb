@@ -299,8 +299,33 @@ describe("AiModelCallRecorder", () => {
     expect(inputs[0]?.usage.rawUsage).toBeUndefined()
   })
 
-  test("hands a persistent accounting failure to durable recovery and blocks the next step", async () => {
-    let attempts = 0
+  test.each([
+    {
+      name: "hands a persistent accounting failure to durable recovery",
+      accountingError: () => new Error("storage unavailable"),
+      recoveryFails: false,
+      accountingAttempts: 3,
+      recoveryAttempts: 1,
+      recoveryScheduled: true,
+    },
+    {
+      name: "reports an unscheduled failure when accounting and durable recovery both fail",
+      accountingError: () => new Error("storage unavailable"),
+      recoveryFails: true,
+      accountingAttempts: 3,
+      recoveryAttempts: 3,
+      recoveryScheduled: false,
+    },
+    {
+      name: "neither retries nor enqueues a permanently invalid ledger append",
+      accountingError: () => new AiUsageStorageError("missing_execution", "missing execution"),
+      recoveryFails: false,
+      accountingAttempts: 1,
+      recoveryAttempts: 0,
+      recoveryScheduled: false,
+    },
+  ])("$name, then blocks the next model step", async (row) => {
+    let accountingAttempts = 0
     const recovered: RecoverAiModelCallInput[] = []
     const usage = recorder(
       new InMemoryStorage(),
@@ -308,50 +333,25 @@ describe("AiModelCallRecorder", () => {
         retryDelaysMs: [10, 20],
         sleep: async () => undefined,
         recordAccounting: async () => {
-          attempts += 1
-          throw new Error("storage unavailable")
+          accountingAttempts += 1
+          throw row.accountingError()
         },
       },
       async (input) => {
         recovered.push(structuredClone(input))
+        if (row.recoveryFails) throw new Error("queue unavailable")
       }
     )
 
     const failure = await usage.onModelCallEnd(callEndEvent()).catch((error: unknown) => error)
 
-    expect(attempts).toBe(3)
-    expect(recovered).toHaveLength(1)
-    expect(recovered[0]?.usage).toMatchObject({ executionId, callId: "call_1" })
+    expect(accountingAttempts).toBe(row.accountingAttempts)
+    expect(recovered.map((input) => [input.usage.executionId, input.usage.callId])).toEqual(
+      Array.from({ length: row.recoveryAttempts }, () => [executionId, "call_1"])
+    )
     expect(failure).toBeInstanceOf(ModelUsageRecordingError)
-    expect(failure).toMatchObject({ recoveryScheduled: true })
+    expect(failure).toMatchObject({ recoveryScheduled: row.recoveryScheduled })
     expect(() => usage.assertHealthy()).toThrow(ModelUsageRecordingError)
-  })
-
-  test("blocks the next model step when accounting and durable recovery both fail", async () => {
-    let accountingAttempts = 0
-    let recoveryAttempts = 0
-    const usage = recorder(
-      new InMemoryStorage(),
-      {
-        retryDelaysMs: [10, 20],
-        sleep: async () => undefined,
-        recordAccounting: async () => {
-          accountingAttempts += 1
-          throw new Error("storage unavailable")
-        },
-      },
-      async () => {
-        recoveryAttempts += 1
-        throw new Error("queue unavailable")
-      }
-    )
-
-    const failure = await usage.onModelCallEnd(callEndEvent()).catch((error: unknown) => error)
-
-    expect(accountingAttempts).toBe(3)
-    expect(recoveryAttempts).toBe(3)
-    expect(failure).toBeInstanceOf(ModelUsageRecordingError)
-    expect(failure).toMatchObject({ recoveryScheduled: false })
   })
 
   test.each([
@@ -421,32 +421,6 @@ describe("AiModelCallRecorder", () => {
     expect(recovered).toEqual(recoverSecond ? ["first", "second"] : ["first"])
     await expect(start("third")).rejects.toMatchObject({ callId: "first" })
     expect(providerCalls).toBe(2)
-  })
-
-  test("does not retry or enqueue a permanently invalid ledger append", async () => {
-    let accountingAttempts = 0
-    let recoveryAttempts = 0
-    const usage = recorder(
-      new InMemoryStorage(),
-      {
-        retryDelaysMs: [10, 20],
-        sleep: async () => undefined,
-        recordAccounting: async () => {
-          accountingAttempts += 1
-          throw new AiUsageStorageError("missing_execution", "missing execution")
-        },
-      },
-      async () => {
-        recoveryAttempts += 1
-      }
-    )
-
-    const failure = await usage.onModelCallEnd(callEndEvent()).catch((error: unknown) => error)
-
-    expect(accountingAttempts).toBe(1)
-    expect(recoveryAttempts).toBe(0)
-    expect(failure).toBeInstanceOf(ModelUsageRecordingError)
-    expect(failure).toMatchObject({ recoveryScheduled: false })
   })
 
   test("retains failures raised while constructing the accounting record", async () => {

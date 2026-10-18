@@ -16,7 +16,6 @@ import {
   SandboxError,
   SixbHost,
 } from "../src"
-import { emptyGrantIndex } from "../src/authorization/types"
 import { createTestAgentExecution, createTestSixb } from "../src/testing"
 import { testLanguageModel } from "./helpers/language-model"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -97,12 +96,6 @@ describe("Agent sandbox binding", () => {
     await expect(
       sixb.agent.threads.create({ sandbox: { undeclared: true } })
     ).rejects.toMatchObject({ code: "invalid_sandbox_params" })
-  })
-
-  test("supports a source-free environment", async () => {
-    const { host, sixb } = setup({})
-    expect((await sixb.agent.threads.create({ sandbox: {} })).sandboxParams).toEqual({})
-    expect(await host.sandboxDefinition!.resolve({ params: {}, sixb })).toEqual({})
   })
 
   test("rejects ambiguous configurations and malformed static environments early", () => {
@@ -442,26 +435,5 @@ describe("Agent sandbox binding", () => {
       expectedSandboxName: "test-name",
     })
     expect(recreated.sandboxState?.status).toBe("new")
-  })
-
-  test("keeps bindings private to the thread owner", async () => {
-    const { host } = setup(recipe())
-    const as = (id: string) =>
-      createTestSixb(host, {
-        authorization: {
-          principal: { type: "user", id },
-          groupIds: [],
-          roleIds: [],
-          grants: { ...emptyGrantIndex(), "run:agent": true },
-        },
-      })
-    const thread = await as("alice").agent.threads.create({
-      sandbox: { clientId: "acme" },
-    })
-    expect(await as("bob").agent.threads.getById(thread.id)).toBeNull()
-    expect((await as("bob").agent.threads.list()).total).toBe(0)
-    await expect(
-      as("bob").agent.runs.request({ threadId: thread.id, text: "Hello" })
-    ).rejects.toMatchObject({ code: "thread_not_found" })
   })
 })

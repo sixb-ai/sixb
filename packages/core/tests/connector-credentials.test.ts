@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryStorage, type SixbErrorCode } from "../src"
+import { InMemoryStorage } from "../src"
 import {
   type ConnectorCredentialContext,
   createConnectorCredentialProtectorFromKey,
 } from "../src/connectors/credentials"
-import { isSixbError } from "../src/errors/internal"
 import { InMemoryConnectorConnectionStorage } from "../src/storage/connector-connections"
+import { expectSixbError, rejectionOf } from "./connector-connections.fixture"
 
 const context: ConnectorCredentialContext = {
   projectId: "project",
@@ -17,22 +17,6 @@ const context: ConnectorCredentialContext = {
 function protector(fill: number) {
   const key = Buffer.from(new Uint8Array(32).fill(fill)).toString("base64url")
   return createConnectorCredentialProtectorFromKey(key)
-}
-
-async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
-  try {
-    await promise
-  } catch (error) {
-    return error
-  }
-  throw new Error("Expected promise to reject.")
-}
-
-function expectSixbError(error: unknown, code: SixbErrorCode) {
-  expect(isSixbError(error)).toBe(true)
-  if (!isSixbError(error)) throw new Error("Expected a coded Sixb error.")
-  expect(error.code).toBe(code)
-  return error
 }
 
 describe("connector credential protection", () => {

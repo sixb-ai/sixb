@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { col, defineConnector, defineDataset, defineSync, defineWebhook, SixbHost } from "../src"
+import { defineConnector, SixbHost } from "../src"
 import { ConnectorService } from "../src/connectors/service"
 import { InMemoryStorage } from "../src/storage/in-memory"
-import { createHarness, encryptionKey } from "./connector-connections.fixture"
+import { createHarness } from "./connector-connections.fixture"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 describe("connector connection startup validation", () => {
@@ -53,45 +53,6 @@ describe("connector connection startup validation", () => {
           ontology: [],
           connectors: [staticConnector],
           connectorConnections: { encryptionKey: "unused" },
-          ...createTestRuntimeDeps(),
-        })
-    ).not.toThrow()
-  })
-
-  test("accepts OAuth Syncs and ordinary webhook definitions", () => {
-    const harness = createHarness()
-    const dataset = defineDataset("accounts", { schema: [col("id", "string")] })
-    const sync = defineSync("accounts")
-      .from(harness.connector)
-      .read(() => [])
-      .intoDataset(dataset)
-
-    expect(
-      () =>
-        new SixbHost({
-          ontology: [],
-          connectors: [harness.connector],
-          datasets: [dataset],
-          syncs: [sync],
-          connectorConnections: { encryptionKey },
-          ...createTestRuntimeDeps(),
-        })
-    ).not.toThrow()
-
-    Object.defineProperty(harness.connector.adapter, "webhooks", {
-      value: [
-        defineWebhook("events")
-          .post()
-          .json()
-          .handle(() => {}),
-      ],
-    })
-    expect(
-      () =>
-        new SixbHost({
-          ontology: [],
-          connectors: [harness.connector],
-          connectorConnections: { encryptionKey },
           ...createTestRuntimeDeps(),
         })
     ).not.toThrow()

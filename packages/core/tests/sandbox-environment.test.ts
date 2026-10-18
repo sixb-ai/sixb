@@ -110,7 +110,7 @@ test("source authentication cannot be silently skipped by direct creation", () =
   ).toEqual({ source })
 })
 
-test("initializes a Git project once and returns its command/file directory", async () => {
+test("initializes a Git project once in its own directory, and a source-free one in place", async () => {
   const f = fixture()
   const project = await initializeSandboxEnvironment(f.sandbox, {
     source: { type: "git", url: "https://example.com/app.git", revision: "feature" },
@@ -129,18 +129,23 @@ test("initializes a Git project once and returns its command/file directory", as
   expect(f.files).toEqual(["/guest/repository/notes.txt"])
   expect(sandboxProjectDirectory(f.sandbox, true).workingDirectory).toBe(project.workingDirectory)
   expect(f.commands).toHaveLength(3)
+
+  const sourceFree = fixture()
+  const inPlace = await initializeSandboxEnvironment(sourceFree.sandbox, { setup: ["prepare"] })
+  expect(inPlace).toBe(sourceFree.sandbox)
+  expect(sourceFree.commands).toEqual([
+    { command: "bash", args: ["-lc", "prepare"], cwd: undefined },
+  ])
 })
 
-test("source-free environments need no Git operations or nested directory", async () => {
-  const f = fixture()
-  const project = await initializeSandboxEnvironment(f.sandbox, { setup: ["prepare"] })
-  expect(project).toBe(f.sandbox)
-  expect(f.commands).toEqual([{ command: "bash", args: ["-lc", "prepare"], cwd: undefined }])
-})
-
-test("does not initialize after cancellation or proceed after a failed command", async () => {
+test("sends no command for unsafe source input or after cancellation, and none past a failure", async () => {
   // Regression proof: remove throwIfAborted or exitCode validation from the initializer.
   const f = fixture()
+  await expect(
+    initializeSandboxEnvironment(f.sandbox, {
+      source: { type: "git", url: "https://secret@example.com/app.git" },
+    })
+  ).rejects.toThrow("credential-free HTTPS")
   await expect(
     initializeSandboxEnvironment(f.sandbox, { setup: ["prepare"] }, AbortSignal.abort())
   ).rejects.toThrow()
@@ -150,14 +155,4 @@ test("does not initialize after cancellation or proceed after a failed command",
     initializeSandboxEnvironment(f.sandbox, { setup: ["first", "second"] })
   ).rejects.toThrow("initialization failed")
   expect(f.commands).toHaveLength(1)
-})
-
-test("rejects unsafe source input before sending commands", async () => {
-  const f = fixture()
-  await expect(
-    initializeSandboxEnvironment(f.sandbox, {
-      source: { type: "git", url: "https://secret@example.com/app.git" },
-    })
-  ).rejects.toThrow("credential-free HTTPS")
-  expect(f.commands).toHaveLength(0)
 })

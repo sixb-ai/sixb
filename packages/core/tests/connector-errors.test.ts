@@ -3,12 +3,11 @@ import { createConnectorCodedError, providerBoundaryError } from "../src/connect
 import { createSixbError, isSixbError } from "../src/errors/internal"
 
 describe("connector provider error boundary", () => {
-  test("preserves connector failures produced by nested connector operations", () => {
+  test("passes connector failures through and wraps coded failures from another domain", () => {
     const connectorError = createConnectorCodedError(
       "connector.authorization_required",
       "Connector authorization is required."
     )
-
     expect(
       providerBoundaryError(
         connectorError,
@@ -16,16 +15,13 @@ describe("connector provider error boundary", () => {
         "Connector provider operation failed."
       )
     ).toBe(connectorError)
-  })
 
-  test("wraps coded failures from another domain", () => {
     const foreignError = createSixbError("dataset.not_found", "[Sixb] Dataset was not found.")
     const error = providerBoundaryError(
       foreignError,
       "connector.provider_failed",
       "Connector provider operation failed."
     )
-
     expect(isSixbError(error)).toBe(true)
     if (!isSixbError(error)) throw new Error("Expected a coded Sixb error.")
     expect(error.code).toBe("connector.provider_failed")

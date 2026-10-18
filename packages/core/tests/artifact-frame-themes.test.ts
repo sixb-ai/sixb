@@ -25,7 +25,7 @@ function declarations(css: string, selector: string): Record<string, string> {
 }
 
 describe("a frame's default themes", () => {
-  test("are the app's, light and dark, for every token the app sends into a frame", () => {
+  test("are the app's, light and dark, for every token the app sends into a frame, and start the kit in the light one", () => {
     // Reproduce by changing one of these tokens in packages/ui/src/styles/globals.css, or by
     // leaving a token out of either theme, as the light one once left out the chart colors.
     const css = readFileSync(GLOBALS_CSS, "utf8")
@@ -42,13 +42,12 @@ describe("a frame's default themes", () => {
         expect(tokens[token], `${mode} ${token}`).toBe(app[token])
       }
     }
-  })
 
-  test("start the kit in the light one", () => {
-    // Reproduce by writing the kit's :root defaults out by hand again, as they once differed.
+    // The kit starts in the light one. Reproduce by writing the kit's :root defaults out by hand
+    // again, as they once differed.
     const root = /:root \{([^}]*)\}/.exec(FRAME_DECK_CSS)?.[1] ?? ""
     for (const [token, value] of Object.entries(FRAME_DEFAULT_THEMES.light.tokens)) {
-      expect(root, token).toContain(`${token}: ${value};`)
+      expect(root, `kit ${token}`).toContain(`${token}: ${value};`)
     }
   })
 })

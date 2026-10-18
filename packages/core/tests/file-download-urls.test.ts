@@ -66,19 +66,6 @@ describe("blobs.createDownloadUrl", () => {
     expect(grant).toMatchObject({ id, executionId: sixb.execution.id })
   })
 
-  test("issues independent URLs for the same file", async () => {
-    const { host, sixb } = createHost()
-    const photo = await storedPhoto(sixb)
-    const first = await sixb.blobs.createDownloadUrl(photo)
-    const second = await sixb.blobs.createDownloadUrl(photo)
-
-    await sixb.blobs.revokeDownloadUrl(first.id)
-
-    expect(second.url).not.toBe(first.url)
-    expect(await resolveFileDownload(host, tokenOf(first.url))).toBeNull()
-    expect(await resolveFileDownload(host, tokenOf(second.url))).not.toBeNull()
-  })
-
   test("honors any requested lifetime that ends before the year 10000", async () => {
     const { sixb } = createHost()
     const photo = await storedPhoto(sixb)
@@ -126,14 +113,18 @@ describe("blobs.createDownloadUrl", () => {
 })
 
 describe("blobs.revokeDownloadUrl", () => {
-  test("stops a URL before it expires", async () => {
+  test("stops a URL before it expires, and only that URL of the file", async () => {
     const { host, sixb } = createHost()
-    const { id, url } = await sixb.blobs.createDownloadUrl(await storedPhoto(sixb))
+    const photo = await storedPhoto(sixb)
+    const { id, url } = await sixb.blobs.createDownloadUrl(photo)
+    const other = await sixb.blobs.createDownloadUrl(photo)
 
     await sixb.blobs.revokeDownloadUrl(id)
     await sixb.blobs.revokeDownloadUrl(id)
 
+    expect(other.url).not.toBe(url)
     expect(await resolveFileDownload(host, tokenOf(url))).toBeNull()
+    expect(await resolveFileDownload(host, tokenOf(other.url))).not.toBeNull()
   })
 
   test("refuses an id it never issued", async () => {
@@ -158,7 +149,7 @@ describe("resolveFileDownload", () => {
 })
 
 describe("setApiPublicOrigin", () => {
-  test("keeps the latest origin, normalized", async () => {
+  test("keeps the latest http or https origin, normalized, and refuses anything else", async () => {
     const { host, sixb } = createHost()
     const photo = await storedPhoto(sixb)
 
@@ -167,10 +158,6 @@ describe("setApiPublicOrigin", () => {
     expect((await sixb.blobs.createDownloadUrl(photo)).url).toStartWith(
       "https://other.example.com/api/files/downloads/"
     )
-  })
-
-  test("accepts only an http or https origin", () => {
-    const { host } = createHost({ origin: null })
     const invalid = [
       ["api.example.com", "Invalid API public origin"],
       ["ftp://api.example.com", "must use http or https"],
@@ -184,6 +171,7 @@ describe("setApiPublicOrigin", () => {
 
 describe("expired download grants", () => {
   test("stay a week for audit, then a maintenance pass deletes them", async () => {
+    const now = Date.parse("2026-10-05T12:00:00.000Z")
     const storage = new InMemoryStorage()
     const events = new DomainEventService({ projectId: "project", broker: new InMemoryBroker() })
     const maintenance = new OntologyMaintenance({
@@ -192,9 +180,9 @@ describe("expired download grants", () => {
       dispatcher: new OntologyOutboxDispatcher({ projectId: "project", storage, events }),
       blobStorage: new InMemoryBlobStorage(),
       options: { intervalMs: 60_000 },
+      now: () => new Date(now),
       onError: () => {},
     })
-    const now = Date.now()
     const grant = (id: string, expiredAgoMs: number) =>
       storage.fileDownloadGrants.create({
         id,

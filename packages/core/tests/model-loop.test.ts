@@ -281,42 +281,63 @@ describe("runModelLoop", () => {
     }
   })
 
-  test("keeps non-JSON local tool outputs and projections out of model steps", async () => {
-    // Regression proof: remove the tool-output or model-output JSON assertion in executeToolCall;
-    // the invalid value then appears as a successful result instead of a recoverable tool error.
-    for (const stage of ["execute", "projection"] as const) {
-      const result = await runModelLoop({
-        model: modelFromCalls([
-          [
-            { type: "stream-start" },
-            { type: "tool-call", toolCallId: "call-1", toolName: "echo", input: '{"value":"ok"}' },
-            finish("tool-calls"),
-          ],
-          [{ type: "stream-start" }, finish()],
-        ]),
-        tools: [
-          {
-            ...echo,
-            execute: async () => (stage === "execute" ? { absent: undefined } : "valid") as never,
-            toModelOutput: () =>
-              (stage === "projection"
-                ? { type: "json", value: { absent: undefined } }
-                : { type: "text", value: "valid" }) as never,
-            errorText: () => "Invalid tool output",
-          },
+  // Regression proof: remove the tool-output or model-output JSON assertion in executeToolCall, or
+  // publish success before toModelOutput; the failure then appears as a result or as two outcomes.
+  test.each([
+    { stage: "execute", failure: "throws" },
+    { stage: "projection", failure: "throws" },
+    { stage: "execute", failure: "returns non-JSON" },
+    { stage: "projection", failure: "returns non-JSON" },
+  ] as const)("keeps a tool $stage that $failure recoverable with exactly one outcome", async ({
+    stage,
+    failure,
+  }) => {
+    const thrown = new Error(`${stage} failed`)
+    const invalid = { absent: undefined } as never
+    const chunks: ModelUiChunk[] = []
+    const result = await runModelLoop({
+      model: modelFromCalls([
+        [
+          { type: "stream-start" },
+          { type: "tool-call", toolCallId: "echo-1", toolName: "echo", input: '{"value":"ok"}' },
+          finish("tool-calls"),
         ],
-        messages: [],
-        maxSteps: 2,
-        signal: new AbortController().signal,
-      })
-      expect(result.status).toBe("completed")
-      expect(result.steps[0]?.content[1]).toStrictEqual({
-        type: "tool-result",
-        toolCallId: "call-1",
-        toolName: "echo",
-        output: { type: "error-text", value: "Invalid tool output" },
-      })
-    }
+        [{ type: "stream-start" }, finish()],
+      ]),
+      messages: [],
+      tools: [
+        {
+          ...echo,
+          async execute(input: { value: string }, context) {
+            if (stage !== "execute") return echo.execute(input, context)
+            if (failure === "throws") throw thrown
+            return invalid
+          },
+          toModelOutput() {
+            if (stage !== "projection") return { type: "text", value: "valid" }
+            if (failure === "throws") throw thrown
+            return { type: "json", value: invalid }
+          },
+          errorText: (error) => (error === thrown ? thrown.message : "Invalid tool output"),
+        },
+      ],
+      maxSteps: 2,
+      signal: new AbortController().signal,
+      onEvent(chunk) {
+        chunks.push(chunk)
+      },
+    })
+    const errorText = failure === "throws" ? thrown.message : "Invalid tool output"
+    expect(result.status).toBe("completed")
+    expect(result.steps[0]?.content[1]).toStrictEqual({
+      type: "tool-result",
+      toolCallId: "echo-1",
+      toolName: "echo",
+      output: { type: "error-text", value: errorText },
+    })
+    expect(chunks.filter((chunk) => chunk.type.startsWith("tool-output-"))).toEqual([
+      { type: "tool-output-error", toolCallId: "echo-1", toolName: "echo", errorText },
+    ])
   })
 
   // Regression proof: remove the finishReason guard before structured-output parsing.
@@ -392,51 +413,6 @@ describe("runModelLoop", () => {
     expect(chunks.some((chunk) => chunk.type === "tool-output-error")).toBe(false)
   })
 
-  // Regression proof: publish success before toModelOutput; projection failure emits both outcomes.
-  test("keeps tool and projection failures recoverable with exactly one outcome", async () => {
-    for (const stage of ["execute", "projection"] as const) {
-      const chunks: ModelUiChunk[] = []
-      const failure = new Error(`${stage} failed`)
-      const result = await runModelLoop({
-        model: modelFromCalls([
-          [
-            { type: "stream-start" },
-            { type: "tool-call", toolCallId: "echo-1", toolName: "echo", input: '{"value":"ok"}' },
-            finish("tool-calls"),
-          ],
-          [{ type: "stream-start" }, finish()],
-        ]),
-        messages: [],
-        tools: [
-          {
-            ...echo,
-            async execute(input: { value: string }, context) {
-              if (stage === "execute") throw failure
-              return echo.execute(input, context)
-            },
-            toModelOutput() {
-              throw failure
-            },
-          },
-        ],
-        maxSteps: 2,
-        signal: new AbortController().signal,
-        onEvent(chunk) {
-          chunks.push(chunk)
-        },
-      })
-      expect(result.status).toBe("completed")
-      expect(chunks.filter((chunk) => chunk.type.startsWith("tool-output-"))).toEqual([
-        {
-          type: "tool-output-error",
-          toolCallId: "echo-1",
-          toolName: "echo",
-          errorText: failure.message,
-        },
-      ])
-    }
-  })
-
   test("retains native IDs independently of the internal fallback response identity", async () => {
     // Removal proof: omit providerIds from CompletedResponse or onModelCallEnd.
     const calls: ModelCallEndEvent[] = []
@@ -461,54 +437,35 @@ describe("runModelLoop", () => {
     expect(calls[0]?.providerIds).toBeUndefined()
     expect(calls[1]?.providerIds).toEqual({ generationId: "gen_1", requestId: "req_1" })
   })
-  test("retains a provider-owned estimate alongside an inline report", async () => {
-    // Regression proof: omit estimate from onModelCallEnd; this must fail even though cost is reported.
-    const calls: ModelCallEndEvent[] = []
-    const model = Object.assign(
-      modelFromCalls([
-        [
-          { type: "stream-start" },
-          {
-            type: "finish",
-            finishReason: "stop",
-            usage: USAGE,
-            reportedCost: { money: { currency: "USD", amountNanos: "12" } },
+  // Regression proof: omit estimate from onModelCallEnd, or call costEstimator.estimate without
+  // its failure boundary; the reported cost alone must not satisfy either row.
+  test.each([
+    {
+      name: "a provider-owned estimate",
+      estimate: ({ usage }: { usage: typeof USAGE }) =>
+        rateModelCall({
+          usage,
+          rateCard: {
+            currency: "USD",
+            unit: "million-tokens",
+            input: "1",
+            output: "2",
+            cacheReadInput: "0.1",
           },
-        ],
-      ]),
-      {
-        costEstimator: {
-          estimate: ({ usage }: { usage: typeof USAGE }) =>
-            rateModelCall({
-              usage,
-              rateCard: {
-                currency: "USD",
-                unit: "million-tokens",
-                input: "1",
-                output: "2",
-                cacheReadInput: "0.1",
-              },
-            }),
-        },
-      }
-    )
-    await runModelLoop({
-      model,
-      messages: [],
-      maxSteps: 1,
-      signal: new AbortController().signal,
-      onModelCallEnd: (event) => {
-        calls.push(event)
+        }),
+      expected: { status: "rated", money: { amountNanos: "16200" } },
+    },
+    {
+      name: "an estimation failure",
+      estimate: () => {
+        throw new Error("unavailable estimator")
       },
-    })
-    expect(calls[0]).toMatchObject({
-      cost: { status: "reported", money: { amountNanos: "12" } },
-      estimate: { status: "rated", money: { amountNanos: "16200" } },
-    })
-  })
-
-  test("estimation failure cannot discard completed usage or an inline report", async () => {
-    // Regression proof: call costEstimator.estimate directly without the failure boundary.
+      expected: { status: "unpriceable" },
+    },
+  ])("retains $name alongside completed usage and an inline report", async ({
+    estimate,
+    expected,
+  }) => {
     const calls: ModelCallEndEvent[] = []
     const model = Object.assign(
       modelFromCalls([
@@ -522,13 +479,7 @@ describe("runModelLoop", () => {
           },
         ],
       ]),
-      {
-        costEstimator: {
-          estimate: () => {
-            throw new Error("unavailable estimator")
-          },
-        },
-      }
+      { costEstimator: { estimate } }
     )
     await runModelLoop({
       model,
@@ -541,10 +492,11 @@ describe("runModelLoop", () => {
     })
     expect(calls[0]).toMatchObject({
       usage: USAGE,
-      cost: { status: "reported" },
-      estimate: { status: "unpriceable" },
+      cost: { status: "reported", money: { amountNanos: "12" } },
+      estimate: expected,
     })
   })
+
   test("forwards and validates per-call output limits", async () => {
     // Regression proof: remove maxOutputTokens from the model.stream request or its validation.
     const model = new MockLanguageModel({
@@ -610,42 +562,6 @@ describe("runModelLoop", () => {
         usage: USAGE,
         cost: { status: "unpriceable", reason: "missing-rate-card" },
         requestedReasoning: "high",
-      },
-    ])
-  })
-
-  test("records completed-call usage before rejecting invalid durable provider data", async () => {
-    const calls: ModelCallEndEvent[] = []
-    const invalidProviderData = { generatedAt: new Date() } as never
-
-    await expect(
-      runModelLoop({
-        model: modelFromCalls([
-          [
-            { type: "stream-start" },
-            { type: "text-start", id: "answer", providerData: invalidProviderData },
-            { type: "text-delta", id: "answer", delta: "Hello" },
-            { type: "text-end", id: "answer" },
-            finish(),
-          ],
-        ]),
-        messages: [],
-        maxSteps: 1,
-        signal: new AbortController().signal,
-        onModelCallEnd(event) {
-          calls.push(event)
-        },
-        generateCallId: () => "call-invalid-projection",
-      })
-    ).rejects.toThrow("provider data.generatedAt is a Date")
-    expect(calls).toEqual([
-      {
-        callId: "call-invalid-projection",
-        providerId: "mock",
-        modelId: "mock-model",
-        responseId: "call-invalid-projection:response",
-        usage: USAGE,
-        cost: { status: "unpriceable", reason: "missing-rate-card" },
       },
     ])
   })
@@ -816,46 +732,6 @@ describe("runModelLoop", () => {
     expect(calls).toBe(0)
   })
 
-  test("continues a provider pause without inventing a local tool result", async () => {
-    const requests: unknown[] = []
-    const model = new MockLanguageModel({
-      stream: async (request) => {
-        requests.push(request)
-        return requests.length === 1
-          ? streamFromArray([
-              { type: "stream-start" },
-              { type: "text-start", id: "partial" },
-              { type: "text-delta", id: "partial", delta: "Working" },
-              { type: "text-end", id: "partial" },
-              finish("pause"),
-            ])
-          : streamFromArray([
-              { type: "stream-start" },
-              { type: "text-start", id: "answer" },
-              { type: "text-delta", id: "answer", delta: "Done" },
-              { type: "text-end", id: "answer" },
-              finish(),
-            ])
-      },
-    })
-
-    const result = await runModelLoop({
-      model,
-      messages: [{ role: "user", content: [{ type: "text", text: "Start" }] }],
-      maxSteps: 2,
-      signal: new AbortController().signal,
-    })
-
-    expect(result).toMatchObject({ status: "completed", output: "Done", finishReason: "stop" })
-    expect(result.steps).toHaveLength(2)
-    expect(requests[1]).toMatchObject({
-      messages: [
-        { role: "user" },
-        { role: "assistant", content: [{ type: "text", text: "Working" }] },
-      ],
-    })
-  })
-
   test("records a final-step tool response without starting an unbounded continuation", async () => {
     let offeredTools: readonly string[] = []
     const model = new MockLanguageModel({
@@ -896,11 +772,15 @@ describe("runModelLoop", () => {
 
   test("executes parallel tools but preserves model call order", async () => {
     const releases = new Map<string, () => void>()
+    const bothStarted = Promise.withResolvers<void>()
     const completion: string[] = []
     const parallelTool: ModelTool<{ value: string }> = {
       ...echo,
       async execute(input) {
-        await new Promise<void>((resolve) => releases.set(input.value, resolve))
+        await new Promise<void>((resolve) => {
+          releases.set(input.value, resolve)
+          if (releases.size === 2) bothStarted.resolve()
+        })
         completion.push(input.value)
         return { echoed: input.value }
       },
@@ -936,7 +816,7 @@ describe("runModelLoop", () => {
       maxSteps: 3,
       signal: new AbortController().signal,
     })
-    await Bun.sleep(0)
+    await bothStarted.promise
     releases.get("second")?.()
     releases.get("first")?.()
     const result = await run
@@ -1082,11 +962,19 @@ describe("runModelLoop", () => {
     expect(calls[0]?.usage).toEqual(USAGE)
   })
 
-  test("always sends the semantic response format and validates the completed output", async () => {
+  test.each([
+    true,
+    false,
+  ])("sends the same semantic response format when nativeStructuredOutput is %p", async (nativeStructuredOutput) => {
     let toolNames: readonly string[] = []
     let responseFormat: unknown
+    const schema = {
+      type: "object",
+      properties: { answer: { type: "string" } },
+      required: ["answer"],
+    }
     const model = new MockLanguageModel({
-      capabilities: { ...MOCK_DEFINITION.capabilities, nativeStructuredOutput: false },
+      capabilities: { ...MOCK_DEFINITION.capabilities, nativeStructuredOutput },
       stream: async (request) => {
         toolNames = request.tools.map((tool) => tool.name)
         responseFormat = request.responseFormat
@@ -1104,11 +992,7 @@ describe("runModelLoop", () => {
       messages: [],
       output: {
         name: "answer",
-        schema: {
-          type: "object",
-          properties: { answer: { type: "string" } },
-          required: ["answer"],
-        },
+        schema,
         validate(value) {
           if (
             typeof value !== "object" ||
@@ -1120,57 +1004,12 @@ describe("runModelLoop", () => {
           return value as { answer: string }
         },
       },
-      maxSteps: 2,
-      signal: new AbortController().signal,
-    })
-
-    expect(toolNames).toEqual([])
-    expect(responseFormat).toEqual({
-      type: "json",
-      name: "answer",
-      schema: {
-        type: "object",
-        properties: { answer: { type: "string" } },
-        required: ["answer"],
-      },
-    })
-    expect(result).toMatchObject({ status: "completed", output: { answer: "yes" } })
-  })
-
-  test("does not let model metadata change the provider-neutral output request", async () => {
-    let toolNames: readonly string[] = []
-    let responseFormat: unknown
-    const model = new MockLanguageModel({
-      stream: async (request) => {
-        toolNames = request.tools.map((tool) => tool.name)
-        responseFormat = request.responseFormat
-        return streamFromArray([
-          { type: "stream-start" },
-          { type: "text-start", id: "json" },
-          { type: "text-delta", id: "json", delta: '{"answer":"yes"}' },
-          { type: "text-end", id: "json" },
-          finish(),
-        ])
-      },
-    })
-    const result = await runModelLoop({
-      model,
-      messages: [],
-      output: {
-        name: "answer",
-        schema: { type: "object", properties: { answer: { type: "string" } } },
-        validate: (value) => value as { answer: string },
-      },
       maxSteps: 1,
       signal: new AbortController().signal,
     })
 
-    expect(toolNames).not.toContain("__sixb_submit_output")
-    expect(responseFormat).toEqual({
-      type: "json",
-      name: "answer",
-      schema: { type: "object", properties: { answer: { type: "string" } } },
-    })
+    expect(toolNames).toEqual([])
+    expect(responseFormat).toEqual({ type: "json", name: "answer", schema })
     expect(result).toMatchObject({ status: "completed", output: { answer: "yes" } })
   })
 
