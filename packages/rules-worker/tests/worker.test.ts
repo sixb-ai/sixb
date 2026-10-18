@@ -70,27 +70,24 @@ afterEach(async () => {
 })
 
 describe("RulesWorker", () => {
-  test("constructor rejects runtimes with no registered rules", () => {
-    expect(() => new RulesWorker(createRuntime({ rules: [] }))).toThrow(
-      "[SixbRulesWorker] Rules workers require at least one registered rule."
-    )
-  })
-
-  test("constructor rejects runtimes without storage.rules", () => {
-    expect(
-      () =>
-        new RulesWorker(
-          createRuntime({
-            storage: createStorageWithoutRules(),
-          })
-        )
-    ).toThrow("[SixbRulesWorker] Rules workers require storage.rules support.")
-  })
-
-  test("constructor bounds reconciliation pages", () => {
-    expect(() => new RulesWorker(createRuntime(), { reconciliationPageSize: 1_001 })).toThrow(
-      "reconciliationPageSize must not exceed 1000"
-    )
+  test.each([
+    {
+      name: "no registered rules",
+      create: () => new RulesWorker(createRuntime({ rules: [] })),
+      error: "[SixbRulesWorker] Rules workers require at least one registered rule.",
+    },
+    {
+      name: "storage without rules support",
+      create: () => new RulesWorker(createRuntime({ storage: createStorageWithoutRules() })),
+      error: "[SixbRulesWorker] Rules workers require storage.rules support.",
+    },
+    {
+      name: "an oversized reconciliation page",
+      create: () => new RulesWorker(createRuntime(), { reconciliationPageSize: 1_001 }),
+      error: "[SixbRulesWorker] reconciliationPageSize must not exceed 1000.",
+    },
+  ])("constructor rejects $name", ({ create, error }) => {
+    expect(create).toThrow(error)
   })
 
   test("worker subscribes to object and link event types", async () => {
@@ -113,7 +110,7 @@ describe("RulesWorker", () => {
     ])
   })
 
-  test("worker drains pending evaluations on stop", async () => {
+  test("stop drains pending evaluations and accepts no later events", async () => {
     const rules = new DelayedRulesStorage()
     const events = createDomainEventService()
     const storage = createStorage({ rules })
@@ -135,26 +132,17 @@ describe("RulesWorker", () => {
     const stop = worker.stop().then(() => {
       stopped = true
     })
-    await Bun.sleep(20)
+    await waitForTurns(20)
     expect(stopped).toBe(false)
 
     rules.releaseGetActive()
     await stop
 
-    expect(stopped).toBe(true)
+    await seedCurrentObject(storage, "posted", "tx-2")
+    await events.publishEnvelopes([objectUpdatedEvent("posted", "tx-2")])
+    await waitForTurns(20)
+
     expect(await ruleEventTypes(events)).toEqual(["rule.triggered"])
-  })
-
-  test("worker does not accept new events after stop", async () => {
-    const events = createDomainEventService()
-    const worker = track(new RulesWorker(createRuntime({ events })))
-    await worker.start()
-    await worker.stop()
-
-    await events.publishEnvelopes([objectUpdatedEvent("posted")])
-    await Bun.sleep(20)
-
-    expect(await ruleEventTypes(events)).toEqual([])
   })
 
   test("evaluation errors are logged and do not stop later events", async () => {
@@ -205,23 +193,6 @@ describe("RulesWorker", () => {
     }
   })
 
-  test("startup reconciliation repairs an object event missed while offline", async () => {
-    const events = createDomainEventService()
-    const storage = new InMemoryStorage()
-    await seedCurrentObject(storage, "posted")
-    const worker = track(
-      new RulesWorker(createRuntime({ events, storage }), {
-        reconciliationPageSize: 1,
-      })
-    )
-
-    await worker.start()
-    await waitFor(async () => (await ruleEventTypes(events)).length === 1)
-    await worker.stop()
-
-    expect(await ruleEventTypes(events)).toEqual(["rule.triggered"])
-  })
-
   test("startup reconciliation resolves active state for a deleted subject", async () => {
     const events = createDomainEventService()
     const storage = new InMemoryStorage()
@@ -254,7 +225,7 @@ describe("RulesWorker", () => {
     ).toBeNull()
   })
 
-  test("reconciliation uses stable pages and evaluates every subject", async () => {
+  test("startup reconciliation pages through every subject a missed event left stale", async () => {
     const events = createDomainEventService()
     const storage = new InMemoryStorage()
     await seedCurrentObject(storage, "posted", "tx-3")
@@ -277,36 +248,23 @@ describe("RulesWorker", () => {
     ).toEqual(["tx-3", "tx-2", "tx-1"])
   })
 
-  test("reconciliation scans one object type once for all of its rules", async () => {
+  test("startup reconciliation scans each object type once, and an idle worker never rescans", async () => {
+    // Reproduce the regression by re-arming `coordinator.requestReconciliation()` on a timer in
+    // `RulesWorker.run`, or by scanning per rule in `reconcileRules`: the page count then grows.
     const events = createDomainEventService()
     const storage = createStorage()
     const objects = new CountingReconciliationObjectStorage(storage.objects)
     replaceObjectStorage(storage, objects.storage)
     await seedCurrentObject(storage, "posted")
-    const worker = track(
-      new RulesWorker(createRuntime({ rules: [postedRule, alsoPostedRule], events, storage }))
-    )
-
-    await worker.start()
-    await waitFor(async () => (await ruleEventTypes(events)).length === 2)
-    await worker.stop()
-
-    expect(objects.pageReads).toBe(1)
-  })
-
-  test("an idle worker reads current state once, at startup", async () => {
-    // Reproduce the regression by re-arming `coordinator.requestReconciliation()` on a timer in
-    // `RulesWorker.run`: the advanced clock then fires it and the page count grows.
-    const storage = createStorage()
-    const objects = new CountingReconciliationObjectStorage(storage.objects)
-    replaceObjectStorage(storage, objects.storage)
     jest.useFakeTimers()
     try {
-      const worker = track(new RulesWorker(createRuntime({ storage })))
+      const worker = track(
+        new RulesWorker(createRuntime({ rules: [postedRule, alsoPostedRule], events, storage }))
+      )
       await worker.start()
-      await settle()
+      await waitFor(async () => (await ruleEventTypes(events)).length === 2)
       jest.advanceTimersByTime(24 * 60 * 60_000)
-      await settle()
+      await waitForTurns(20)
 
       expect(objects.pageReads).toBe(1)
     } finally {
@@ -323,6 +281,7 @@ describe("RulesWorker", () => {
       const storage = createStorage()
       replaceObjectStorage(storage, new ThrowOnceObjectStorage(storage.objects).storage)
       await seedCurrentObject(storage, "posted", "tx-0")
+      jest.useFakeTimers()
       const worker = track(new RulesWorker(createRuntime({ events, storage })))
       await worker.start()
       await waitFor(async () => (await ruleEventTypes(events)).length === 1)
@@ -331,8 +290,12 @@ describe("RulesWorker", () => {
       await seedCurrentObject(storage, "posted")
       await events.publishEnvelopes([objectUpdatedEvent("posted")])
 
+      // The repair is a reconciliation on a backoff timer.
+      await waitFor(() => jest.getTimerCount() === 1)
+      jest.runOnlyPendingTimers()
       await waitFor(async () => (await ruleEventTypes(events)).length === 2)
     } finally {
+      jest.useRealTimers()
       console.error = originalError
     }
   })
@@ -359,12 +322,16 @@ describe("RulesWorker", () => {
         })
       )
       await seedCurrentObject(storage, "posted")
+      jest.useFakeTimers()
       const worker = track(new RulesWorker(createRuntime({ events, storage })))
       await worker.start()
 
+      // The failed startup pass is retried on a backoff timer.
+      await waitFor(() => failed && jest.getTimerCount() === 1)
+      jest.runOnlyPendingTimers()
       await waitFor(async () => (await ruleEventTypes(events)).length === 1)
-      expect(failed).toBe(true)
     } finally {
+      jest.useRealTimers()
       console.error = originalError
     }
   })
@@ -380,7 +347,7 @@ describe("RulesWorker", () => {
     await worker.start()
     await objects.waitForReconciliation()
     await events.publishEnvelopes([objectUpdatedEvent("posted")])
-    await Bun.sleep(20)
+    await waitForTurns(20)
 
     expect(objects.liveReads).toBe(0)
     objects.releaseReconciliation()
@@ -720,20 +687,26 @@ function createDomainEventService(): DomainEventService {
   return new DomainEventService({ projectId, broker: new InMemoryBroker() })
 }
 
+/**
+ * Polls between event-loop turns rather than on a timer, so it also works while timers are faked.
+ * The clock is frozen then, and the test's own timeout bounds the wait instead.
+ */
 async function waitFor(fn: () => boolean | Promise<boolean>, timeoutMs = 2_000): Promise<void> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     if (await fn()) return
-    await Bun.sleep(10)
+    await nextTurn()
   }
   throw new Error("Timed out waiting for condition.")
 }
 
-/** Drains promise work; `process.nextTick` still runs while timers are faked. */
-async function settle(): Promise<void> {
-  for (let tick = 0; tick < 10; tick += 1) {
-    await new Promise<void>((resolve) => process.nextTick(resolve))
-  }
+/** Lets queued work run for a few event-loop turns, to show that something did not happen. */
+async function waitForTurns(turns: number): Promise<void> {
+  for (let turn = 0; turn < turns; turn += 1) await nextTurn()
+}
+
+function nextTurn(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
 }
 
 function createDeferred<T>() {

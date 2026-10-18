@@ -139,7 +139,7 @@ export async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Prom
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     if (predicate()) return
-    await Bun.sleep(5)
+    await new Promise<void>((resolve) => setImmediate(resolve))
   }
   throw new Error("Timed out waiting for managed Sync state.")
 }

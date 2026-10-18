@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import {
   col,
   defineConnector,
@@ -149,13 +149,34 @@ function eventWorkflowRoutes(): OrchestratorRoutes {
   })
 }
 
+/**
+ * Polls between event-loop turns rather than on a timer, so it also works while timers are faked.
+ * The clock is frozen then, and the test's own timeout bounds the wait instead.
+ */
 async function waitFor(fn: () => Promise<boolean> | boolean, timeoutMs = 2_000): Promise<void> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     if (await fn()) return
-    await Bun.sleep(10)
+    await new Promise<void>((resolve) => setImmediate(resolve))
   }
   throw new Error("Timed out waiting for condition.")
+}
+
+/** Lets queued work run for a few event-loop turns, to show that something did not happen. */
+async function waitForTurns(turns: number): Promise<void> {
+  for (let turn = 0; turn < turns; turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+}
+
+async function quietly<T>(run: () => Promise<T>): Promise<T> {
+  const originalError = console.error
+  console.error = () => {}
+  try {
+    return await run()
+  } finally {
+    console.error = originalError
+  }
 }
 
 function thrownBy(run: () => unknown): unknown {
@@ -170,7 +191,10 @@ function thrownBy(run: () => unknown): unknown {
 const workers: OrchestratorWorker[] = []
 
 // Revert the returned processing promise in consumeBatches: all retained batches enter at once.
-test("retained backpressure and queue recovery compose with the real Workflow dispatcher", async () => {
+// Drop `from: "earliest"` from consumeRetainedEventSchedules: the events published before start are
+// never delivered. Skip the retry in retryBatch: the failed batch's 99 siblings are never queued.
+// The broker delivers retained events in pages of 100, so 150 events make two batches.
+test("retained event schedules catch up with backpressure and replay a failed enqueue", async () => {
   const broker = new InMemoryBroker()
   const queues = new InMemoryQueues()
   const eventRuntime = createEvents(PROJECT_ID, broker)
@@ -186,7 +210,7 @@ test("retained backpressure and queue recovery compose with the real Workflow di
     blobStorage: new InMemoryBlobStorage(),
   })
   await eventRuntime.publishEnvelopes(
-    Array.from({ length: 300 }, (_, i) => makeInvoiceUpdatedEvent(0, 700 + i))
+    Array.from({ length: 150 }, (_, i) => makeInvoiceUpdatedEvent(0, 700 + i))
   )
   let release!: () => void
   const blocked = new Promise<void>((resolve) => {
@@ -211,27 +235,34 @@ test("retained backpressure and queue recovery compose with the real Workflow di
       deliveries += 1
       return handler(batch)
     })
+  jest.useFakeTimers()
   try {
-    await startWorker(
-      eventRuntime,
-      queues,
-      eventWorkflowRoutes(),
-      PROJECT_ID,
-      undefined,
-      new WorkflowRunDispatcher(host)
-    )
-    await waitFor(() => attempts === 1)
-    await Bun.sleep(20)
-    expect(deliveries).toBe(1)
-    release()
-    await waitFor(() => acknowledged === 300)
-    expect(attempts).toBe(301)
-    expect(deliveries).toBe(3)
+    await quietly(async () => {
+      await startWorker(
+        eventRuntime,
+        queues,
+        eventWorkflowRoutes(),
+        PROJECT_ID,
+        undefined,
+        new WorkflowRunDispatcher(host)
+      )
+      await waitFor(() => attempts > 0)
+      await waitForTurns(20)
+      expect(deliveries).toBe(1)
+      release()
+      // The failed batch waits out a retry backoff before it is dispatched again.
+      await waitFor(() => jest.getTimerCount() === 1)
+      jest.runOnlyPendingTimers()
+      await waitFor(() => acknowledged === 150)
+    })
+    expect(attempts).toBe(151)
+    expect(deliveries).toBe(2)
     expect(
       await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "test", limit: 500 })
-    ).toHaveLength(300)
+    ).toHaveLength(150)
   } finally {
     release()
+    jest.useRealTimers()
   }
 })
 
@@ -464,8 +495,12 @@ describe("OrchestratorWorker", () => {
     ])
   })
 
-  test("event schedule fires only on a false-to-true transition and maps { event }", async () => {
-    const eventRuntime = createEvents()
+  // Events reach a subscription in publication order, so once the edge is dispatched, the earlier
+  // events have been judged too.
+  test("event schedules fire only on their own project's false-to-true transitions", async () => {
+    const broker = new InMemoryBroker()
+    const eventRuntime = createEvents(PROJECT_ID, broker)
+    const otherEvents = createEvents("other-project", broker)
     const queues = new InMemoryQueues()
     const dispatches: WorkflowDispatchInput[] = []
     await startWorker(
@@ -477,78 +512,26 @@ describe("OrchestratorWorker", () => {
       createTestWorkflowRunDispatcher(queues, dispatches)
     )
 
+    await otherEvents.publishEnvelopes([makeInvoiceUpdatedEvent(400, 700, "other-project")])
     await eventRuntime.publishEnvelopes([makeInvoiceUpdatedEvent(600, 700)])
-    await Bun.sleep(50)
-    expect(
-      await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "no-edge" })
-    ).toHaveLength(0)
-
     const [sourceEvent] = await eventRuntime.publishEnvelopes([makeInvoiceUpdatedEvent(400, 700)])
+    await waitFor(() => dispatches.length > 0)
 
-    await waitFor(async () => {
-      const claimed = await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "edge" })
-      if (claimed.length === 0) return false
-      expect(claimed[0]!.job.payload).toEqual({
+    expect(dispatches).toEqual([
+      expect.objectContaining({
+        workflowId: highValueInvoiceWorkflow.id,
+        input: { invoiceId: "inv-1", amount: 700 },
+        scheduleId: highValueInvoice.id,
+        source: { type: "event", eventId: sourceEvent!.id },
+        correlationId: sourceEvent!.correlationId ?? sourceEvent!.id,
+      }),
+    ])
+    const claimed = await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "edge" })
+    expect(claimed.map((job) => job.job.payload)).toEqual([
+      {
         runId: `workflow:${highValueInvoiceWorkflow.id}:schedule:${highValueInvoice.id}:event:${sourceEvent!.id}`,
-      })
-      expect(dispatches).toEqual([
-        expect.objectContaining({
-          workflowId: highValueInvoiceWorkflow.id,
-          input: { invoiceId: "inv-1", amount: 700 },
-          scheduleId: highValueInvoice.id,
-          source: { type: "event", eventId: sourceEvent!.id },
-          correlationId: sourceEvent!.correlationId ?? sourceEvent!.id,
-        }),
-      ])
-      return true
-    })
-  })
-
-  test("retained event schedules catch up when the orchestrator starts", async () => {
-    const eventRuntime = createEvents()
-    const queues = new InMemoryQueues()
-    const [sourceEvent] = await eventRuntime.publishEnvelopes([makeInvoiceUpdatedEvent(400, 700)])
-
-    await startWorker(eventRuntime, queues, eventWorkflowRoutes())
-
-    await waitFor(async () => {
-      const claimed = await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "observer" })
-      if (claimed.length === 0) return false
-      expect(claimed[0]!.job.payload.runId).toBe(
-        `workflow:${highValueInvoiceWorkflow.id}:schedule:${highValueInvoice.id}:event:${sourceEvent!.id}`
-      )
-      return true
-    })
-  })
-
-  test("a transient event-schedule enqueue failure is replayed", async () => {
-    const eventRuntime = createEvents()
-    const queues = new InMemoryQueues()
-    await eventRuntime.publishEnvelopes([makeInvoiceUpdatedEvent(400, 700)])
-
-    let enqueueAttempts = 0
-    const enqueue = queues.workflows.enqueue.bind(queues.workflows)
-    queues.workflows.enqueue = async (params) => {
-      enqueueAttempts += 1
-      if (enqueueAttempts === 1) throw new Error("Transient enqueue failure")
-      return enqueue(params)
-    }
-
-    const originalError = console.error
-    console.error = () => {}
-    try {
-      await startWorker(eventRuntime, queues, eventWorkflowRoutes())
-      await waitFor(async () => {
-        const claimed = await queues.workflows.claim({
-          projectId: PROJECT_ID,
-          workerId: "observer",
-        })
-        return claimed.length === 1
-      })
-      expect(enqueueAttempts).toBe(2)
-    } finally {
-      console.error = originalError
-    }
+      },
+    ])
   })
 
   test("one dataset event schedule fans out to all three consumer queues", async () => {
@@ -638,11 +621,6 @@ describe("OrchestratorWorker", () => {
         },
       ],
     })
-    await Bun.sleep(50)
-    expect(
-      await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "failed" })
-    ).toHaveLength(0)
-
     await eventRuntime.append({
       correlationId: "upstream-correlation",
       events: [
@@ -652,12 +630,13 @@ describe("OrchestratorWorker", () => {
         },
       ],
     })
-    await waitFor(async () => {
-      const claimed = await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "ok" })
-      return claimed.length === 1
-    })
+    // Both events share one ordered subscription: the failed run was judged first.
+    await waitFor(() => dispatches.length > 0)
     expect(dispatches).toHaveLength(1)
     expect(dispatches[0]?.correlationId).toBe("upstream-correlation")
+    expect(
+      await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "ok", limit: 10 })
+    ).toHaveLength(1)
   })
 
   test("dataset commits pass the immutable version to the Projection dispatcher", async () => {
@@ -873,49 +852,41 @@ describe("OrchestratorWorker", () => {
     const eventRuntime = createEvents()
     const queues = new InMemoryQueues()
     const enqueueSync = queues.syncRuns.enqueue.bind(queues.syncRuns)
-    let attempts = 0
+    let syncAttempts = 0
     queues.syncRuns.enqueue = async (params) => {
-      if (++attempts === 1) throw new Error("Unavailable")
+      if (++syncAttempts === 1) throw new Error("Unavailable")
       return enqueueSync(params)
     }
+    const enqueuePipeline = queues.pipelines.enqueue.bind(queues.pipelines)
+    let pipelineDispatches = 0
+    queues.pipelines.enqueue = async (params) => {
+      const jobs = await enqueuePipeline(params)
+      pipelineDispatches += 1
+      return jobs
+    }
 
-    const originalError = console.error
-    console.error = () => {}
+    jest.useFakeTimers()
     try {
-      await startWorker(eventRuntime, queues, routes)
-      await eventRuntime.append({ events: [makeScheduleTriggeredEvent(daily.id)] })
-      await waitFor(async () => {
-        const claimed = await queues.pipelines.claim({
-          projectId: PROJECT_ID,
-          workerId: "observer",
-        })
-        return claimed.length === 1
+      await quietly(async () => {
+        await startWorker(eventRuntime, queues, routes)
+        await eventRuntime.append({ events: [makeScheduleTriggeredEvent(daily.id)] })
+        // The batch failed on its sync sibling and waits out a retry backoff.
+        await waitFor(() => pipelineDispatches === 1 && jest.getTimerCount() === 1)
+        jest.runOnlyPendingTimers()
+        await waitFor(() => pipelineDispatches === 2)
       })
-      await waitFor(() => attempts === 2)
+
+      // Claimed on the faked clock: the retried job is stamped with it.
+      expect(syncAttempts).toBe(2)
       expect(
         await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "sync", limit: 10 })
       ).toHaveLength(1)
       expect(
         await queues.pipelines.claim({ projectId: PROJECT_ID, workerId: "pipeline", limit: 10 })
-      ).toHaveLength(0)
+      ).toHaveLength(1)
     } finally {
-      console.error = originalError
+      jest.useRealTimers()
     }
-  })
-
-  test("project-scoped subscriptions ignore another project's events", async () => {
-    const broker = new InMemoryBroker()
-    const eventRuntime = createEvents(PROJECT_ID, broker)
-    const otherEvents = createEvents("other-project", broker)
-    const queues = new InMemoryQueues()
-    await startWorker(eventRuntime, queues, eventWorkflowRoutes())
-
-    await otherEvents.publishEnvelopes([makeInvoiceUpdatedEvent(400, 700, "other-project")])
-    await Bun.sleep(50)
-
-    expect(
-      await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "observer" })
-    ).toHaveLength(0)
   })
 
   test("stop drains pending direct dispatches", async () => {
@@ -938,98 +909,60 @@ describe("OrchestratorWorker", () => {
     ).toHaveLength(1)
   })
 
-  test("rejects an empty project id", () => {
-    expect(
-      thrownBy(
-        () =>
-          new OrchestratorWorker({
-            projectId: "",
-            events: createEvents(),
-            queues: new InMemoryQueues(),
-            routes: new Map(),
-            dispatchers: {},
-          })
-      )
-    ).toMatchObject({
-      code: "internal.unexpected",
-      retryable: false,
-      message: "[SixbOrchestrator] projectId is required.",
-    })
-  })
+  const invoiceProjectionRoutes = (...descriptors: ProjectionDispatchDescriptor[]) =>
+    compileRoutes({ schedules: [], syncs: [], pipelines: [], projections: descriptors })
 
-  test("reports projection dispatch configuration errors structurally", () => {
-    const descriptor = invoiceProjectionDescriptor()
-    const routes = compileRoutes({
-      schedules: [],
-      syncs: [],
-      pipelines: [],
-      projections: [descriptor],
-    })
-
-    expect(
-      thrownBy(
-        () =>
-          new OrchestratorWorker({
-            projectId: PROJECT_ID,
-            events: createEvents(),
-            queues: new InMemoryQueues(),
-            routes,
-            dispatchers: {},
-          })
-      )
-    ).toMatchObject({
-      code: "internal.unexpected",
-      retryable: false,
-      message:
-        "[SixbOrchestrator] Projection routes require lake storage for durable reconciliation.",
-      details: {
-        projectId: PROJECT_ID,
-        projectionIds: [descriptor.projectionId],
+  test.each([
+    {
+      name: "an empty project id",
+      projectId: "",
+      routes: new Map() as OrchestratorRoutes,
+      error: { message: "[SixbOrchestrator] projectId is required." },
+    },
+    {
+      name: "projection routes without durable reconciliation",
+      projectId: PROJECT_ID,
+      routes: invoiceProjectionRoutes(invoiceProjectionDescriptor()),
+      error: {
+        message:
+          "[SixbOrchestrator] Projection routes require lake storage for durable reconciliation.",
+        details: { projectId: PROJECT_ID, projectionIds: ["invoice-projection"] },
       },
-    })
-  })
-
-  test("reports conflicting projection routes with their correlation details", () => {
-    const descriptor = invoiceProjectionDescriptor()
-    const routes = compileRoutes({
-      schedules: [],
-      syncs: [],
-      pipelines: [],
-      projections: [
-        descriptor,
-        invoiceProjectionDescriptor({ projectionRevision: "projection-2" }),
-      ],
-    })
-
+    },
+    {
+      name: "conflicting projection routes",
+      projectId: PROJECT_ID,
+      routes: invoiceProjectionRoutes(
+        invoiceProjectionDescriptor(),
+        invoiceProjectionDescriptor({ projectionRevision: "projection-2" })
+      ),
+      error: {
+        message:
+          "[SixbOrchestrator] Projection 'invoice-projection' has conflicting dispatch routes.",
+        details: { projectId: PROJECT_ID, projectionId: "invoice-projection" },
+      },
+    },
+    {
+      name: "workflow routes without durable Core dispatch",
+      projectId: PROJECT_ID,
+      routes: eventWorkflowRoutes(),
+      error: {
+        message: "[SixbOrchestrator] Routes require the 'workflows' dispatcher.",
+        details: { projectId: PROJECT_ID, dispatcher: "workflows" },
+      },
+    },
+  ])("rejects $name structurally", ({ projectId, routes, error }) => {
     expect(
       thrownBy(
         () =>
           new OrchestratorWorker({
-            projectId: PROJECT_ID,
+            projectId,
             events: createEvents(),
             queues: new InMemoryQueues(),
             routes,
             dispatchers: {},
           })
       )
-    ).toMatchObject({
-      code: "internal.unexpected",
-      retryable: false,
-      message: `[SixbOrchestrator] Projection '${descriptor.projectionId}' has conflicting dispatch routes.`,
-      details: { projectId: PROJECT_ID, projectionId: descriptor.projectionId },
-    })
-  })
-
-  test("requires durable Core dispatch for workflow routes", () => {
-    expect(
-      () =>
-        new OrchestratorWorker({
-          projectId: PROJECT_ID,
-          events: createEvents(),
-          queues: new InMemoryQueues(),
-          routes: eventWorkflowRoutes(),
-          dispatchers: {},
-        })
-    ).toThrow("[SixbOrchestrator] Routes require the 'workflows' dispatcher.")
+    ).toMatchObject({ code: "internal.unexpected", retryable: false, ...error })
   })
 })

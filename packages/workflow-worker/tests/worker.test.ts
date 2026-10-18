@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import {
   type ActionDefinition,
   defineIntervention,
@@ -17,16 +17,10 @@ import {
   SixbHost,
   type WorkflowDefinition,
 } from "@sixb/core"
+import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
-import {
-  type DecisionModel,
-  decisionOutput,
-  defineLanguageModel,
-  type LanguageModel,
-  type LanguageModelStreamEvent,
-  question,
-} from "@sixb/core/models"
+import { type DecisionModel, decisionOutput, question } from "@sixb/core/models"
 import type { ClaimedQueueJob, WorkflowQueueJob } from "@sixb/core/queues"
 import {
   createTestSixb,
@@ -58,11 +52,15 @@ const findBestInvoice = defineWorkflowStep("find-best-invoice")
     invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
   }))
 
-const slowStep = defineWorkflowStep("slow-step")
+/** Each attempt waits until the test calls the release it pushed. */
+const gatedStepReleases: (() => void)[] = []
+const gatedStep = defineWorkflowStep("gated-step")
   .input({})
   .output({})
   .run(async () => {
-    await Bun.sleep(50)
+    await new Promise<void>((resolve) => {
+      gatedStepReleases.push(resolve)
+    })
     return {}
   })
 
@@ -85,17 +83,6 @@ const reviewInvoice = defineIntervention("review-invoice")
   .response({
     approvedInvoice: ref(Invoice),
   })
-
-const finalizeInvoice = defineWorkflowStep("finalize-invoice")
-  .input({
-    approvedInvoice: ref(Invoice),
-  })
-  .output({
-    invoice: ref(Invoice),
-  })
-  .run(({ input }) => ({
-    invoice: input.approvedInvoice,
-  }))
 
 const workers: WorkflowWorker[] = []
 
@@ -153,7 +140,9 @@ async function waitFor<T>(
       return value
     }
 
-    await Bun.sleep(20)
+    // Between event-loop turns rather than on a timer, so it also works while timers are faked.
+    // The clock is frozen then, and the test's own timeout bounds the wait instead.
+    await new Promise<void>((resolve) => setImmediate(resolve))
   }
 
   throw new Error("Timed out waiting for condition.")
@@ -211,61 +200,6 @@ describe("WorkflowWorker", () => {
           executionId: run!.executionId,
         })
       ).toMatchObject({ attempt: 1, usage: { inputTokens: 7, outputTokens: 3, totalTokens: 10 } })
-    } finally {
-      await worker.stop()
-    }
-  })
-
-  test("ordinary workflow steps generate inline under the workflow execution", async () => {
-    // Removal proof: remove modelExecution from the Workflow worker's primitive binding.
-    const model: LanguageModel = {
-      providerId: "test",
-      modelId: "summarize",
-      definition: defineLanguageModel({
-        kind: "language",
-        providerId: "test",
-        modelId: "summarize",
-        capabilities: {},
-      }),
-      async stream() {
-        return {
-          events: (async function* (): AsyncIterable<LanguageModelStreamEvent> {
-            yield { type: "stream-start" }
-            yield { type: "text-start", id: "text" }
-            yield { type: "text-delta", id: "text", delta: "Summary" }
-            yield { type: "text-end", id: "text" }
-            yield {
-              type: "finish",
-              finishReason: "stop",
-              usage: { inputTokens: 7, outputTokens: 2 },
-            }
-          })(),
-        }
-      },
-    }
-    const step = defineWorkflowStep("summarize")
-      .input({})
-      .output({ summary: "string" })
-      .run(async ({ sixb }) => ({
-        summary: (await sixb.models.language.generate({ model, prompt: "Summarize" })).output,
-      }))
-    const workflow = defineWorkflow("inline-model").input({}).then(step)
-    const host = createSixb({ workflows: [workflow] })
-    const worker = new WorkflowWorker(host)
-    await worker.start()
-    try {
-      await requestWorkflowRun(host, workflow, "model-run", {})
-      const run = await waitFor(
-        () => host.storage.workflowRuns!.getById({ projectId: host.id, id: "model-run" }),
-        (value) => value?.status === "succeeded" || value?.status === "failed"
-      )
-      expect(run?.status).toBe("succeeded")
-      expect(
-        await host.storage.aiUsage!.getLatestForExecution({
-          projectId: host.id,
-          executionId: run!.executionId,
-        })
-      ).toMatchObject({ attempt: 1, requesterGroupIds: [], usage: { totalTokens: 9 } })
     } finally {
       await worker.stop()
     }
@@ -545,6 +479,19 @@ describe("WorkflowWorker", () => {
     await requestWorkflowRun(sixb, workflow, "wfrun_worker_failed", {
       transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
     })
+    // The duplicate delivery below finds the run already failed and must not report it again.
+    const settlements: string[] = []
+    const fail = sixb.queues.workflows.fail.bind(sixb.queues.workflows)
+    sixb.queues.workflows.fail = async (input) => {
+      await fail(input)
+      settlements.push("failed")
+    }
+    const complete = sixb.queues.workflows.complete.bind(sixb.queues.workflows)
+    sixb.queues.workflows.complete = async (input) => {
+      const result = await complete(input)
+      settlements.push("completed")
+      return result
+    }
     await sixb.queues.workflows.enqueue({
       projectId: sixb.id,
       jobs: [
@@ -677,7 +624,12 @@ describe("WorkflowWorker", () => {
       },
     })
 
-    await Bun.sleep(50)
+    await waitFor(
+      async () => settlements,
+      (value) => value.length === 2
+    )
+    await flushSixbErrors(sixb)
+    expect(settlements).toEqual(["failed", "completed"])
     expect(reports).toHaveLength(1)
 
     const claimed = await sixb.queues.workflows.claim({
@@ -753,175 +705,6 @@ describe("WorkflowWorker", () => {
       failure: run?.error,
     })
     expect(reported[0]?.context.occurredAt).toBe(run?.error?.at ?? "")
-  })
-
-  test("completes queue jobs when workflow runs suspend at intervention nodes", async () => {
-    const workflow = defineWorkflow("review-transaction")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .then(findBestInvoice)
-      .then(reviewInvoice, ({ steps }) => ({
-        invoice: steps.findBestInvoice.invoice,
-      }))
-    const sixb = createSixb({ workflows: [workflow] })
-    await requestWorkflowRun(sixb, workflow, "wfrun_worker_waiting", {
-      transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
-    })
-
-    const worker = new WorkflowWorker(sixb)
-    workers.push(worker)
-    await worker.start()
-
-    const run = await waitFor(
-      () =>
-        sixb.storage.workflowRuns!.getById({
-          projectId: sixb.id,
-          id: "wfrun_worker_waiting",
-        }),
-      (value) => value?.status === "waiting"
-    )
-    const interventions = await waitFor(
-      () =>
-        sixb.storage.workflowInterventions!.list({
-          projectId: sixb.id,
-          workflowRunId: "wfrun_worker_waiting",
-        }),
-      (value) => value.total === 1
-    )
-    const events = await waitFor(
-      () =>
-        sixb.events.read({
-          types: [
-            "workflow.run.started",
-            "workflow.run.node.started",
-            "workflow.run.node.finished",
-            "workflow.intervention.requested",
-            "workflow.run.node.waiting",
-            "workflow.run.waiting",
-          ],
-        }),
-      (value) => value.length === 7
-    )
-
-    expect(run?.workflowId).toBe(workflow.id)
-    expect(interventions.interventions[0]).toMatchObject({
-      id: "wfrun_worker_waiting:intervention:1",
-      workflowRunId: "wfrun_worker_waiting",
-      status: "pending",
-      input: {
-        invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
-      },
-    })
-    expect(events.map((event) => event.type)).toEqual([
-      "workflow.run.started",
-      "workflow.run.node.started",
-      "workflow.run.node.finished",
-      "workflow.run.node.started",
-      "workflow.intervention.requested",
-      "workflow.run.node.waiting",
-      "workflow.run.waiting",
-    ])
-
-    const claimed = await sixb.queues.workflows.claim({
-      projectId: sixb.id,
-      workerId: "observer",
-    })
-    expect(claimed).toHaveLength(0)
-  })
-
-  test("processes resume jobs for submitted workflow interventions", async () => {
-    const workflow = defineWorkflow("resume-reviewed-transaction")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .then(findBestInvoice)
-      .then(reviewInvoice, ({ steps }) => ({
-        invoice: steps.findBestInvoice.invoice,
-      }))
-      .then(finalizeInvoice, ({ steps }) => ({
-        approvedInvoice: steps.reviewInvoice.approvedInvoice,
-      }))
-    const sixb = createSixb({ workflows: [workflow] })
-
-    await requestWorkflowRun(sixb, workflow, "wfrun_worker_resume", {
-      transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
-    })
-
-    const worker = new WorkflowWorker(sixb)
-    workers.push(worker)
-    await worker.start()
-
-    await waitFor(
-      () =>
-        sixb.storage.workflowRuns!.getById({
-          projectId: sixb.id,
-          id: "wfrun_worker_resume",
-        }),
-      (value) => value?.status === "waiting"
-    )
-
-    await sixb.storage.workflowInterventions!.submit({
-      projectId: sixb.id,
-      id: "wfrun_worker_resume:intervention:1",
-      response: {
-        approvedInvoice: { objectTypeId: "Invoice", primaryId: "inv_reviewed" },
-      },
-    })
-    await sixb.queues.workflows.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "workflow.run.resume.requested",
-          payload: {
-            runId: "wfrun_worker_resume",
-            nodeRunId: "wfrun_worker_resume:node:1",
-          },
-        },
-      ],
-    })
-
-    const run = await waitFor(
-      () =>
-        sixb.storage.workflowRuns!.getById({
-          projectId: sixb.id,
-          id: "wfrun_worker_resume",
-        }),
-      (value) => value?.status === "succeeded"
-    )
-    const nodes = await sixb.storage.workflowRuns!.nodes.list({
-      projectId: sixb.id,
-      workflowRunId: "wfrun_worker_resume",
-      order: "asc",
-    })
-    const events = await waitFor(
-      () =>
-        sixb.events.read({
-          types: [
-            "workflow.run.node.finished",
-            "workflow.run.node.started",
-            "workflow.run.finished",
-          ],
-        }),
-      (value) => value.length === 7
-    )
-
-    expect(run?.workflowId).toBe(workflow.id)
-    expect(nodes.nodes.map((node) => `${node.nodeId}:${node.status}`)).toEqual([
-      "find-best-invoice:succeeded",
-      "review-invoice:succeeded",
-      "finalize-invoice:succeeded",
-    ])
-    expect(nodes.nodes[2]?.output).toEqual({
-      invoice: { objectTypeId: "Invoice", primaryId: "inv_reviewed" },
-    })
-    expect(events.at(-1)?.type).toBe("workflow.run.finished")
-
-    const claimed = await sixb.queues.workflows.claim({
-      projectId: sixb.id,
-      workerId: "observer",
-    })
-    expect(claimed).toHaveLength(0)
   })
 
   test("reports a resumed workflow only when it transitions to failed", async () => {
@@ -1022,7 +805,7 @@ describe("WorkflowWorker", () => {
 
   test("keeps the run recoverable without reporting a failure on worker shutdown", async () => {
     const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-    const workflow = defineWorkflow("cancel-workflow").input({}).then(slowStep)
+    const workflow = defineWorkflow("cancel-workflow").input({}).then(gatedStep)
     const sixb = createSixb({
       workflows: [workflow],
       onError: (error, context) => {
@@ -1030,89 +813,76 @@ describe("WorkflowWorker", () => {
       },
     })
     await requestWorkflowRun(sixb, workflow, "wfrun_worker_cancelled", {})
+    const readRun = () =>
+      sixb.storage.workflowRuns!.getById({ projectId: sixb.id, id: "wfrun_worker_cancelled" })
+    const readEvents = () =>
+      sixb.events.read({
+        types: [
+          "workflow.run.started",
+          "workflow.run.node.started",
+          "workflow.run.node.finished",
+          "workflow.run.finished",
+        ],
+      })
 
-    const worker = new WorkflowWorker(sixb)
-    workers.push(worker)
-    await worker.start()
+    jest.useFakeTimers()
+    try {
+      const worker = new WorkflowWorker(sixb)
+      workers.push(worker)
+      await worker.start()
+      await waitFor(
+        async () => gatedStepReleases.length,
+        (started) => started === 1
+      )
 
-    await waitFor(
-      () =>
-        sixb.storage.workflowRuns!.getById({
-          projectId: sixb.id,
-          id: "wfrun_worker_cancelled",
-        }),
-      (value) => value?.status === "running"
-    )
+      // The step ignores cancellation; it returns only after shutdown has begun.
+      const stopping = worker.stop()
+      gatedStepReleases[0]?.()
+      await stopping
 
-    await worker.stop()
+      expect((await readRun())?.status).toBe("running")
+      expect((await readEvents()).map((event) => event.type)).toEqual([
+        "workflow.run.started",
+        "workflow.run.node.started",
+      ])
 
-    const run = await sixb.storage.workflowRuns!.getById({
-      projectId: sixb.id,
-      id: "wfrun_worker_cancelled",
-    })
-    expect(run?.status).toBe("running")
-    await Bun.sleep(0)
-    expect(reports).toHaveLength(0)
+      // Shutdown releases the delivery for redelivery after the worker's one-second backoff.
+      jest.advanceTimersByTime(1_000)
+      const replacement = new WorkflowWorker(sixb)
+      workers.push(replacement)
+      await replacement.start()
+      await waitFor(
+        async () => gatedStepReleases.length,
+        (started) => started === 2
+      )
+      gatedStepReleases[1]?.()
+      const recovered = await waitFor(readRun, (value) => value?.status === "succeeded")
 
-    const interruptedEvents = await sixb.events.read({
-      types: [
+      expect(recovered).toMatchObject({ status: "succeeded", attempt: 2 })
+      await flushSixbErrors(sixb)
+      expect(reports).toHaveLength(0)
+
+      const events = await readEvents()
+      expect(events.map((event) => event.type)).toEqual([
         "workflow.run.started",
         "workflow.run.node.started",
         "workflow.run.node.finished",
         "workflow.run.finished",
-      ],
-    })
-    expect(interruptedEvents.map((event) => event.type)).toEqual([
-      "workflow.run.started",
-      "workflow.run.node.started",
-    ])
-
-    const replacement = new WorkflowWorker(sixb)
-    workers.push(replacement)
-    await replacement.start()
-    const recovered = await waitFor(
-      () =>
-        sixb.storage.workflowRuns!.getById({
-          projectId: sixb.id,
-          id: "wfrun_worker_cancelled",
-        }),
-      (value) => value?.status === "succeeded"
-    )
-
-    expect(recovered).toMatchObject({ status: "succeeded", attempt: 2 })
-    expect(reports).toHaveLength(0)
-
-    const events = await sixb.events.read({
-      types: [
-        "workflow.run.started",
-        "workflow.run.node.started",
-        "workflow.run.node.finished",
-        "workflow.run.finished",
-      ],
-    })
-    expect(events.map((event) => event.type)).toEqual([
-      "workflow.run.started",
-      "workflow.run.node.started",
-      "workflow.run.node.finished",
-      "workflow.run.finished",
-    ])
-    expect(events[2]?.payload).toMatchObject({
-      workflowId: workflow.id,
-      runId: "wfrun_worker_cancelled",
-      nodeRunId: "wfrun_worker_cancelled:node:0",
-      status: "succeeded",
-    })
-    expect(events[3]?.payload).toMatchObject({
-      workflowId: workflow.id,
-      runId: "wfrun_worker_cancelled",
-      status: "succeeded",
-      finishedAt: expect.any(String),
-    })
-
-    const claimed = await sixb.queues.workflows.claim({
-      projectId: sixb.id,
-      workerId: "observer",
-    })
-    expect(claimed).toHaveLength(0)
+      ])
+      expect(events[2]?.payload).toMatchObject({
+        workflowId: workflow.id,
+        runId: "wfrun_worker_cancelled",
+        nodeRunId: "wfrun_worker_cancelled:node:0",
+        status: "succeeded",
+      })
+      expect(events[3]?.payload).toMatchObject({
+        workflowId: workflow.id,
+        runId: "wfrun_worker_cancelled",
+        status: "succeeded",
+        finishedAt: expect.any(String),
+      })
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })

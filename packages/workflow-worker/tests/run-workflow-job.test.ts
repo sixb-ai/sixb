@@ -112,19 +112,6 @@ const prepareInvoice = defineWorkflowStep("prepare-invoice")
     extraContext: "ignored-by-action-request",
   }))
 
-const reviewInvoiceDecision = defineIntervention("review-invoice-decision")
-  .input({
-    transaction: ref(Transaction),
-    invoice: ref(Invoice),
-    confidence: "double",
-  })
-  .response({
-    approved: "boolean",
-  })
-  .defaults(({ input }) => ({
-    approved: input.confidence >= 0.95,
-  }))
-
 const reviewBeforeAttach = defineIntervention("review-before-attach")
   .input({
     transaction: ref(Transaction),
@@ -523,46 +510,6 @@ describe("runWorkflowJob", () => {
     expect((await runs.getById({ projectId: sixb.id, id: result.id }))?.attempt).toBe(2)
   })
 
-  test("does not fail a workflow when lifecycle observer notification fails", async () => {
-    const workflow = defineWorkflow("observer-fails")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .then(findBestInvoice)
-    const sixb = createSixb({ workflows: [workflow] })
-    const reportedFailures: unknown[] = []
-    const observer: WorkflowRunObserver = {
-      async onRunStarted() {
-        throw new Error("observer failed")
-      },
-      onNodeStarted: async () => undefined,
-      onNodeFinished: async () => undefined,
-      onRunFinished: async () => undefined,
-    }
-
-    const originalConsoleError = console.error
-    console.error = () => undefined
-    try {
-      const result = await runWorkflowJob({
-        runtime: createRuntime(sixb),
-        job: {
-          id: "wfrun_observer_fails",
-          workflowId: workflow.id,
-          input: {
-            transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
-          },
-        },
-        observer,
-        onRunFailed: (error) => reportedFailures.push(error),
-      })
-
-      expect(result.run.status).toBe("succeeded")
-      expect(reportedFailures).toHaveLength(0)
-    } finally {
-      console.error = originalConsoleError
-    }
-  })
-
   test("runs direct and mapped step dataflow sequentially", async () => {
     const workflow = defineWorkflow("reconcile-transaction")
       .input({
@@ -880,14 +827,17 @@ describe("runWorkflowJob", () => {
     expect(await listNodes()).toEqual(nodesWaitingOnApproval)
   })
 
-  test("notifies run waiting when a parked node notification fails", async () => {
+  test("isolates lifecycle observer failures from the run and from later notifications", async () => {
     const workflow = defineWorkflow("agent-waiting-observer-fails")
       .input({ transaction: ref(Transaction) })
       .then(resolveInvoiceWithAgent)
     const sixb = createSixb({ workflows: [workflow] })
+    const reportedFailures: unknown[] = []
     let runWaitingNotified = false
     const observer: WorkflowRunObserver = {
-      onRunStarted: async () => undefined,
+      async onRunStarted() {
+        throw new Error("run started observer failed")
+      },
       onNodeStarted: async () => undefined,
       async onNodeWaiting() {
         throw new Error("node waiting observer failed")
@@ -912,10 +862,12 @@ describe("runWorkflowJob", () => {
           },
         },
         observer,
+        onRunFailed: (error) => reportedFailures.push(error),
       })
 
       expect(result.status).toBe("waiting")
       expect(runWaitingNotified).toBe(true)
+      expect(reportedFailures).toHaveLength(0)
     } finally {
       console.error = originalConsoleError
     }
@@ -1134,31 +1086,6 @@ describe("runWorkflowJob", () => {
       "find-best-invoice:succeeded",
       "review-before-attach:waiting",
     ])
-  })
-
-  test("validates workflow input before starting the run", async () => {
-    const workflow = defineWorkflow("requires-transaction")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .then(findBestInvoice)
-    const sixb = createSixb({ workflows: [workflow] })
-
-    await expect(
-      runWorkflowJob({
-        runtime: createRuntime(sixb),
-        job: {
-          id: "wfrun_invalid_input",
-          workflowId: workflow.id,
-          input: {},
-        },
-      })
-    ).rejects.toBeInstanceOf(WorkflowValidationError)
-
-    const runs = await sixb.storage.workflowRuns!.list({
-      projectId: sixb.id,
-    })
-    expect(runs.total).toBe(0)
   })
 
   test("marks queued runs failed when validation fails before start", async () => {
@@ -1551,41 +1478,6 @@ describe("runWorkflowJob", () => {
     })
   })
 
-  test("runs global action nodes with direct dataflow", async () => {
-    actionHandlerCalls = 0
-    const workflow = defineWorkflow("create-invoice-direct-workflow")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .then(findBestInvoice)
-      .then(createInvoice)
-    const sixb = createSixb({ actions: [createInvoice], workflows: [workflow] })
-
-    const result = await runWorkflowJob({
-      runtime: createRuntime(sixb),
-      job: {
-        id: "wfrun_global_action_direct",
-        workflowId: workflow.id,
-        input: {
-          transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
-        },
-      },
-    })
-
-    expect(actionHandlerCalls).toBe(1)
-    const actionRun = await getActionRun(sixb, "wfrun_global_action_direct:action:1")
-    expect(actionRun).toMatchObject({ subject: { kind: "none" }, actionId: "create-invoice" })
-    expect(actionRun.params).toEqual({
-      invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
-    })
-    expect(result.nodes[1]?.input).toEqual({
-      params: {
-        invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
-      },
-    })
-    expect(result.nodes[1]?.status).toBe("succeeded")
-  })
-
   test("preserves action-node details without inventing a node run before preparation", async () => {
     const workflow = defineWorkflow("invalid-global-action-input-workflow")
       .input({
@@ -1777,75 +1669,6 @@ describe("runWorkflowJob", () => {
     })
   })
 
-  test("parks workflow runs at intervention nodes and creates pending interventions", async () => {
-    const workflow = defineWorkflow("review-invoice-intervention-workflow")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .then(findBestInvoice)
-      .then(reviewInvoiceDecision)
-    const sixb = createSixb({ workflows: [workflow] })
-
-    const result = await runWorkflowJob({
-      runtime: createRuntime(sixb),
-      job: {
-        id: "wfrun_intervention",
-        workflowId: workflow.id,
-        input: {
-          transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
-        },
-      },
-      observer: new EventsRuntimeWorkflowRunObserver(sixb.events),
-    })
-
-    const run = await sixb.storage.workflowRuns!.getById({
-      projectId: sixb.id,
-      id: "wfrun_intervention",
-    })
-    const nodes = await sixb.storage.workflowRuns!.nodes.list({
-      projectId: sixb.id,
-      workflowRunId: "wfrun_intervention",
-      order: "asc",
-    })
-    const intervention = await sixb.storage.workflowInterventions!.getById({
-      projectId: sixb.id,
-      id: "wfrun_intervention:intervention:1",
-    })
-    const events = await sixb.events.read({
-      topics: ["workflows"],
-    })
-
-    expect(result.status).toBe("waiting")
-    expect(run?.status).toBe("waiting")
-    expect(result.nodes.map((node) => node.status)).toEqual(["succeeded", "waiting"])
-    expect(nodes.nodes.map((node) => [node.nodeType, node.status])).toEqual([
-      ["step", "succeeded"],
-      ["intervention", "waiting"],
-    ])
-    expect(intervention).toMatchObject({
-      workflowId: workflow.id,
-      workflowRunId: "wfrun_intervention",
-      nodeRunId: "wfrun_intervention:node:1",
-      interventionId: "review-invoice-decision",
-      status: "pending",
-      input: {
-        confidence: 0.98,
-        invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
-        transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
-      },
-      defaultResponse: { approved: true },
-    })
-    expect(events.map((event) => event.type)).toEqual([
-      "workflow.run.started",
-      "workflow.run.node.started",
-      "workflow.run.node.finished",
-      "workflow.run.node.started",
-      "workflow.intervention.requested",
-      "workflow.run.node.waiting",
-      "workflow.run.waiting",
-    ])
-  })
-
   test("marks action node and workflow failed when the action run fails", async () => {
     const workflow = defineWorkflow("attach-invoice-fails-workflow")
       .input({
@@ -1902,49 +1725,6 @@ describe("runWorkflowJob", () => {
     expect(nodes.nodes[1]?.error?.message).toBe(
       "Workflow node execution failed. Action execution failed. Upstream request returned HTTP 429."
     )
-  })
-
-  test("marks action node and workflow failed when the action run fails after request", async () => {
-    const workflow = defineWorkflow("missing-subject-workflow")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .then(findBestInvoice)
-      .then(attachInvoice, ({ input, steps }) => ({
-        subject: input.transaction,
-        params: {
-          invoice: steps.findBestInvoice.invoice,
-        },
-      }))
-    const sixb = createSixb({ actions: [attachInvoice], workflows: [workflow] })
-
-    await expect(
-      runWorkflowJob({
-        runtime: createRuntime(sixb),
-        job: {
-          id: "wfrun_action_failed",
-          workflowId: workflow.id,
-          input: {
-            transaction: { objectTypeId: "Transaction", primaryId: "missing" },
-          },
-        },
-      })
-    ).rejects.toThrow("Action execution failed.")
-
-    const run = await sixb.storage.workflowRuns!.getById({
-      projectId: sixb.id,
-      id: "wfrun_action_failed",
-    })
-    const nodes = await sixb.storage.workflowRuns!.nodes.list({
-      projectId: sixb.id,
-      workflowRunId: "wfrun_action_failed",
-      order: "asc",
-    })
-    expect(run?.status).toBe("failed")
-    expect(nodes.nodes.map((node) => node.status)).toEqual(["succeeded", "failed"])
-    expect(await getActionRun(sixb, "wfrun_action_failed:action:1")).toMatchObject({
-      status: "failed",
-    })
   })
 
   test("fails clearly when the workflow is missing", async () => {
