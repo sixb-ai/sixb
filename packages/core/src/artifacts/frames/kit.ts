@@ -195,6 +195,8 @@ ${Object.entries(LIGHT)
   section.slide a { color: inherit; text-decoration-thickness: 2px; text-underline-offset: 5px; }
   section.slide small, section.slide .note { font-size: 20px; color: var(--muted-foreground); }
   section.slide img, section.slide svg, section.slide video { max-width: 100%; max-height: 100%; }
+  /* A figure's default 40px margins would squeeze a chart and its labels below the type floor. */
+  section.slide figure { margin: 0; }
   section.slide code { font-family: var(--font-mono); font-size: 0.85em; }
 
   /* Chrome: a label above the heading (two spans sit at either end), and the footer. */
