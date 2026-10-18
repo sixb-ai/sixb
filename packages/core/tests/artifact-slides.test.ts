@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import type { ArtifactFile } from "../src"
 import { ArtifactRequestError, SixbHost } from "../src"
-import { DECK_KEYS, FRAME_PROTOCOL, frameStartHash } from "../src/artifacts/frames/protocol"
+import {
+  DECK_KEYS,
+  FRAME_PROTOCOL,
+  frameStartHash,
+  parseFrameEvent,
+} from "../src/artifacts/frames/protocol"
 import { frameRuntime } from "../src/artifacts/frames/runtime"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { createTestSixb } from "../src/testing"
@@ -136,13 +141,68 @@ describe("a frame's start", () => {
 })
 
 describe("the frame runtime", () => {
-  test("speaks the protocol and passes the keys the app declares", () => {
+  test("speaks the protocol and passes exactly the keys the app declares", () => {
     // The runtime is served as its own source, so it repeats these instead of importing them.
+    // Reproduce by adding or dropping a key in the runtime's KEYS: the lists no longer match.
     const source = frameRuntime.toString()
     expect(source).toContain(`"${FRAME_PROTOCOL}"`)
-    for (const key of DECK_KEYS) expect(source).toContain(JSON.stringify(key))
+    const keys = /\bKEYS\s*=\s*\[([^\]]*)\]/.exec(source)?.[1]
+    expect(keys).toBeDefined()
+    const runtimeKeys = Array.from(keys?.matchAll(/"((?:[^"\\]|\\.)*)"/g) ?? [], (match) =>
+      JSON.parse(match[0])
+    )
+    expect(runtimeKeys).toEqual([...DECK_KEYS])
     for (const key of ["sixb-slide", "sixb-fill"]) expect(source).toContain(`"${key}"`)
     // It names nothing outside itself: its source runs on its own.
     expect(() => new Function(`return (${source})`)()).not.toThrow()
+  })
+})
+
+describe("a frame's events", () => {
+  const event = (name: string, params: unknown) =>
+    parseFrameEvent({ protocol: FRAME_PROTOCOL, event: name, params })
+  const rect = { x: 10, y: 20, width: 300, height: 200 }
+
+  test("read as the protocol declares them", () => {
+    expect(event("ready", { slides: 3 })).toEqual({
+      protocol: FRAME_PROTOCOL,
+      event: "ready",
+      params: { slides: 3 },
+    })
+    expect(event("select", { slide: 2 })?.params).toEqual({ slide: 2 })
+    expect(event("key", { key: "ArrowRight" })?.params).toEqual({ key: "ArrowRight" })
+    expect(event("open", { address: "artifact:art_0123456789" })?.params).toEqual({
+      address: "artifact:art_0123456789",
+    })
+    expect(
+      event("embeds", { embeds: [{ address: "artifact:art_0123456789#1", rect, scale: 0.5 }] })
+        ?.params
+    ).toEqual({ embeds: [{ address: "artifact:art_0123456789#1", rect, scale: 0.5 }] })
+  })
+
+  test("that a deck's own scripts could post out of shape are dropped", () => {
+    // A deck runs inline scripts: reproduce by returning `data` as a FrameEvent unchecked.
+    for (const [name, params] of [
+      ["ready", { slides: -1 }],
+      ["ready", { slides: 2.5 }],
+      ["ready", { slides: "100000000" }],
+      ["select", { slide: 0 }],
+      ["select", { slide: Number.POSITIVE_INFINITY }],
+      ["key", { key: "q" }],
+      ["open", { address: 42 }],
+      ["open", { address: `artifact:${"a".repeat(3000)}` }],
+      ["embeds", { embeds: "all" }],
+      ["embeds", { embeds: [{ address: "artifact:art_0123456789", rect, scale: 0 }] }],
+      ["embeds", { embeds: [{ address: "artifact:art_0123456789", rect: { ...rect, x: "1" } }] }],
+      ["embeds", { embeds: Array.from({ length: 201 }, () => ({ address: "a", rect, scale: 1 })) }],
+      ["unknown", {}],
+    ] as const) {
+      expect(event(name, params)).toBeNull()
+    }
+    expect(parseFrameEvent({ protocol: "other/1", event: "ready", params: { slides: 1 } })).toBe(
+      null
+    )
+    expect(parseFrameEvent(null)).toBeNull()
+    expect(parseFrameEvent({ protocol: FRAME_PROTOCOL, event: "ready" })).toBeNull()
   })
 })
