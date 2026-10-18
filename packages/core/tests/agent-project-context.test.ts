@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, rm, symlink, truncate, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
@@ -38,6 +38,12 @@ async function writeProjectFile(
   await writeFile(join(root, path), contents)
 }
 
+/** Discovery checks sizes before reading, so a sparse file proves the byte cap without writing it. */
+async function writeOversizedFile(root: string, path: string): Promise<void> {
+  await writeProjectFile(root, path, "")
+  await truncate(join(root, path), 17 * 1024 * 1024)
+}
+
 function skillMarkdown(frontmatter: readonly string[], body = "# Instructions"): string {
   return ["---", ...frontmatter, "---", "", body].join("\n")
 }
@@ -47,9 +53,10 @@ function load(root: string) {
 }
 
 describe("Agent Skills discovery", () => {
-  test("a project without skills/ has none", async () => {
+  test("a project without skills/ or SIXB.md has neither", async () => {
     const sixb = await load(await projectRoot())
     expect(sixb.definitions.agent.skills.list()).toEqual([])
+    expect(sixb.definitions.agent.instructions).toBeUndefined()
   })
 
   test("parses YAML metadata and keeps binary files and executable modes", async () => {
@@ -165,22 +172,13 @@ describe("Agent Skills discovery", () => {
       "skills/acme-style/SKILL.md",
       skillMarkdown(["name: acme-style", "description: Use when drafting messages."])
     )
-    await writeProjectFile(
-      root,
-      "skills/acme-style/assets/large.bin",
-      new Uint8Array(17 * 1024 * 1024)
-    )
+    await writeOversizedFile(root, "skills/acme-style/assets/large.bin")
 
     await expect(load(root)).rejects.toThrow("[Sixb] The files under skills/ exceed 16 MB.")
   })
 })
 
 describe("SIXB.md discovery", () => {
-  test("is optional", async () => {
-    const sixb = await load(await projectRoot())
-    expect(sixb.definitions.agent.instructions).toBeUndefined()
-  })
-
   test("keeps the instructions verbatim", async () => {
     const root = await projectRoot()
     const instructions = "# Acme\n\nAnswer in French.\n"
@@ -312,8 +310,7 @@ describe("ontology docs discovery", () => {
     },
     {
       label: "too many bytes of docs and scripts",
-      setup: (root: string) =>
-        writeProjectFile(root, "ontology/scripts/model.bin", new Uint8Array(17 * 1024 * 1024)),
+      setup: (root: string) => writeOversizedFile(root, "ontology/scripts/model.bin"),
       error: "[Sixb] The files under ontology/ exceed 16 MB.",
     },
     {

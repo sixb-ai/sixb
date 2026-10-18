@@ -62,6 +62,13 @@ describe("AI model-call limits", () => {
     await expect(controller.beforeModelCall(admission("call_1"))).resolves.toEqual({
       reservation: "active",
     })
+    const statuses = await storage.aiLimits.listPolicyStatuses({ projectId })
+    expect(
+      statuses.map((status) => [status.policy.id, status.consumption.reserved.amount]).sort()
+    ).toEqual([
+      ["project_tokens", 4_196],
+      ["support_tokens", 4_196],
+    ])
     const rejection = await Promise.resolve(controller.beforeModelCall(admission("call_2"))).catch(
       (error: unknown) => error
     )

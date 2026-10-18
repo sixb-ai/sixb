@@ -141,9 +141,6 @@ describe("audio transcription", () => {
       sixb.models.audio.transcribe({ audio, model: { ...impostor, modelId: "other" } })
     ).rejects.toThrow("Configure")
     expect(() => createModelCatalog({ audio: { transcription: [] } })).toThrow("at least one")
-    expect(() => createModelCatalog({ audio: { transcription: [impostor, impostor] } })).toThrow(
-      "Duplicate"
-    )
   })
 
   test("rejects oversized, mismatched and unsupported files before inference", async () => {

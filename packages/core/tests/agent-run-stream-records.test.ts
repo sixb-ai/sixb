@@ -61,7 +61,7 @@ function subagentRunRecord(overrides: Partial<SubagentRunRecord> = {}): Subagent
 }
 
 describe("agent run stream records", () => {
-  test("builds and validates the low-frequency project activity event", () => {
+  test("builds, validates, and publishes the project activity event keyed by its thread", async () => {
     const event = agentRunActivityEvent(runRecord({ status: "running", attempt: 2 }), OCCURRED_AT)
 
     expect(event).toMatchObject({
@@ -77,6 +77,20 @@ describe("agent run stream records", () => {
     // Regression proof: restoring agentId in either event builder fails these absence checks.
     expect(event).not.toHaveProperty("agentId")
     expect(isAgentRunActivityEvent({ ...event, status: "thinking" })).toBe(false)
+
+    const broker = new InMemoryBroker()
+    const queued = runRecord({ status: "queued" })
+    await publishAgentRunActivity(broker, queued)
+    const activity = await broker.read({
+      projectId: queued.projectId,
+      streamId: AGENT_ACTIVITY_STREAM_ID,
+    })
+    expect(activity.records).toHaveLength(1)
+    expect(activity.records[0]).toMatchObject({
+      name: "agent.run.activity",
+      key: queued.threadId,
+      payload: { status: "queued", runId: queued.id },
+    })
   })
 
   test("builds the finished event from a terminal run record", () => {
@@ -268,24 +282,6 @@ describe("agent run stream records", () => {
       runId: run.id,
       threadId: run.threadId,
       status: "cancelled",
-    })
-  })
-
-  test("publishes queued activity without creating a per-run transcript stream", async () => {
-    const broker = new InMemoryBroker()
-    const run = runRecord({ status: "queued" })
-
-    await publishAgentRunActivity(broker, run)
-
-    const activity = await broker.read({
-      projectId: run.projectId,
-      streamId: AGENT_ACTIVITY_STREAM_ID,
-    })
-    expect(activity.records).toHaveLength(1)
-    expect(activity.records[0]).toMatchObject({
-      name: "agent.run.activity",
-      key: run.threadId,
-      payload: { status: "queued", runId: run.id },
     })
   })
 })

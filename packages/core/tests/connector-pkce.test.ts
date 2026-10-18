@@ -3,6 +3,7 @@ import { createHash } from "node:crypto"
 import type { OAuthConnectorCodeExchangeInput } from "../src"
 import {
   callbackUrl,
+  connectAccount,
   connectionSnapshot,
   createHarness,
   managementCommand,
@@ -74,14 +75,7 @@ describe("connector PKCE capability", () => {
         return { accessToken: "token" }
       },
     })
-    const initial = await startAuthorization(harness)
-    const grant = await initial.complete()
-    await harness.process.selectAccount(managementCommand(), harness.connector.id, {
-      owner: projectOwner,
-      slot: "social",
-      authorizationId: grant.authorizationId,
-      accountId: "account-a",
-    })
+    const { authorizationId } = await connectAccount(harness)
     const started = await harness.process.startAuthorization(
       managementCommand(),
       harness.connector.id,
@@ -89,7 +83,7 @@ describe("connector PKCE capability", () => {
         owner: projectOwner,
         slot: "social",
         redirectUri: callbackUrl,
-        reauthorizationId: grant.authorizationId,
+        reauthorizationId: authorizationId,
       }
     )
     const url = new URL(started.authorizationUrl)

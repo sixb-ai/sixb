@@ -314,23 +314,23 @@ describe("language generation", () => {
     expect(Object.getPrototypeOf(output)).toBe(Object.prototype)
   })
 
-  test("returns text truncation but rejects incomplete structured output", async () => {
-    const { model } = fakeModel({ text: '{"count":2}', finishReason: "length" })
-    const { sixb } = setup([model])
-    expect((await sixb.models.language.generate({ prompt: "Hi" })).finishReason).toBe("length")
-    await expect(
-      sixb.models.language.generate({ prompt: "Hi", output: { count: "integer" } })
-    ).rejects.toBeInstanceOf(StructuredOutputError)
-  })
-
+  // A truncated text is a result; a failed finish or a pending continuation is not.
   test.each([
-    "error",
-    "content-filter",
-    "pause",
-  ] as const)("rejects %s without a continuation", async (finishReason) => {
+    ["length", "length"],
+    ["error", "[SixbModels] Generation ended with 'error'."],
+    ["content-filter", "[SixbModels] Generation ended with 'content-filter'."],
+    [
+      "pause",
+      "[SixbModels] Model reached the step limit while a provider continuation was pending.",
+    ],
+  ] as const)("accounts for a %s finish without a continuation", async (finishReason, outcome) => {
     const { model, requests } = fakeModel({ finishReason })
     const { sixb, storage, identity } = setup([model])
-    await expect(sixb.models.language.generate({ prompt: "Hi" })).rejects.toThrow()
+    const settled = await sixb.models.language.generate({ prompt: "Hi" }).then(
+      (result) => result.finishReason,
+      (error: Error) => error.message
+    )
+    expect(settled).toBe(outcome)
     expect(requests).toHaveLength(1)
     expect(await storage.aiUsage.summarizeExecution(identity)).toMatchObject({ modelCallCount: 1 })
   })

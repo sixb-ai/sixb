@@ -10,8 +10,9 @@ const Room = defineObjectType({
 })
 
 describe("connectors", () => {
-  test("connects lazily and caches the connected client", async () => {
+  test("connects lazily, caches the client until closed, and reconnects on next access", async () => {
     let connectCount = 0
+    let disconnectCount = 0
 
     const erpDb = defineConnector("erpDb", {
       type: "test",
@@ -20,36 +21,8 @@ describe("connectors", () => {
         return {
           connectorId: context.connectorId,
           projectId: context.projectId,
+          instance: connectCount,
         }
-      },
-    })
-
-    const sixb = createTestSixb({
-      ontology: [Room],
-      connectors: [erpDb],
-      ...createTestRuntimeDeps(),
-    })
-
-    expect(connectCount).toBe(0)
-
-    const first = await sixb.connector(erpDb)
-    const second = await sixb.connector(erpDb)
-
-    expect(connectCount).toBe(1)
-    expect(first).toBe(second)
-    expect(first.connectorId).toBe("erpDb")
-    expect(first.projectId).toBe("default")
-  })
-
-  test("disconnects connected clients and reconnects on next access", async () => {
-    let connectCount = 0
-    let disconnectCount = 0
-
-    const erpDb = defineConnector("erpDb", {
-      type: "test",
-      connect() {
-        connectCount += 1
-        return { instance: connectCount }
       },
       disconnect() {
         disconnectCount += 1
@@ -62,45 +35,33 @@ describe("connectors", () => {
       ...createTestRuntimeDeps(),
     })
     const sixb = createTestSixb(host)
+    expect(connectCount).toBe(0)
+
     const first = await sixb.connector(erpDb)
+    expect(await sixb.connector(erpDb)).toBe(first)
+    expect(connectCount).toBe(1)
+    expect(first).toMatchObject({ connectorId: "erpDb", projectId: "default" })
+
     await host.closeConnectors()
     const second = await sixb.connector(erpDb)
-
     expect(disconnectCount).toBe(1)
     expect(connectCount).toBe(2)
-    expect(first).not.toBe(second)
+    expect(second).not.toBe(first)
   })
 
-  test("lists connectors and gets them by id", () => {
-    const erpDb = defineConnector("erpDb", {
+  test("rejects unknown connectors and unregistered definition instances", async () => {
+    const registered = defineConnector("erpDb", {
       type: "test",
       connect() {
-        return { ok: true }
+        return { kind: "registered" as const }
       },
     })
-
-    const hubspot = defineConnector("hubspot", {
+    const imposter = defineConnector("erpDb", {
       type: "test",
       connect() {
-        return { ok: true }
+        return { kind: "imposter" as const }
       },
     })
-
-    const host = new SixbHost({
-      ontology: [Room],
-      connectors: [erpDb, hubspot],
-      ...createTestRuntimeDeps(),
-    })
-
-    expect(host.definitions.connectors.list().map((connector) => connector.id)).toEqual([
-      "erpDb",
-      "hubspot",
-    ])
-    expect(host.definitions.connectors.getById("erpDb")).toBe(erpDb)
-    expect(host.definitions.connectors.getById("missing")).toBeNull()
-  })
-
-  test("rejects an unknown connector with ConnectorNotFoundError", async () => {
     const unknown = defineConnector("unknown", {
       type: "test",
       connect() {
@@ -110,35 +71,13 @@ describe("connectors", () => {
 
     const sixb = createTestSixb({
       ontology: [Room],
-      connectors: [],
-      ...createTestRuntimeDeps(),
-    })
-
-    await expect(sixb.connector(unknown)).rejects.toBeInstanceOf(ConnectorNotFoundError)
-    await expect(sixb.connector(unknown)).rejects.toThrow("Unknown connector 'unknown'")
-  })
-
-  test("rejects an unregistered connector definition instance", async () => {
-    const registered = defineConnector("erpDb", {
-      type: "test",
-      connect() {
-        return { kind: "registered" as const }
-      },
-    })
-
-    const imposter = defineConnector("erpDb", {
-      type: "test",
-      connect() {
-        return { kind: "imposter" as const }
-      },
-    })
-
-    const sixb = createTestSixb({
-      ontology: [Room],
       connectors: [registered],
       ...createTestRuntimeDeps(),
     })
 
+    const missing = sixb.connector(unknown)
+    await expect(missing).rejects.toBeInstanceOf(ConnectorNotFoundError)
+    await expect(missing).rejects.toThrow("Unknown connector 'unknown'")
     await expect(sixb.connector(imposter)).rejects.toThrow("not the registered definition instance")
   })
 })

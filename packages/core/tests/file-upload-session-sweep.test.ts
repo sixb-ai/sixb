@@ -47,11 +47,12 @@ describe("OntologyMaintenance abandoned upload sweep", () => {
     ).toBe(1)
   })
 
-  test("leaves a session alone until well past expiry", async () => {
+  test("leaves a session alone until well past expiry, and another project's always", async () => {
     const blobs = new DirectUploadBlobStorage()
     const { storage, maintenance } = setup(blobs)
     // A request that passed the expiry gate may still be completing its provider upload.
     await abandoned(storage, "upload_just_expired", MINUTE_MS)
+    await abandoned(storage, "upload_other_project", 10 * MINUTE_MS, "other-project")
 
     await maintenance.runNow()
 
@@ -105,16 +106,6 @@ describe("OntologyMaintenance abandoned upload sweep", () => {
 
     expect(blobs.aborted).toHaveLength(1)
     expect(maintenance.getSnapshot().lastError).toBeNull()
-  })
-
-  test("sweeps only its own project's sessions", async () => {
-    const blobs = new DirectUploadBlobStorage()
-    const { storage, maintenance } = setup(blobs)
-    await abandoned(storage, "upload_other_project", 10 * MINUTE_MS, "other-project")
-
-    await maintenance.runNow()
-
-    expect(blobs.attempts).toBe(0)
   })
 
   test("retires at most cleanupLimit sessions per pass, oldest expiry first", async () => {

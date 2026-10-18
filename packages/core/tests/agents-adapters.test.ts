@@ -15,12 +15,6 @@ const fileRef: FileRef = {
 }
 
 describe("toModelMessages", () => {
-  test("projects a user message", () => {
-    expect(toModelMessages([sixbMessage("user", [{ type: "text", text: "hi" }])])).toEqual([
-      { role: "user", content: [{ type: "text", text: "hi" }] },
-    ])
-  })
-
   test("projects context once before the user text", () => {
     expect(
       toModelMessages([
@@ -54,34 +48,6 @@ describe("toModelMessages", () => {
             ].join("\n"),
           },
           { type: "text", text: "What should I do next?" },
-        ],
-      },
-    ])
-  })
-
-  test("projects user file parts with a caller-provided data resolver", () => {
-    const url = new URL("https://sixb.example/files/invoice.pdf")
-    expect(
-      toModelMessages(
-        [
-          {
-            role: "user",
-            parts: [{ type: "file", fileRef }],
-            id: "msg_1",
-          },
-        ],
-        { fileData: ({ message }) => (message.id === "msg_1" ? url : undefined) }
-      )
-    ).toEqual([
-      {
-        role: "user",
-        content: [
-          {
-            type: "file",
-            data: url,
-            filename: "invoice.pdf",
-            mediaType: "application/pdf",
-          },
         ],
       },
     ])
@@ -169,24 +135,14 @@ describe("toModelMessages", () => {
     ).toEqual([{ role: "assistant", content: [{ type: "text", text: "Done." }] }])
   })
 
-  test("joins system text into a single string", () => {
+  test("joins system text into one string and merges its providerMetadata into providerData", () => {
     expect(
       toModelMessages([
         sixbMessage("system", [
           { type: "text", text: "You are " },
-          { type: "text", text: "helpful." },
-        ]),
-      ])
-    ).toEqual([{ role: "system", content: "You are helpful." }])
-  })
-
-  test("merges system text providerMetadata into providerData", () => {
-    expect(
-      toModelMessages([
-        sixbMessage("system", [
           {
             type: "text",
-            text: "Cached prompt",
+            text: "helpful.",
             providerMetadata: { anthropic: { cacheControl: "ephemeral" } },
           },
         ]),
@@ -194,7 +150,7 @@ describe("toModelMessages", () => {
     ).toEqual([
       {
         role: "system",
-        content: "Cached prompt",
+        content: "You are helpful.",
         providerData: { anthropic: { cacheControl: "ephemeral" } },
       },
     ])

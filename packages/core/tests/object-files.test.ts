@@ -6,6 +6,7 @@ import {
   defineMarking,
   defineObjectType,
   defineRole,
+  type FileRef,
   type OpenedFileRef,
   prop,
   resolveAuthorizationContext,
@@ -89,25 +90,9 @@ async function contents(file: OpenedFileRef | null) {
 }
 
 describe("object file reads", () => {
-  test("opens a file property through the object that holds it", async () => {
-    const { staffReader } = await seed()
-
-    const logo = await staffReader
-      .objects(Organization)
-      .byId("acme")
-      .file(Organization.p.logo)
-      .open()
-    expect(await contents(logo)).toEqual({
-      fileName: "logo.txt",
-      mediaType: "text/plain",
-      sizeBytes: 4,
-      text: "logo",
-    })
-  })
-
   // Regression proof: open the blob in openFileRef() rather than on the body's first read; the
   // spy then records the open before anything reads the body.
-  test("opens the stored blob only when the body is read", async () => {
+  test("opens a file property through the object that holds it, and its blob only when read", async () => {
     const { host, staffReader } = await seed()
     const openBlob = spyOn(host.blobStorage, "open")
 
@@ -117,7 +102,12 @@ describe("object file reads", () => {
       .file(Organization.p.logo)
       .open()
     expect(openBlob).not.toHaveBeenCalled()
-    expect(await new Response(logo?.body).text()).toBe("logo")
+    expect(await contents(logo)).toEqual({
+      fileName: "logo.txt",
+      mediaType: "text/plain",
+      sizeBytes: 4,
+      text: "logo",
+    })
     expect(openBlob).toHaveBeenCalledTimes(1)
   })
 
@@ -185,9 +175,9 @@ describe("object file reads", () => {
     expect(() => untyped.file(Supplier.p.logo)).toThrow("cannot be used with organization")
   })
 
-  test("resolves FileRefs only through own JSON pointer properties", async () => {
-    const { host } = await seed()
-    const fileRef = await host.blobStorage.put({ body: encoder.encode("file") })
+  test("resolves FileRefs only through own JSON pointer properties", () => {
+    const digest = "a".repeat(64)
+    const fileRef: FileRef = { blobId: `blob_${digest}`, digest: `sha256:${digest}`, sizeBytes: 4 }
 
     expect(resolveFileRefAtPath({ properties: { pdf: fileRef } }, "/properties/pdf")).toEqual(
       fileRef

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, jest, test } from "bun:test"
 import { createHash } from "node:crypto"
 import { AuthorizationError, defineConnector, SixbHost } from "../src"
 import { ConnectorService } from "../src/connectors/service"
@@ -8,6 +8,7 @@ import {
   authorize,
   callbackUrl,
   connectionSnapshot,
+  createGate,
   createHarness,
   encryptionKey,
   expectSixbError,
@@ -266,18 +267,24 @@ describe("connector OAuth lifecycle", () => {
 
   test("bounds provider authorization URL generation before persisting an attempt", async () => {
     const harness = createHarness({ providerOperationTimeoutMs: 20 })
-    harness.setAuthorizationUrlGate(new Promise<void>(() => {}))
+    const authorizationUrl = createGate()
+    harness.setAuthorizationUrlGate(authorizationUrl.wait)
 
-    expectSixbError(
-      await rejectionOf(
+    jest.useFakeTimers()
+    try {
+      const starting = rejectionOf(
         harness.process.startAuthorization(managementCommand(), harness.connector.id, {
           owner: projectOwner,
           slot: "social",
           redirectUri: callbackUrl,
         })
-      ),
-      "connector.provider_unavailable"
-    )
+      )
+      await authorizationUrl.entered
+      jest.advanceTimersByTime(20)
+      expectSixbError(await starting, "connector.provider_unavailable")
+    } finally {
+      jest.useRealTimers()
+    }
     expect(connectionSnapshot(harness.storage).attempts.size).toBe(0)
   })
 
@@ -295,14 +302,20 @@ describe("connector OAuth lifecycle", () => {
 
   test("bounds initial account discovery and revokes the unused credentials", async () => {
     const harness = createHarness({ providerOperationTimeoutMs: 20 })
-    harness.setDiscoverGate(new Promise<void>(() => {}))
+    const discovery = createGate()
+    harness.setDiscoverGate(discovery.wait)
     const started = await startAuthorization(harness)
 
-    const error = expectSixbError(
-      await rejectionOf(started.complete()),
-      "connector.provider_failed"
-    )
-    expect(error.retryable).toBe(false)
+    jest.useFakeTimers()
+    try {
+      const completing = rejectionOf(started.complete())
+      await discovery.entered
+      jest.advanceTimersByTime(20)
+      const error = expectSixbError(await completing, "connector.provider_failed")
+      expect(error.retryable).toBe(false)
+    } finally {
+      jest.useRealTimers()
+    }
     const pending = [...connectionSnapshot(harness.storage).authorizations.values()]
     expect(pending).toHaveLength(1)
     expect(pending[0]).toMatchObject({ status: "revoked", credentials: undefined, accounts: [] })

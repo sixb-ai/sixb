@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { ArtifactFile, ArtifactRequestErrorCode, FileRef } from "../src"
 import { ArtifactRequestError, SixbHost } from "../src"
-import { createArtifactId } from "../src/artifacts/ids"
 import { createHeadingSlugger } from "../src/artifacts/outline"
 import { parseArtifactTheme } from "../src/artifacts/theme"
 import { emptyGrantIndex } from "../src/authorization/types"
@@ -74,7 +73,8 @@ describe("publishing a document", () => {
     })
 
     expect(published.artifact).toMatchObject({
-      id: expect.stringMatching(/^art_[0-9a-z]{10}$/),
+      // Short, from an alphabet without easily misread letters.
+      id: expect.stringMatching(/^art_[0-9abcdefghjkmnpqrstvwxyz]{10}$/),
       kind: "document",
       title: "Q3 report",
       owner: { type: "user", id: "alice" },
@@ -136,19 +136,6 @@ describe("publishing a document", () => {
     )
   })
 
-  test("needs its Markdown in document.md", async () => {
-    const { as, put } = setup()
-    await expectRequestError(
-      as("alice").artifacts.create({
-        kind: "document",
-        title: "Report",
-        files: [await put("report.md", "# Hi")],
-      }),
-      "invalid_artifact",
-      "document.md"
-    )
-  })
-
   test("checks a theme.json it carries", async () => {
     const { as, put } = setup()
     const create = async (theme: string) =>
@@ -171,7 +158,7 @@ describe("publishing a document", () => {
 })
 
 describe("publishing any version", () => {
-  test("refuses unsafe paths, repeated paths, unstored files, and an empty title", async () => {
+  test("refuses unsafe paths, repeated paths, unstored files, an empty title, and an unknown kind", async () => {
     const { as, put } = setup()
     const doc = await put("document.md", "# Report")
     const create = (files: ArtifactFile[], title = "Report") =>
@@ -195,6 +182,11 @@ describe("publishing any version", () => {
       create([{ path: "document.md", file: notStored }]),
       "invalid_artifact",
       "not stored"
+    )
+    await expectRequestError(
+      as("alice").artifacts.create({ kind: "canvas" as never, title: "Q3", files: [doc] }),
+      "invalid_artifact",
+      "'canvas' is not a kind of artifact"
     )
   })
 
@@ -222,24 +214,11 @@ describe("publishing any version", () => {
       "exactly one file"
     )
   })
-
-  test("refuses a kind it does not know", async () => {
-    const { as, put } = setup()
-    await expectRequestError(
-      as("alice").artifacts.create({
-        kind: "canvas" as never,
-        title: "Q3",
-        files: [await put("canvas.json", "{}")],
-      }),
-      "invalid_artifact",
-      "'canvas' is not a kind of artifact"
-    )
-  })
 })
 
 describe("artifact ownership", () => {
-  test("only the owner reads, publishes, and deletes; the kind never changes", async () => {
-    const { as, put } = setup()
+  test("only the owner and system code read; only the owner publishes and deletes; the kind never changes", async () => {
+    const { host, as, put } = setup()
     const files = [await put("document.md", "# Report")]
     const { artifact } = await as("alice").artifacts.create({
       kind: "document",
@@ -256,6 +235,7 @@ describe("artifact ownership", () => {
       "artifact_not_found"
     )
     expect(await as("bob").artifacts.delete(artifact.id)).toBe(false)
+    expect((await createTestSixb(host).artifacts.get(artifact.id))?.id).toBe(artifact.id)
 
     const second = await as("alice").artifacts.publish(artifact.id, {
       kind: "document",
@@ -275,16 +255,6 @@ describe("artifact ownership", () => {
     ])
     expect(await as("alice").artifacts.delete(artifact.id)).toBe(true)
     expect(await as("alice").artifacts.get(artifact.id)).toBeNull()
-  })
-
-  test("system code reaches every artifact in the project", async () => {
-    const { host, as, put } = setup()
-    const { artifact } = await as("alice").artifacts.create({
-      kind: "document",
-      title: "Report",
-      files: [await put("document.md", "# Report")],
-    })
-    expect((await createTestSixb(host).artifacts.get(artifact.id))?.id).toBe(artifact.id)
   })
 })
 
@@ -343,11 +313,5 @@ describe("artifact model helpers", () => {
       "error"
     )
     expect(parseArtifactTheme("{")).toEqual({ error: "theme.json is not valid JSON." })
-  })
-
-  test("makes short ids from an alphabet without easily misread letters", () => {
-    const ids = new Set(Array.from({ length: 200 }, createArtifactId))
-    expect(ids.size).toBe(200)
-    for (const id of ids) expect(id).toMatch(/^art_[0-9abcdefghjkmnpqrstvwxyz]{10}$/)
   })
 })

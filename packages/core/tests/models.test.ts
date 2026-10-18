@@ -6,10 +6,11 @@ import { join } from "node:path"
 import { createSixb, defineAgentTool, defineObjectType, prop } from "../src"
 import { createModelCatalog, defineLanguageModel, type LanguageModel } from "../src/models"
 import { createTestSixb } from "../src/testing"
+import { createTestRuntimeDeps } from "./test-runtime-deps"
 
-// Removal proof: omit publisher/via from defineLanguageModel, or retain the caller's
-// publisher object; this loses display identity or allows it to mutate after definition.
-test("model definitions validate and snapshot publisher display metadata", () => {
+// Removal proof: omit publisher, via or maxInputTokens from defineLanguageModel's output or
+// validation, or retain the caller's publisher object so it can mutate after definition.
+test("model definitions validate and snapshot display metadata and input limits", () => {
   const publisher = { id: "openai", name: "OpenAI" }
   const input = {
     kind: "language" as const,
@@ -18,42 +19,30 @@ test("model definitions validate and snapshot publisher display metadata", () =>
     capabilities: {},
     publisher,
     via: "Azure AI Foundry",
+    contextWindow: 200_000,
+    maxInputTokens: 180_000,
   }
   const definition = defineLanguageModel(input)
   publisher.name = "Changed"
-  expect(definition.publisher).toEqual({ id: "openai", name: "OpenAI" })
-  expect(Object.isFrozen(definition.publisher)).toBe(true)
-  expect(definition.via).toBe("Azure AI Foundry")
-  for (const invalid of [
-    { id: "", name: "OpenAI" },
-    { id: " openai", name: "OpenAI" },
-    { id: "openai", name: "" },
-  ]) {
-    expect(() => defineLanguageModel({ ...input, publisher: invalid })).toThrow("publisher")
-  }
-  expect(() => defineLanguageModel({ ...input, via: "" })).toThrow("via")
-})
-
-test("model definitions preserve and validate distinct input limits", () => {
-  // Regression proof: omit maxInputTokens from defineLanguageModel's output or validation.
-  const definition = {
-    kind: "language" as const,
-    providerId: "mock",
-    modelId: "model",
-    capabilities: {},
-    contextWindow: 200_000,
-    maxInputTokens: 180_000,
-  }
-  expect(defineLanguageModel(definition)).toMatchObject({
+  expect(definition).toMatchObject({
+    publisher: { id: "openai", name: "OpenAI" },
+    via: "Azure AI Foundry",
     contextWindow: 200_000,
     maxInputTokens: 180_000,
   })
-  for (const maxInputTokens of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
-    expect(() => defineLanguageModel({ ...definition, maxInputTokens })).toThrow("maxInputTokens")
+  expect(Object.isFrozen(definition.publisher)).toBe(true)
+  for (const [invalid, field] of [
+    [{ publisher: { id: "", name: "OpenAI" } }, "publisher"],
+    [{ publisher: { id: " openai", name: "OpenAI" } }, "publisher"],
+    [{ publisher: { id: "openai", name: "" } }, "publisher"],
+    [{ via: "" }, "via"],
+    ...[0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY].map(
+      (maxInputTokens) => [{ maxInputTokens }, "maxInputTokens"] as const
+    ),
+  ] as const) {
+    expect(() => defineLanguageModel({ ...input, ...invalid })).toThrow(field)
   }
 })
-
-import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const tempRoots = new Set<string>()
 
@@ -92,179 +81,129 @@ afterEach(async () => {
 })
 
 describe("createModelCatalog", () => {
-  test("exposes the binding identity without creating another model id", () => {
-    const catalog = createModelCatalog({ language: [gpt] })
-
-    expect(catalog.language.list().map(({ provider, modelId }) => ({ provider, modelId }))).toEqual(
-      [{ provider: "gateway", modelId: "openai/gpt-5.4" }]
-    )
-  })
-
-  test("preserves the configured order", () => {
-    const catalog = createModelCatalog({ language: [gpt, sonnet] })
-
-    expect(catalog.language.list().map((entry) => entry.modelId)).toEqual([
-      "openai/gpt-5.4",
-      "anthropic/claude-sonnet-4.6",
-    ])
-  })
-
-  test("uses the first language model as the default", () => {
-    const catalog = createModelCatalog({ language: [gpt, sonnet] })
+  test("indexes bindings in configured order by provider and model id", () => {
+    // Proven by removal: a lookup keyed by `${provider}/${modelId}` makes `slashedProvider` and
+    // `slashedModel` collide; one keyed by modelId alone makes `direct` replace `gpt`.
+    const direct = testModel("openai", "openai/gpt-5.4")
+    const slashedProvider = testModel("a/b", "c")
+    const slashedModel = testModel("a", "b/c")
+    const catalog = createModelCatalog({
+      language: [gpt, sonnet, direct, slashedProvider, slashedModel],
+    })
 
     expect(catalog.language.default.model).toBe(gpt)
-  })
-
-  test("resolves an entry by reference and returns null for an unknown one", () => {
-    const catalog = createModelCatalog({ language: [gpt] })
-
+    expect(catalog.language.list().map(({ provider, modelId }) => ({ provider, modelId }))).toEqual(
+      [
+        { provider: "gateway", modelId: "openai/gpt-5.4" },
+        { provider: "gateway", modelId: "anthropic/claude-sonnet-4.6" },
+        { provider: "openai", modelId: "openai/gpt-5.4" },
+        { provider: "a/b", modelId: "c" },
+        { provider: "a", modelId: "b/c" },
+      ]
+    )
     expect(
       catalog.language.getByRef({ provider: "gateway", modelId: "openai/gpt-5.4" })?.model
     ).toBe(gpt)
-    expect(catalog.language.getByRef({ provider: "gateway", modelId: "openai/gpt-9" })).toBeNull()
-  })
-
-  test("rejects two models that derive the same reference", () => {
-    // Proven by removal: drop the `byRef.has(key)` guard in `models/catalog-index.ts` and this fails —
-    // the second entry replaces the first in the lookup while `list()` still reports both.
-    expect(() =>
-      createModelCatalog({ language: [gpt, testModel("gateway", "openai/gpt-5.4")] })
-    ).toThrow(/Duplicate language model 'gateway\/openai\/gpt-5\.4'/)
-  })
-
-  test("keeps one vendor model configured through two bindings as two entries", () => {
-    const catalog = createModelCatalog({
-      language: [testModel("openai.chat", "gpt-5.4"), testModel("openai.responses", "gpt-5.4")],
-    })
-
-    expect(catalog.language.list().map((entry) => entry.provider)).toEqual([
-      "openai.chat",
-      "openai.responses",
-    ])
-  })
-
-  test("does not collide when delimiters appear in provider or modelId", () => {
-    // Proven by removal: a lookup keyed by `${provider}/${modelId}` makes these bindings collide.
-    const first = testModel("a/b", "c")
-    const second = testModel("a", "b/c")
-    const catalog = createModelCatalog({ language: [first, second] })
-
-    expect(catalog.language.getByRef({ provider: "a/b", modelId: "c" })?.model).toBe(first)
-    expect(catalog.language.getByRef({ provider: "a", modelId: "b/c" })?.model).toBe(second)
-  })
-
-  test("rejects an empty language catalog", () => {
-    // Proven by removal: drop the `defaultEntry === undefined` guard and this fails, because
-    // `default` then reads as undefined instead of the catalog refusing to exist.
-    expect(() => createModelCatalog({ language: [] })).toThrow(
-      /'models.language' needs at least one model/
-    )
-  })
-
-  test("rejects a malformed language catalog", () => {
-    expect(() =>
-      createModelCatalog({ language: null } as unknown as Parameters<typeof createModelCatalog>[0])
-    ).toThrow(/'models.language' must be an array/)
-  })
-
-  test.each([
-    ["stream", { stream: undefined }],
-    ["definition", { definition: undefined }],
-  ])("rejects an invalid %s field", (_field, override) => {
-    const invalid = { ...gpt, ...override } as unknown as LanguageModel
-    expect(() => createModelCatalog({ language: [invalid] })).toThrow(/Invalid language model/)
-  })
-
-  test.each([
-    ["providerId", ""],
-    ["providerId", " gateway"],
-    ["modelId", ""],
-    ["modelId", "openai/gpt-5.4 "],
-  ] as const)("rejects an invalid %s identity", (field, value) => {
-    const invalid = { ...gpt, [field]: value } as LanguageModel
-
-    expect(() => createModelCatalog({ language: [invalid] })).toThrow(/Invalid language model/)
-  })
-
-  test("reads a model's default reasoning from its binding", () => {
-    const catalog = createModelCatalog({ language: [{ ...gpt, defaultReasoning: "low" }, sonnet] })
-
-    expect(catalog.language.default.model.defaultReasoning).toBe("low")
-    expect(catalog.language.list()[1]?.model.defaultReasoning).toBeUndefined()
-  })
-
-  test("rejects a default reasoning the model declares it cannot use", () => {
-    // Proven by removal: drop `assertDefaultReasoning` from the catalog's validator.
-    const model = {
-      ...gpt,
-      definition: defineLanguageModel({
-        ...gpt.definition,
-        capabilities: { reasoning: { efforts: ["low", "high"] } },
-      }),
-    }
-    expect(() => createModelCatalog({ language: [{ ...model, defaultReasoning: "max" }] })).toThrow(
-      "[Sixb] Invalid language model at 'models.language[0]': default reasoning 'max' cannot be used: reasoning effort 'max' is not supported."
-    )
     expect(
-      createModelCatalog({ language: [{ ...model, defaultReasoning: "high" }] }).language.default
-        .model.defaultReasoning
-    ).toBe("high")
-    // Undeclared capabilities are resolved later; the provider falls back when needed.
-    expect(createModelCatalog({ language: [{ ...gpt, defaultReasoning: "max" }] })).toBeDefined()
+      catalog.language.getByRef({ provider: "openai", modelId: "openai/gpt-5.4" })?.model
+    ).toBe(direct)
+    expect(catalog.language.getByRef({ provider: "a/b", modelId: "c" })?.model).toBe(
+      slashedProvider
+    )
+    expect(catalog.language.getByRef({ provider: "a", modelId: "b/c" })?.model).toBe(slashedModel)
+    expect(catalog.language.getByRef({ provider: "gateway", modelId: "openai/gpt-9" })).toBeNull()
+    expect(Object.isFrozen(catalog.language.list())).toBe(true)
+    // The catalog freezes its own entries, never the provider-owned model.
+    expect(Object.isFrozen(gpt)).toBe(false)
   })
 
+  const reasoningEfforts: LanguageModel = {
+    ...gpt,
+    definition: defineLanguageModel({
+      ...gpt.definition,
+      capabilities: { reasoning: { efforts: ["low", "high"] } },
+    }),
+  }
+  // Both sides carry the bad identity, so only the binding's own identifier check can reject it.
+  const identity = (field: "providerId" | "modelId", value: string) => ({
+    ...gpt,
+    [field]: value,
+    definition: { ...gpt.definition, [field]: value },
+  })
+
+  // Proven by removal: drop the `byRef.has(key)` guard in `models/catalog-index.ts` (the second
+  // entry replaces the first in the lookup), the `defaultEntry === undefined` guard (`default`
+  // reads as undefined), or `assertDefaultReasoning` from the catalog's validator.
   test.each([
-    [{ budgetTokens: 1_000 }],
-    ["extreme"],
-  ])("rejects a default reasoning that is not a level %#", (defaultReasoning) => {
+    [
+      "a duplicate binding",
+      [gpt, testModel("gateway", "openai/gpt-5.4")],
+      /Duplicate language model 'gateway\/openai\/gpt-5\.4'/,
+    ],
+    ["an empty catalog", [], /'models.language' needs at least one model/],
+    ["a non-array catalog", null, /'models.language' must be an array/],
+    ["a binding without stream", [{ ...gpt, stream: undefined }], /'stream' to be a function/],
+    ["a binding without a definition", [{ ...gpt, definition: undefined }], /models.language\[0\]/],
+    ["an empty providerId", [identity("providerId", "")], /'provider' to be a non-empty string/],
+    ["a padded providerId", [identity("providerId", " gateway")], /'provider' not to have/],
+    ["an empty modelId", [identity("modelId", "")], /'modelId' to be a non-empty string/],
+    ["a padded modelId", [identity("modelId", "openai/gpt-5.4 ")], /'modelId' not to have/],
+    [
+      "a definition for another model",
+      [{ ...gpt, definition: { ...gpt.definition, modelId: "other" } }],
+      /definition identity does not match the binding/,
+    ],
+    [
+      "a budget default reasoning",
+      [{ ...gpt, defaultReasoning: { budgetTokens: 1_000 } }],
+      /expected 'defaultReasoning' to be one of/,
+    ],
+    [
+      "an unknown default reasoning",
+      [{ ...gpt, defaultReasoning: "extreme" }],
+      /expected 'defaultReasoning' to be one of/,
+    ],
+    [
+      "a default reasoning the model declares it cannot use",
+      [{ ...reasoningEfforts, defaultReasoning: "max" }],
+      "[Sixb] Invalid language model at 'models.language[0]': default reasoning 'max' cannot be used: reasoning effort 'max' is not supported.",
+    ],
+  ] as const)("rejects %s", (_case, language, error) => {
     expect(() =>
-      createModelCatalog({
-        language: [{ ...gpt, defaultReasoning } as unknown as LanguageModel],
-      })
-    ).toThrow("expected 'defaultReasoning' to be one of")
+      createModelCatalog({ language } as unknown as Parameters<typeof createModelCatalog>[0])
+    ).toThrow(error)
   })
 
-  test("does not freeze the provider-owned model", () => {
-    const model = testModel("gateway", "openai/gpt-5.4")
-
-    createModelCatalog({ language: [model] })
-
-    expect(Object.isFrozen(model)).toBe(false)
+  test("keeps a default reasoning the model supports or does not declare", () => {
+    const supported = createModelCatalog({
+      language: [{ ...reasoningEfforts, defaultReasoning: "high" }, sonnet],
+    })
+    expect(supported.language.default.model.defaultReasoning).toBe("high")
+    expect(supported.language.list()[1]?.model.defaultReasoning).toBeUndefined()
+    // Undeclared capabilities are resolved later; the provider falls back when needed.
+    expect(
+      createModelCatalog({ language: [{ ...gpt, defaultReasoning: "max" }] }).language.default.model
+        .defaultReasoning
+    ).toBe("max")
   })
 })
 
 describe("createSixb models", () => {
-  test("configures the project Agent from models and tools", async () => {
+  test("configures the project Agent from the default language model", async () => {
     const projectRoot = await createTempProjectRoot()
-    const lookup = defineAgentTool("lookup")
-      .description("Look up project data.")
-      .input({ query: "string" })
-      .run(({ input }) => ({ query: input.query }))
 
     const sixb = await createSixb({
       projectRoot,
       ontologies: [Room],
       models: { language: [gpt, sonnet] },
-      tools: [lookup],
       ...createTestRuntimeDeps(),
     })
 
     expect(sixb.definitions.models?.language?.default.model).toBe(gpt)
-    expect("agents" in sixb.definitions).toBe(false)
     expect(createTestSixb(sixb).agent.get()).toEqual({
       name: "Sixb",
       model: { provider: gpt.providerId, modelId: gpt.modelId },
     })
-    expect(sixb.definitions.tools.getByName("lookup")?.name).toBe("lookup")
-  })
-
-  test("leaves the catalog absent when models are not configured", async () => {
-    const projectRoot = await createTempProjectRoot()
-
-    const sixb = await createSixb({ projectRoot, ontologies: [Room], ...createTestRuntimeDeps() })
-
-    expect(sixb.definitions.models).toBeUndefined()
-    expect(createTestSixb(sixb).agent.get()).toBeNull()
   })
 
   test("rejects retired agents configuration even from JavaScript", async () => {

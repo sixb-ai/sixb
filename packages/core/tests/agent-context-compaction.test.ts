@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type AgentThreadModelContextMessage,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
+  projectAgentThreadModelContext,
   selectAgentContextCompactionBoundary,
   serializeAgentMessagesForSummary,
   shouldCompactAgentContext,
 } from "../src/agents"
-import type { AgentMessageRecord } from "../src/storage/agents"
+import type { AgentContextCheckpointRecord, AgentMessageRecord } from "../src/storage/agents"
 
 function message(seq: number, role: AgentMessageRecord["role"], text: string): AgentMessageRecord {
   return {
@@ -51,75 +53,66 @@ describe("agent context token estimation", () => {
     expect(shouldCompactAgentContext({ inputBudgetTokens, estimatedInputTokens: 8_001 })).toBe(true)
   })
 
-  test("estimates the complete request shape deterministically", () => {
+  test("counts the system prompt and every tool definition on top of the messages", () => {
     const messages = [message(1, "user", "hello"), message(2, "assistant", "world")]
-    const first = estimateAgentContextRequestTokens({
-      systemPrompt: "system rules",
-      tools: [
-        { name: "lookup", description: "Look up a record", inputSchema: '{"type":"object"}' },
-      ],
-      messages,
-    })
-    const second = estimateAgentContextRequestTokens({
-      systemPrompt: "system rules",
-      tools: [
-        { name: "lookup", description: "Look up a record", inputSchema: '{"type":"object"}' },
-      ],
-      messages,
-    })
+    const tool = {
+      name: "lookup",
+      description: "Look up a record",
+      inputSchema: '{"type":"object"}',
+    }
+    const estimate = (systemPrompt: string, tools: (typeof tool)[]) =>
+      estimateAgentContextRequestTokens({ systemPrompt, tools, messages }).tokens
+    const bare = estimate("", [])
 
-    expect(first).toEqual(second)
-    expect(first.estimatorVersion).toBe(1)
-    expect(first.tokens).toBeGreaterThan(estimateAgentContextMessagesTokens(messages).tokens)
+    expect(bare).toBeGreaterThan(estimateAgentContextMessagesTokens(messages).tokens)
+    expect(estimate("system rules ".repeat(40), [])).toBeGreaterThan(bare)
+    expect(estimate("", [tool, tool])).toBeGreaterThan(estimate("", [tool]))
   })
 })
 
 describe("agent context compaction boundary", () => {
-  test("retains the triggering user turn and starts only at a user boundary", () => {
-    const messages = [
-      message(1, "user", "old question"),
-      message(2, "assistant", "old answer"),
-      message(3, "user", "recent question"),
-      message(4, "assistant", "recent answer"),
-      message(5, "user", "current request"),
-    ]
-    const recentTurnTokens = estimateAgentContextMessagesTokens(messages.slice(3)).tokens
-    const boundary = selectAgentContextCompactionBoundary({
-      messages,
-      keepRecentTokens: recentTurnTokens,
-    })
+  const turns = [
+    message(1, "user", "old question"),
+    message(2, "assistant", "old answer"),
+    message(3, "user", "recent question"),
+    message(4, "assistant", "recent answer"),
+    message(5, "user", "current request"),
+  ]
 
-    expect(boundary?.summarizedThroughSeq).toBe(2)
-    expect(boundary?.messagesToSummarize.map((item) => item.seq)).toEqual([1, 2])
-    expect(boundary?.retainedMessages.map((item) => item.seq)).toEqual([3, 4, 5])
-    expect(boundary?.retainedMessages[0]?.role).toBe("user")
-  })
-
-  test("returns null when no complete older turn can be removed", () => {
-    expect(
-      selectAgentContextCompactionBoundary({
-        messages: [message(1, "user", "only request")],
-        keepRecentTokens: 1,
-      })
-    ).toBeNull()
-  })
-
-  test("summarizes an oversized completed turn before a short current request", () => {
-    const messages = [
-      message(1, "user", "research this organization"),
-      message(2, "assistant", `research results: ${"x".repeat(8_000)}`),
-      message(3, "user", "continue on"),
-    ]
-    const boundary = selectAgentContextCompactionBoundary({
-      messages,
+  test.each([
+    {
+      label: "retains the triggering user turn and starts only at a user boundary",
+      messages: turns,
+      keepRecentTokens: estimateAgentContextMessagesTokens(turns.slice(3)).tokens,
+      expected: { summarizedThroughSeq: 2, summarized: [1, 2], retained: [3, 4, 5] },
+    },
+    {
+      label: "returns null when no complete older turn can be removed",
+      messages: [message(1, "user", "only request")],
+      keepRecentTokens: 1,
+      expected: null,
+    },
+    {
+      // Regression proof: the former minimum-tail selector returned null because the oversized
+      // assistant message pushed the boundary back to the first user message.
+      label: "summarizes an oversized completed turn before a short current request",
+      messages: [
+        message(1, "user", "research this organization"),
+        message(2, "assistant", `research results: ${"x".repeat(8_000)}`),
+        message(3, "user", "continue on"),
+      ],
       keepRecentTokens: 700,
-    })
+      expected: { summarizedThroughSeq: 2, summarized: [1, 2], retained: [3] },
+    },
+  ])("$label", ({ messages, keepRecentTokens, expected }) => {
+    const boundary = selectAgentContextCompactionBoundary({ messages, keepRecentTokens })
+    const selected: unknown = boundary && {
+      summarizedThroughSeq: boundary.summarizedThroughSeq,
+      summarized: boundary.messagesToSummarize.map((item) => item.seq),
+      retained: boundary.retainedMessages.map((item) => item.seq),
+    }
 
-    // Regression proof: the former minimum-tail selector returned null because the oversized
-    // assistant message pushed the boundary back to the first user message.
-    expect(boundary?.summarizedThroughSeq).toBe(2)
-    expect(boundary?.messagesToSummarize.map((item) => item.seq)).toEqual([1, 2])
-    expect(boundary?.retainedMessages.map((item) => item.seq)).toEqual([3])
+    expect(selected).toEqual(expected)
   })
 })
 
@@ -158,5 +151,70 @@ describe("agent summary serialization", () => {
     expect(serialized).toContain('message_id="message_2" part_index="2"')
     expect(serialized).toContain('blob_id="blob_abc"')
     expect(serialized).toContain("Result &lt;ready&gt;")
+  })
+})
+
+describe("agent thread model-context projection", () => {
+  const checkpoint: AgentContextCheckpointRecord = {
+    id: "checkpoint_1",
+    projectId: "project",
+    threadId: "thread",
+    createdByRunId: "run_2",
+    reason: "threshold",
+    summary: "User chose <priority> & asked to continue.",
+    summaryFormatVersion: 1,
+    summarizedThroughSeq: 2,
+    observedHeadSeq: 3,
+    estimatedInputTokensBefore: 1_000,
+    estimatedInputTokensAfter: 300,
+    summaryModelId: "test-model",
+    createdAt: new Date("2026-08-27T12:00:00.000Z"),
+  }
+
+  test("preserves the complete model view when no checkpoint exists", () => {
+    const messages = [message(1, "user", "one"), message(2, "assistant", "two")]
+
+    expect(projectAgentThreadModelContext({ checkpoint: null, messages })).toBe(messages)
+  })
+
+  test("prepends one escaped user-role summary to the retained tail", () => {
+    const retained = [message(3, "user", "three"), message(4, "assistant", "four")]
+    const projected = projectAgentThreadModelContext({ checkpoint, messages: retained })
+
+    expect(projected).toHaveLength(3)
+    expect(projected.slice(1)).toEqual(retained)
+    expect(projected[0]).toEqual({
+      role: "user",
+      parts: [
+        {
+          type: "text",
+          text: [
+            "The earlier conversation was compacted into this continuation summary.",
+            "",
+            "<sixb_thread_summary>",
+            "User chose &lt;priority&gt; &amp; asked to continue.",
+            "</sixb_thread_summary>",
+          ].join("\n"),
+        },
+      ],
+    } satisfies AgentThreadModelContextMessage)
+  })
+
+  test("rejects a missing, split-turn, or non-contiguous retained tail", () => {
+    expect(() => projectAgentThreadModelContext({ checkpoint, messages: [] })).toThrow(
+      "has no retained messages"
+    )
+    expect(() =>
+      projectAgentThreadModelContext({
+        checkpoint,
+        messages: [message(3, "assistant", "split turn")],
+      })
+    ).toThrow("does not begin at a user turn boundary")
+    expect(() =>
+      projectAgentThreadModelContext({
+        checkpoint,
+        messages: [message(4, "user", "gap")],
+      })
+    ).toThrow("has a sequence gap")
   })
 })

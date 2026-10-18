@@ -68,14 +68,23 @@ function cost(): Extract<AiModelCallCostRecord, { status: "rated" }> {
 }
 
 describe("AI cost record validation", () => {
-  test("validates persisted component arithmetic", () => {
-    const record = cost()
-    expect(() =>
-      normalizeAiModelCallCostRecord({
-        ...record,
-        money: { ...record.money, amountNanos: "1" },
-      })
-    ).toThrow("total does not equal")
+  test.each([
+    {
+      name: "a total that differs from its components",
+      record: { ...cost(), money: { currency: "USD" as const, amountNanos: "1" } },
+      error: "total does not equal",
+    },
+    {
+      name: "a model rate-card rating without component evidence",
+      record: {
+        ...cost(),
+        priceSource: { ...cost().priceSource, sourceId: "model-rate-card" },
+        components: [],
+      },
+      error: "requires components",
+    },
+  ])("rejects $name", ({ record, error }) => {
+    expect(() => normalizeAiModelCallCostRecord(record)).toThrow(error)
   })
 
   test("matches billed quantities to usage without consulting a catalog", () => {
@@ -170,15 +179,5 @@ describe("AI cost record validation", () => {
         cacheUsage
       )
     ).toBe(false)
-  })
-
-  test("requires component evidence for model rate-card ratings", () => {
-    expect(() =>
-      normalizeAiModelCallCostRecord({
-        ...cost(),
-        priceSource: { ...cost().priceSource, sourceId: "model-rate-card" },
-        components: [],
-      })
-    ).toThrow("requires components")
   })
 })

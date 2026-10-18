@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, jest, test } from "bun:test"
 import { AuthorizationError, SixbHost } from "../src"
 import { createConnectorRuntime } from "../src/connectors/execution"
 import { ConnectorService } from "../src/connectors/service"
@@ -8,8 +8,9 @@ import type { SixbRuntimeContext } from "../src/runtime/types"
 import { resolveSyncConnectorSources } from "../src/syncs/sources"
 import { createTestActionExecution, createTestSyncExecution } from "../src/testing"
 import {
-  authorize,
   callbackUrl,
+  connectAccount,
+  createGate,
   createHarness,
   encryptionKey,
   expectSixbError,
@@ -194,13 +195,7 @@ describe("connector connection execution boundary", () => {
 
   test("cancels and bounds managed client creation", async () => {
     const harness = createHarness({ providerOperationTimeoutMs: 20 })
-    const authorization = await authorize(harness)
-    await harness.process.selectAccount(managementCommand(), harness.connector.id, {
-      authorizationId: authorization.authorizationId,
-      accountId: "account-a",
-      owner: projectOwner,
-      slot: "social",
-    })
+    await connectAccount(harness)
     const primitive = { kind: "sync" as const, id: "sync-social", runId: "run-social" }
     const execution = {
       id: "execution-social",
@@ -220,16 +215,26 @@ describe("connector connection execution boundary", () => {
     const [source] = await resolveSyncConnectorSources(connector, harness.connector)
     if (!source) throw new Error("Expected one managed connector source.")
 
-    harness.setConnectGate(new Promise(() => {}))
+    const cancellable = createGate()
+    harness.setConnectGate(cancellable.wait)
     const runController = new AbortController()
     const cancelled = source.connect(runController.signal)
-    await waitFor(() => harness.connectionSignals.length === 1)
+    await cancellable.entered
     runController.abort(new DOMException("cancelled by test", "AbortError"))
     await expect(cancelled).rejects.toThrow("cancelled by test")
     expect(harness.connectionSignals[0]?.aborted).toBe(true)
 
-    const timedOut = await rejectionOf(source.connect(new AbortController().signal))
-    expectSixbError(timedOut, "connector.provider_unavailable")
+    const stalled = createGate()
+    harness.setConnectGate(stalled.wait)
+    jest.useFakeTimers()
+    try {
+      const timedOut = rejectionOf(source.connect(new AbortController().signal))
+      await stalled.entered
+      jest.advanceTimersByTime(20)
+      expectSixbError(await timedOut, "connector.provider_unavailable")
+    } finally {
+      jest.useRealTimers()
+    }
     expect(harness.connectionSignals[1]?.aborted).toBe(true)
 
     harness.setConnectGate(undefined)
@@ -240,12 +245,3 @@ describe("connector connection execution boundary", () => {
     expect(client.aborted()).toBe(true)
   })
 })
-
-async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
-  const startedAt = Date.now()
-  while (Date.now() - startedAt < timeoutMs) {
-    if (predicate()) return
-    await Bun.sleep(5)
-  }
-  throw new Error("Timed out waiting for connector client creation.")
-}

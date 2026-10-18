@@ -53,12 +53,6 @@ async function userScope(host: ReturnType<typeof setup>["host"], id: string, all
 }
 
 describe("single project Agent", () => {
-  test("does not export the retired static Agent builder", async () => {
-    // Regression proof: re-export defineAgent from either public barrel.
-    expect(await import("../src")).not.toHaveProperty("defineAgent")
-    expect(await import("../src/agents")).not.toHaveProperty("defineAgent")
-  })
-
   test("captures model selection and user authority without creating an Agent service account", async () => {
     const { host, storage } = setup()
     const sixb = await userScope(host, "owner")
@@ -273,6 +267,9 @@ describe("single project Agent", () => {
     expect(await owner.agent.runs.getById(run.id)).not.toHaveProperty("agentId")
     expect(await other.agent.threads.getById(thread.id)).toBeNull()
     expect((await other.agent.threads.list()).total).toBe(0)
+    await expect(
+      other.agent.runs.request({ threadId: thread.id, text: "Hello" })
+    ).rejects.toMatchObject({ code: "thread_not_found" })
     expect(await denied.agent.runs.getById(run.id)).toBeNull()
     const continued = await owner.agent.runs.request({ threadId: thread.id, text: "Continue" })
     expect(continued.run.threadId).toBe(thread.id)

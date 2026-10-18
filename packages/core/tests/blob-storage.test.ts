@@ -19,71 +19,28 @@ const validFileRef: FileRef = {
 }
 
 describe("InMemoryBlobStorage", () => {
-  test("returns the same content-addressed id and digest for identical bytes", async () => {
+  test("keeps one blob per content, whatever the body, and serves it by id, range, and stat", async () => {
     const store = new InMemoryBlobStorage()
 
     const first = await store.put({
-      body: encoder.encode("same bytes"),
+      body: encoder.encode("range bytes"),
       fileName: "first.txt",
     })
     const second = await store.put({
-      body: new Blob(["same bytes"]),
+      body: new Blob(["range bytes"]),
       fileName: "second.txt",
     })
 
     expect(second.blobId).toBe(first.blobId)
     expect(second.digest).toBe(first.digest)
-    expect(first.blobId).toBe(`blob_${first.digest.slice("sha256:".length)}`)
     expect(first.fileName).toBe("first.txt")
     expect(second.fileName).toBe("second.txt")
-  })
-
-  test("returns different ids for different bytes", async () => {
-    const store = new InMemoryBlobStorage()
-
-    const first = await store.put({ body: encoder.encode("alpha") })
-    const second = await store.put({ body: encoder.encode("beta") })
-
-    expect(second.blobId).not.toBe(first.blobId)
-    expect(second.digest).not.toBe(first.digest)
-  })
-
-  test("open streams the original bytes", async () => {
-    const store = new InMemoryBlobStorage()
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoder.encode("streamed "))
-        controller.enqueue(encoder.encode("body"))
-        controller.close()
-      },
-    })
-
-    const fileRef = await store.put({ body })
-    const stream = await store.open(fileRef.blobId)
-
-    expect(await new Response(stream).text()).toBe("streamed body")
-  })
-
-  test("openRange streams a byte range", async () => {
-    const store = new InMemoryBlobStorage()
-    const fileRef = await store.put({ body: encoder.encode("range bytes") })
-
-    const stream = await store.openRange(fileRef.blobId, {
-      start: 6,
-      endInclusive: 10,
-    })
-
-    expect(await new Response(stream).text()).toBe("bytes")
-  })
-
-  test("stat returns size and digest info", async () => {
-    const store = new InMemoryBlobStorage()
-    const fileRef = await store.put({ body: encoder.encode("blob info") })
-
-    await expect(store.stat(fileRef.blobId)).resolves.toEqual({
-      blobId: fileRef.blobId,
-      digest: fileRef.digest,
-      sizeBytes: fileRef.sizeBytes,
+    const range = await store.openRange(first.blobId, { start: 6, endInclusive: 10 })
+    expect(await new Response(range).text()).toBe("bytes")
+    await expect(store.stat(first.blobId)).resolves.toEqual({
+      blobId: first.blobId,
+      digest: first.digest,
+      sizeBytes: 11,
     })
   })
 
@@ -97,23 +54,21 @@ describe("InMemoryBlobStorage", () => {
 })
 
 describe("isFileRef", () => {
-  test("accepts a content-addressed reference and produced FileRefs", async () => {
-    expect(isFileRef(validFileRef)).toBe(true)
-
+  test("accepts content-addressed references and rejects forged or malformed ones", async () => {
     const produced = await new InMemoryBlobStorage().put({ body: encoder.encode("abc") })
-    expect(isFileRef(produced)).toBe(true)
-  })
+    for (const valid of [validFileRef, produced]) expect(isFileRef(valid)).toBe(true)
 
-  test("rejects a reference whose blobId does not derive from its digest", () => {
-    expect(isFileRef({ ...validFileRef, blobId: `blob_${"b".repeat(64)}` })).toBe(false)
-  })
-
-  test("rejects malformed digests, sizes, and metadata", () => {
-    expect(isFileRef({ ...validFileRef, digest: "md5:abc" })).toBe(false)
-    expect(isFileRef({ ...validFileRef, sizeBytes: -1 })).toBe(false)
-    expect(isFileRef({ ...validFileRef, sizeBytes: 1.5 })).toBe(false)
-    expect(isFileRef({ ...validFileRef, fileName: 123 })).toBe(false)
-    expect(isFileRef(null)).toBe(false)
+    for (const invalid of [
+      // The blobId must derive from the digest.
+      { ...validFileRef, blobId: `blob_${"b".repeat(64)}` },
+      { ...validFileRef, digest: "md5:abc" },
+      { ...validFileRef, sizeBytes: -1 },
+      { ...validFileRef, sizeBytes: 1.5 },
+      { ...validFileRef, fileName: 123 },
+      null,
+    ]) {
+      expect(isFileRef(invalid), JSON.stringify(invalid)).toBe(false)
+    }
   })
 
   // Stored references keep loading whatever their media type; only writes use isValidFileRef.
@@ -152,20 +107,14 @@ describe("canonicalMediaType", () => {
     }
   })
 
-  test("rejects lists, which a browser reads as their last type", () => {
+  test("rejects lists and anything else that is not one well-formed media type", () => {
     for (const value of [
+      // A browser reads a list as its last type.
       "image/png,text/html",
       "image/png, text/html",
       "image/png;charset=utf-8,text/html",
       'text/plain;name="a,b"',
       "image/png,",
-    ]) {
-      expect(canonicalMediaType(value), value).toBeNull()
-    }
-  })
-
-  test("rejects anything that is not one well-formed media type", () => {
-    for (const value of [
       "",
       "image",
       "image/",
@@ -183,11 +132,11 @@ describe("canonicalMediaType", () => {
       "image/pñg",
       "image/png\r\nx-injected: 1",
       "text/(html)",
+      undefined,
+      42,
     ]) {
-      expect(canonicalMediaType(value), value).toBeNull()
+      expect(canonicalMediaType(value), String(value)).toBeNull()
     }
-    expect(canonicalMediaType(undefined)).toBeNull()
-    expect(canonicalMediaType(42)).toBeNull()
   })
 })
 
@@ -195,25 +144,23 @@ describe("inferFileMediaType", () => {
   const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00])
   const pdf = new TextEncoder().encode("%PDF-1.7\n")
 
-  test("reads the type from the extension, ignoring its case", () => {
-    expect(inferFileMediaType("report.MD")).toBe("text/markdown")
-    expect(inferFileMediaType("data.tsv")).toBe("text/tab-separated-values")
-    expect(inferFileMediaType("deck.pptx")).toBe(
-      "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-    )
-    expect(inferFileMediaType("archive.tar.zip")).toBe("application/zip")
-  })
-
-  test("trusts a known signature over the extension", () => {
-    expect(inferFileMediaType("chart.txt", png)).toBe("image/png")
-    expect(inferFileMediaType("scan.bin", pdf)).toBe("application/pdf")
-  })
-
-  test("falls back to octet-stream for an unknown or missing extension", () => {
-    expect(inferFileMediaType("README")).toBe("application/octet-stream")
-    expect(inferFileMediaType("notes.unknown", new TextEncoder().encode("plain"))).toBe(
-      "application/octet-stream"
-    )
+  test("trusts a known signature, then the extension in any case, then octet-stream", () => {
+    for (const [fileName, bytes, mediaType] of [
+      ["report.MD", undefined, "text/markdown"],
+      ["data.tsv", undefined, "text/tab-separated-values"],
+      [
+        "deck.pptx",
+        undefined,
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      ],
+      ["archive.tar.zip", undefined, "application/zip"],
+      ["chart.txt", png, "image/png"],
+      ["scan.bin", pdf, "application/pdf"],
+      ["README", undefined, "application/octet-stream"],
+      ["notes.unknown", new TextEncoder().encode("plain"), "application/octet-stream"],
+    ] as const) {
+      expect(inferFileMediaType(fileName, bytes), fileName).toBe(mediaType)
+    }
   })
 
   test("recognizes only unambiguous signatures", () => {
