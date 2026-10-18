@@ -153,6 +153,26 @@ repo's `typecheck` chain reads source.
   watch the test fail — a test that passes either way locks in nothing, and reads for years as if
   it did. Say in the test how to reproduce that check, and say it there when a toolchain version
   is what makes the failure reachable.
+- No `Bun.spawnSync` in a test. Inside `bun test --parallel` it sometimes never sees its child
+  exit, so the test dies at its timeout or the worker spins beside a zombie until the CI guard
+  kills the run. Spawn with async `Bun.spawn` and a kill timer, or call the code in-process when
+  the process boundary is not what the test is about.
+- Don't wait on real time. A test that sleeps through a backoff, a deadline or a "nothing
+  arrives" window pays for it on every run and flakes under load. Drive the timer with
+  `jest.useFakeTimers()`, or wait for the event the code emits; restore real timers in
+  `afterEach`, because a fake-timer test that times out never reaches its own `finally`. A
+  production option that exists only to shorten a test's wait is a test-only seam — don't add one.
+- Await a rejection that might never settle as `await promise.catch((error) => error)`, not
+  `expect(promise).rejects`: on Bun 1.4.2 the latter hangs the whole file past the per-test
+  timeout, so a regression shows up as a guard stall instead of a named failure.
+- A negative check must be able to fail. Asserting that a spy was not called before the async work
+  that would call it could run, or that nothing arrived during a quiet window, passes either way.
+  Assert on the durable record, or publish what should be filtered out first so the first thing
+  delivered proves the filter.
+- One owner per contract. Provider semantics belong to the shared suites in
+  `packages/core/src/testing`, a helper's behavior to the helper's tests, a guard enforced for
+  every route to that guard; a provider, resource or route suite proves only what is specific to
+  it. Size fixtures to just past the page or chunk boundary they cross.
 - Run targeted tests first, then broader checks when shared behavior changes.
 
 ## Contribution Flow
