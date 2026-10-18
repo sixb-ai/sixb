@@ -27,9 +27,13 @@ export function GridCell({
   header,
   fixed,
   lastFixed,
+  scrolled,
   selected,
   active,
+  corner,
   matched,
+  spill,
+  covered,
   sort,
   title,
   style,
@@ -41,10 +45,18 @@ export function GridCell({
   readonly header: boolean
   readonly fixed: boolean
   readonly lastFixed: boolean
+  /** The grid is scrolled sideways, so the last frozen column casts a shadow over the rest. */
+  readonly scrolled: boolean
   readonly selected: boolean
   readonly active: boolean
+  /** The selection's bottom right cell, which carries a spreadsheet's fill handle. */
+  readonly corner: boolean
   /** It holds what the find bar searches for. */
   readonly matched: boolean
+  /** Its text runs on over empty cells to its right, this many pixels wide in all. */
+  readonly spill?: number
+  /** Its cell is empty and a cell to its left runs text over it, up to its edge or past it. */
+  readonly covered?: "through" | "end"
   /** How the sheet is sorted by this column, for a header cell. */
   readonly sort?: SortDirection
   /** What a header's column holds, shown on hover. */
@@ -65,25 +77,63 @@ export function GridCell({
       aria-sort={sort}
       title={title}
       className={cn(
-        "flex shrink-0 items-center overflow-hidden border-r border-b border-border/70 px-2.5 whitespace-nowrap",
-        header ? "bg-background font-semibold" : "bg-background",
+        "flex shrink-0 items-center border-r border-b border-(--sheet-line) px-2 whitespace-nowrap",
+        header ? "border-b-border bg-(--sheet-header) font-semibold" : "bg-(--sheet-cell)",
         fixed ? "sticky z-[1]" : "relative",
-        lastFixed && "shadow-[1px_0_0_var(--border)]",
+        spill === undefined ? "overflow-hidden" : "overflow-visible",
+        // Text that runs on draws over the gridlines it crosses, as a spreadsheet's does.
+        (spill !== undefined || covered === "through") && "border-r-transparent",
+        lastFixed &&
+          (scrolled
+            ? "shadow-[1px_0_0_var(--border),5px_0_8px_-5px_rgb(0_0_0/0.18)]"
+            : "shadow-[1px_0_0_var(--border)]"),
         selected &&
           !active &&
           !matched &&
-          "bg-[color-mix(in_oklab,var(--primary)_7%,var(--background))]",
+          "bg-[color-mix(in_oklab,var(--primary)_8%,var(--sheet-cell))]",
         // Matches are marked as a page's find marks them; the current one, the active cell, more.
         matched &&
           (active
-            ? "bg-[color-mix(in_oklab,var(--warning)_45%,var(--background))]"
-            : "bg-[color-mix(in_oklab,var(--warning)_20%,var(--background))]")
+            ? "bg-[color-mix(in_oklab,var(--warning)_45%,var(--sheet-cell))]"
+            : "bg-[color-mix(in_oklab,var(--warning)_20%,var(--sheet-cell))]")
       )}
       data-matched={matched ? "" : undefined}
       style={style}
     >
       {children}
+      {corner ? (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute right-0 bottom-0 z-[2] size-[7px] bg-primary ring-1 ring-(--sheet-cell)"
+        />
+      ) : null}
     </div>
+  )
+}
+
+/** A cell past the sheet's data, drawn so the grid's lines run to the edge of the view. */
+export function EmptyCell({
+  width,
+  fixed,
+  left,
+  through,
+}: {
+  readonly width: number
+  readonly fixed?: boolean
+  readonly left?: number
+  /** Text from a cell to its left runs on past it, so its right gridline does not show. */
+  readonly through?: boolean
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className={cn(
+        "shrink-0 border-r border-b border-(--sheet-line) bg-(--sheet-cell)",
+        fixed && "sticky z-[1]",
+        through && "border-r-transparent"
+      )}
+      style={{ width, ...(left === undefined ? {} : { left }) }}
+    />
   )
 }
 
@@ -160,17 +210,20 @@ function TypeGlyph({ column }: { readonly column: SheetColumn | undefined }) {
 export function CellContent({
   cell,
   numeric,
+  spill,
   imageUrl,
 }: {
   readonly cell: FormattedCell
   readonly numeric: boolean
+  /** The width the text runs on to over empty cells to its right. */
+  readonly spill?: number
   readonly imageUrl?: (path: string) => string | undefined
 }) {
   if (cell.reference) {
     return (
       <ArtifactLink
         address={cell.reference}
-        className="truncate text-primary underline-offset-2 hover:underline"
+        className="min-w-0 overflow-hidden text-primary underline-offset-2 hover:underline"
       >
         <ArtifactAddressLabel address={cell.reference} />
       </ArtifactLink>
@@ -182,7 +235,7 @@ export function CellContent({
         href={cell.href}
         target="_blank"
         rel="noreferrer noopener"
-        className="truncate text-primary underline-offset-2 hover:underline"
+        className="min-w-0 overflow-hidden text-primary underline-offset-2 hover:underline"
       >
         {cell.text}
       </a>
@@ -192,16 +245,27 @@ export function CellContent({
     const src = imageUrl?.(cell.image)
     return (
       <span className="flex min-w-0 items-center gap-2">
-        {src ? <img src={src} alt="" className="size-6 shrink-0 rounded object-cover" /> : null}
-        <span className="truncate text-muted-foreground">{cell.text}</span>
+        {src ? <img src={src} alt="" className="size-5 shrink-0 rounded object-cover" /> : null}
+        <span className="min-w-0 overflow-hidden text-muted-foreground">{cell.text}</span>
       </span>
     )
   }
+  if (spill !== undefined) {
+    return (
+      <span
+        className="pointer-events-none absolute inset-y-0 left-0 z-[1] flex items-center overflow-hidden px-2"
+        style={{ width: spill }}
+      >
+        {cell.text}
+      </span>
+    )
+  }
+  // A cell's text stops at its edge, as a spreadsheet's does; the formula bar shows it whole.
   return (
     <span
       className={cn(
-        "min-w-0 flex-1 truncate",
-        numeric && "text-right tabular-nums",
+        "min-w-0 flex-1 overflow-hidden",
+        (numeric || cell.number) && "text-right tabular-nums",
         cell.negative && "text-destructive"
       )}
     >

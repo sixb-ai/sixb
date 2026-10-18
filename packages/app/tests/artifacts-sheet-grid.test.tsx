@@ -446,6 +446,70 @@ describe("the sheet grid", () => {
     expect(cell(0, 1).getAttribute("title")).toBe("Revenue · Currency · USD")
   })
 
+  test("runs long text on over empty cells to its right, and stops it at a cell with a value", () => {
+    // Reproduce by returning no spills from runOn: the note stops at its own narrow cell.
+    const notes = sheetModel(
+      {
+        name: "Notes",
+        frozenRows: 1,
+        frozenColumns: 0,
+        columns: {},
+        widths: { Note: 60, Gap: 60, Next: 60 },
+      },
+      parseCsv("Note,Gap,Next\nA long note that runs on,,x\nAnother long note runs on,y,\n")
+    )
+    const ui = render(<SheetGrid model={notes} locale="en-US" />)
+    const at = (row: number, column: number) =>
+      ui.container.querySelector<HTMLElement>(`[data-row="${row}"][data-column="${column}"]`)
+    // Row 2's note runs over the empty Gap cell, up to Next, which holds a value.
+    const spilled = at(1, 0)?.querySelector<HTMLElement>("span[style]")
+    expect(spilled?.style.width).toBe("120px")
+    expect(at(1, 0)?.className).toContain("overflow-visible")
+    // Row 3's neighbour holds a value: its note stops at its edge.
+    expect(at(2, 0)?.querySelector("span[style]")).toBeNull()
+    expect(at(2, 0)?.className).toContain("overflow-hidden")
+  })
+
+  test("aligns numbers in a text column right, as a spreadsheet aligns any number", () => {
+    const mixed = sheetModel(
+      { name: "Mixed", frozenRows: 1, frozenColumns: 0, columns: {}, widths: {} },
+      parseCsv("Value\n5100 USD\n42\n")
+    )
+    const ui = render(<SheetGrid model={mixed} locale="en-US" />)
+    const content = (row: number) =>
+      ui.container.querySelector(`[data-row="${row}"][data-column="0"] span`)?.className ?? ""
+    expect(content(1)).not.toContain("text-right")
+    expect(content(2)).toContain("text-right")
+  })
+
+  test("fills the view past the data with empty rows and columns, and marks the fill handle", () => {
+    // Reproduce by dropping the empty rows and columns: the grid ends at C4.
+    const { grid, cell } = mount()
+    const letters = Array.from(document.querySelectorAll('[aria-hidden="true"]'))
+      .map((element) => element.textContent?.trim())
+      .filter((text) => text === "D" || text === "E")
+    expect(letters).toEqual(["D", "E"])
+    // The header and three rows are rows 1 to 4; the empty rows go on from 5.
+    const empty = grid.querySelector(':scope > [aria-hidden="true"]')
+    expect(empty?.firstElementChild?.firstElementChild?.textContent).toBe("5")
+    expect(empty?.children.length).toBeGreaterThan(10)
+    // The active cell is the selection's bottom right, and carries the handle.
+    expect(cell(1, 0).querySelector("span.bg-primary")).not.toBeNull()
+  })
+
+  test("rules a selected column's letter only when the selection starts below the header", () => {
+    // Reproduce by putting the rule back in SELECTED_LETTER: a whole column's letter draws it on
+    // top of the selection's outline, a double line over the header row.
+    const { cell } = mount()
+    const ruled = () => cell(-1, 1).className.includes("inset_0_-2px_0_var(--primary)")
+    fireEvent.pointerDown(cell(2, 1), { button: 0 })
+    fireEvent.pointerUp(cell(2, 1))
+    expect(ruled()).toBe(true)
+    fireEvent.pointerDown(cell(-1, 1), { button: 0 })
+    fireEvent.pointerUp(cell(-1, 1))
+    expect(ruled()).toBe(false)
+  })
+
   test("freezes the columns the reader froze", () => {
     const { cell } = mount({ ...INITIAL_SHEET_VIEW, frozenColumns: 2 })
     expect(cell(1, 0).className).toContain("sticky")
