@@ -1,9 +1,19 @@
 import { cn } from "@sixb/ui/lib/utils"
-import { ArrowDown, ArrowUp, CalendarDays, Image, Link2 } from "lucide-react"
+import {
+  ArrowDown,
+  ArrowUp,
+  CalendarDays,
+  Check,
+  Image,
+  Link2,
+  SquareCheck,
+  Tag,
+} from "lucide-react"
 import type { CSSProperties, ReactNode } from "react"
 import type { ArtifactMessages } from "../../messages"
 import { ArtifactAddressLabel, ArtifactLink } from "../../references/references"
 import { currencySymbol, type FormattedCell } from "./format"
+import { type CellHighlight, TONE_COLORS } from "./highlight"
 import type { SheetColumn } from "./model"
 import { type CellRange, inRange, type SortDirection } from "./selection"
 
@@ -37,6 +47,7 @@ export function GridCell({
   sort,
   title,
   description,
+  highlight,
   style,
   children,
 }: {
@@ -64,6 +75,8 @@ export function GridCell({
   readonly title?: string
   /** What a header's column means, from the workbook, for assistive technology. */
   readonly description?: string
+  /** A bar or shade by the cell's value in its column. The selection's tint covers a shade. */
+  readonly highlight?: CellHighlight
   readonly style: CSSProperties
   readonly children: ReactNode
 }) {
@@ -102,8 +115,27 @@ export function GridCell({
             : "bg-[color-mix(in_oklab,var(--warning)_20%,var(--sheet-cell))]")
       )}
       data-matched={matched ? "" : undefined}
-      style={style}
+      style={
+        highlight?.kind === "shade" && !selected && !matched
+          ? { ...style, backgroundColor: highlight.color }
+          : style
+      }
     >
+      {highlight?.kind === "bar" ? (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute inset-y-[5px] rounded-[3px]",
+            highlight.negative
+              ? "bg-[color-mix(in_oklab,var(--destructive)_24%,transparent)]"
+              : "bg-[color-mix(in_oklab,var(--foreground)_11%,transparent)]"
+          )}
+          style={{
+            left: `calc(4px + (100% - 8px) * ${highlight.from})`,
+            width: `calc((100% - 8px) * ${highlight.to - highlight.from})`,
+          }}
+        />
+      ) : null}
       {children}
       {corner ? (
         <span
@@ -209,6 +241,10 @@ function TypeGlyph({ column }: { readonly column: SheetColumn | undefined }) {
       <Link2 className="size-3" />
     ) : type === "image" ? (
       <Image className="size-3" />
+    ) : type === "boolean" ? (
+      <SquareCheck className="size-3" />
+    ) : type === "tag" ? (
+      <Tag className="size-3" />
     ) : null
   return glyph ? (
     <span
@@ -302,6 +338,39 @@ export function CellContent({
       <span className="flex min-w-0 items-center gap-2">
         {src ? <img src={src} alt="" className="size-5 shrink-0 rounded object-cover" /> : null}
         <span className="min-w-0 overflow-hidden text-muted-foreground">{cell.text}</span>
+      </span>
+    )
+  }
+  if (cell.check !== undefined) {
+    // A read-only checkbox, centred as a spreadsheet's is.
+    return (
+      <span className="flex min-w-0 flex-1 justify-center">
+        <span
+          role="img"
+          aria-label={cell.text}
+          className={cn(
+            "flex size-[15px] items-center justify-center rounded-[4px] border",
+            cell.check
+              ? "border-foreground bg-foreground text-background"
+              : "border-[color-mix(in_oklab,var(--foreground)_28%,transparent)]"
+          )}
+        >
+          {cell.check ? <Check className="size-[11px]" strokeWidth={3} /> : null}
+        </span>
+      </span>
+    )
+  }
+  if (cell.tag) {
+    const color = TONE_COLORS[cell.tag]
+    return (
+      <span
+        className="min-w-0 truncate rounded-full px-2 py-px text-[12px] leading-[18px] font-medium"
+        style={{
+          backgroundColor: `color-mix(in oklab, ${color} 14%, var(--sheet-cell))`,
+          color: `color-mix(in oklab, ${color} 70%, var(--foreground))`,
+        }}
+      >
+        {cell.text}
       </span>
     )
   }

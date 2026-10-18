@@ -53,6 +53,8 @@ export {
   type SheetChartType,
   type SheetColumnFormat,
   type SheetColumnType,
+  type SheetHighlight,
+  type SheetTone,
   type SheetTotal,
   sheetFilePath,
   WORKBOOK_FILE,

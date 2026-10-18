@@ -209,7 +209,12 @@ function cellProblem(
         ? undefined
         : "is not one of the artifact's files: add the image to the artifact and give its relative path, or give another artifact's address."
     }
+    case "boolean":
+      return /^(true|false)$/i.test(value.trim())
+        ? undefined
+        : "is not true or false: write true or false, or leave the cell empty."
     case "text":
+    case "tag":
       return undefined
   }
 }

@@ -132,10 +132,11 @@ function estimatedWidth(
   sample: readonly string[],
   format: SheetColumnFormat
 ): number {
-  // Formatting adds currency signs, grouping, and month names; compact takes digits away.
+  // Formatting adds currency signs, grouping, month names, and a tag's chip; compact takes digits
+  // away, and a checkbox is narrow.
   const extra = format.compact
     ? -2
-    : format.type === "currency"
+    : format.type === "currency" || format.type === "tag"
       ? 4
       : format.type === "number" || format.type === "date"
         ? 2

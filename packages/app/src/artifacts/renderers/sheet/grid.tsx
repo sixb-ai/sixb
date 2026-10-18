@@ -41,6 +41,7 @@ import { findMatches } from "./find"
 import { modulo, type SheetFind, type SheetFindCount } from "./find-bar"
 import { elementTextMeasure, fitWidth, type TextMeasure } from "./fit"
 import { cellFormatter, type FormattedCell, numberFormat } from "./format"
+import { cellHighlight, highlightRanges } from "./highlight"
 import type { SheetColumn, SheetModel } from "./model"
 import {
   type CellPoint,
@@ -184,6 +185,7 @@ export function SheetGrid({
   )
   const rowCount = order.length + 1
   const columnCount = model.columns.length
+  const highlights = useMemo(() => highlightRanges(model), [model])
   // Totals follow what the reader sees: the filters change them, the sort does not.
   const totals = useMemo(() => (model.totals ? columnTotals(model, order) : null), [model, order])
   const range = useMemo(() => cellRange(anchor, focus), [anchor, focus])
@@ -643,7 +645,9 @@ export function SheetGrid({
       const column = segment[index] as number
       const cell = cellAt(row, column)
       if (!cell || model.columns[column]?.numeric || cell.number) continue
-      if (cell.href || cell.reference || cell.image || !cell.text.trim()) continue
+      if (cell.href || cell.reference || cell.image || cell.tag || cell.check !== undefined)
+        continue
+      if (!cell.text.trim()) continue
       const need = textWidth(cell.text) + CELL_PADDING * 2
       let width = widths[column] ?? 0
       if (need <= width) continue
@@ -687,6 +691,9 @@ export function SheetGrid({
       const spill = run?.spills.get(column)
       const covered = run?.covered.get(column)
       const width = widths[column] ?? 0
+      const shading = highlights.get(column)
+      const highlight =
+        header || !shading ? undefined : cellHighlight(shading, valueAt(row, column))
       const style: CSSProperties = {
         width,
         ...(fixed ? { left: rowNumberWidth + (offsets[column] ?? 0) } : {}),
@@ -712,6 +719,7 @@ export function SheetGrid({
             ? headerTitle(model.columns[column] as SheetColumn)
             : {})}
           matched={matched.has(`${row}:${column}`)}
+          {...(highlight ? { highlight } : {})}
           style={style}
         >
           {header ? (

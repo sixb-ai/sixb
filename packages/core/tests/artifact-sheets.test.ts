@@ -127,6 +127,22 @@ describe("parseWorkbook", () => {
       "use one of sum, average, min, max, count",
     ],
     [
+      { sheets: [{ name: "A", columns: { X: { type: "text", tones: { Late: "negative" } } } }] },
+      'sets "tones" but is not a tag column',
+    ],
+    [
+      { sheets: [{ name: "A", columns: { X: { type: "tag", tones: { Late: "red" } } } }] },
+      `gives 'Late' the tone "red"; use one of neutral, positive, warning, negative, chart-1`,
+    ],
+    [
+      { sheets: [{ name: "A", columns: { X: { type: "tag", highlight: "bars" } } }] },
+      'sets "highlight" but is not a number, currency, or percent column',
+    ],
+    [
+      { sheets: [{ name: "A", columns: { X: { type: "number", highlight: "heat" } } }] },
+      '"highlight" is "heat"; use one of bars, scale, diverging',
+    ],
+    [
       { sheets: [{ name: "A", totals: { X: "sum" } }] },
       "only a number, currency, or percent column",
     ],
@@ -285,6 +301,22 @@ describe("publishing a sheet", () => {
       ],
       [{ "sheets/Accounts.csv": "Name,Logo,Site,Since\nX,,ftp://x,\n" }, "full https:// address"],
       [{ "sheets/Accounts.csv": "Name,Logo,Site,Since\nX,,,04/01/2019\n" }, "write YYYY-MM-DD"],
+      [
+        {
+          "workbook.json": JSON.stringify({
+            ...WORKBOOK,
+            sheets: [
+              {
+                ...WORKBOOK.sheets[0],
+                columns: { ...WORKBOOK.sheets[0]?.columns, Margin: "boolean" },
+              },
+              WORKBOOK.sheets[1],
+            ],
+          }),
+          "sheets/Summary.csv": "Quarter,Revenue,Margin\nQ2,1,TRUE\nQ3,2,yes\n",
+        },
+        `'sheets/Summary.csv' row 3, column 'Margin': "yes" is not true or false`,
+      ],
       [
         {
           "workbook.json": JSON.stringify({

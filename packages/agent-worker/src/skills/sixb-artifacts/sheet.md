@@ -32,6 +32,8 @@ Write values raw. The workbook formats them in the reader's locale:
 | `date` | `2026-09-30`, or an ISO 8601 date and time | Sep 30, 2026 |
 | `link` | `https://example.com/cases/4182`, or an `artifact:` address | example.com/cases/4182 |
 | `image` | `photos/unit-7.jpg`, a file in the artifact, or an `artifact:` address | A thumbnail |
+| `boolean` | `true` or `false` | A checkbox |
+| `tag` | A short label from a small set: `Late`, `On track` | A chip, in its tone |
 | `text` | Anything | As written |
 
 - No symbols, thousands separators, or units in numbers: `4120000`, not `$4.12M` or `4,120,000`.
@@ -70,12 +72,28 @@ A sheet holds at most 200 columns and 100,000 rows; a workbook, 20 sheets and 10
 | Key | Means | Default |
 | --- | --- | --- |
 | `name` | The sheet's tab, and its file: `sheets/<name>.csv` | Required |
-| `columns` | A type for each column by name, or `{ type, currency, decimals, compact, signed }` | Text |
+| `columns` | A type for each column by name, or `{ type, currency, decimals, compact, signed, tones, highlight }` | Text |
 | `frozenRows` | Rows that stay in view while scrolling, header included, 0 to 10 | 1 |
 | `frozenColumns` | Columns that stay in view while scrolling sideways, 0 to 5 | 0 |
 | `widths` | Column widths in pixels, 40 to 800 | Fitted to the values |
 | `descriptions` | What a column means, by name, at most 300 characters; shown on its header | None |
 | `totals` | A row pinned under the sheet: `sum`, `average`, `min`, or `max` of a numeric column, or `count` of any column's values | None |
+
+A tag column names its colors in `tones`, by value: `positive`, `warning`, `negative`, or
+`neutral` for what a status means, or `chart-1` to `chart-5` for categories. A value not named is
+neutral. Use a tag for a status or a category, not for free text.
+
+`highlight` shades a number, currency, or percent column by value, across the whole column:
+`bars` draws a bar in each cell from zero, for amounts to compare at a glance; `scale` shades from
+light to dark, for rates and scores; `diverging` shades positive values green and negative ones
+red, for changes and variances. Highlight the one or two columns the reader should scan, not
+every column.
+
+```json
+"Status": { "type": "tag", "tones": { "Late": "negative", "At risk": "warning", "On track": "positive" } },
+"Revenue": { "type": "currency", "highlight": "bars" },
+"Change": { "type": "percent", "signed": true, "highlight": "diverging" }
+```
 
 `currency` is an ISO 4217 code and defaults to USD. `decimals` is 0 to 6; without it a column shows
 the decimals its values need. `compact: true` shows a number or currency short, `$4.1M` or `12K`,
@@ -115,5 +133,6 @@ Open each CSV and check its header and a few rows. A refusal names the file, row
 
 ## Examples
 
-`examples/sheet/` holds two finished workbooks to start from: service metrics with two sheets, a line
-chart, and a bar chart; and a parts inventory with a frozen first column, dates, links, and a pie.
+`examples/sheet/` holds two finished workbooks to start from: service metrics with two sheets,
+totals, descriptions, compact and signed numbers, a line chart, and a bar chart; and a parts
+inventory with a frozen first column, a status tag, bars, a checkbox, dates, links, and a pie.
