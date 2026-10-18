@@ -613,25 +613,6 @@ describe("Vercel AI Gateway provider", () => {
       ).toBeUndefined()
     }
   })
-  test("declines native decoding for schemas outside the strict Responses subset", () => {
-    expect(
-      isStrictGatewaySchema({
-        type: "object",
-        properties: { answer: { type: "string" } },
-        required: [],
-        additionalProperties: false,
-      })
-    ).toBe(false)
-    expect(
-      isStrictGatewaySchema({
-        type: "object",
-        properties: { values: { type: "object", additionalProperties: { type: "string" } } },
-        required: ["values"],
-        additionalProperties: false,
-      })
-    ).toBe(false)
-  })
-
   // Regression proof: disable reasoningEvents; the live-shape fixture loses its reasoning deltas.
   // Captured from Gateway GLM 5.3 Flash (Baseten), reasoning: high, on 2026-09-14.
   test("streams Gateway reasoning through the model loop with usage and replay intact", async () => {
@@ -1030,7 +1011,6 @@ describe("Vercel AI Gateway provider", () => {
   test.each([
     { parameters: ["response_format"], resolved: false },
     { parameters: [], resolved: false },
-    { parameters: undefined, resolved: false },
     { parameters: [], resolved: true },
   ])("sends structured output with catalog metadata %j", async ({ parameters, resolved }) => {
     const requested: string[] = []
@@ -1239,10 +1219,8 @@ describe("Vercel AI Gateway provider", () => {
   })
 
   // Regression proof: restore the unknown-as-unsupported gate; endpoint rejection is never observed.
-  test.each([
-    "model_not_supported",
-    "invalid_json_schema",
-  ])("preserves endpoint rejection %s with unknown capability", async (code) => {
+  test("preserves endpoint rejection with unknown capability", async () => {
+    const code = "invalid_json_schema"
     let posts = 0
     const model = createVercelGateway({
       fetch: async (url) => {

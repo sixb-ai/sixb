@@ -1,13 +1,14 @@
-import { expect, test } from "bun:test"
+import { afterEach, expect, jest, test } from "bun:test"
 import { FoundryTransport } from "../src/transport"
+
+// A timed-out test skips its own cleanup; never leak fake timers into later tests.
+afterEach(() => {
+  jest.useRealTimers()
+})
 
 // Regression proof: directly await fetch in post(). The watchdog wins instead of
 // caller cancellation, and a late response's body is never released.
-test.each([
-  "responses",
-  "chat",
-  "messages",
-] as const)("%s cancellation bounds an uncooperative fetch and releases late responses", async (protocol) => {
+test("cancellation bounds an uncooperative fetch and releases late responses", async () => {
   const entered = Promise.withResolvers<void>()
   const pending = Promise.withResolvers<Response>()
   const cancelled = Promise.withResolvers<unknown>()
@@ -23,7 +24,7 @@ test.each([
   })
   const controller = new AbortController()
   const reason = new Error("caller cancelled")
-  const post = transport.post("{}", controller.signal, "provider", "model", protocol).then(
+  const post = transport.post("{}", controller.signal, "provider", "model").then(
     () => "unexpected response",
     (error) => error
   )
@@ -93,4 +94,31 @@ test("cancellation does not await an uncooperative HTTP error body's cleanup", a
     cleanup.resolve()
     await post
   }
+})
+
+// Regression proof: drop the abort listener in transport.ts wait(). The 60-second
+// Retry-After wait then outlives the caller and the request never settles.
+test("cancellation interrupts a retry wait", async () => {
+  jest.useFakeTimers()
+  let calls = 0
+  const transport = new FoundryTransport({
+    endpoint: "https://example.test/api/projects/test",
+    apiKey: "key",
+    fetch: async () => {
+      calls++
+      return new Response(null, { status: 503, headers: { "retry-after": "60" } })
+    },
+  })
+  const controller = new AbortController()
+  const reason = new Error("cancel retry")
+  const post = transport.post("{}", controller.signal, "provider", "model").then(
+    () => "unexpected response",
+    (error) => error
+  )
+  for (let turn = 0; turn < 100 && jest.getTimerCount() === 0; turn++) await Promise.resolve()
+  expect(jest.getTimerCount()).toBe(1)
+  controller.abort(reason)
+  expect(await post).toBe(reason)
+  expect(jest.getTimerCount()).toBe(0)
+  expect(calls).toBe(1)
 })

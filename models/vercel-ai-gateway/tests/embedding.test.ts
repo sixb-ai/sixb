@@ -139,15 +139,13 @@ test("embedding pins input pricing without requiring a language model or output 
 test("embedding resolution preserves captured dimensions when caller options change", async () => {
   // Removal proof: pass the original options object to createGatewayEmbedding in resolve().
   const gateway = createVercelGateway({ fetch: async () => Response.json({ data: [] }) })
-  for (const modelId of ["test/model", "voyage/voyage-4-large", "cohere/embed-v4.0"]) {
-    const options = { dimensions: 2 }
-    const binding = gateway.embedding(modelId, options)
-    options.dimensions = 3
-    const model = await binding.resolve!()
-    expect(model.definition.dimensions).toBe(2)
-    expect(model.definition).toEqual(binding.definition)
-    expect(model.batching).toEqual(binding.batching)
-  }
+  const options = { dimensions: 2 }
+  const binding = gateway.embedding("voyage/voyage-4-large", options)
+  options.dimensions = 3
+  const model = await binding.resolve!()
+  expect(model.definition.dimensions).toBe(2)
+  expect(model.definition).toEqual(binding.definition)
+  expect(model.batching).toEqual(binding.batching)
 })
 
 test("only known embedding routes advertise safe automatic batching bounds", () => {

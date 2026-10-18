@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { afterEach, expect, jest, test } from "bun:test"
 import { question } from "@sixb/core"
 import { createVercelGateway } from "../src"
 import {
@@ -7,6 +7,11 @@ import {
   decisionQuestions,
   decisionRuntime,
 } from "./decision-fixture"
+
+// A timed-out test skips its own cleanup; never leak fake timers into later tests.
+afterEach(() => {
+  jest.useRealTimers()
+})
 
 test("decision translates all primitives and reuses the configured Gateway transport", async () => {
   let calls = 0
@@ -180,10 +185,15 @@ test("decision validates construction and propagates cancellation and timeouts",
     model.evaluate({ input: "x", questions: decisionQuestions, signal: controller.signal })
   ).rejects.toThrow("cancelled")
   expect(calls).toBe(1)
-  await expect(model.evaluate({ input: "x", questions: decisionQuestions })).rejects.toMatchObject({
-    name: "TimeoutError",
-  })
+  jest.useFakeTimers()
+  const timedOut = model
+    .evaluate({ input: "x", questions: decisionQuestions })
+    .catch((error: unknown) => error)
+  for (let turn = 0; turn < 100 && calls < 2; turn++) await Promise.resolve()
   expect(calls).toBe(2)
+  jest.advanceTimersByTime(20)
+  // Await a caught promise: Bun's `expect(pending).rejects` never reaches the test timeout.
+  expect(await timedOut).toMatchObject({ name: "TimeoutError" })
 })
 
 test("pricing is pinned per resolved decision and evaluation entries stay out of the language catalog", async () => {

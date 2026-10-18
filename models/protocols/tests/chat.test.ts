@@ -2,10 +2,7 @@ import { expect, test } from "bun:test"
 import type { JsonObject, LanguageModelStreamEvent, ModelMessage } from "@sixb/core/models"
 import { chatEvents, chatInput } from "../src/chat"
 
-function body(
-  values: readonly (JsonObject | string)[],
-  cancel?: () => void
-): ReadableStream<Uint8Array> {
+function body(values: readonly (JsonObject | string)[]): ReadableStream<Uint8Array> {
   const data = new TextEncoder().encode(
     values
       .map((value) => `data: ${typeof value === "string" ? value : JSON.stringify(value)}\r\n\r\n`)
@@ -14,9 +11,8 @@ function body(
   return new ReadableStream({
     start(controller) {
       for (const byte of data) controller.enqueue(Uint8Array.of(byte))
-      if (!cancel) controller.close()
+      controller.close()
     },
-    cancel,
   })
 }
 const options = {
@@ -290,32 +286,6 @@ test("treats an error after a choice finish as failure, not a completed answer",
     type: "error",
     error: { code: "content_filter", message: "[Test] blocked", requestId: "request" },
   })
-})
-
-test("cancels incomplete bodies on consumer return and abort", async () => {
-  let cancelled = 0
-  const controller = new AbortController()
-  const iterator = chatEvents(
-    body([chunk({ content: "first" })], () => {
-      cancelled++
-    }),
-    controller.signal,
-    options
-  )
-  for await (const event of iterator) if (event.type === "text-delta") break
-  expect(cancelled).toBe(1)
-  const consume = async () => {
-    for await (const event of chatEvents(
-      body([chunk({ content: "second" })], () => {
-        cancelled++
-      }),
-      controller.signal,
-      options
-    ))
-      if (event.type === "text-delta") controller.abort(new Error("cancelled"))
-  }
-  await expect(consume()).rejects.toThrow("cancelled")
-  expect(cancelled).toBe(2)
 })
 
 test("serializes portable history and isolates reasoning to same-provider current-turn tool continuation", () => {

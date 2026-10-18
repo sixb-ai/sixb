@@ -78,3 +78,50 @@ test("releases normally completed SSE bodies", async () => {
   expect(cancelled).toBe(false)
   expect(body.locked).toBe(false)
 })
+
+// Removal proof: await reader.cancel() in the decoder's finally block; the watchdog wins.
+test.each([
+  "return",
+  "throw",
+  "abort",
+])("uncooperative SSE cleanup preserves %s without hanging", async (mode) => {
+  const cleanup = Promise.withResolvers<void>()
+  const controller = new AbortController()
+  const body = new ReadableStream<Uint8Array>({
+    start(c) {
+      c.enqueue(new TextEncoder().encode("data: hello\n\n"))
+    },
+    cancel() {
+      return cleanup.promise
+    },
+  })
+  const iterator = decodeServerSentEvents(body, controller.signal)[Symbol.asyncIterator]()
+  await iterator.next()
+  const reason = new Error("consumer stopped")
+  if (mode === "abort") controller.abort(reason)
+  const pending = (
+    mode === "return"
+      ? iterator.return!()
+      : mode === "throw"
+        ? iterator.throw!(reason)
+        : iterator.next()
+  ).then(
+    () => "done",
+    (error) => error
+  )
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const result = await Promise.race([
+      pending,
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve("watchdog"), 100)
+      }),
+    ])
+    expect(result).toBe(mode === "return" ? "done" : reason)
+    expect(body.locked).toBe(false)
+  } finally {
+    clearTimeout(timer)
+    cleanup.resolve()
+    await pending
+  }
+})

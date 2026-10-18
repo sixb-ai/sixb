@@ -1,9 +1,15 @@
-import { expect, test } from "bun:test"
+import { afterEach, expect, jest, test } from "bun:test"
 import { ModelCatalogUnavailableError } from "@sixb/core/models"
 import { type AzureAIFoundryOptions, createAzureAIFoundry as create } from "../src"
 import { foundryMessagesUsage } from "../src/messages-accounting"
 
 const endpoint = "https://resource.services.ai.azure.com/api/projects/test"
+
+// A timed-out test skips its own cleanup; never leak fake timers into later tests. Deadline
+// tests await a caught promise: Bun's `expect(pending).rejects` never reaches the test timeout.
+afterEach(() => {
+  jest.useRealTimers()
+})
 const fixtureNames = [
   "production",
   "deployment",
@@ -622,18 +628,32 @@ test("derives Messages thinking controls from metadata, not model names", async 
   expect(body).toMatchObject({ thinking: { type: "enabled", budget_tokens: 1024 } })
 })
 
-test("bounds fetch and body waits independently of transport cancellation support", async () => {
-  for (const fetch of [
-    async () => new Promise<Response>(() => {}),
-    async () => new Response(new ReadableStream()),
-  ]) {
-    const provider = createAzureAIFoundry({
-      endpoint,
-      apiKey: "key",
-      catalog: { timeoutMs: 10, fetch },
-    })
-    await expect(provider("deployment").resolve()).rejects.toBeInstanceOf(
-      ModelCatalogUnavailableError
-    )
-  }
+test.each([
+  "fetch",
+  "body",
+])("bounds a stalled catalog %s independently of transport cancellation support", async (stage) => {
+  jest.useFakeTimers()
+  const stalled = Promise.withResolvers<void>()
+  const provider = createAzureAIFoundry({
+    endpoint,
+    apiKey: "key",
+    catalog: {
+      timeoutMs: 10,
+      fetch: async () => {
+        if (stage === "fetch") {
+          stalled.resolve()
+          return new Promise<Response>(() => {})
+        }
+        return new Response(
+          new ReadableStream({ pull: () => stalled.resolve() }, { highWaterMark: 0 })
+        )
+      },
+    },
+  })
+  const resolution = provider("deployment")
+    .resolve()
+    .catch((error: unknown) => error)
+  await stalled.promise
+  jest.advanceTimersByTime(10)
+  expect(await resolution).toBeInstanceOf(ModelCatalogUnavailableError)
 })

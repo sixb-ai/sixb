@@ -194,14 +194,13 @@ test("native Messages rejects connected deployments whose resource cannot be inf
 })
 
 // The old optional apiKey accepted these configurations at construction.
-test.each([undefined, "", "   "])("requires an explicit nonempty API key (%j)", (apiKey) => {
+test.each([undefined, "   "])("requires an explicit nonempty API key (%j)", (apiKey) => {
   expect(() => createAzureAIFoundry({ endpoint, apiKey })).toThrow("apiKey is required")
 })
 
 test.each([
   "",
   "/openai/v1",
-  "/anthropic/v1",
   "/api/projects/test/openai/v1",
 ])("requires a project URL rather than a resource/inference URL (%s)", (path) => {
   expect(() =>

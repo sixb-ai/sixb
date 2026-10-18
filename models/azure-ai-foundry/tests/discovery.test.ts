@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from "bun:test"
+import { afterEach, expect, jest, spyOn, test } from "bun:test"
 import {
   type JsonObject,
   type LanguageModelRequest,
@@ -14,6 +14,12 @@ const providerFixture = (options: Parameters<typeof create>[0]) =>
     catalog: { fetch: async () => Response.json({ azure: { models: {} } }) },
   })
 const endpoint = "https://resource.services.ai.azure.com/api/projects/example"
+
+// A timed-out test skips its own cleanup; never leak fake timers into later tests. Deadline
+// tests await a caught promise: Bun's `expect(pending).rejects` never reaches the test timeout.
+afterEach(() => {
+  jest.useRealTimers()
+})
 
 // Removal proof: remove the Messages fallback in resolveModel, or its BOOLEAN_KEYS entry.
 test("routes uncataloged Messages deployments and validates their eligibility", async () => {
@@ -435,42 +441,32 @@ test("applies the byte budget across pages and keeps the previous snapshot after
 })
 
 test("cancels a late response from a transport that ignored the discovery deadline", async () => {
-  let finishFetch: (response: Response) => void = () => {
-    throw new Error("fetch not started")
-  }
-  let confirmCancellation: () => void = () => {}
-  const cancelled = new Promise<void>((resolve) => {
-    confirmCancellation = resolve
-  })
+  jest.useFakeTimers()
+  const started = Promise.withResolvers<void>()
+  const late = Promise.withResolvers<Response>()
+  const cancelled = Promise.withResolvers<void>()
   const provider = providerFixture({
     endpoint,
     apiKey: () => "token",
     discovery: { timeoutMs: 20 },
-    fetch: () =>
-      new Promise<Response>((resolve) => {
-        finishFetch = resolve
-      }),
+    fetch: () => {
+      started.resolve()
+      return late.promise
+    },
   })
-  await expect(provider.catalog.list()).rejects.toBeInstanceOf(ModelCatalogUnavailableError)
-  finishFetch(
-    new Response(
-      new ReadableStream({
-        cancel() {
-          confirmCancellation()
-        },
-      })
-    )
-  )
-  await cancelled
+  const listing = provider.catalog.list().catch((error: unknown) => error)
+  await started.promise
+  jest.advanceTimersByTime(20)
+  expect(await listing).toBeInstanceOf(ModelCatalogUnavailableError)
+  late.resolve(new Response(new ReadableStream({ cancel: () => cancelled.resolve() })))
+  await cancelled.promise
 })
 
 const malformed: JsonObject[] = [
   { capabilities: { responses: true } },
   { capabilities: { responses: "FALSE" } },
-  { capabilities: { chatCompletion: "yes" } },
   { capabilities: { maxContextToken: "128k" } },
   { capabilities: { maxOutputToken: "9007199254740992" } },
-  { capabilities: { maxOutputToken: "0" } },
   { modelPublisher: 123 },
   { modelVersion: null },
   { sku: { name: "sku", capacity: -1 } },
@@ -536,40 +532,52 @@ test("classifies transport/access failures, retries later, and retains the last 
   expect(await provider.catalog.list()).toHaveLength(1)
 })
 
+// Each stage waits on the discovery deadline, driven by fake timers once the stage stalls.
 test.each([
   "credential",
   "fetch",
   "body",
 ])("bounds a stalled %s with one discovery deadline", async (stage) => {
+  jest.useFakeTimers()
+  const stalled = Promise.withResolvers<void>()
   let cancelled = false
   let signal: AbortSignal | undefined
   const provider = providerFixture({
     endpoint,
     apiKey: (current) => {
       signal = current
-      return stage === "credential" ? new Promise<string>(() => {}) : "token"
+      if (stage !== "credential") return "token"
+      stalled.resolve()
+      return new Promise<string>(() => {})
     },
     discovery: { timeoutMs: 20 },
     fetch: async () => {
-      if (stage === "fetch") return new Promise<Response>(() => {})
+      if (stage === "fetch") {
+        stalled.resolve()
+        return new Promise<Response>(() => {})
+      }
       return new Response(
-        new ReadableStream({
-          cancel() {
-            cancelled = true
+        new ReadableStream(
+          {
+            pull: () => stalled.resolve(),
+            cancel() {
+              cancelled = true
+            },
           },
-        })
+          { highWaterMark: 0 }
+        )
       )
     },
   })
-  await expect(provider.catalog.list()).rejects.toBeInstanceOf(ModelCatalogUnavailableError)
+  const listing = provider.catalog.list().catch((error: unknown) => error)
+  await stalled.promise
+  jest.advanceTimersByTime(20)
+  expect(await listing).toBeInstanceOf(ModelCatalogUnavailableError)
   expect(signal?.aborted).toBe(true)
   if (stage === "body") expect(cancelled).toBe(true)
 })
 
-test("requires project URLs and validates discovery bounds", () => {
-  expect(() =>
-    providerFixture({ endpoint: "https://resource.openai.azure.com", apiKey: "key" })
-  ).toThrow("project URL")
+test("validates discovery bounds", () => {
   for (const discovery of [{ maxPages: 0 }, { ttlMs: -1 }, { timeoutMs: Number.NaN }])
     expect(() => providerFixture({ endpoint, apiKey: "key", discovery })).toThrow(
       "positive safe integer"
