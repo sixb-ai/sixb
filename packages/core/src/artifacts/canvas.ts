@@ -367,19 +367,3 @@ function record(
   }
   return input
 }
-
-/** The box an item covers, or none for an arrow, a text without a width, or a note's free height. */
-export function canvasItemBox(
-  item: CanvasItem
-): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } | null {
-  switch (item.type) {
-    case "arrow":
-      return null
-    case "text":
-      return null
-    case "note":
-      return item.h === undefined ? null : { x: item.x, y: item.y, w: item.w, h: item.h }
-    default:
-      return { x: item.x, y: item.y, w: item.w, h: item.h }
-  }
-}

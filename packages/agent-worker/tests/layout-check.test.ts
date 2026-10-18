@@ -179,7 +179,7 @@ describe("the layout check", () => {
     expect(readFileSync(join(library, "runtime.js"), "utf8")).toContain("sixb-frame/1")
     expect(readFileSync(join(library, "probe.js"), "utf8")).toStartWith("(function layoutProbe")
     expect(
-      readFileSync(join(root, ".sixb/agent/checks/art_0000000000-v1/entry.html"), "utf8")
+      readFileSync(join(root, ".sixb/agent/checks/art_0000000000-v1/entries/index.html"), "utf8")
     ).toContain(
       '<head><link rel="stylesheet" href="__sixb/deck.css"><script src="__sixb/runtime.js" data-sixb-layout="deck"></script>'
     )
@@ -210,7 +210,7 @@ describe("the layout check", () => {
       tokens: { "--foreground": "#2b2b2b", "--background": "#fafafa" },
     })
     expect(written.filter((path) => path.startsWith(library))).toHaveLength(5)
-    expect(written.filter((path) => path.endsWith("/entry.html"))).toHaveLength(2)
+    expect(written.filter((path) => path.endsWith("/entries/index.html"))).toHaveLength(2)
   })
 
   test("keeps what a check reported, however its command ended", async () => {
@@ -350,10 +350,74 @@ exports.chromium = {
         },
       ],
     })
-    expect(readFileSync(join(output, "entry.html"), "utf8")).toContain(
+    expect(readFileSync(join(output, "entries/index.html"), "utf8")).toContain(
       '<link rel="stylesheet" href="__sixb/page.css"><script src="__sixb/runtime.js" data-sixb-layout="page">'
     )
     expect(commands[0]?.options.env).toMatchObject({ SIXB_CHECK_LAYOUT: "page" })
+  })
+
+  test("opens a canvas's boards each at its size, and names the board a warning is on", async () => {
+    // Reproduce by injecting a board's kit without its folder: boards/welcome.html asks for
+    // boards/__sixb/page.css, which nothing serves, and the board lays out unstyled.
+    const output = join(root, ".sixb/agent/checks/art_0000000000-v1")
+    const html = (title: string) =>
+      new TextEncoder().encode(`<html><head></head><body>${title}</body></html>`)
+    const { handle, commands } = sandbox({
+      stdout: JSON.stringify({
+        layout: "canvas",
+        problems: [
+          problem({
+            code: "wide",
+            slide: undefined,
+            board: "region",
+            selector: "div.choice",
+            text: "North",
+            rect: { x: 20, y: 300, width: 480, height: 64 },
+          }),
+        ],
+        errors: [],
+        screenshots: [join(output, "boards/welcome.png"), join(output, "boards/region.png")],
+      }),
+    })
+    const result = await checkLayout({
+      handle,
+      layout: "canvas",
+      boards: [
+        { id: "welcome", file: "boards/welcome.html", w: 390, h: 844, html: html("Welcome") },
+        { id: "region", file: "boards/region.html", w: 390, h: 844, html: html("Region") },
+      ],
+      directory: join(root, "canvas"),
+      files: ["canvas.json", "boards/welcome.html", "boards/region.html", "boards/shared.css"],
+      name: "art_0000000000-v1",
+      signal: new AbortController().signal,
+    })
+    expect(result).toEqual({
+      status: "checked",
+      screenshots: [
+        ".sixb/agent/checks/art_0000000000-v1/boards/welcome.png",
+        ".sixb/agent/checks/art_0000000000-v1/boards/region.png",
+      ],
+      warnings: [
+        {
+          code: "layout_wide",
+          part: "region",
+          message:
+            "Board 'region': div.choice “North” runs past the screen's right edge at 20,300 (480×64), so the whole page scrolls sideways; let it wrap or shrink, or put it in a box that scrolls (.table-scroll).",
+        },
+      ],
+    })
+    expect(JSON.parse(readFileSync(join(output, "boards.json"), "utf8"))).toEqual([
+      { id: "welcome", file: "boards/welcome.html", w: 390, h: 844 },
+      { id: "region", file: "boards/region.html", w: 390, h: 844 },
+    ])
+    expect(JSON.parse(readFileSync(join(output, "entries.json"), "utf8"))).toEqual({
+      "boards/welcome.html": "entries/boards/welcome.html",
+      "boards/region.html": "entries/boards/region.html",
+    })
+    expect(readFileSync(join(output, "entries/boards/welcome.html"), "utf8")).toContain(
+      '<link rel="stylesheet" href="../__sixb/page.css"><script src="../__sixb/runtime.js" data-sixb-layout="page">'
+    )
+    expect(commands[0]?.options.env).toMatchObject({ SIXB_CHECK_LAYOUT: "canvas" })
   })
 
   test("counts a report for another layout as a failed check", async () => {

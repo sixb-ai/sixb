@@ -1,0 +1,107 @@
+{
+  "items": [
+    {
+      "id": "heading",
+      "type": "text",
+      "x": 0,
+      "y": -300,
+      "text": "Field app onboarding",
+      "size": "xl"
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "x": 0,
+      "y": -220,
+      "w": 1200,
+      "text": "Three screens from install to a technician's first job, for the October pilot in North.",
+      "size": "m"
+    },
+    {
+      "id": "first-run",
+      "type": "section",
+      "x": 0,
+      "y": -120,
+      "w": 1650,
+      "h": 964,
+      "title": "First run"
+    },
+    {
+      "id": "welcome",
+      "type": "board",
+      "file": "boards/welcome.html",
+      "x": 0,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Welcome"
+    },
+    {
+      "id": "region",
+      "type": "board",
+      "file": "boards/region.html",
+      "x": 630,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Choose a region"
+    },
+    {
+      "id": "first-job",
+      "type": "board",
+      "file": "boards/first-job.html",
+      "x": 1260,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "First job"
+    },
+    {
+      "id": "to-region",
+      "type": "arrow",
+      "from": "welcome",
+      "to": "region",
+      "label": "Get started"
+    },
+    {
+      "id": "to-first-job",
+      "type": "arrow",
+      "from": "region",
+      "to": "first-job",
+      "label": "Continue"
+    },
+    {
+      "id": "skip-region",
+      "type": "note",
+      "x": 630,
+      "y": 1010,
+      "w": 300,
+      "text": "Skip this screen when the phone's location finds a depot?"
+    },
+    {
+      "id": "about-region",
+      "type": "arrow",
+      "from": "skip-region",
+      "to": "region",
+      "dashed": true
+    },
+    {
+      "id": "pilot-ask",
+      "type": "note",
+      "x": 1260,
+      "y": 1010,
+      "w": 300,
+      "text": "Pilot crews asked to open the route in their own maps app.",
+      "tone": "neutral"
+    },
+    {
+      "id": "ship-first",
+      "type": "note",
+      "x": 0,
+      "y": 1010,
+      "w": 300,
+      "text": "Ship first: welcome and first job. Regions can follow.",
+      "tone": "positive"
+    }
+  ]
+}

@@ -244,6 +244,38 @@ describe("publishing a canvas", () => {
     })
   })
 
+  test("warns of boards that overlap, and notes or text over a board, and keeps the version", async () => {
+    const { publish } = setup()
+    const published = await publish({
+      "canvas.json": JSON.stringify({
+        items: [
+          board("home"),
+          board("pricing", 1200),
+          { id: "ask", type: "note", x: 1300, y: 100, w: 240, text: "Annual first?" },
+          { id: "label", type: "text", x: 40, y: 900, text: "Below the boards, as it should be" },
+          { id: "around", type: "section", x: -40, y: -40, w: 2600, h: 900 },
+        ],
+      }),
+      "boards/home.html": "<main></main>",
+      "boards/pricing.html": "<main></main>",
+    })
+    // Reproduce by testing only boards against boards: the note on the pricing board is missed.
+    expect(published.warnings).toEqual([
+      {
+        code: "canvas_overlap",
+        part: "home",
+        message:
+          "Boards 'home' and 'pricing' overlap, so one covers the other's page: leave 80 pixels between boards in a row and 160 between rows.",
+      },
+      {
+        code: "canvas_covers_board",
+        part: "ask",
+        message:
+          "Note 'ask' sits on board 'pricing' and covers its page: put it beside the board, and an arrow to it when it is about the board.",
+      },
+    ])
+  })
+
   test("refuses a board without its file, and what its HTML can't show", async () => {
     const { publish } = setup()
     const canvas = JSON.stringify({ items: [board("home")] })

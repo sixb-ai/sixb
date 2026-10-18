@@ -302,6 +302,10 @@ Double-click a board, press Enter on it, or press the button by its name to open
 viewer and answers like a page, ← and → step through the boards in order, and Esc goes back to the
 canvas.
 
+Publishing warns of boards that overlap and of notes or text on a board. When the Agent publishes a
+canvas, its sandbox's browser opens each board at its own size, as it checks a page, and the Agent
+gets each board's warnings and screenshot.
+
 ## Reference another artifact
 
 A document, a sheet, or an agent's reply can show another artifact, or a part of it, by its

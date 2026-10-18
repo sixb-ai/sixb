@@ -40,9 +40,22 @@ export interface LayoutWarning {
   readonly part?: string
 }
 
+/** What the check lays out: a deck, a page, or a canvas's boards, each a page at its own size. */
+export type CheckLayout = FrameLayout | "canvas"
+
+/** A canvas's board, as the check opens it. */
+export interface CheckedBoard {
+  readonly id: string
+  /** Its HTML file, relative to the version's directory. */
+  readonly file: string
+  readonly w: number
+  readonly h: number
+  readonly html: Uint8Array
+}
+
 interface CheckReport {
   /** The layout the check laid the entry out in, which says it ran to the end of its setup. */
-  readonly layout?: FrameLayout
+  readonly layout?: CheckLayout
   readonly slides?: number
   readonly problems?: readonly CheckedProblem[]
   readonly errors?: readonly string[]
@@ -58,38 +71,53 @@ interface CheckReport {
 export type PageView = "desktop" | "phone"
 
 /**
- * Lays a published deck or page out in the sandbox's headless Chromium, as the app's frame does,
- * and reports what a reader would find wrong: on each slide of a deck, or on a page at a laptop's
- * width and a phone's, with a screenshot of each for the Agent to look at. A sandbox without the
- * agent image's browser skips it; so does a check that fails, which never costs the Agent its
- * publish.
+ * Lays a published deck, page, or canvas out in the sandbox's headless Chromium, as the app's
+ * frame does, and reports what a reader would find wrong: on each slide of a deck, on a page at a
+ * laptop's width and a phone's, or on each of a canvas's boards at its own size, with a screenshot
+ * of each for the Agent to look at. A sandbox without the agent image's browser skips it; so does
+ * a check that fails, which never costs the Agent its publish.
  */
-export async function checkLayout(input: {
-  readonly handle: AgentSandboxHandle
-  readonly layout: FrameLayout
-  /** The version's directory in the sandbox. */
-  readonly directory: string
-  /** The paths the version publishes, relative to the directory: the check serves no others. */
-  readonly files: readonly string[]
-  readonly entry: Uint8Array
-  /** Names the check's directory, so each version's screenshots stay apart. */
-  readonly name: string
-  /** The version's `theme.json`, which the reader's frame applies over the app's theme. */
-  readonly theme?: ArtifactTheme
-  readonly signal: AbortSignal
-  /** Test seam; production allows 120 seconds. */
-  readonly timeoutMs?: number
-}): Promise<LayoutCheck> {
+export async function checkLayout(
+  input: {
+    readonly handle: AgentSandboxHandle
+    /** The version's directory in the sandbox. */
+    readonly directory: string
+    /** The paths the version publishes, relative to the directory: the check serves no others. */
+    readonly files: readonly string[]
+    /** Names the check's directory, so each version's screenshots stay apart. */
+    readonly name: string
+    /** The version's `theme.json`, which the reader's frame applies over the app's theme. */
+    readonly theme?: ArtifactTheme
+    readonly signal: AbortSignal
+    /** Test seam; production allows 120 seconds. */
+    readonly timeoutMs?: number
+  } & (
+    | { readonly layout: FrameLayout; readonly entry: Uint8Array }
+    | { readonly layout: "canvas"; readonly boards: readonly CheckedBoard[] }
+  )
+): Promise<LayoutCheck> {
   const { sandbox } = input.handle
   const timeoutMs = input.timeoutMs ?? CHECK_TIMEOUT_MS
   const library = posix.join(sandbox.workingDirectory, LIBRARY)
   const output = posix.join(sandbox.workingDirectory, CHECKS, input.name)
-  // The sandbox has no way to the API: what the version shows from other artifacts is a
-  // placeholder.
-  const entry = await injectFrameAssets(
-    await rewriteFrameReferences(new TextDecoder().decode(input.entry), []),
-    input.layout
-  )
+  // Each page to open, with the kit and the runtime as its frame serves them. The sandbox has no
+  // way to the API: what the version shows from other artifacts is a placeholder.
+  const pages =
+    input.layout === "canvas"
+      ? input.boards.map((board) => ({
+          path: board.file,
+          layout: "page" as const,
+          html: board.html,
+        }))
+      : [{ path: "index.html", layout: input.layout, html: input.entry }]
+  const entries = pages.map((page) => ({
+    path: page.path,
+    contents: injectFrameAssets(
+      rewriteFrameReferences(new TextDecoder().decode(page.html), [], page.path),
+      page.layout,
+      page.path
+    ),
+  }))
   await sandbox.writeFiles([
     ...(installed.has(sandbox)
       ? []
@@ -100,7 +128,26 @@ export async function checkLayout(input: {
           { path: posix.join(library, "runtime.js"), contents: asset("__sixb/runtime.js") },
           { path: posix.join(library, "probe.js"), contents: `(${layoutProbe.toString()})` },
         ]),
-    { path: posix.join(output, "entry.html"), contents: entry },
+    ...entries.map((entry) => ({
+      path: posix.join(output, "entries", entry.path),
+      contents: entry.contents,
+    })),
+    {
+      path: posix.join(output, "entries.json"),
+      contents: JSON.stringify(
+        Object.fromEntries(entries.map((entry) => [entry.path, posix.join("entries", entry.path)]))
+      ),
+    },
+    ...(input.layout === "canvas"
+      ? [
+          {
+            path: posix.join(output, "boards.json"),
+            contents: JSON.stringify(
+              input.boards.map(({ id, file, w, h }) => ({ id, file, w, h }))
+            ),
+          },
+        ]
+      : []),
     { path: posix.join(output, "themes.json"), contents: JSON.stringify(deckThemes(input.theme)) },
     { path: posix.join(output, "files.json"), contents: JSON.stringify(input.files) },
   ])
@@ -148,7 +195,8 @@ export async function checkLayout(input: {
     console.warn(`[SixbAgentWorker] The layout check failed: ${detail.slice(0, 500)}`)
     return { status: "skipped", reason: "the check failed in the sandbox" }
   }
-  const noun = input.layout === "deck" ? "deck" : "page"
+  const noun = { deck: "deck", page: "page", canvas: "canvas" }[input.layout]
+  const reached = { deck: "Slides", page: "Widths", canvas: "Boards" }[input.layout]
   const relative = (path: string) => posix.relative(sandbox.workingDirectory, path)
   const screenshots = (report.screenshots ?? []).map(relative)
   return {
@@ -165,7 +213,7 @@ export async function checkLayout(input: {
         : [
             {
               code: "layout_incomplete",
-              message: `The check stopped early: ${report.stopped.slice(0, 200)}. ${noun === "deck" ? "Slides" : "Widths"} it did not reach were not checked.`,
+              message: `The check stopped early: ${report.stopped.slice(0, 200)}. ${reached} it did not reach were not checked.`,
             },
           ]),
     ],
@@ -223,6 +271,8 @@ type CheckedProblem = LayoutProblem & {
   readonly theme: "light" | "dark"
   readonly slide?: number
   readonly view?: PageView
+  /** The canvas's board it is on. */
+  readonly board?: string
 }
 
 /**
@@ -238,12 +288,13 @@ export function layoutWarnings(problems: readonly CheckedProblem[]): LayoutWarni
       problem: CheckedProblem
       slides: Set<number>
       views: Set<PageView>
+      boards: Set<string>
       texts: Set<string>
       themes: Set<string>
     }
   >()
   for (const problem of problems) {
-    const at = problem.slide ?? problem.view
+    const at = problem.slide ?? problem.view ?? problem.board
     const cause =
       problem.code === "small_text" || problem.code === "small_target"
         ? `${problem.selector}|${problem.size}`
@@ -255,35 +306,51 @@ export function layoutWarnings(problems: readonly CheckedProblem[]): LayoutWarni
       problem,
       slides: new Set(),
       views: new Set(),
+      boards: new Set(),
       texts: new Set(),
       themes: new Set(),
     }
     if (problem.slide !== undefined) group.slides.add(problem.slide)
     if (problem.view) group.views.add(problem.view)
+    if (problem.board) group.boards.add(problem.board)
     group.texts.add(problem.text)
     group.themes.add(problem.theme)
     groups.set(key, group)
   }
-  const first = (group: { slides: Set<number>; views: Set<PageView> }) =>
+  // Boards in the order the check met them, as the canvas lists them.
+  const boardOrder = [
+    ...new Set(problems.flatMap((problem) => (problem.board ? [problem.board] : []))),
+  ]
+  const first = (group: { slides: Set<number>; views: Set<PageView>; boards: Set<string> }) =>
     group.slides.size > 0
       ? Math.min(...group.slides)
-      : Math.min(...[...group.views].map((view) => VIEWS.indexOf(view)))
+      : group.boards.size > 0
+        ? Math.min(...[...group.boards].map((board) => boardOrder.indexOf(board)))
+        : Math.min(...[...group.views].map((view) => VIEWS.indexOf(view)))
   const ordered = [...groups.values()].sort(
     (a, b) =>
       SEVERITY.indexOf(a.problem.code) - SEVERITY.indexOf(b.problem.code) || first(a) - first(b)
   )
   const warnings: LayoutWarning[] = ordered
     .slice(0, MAX_WARNINGS)
-    .map(({ problem, slides, views, texts, themes }) => {
+    .map(({ problem, slides, views, boards, texts, themes }) => {
       const theme =
         problem.code === "contrast" && themes.size === 1 ? ` in ${[...themes][0]} mode` : ""
       const page = slides.size === 0
-      const where = page ? viewList([...views]) : slideList([...slides])
+      const onBoards = boardOrder.filter((board) => boards.has(board))
+      const where =
+        onBoards.length > 0
+          ? boardList(onBoards)
+          : page
+            ? viewList([...views])
+            : slideList([...slides])
       return {
         code: `layout_${problem.code}`,
-        part: page
-          ? (VIEWS.find((view) => views.has(view)) ?? "desktop")
-          : String(Math.min(...slides)),
+        part:
+          onBoards[0] ??
+          (page
+            ? (VIEWS.find((view) => views.has(view)) ?? "desktop")
+            : String(Math.min(...slides))),
         message: `${where}: ${describeProblem(problem, [...texts], page)}${theme}.`,
       }
     })
@@ -295,6 +362,13 @@ export function layoutWarnings(problems: readonly CheckedProblem[]): LayoutWarni
     })
   }
   return warnings
+}
+
+/** `Board 'region'`, `Boards 'welcome' and 'region'`. */
+function boardList(boards: readonly string[]): string {
+  const named = boards.map((board) => `'${board}'`)
+  if (named.length === 1) return `Board ${named[0]}`
+  return `Boards ${named.slice(0, -1).join(", ")} and ${named.at(-1)}`
 }
 
 /** `Slide 3`, `Slides 1–4 and 7`. */
