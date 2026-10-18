@@ -24,11 +24,13 @@ export function refuseFrameAssetPaths(files: readonly ArtifactFile[], what: stri
  * Reads the `artifact:` addresses a web artifact's HTML uses, to resolve: links (`<a href>`),
  * files it shows from other artifacts (`<img src>`), and anything else it shows (`<sixb-embed
  * src>`), a chart, a range, a section, or a slide, which the app draws over the frame. `at` names
- * where each sits, such as a deck's slide. The first thing that would not render is the refusal.
+ * where each sits, such as a deck's slide, and `file` the HTML file it reads. The first thing that
+ * would not render is the refusal.
  */
 export function readHtmlReferences(
   rewriter: HTMLRewriter,
-  at: () => string
+  at: () => string,
+  file: string = HTML_ENTRY
 ): { readonly references: FoundReference[]; readonly refusal: () => string | undefined } {
   const references: FoundReference[] = []
   let refused: string | undefined
@@ -68,7 +70,7 @@ export function readHtmlReferences(
           element.getAttribute("src") ?? element.getAttribute("data") ?? ""
         ).trim()
         if (isArtifactAddress(source)) {
-          refused ??= `${HTML_ENTRY} frames '${source}': show another artifact with <sixb-embed src="${source}"></sixb-embed>, or a file of one with <img>.`
+          refused ??= `${file} frames '${source}': show another artifact with <sixb-embed src="${source}"></sixb-embed>, or a file of one with <img>.`
         }
       },
     })

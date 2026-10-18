@@ -1,5 +1,6 @@
 import { FormulaSyntaxError, parseFormula } from "./formula/parser"
 import { ARTIFACT_LIMITS } from "./limits"
+import { ARTIFACT_TONES, type ArtifactTone, isArtifactTone } from "./tones"
 
 /**
  * A sheet artifact is `workbook.json` and one CSV per sheet under `sheets/`. The CSV holds the
@@ -24,23 +25,6 @@ export type SheetColumnType = (typeof SHEET_COLUMN_TYPES)[number]
 
 /** Column types whose cells are numbers, so a chart can plot them and a range can sum them. */
 export const NUMERIC_COLUMN_TYPES: readonly SheetColumnType[] = ["number", "currency", "percent"]
-
-/**
- * The colors a tag's values take: the theme's meanings, or one of its chart colors. A value not
- * named is neutral.
- */
-export const SHEET_TONES = [
-  "neutral",
-  "positive",
-  "warning",
-  "negative",
-  "chart-1",
-  "chart-2",
-  "chart-3",
-  "chart-4",
-  "chart-5",
-] as const
-export type SheetTone = (typeof SHEET_TONES)[number]
 
 /**
  * How a numeric column's cells are shaded by value, across the column: a bar in the cell, a
@@ -70,8 +54,8 @@ export interface SheetColumnFormat {
   readonly compact?: boolean
   /** A sign on positive values too, `+3.2%`, for numbers, currencies, and percents. */
   readonly signed?: boolean
-  /** A tag column's colors by value. */
-  readonly tones?: Readonly<Record<string, SheetTone>>
+  /** A tag column's colors by value; a value not named is neutral. */
+  readonly tones?: Readonly<Record<string, ArtifactTone>>
   /** How a numeric column's cells are shaded by value. */
   readonly highlight?: SheetHighlight
   /** The formula that computes the column's every value, as an Excel table's column does. */
@@ -338,7 +322,7 @@ function readColumnFormat(value: unknown, at: string): SheetColumnFormat {
       throw new WorkbookError(`${at} sets "${key}" but is not a ${named} column.`)
     }
   }
-  let tones: Record<string, SheetTone> | undefined
+  let tones: Record<string, ArtifactTone> | undefined
   if (input.tones !== undefined) {
     if (type !== "tag") throw new WorkbookError(`${at} sets "tones" but is not a tag column.`)
     tones = {}
@@ -354,12 +338,12 @@ function readColumnFormat(value: unknown, at: string): SheetColumnFormat {
           `${at} "tones" names a value of ${tag.length} characters; a tag is 1 to ${TAG_MAX}.`
         )
       }
-      if (!(SHEET_TONES as readonly unknown[]).includes(tone)) {
+      if (!isArtifactTone(tone)) {
         throw new WorkbookError(
-          `${at} gives '${tag}' the tone ${JSON.stringify(tone)}; use one of ${SHEET_TONES.join(", ")}.`
+          `${at} gives '${tag}' the tone ${JSON.stringify(tone)}; use one of ${ARTIFACT_TONES.join(", ")}.`
         )
       }
-      tones[tag] = tone as SheetTone
+      tones[tag] = tone as ArtifactTone
     }
   }
   if (input.highlight !== undefined) {

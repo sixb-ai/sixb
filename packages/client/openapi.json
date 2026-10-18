@@ -34896,7 +34896,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["document", "sheet", "slides", "page", "file"],
+              "enum": ["document", "sheet", "slides", "page", "canvas", "file"],
               "description": "Only artifacts of this kind"
             }
           },
@@ -34938,7 +34938,7 @@
                           },
                           "kind": {
                             "type": "string",
-                            "enum": ["document", "sheet", "slides", "page", "file"]
+                            "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
                           },
                           "title": {
                             "type": "string"
@@ -35065,7 +35065,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "page", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -35125,7 +35125,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "page", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -35185,7 +35185,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "page", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -35260,7 +35260,7 @@
                         },
                         "kind": {
                           "type": "string",
-                          "enum": ["document", "sheet", "slides", "page", "file"]
+                          "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
                         },
                         "title": {
                           "type": "string"
@@ -35469,6 +35469,37 @@
                                 }
                               },
                               "required": ["kind"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": ["canvas"]
+                                },
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["board", "section"]
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["id", "type"],
+                                    "additionalProperties": false
+                                  }
+                                }
+                              },
+                              "required": ["kind", "items"],
                               "additionalProperties": false
                             },
                             {
@@ -35734,7 +35765,7 @@
                         },
                         "kind": {
                           "type": "string",
-                          "enum": ["document", "sheet", "slides", "page", "file"]
+                          "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
                         },
                         "title": {
                           "type": "string"
@@ -36007,7 +36038,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "page", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -36067,7 +36098,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "page", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -36127,7 +36158,7 @@
                 "properties": {
                   "kind": {
                     "type": "string",
-                    "enum": ["document", "sheet", "slides", "page", "file"]
+                    "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
                   },
                   "title": {
                     "type": "string"
@@ -36202,7 +36233,7 @@
                         },
                         "kind": {
                           "type": "string",
-                          "enum": ["document", "sheet", "slides", "page", "file"]
+                          "enum": ["document", "sheet", "slides", "page", "canvas", "file"]
                         },
                         "title": {
                           "type": "string"
@@ -36411,6 +36442,37 @@
                                 }
                               },
                               "required": ["kind"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": ["canvas"]
+                                },
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["board", "section"]
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["id", "type"],
+                                    "additionalProperties": false
+                                  }
+                                }
+                              },
+                              "required": ["kind", "items"],
                               "additionalProperties": false
                             },
                             {
@@ -36965,6 +37027,37 @@
                             }
                           },
                           "required": ["kind"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": ["canvas"]
+                            },
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["board", "section"]
+                                  },
+                                  "title": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["id", "type"],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": ["kind", "items"],
                           "additionalProperties": false
                         },
                         {

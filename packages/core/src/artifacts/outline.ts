@@ -7,6 +7,7 @@ export type ArtifactOutline =
   | SheetOutline
   | SlidesOutline
   | PageOutline
+  | CanvasOutline
   | FileOutline
 
 export interface DocumentOutline {
@@ -43,6 +44,18 @@ export interface SlidesOutline {
 export interface PageOutline {
   readonly kind: "page"
   /** The page's `<title>`, else its first heading. */
+  readonly title?: string
+}
+
+export interface CanvasOutline {
+  readonly kind: "canvas"
+  /** The boards and sections an address can name, by id, in the canvas's order. */
+  readonly items: readonly CanvasOutlineItem[]
+}
+
+export interface CanvasOutlineItem {
+  readonly id: string
+  readonly type: "board" | "section"
   readonly title?: string
 }
 

@@ -1,10 +1,10 @@
 import {
+  type ArtifactTone,
   FORMULA_ERRORS,
   isArtifactAddress,
   parseSheetDate,
   parseSheetNumber,
   type SheetColumnFormat,
-  type SheetTone,
 } from "@sixb/core/artifacts"
 import type { SheetColumn } from "./model"
 
@@ -23,7 +23,7 @@ export interface FormattedCell {
   /** A boolean cell's value, drawn as a checkbox. */
   readonly check?: boolean
   /** A tag cell's tone, drawn as a chip in it. */
-  readonly tag?: SheetTone
+  readonly tag?: ArtifactTone
   /** A computed cell that computed to an error, such as `#DIV/0!`. */
   readonly error?: boolean
 }

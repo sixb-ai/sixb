@@ -12,8 +12,9 @@ import {
 import type { CSSProperties, ReactNode } from "react"
 import type { ArtifactMessages } from "../../messages"
 import { ArtifactAddressLabel, ArtifactLink } from "../../references/references"
+import { TONE_COLORS } from "../../tones"
 import { currencySymbol, type FormattedCell } from "./format"
-import { type CellHighlight, TONE_COLORS } from "./highlight"
+import type { CellHighlight } from "./highlight"
 import type { SheetColumn } from "./model"
 import { type CellRange, inRange, type SortDirection } from "./selection"
 

@@ -36,6 +36,7 @@ import { type ArtifactKindName, ArtifactKindTile } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
 import { type ArtifactVersion, versionFileSource } from "./queries"
 import { ArtifactReferencesProvider } from "./references/references"
+import { CanvasRenderer } from "./renderers/canvas/renderer"
 import { DocumentRenderer } from "./renderers/document"
 import { FileRenderer } from "./renderers/file"
 import { ViewerLoading, ViewerNotice } from "./renderers/notice"
@@ -200,6 +201,8 @@ function ArtifactBody({
       return <SlidesRenderer version={version} part={part} />
     case "page":
       return <PageRenderer version={version} />
+    case "canvas":
+      return <CanvasRenderer version={version} {...(part ? { part } : {})} />
     case "file": {
       const source = versionFileSource(version, version.entry)
       return source ? (
@@ -329,7 +332,9 @@ function EntryDownloadMenu({
   const messages = useArtifactMessages()
   const locale = useLocale()
   const source =
-    kind === "slides" || kind === "page" ? null : versionFileSource(version, version.entry)
+    kind === "slides" || kind === "page" || kind === "canvas"
+      ? null
+      : versionFileSource(version, version.entry)
   if (!source) return null
   return (
     <DownloadMenu

@@ -185,9 +185,9 @@ describe("publishing any version", () => {
       "not stored"
     )
     await expectRequestError(
-      as("alice").artifacts.create({ kind: "canvas" as never, title: "Q3", files: [doc] }),
+      as("alice").artifacts.create({ kind: "map" as never, title: "Q3", files: [doc] }),
       "invalid_artifact",
-      "'canvas' is not a kind of artifact"
+      "'map' is not a kind of artifact"
     )
   })
 

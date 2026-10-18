@@ -33,6 +33,17 @@ const SlidesOutlineSchema = z.object({
 
 const PageOutlineSchema = z.object({ kind: z.literal("page"), title: z.string().optional() })
 
+const CanvasOutlineSchema = z.object({
+  kind: z.literal("canvas"),
+  items: z.array(
+    z.object({
+      id: z.string(),
+      type: z.enum(["board", "section"]),
+      title: z.string().optional(),
+    })
+  ),
+})
+
 const FileOutlineSchema = z.object({ kind: z.literal("file"), mediaType: z.string() })
 
 const ArtifactOutlineSchema = z.discriminatedUnion("kind", [
@@ -40,6 +51,7 @@ const ArtifactOutlineSchema = z.discriminatedUnion("kind", [
   SheetOutlineSchema,
   SlidesOutlineSchema,
   PageOutlineSchema,
+  CanvasOutlineSchema,
   FileOutlineSchema,
 ])
 

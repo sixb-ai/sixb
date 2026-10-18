@@ -11,6 +11,7 @@ export const en = {
     sheet: "Sheet",
     slides: "Slides",
     page: "Page",
+    canvas: "Canvas",
     file: "File",
   },
   viewer: {
@@ -56,7 +57,7 @@ export const en = {
   },
   gallery: {
     title: "Artifacts",
-    description: "Documents, sheets, slides, pages, and files published in this project.",
+    description: "Documents, sheets, slides, pages, canvases, and files published in this project.",
     filter: "Filter by kind",
     all: "All",
     kinds: {
@@ -64,6 +65,7 @@ export const en = {
       sheet: "Sheets",
       slides: "Slides",
       page: "Pages",
+      canvas: "Canvases",
       file: "Files",
     },
     count: (count: number, kind?: ArtifactKind) => {
@@ -73,6 +75,7 @@ export const en = {
         sheet: ["sheet", "sheets"],
         slides: ["deck", "decks"],
         page: ["page", "pages"],
+        canvas: ["canvas", "canvases"],
         file: ["file", "files"],
       }[kind ?? "all"]
       return `${number(count)} ${count === 1 ? one : many}`
@@ -81,7 +84,7 @@ export const en = {
     emptyDescription:
       "Ask the agent for a report, a spreadsheet, or a deck. What it publishes appears here.",
     emptyKind: (kind: ArtifactKind) =>
-      `No ${{ document: "documents", sheet: "sheets", slides: "decks", page: "pages", file: "files" }[kind]} yet`,
+      `No ${{ document: "documents", sheet: "sheets", slides: "decks", page: "pages", canvas: "canvases", file: "files" }[kind]} yet`,
     showAll: "Show all",
     loadFailed: "Artifacts could not be loaded.",
     retry: "Try again",
@@ -89,6 +92,18 @@ export const en = {
   page: {
     frame: (title: string) => `Page ${title}`,
     loadFailed: "This page could not be opened.",
+  },
+  canvas: {
+    canvas: (title: string) => `Canvas ${title}`,
+    loadFailed: "This canvas could not be opened.",
+    board: "Board",
+    embed: "Embedded artifact",
+    zoomIn: "Zoom in",
+    zoomOut: "Zoom out",
+    fit: "Fit",
+    fitView: "Fit everything in view",
+    zoom: (percent: number) => `${number(percent)}%`,
+    actualSize: "Zoom to 100%",
   },
   slides: {
     deck: (title: string) => `Slides: ${title}`,
@@ -108,6 +123,8 @@ export const en = {
     rows: (count: number) => (count === 1 ? "1 row" : `${number(count)} rows`),
     sections: (count: number) => (count === 1 ? "1 section" : `${number(count)} sections`),
     slides: (count: number) => (count === 1 ? "1 slide" : `${number(count)} slides`),
+    boards: (count: number) => (count === 1 ? "1 board" : `${number(count)} boards`),
+    items: (count: number) => (count === 1 ? "1 item" : `${number(count)} items`),
     /** What a version changed, read from its structure against the version before it. */
     added: (name: string) => `Added ${name}`,
     removed: (name: string) => `Removed ${name}`,
@@ -254,6 +271,7 @@ export const fr: Translation<ArtifactMessages> = {
     sheet: "Feuille",
     slides: "Diapositives",
     page: "Page",
+    canvas: "Canevas",
     file: "Fichier",
   },
   viewer: {
@@ -299,7 +317,8 @@ export const fr: Translation<ArtifactMessages> = {
   },
   gallery: {
     title: "Artefacts",
-    description: "Documents, feuilles, diapositives, pages et fichiers publiés dans ce projet.",
+    description:
+      "Documents, feuilles, diapositives, pages, canevas et fichiers publiés dans ce projet.",
     filter: "Filtrer par type",
     all: "Tous",
     kinds: {
@@ -307,6 +326,7 @@ export const fr: Translation<ArtifactMessages> = {
       sheet: "Feuilles",
       slides: "Diapositives",
       page: "Pages",
+      canvas: "Canevas",
       file: "Fichiers",
     },
     count: (count, kind) => {
@@ -316,6 +336,7 @@ export const fr: Translation<ArtifactMessages> = {
         sheet: ["feuille", "feuilles"],
         slides: ["présentation", "présentations"],
         page: ["page", "pages"],
+        canvas: ["canevas", "canevas"],
         file: ["fichier", "fichiers"],
       }[kind ?? "all"]
       return `${numberFr(count)} ${count <= 1 ? one : many}`
@@ -324,7 +345,7 @@ export const fr: Translation<ArtifactMessages> = {
     emptyDescription:
       "Demandez à l’agent un rapport, un tableur ou une présentation : ce qu’il publie apparaît ici.",
     emptyKind: (kind) =>
-      `Aucun${kind === "sheet" || kind === "slides" || kind === "page" ? "e" : ""} ${{ document: "document", sheet: "feuille", slides: "présentation", page: "page", file: "fichier" }[kind]} pour l’instant`,
+      `Aucun${kind === "sheet" || kind === "slides" || kind === "page" ? "e" : ""} ${{ document: "document", sheet: "feuille", slides: "présentation", page: "page", canvas: "canevas", file: "fichier" }[kind]} pour l’instant`,
     showAll: "Tout afficher",
     loadFailed: "Impossible de charger les artefacts.",
     retry: "Réessayer",
@@ -332,6 +353,18 @@ export const fr: Translation<ArtifactMessages> = {
   page: {
     frame: (title) => `Page ${title}`,
     loadFailed: "Impossible d’ouvrir cette page.",
+  },
+  canvas: {
+    canvas: (title) => `Canevas ${title}`,
+    loadFailed: "Impossible d’ouvrir ce canevas.",
+    board: "Planche",
+    embed: "Artefact intégré",
+    zoomIn: "Zoom avant",
+    zoomOut: "Zoom arrière",
+    fit: "Ajuster",
+    fitView: "Tout afficher",
+    zoom: (percent) => `${numberFr(percent)} %`,
+    actualSize: "Zoom à 100 %",
   },
   slides: {
     deck: (title) => `Diapositives : ${title}`,
@@ -351,6 +384,8 @@ export const fr: Translation<ArtifactMessages> = {
     rows: (count) => (count === 1 ? "1 ligne" : `${numberFr(count)} lignes`),
     sections: (count) => (count === 1 ? "1 section" : `${numberFr(count)} sections`),
     slides: (count) => (count === 1 ? "1 diapositive" : `${numberFr(count)} diapositives`),
+    boards: (count) => (count === 1 ? "1 planche" : `${numberFr(count)} planches`),
+    items: (count) => (count === 1 ? "1 élément" : `${numberFr(count)} éléments`),
     added: (name) => `« ${name} » ajouté`,
     removed: (name) => `« ${name} » supprimé`,
     addedSheets: (count) => `${numberFr(count)} feuilles ajoutées`,

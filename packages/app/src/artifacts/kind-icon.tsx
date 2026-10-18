@@ -1,6 +1,6 @@
 import type { GetArtifactResponse } from "@sixb/client"
 import { cn } from "@sixb/ui/lib/utils"
-import { AppWindow, File, FileText, Presentation, Table2 } from "lucide-react"
+import { AppWindow, File, FileText, Presentation, Shapes, Table2 } from "lucide-react"
 
 export type ArtifactKindName = GetArtifactResponse["artifact"]["kind"]
 
@@ -9,6 +9,7 @@ const KIND_ICONS: Record<ArtifactKindName, typeof FileText> = {
   sheet: Table2,
   slides: Presentation,
   page: AppWindow,
+  canvas: Shapes,
   file: File,
 }
 

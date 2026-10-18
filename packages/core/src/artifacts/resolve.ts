@@ -17,6 +17,8 @@ export type ResolvedArtifactPart =
   | { readonly type: "chart"; readonly chart: string }
   | { readonly type: "section"; readonly slug: string }
   | { readonly type: "slide"; readonly slide: number }
+  | { readonly type: "board"; readonly id: string }
+  | { readonly type: "region"; readonly id: string }
 
 /**
  * Finds what an address names in a version, against its outline and files. A problem says what is
@@ -84,6 +86,19 @@ export function resolveArtifactAddress(
       return slide <= outline.slides.length
         ? { part: { type: "slide", slide } }
         : { problem: `has no slide '${address.part}': it has ${outline.slides.length} slides` }
+    }
+    case "canvas": {
+      // A canvas names its boards and its sections, which are regions of it.
+      const item = outline.items.find((candidate) => candidate.id === address.part)
+      if (!item) {
+        return {
+          problem: `has no board or section '${address.part}'${listed(
+            "its boards and sections",
+            outline.items.map((candidate) => candidate.id)
+          )}`,
+        }
+      }
+      return { part: { type: item.type === "board" ? "board" : "region", id: item.id } }
     }
     case "page":
     case "file":

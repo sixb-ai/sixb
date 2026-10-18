@@ -170,3 +170,35 @@
 :is(.prose .sixb-embed, .sixb-embed-filled) .sixb-embed-section > .prose > :first-child {
   margin-top: 0;
 }
+
+/*
+ * A canvas artifact's board (renderers/canvas): the dot grid in the theme's colors. Its items take
+ * their colors from the board.
+ */
+.sixb-artboard {
+  --xy-background-pattern-dots-color-default: color-mix(
+    in oklab,
+    var(--muted-foreground) 32%,
+    transparent
+  );
+}
+
+/*
+ * A board, an embed, or a plain note on a canvas: the page itself, edged by a hairline and lifted
+ * by a soft shadow, as a print lies on a table. The hairline is what shows it in dark mode.
+ */
+.sixb-canvas-surface {
+  border-radius: 6px;
+  background: var(--card);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--foreground) 9%, transparent),
+    0 1px 2px rgb(0 0 0 / 0.05),
+    0 20px 44px -28px rgb(0 0 0 / 0.35);
+}
+
+/* A board takes focus from the keyboard, to open it; the ring shows where focus is. */
+.sixb-artboard .react-flow__node:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+  border-radius: 8px;
+}

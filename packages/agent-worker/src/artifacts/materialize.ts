@@ -35,7 +35,10 @@ interface ManifestEntry {
   readonly address: string
   /** The same at this version, which never changes: a reply shows what its words describe. */
   readonly pinned: string
-  /** Addresses of its parts: a document's sections, a sheet's sheets and charts, a deck's slides. */
+  /**
+   * Addresses of its parts: a document's sections, a sheet's sheets and charts, a deck's slides, a
+   * canvas's boards and sections.
+   */
   readonly parts?: readonly {
     readonly address: string
     readonly pinned: string
@@ -265,7 +268,14 @@ function partsOf(
           ? outline.slides.map((slide, index) =>
               part(String(index + 1), `Slide ${index + 1}${slide.title ? `: ${slide.title}` : ""}`)
             )
-          : []
+          : outline.kind === "canvas"
+            ? outline.items.map((item) =>
+                part(
+                  item.id,
+                  `${item.type === "board" ? "Board" : "Section"} ${item.id}${item.title ? `: ${item.title}` : ""}`
+                )
+              )
+            : []
   return parts.length > 0 ? { parts } : {}
 }
 
