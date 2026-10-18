@@ -865,3 +865,48 @@ describe("a sheet's totals row", () => {
     view.unmount()
   })
 })
+
+describe("a computed column", () => {
+  const computed = (() => {
+    const workbook = parseWorkbook(
+      JSON.stringify({
+        sheets: [
+          {
+            name: "Margins",
+            columns: {
+              Revenue: "currency",
+              Cost: "currency",
+              Margin: { type: "percent", formula: "([@Revenue]-[@Cost])/[@Revenue]" },
+            },
+          },
+        ],
+      })
+    )
+    if (!("workbook" in workbook) || !workbook.workbook.sheets[0]) throw new Error("No workbook.")
+    return sheetModel(
+      workbook.workbook.sheets[0],
+      parseCsv("Hotel,Revenue,Cost,Margin\nLisbon,1400,910,\nNew,0,10,\n")
+    )
+  })()
+
+  test("shows its computed values, its errors marked, and its formula in the formula bar", async () => {
+    expect(computed.rows.map((row) => row[3])).toEqual(["0.35", "#DIV/0!"])
+    const statuses: SheetGridStatus[] = []
+    const view = render(
+      <SheetGrid
+        model={computed}
+        locale="en-US"
+        onStatusChange={(status) => statuses.push(status)}
+      />
+    )
+    const cell = (row: number, column: number) =>
+      view.container.querySelector(`[data-row="${row}"][data-column="${column}"]`)
+    expect(cell(1, 3)?.textContent).toBe("35%")
+    expect(cell(2, 3)?.querySelector(".text-destructive")?.textContent).toBe("#DIV/0!")
+    await act(async () => {
+      fireEvent.pointerDown(cell(1, 3) as Element, { button: 0, pointerId: 1 })
+    })
+    expect(statuses.at(-1)?.value).toBe("=([@Revenue]-[@Cost])/[@Revenue]")
+    view.unmount()
+  })
+})

@@ -1,14 +1,15 @@
-import { sheetFilePath } from "@sixb/core/artifacts"
+import { formatCsv, sheetFilePath } from "@sixb/core/artifacts"
 import { useQueryClient } from "@tanstack/react-query"
 import type { DownloadOption } from "../../downloads"
 import { useArtifactMessages } from "../../messages"
 import { type ArtifactVersion, versionFileSource } from "../../queries"
-import { readWorkbookModels, useWorkbook } from "./workbook"
+import { readSheetModel, readWorkbookModels, useWorkbook } from "./workbook"
 import { workbookXlsx, XLSX_MEDIA_TYPE } from "./xlsx"
 
 /**
  * What a sheet artifact downloads as: the whole workbook as an `.xlsx`, built in the browser from
- * the sheets' files, typed and formatted as the grid shows them; then each sheet as its CSV.
+ * the sheets' files, typed and formatted as the grid shows them; then each sheet as its CSV, with
+ * its computed columns' values written in, since the published file leaves them empty.
  */
 export function useWorkbookDownloads(
   version: ArtifactVersion,
@@ -35,19 +36,30 @@ export function useWorkbookDownloads(
     },
     ...workbook.sheets.flatMap((sheet): DownloadOption[] => {
       const source = versionFileSource(version, sheetFilePath(sheet.name))
-      return source
-        ? [
-            {
-              key: `csv:${sheet.name}`,
-              type: "csv",
-              title: sheet.name,
-              detail: messages.csvDetail(outline.find((entry) => entry.name === sheet.name)?.rows),
-              section: messages.sheetsAsCsv,
-              href: source.downloadUrl,
-              fileName: `${sheet.name}.csv`,
-            },
-          ]
-        : []
+      if (!source) return []
+      const option = {
+        key: `csv:${sheet.name}`,
+        type: "csv",
+        title: sheet.name,
+        detail: messages.csvDetail(outline.find((entry) => entry.name === sheet.name)?.rows),
+        section: messages.sheetsAsCsv,
+      } as const
+      const computed = Object.values(sheet.columns).some((format) => format.formula)
+      return [
+        computed
+          ? {
+              ...option,
+              run: async () => {
+                const model = await readSheetModel(client, version, sheet)
+                const text = formatCsv(
+                  model.columns.map((column) => column.name),
+                  model.rows
+                )
+                saveFile(new Blob([text], { type: "text/csv" }), `${sheet.name}.csv`)
+              },
+            }
+          : { ...option, href: source.downloadUrl, fileName: `${sheet.name}.csv` },
+      ]
     }),
   ]
 }

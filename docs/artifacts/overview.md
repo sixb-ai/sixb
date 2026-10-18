@@ -124,6 +124,14 @@ Central,962,0.934,-0.013,141950
   of the rows the reader sees, so a filter changes it; the first column without a total says
   "Total". Leave total rows out of the CSV. `descriptions` explain a column on its header, in at
   most 300 characters.
+- A column with a `formula` computes each row from the others, as an Excel table's columns do:
+  `"Margin": { "type": "percent", "formula": "([@Revenue]-[@Cost])/[@Revenue]" }`. `[@Name]` is
+  this row's value, `[Name]` the whole column inside `SUM`, `AVERAGE`, `MIN`, `MAX`, or `COUNT`, and
+  `IF`, `IFERROR`, `AND`, `OR`, `NOT`, `ISBLANK`, `ROUND`, `ABS`, `LEN`, `LOWER`, `UPPER`,
+  `CONCAT`, `YEAR`, `MONTH`, and `DAYS` are there too. The CSV names the column and leaves its
+  values empty. Publishing refuses a formula naming a column the sheet lacks, columns that compute
+  from each other, and a result the column's type can't show, and warns of rows that compute to
+  `#DIV/0!` or `#VALUE!`. The `.xlsx` keeps each cell's formula.
 - `frozenRows` (default 1, the header) and `frozenColumns` (default 0) stay in view while the
   sheet scrolls; `widths` sets columns' widths in pixels.
 - A chart is a `bar`, `line`, `area`, or `pie` chart of up to five `y` columns against an `x`

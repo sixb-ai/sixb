@@ -14,7 +14,17 @@ export {
   parseSheetPart,
   type SheetPart,
 } from "./address"
-export { CsvParseError, type CsvTable, parseCsv } from "./csv"
+export { CsvParseError, type CsvTable, formatCsv, parseCsv } from "./csv"
+export {
+  checkFormula,
+  evaluateComputedColumns,
+  FORMULA_ERRORS,
+  type FormulaErrorCode,
+  type FormulaNode,
+  type FormulaOperator,
+  formulaDependencies,
+  parseFormula,
+} from "./formula"
 export {
   type DeckMode,
   FRAME_PROTOCOL,

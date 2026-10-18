@@ -60,6 +60,8 @@ export interface PreparedArtifactVersion {
   readonly kind: ArtifactKind
   readonly author: Principal
   readonly version: ArtifactVersionInput
+  /** What its kind's check found worth fixing in a version it accepts. */
+  readonly warnings: readonly ArtifactWarning[]
 }
 
 /**
@@ -96,6 +98,7 @@ export async function prepareArtifactVersion(
     ...(input.artifactId ? { artifactId: input.artifactId } : {}),
     kind: input.kind,
     author: input.author,
+    warnings: validated.warnings ?? [],
     version: {
       title,
       entry: validated.entry,
@@ -120,28 +123,31 @@ export async function storeArtifactVersion(
 }
 
 /**
- * What a stored version breaks in other artifacts that show it. A first version breaks nothing:
- * no other artifact could name it yet. The version is stored by now, so a failed check only loses
- * the warnings.
+ * What is worth fixing in a stored version: what its kind's check found, then what it breaks in
+ * other artifacts that show it. A first version breaks nothing: no other artifact could name it
+ * yet. The version is stored by now, so a failed check only loses those warnings.
  */
 export async function artifactVersionWarnings(
   context: PublishArtifactContext,
   prepared: PreparedArtifactVersion,
   stored: PublishedArtifactVersion
 ): Promise<readonly ArtifactWarning[]> {
-  if (!prepared.artifactId) return []
+  if (!prepared.artifactId) return prepared.warnings
   try {
-    return await brokenDependents(
-      referenceContext(context, prepared),
-      stored.artifact,
-      stored.version
-    )
+    return [
+      ...prepared.warnings,
+      ...(await brokenDependents(
+        referenceContext(context, prepared),
+        stored.artifact,
+        stored.version
+      )),
+    ]
   } catch (error) {
     console.warn(
       `[Sixb] Could not check which artifacts version ${stored.version.version} of '${stored.artifact.id}' breaks:`,
       error
     )
-    return []
+    return prepared.warnings
   }
 }
 
@@ -165,6 +171,7 @@ async function validateKind(
   readonly entry: string
   readonly outline: ArtifactOutline
   readonly references?: readonly FoundReference[]
+  readonly warnings?: readonly ArtifactWarning[]
 }> {
   switch (kind) {
     case "document":

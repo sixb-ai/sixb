@@ -1,5 +1,6 @@
 import {
   type CsvTable,
+  evaluateComputedColumns,
   NUMERIC_COLUMN_TYPES,
   parseSheetNumber,
   type SheetColumnFormat,
@@ -39,8 +40,12 @@ type SheetLayout = Pick<
 > &
   Partial<Pick<WorkbookSheet, "descriptions" | "totals">>
 
-/** A sheet of a workbook, laid out as its workbook says. */
-export function sheetModel(sheet: SheetLayout, table: CsvTable): SheetModel {
+/**
+ * A sheet of a workbook, laid out as its workbook says, its computed columns filled. Publishing
+ * refused formulas that can't compute, so they all do here.
+ */
+export function sheetModel(sheet: SheetLayout, source: CsvTable): SheetModel {
+  const table = evaluateComputedColumns(sheet, source).table
   const columns = table.header.map((name, index) => {
     const format = sheet.columns[name] ?? { type: "text" as const }
     const description = sheet.descriptions?.[name]
