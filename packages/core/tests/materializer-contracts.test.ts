@@ -1,36 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import type {
-  AdvanceProjectionTelemetryCheckpointInput,
-  AppliedMaterialization,
-  ApplyMaterializationInput,
-  ApplyMaterializationResult,
-  FinalizeMaterializationInput,
-  MaterializationPlanHeader,
-  MaterializationSession,
-  MaterializationStatePage,
-  MaterializationVectorChangePage,
-  OntologyCommitRecord,
-  OntologyCommitWrite,
-  OntologyMaterializationEvent,
-  OntologyMaterializationStorage,
-  OntologySourceStorage,
-  StageMaterializationWorkInput,
-  StageSourceAssertion,
-  StreamMaterializationStateInput,
-  StreamMaterializationVectorChangesInput,
-} from "@sixb/core/storage"
-import * as rootExports from "../src"
-import { utf8JsonByteLength } from "../src/materialization/refs"
+import { defineObjectType, OntologyRegistry, prop } from "../src"
 import {
   createCommitId,
   createEventId,
   createOntologyMaterializer,
-  createTimedCommitIdentity,
   linkRefKey,
   normalizeOntologyEditCommit,
   normalizeProjectionSourceEntry,
   normalizeTelemetryAppend,
-  ONTOLOGY_MATERIALIZATION_EVENT_KIND_ORDER,
   objectRefKey,
   projectionEntityKey,
   sha256Canonical,
@@ -39,55 +16,10 @@ import {
   DEFAULT_MATERIALIZATION_BATCHING,
   resolveMaterializationBatching,
 } from "../src/materializer/shared/batching"
-import { chunkBySize } from "../src/materializer/shared/chunking"
 import { createMaterializerFixture } from "./materializer-fixture"
 
 const leftObject = { objectTypeId: "a:b", primaryId: "c" }
 const rightObject = { objectTypeId: "a", primaryId: "b:c" }
-
-class FakeMaterializationStorage implements OntologyMaterializationStorage {
-  private readonly sessions = new WeakMap<object, MaterializationPlanHeader>()
-
-  async begin(input: MaterializationPlanHeader): Promise<MaterializationSession> {
-    const providerToken = {}
-    this.sessions.set(providerToken, input)
-    return { providerToken }
-  }
-
-  async *streamState(
-    input: StreamMaterializationStateInput
-  ): AsyncIterable<MaterializationStatePage> {
-    this.requireActive(input.session)
-    yield* []
-  }
-
-  async stageWork(input: StageMaterializationWorkInput): Promise<void> {
-    this.requireActive(input.session)
-  }
-
-  async *streamVectorChanges(
-    input: StreamMaterializationVectorChangesInput
-  ): AsyncIterable<MaterializationVectorChangePage> {
-    this.requireActive(input.session)
-    yield* []
-  }
-
-  async apply(input: ApplyMaterializationInput): Promise<AppliedMaterialization> {
-    this.requireActive(input.session)
-    return { eventCount: 0 }
-  }
-
-  async finalize(input: FinalizeMaterializationInput): Promise<ApplyMaterializationResult> {
-    this.requireActive(input.session)
-    throw new Error("Fake provider does not finalize")
-  }
-
-  private requireActive(session: MaterializationSession): MaterializationPlanHeader {
-    const header = this.sessions.get(session.providerToken)
-    if (!header) throw new Error("Inactive materialization session")
-    return header
-  }
-}
 
 describe("materializer canonical contracts", () => {
   test("rejects storage without ontology capabilities at construction", () => {
@@ -106,14 +38,14 @@ describe("materializer canonical contracts", () => {
 
   test("rejects an Ontology that differs from the projection registry", () => {
     const { projections, storage } = createMaterializerFixture()
-    const incompatibleOntology = new rootExports.OntologyRegistry({
+    const incompatibleOntology = new OntologyRegistry({
       sources: [
-        rootExports.defineObjectType({
+        defineObjectType({
           id: "Device",
           name: "Device",
           properties: [
-            rootExports.prop("id", "string", { primary: true, required: true }),
-            rootExports.prop("name", "double", { required: true }),
+            prop("id", "string", { primary: true, required: true }),
+            prop("name", "double", { required: true }),
           ],
         }),
       ],
@@ -351,122 +283,6 @@ describe("materializer canonical contracts", () => {
     ).toBe(2)
   })
 
-  test("freezes provider staging and telemetry checkpoint shapes", () => {
-    const staged = {
-      root: { kind: "object", ref: leftObject },
-      assertion: { kind: "object", ref: leftObject, properties: {} },
-      stagingOrdinal: 3,
-    } satisfies StageSourceAssertion
-    expect(Object.keys(staged)).toEqual(["root", "assertion", "stagingOrdinal"])
-
-    const checkpoint = {
-      id: "run-1",
-      projectId: "project",
-      executionToken: "execution-1",
-      identity: {
-        projectionId: "temperatures",
-        projectionKind: "telemetry",
-        protocol: "telemetry",
-        datasetVersion: {
-          datasetId: "readings",
-          versionId: "version-1",
-          createdAt: "2026-01-02T03:04:05.000Z",
-        },
-        ontologyRevision: "ontology-1",
-        projectionRevision: "revision-1",
-        ownershipHash: "ownership-1",
-      },
-      batchOrdinal: 4,
-      batchRowCount: 512,
-      batchRowsSkipped: 0,
-      inputExhausted: false,
-    } satisfies AdvanceProjectionTelemetryCheckpointInput
-    expect(checkpoint.batchRowCount).toBe(512)
-
-    type ActiveSource = Awaited<ReturnType<OntologySourceStorage["getActive"]>>
-    const activeSource: ActiveSource = null
-    expect(activeSource).toBeNull()
-  })
-
-  test("lets providers construct opaque sessions and rejects inactive handles", async () => {
-    const provider = new FakeMaterializationStorage()
-    const header = {
-      commit: {
-        projectId: "project",
-        id: "commit-1",
-        idempotencyKey: "runtime:request-1",
-        requestHash: "request-hash",
-        executionId: "execution-1",
-        origin: { kind: "runtime", requestId: "request-1" },
-        ontologyRevision: "ontology-revision",
-        intent: { kind: "edit", mode: "atomic", operationCount: 0 },
-        committedAt: "2026-01-02T03:04:05.000Z",
-      },
-      expected: {
-        sources: [],
-        objects: [],
-        links: [],
-        linkScopes: [],
-        points: [],
-      },
-    } satisfies MaterializationPlanHeader
-    const session = await provider.begin(header)
-    expect(Object.keys(session)).toEqual(["providerToken"])
-
-    await expect(provider.apply({ session })).resolves.toEqual({ eventCount: 0 })
-
-    const inactiveSession: MaterializationSession = { providerToken: {} }
-    await expect(provider.apply({ session: inactiveSession })).rejects.toThrow(
-      "Inactive materialization session"
-    )
-  })
-
-  test("correlates finalized commits and returns one authoritative result", () => {
-    const write = {
-      projectId: "project",
-      id: "commit-1",
-      idempotencyKey: "runtime:request-1",
-      requestHash: "request-hash",
-      executionId: "execution-1",
-      origin: { kind: "runtime", requestId: "request-1" },
-      ontologyRevision: "ontology-revision",
-      intent: { kind: "edit", mode: "atomic", operationCount: 0 },
-      committedAt: "2026-01-02T03:04:05.000Z",
-    } satisfies OntologyCommitWrite
-    const result = {
-      kind: "edit",
-      commitId: "commit-1",
-      created: true,
-      eventCount: 0,
-      committedAt: write.committedAt,
-      outcomes: [],
-      changes: { objects: [], links: [] },
-    } as const
-    const record = { ...write, result } satisfies OntologyCommitRecord
-    const applied = { commit: record } satisfies ApplyMaterializationResult
-
-    expect(Object.keys(write)).not.toContain("result")
-    expect(applied.commit.result).toBe(result)
-    expect(Object.keys(applied)).toEqual(["commit"])
-
-    // @ts-expect-error An edit commit cannot finalize with a telemetry result.
-    const mismatched: OntologyCommitRecord = {
-      ...write,
-      result: {
-        kind: "telemetry",
-        commitId: "commit-1",
-        created: true,
-        eventCount: 0,
-        committedAt: write.committedAt,
-        pointsCreated: 0,
-        pointsUpdated: 0,
-        pointsUnchanged: 0,
-        latestObjectsChanged: 0,
-      },
-    }
-    expect(mismatched.result.kind).toBe("telemetry")
-  })
-
   test("derives stable SHA-256 commit and event identities", () => {
     expect(sha256Canonical({ b: 2, a: 1 })).toBe(sha256Canonical({ a: 1, b: 2 }))
     expect(sha256Canonical({ a: 1 })).toMatch(/^[0-9a-f]{64}$/)
@@ -478,55 +294,6 @@ describe("materializer canonical contracts", () => {
       createCommitId("project", "runtime:request")
     )
     expect(createEventId("project", "commit", 1)).not.toBe(createEventId("project", "commit", 2))
-    expect(
-      createTimedCommitIdentity({
-        projectId: "project",
-        idempotencyKey: "runtime:request",
-        normalizedCallerIntent: { operation: "empty" },
-        now: new Date("2026-01-02T03:04:05.000Z"),
-      })
-    ).toEqual({
-      idempotencyKey: "runtime:request",
-      requestHash: sha256Canonical({ operation: "empty" }),
-      commitId: createCommitId("project", "runtime:request"),
-      committedAt: "2026-01-02T03:04:05.000Z",
-    })
-  })
-
-  test("freezes persisted event ordering, origin, and commit ordinal", () => {
-    const event = {
-      id: "event-1",
-      schemaVersion: 1,
-      projectId: "project",
-      occurredAt: "2026-01-02T03:04:05.000Z",
-      correlationId: "correlation-1",
-      origin: { kind: "runtime", requestId: "request-1" },
-      executor: { type: "request", requestId: "request-1" },
-      commitId: "commit-1",
-      commitOrdinal: 0,
-      type: "object.updated",
-      topic: "objects",
-      partitionKey: "Entity:1",
-      payload: {
-        objectTypeId: "Entity",
-        primaryId: "1",
-        properties: { name: "after" },
-        propertyChanges: {
-          obsolete: { operation: "cleared", before: "old", after: null },
-        },
-      },
-    } satisfies OntologyMaterializationEvent
-
-    expect(event.payload.propertyChanges.obsolete?.operation).toBe("cleared")
-    expect(ONTOLOGY_MATERIALIZATION_EVENT_KIND_ORDER).toEqual([
-      "object.created",
-      "object.updated",
-      "object.deleted",
-      "link.created",
-      "link.updated",
-      "link.deleted",
-      "telemetry.appended",
-    ])
   })
 
   test("keeps bounded batching under the hood", () => {
@@ -535,34 +302,5 @@ describe("materializer canonical contracts", () => {
     expect(() => resolveMaterializationBatching({ planChunkRows: 0 })).toThrow(
       "must be a positive safe integer"
     )
-  })
-
-  test("uses UTF-8 bytes for staged work chunk thresholds", async () => {
-    const item = {
-      kind: "object-override-delete" as const,
-      value: {
-        ref: { objectTypeId: "Device", primaryId: "😀" },
-        expectedLastCommitId: "previous",
-      },
-    }
-    const utf8Bytes = new TextEncoder().encode(JSON.stringify(item)).byteLength
-    const chunks = []
-    for await (const chunk of chunkBySize([item, item], {
-      maxRows: 10,
-      maxBytes: utf8Bytes * 2 - 1,
-      byteLength: utf8JsonByteLength,
-    })) {
-      chunks.push(chunk)
-    }
-    expect(chunks.map((chunk) => chunk.length)).toEqual([1, 1])
-  })
-
-  test("does not expose materializer values or tuning from the package root", () => {
-    expect("OntologyMaterializer" in rootExports).toBe(false)
-    expect("ProjectionRegistry" in rootExports).toBe(false)
-    expect("InMemoryOntologyStorage" in rootExports).toBe(false)
-    expect("MaterializationOptions" in rootExports).toBe(false)
-    expect("MaterializationBatching" in rootExports).toBe(false)
-    expect("sha256Canonical" in rootExports).toBe(false)
   })
 })

@@ -19,56 +19,8 @@ const series = {
 const humiditySeries = { ...series, propertyId: "humidity" }
 
 describe("ontology materializer telemetry", () => {
-  test("accepts partial and complete rows from a grouped telemetry projection", async () => {
+  test("bounds grouped projection batches by their rows and properties", async () => {
     const { materializer, storage } = createMaterializerFixture()
-    await materializer.projections.replace(
-      replacement("grouped-telemetry", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
-    )
-
-    await expect(
-      materializer.telemetry.append({
-        source: {
-          kind: "projection",
-          projection: { projectionId: "temperatures" },
-          datasetVersion: {
-            datasetId: "readings",
-            versionId: "grouped-v1",
-            createdAt: "2026-01-01T00:00:00Z",
-          },
-          execution: pendingProjectionExecution("grouped-telemetry-run"),
-          batchOrdinal: 0,
-          sourceRowCount: 2,
-          sourceRowsSkipped: 0,
-          inputExhausted: true,
-        },
-        points: [
-          { series, value: 20, at: "2026-01-01T01:00:00Z" },
-          { series: humiditySeries, value: 45, at: "2026-01-01T01:00:00Z" },
-          { series, value: 21, at: "2026-01-01T02:00:00Z" },
-        ],
-      })
-    ).resolves.toMatchObject({ pointsCreated: 3 })
-
-    expect(
-      await storage.timeseries.getHistory({
-        projectId: "project",
-        objectTypeId: "Device",
-        objectId: "one",
-        propertyId: "temperature",
-      })
-    ).toHaveLength(2)
-    expect(
-      await storage.timeseries.getHistory({
-        projectId: "project",
-        objectTypeId: "Device",
-        objectId: "one",
-        propertyId: "humidity",
-      })
-    ).toHaveLength(1)
-  })
-
-  test("rejects grouped projection batches outside their row/property bounds", async () => {
-    const { materializer } = createMaterializerFixture()
     await materializer.projections.replace(
       replacement("grouped-bounds", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
     )
@@ -103,6 +55,24 @@ describe("ontology materializer telemetry", () => {
         { series, value: 24, at: "2026-01-01T05:00:00Z" },
       ])
     ).rejects.toThrow("must emit between 2 and 4 points")
+
+    // Two rows of two properties each, one row partial.
+    await expect(
+      append([
+        { series, value: 20, at: "2026-01-01T01:00:00Z" },
+        { series: humiditySeries, value: 45, at: "2026-01-01T01:00:00Z" },
+        { series, value: 21, at: "2026-01-01T02:00:00Z" },
+      ])
+    ).resolves.toMatchObject({ pointsCreated: 3 })
+    const history = (propertyId: string) =>
+      storage.timeseries.getHistory({
+        projectId: "project",
+        objectTypeId: "Device",
+        objectId: "one",
+        propertyId,
+      })
+    expect(await history("temperature")).toHaveLength(2)
+    expect(await history("humidity")).toHaveLength(1)
   })
 
   test("correlates durable targets for telemetry batches and terminal decisions", async () => {
@@ -295,7 +265,9 @@ describe("ontology materializer telemetry", () => {
         buffers.set(boundary, Math.max(buffers.get(boundary) ?? 0, rows))
       },
     })
-    const points = Array.from({ length: 400 }, (_, index) => ({
+    // Seven points: past the state page of three and the plan chunk of five.
+    const pointCount = 7
+    const points = Array.from({ length: pointCount }, (_, index) => ({
       series,
       value: index,
       at: new Date(Date.UTC(2026, 0, 2, 0, 0, index)).toISOString(),
@@ -304,17 +276,19 @@ describe("ontology materializer telemetry", () => {
       source: { kind: "runtime", requestId: "telemetry-scale" },
       points,
     })
-    expect(result.pointsCreated).toBe(400)
-    expect(classifications).toHaveLength(400)
-    expect(new Set(classifications).size).toBe(400)
+    expect(result.pointsCreated).toBe(pointCount)
+    expect(classifications).toHaveLength(pointCount)
+    expect(new Set(classifications).size).toBe(pointCount)
     expect(buffers.get("state.point.page")).toBeLessThanOrEqual(3)
     expect(buffers.get("work.stage")).toBeLessThanOrEqual(5)
     expect(maxCoreExistingPoints).toBeLessThanOrEqual(3)
   })
 
   test("preloads telemetry state with constant reads across batch boundaries", async () => {
-    for (const pointCount of [1, 1_000, 1_001]) {
-      const { materializer, storage } = createMaterializerFixture()
+    for (const pointCount of [1, 2, 3]) {
+      const { materializer, storage } = createMaterializerFixture({
+        dependencies: { batching: { statePageRows: 2, planChunkRows: 2 } },
+      })
       await materializer.projections.replace(
         replacement(`telemetry-read-scale-source-${pointCount}`, "2026-01-01T00:00:00Z", [
           sourceEntry("one", "one"),

@@ -2,12 +2,12 @@ import { describe, expect, mock, test } from "bun:test"
 import {
   defineObjectType,
   InMemoryBroker,
-  type InMemoryStorage,
   link,
   MaterializationValidationError,
   ObjectNotFoundError,
   OntologyValidationError,
   prop,
+  type SixbErrorHandler,
   SixbHost,
 } from "../src"
 import { DomainEventService, OntologyOutboxDispatcher } from "../src/events"
@@ -48,9 +48,14 @@ const Room = defineObjectType({
 
 const ONTOLOGY = [Room, Sensor] as const
 
-function createRuntime() {
+function createRuntime(options: { readonly onError?: SixbErrorHandler } = {}) {
   const deps = createTestRuntimeDeps()
-  const host = new SixbHost({ id: "runtime-adapter-tests", ontology: ONTOLOGY, ...deps })
+  const host = new SixbHost({
+    id: "runtime-adapter-tests",
+    ontology: ONTOLOGY,
+    ...deps,
+    ...options,
+  })
   const sixb = createTestSixb(host, {
     executionId: "runtime-adapter-execution",
     requestId: "runtime-adapter-request",
@@ -59,12 +64,17 @@ function createRuntime() {
   return { deps, host, sixb }
 }
 
-type AdapterRuntime = ReturnType<typeof createRuntime>["sixb"]
 type AdapterHost = ReturnType<typeof createRuntime>["host"]
 
 async function commitOrigins(host: AdapterHost) {
   const { commits } = await host.storage.ontology.commits.list({ projectId: host.id })
   return commits.map((commit) => commit.origin.kind)
+}
+
+/** How many events each commit wrote to the outbox, smallest first. */
+async function commitEventCounts(host: AdapterHost) {
+  const { commits } = await host.storage.ontology.commits.list({ projectId: host.id })
+  return commits.map((commit) => commit.result.eventCount).sort((left, right) => left - right)
 }
 
 async function listSensorLinks(host: AdapterHost, linkId: string) {
@@ -83,7 +93,8 @@ describe("runtime object writes", () => {
   })
 
   test("typed and dynamic mutations all commit through the materializer as runtime origins", async () => {
-    const { host, sixb } = createRuntime()
+    const { deps, host, sixb } = createRuntime()
+    const published = nextPublication(deps.broker)
 
     await sixb.objects(Sensor).upsert({ properties: { id: "s1", name: "Temp" } })
     await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
@@ -115,7 +126,7 @@ describe("runtime object writes", () => {
       correlationId: "runtime-adapter-correlation",
       authorizationRef: { type: "disabled" },
     })
-    await waitFor(() => sixb.events.read().then((events) => events.length > 0))
+    await published
     const events = await sixb.events.read()
     expect(events.length).toBeGreaterThan(0)
     expect(
@@ -183,32 +194,29 @@ describe("runtime object writes", () => {
   })
 
   test("keeps a same-value upsert an effective no-op", async () => {
-    const { deps, host, sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     const created = await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
-    await waitForDeliveredEvents(sixb, 1)
-    const publishSpy = spyPublishedFacts(deps.broker)
 
     const replayed = await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
 
     expect(replayed).toEqual(created)
-    expect(publishSpy).not.toHaveBeenCalled()
-    // The commit is still recorded: the request was durable even though nothing changed.
+    // The commit is still recorded: the request was durable even though nothing changed. It wrote
+    // no event, so there is nothing to publish.
     expect(await commitOrigins(host)).toEqual(["runtime", "runtime"])
+    expect(await commitEventCounts(host)).toEqual([0, 1])
   })
 
   test("treats removing a missing link as a no-op", async () => {
-    const { deps, host, sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     await sixb.objects.upsert("sensor", { id: "s1", name: "Temp" })
-    await waitForDeliveredEvents(sixb, 2)
-    const publishSpy = spyPublishedFacts(deps.broker)
 
     await sixb.objects.removeLink("room", "r1", "sensors", {
       targetTypeId: "sensor",
       targetId: "s1",
     })
 
-    expect(publishSpy).not.toHaveBeenCalled()
+    expect(await commitEventCounts(host)).toEqual([0, 1, 1])
     expect(await listSensorLinks(host, "sensors")).toEqual([])
   })
 
@@ -275,14 +283,6 @@ describe("runtime object writes", () => {
     })
   })
 
-  test("surfaces effective validation from the materializer", async () => {
-    const { sixb } = createRuntime()
-
-    await expect(sixb.objects.upsert("room", { id: "r1" })).rejects.toBeInstanceOf(
-      MaterializationValidationError
-    )
-  })
-
   test("single and batch writes report the same validation failure catchably", async () => {
     // The batch path rewraps materializer item errors as OntologyValidationError. A caller that
     // branches on `instanceof OntologyValidationError` must catch the single-write error too, or
@@ -292,6 +292,8 @@ describe("runtime object writes", () => {
     const single = await sixb.objects.upsert("room", { id: "r1" }).catch((error: unknown) => error)
     const [batch] = await sixb.objects.upsertBatch("room", [{ properties: { id: "r1" } }])
 
+    // The single write surfaces the materializer's own error, which is an OntologyValidationError.
+    expect(single).toBeInstanceOf(MaterializationValidationError)
     expect(single).toBeInstanceOf(OntologyValidationError)
     expect(batch?.ok === false && batch.error).toBeInstanceOf(OntologyValidationError)
     expect((single as Error).message).toBe(
@@ -465,7 +467,12 @@ describe("committed fact delivery", () => {
   })
 
   test("keeps committed facts durable through a broker outage and delivers them later", async () => {
-    const { deps, host, sixb } = createRuntime()
+    const deliveryFailed = Promise.withResolvers<void>()
+    const { deps, host, sixb } = createRuntime({
+      onError: (_error, context) => {
+        if (context.type === "event.delivery.failed") deliveryFailed.resolve()
+      },
+    })
     let outage = true
     const publish = deps.broker.append.bind(deps.broker)
     deps.broker.append = async (input) => {
@@ -476,7 +483,8 @@ describe("committed fact delivery", () => {
     const created = await sixb.objects.upsert("room", { id: "r1", name: "Kitchen" })
     expect(created.properties.name).toBe("Kitchen")
     expect(await sixb.events.read({ types: ["object.created"] })).toHaveLength(0)
-    await waitForOutboxRetry(deps.storage)
+    // Reported once the failed publication has handed its row back to the outbox.
+    await deliveryFailed.promise
 
     outage = false
     // A failed publication backs the row off before retrying, so recovery runs past that window.
@@ -514,14 +522,6 @@ describe("committed fact delivery", () => {
   })
 })
 
-/** Mutations write durable outbox facts, so publication is the observable delivery boundary. */
-function spyPublishedFacts(broker: InMemoryBroker) {
-  const publish = broker.append.bind(broker)
-  const spy = mock(publish)
-  broker.append = spy
-  return spy
-}
-
 class NeverSettlingBroker extends InMemoryBroker {
   private resolveStarted!: () => void
   readonly started = new Promise<void>((resolve) => {
@@ -534,23 +534,14 @@ class NeverSettlingBroker extends InMemoryBroker {
   }
 }
 
-async function waitForDeliveredEvents(sixb: AdapterRuntime, count: number): Promise<void> {
-  await waitFor(() => sixb.events.read().then((events) => events.length >= count))
-}
-
-async function waitForOutboxRetry(storage: InMemoryStorage): Promise<void> {
-  await waitFor(() => {
-    const rows = [
-      ...getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot().outbox.values(),
-    ]
-    return rows.length > 0 && rows.every((row) => row.attempts > 0 && row.leaseId === null)
-  })
-}
-
-async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 1_000) {
-  const deadline = Date.now() + timeoutMs
-  while (!(await predicate())) {
-    if (Date.now() >= deadline) throw new Error("Timed out waiting for asynchronous delivery.")
-    await Bun.sleep(1)
+/** Resolves once the broker has published the first committed facts after this call. */
+function nextPublication(broker: InMemoryBroker): Promise<void> {
+  const published = Promise.withResolvers<void>()
+  const append = broker.append.bind(broker)
+  broker.append = async (input) => {
+    const result = await append(input)
+    published.resolve()
+    return result
   }
+  return published.promise
 }

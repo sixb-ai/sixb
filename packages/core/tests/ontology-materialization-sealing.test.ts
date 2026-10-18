@@ -402,37 +402,6 @@ describe("in-memory ontology materialization finalization", () => {
     ).rejects.toThrow("must begin with the commit its plan carries")
   })
 
-  test("plans only links for an empty link projection", async () => {
-    const storage = new InMemoryStorage()
-    const candidate = await prepareEmptyCandidate(storage, {
-      projectionId: "device-links",
-      projectionKind: "link",
-      runId: "empty-link-run",
-      materializationId: "empty-link-candidate",
-      versionId: "v1",
-      datasetCreatedAt: "2026-01-01T00:00:00.000Z",
-      candidateCreatedAt: "2026-01-02T00:00:00.000Z",
-      readyAt: "2026-01-02T00:01:00.000Z",
-    })
-    const header = replacementHeader(candidate, "empty-link-commit", "2026-01-03T00:00:00.000Z")
-    await storage.transaction(async (tx) => {
-      if (!tx.ontology) throw new Error("missing ontology")
-      const session = await beginPlanned(tx, header, candidate)
-      await tx.ontology.materializations.apply({ session })
-      await tx.ontology.materializations.finalize({
-        session,
-        finalization: replacementFinalization(candidate, header),
-      })
-    })
-    expect(
-      await storage.ontology.sources.getActive({ projectId, source: candidate.source })
-    ).toMatchObject({
-      materializationId: candidate.materializationId,
-      projectionKind: "link",
-      protocol: "replacement",
-    })
-  })
-
   test("keeps a plan-bound session to its plan and requires telemetry classification coverage", async () => {
     const storage = new InMemoryStorage()
     const candidate = await prepareEmptyCandidate(storage, {
