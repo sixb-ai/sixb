@@ -27,6 +27,9 @@ interface BlockUploadInput {
 export async function uploadBlocks(input: BlockUploadInput): Promise<BlockUploadResult> {
   const controller = new AbortController()
   const { signal } = controller
+  // Internal failures stop scheduling but let sent blocks land before the caller
+  // clears staging; only the caller's cancellation aborts requests in flight.
+  const requestSignal = input.signal ?? new AbortController().signal
   const reader = input.stream.getReader()
   const hash = createHash("sha256")
   const active = new Set<Promise<void>>()
@@ -60,7 +63,7 @@ export async function uploadBlocks(input: BlockUploadInput): Promise<BlockUpload
     const task = Promise.resolve()
       .then(() => {
         signal.throwIfAborted()
-        return input.stage(id, bytes, signal)
+        return input.stage(id, bytes, requestSignal)
       })
       .catch((error: unknown) => controller.abort(error))
       .finally(() => active.delete(task))

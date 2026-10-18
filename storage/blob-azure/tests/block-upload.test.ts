@@ -99,10 +99,14 @@ describe("Azure block upload", () => {
     ).toEqual(bytes)
   })
 
-  test("a failed block cancels a stalled producer and aborts other requests", async () => {
+  test("a failed block cancels a stalled producer and lets other requests finish", async () => {
+    // Regression check: hand stage the internal controller's signal again. The
+    // failure then aborts the other request, which never finishes.
     const failure = deferred()
     const started = deferred()
-    let cancelled = false
+    const cancelling = deferred()
+    const release = deferred()
+    const events: string[] = []
     let otherAborted = false
     let calls = 0
     const upload = uploadBlocks({
@@ -111,7 +115,7 @@ describe("Azure block upload", () => {
           controller.enqueue(encoder.encode("abcdefgh"))
         },
         cancel() {
-          cancelled = true
+          cancelling.resolve()
         },
       }),
       blockSizeBytes: 4,
@@ -122,7 +126,7 @@ describe("Azure block upload", () => {
           throw new Error("block failed")
         }
         started.resolve()
-        await new Promise<void>((_resolve, reject) => {
+        await new Promise<void>((resolve, reject) => {
           signal.addEventListener(
             "abort",
             () => {
@@ -131,14 +135,72 @@ describe("Azure block upload", () => {
             },
             { once: true }
           )
+          void release.promise.then(resolve)
         })
+        events.push("request finished")
       },
+    }).catch((error: unknown) => {
+      events.push("upload rejected")
+      return error
     })
     await started.promise
     failure.resolve()
-    expect(await upload.catch((error: unknown) => error)).toEqual(new Error("block failed"))
-    expect(cancelled).toBe(true)
-    expect(otherAborted).toBe(true)
+    try {
+      await cancelling.promise
+      expect(otherAborted).toBe(false)
+    } finally {
+      release.resolve()
+    }
+    expect(await upload).toEqual(new Error("block failed"))
+    expect(events).toEqual(["request finished", "upload rejected"])
+  })
+
+  test("caller cancellation aborts in-flight requests", async () => {
+    // Regression check: hand stage a signal that never aborts. The requests then
+    // keep running after the caller cancels.
+    const caller = new AbortController()
+    const started = deferred()
+    const cancelling = deferred()
+    const release = deferred()
+    const aborted: unknown[] = []
+    let calls = 0
+    const upload = uploadBlocks({
+      stream: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode("abcdefgh"))
+        },
+        cancel() {
+          cancelling.resolve()
+        },
+      }),
+      blockSizeBytes: 4,
+      concurrency: 3,
+      signal: caller.signal,
+      stage: async (_id, _bytes, signal) => {
+        if (++calls === 2) started.resolve()
+        await new Promise<void>((resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              aborted.push(signal.reason)
+              reject(signal.reason)
+            },
+            { once: true }
+          )
+          void release.promise.then(resolve)
+        })
+      },
+    }).catch((error: unknown) => error)
+    await started.promise
+    const reason = new Error("caller cancelled")
+    try {
+      caller.abort(reason)
+      expect(aborted).toEqual([reason, reason])
+    } finally {
+      release.resolve()
+    }
+    await cancelling.promise
+    expect(await upload).toBe(reason)
   })
 
   test("aborts a stalled reader and preserves the caller's abort reason", async () => {
