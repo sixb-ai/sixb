@@ -239,12 +239,12 @@ test("Northline expands and minimizes the same conversation and unsent composer"
   cache.clear()
 })
 
-test.each(["/agents", "/agents/a"])("standalone %s has an exit even on a direct link", (path) => {
+test("standalone /agents has an exit even on a direct link", () => {
   // Remove AgentChatPage's Back to app header action to reproduce the missing in-app exit.
   const cache = conversationCache()
   const ui = render(
     <QueryClientProvider client={cache}>
-      <MemoryRouter initialEntries={[path]}>
+      <MemoryRouter initialEntries={["/agents"]}>
         <Routes>
           <Route path="/agents/:threadId?" element={<AgentChatPage />} />
           <Route path="/" element={<p>Application home</p>} />

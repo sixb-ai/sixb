@@ -3,8 +3,10 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { ModelControls } from "../src/agent/components/model-controls"
 import {
+  type ModelPreference,
   preferenceWithoutReasoning,
   preferenceWithReasoning,
+  type ResolvedModelSelection,
   resolveModelSelection,
 } from "../src/agent/model-selection"
 import type { LanguageModel } from "../src/agent/types"
@@ -26,46 +28,74 @@ const fast = model("fast", { isDefault: true, defaultReasoning: "low" })
 const deep = model("deep", { defaultReasoning: "high" })
 const models = [deep, fast]
 
-test("follows the project defaults without asking for them", () => {
+const deepRef = { provider: "test", modelId: "deep" } as const
+const newDefault = [
+  { ...deep, isDefault: true },
+  { ...fast, isDefault: false },
+]
+const plain = model("plain", { isDefault: true, reasoningLevels: ["provider-default", "low"] })
+const unofferedDefault = model("plain", { isDefault: true, defaultReasoning: "max" })
+
+test.each<[string, readonly LanguageModel[], ModelPreference | null, ResolvedModelSelection]>([
   // Proven by removal: always build `request` from the displayed model and reasoning.
-  expect(resolveModelSelection(models, null)).toEqual({ model: fast, reasoning: "low" })
-})
-
-test("a chosen model starts from its own default reasoning, left to the server", () => {
-  expect(resolveModelSelection(models, { model: { provider: "test", modelId: "deep" } })).toEqual({
-    model: deep,
-    reasoning: "high",
-    request: { model: { provider: "test", modelId: "deep" } },
-  })
-})
-
-test("sends an explicitly chosen reasoning the model supports", () => {
-  const preference = { model: { provider: "test", modelId: "deep" }, reasoning: "low" } as const
-  expect(resolveModelSelection(models, preference).request).toEqual(preference)
-  expect(resolveModelSelection(models, { ...preference, reasoning: "max" }).request).toEqual({
-    model: preference.model,
-  })
-})
-
-test("an effort chosen without a model follows whichever model is the default", () => {
+  [
+    "follows the project defaults without asking for them",
+    models,
+    null,
+    { model: fast, reasoning: "low" },
+  ],
+  [
+    "a chosen model starts from its own default reasoning, left to the server",
+    models,
+    { model: deepRef },
+    { model: deep, reasoning: "high", request: { model: deepRef } },
+  ],
+  [
+    "sends an explicitly chosen reasoning the model supports",
+    models,
+    { model: deepRef, reasoning: "low" },
+    { model: deep, reasoning: "low", request: { model: deepRef, reasoning: "low" } },
+  ],
+  [
+    "leaves a reasoning the chosen model does not offer to the server",
+    models,
+    { model: deepRef, reasoning: "max" },
+    { model: deep, reasoning: "high", request: { model: deepRef } },
+  ],
   // Proven by removal: resolve the reasoning only against `preferred`; the effort is then dropped.
-  const preference = { reasoning: "high" } as const
-  expect(resolveModelSelection(models, preference)).toEqual({
-    model: fast,
-    reasoning: "high",
-    request: { reasoning: "high" },
-  })
-  const newDefault = [
-    { ...deep, isDefault: true },
-    { ...fast, isDefault: false },
-  ]
-  expect(resolveModelSelection(newDefault, preference).model?.modelId).toBe("deep")
-  // A default that cannot use it falls back to its own default, and the request stays empty.
-  const plain = model("plain", { isDefault: true, reasoningLevels: ["provider-default", "low"] })
-  expect(resolveModelSelection([plain], preference)).toEqual({
-    model: plain,
-    reasoning: "provider-default",
-  })
+  [
+    "an effort chosen without a model follows the default model",
+    models,
+    { reasoning: "high" },
+    { model: fast, reasoning: "high", request: { reasoning: "high" } },
+  ],
+  [
+    "an effort chosen without a model follows a new default model",
+    newDefault,
+    { reasoning: "high" },
+    { model: newDefault[0], reasoning: "high", request: { reasoning: "high" } },
+  ],
+  [
+    "an effort the default cannot use falls back to its own default, and the request stays empty",
+    [plain],
+    { reasoning: "high" },
+    { model: plain, reasoning: "provider-default" },
+  ],
+  [
+    "falls back to the defaults when the chosen model left the catalog",
+    models,
+    { model: { provider: "test", modelId: "gone" } },
+    { model: fast, reasoning: "low" },
+  ],
+  [
+    "shows the provider default when a default level is not offered",
+    [unofferedDefault],
+    null,
+    { model: unofferedDefault, reasoning: "provider-default" },
+  ],
+  ["resolves nothing from an empty catalog", [], null, {}],
+])("%s", (_name, catalog, preference, expected) => {
+  expect(resolveModelSelection(catalog, preference)).toEqual(expected)
 })
 
 test("moving only the effort never pins the default model, and resetting forgets it", () => {
@@ -83,19 +113,6 @@ test("moving only the effort never pins the default model, and resetting forgets
   expect(preferenceWithoutReasoning(chosen)).toEqual({
     model: { provider: "test", modelId: "deep" },
   })
-})
-
-test("falls back to the defaults when the chosen model left the catalog", () => {
-  expect(resolveModelSelection(models, { model: { provider: "test", modelId: "gone" } })).toEqual({
-    model: fast,
-    reasoning: "low",
-  })
-})
-
-test("shows the provider default when a default level is not offered", () => {
-  const plain = model("plain", { isDefault: true, defaultReasoning: "max" })
-  expect(resolveModelSelection([plain], null).reasoning).toBe("provider-default")
-  expect(resolveModelSelection([], null)).toEqual({})
 })
 
 test("names the defaults the composer follows", () => {

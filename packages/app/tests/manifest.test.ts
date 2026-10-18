@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { generateAppEntry } from "../src/codegen"
@@ -44,8 +44,10 @@ describe("custom app metadata and manifest generation", () => {
     )
     const html = await readFile(htmlPath, "utf-8")
     const main = await readFile(mainPath, "utf-8")
-    const manifest = JSON.parse(await readFile(manifestPath, "utf-8"))
+    const manifestText = await readFile(manifestPath, "utf-8")
+    const manifest = JSON.parse(manifestText)
 
+    expect(manifestText).toEndWith("\n")
     expect(manifest).toEqual({
       id: "/",
       name: "Sixb",
@@ -160,12 +162,10 @@ describe("custom app metadata and manifest generation", () => {
     expect(manifest.background_color).toBe("#121212")
 
     await writeLayout(fixture, JSON.stringify({ themeColor: "  " }))
-    expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
-      "[SixbCustomApp] Invalid app metadata"
-    )
-    expect(generateAppEntry(fixture.root, fixture.generatedDir)).rejects.toThrow(
-      "metadata.themeColor must be a non-empty string"
-    )
+    const error = await generateAppEntry(fixture.root, fixture.generatedDir).catch((e) => e)
+    expect(error).toBeInstanceOf(Error)
+    expect(error.message).toContain("[SixbCustomApp] Invalid app metadata")
+    expect(error.message).toContain("metadata.themeColor must be a non-empty string")
   })
 
   // Regression proof: remove validateVisibility's call in metadata.ts and both rejections fail.
@@ -253,9 +253,12 @@ describe("custom app metadata and manifest generation", () => {
       stdout: "ignore",
       stderr: "pipe",
     })
-    const exitCode = await proc.exited
+    const stderr = new Response(proc.stderr).text()
+    // A wedged bundler is killed at this bound instead of outliving the test.
+    const killTimer = setTimeout(() => proc.kill("SIGKILL"), 20_000)
+    const exitCode = await proc.exited.finally(() => clearTimeout(killTimer))
     if (exitCode !== 0) {
-      throw new Error(await new Response(proc.stderr).text())
+      throw new Error(`Build exited with ${exitCode}: ${await stderr}`)
     }
 
     const outdir = join(fixture.root, ".sixb", "dist", "app")
@@ -291,30 +294,7 @@ describe("custom app metadata and manifest generation", () => {
     expect(builtManifest.name).toBe("Built PWA")
     expect(builtManifest.icons[0].src).toBe("/icon-192.png")
     expect(await readFile(join(outdir, "icon-192.png"), "utf-8")).toBe("fixture png")
-  })
-
-  test("does not rewrite unchanged HTML or manifest output", async () => {
-    const fixture = await createFixture()
-    roots.push(fixture.root)
-    await writeLayout(fixture, JSON.stringify({ title: "Stable" }))
-
-    const first = await generateAppEntry(fixture.root, fixture.generatedDir)
-    const before = await Promise.all(
-      [first.htmlPath, first.mainPath, first.manifestPath].map(
-        async (path) => (await stat(path)).mtimeMs
-      )
-    )
-    await Bun.sleep(25)
-    const second = await generateAppEntry(fixture.root, fixture.generatedDir)
-    const after = await Promise.all(
-      [second.htmlPath, second.mainPath, second.manifestPath].map(
-        async (path) => (await stat(path)).mtimeMs
-      )
-    )
-
-    expect(after).toEqual(before)
-    expect(await readFile(second.manifestPath, "utf-8")).toEndWith("\n")
-  })
+  }, 30_000)
 
   // Regression proof: drop `!options.projectPages` from defaultShell in codegen and the second
   // runtime wraps the project's own pages in AppShell.

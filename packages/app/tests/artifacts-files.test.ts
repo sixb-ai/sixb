@@ -86,31 +86,26 @@ describe("file sources", () => {
 })
 
 describe("artifact panel presentation", () => {
-  const presentation = (
-    input: Partial<Parameters<typeof artifactPanelPresentation>[0]>
-  ): ReturnType<typeof artifactPanelPresentation> =>
-    artifactPanelPresentation({
-      compact: false,
-      isMobile: false,
-      hasCanvas: false,
-      split: false,
-      ...input,
-    })
-
-  test("sits beside the full-page conversation and opens as a dialog on a phone", () => {
-    expect(presentation({})).toBe("panel")
-    expect(presentation({ isMobile: true })).toBe("dialog")
-    expect(presentation({ compact: true })).toBe("dialog")
-  })
-
-  test("keeps a compact conversation and artifact side by side when the host asks", () => {
-    expect(presentation({ compact: true, split: true })).toBe("panel")
-    expect(presentation({ compact: true, split: true, isMobile: true })).toBe("dialog")
-  })
-
-  test("opens as a canvas beside the dock without changing phones", () => {
-    expect(presentation({ compact: true, hasCanvas: true })).toBe("canvas")
-    expect(presentation({ compact: true, hasCanvas: true, isMobile: true })).toBe("dialog")
-    expect(presentation({ hasCanvas: true })).toBe("panel")
+  // Beside a full-page conversation, or a compact one whose host asks for a split, it is a panel;
+  // beside the dock it is a canvas; on a phone, or in a compact conversation, a dialog.
+  test.each([
+    [{}, "panel"],
+    [{ isMobile: true }, "dialog"],
+    [{ compact: true }, "dialog"],
+    [{ compact: true, split: true }, "panel"],
+    [{ compact: true, split: true, isMobile: true }, "dialog"],
+    [{ compact: true, hasCanvas: true }, "canvas"],
+    [{ compact: true, hasCanvas: true, isMobile: true }, "dialog"],
+    [{ hasCanvas: true }, "panel"],
+  ] as const)("%o opens as a %s", (input, expected) => {
+    expect(
+      artifactPanelPresentation({
+        compact: false,
+        isMobile: false,
+        hasCanvas: false,
+        split: false,
+        ...input,
+      })
+    ).toBe(expected)
   })
 })

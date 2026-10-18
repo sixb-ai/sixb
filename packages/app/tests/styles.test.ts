@@ -30,30 +30,18 @@ async function linkDepsInto(projectRoot: string, packages: readonly string[]): P
 const TAILWIND_PACKAGES = ["@tailwindcss/cli", "tailwindcss"] as const
 
 describe("usesTailwind", () => {
-  test("plain handwritten CSS is not Tailwind source", () => {
-    expect(usesTailwind(":root { --bg: #000; }\nbody { margin: 0; }")).toBe(false)
-  })
-
-  test("url and relative imports are not Tailwind source", () => {
-    expect(usesTailwind('@import url("https://fonts.googleapis.com/css2?family=Sora");')).toBe(
-      false
-    )
-    expect(usesTailwind('@import "./tokens.css";')).toBe(false)
-  })
-
-  test("Tailwind at-rules mark the file as source", () => {
-    expect(usesTailwind('@source "./**/*.{ts,tsx}";')).toBe(true)
-    expect(usesTailwind("@theme { --color-brand: #fff; }")).toBe(true)
-    expect(usesTailwind(".btn { @apply rounded; }")).toBe(true)
-  })
-
-  test("bare-specifier imports mark the file as source", () => {
-    expect(usesTailwind('@import "tailwindcss";')).toBe(true)
-    expect(usesTailwind('@import "@sixb/ui/globals.css";')).toBe(true)
-  })
-
-  test("directives inside comments are ignored", () => {
-    expect(usesTailwind('/* @import "tailwindcss"; @source "./x"; */ body {}')).toBe(false)
+  test.each([
+    ["plain handwritten CSS", ":root { --bg: #000; }\nbody { margin: 0; }", false],
+    ["a url import", '@import url("https://fonts.googleapis.com/css2?family=Sora");', false],
+    ["a relative import", '@import "./tokens.css";', false],
+    ["@source", '@source "./**/*.{ts,tsx}";', true],
+    ["@theme", "@theme { --color-brand: #fff; }", true],
+    ["@apply", ".btn { @apply rounded; }", true],
+    ["a bare tailwindcss import", '@import "tailwindcss";', true],
+    ["a bare package stylesheet import", '@import "@sixb/ui/globals.css";', true],
+    ["directives inside comments", '/* @import "tailwindcss"; @source "./x"; */ body {}', false],
+  ])("%s → Tailwind source: %p", (_label, css, expected) => {
+    expect(usesTailwind(css)).toBe(expected)
   })
 })
 
@@ -95,13 +83,13 @@ describe("resolveCustomAppStylesheet", () => {
   test("Tailwind source without an installed CLI fails with an actionable error", async () => {
     await writeFile(join(tempRoot, "app", "globals.css"), '@import "tailwindcss";\n')
 
-    expect(
-      resolveCustomAppStylesheet({
-        appDir: join(tempRoot, "app"),
-        generatedDir: join(tempRoot, ".sixb", "generated"),
-        rootDir: tempRoot,
-      })
-    ).rejects.toThrow("@tailwindcss/cli")
+    const error = await resolveCustomAppStylesheet({
+      appDir: join(tempRoot, "app"),
+      generatedDir: join(tempRoot, ".sixb", "generated"),
+      rootDir: tempRoot,
+    }).catch((caught) => caught)
+    expect(error).toBeInstanceOf(Error)
+    expect(error.message).toContain("@tailwindcss/cli")
   })
 
   test("Tailwind source compiles to the generated dir when the CLI is resolvable", async () => {
@@ -167,9 +155,10 @@ describe("createTailwindCssCompiler", () => {
   })
 })
 
-describe("custom app Tailwind build (e2e)", () => {
+describe("custom app Tailwind dev server", () => {
   // Inside the repo so the generated entry's react/react-router imports and
   // the Tailwind CLI resolve from the workspace's node_modules.
+  // The production build of this fixture runs in build-browser.e2e.ts.
   let tempRoot = ""
 
   beforeEach(async () => {
@@ -207,96 +196,10 @@ describe("custom app Tailwind build (e2e)", () => {
     }
   })
 
-  test("sixb-style build compiles Tailwind CSS fresh and bundles it", async () => {
-    // A leftover chunk from a previous build must not survive: the outdir is
-    // build-owned and gets cleared, or stale hashed assets accumulate forever.
-    const staleChunkPath = join(tempRoot, ".sixb", "dist", "app", "chunk-stale123.js")
-    await mkdir(dirname(staleChunkPath), { recursive: true })
-    await writeFile(staleChunkPath, "console.log('stale')\n")
-
-    // Build in a subprocess like the real `sixb build` CLI. An in-process
-    // Bun.build would also leak bundler state that breaks later dev-server
-    // bundling tests in the same bun:test process.
-    const buildScript = join(tempRoot, "run-build.ts")
-    const createCustomAppPath = resolve(import.meta.dir, "..", "src", "createCustomApp.ts")
-    await writeFile(
-      buildScript,
-      [
-        `import { createCustomApp } from ${JSON.stringify(createCustomAppPath)}`,
-        `const app = await createCustomApp({ rootDir: ${JSON.stringify(tempRoot)}, apiBaseUrl: "http://127.0.0.1:3000" })`,
-        "const result = await app.build()",
-        "if (!result.success) throw new Error((result.logs ?? []).join('\\n'))",
-        "",
-      ].join("\n")
-    )
-    const proc = Bun.spawn([process.execPath, "run", buildScript], {
-      cwd: tempRoot,
-      stdout: "ignore",
-      stderr: "pipe",
-    })
-    const exitCode = await proc.exited
-    if (exitCode !== 0) {
-      throw new Error(await new Response(proc.stderr).text())
-    }
-
-    // The compiled stylesheet lands under .sixb/generated, not app/.
-    // Canary classes, one per scanned source — proves Tailwind compiled the app's own page plus the
-    // linked component libraries, not just one of them. `line-through` is the app page, `max-h-60`
-    // comes only from the agent's components, `scroll-mt-4` only from the built-in pages.
-    // (Repoint these if a class is removed from its source rather than asserting a class that no
-    // longer exists.)
-    const generatedCss = await readFile(join(tempRoot, ".sixb", "generated", "app.css"), "utf-8")
-    expect(generatedCss).toContain("line-through")
-    expect(generatedCss).toContain("max-h-60")
-    expect(generatedCss).toContain("scroll-mt-4")
-    expect(generatedCss.lastIndexOf("--background: #123456")).toBeGreaterThan(
-      generatedCss.lastIndexOf("--background: #fafafa")
-    )
-
-    const generatedRuntime = await readFile(
-      join(tempRoot, ".sixb", "generated", "app-runtime.tsx"),
-      "utf-8"
-    )
-    expect(generatedRuntime).toContain('import "./app.css"')
-    expect(generatedRuntime).not.toContain('import "./framework.css"')
-
-    // The bundled output ships the compiled utility, proving the generated
-    // entry imported the compiled CSS rather than the raw Tailwind source.
-    const outdir = join(tempRoot, ".sixb", "dist", "app")
-    const cssBundles: string[] = []
-    for await (const path of new Bun.Glob("*.css").scan({ cwd: outdir, absolute: true })) {
-      cssBundles.push(await readFile(path, "utf-8"))
-    }
-    expect(cssBundles.join("\n")).toContain("line-through")
-    expect(cssBundles.join("\n")).not.toContain("@source")
-
-    const builtHtml = await readFile(join(outdir, "index.html"), "utf-8")
-    const entryFile = builtHtml.match(/src="\/(app-[a-z0-9]+\.js)"/)?.[1]
-    expect(entryFile).toBeDefined()
-    const sharedHtml = await readFile(join(outdir, "shared-index.html"), "utf-8")
-    expect(sharedHtml).toContain("async loadAppStyles()")
-    expect(sharedHtml).toContain('link.addEventListener("load", resolve, { once: true })')
-    expect(sharedHtml).toContain('link.addEventListener("error", resolve, { once: true })')
-    expect(sharedHtml.indexOf("await Promise.all(")).toBeLessThan(
-      sharedHtml.indexOf("document.head.append(link)")
-    )
-    const javascriptFiles = await Array.fromAsync(new Bun.Glob("*.js").scan({ cwd: outdir }))
-    expect(javascriptFiles.length).toBeGreaterThan(1)
-    const hasDynamicChunk = await Promise.all(
-      javascriptFiles.map(async (file) =>
-        (await readFile(join(outdir, file), "utf-8")).includes('import("/chunk-')
-      )
-    )
-    expect(hasDynamicChunk).toContain(true)
-    // Regression proof: restoring the HTML entry without `splitting` emits one ~10 MB JavaScript
-    // file for this fixture (all Shiki grammars) and fails both assertions above.
-
-    expect(await Bun.file(staleChunkPath).exists()).toBe(false)
-  }, 30_000)
-
   test("dev watches app sources and recompiles Tailwind CSS in-process", async () => {
     const app = await createCustomApp({ rootDir: tempRoot, apiBaseUrl: "http://127.0.0.1:3000" })
-    const server = await app.dev({ host: "127.0.0.1", port: await getFreePort() })
+    // Nothing is fetched, so the server may bind any free port.
+    const server = await app.dev({ host: "127.0.0.1", port: 0 })
     const generatedCssPath = join(tempRoot, ".sixb", "generated", "app.css")
     const watchedUtility = "--sixb-watch-sentinel"
 
@@ -316,12 +219,13 @@ describe("custom app Tailwind build (e2e)", () => {
         css = await readFile(generatedCssPath, "utf-8")
         if (css.includes(watchedUtility)) break
         attempts++
-        if (attempts % 20 === 0) {
+        if (attempts % 80 === 0) {
           // macOS fsevents can drop the first event on a freshly created
           // recursive watch; re-touching the file re-triggers it.
           await writeFile(join(tempRoot, "app", "page.tsx"), updatedPage)
         }
-        await Bun.sleep(100)
+        // Reading the file is cheap; a short poll ends soon after the rebuild lands.
+        await Bun.sleep(25)
       }
       expect(css).toContain(watchedUtility)
     } finally {
@@ -329,16 +233,6 @@ describe("custom app Tailwind build (e2e)", () => {
     }
   }, 30_000)
 })
-
-async function getFreePort(): Promise<number> {
-  const probe = Bun.serve({ port: 0, fetch: () => new Response(null) })
-  const port = probe.port
-  probe.stop(true)
-  if (port === undefined) {
-    throw new Error("Could not resolve an open port")
-  }
-  return port
-}
 
 async function installFakeTailwindCli(projectRoot: string): Promise<void> {
   const cliRoot = join(projectRoot, "node_modules", "@tailwindcss", "cli")

@@ -19,27 +19,25 @@ function jsonError(status: number, message: string) {
 // render — "not recorded", "empty", or "failed". A silent widening here would report a
 // real outage as a configuration choice, so it is pinned rather than trusted.
 describe("isUnrecorded", () => {
-  test("recognizes the 501 a run-history route returns without its storage role", async () => {
-    const client = createSixbClient({
-      baseUrl: "http://localhost:3002",
-      fetch: respondWith(
-        jsonError(501, "[SixbServer] Sync run storage is not configured on this runtime.")
-      ),
-    })
-
-    const { error } = await listSyncRuns({ client })
-    expect(isUnrecorded(error)).toBe(true)
-  })
-
-  test("does not claim any other failure", async () => {
-    for (const status of [400, 403, 404, 500, 502, 503]) {
+  test("recognizes only the 501 a run-history route returns without its storage role", async () => {
+    for (const [status, unrecorded] of [
+      [501, true],
+      [400, false],
+      [403, false],
+      [404, false],
+      [500, false],
+      [502, false],
+      [503, false],
+    ] as const) {
       const client = createSixbClient({
         baseUrl: "http://localhost:3002",
-        fetch: respondWith(jsonError(status, "Boom")),
+        fetch: respondWith(
+          jsonError(status, "[SixbServer] Sync run storage is not configured on this runtime.")
+        ),
       })
 
       const { error } = await listSyncRuns({ client })
-      expect(isUnrecorded(error)).toBe(false)
+      expect(isUnrecorded(error)).toBe(unrecorded)
     }
 
     // A network failure never reaches a status at all.

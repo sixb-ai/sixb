@@ -304,19 +304,16 @@ describe("an artifact card's preview", () => {
     expect(html).toContain(">Revenue grew 18% on renewals.<")
   })
 
-  test("reads a lede that opens in bold, the way the Agent writes a report's front matter", () => {
-    // Reproduce by letting a leading `*` end the lede, as a list marker would: the preview is
-    // only the title.
-    expect(
-      documentOpening("# Q3 review\n\n**Northline**  \n**Period:** July to September\\\nEnd.")
-    ).toEqual({ title: "Q3 review", lede: "Northline Period: July to September End." })
-  })
-
   test("reads a document's opening as its page does", () => {
     expect(documentOpening("Intro\n\n# Title\n\nThe lede,\nwrapped.\n\nMore.")).toEqual({
       title: "Title",
       lede: "The lede, wrapped.",
     })
+    // A lede may open in bold, the way the Agent writes a report's front matter. Reproduce by
+    // letting a leading `*` end the lede, as a list marker would: the preview is only the title.
+    expect(
+      documentOpening("# Q3 review\n\n**Northline**  \n**Period:** July to September\\\nEnd.")
+    ).toEqual({ title: "Q3 review", lede: "Northline Period: July to September End." })
     // What follows the title is the lede only when it is a paragraph.
     expect(documentOpening("# Title\n\n![Chart](chart.svg)\n\nText.")).toEqual({ title: "Title" })
     expect(documentOpening("# Title\n\n- one\n- two")).toEqual({ title: "Title" })

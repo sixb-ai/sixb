@@ -19,14 +19,13 @@ if (scenario === "dev") {
 }
 
 async function runDev(root: string): Promise<void> {
-  const port = await getFreePort()
   const app = await createCustomApp({
     rootDir: root,
     apiBaseUrl: "https://api.example.test/v1",
     authEnabled: false,
     builtInPages: false,
   })
-  const server = await app.dev({ host: "127.0.0.1", port })
+  const { port, server } = await onFreePort((port) => app.dev({ host: "127.0.0.1", port }))
 
   try {
     const origin = `http://127.0.0.1:${port}`
@@ -140,13 +139,9 @@ async function runProduction(root: string): Promise<void> {
     "initial production shared entry"
   )
 
-  const port = await getFreePort()
-  const server = await app.start({
-    host: "127.0.0.1",
-    port,
-    outdir,
-    apiBaseUrl: "https://api.example.test/v1",
-  })
+  const { port, server } = await onFreePort((port) =>
+    app.start({ host: "127.0.0.1", port, outdir, apiBaseUrl: "https://api.example.test/v1" })
+  )
   try {
     const origin = `http://127.0.0.1:${port}`
     const shared = await fetch(`${origin}/shared/shr_1/reports/report-1`)
@@ -292,6 +287,23 @@ async function linkDependencies(root: string): Promise<void> {
     const destination = join(root, "node_modules", ...name.split("/"))
     await mkdir(dirname(destination), { recursive: true })
     await symlink(source, destination, "dir")
+  }
+}
+
+/**
+ * The app's servers answer with the port they were asked for, not one they bound, so a port is
+ * reserved right before use and picked again when a parallel process takes it in between.
+ */
+async function onFreePort<T>(
+  start: (port: number) => Promise<T>
+): Promise<{ readonly port: number; readonly server: T }> {
+  for (let attempt = 1; ; attempt += 1) {
+    const port = await getFreePort()
+    try {
+      return { port, server: await start(port) }
+    } catch (error) {
+      if (attempt === 5 || (error as { code?: unknown }).code !== "EADDRINUSE") throw error
+    }
   }
 }
 

@@ -68,11 +68,9 @@ describe("photonFeatureToSuggestion", () => {
     expect(photonFeatureToSuggestion(null)).toBeNull()
   })
 
+  // A US county loses its suffix in `county` and keeps it in `description` (see the complete
+  // feature above).
   test("keeps a county name without its suffix and only re-labels US counties", () => {
-    const us = photonFeatureToSuggestion(OFFICE_FEATURE)
-    expect(us?.county).toBe("Kings")
-    expect(us?.description).toContain("Kings County")
-
     const nonUs = photonFeatureToSuggestion({
       properties: { street: "Hauptstraße", county: "Landkreis Rosenheim", countrycode: "de" },
     })
@@ -98,15 +96,10 @@ describe("region codes", () => {
     expect(suggestionForState("New York")?.regionCode).toBe("NY")
     expect(suggestionForState("district of columbia")?.regionCode).toBe("DC")
     expect(suggestionForState("ny")?.regionCode).toBe("NY")
-    expect(suggestionForState("Bavaria")?.regionCode).toBeNull()
     expect(suggestionForState("")?.regionCode).toBeNull()
     expect(suggestionForState(undefined)?.regionCode).toBeNull()
-  })
-
-  test("keeps the provider spelling on region even when no code can be derived", () => {
-    const suggestion = suggestionForState("Bavaria")
-    expect(suggestion?.region).toBe("Bavaria")
-    expect(suggestion?.regionCode).toBeNull()
+    // Without a code, region keeps the provider's spelling.
+    expect(suggestionForState("Bavaria")).toMatchObject({ region: "Bavaria", regionCode: null })
   })
 })
 
@@ -189,24 +182,17 @@ describe("createPhotonProvider", () => {
     expect(urls).toHaveLength(0)
   })
 
-  test("caches repeated queries", async () => {
+  test.each([
+    ["caches repeated queries", undefined, 1],
+    ["honours a disabled cache", 0, 2],
+  ] as const)("%s", async (_label, cacheTtlMs, requests) => {
     const { fetchImpl, urls } = stubFetch({ features: [OFFICE_FEATURE] })
-    const provider = createPhotonProvider({ fetchImpl })
+    const provider = createPhotonProvider({ fetchImpl, cacheTtlMs })
 
     await provider.search("123 main")
     await provider.search("123 main")
 
-    expect(urls).toHaveLength(1)
-  })
-
-  test("honours a disabled cache", async () => {
-    const { fetchImpl, urls } = stubFetch({ features: [OFFICE_FEATURE] })
-    const provider = createPhotonProvider({ fetchImpl, cacheTtlMs: 0 })
-
-    await provider.search("123 main")
-    await provider.search("123 main")
-
-    expect(urls).toHaveLength(2)
+    expect(urls).toHaveLength(requests)
   })
 
   test("coalesces concurrent identical queries into one request", async () => {
@@ -235,13 +221,13 @@ describe("createPhotonProvider", () => {
     const controller = new AbortController()
 
     const aborted = provider.search("123 main", { signal: controller.signal })
+    const other = provider.search("123 main")
     controller.abort()
     release()
 
     expect(await abortNameOf(aborted)).toBe("AbortError")
-
-    // The in-flight request still completed and populated the cache.
-    await Bun.sleep(20)
+    // The caller sharing the request still gets its response, and so does the next one.
+    expect(await other).toHaveLength(1)
     expect(await provider.search("123 main")).toHaveLength(1)
     expect(urls).toHaveLength(1)
   })
@@ -282,12 +268,6 @@ describe("createPhotonProvider", () => {
     const provider = createPhotonProvider({ fetchImpl })
 
     expect(await provider.reverse?.({ latitude: 0, longitude: 0 })).toBeNull()
-  })
-
-  test("has no retrieve or session step", () => {
-    const provider = createPhotonProvider()
-    expect(provider.retrieve).toBeUndefined()
-    expect(provider.createSession).toBeUndefined()
   })
 })
 

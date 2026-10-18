@@ -10,32 +10,36 @@ import {
 } from "@sixb/ui/lib/speech"
 
 describe("appendDictationText", () => {
-  test("uses the dictated text when the field is empty", () => {
-    expect(appendDictationText("", "  Remove the damaged tree.  ")).toBe("Remove the damaged tree.")
-  })
-
-  test("appends to existing text with one separator", () => {
-    expect(appendDictationText("Prune the trees.   ", "  Remove all debris.")).toBe(
-      "Prune the trees. Remove all debris."
-    )
-  })
-
-  test("leaves the field untouched for a blank transcript", () => {
-    expect(appendDictationText("Existing scope  ", "   ")).toBe("Existing scope  ")
+  test.each([
+    [
+      "uses the dictated text when the field is empty",
+      "",
+      "  Remove the damaged tree.  ",
+      "Remove the damaged tree.",
+    ],
+    [
+      "appends to existing text with one separator",
+      "Prune the trees.   ",
+      "  Remove all debris.",
+      "Prune the trees. Remove all debris.",
+    ],
+    [
+      "leaves the field untouched for a blank transcript",
+      "Existing scope  ",
+      "   ",
+      "Existing scope  ",
+    ],
+  ])("%s", (_label, field, transcript, expected) => {
+    expect(appendDictationText(field, transcript)).toBe(expected)
   })
 })
 
 describe("speechErrorMessage", () => {
-  test("maps permission denial to an actionable message", () => {
+  test("maps permission denial to an actionable message, an abort to none, and the rest to one each", () => {
     expect(speechErrorMessage("not-allowed")).toContain("Microphone access was denied")
     expect(speechErrorMessage("service-not-allowed")).toContain("Microphone access was denied")
-  })
-
-  test("does not surface intentional aborts as errors", () => {
+    // An intentional abort is not an error.
     expect(speechErrorMessage("aborted")).toBeNull()
-  })
-
-  test("has a message for every other code", () => {
     const codes: SpeechErrorCode[] = [
       "audio-capture",
       "language-not-supported",
@@ -78,76 +82,66 @@ describe("createWebSpeechRecognizer", () => {
     const recognizer = createWebSpeechRecognizer({ implementation: fakeConstructor() })
 
     recognizer.start({ lang: "es-ES", maxAlternatives: 3 }, {})
-    const instance = lastInstance()
+    expect(lastInstance()).toMatchObject({
+      lang: "es-ES",
+      maxAlternatives: 3,
+      continuous: true,
+      interimResults: true,
+      started: 1,
+    })
 
-    expect(instance.lang).toBe("es-ES")
-    expect(instance.maxAlternatives).toBe(3)
-    expect(instance.continuous).toBe(true)
-    expect(instance.interimResults).toBe(true)
-    expect(instance.started).toBe(1)
-  })
-
-  test("honours explicitly disabled continuous and interim results", () => {
-    const recognizer = createWebSpeechRecognizer({ implementation: fakeConstructor() })
-
+    // Explicitly disabled continuous and interim results are honoured.
     recognizer.start({ continuous: false, interimResults: false }, {})
-    const instance = lastInstance()
-
-    expect(instance.continuous).toBe(false)
-    expect(instance.interimResults).toBe(false)
+    expect(lastInstance()).toMatchObject({ continuous: false, interimResults: false })
   })
 
-  test("reports interim text before the final result that replaces it", () => {
+  test.each([
+    [
+      "reports interim text before the final result that replaces it",
+      {
+        resultIndex: 0,
+        results: [
+          { isFinal: true, 0: { transcript: "Remove the tree." } },
+          { isFinal: false, 0: { transcript: "and haul away" } },
+        ],
+      },
+      [
+        { transcript: "and haul away", isFinal: false },
+        { transcript: "Remove the tree.", isFinal: true },
+      ],
+    ],
+    [
+      "reads only from resultIndex onward and skips empty alternatives",
+      {
+        resultIndex: 1,
+        results: [
+          { isFinal: true, 0: { transcript: "already delivered" } },
+          { isFinal: true, 0: { transcript: "" } },
+          { isFinal: true, 0: undefined },
+          { isFinal: true, 0: { transcript: "second chunk" } },
+        ],
+      },
+      [{ transcript: "second chunk", isFinal: true }],
+    ],
+    [
+      "joins multiple final chunks from one event",
+      {
+        resultIndex: 0,
+        results: [
+          { isFinal: true, 0: { transcript: "first" } },
+          { isFinal: true, 0: { transcript: "second" } },
+        ],
+      },
+      [{ transcript: "first second", isFinal: true }],
+    ],
+  ])("%s", (_label, event, expected) => {
     const results: SpeechResult[] = []
     const recognizer = createWebSpeechRecognizer({ implementation: fakeConstructor() })
 
     recognizer.start({}, { onResult: (result) => results.push(result) })
-    call(lastInstance().onresult, {
-      resultIndex: 0,
-      results: [
-        { isFinal: true, 0: { transcript: "Remove the tree." } },
-        { isFinal: false, 0: { transcript: "and haul away" } },
-      ],
-    })
+    call(lastInstance().onresult, event)
 
-    expect(results).toEqual([
-      { transcript: "and haul away", isFinal: false },
-      { transcript: "Remove the tree.", isFinal: true },
-    ])
-  })
-
-  test("reads only from resultIndex onward and skips empty alternatives", () => {
-    const results: SpeechResult[] = []
-    const recognizer = createWebSpeechRecognizer({ implementation: fakeConstructor() })
-
-    recognizer.start({}, { onResult: (result) => results.push(result) })
-    call(lastInstance().onresult, {
-      resultIndex: 1,
-      results: [
-        { isFinal: true, 0: { transcript: "already delivered" } },
-        { isFinal: true, 0: { transcript: "" } },
-        { isFinal: true, 0: undefined },
-        { isFinal: true, 0: { transcript: "second chunk" } },
-      ],
-    })
-
-    expect(results).toEqual([{ transcript: "second chunk", isFinal: true }])
-  })
-
-  test("joins multiple final chunks from one event", () => {
-    const results: SpeechResult[] = []
-    const recognizer = createWebSpeechRecognizer({ implementation: fakeConstructor() })
-
-    recognizer.start({}, { onResult: (result) => results.push(result) })
-    call(lastInstance().onresult, {
-      resultIndex: 0,
-      results: [
-        { isFinal: true, 0: { transcript: "first" } },
-        { isFinal: true, 0: { transcript: "second" } },
-      ],
-    })
-
-    expect(results).toEqual([{ transcript: "first second", isFinal: true }])
+    expect(results).toEqual(expected)
   })
 
   test("treats either sound or speech as incoming audio", () => {

@@ -35,40 +35,6 @@ describe("generated shared application bootstrap", () => {
     await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
   })
 
-  test("scrubs only a canonical link secret before loading any shared code", async () => {
-    const fixture = await createFixture()
-    roots.push(fixture.root)
-    const { sharedHtmlPath } = await generateAppEntry(fixture.root, fixture.generatedDir)
-    const shell = await readFile(sharedHtmlPath, "utf-8")
-
-    // This is intentionally a source-order contract: the inline module cannot be imported into
-    // Bun without executing its dynamic browser entry. Removing/moving the scrub makes one of
-    // these monotonic positions or the explicit abort branch fail.
-    const capture = shell.indexOf("const rawFragment = window.location.hash")
-    const secretCheck = shell.indexOf("const secret = /^[A-Za-z0-9_-]{43}$/.test(rawFragment)")
-    const scrub = shell.indexOf("window.history.replaceState(")
-    const orchestration = shell.indexOf("async function bootstrapSharedApp()")
-    const bootstrap = shell.indexOf("const bootstrap = consumeBootstrap()", orchestration)
-    const sharedImport = shell.indexOf('await import("./shared-main.tsx")')
-
-    expect(capture).toBeGreaterThan(-1)
-    expect(secretCheck).toBeGreaterThan(capture)
-    expect(scrub).toBeGreaterThan(secretCheck)
-    expect(orchestration).toBeGreaterThan(scrub)
-    expect(bootstrap).toBeGreaterThan(orchestration)
-    expect(sharedImport).toBeGreaterThan(bootstrap)
-    expect(shell).toContain("if (secret !== null) {")
-    expect(shell).toContain("} catch {\n            return null\n          }")
-    expect(shell).toContain("if (!bootstrap) {\n          renderUnavailable()\n          return")
-    expect(shell).toContain("void bootstrapSharedApp()")
-    expect(shell).not.toContain('<script type="module">')
-    expect(shell).toContain("const match = /^\\/shared\\/([^/]+)(\\/.*)?$/")
-    expect(shell).toContain('requestedPath: match[2] ?? "/"')
-    expect(shell).not.toContain('src="./shared-main.tsx"')
-    expect(shell).not.toContain('import("./app-runtime")')
-    expect(shell).not.toContain("configureSixbSharedBrowserClient")
-  })
-
   test("aborts the executable bootstrap when the fragment cannot be scrubbed", async () => {
     const fixture = await createFixture()
     roots.push(fixture.root)
@@ -89,7 +55,29 @@ describe("generated shared application bootstrap", () => {
     expect(sharedImports).toBe(0)
   })
 
-  test("executes the scrub before import and keeps the bearer local to the bootstrap", async () => {
+  // The shell's inline bootstrap runs here with the browser stubbed. Removing or moving the scrub
+  // reorders the events; scrubbing every fragment strips an ordinary page anchor on reload.
+  test.each([
+    {
+      name: "scrubs a canonical link secret before importing any shared code",
+      hash: `#${"S".repeat(43)}`,
+      pathname: "/shared/shr_1/reports/report-1",
+      events: ["scrub", "import", "start"],
+      bootstrap: {
+        basename: "/shared/shr_1",
+        grantId: "shr_1",
+        requestedPath: "/reports/report-1",
+        secret: "S".repeat(43),
+      },
+    },
+    {
+      name: "leaves an ordinary page anchor on the URL and restores the session without a secret",
+      hash: "#section",
+      pathname: "/shared/shr_1",
+      events: ["import", "start"],
+      bootstrap: { basename: "/shared/shr_1", grantId: "shr_1", requestedPath: "/", secret: null },
+    },
+  ])("$name", async ({ hash, pathname, events: expectedEvents, bootstrap }) => {
     const fixture = await createFixture()
     roots.push(fixture.root)
     const { sharedHtmlPath } = await generateAppEntry(fixture.root, fixture.generatedDir)
@@ -98,6 +86,8 @@ describe("generated shared application bootstrap", () => {
     let receivedBootstrap: unknown
 
     await executeSharedShellBootstrap(shell, {
+      hash,
+      pathname,
       replaceState() {
         events.push("scrub")
       },
@@ -112,30 +102,18 @@ describe("generated shared application bootstrap", () => {
       },
     })
 
-    expect(events).toEqual(["scrub", "import", "start"])
-    expect(receivedBootstrap).toEqual({
-      basename: "/shared/shr_1",
-      grantId: "shr_1",
-      requestedPath: "/reports/report-1",
-      secret: "S".repeat(43),
-    })
+    expect(events).toEqual([...expectedEvents])
+    expect(receivedBootstrap).toEqual(bootstrap)
   })
 
   test("preserves ordinary anchors on restore and trusts the server destination after exchange", async () => {
     const fixture = await createFixture()
     roots.push(fixture.root)
-    const { sharedHtmlPath, sharedMainPath } = await generateAppEntry(
-      fixture.root,
-      fixture.generatedDir
-    )
-    const shell = await readFile(sharedHtmlPath, "utf-8")
+    const { sharedMainPath } = await generateAppEntry(fixture.root, fixture.generatedDir)
     const sharedMain = await readFile(sharedMainPath, "utf-8")
 
-    // A #section fragment produces a null secret and is left on the URL. The controller then
-    // restores the HttpOnly session through the same establish(null) path.
-    expect(shell).toContain("const secret = /^[A-Za-z0-9_-]{43}$/.test(rawFragment)")
-    expect(shell).toContain("if (secret !== null) {")
-    expect(shell).not.toContain("if (window.location.hash) {")
+    // A #section fragment reaches this bootstrap as a null secret (see the bootstrap cases above),
+    // and the controller restores the HttpOnly session through the same establish(null) path.
     expect(sharedMain).toContain("const session = await controller.establish(secret)")
 
     // Only a successful one-time exchange replaces the caller-supplied destination. A restore
@@ -262,6 +240,11 @@ describe("generated shared application bootstrap", () => {
     expect(shell).toContain('"baseUrl":"https://api.example.test"')
     expect(shell).toContain('"enabled":false')
     expect(shell).not.toContain("app.webmanifest")
+    // The shell names no app code: its one module loads only after the bootstrap above.
+    expect(shell).not.toContain('<script type="module">')
+    expect(shell).not.toContain('src="./shared-main.tsx"')
+    expect(shell).not.toContain('import("./app-runtime")')
+    expect(shell).not.toContain("configureSixbSharedBrowserClient")
 
     const genericMessage = "This shared link is invalid, expired, or no longer available."
     expect(shell).toContain(genericMessage)
@@ -330,6 +313,8 @@ describe("generated shared application bootstrap", () => {
 })
 
 interface SharedShellHarnessOptions {
+  readonly hash?: string
+  readonly pathname?: string
   readonly replaceState: () => void
   readonly loadSharedMain: () => Promise<{
     readonly startSharedApp: (bootstrap: unknown) => void
@@ -379,8 +364,8 @@ async function executeSharedShellBootstrap(
   }
   const windowStub = {
     location: {
-      hash: `#${"S".repeat(43)}`,
-      pathname: "/shared/shr_1/reports/report-1",
+      hash: options.hash ?? `#${"S".repeat(43)}`,
+      pathname: options.pathname ?? "/shared/shr_1/reports/report-1",
       search: "?caller=discarded",
     },
     history: {

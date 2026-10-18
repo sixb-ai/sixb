@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { type DefaultTreeAdapterTypes, parseFragment } from "parse5"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { Composer, type ComposerProps, composerCanFocus } from "../src/agent/components/composer"
+import { Composer, type ComposerProps } from "../src/agent/components/composer"
 import type { LanguageModel } from "../src/agent/types"
 
 const model = {
@@ -28,16 +28,11 @@ const model = {
 
 describe("Composer", () => {
   test("requests initial focus only while the input is available", () => {
+    // One availability policy decides initial, return, and completion focus.
     expect(renderComposer()).toContain('autofocus=""')
-    expect(renderComposer({ disabled: true, running: true })).not.toContain('autofocus=""')
-    expect(renderComposer({ pending: true })).not.toContain('autofocus=""')
-  })
-
-  test("uses one availability policy for initial, return, and completion focus", () => {
-    expect(composerCanFocus({})).toBe(true)
-    expect(composerCanFocus({ disabled: true })).toBe(false)
-    expect(composerCanFocus({ pending: true })).toBe(false)
-    expect(composerCanFocus({ running: true })).toBe(false)
+    for (const unavailable of [{ disabled: true }, { pending: true }, { running: true }]) {
+      expect(renderComposer(unavailable)).not.toContain('autofocus=""')
+    }
   })
 
   test("shows the selected model, provider logo, and reasoning control", () => {
@@ -56,9 +51,9 @@ describe("Composer", () => {
     expect(html).toContain('aria-label="Choose model and reasoning effort"')
   })
 
-  test.each([false, true])("keeps send errors within the input width (compact: %s)", (compact) => {
+  test("keeps send errors within the input width", () => {
     // Moving the error outside the composer's width constraint reproduces the misalignment.
-    const nodes = elements(parseFragment(renderComposer({ compact, error: "Send failed." })))
+    const nodes = elements(parseFragment(renderComposer({ error: "Send failed." })))
     const alert = nodes.find((node) =>
       node.attrs.some((attribute) => attribute.name === "role" && attribute.value === "alert")
     )

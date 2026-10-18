@@ -66,30 +66,20 @@ describe("liveRunReducer", () => {
     ).toEqual(["text:Before tool.", "tool:bash", "text:After tool."])
   })
 
-  test("does not materialize empty text lifecycle chunks or whitespace-only spans", () => {
-    let state = createLiveRunState("run")
-    for (const chunk of [
+  test("materializes whitespace only after visible text has started", () => {
+    const empty = reduceChunks([
       { type: "text-start", id: "empty" },
       { type: "text-delta", id: "empty", delta: " \n" },
       { type: "text-end", id: "empty" },
-    ]) {
-      state = liveRunReducer(state, {
-        type: "event",
-        event: uiChunk(chunk),
-      })
-    }
+    ])
+    expect(empty.parts).toEqual([])
+    expect(empty.partKeys).toEqual([])
 
-    expect(state.parts).toEqual([])
-    expect(state.partKeys).toEqual([])
-  })
-
-  test("keeps whitespace deltas after visible text has started", () => {
     const state = reduceChunks([
       { type: "text-delta", id: "text", delta: "Hello" },
       { type: "text-delta", id: "text", delta: " " },
       { type: "text-delta", id: "text", delta: "world" },
     ])
-
     expect(state.parts).toEqual([{ kind: "text", text: "Hello world" }])
   })
 

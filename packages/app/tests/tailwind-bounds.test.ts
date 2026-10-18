@@ -55,10 +55,14 @@ describe("createTailwindCssCompiler bounds", () => {
     // Unbounded, a wedged CLI held `sixb dev` open forever, and `stop()` awaited the same
     // build — so shutdown hung with it and the only way out was killing the terminal.
     const root = await projectWithFakeTailwind("await new Promise(() => {})\n")
-    const compiler = compilerIn(root, 250)
+    const compiler = compilerIn(root, 25)
 
-    await expect(compiler.compile()).rejects.toThrow(
-      "[Test] Tailwind CSS build did not finish within 250ms and was killed."
+    // Caught rather than `expect().rejects`: without the bound this build never settles, and the
+    // test should then fail at its own timeout instead of stalling the run.
+    const error = await compiler.compile().catch((caught) => caught)
+    expect(error).toBeInstanceOf(Error)
+    expect(error.message).toContain(
+      "[Test] Tailwind CSS build did not finish within 25ms and was killed."
     )
 
     await compiler.stop()
@@ -95,7 +99,7 @@ describe("createTailwindCssCompiler bounds", () => {
     await compiler.stop()
   }, 15_000)
 
-  test("a build that succeeds stays silent", async () => {
+  test("a build that exits 0 succeeds even when it writes warnings", async () => {
     const root = await projectWithFakeTailwind('process.stderr.write("a warning\\n")\n')
     const compiler = compilerIn(root, 5_000)
 
