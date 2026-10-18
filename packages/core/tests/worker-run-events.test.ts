@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBroker } from "../src"
-import { DomainEventService, toStoredEvent } from "../src/events"
+import { DomainEventService } from "../src/events"
 
 const PIPELINE_STEP_FAILURE = {
   code: "internal.unexpected",
@@ -37,52 +37,93 @@ const SYNC_RUN_FAILURE = {
   },
 } as const
 
+const STEP = {
+  pipelineId: "canonical-transactions",
+  runId: "run-002",
+  stepRunId: "run-002:step:1:clean",
+  stepId: "clean",
+  stepIndex: 0,
+  totalSteps: 1,
+  datasetId: "canonical.transactions",
+} as const
+
 describe("worker run lifecycle events", () => {
-  test("stores sync run lifecycle events with sync topic and run partition", () => {
-    const started = toStoredEvent({
+  test("stores sync and pipeline run lifecycles in order on their topic and run partition", async () => {
+    const eventsRuntime = new DomainEventService({
       projectId: "project-a",
-      cursor: "1",
-      event: {
-        type: "sync.run.started",
-        payload: {
-          syncId: "sync-transactions",
-          runId: "run-001",
-          startedAt: "2026-05-08T10:00:00.000Z",
-        },
-      },
-    })
-    const finished = toStoredEvent({
-      projectId: "project-a",
-      cursor: "2",
-      event: {
-        type: "sync.run.finished",
-        payload: {
-          syncId: "sync-transactions",
-          runId: "run-001",
-          status: "succeeded",
-          datasetId: "raw.transactions",
-          versionId: "v1",
-        },
-      },
+      broker: new InMemoryBroker(),
     })
 
-    expect([started, finished]).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
+    await eventsRuntime.append({
+      events: [
+        {
           type: "sync.run.started",
-          topic: "syncs",
-          partitionKey: "sync-transactions:run-001",
-        }),
-        expect.objectContaining({
+          payload: {
+            syncId: "sync-transactions",
+            runId: "run-001",
+            startedAt: "2026-05-08T10:00:00.000Z",
+          },
+        },
+        {
+          type: "pipeline.run.started",
+          payload: {
+            pipelineId: "canonical-transactions",
+            runId: "run-002",
+            startedAt: "2026-05-08T10:00:00.000Z",
+          },
+        },
+        {
+          type: "pipeline.run.step.started",
+          payload: { ...STEP, startedAt: "2026-05-08T10:00:01.000Z" },
+        },
+        {
+          type: "pipeline.run.step.finished",
+          payload: {
+            ...STEP,
+            status: "succeeded",
+            finishedAt: "2026-05-08T10:00:02.000Z",
+            versionId: "v2",
+            rowsWritten: 10,
+          },
+        },
+        {
+          type: "pipeline.run.finished",
+          payload: {
+            pipelineId: "canonical-transactions",
+            runId: "run-002",
+            status: "succeeded",
+            datasetId: "canonical.transactions",
+            versionId: "v2",
+          },
+        },
+        {
           type: "sync.run.finished",
-          topic: "syncs",
-          partitionKey: "sync-transactions:run-001",
-        }),
-      ])
-    )
+          payload: {
+            syncId: "sync-transactions",
+            runId: "run-001",
+            status: "succeeded",
+            datasetId: "raw.transactions",
+            versionId: "v1",
+          },
+        },
+      ],
+    })
+
+    const pipelines = await eventsRuntime.read({ topics: ["pipelines"] })
+    expect(pipelines.map((event) => [event.type, event.partitionKey])).toEqual([
+      ["pipeline.run.started", "canonical-transactions:run-002"],
+      ["pipeline.run.step.started", "canonical-transactions:run-002"],
+      ["pipeline.run.step.finished", "canonical-transactions:run-002"],
+      ["pipeline.run.finished", "canonical-transactions:run-002"],
+    ])
+    const syncs = await eventsRuntime.read({ topics: ["syncs"] })
+    expect(syncs.map((event) => [event.type, event.partitionKey])).toEqual([
+      ["sync.run.started", "sync-transactions:run-001"],
+      ["sync.run.finished", "sync-transactions:run-001"],
+    ])
   })
 
-  test("preserves the sync run failure record", async () => {
+  test("preserves sync, pipeline step, and pipeline run failure records", async () => {
     const eventsRuntime = new DomainEventService({
       projectId: "project-a",
       broker: new InMemoryBroker(),
@@ -100,135 +141,15 @@ describe("worker run lifecycle events", () => {
             error: SYNC_RUN_FAILURE,
           },
         },
-      ],
-    })
-
-    const [event] = await eventsRuntime.read({ types: ["sync.run.finished"] })
-    expect(event?.type).toBe("sync.run.finished")
-    if (event?.type !== "sync.run.finished") {
-      throw new Error("Expected a sync run completion event.")
-    }
-    expect(event.payload.error).toEqual(SYNC_RUN_FAILURE)
-  })
-
-  test("appends and reads pipeline run lifecycle events in order", async () => {
-    const eventsRuntime = new DomainEventService({
-      projectId: "project-a",
-      broker: new InMemoryBroker(),
-    })
-
-    await eventsRuntime.append({
-      events: [
-        {
-          type: "pipeline.run.started",
-          payload: {
-            pipelineId: "canonical-transactions",
-            runId: "run-002",
-            startedAt: "2026-05-08T10:00:00.000Z",
-          },
-        },
-        {
-          type: "pipeline.run.step.started",
-          payload: {
-            pipelineId: "canonical-transactions",
-            runId: "run-002",
-            stepRunId: "run-002:step:1:clean",
-            stepId: "clean",
-            stepIndex: 0,
-            totalSteps: 1,
-            datasetId: "canonical.transactions",
-            startedAt: "2026-05-08T10:00:01.000Z",
-          },
-        },
         {
           type: "pipeline.run.step.finished",
           payload: {
-            pipelineId: "canonical-transactions",
-            runId: "run-002",
-            stepRunId: "run-002:step:1:clean",
-            stepId: "clean",
-            stepIndex: 0,
-            totalSteps: 1,
-            datasetId: "canonical.transactions",
-            status: "succeeded",
-            finishedAt: "2026-05-08T10:00:02.000Z",
-            versionId: "v2",
-            rowsWritten: 10,
-          },
-        },
-        {
-          type: "pipeline.run.finished",
-          payload: {
-            pipelineId: "canonical-transactions",
-            runId: "run-002",
-            status: "succeeded",
-            datasetId: "canonical.transactions",
-            versionId: "v2",
-          },
-        },
-      ],
-    })
-
-    const events = await eventsRuntime.read({
-      topics: ["pipelines"],
-    })
-
-    expect(events.map((event) => event.type)).toEqual([
-      "pipeline.run.started",
-      "pipeline.run.step.started",
-      "pipeline.run.step.finished",
-      "pipeline.run.finished",
-    ])
-    expect(events.map((event) => event.partitionKey)).toEqual([
-      "canonical-transactions:run-002",
-      "canonical-transactions:run-002",
-      "canonical-transactions:run-002",
-      "canonical-transactions:run-002",
-    ])
-  })
-
-  test("preserves the pipeline step failure record", async () => {
-    const eventsRuntime = new DomainEventService({
-      projectId: "project-a",
-      broker: new InMemoryBroker(),
-    })
-
-    await eventsRuntime.append({
-      events: [
-        {
-          type: "pipeline.run.step.finished",
-          payload: {
-            pipelineId: "canonical-transactions",
-            runId: "run-002",
-            stepRunId: "run-002:step:1:clean",
-            stepId: "clean",
-            stepIndex: 0,
-            totalSteps: 1,
-            datasetId: "canonical.transactions",
+            ...STEP,
             status: "failed",
             finishedAt: "2026-05-08T10:00:02.000Z",
             error: PIPELINE_STEP_FAILURE,
           },
         },
-      ],
-    })
-
-    const [event] = await eventsRuntime.read({ types: ["pipeline.run.step.finished"] })
-    expect(event?.type).toBe("pipeline.run.step.finished")
-    if (event?.type !== "pipeline.run.step.finished") {
-      throw new Error("Expected a pipeline step completion event.")
-    }
-    expect(event.payload.error).toEqual(PIPELINE_STEP_FAILURE)
-  })
-
-  test("preserves the pipeline run failure record", async () => {
-    const eventsRuntime = new DomainEventService({
-      projectId: "project-a",
-      broker: new InMemoryBroker(),
-    })
-
-    await eventsRuntime.append({
-      events: [
         {
           type: "pipeline.run.finished",
           payload: {
@@ -241,11 +162,9 @@ describe("worker run lifecycle events", () => {
       ],
     })
 
-    const [event] = await eventsRuntime.read({ types: ["pipeline.run.finished"] })
-    expect(event?.type).toBe("pipeline.run.finished")
-    if (event?.type !== "pipeline.run.finished") {
-      throw new Error("Expected a pipeline run completion event.")
-    }
-    expect(event.payload.error).toEqual(PIPELINE_RUN_FAILURE)
+    const errors = (await eventsRuntime.read()).map((event) =>
+      "error" in event.payload ? event.payload.error : undefined
+    )
+    expect(errors).toEqual([SYNC_RUN_FAILURE, PIPELINE_STEP_FAILURE, PIPELINE_RUN_FAILURE])
   })
 })

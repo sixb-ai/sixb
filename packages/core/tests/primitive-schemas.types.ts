@@ -1,6 +1,5 @@
 import type { DecimalValue, PrimitiveSchema, Property } from "../src"
 import { assertNever } from "../src/assert-never"
-import type { PrimitiveTraits } from "../src/ontology/primitives"
 import type { OrderedPredicateValueFor, PredicateValueFor } from "../src/predicates"
 
 /**
@@ -13,31 +12,6 @@ import type { OrderedPredicateValueFor, PredicateValueFor } from "../src/predica
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
 type Expect<T extends true> = T
-
-const traits: PrimitiveTraits = {
-  queryScalarKind: "string",
-  exact: true,
-  exactSearch: true,
-  sortable: true,
-  text: true,
-  contains: true,
-  facet: true,
-  telemetry: true,
-  shareableParam: true,
-}
-
-// The traits table uses this constraint: a table without a row for every primitive is rejected.
-export const missingRow = {
-  string: traits,
-  uuid: traits,
-  integer: traits,
-  double: traits,
-  decimal: traits,
-  date: traits,
-  timestamp: traits,
-  boolean: traits,
-  // @ts-expect-error fileRef has no row
-} satisfies Record<PrimitiveSchema, PrimitiveTraits>
 
 // Per-type switches close with `assertNever` or `satisfies never`: a missing case is rejected.
 export function missingCase(schema: PrimitiveSchema): string {

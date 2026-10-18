@@ -1,16 +1,28 @@
-import { expect, spyOn, test } from "bun:test"
+import { afterEach, expect, jest, spyOn, test } from "bun:test"
 import { InMemoryBroker, InMemoryStorage } from "../src"
 import { DomainEventService, OntologyOutboxDispatcher } from "../src/events"
 import type { OntologyOutboxStorage } from "../src/storage"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import { atomic, createMaterializerFixture } from "./materializer-fixture"
 
+afterEach(() => {
+  jest.useRealTimers()
+})
+
+/** `setImmediate` stays real under Bun's fake timers, so this drains every pending microtask. */
+function flush(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
 // Regression proof: remove the macrotask yield between catch-up passes. Bun 1.4.2 then
-// delivers the entire in-memory backlog before a pending immediate can run.
-test("outbox catch-up yields to the event loop before exhausting a large backlog", async () => {
-  const storage = await seededStorage(500)
+// delivers the entire in-memory backlog before a pending immediate can run. Remove the rearming
+// `notify()` after a full slice instead, and catch-up stops after one bounded drain pass.
+test("outbox catch-up yields to the event loop and rearms bounded slices until the backlog drains", async () => {
+  const backlog = 100
+  const storage = await seededStorage(backlog)
   let delivered = 0
   const observed = Promise.withResolvers<number>()
+  const drained = Promise.withResolvers<void>()
   const service = new DomainEventService({ projectId: "project", broker: new InMemoryBroker() })
   const dispatcher = new OntologyOutboxDispatcher({
     projectId: "project",
@@ -22,19 +34,24 @@ test("outbox catch-up yields to the event loop before exhausting a large backlog
         const result = await service.publishEnvelopes(rows)
         delivered += rows.length
         if (delivered === rows.length) setImmediate(() => observed.resolve(delivered))
+        if (delivered === backlog) drained.resolve()
         return result
       },
     },
   })
   try {
     dispatcher.notify()
-    expect(await observed.promise).toBeLessThan(500)
+    expect(await observed.promise).toBeLessThan(backlog)
+    // Delivered by rearmed passes, before stop() runs its own final pass.
+    await drained.promise
   } finally {
     await dispatcher.stop()
   }
+  expect((await storage.ontology.outbox.summarize({ projectId: "project" })).pendingCount).toBe(0)
 })
 
 test("a late broker acknowledgement cannot settle a lease reclaimed after shutdown", async () => {
+  jest.useFakeTimers()
   const storage = await seededStorage(1)
   const service = new DomainEventService({ projectId: "project", broker: new InMemoryBroker() })
   const started = Promise.withResolvers<void>()
@@ -67,7 +84,9 @@ test("a late broker acknowledgement cannot settle a lease reclaimed after shutdo
   first.notify()
   await started.promise
   try {
-    await first.stop()
+    const firstStop = first.stop()
+    jest.advanceTimersByTime(5)
+    await firstStop
     await next.drain()
     release.resolve()
     await completed.promise
@@ -154,6 +173,7 @@ test("shutdown finishes only its bounded final passes and leaves the rest recove
 for (const operation of ["claim", "markPublished", "reschedule"] as const) {
   // Regression proof: restore the old bounded stop, which forgets outstanding storage work.
   test(`outbox stop waits for an in-flight ${operation} to settle`, async () => {
+    jest.useFakeTimers()
     const storage = await seededStorage(1)
     const started = Promise.withResolvers<void>()
     const released = Promise.withResolvers<void>()
@@ -178,7 +198,9 @@ for (const operation of ["claim", "markPublished", "reschedule"] as const) {
       stopped = true
     })
     try {
-      await Bun.sleep(20)
+      // The 5ms broker grace period expires; the outstanding storage call still holds stop open.
+      jest.advanceTimersByTime(5)
+      await flush()
       expect(stopped).toBe(false)
     } finally {
       released.resolve()

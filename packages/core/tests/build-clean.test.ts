@@ -20,13 +20,19 @@ test("build cleanup preserves example data while removing package output", async
     await Bun.write(data, "local runtime data")
     await Bun.write(output, "generated output")
     // Regression proof: restoring examples/*/.sixb in build:clean deletes this data fixture.
-    const result = Bun.spawnSync([process.execPath, "run", "build:clean"], {
+    // Async spawn: `Bun.spawnSync` inside a parallel test worker has missed its child's exit in CI.
+    const child = Bun.spawn([process.execPath, "run", "build:clean"], {
       cwd: directory,
       stdout: "pipe",
       stderr: "pipe",
-      timeout: 5000,
     })
-    expect(result.exitCode).toBe(0)
+    const kill = setTimeout(() => child.kill("SIGKILL"), 5_000)
+    const [exitCode, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stderr).text(),
+      new Response(child.stdout).text(),
+    ]).finally(() => clearTimeout(kill))
+    expect(exitCode, stderr).toBe(0)
     expect(await Bun.file(data).exists()).toBe(true)
     expect(await Bun.file(data).text()).toBe("local runtime data")
     expect(await Bun.file(output).exists()).toBe(false)

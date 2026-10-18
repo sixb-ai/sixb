@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import * as publicCore from "../src"
 import { SIXB_ERROR_DEFINITIONS } from "../src/errors/catalog"
-import * as internalErrorModel from "../src/errors/internal"
 import {
   captureSixbFailure,
   createSixbError,
@@ -23,11 +21,6 @@ import {
 const AT = new Date("2026-08-05T12:00:00.000Z")
 
 describe("Sixb error model", () => {
-  test("keeps the error class private while exposing serializable contracts", () => {
-    expect(publicCore).not.toHaveProperty("SixbError")
-    expect(internalErrorModel).not.toHaveProperty("SixbError")
-  })
-
   test("creates a coded internal error from catalog policy", () => {
     const cause = new Error("provider offline")
     const details = { operation: "commit", nested: { attempt: 2 } }

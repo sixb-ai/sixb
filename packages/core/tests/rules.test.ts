@@ -49,16 +49,22 @@ afterEach(async () => {
 })
 
 describe("rules", () => {
-  test("defineRule returns an inert rule definition", () => {
-    const rule = defineRule("transaction.requires-document")
+  test("defineRule returns an inert rule definition with link predicates", () => {
+    const rule = defineRule("transaction.link-predicates")
       .on(Transaction)
-      .where((tx) => tx.l.document.isMissing())
+      .where((tx) => tx.all(tx.l.document.exists(), tx.l.document.isMissing()))
 
     expect(rule).toEqual({
       kind: "rule",
-      id: "transaction.requires-document",
+      id: "transaction.link-predicates",
       subject: { kind: "object", objectTypeId: "transaction" },
-      predicate: { kind: "link", linkId: "document", op: "isMissing" },
+      predicate: {
+        kind: "all",
+        predicates: [
+          { kind: "link", linkId: "document", op: "exists" },
+          { kind: "link", linkId: "document", op: "isMissing" },
+        ],
+      },
     })
   })
 
@@ -89,20 +95,6 @@ describe("rules", () => {
         { kind: "property", propertyId: "amount", op: "lte", value: 1000 },
         { kind: "property", propertyId: "amount", op: "isPresent" },
         { kind: "property", propertyId: "amount", op: "isMissing" },
-      ],
-    })
-  })
-
-  test("link predicates produce the expected AST", () => {
-    const rule = defineRule("transaction.link-predicates")
-      .on(Transaction)
-      .where((tx) => tx.all(tx.l.document.exists(), tx.l.document.isMissing()))
-
-    expect(rule.predicate).toEqual({
-      kind: "all",
-      predicates: [
-        { kind: "link", linkId: "document", op: "exists" },
-        { kind: "link", linkId: "document", op: "isMissing" },
       ],
     })
   })
@@ -219,50 +211,37 @@ export const transactionRequiresDocument = defineRule("transaction.requires-docu
     })
   })
 
-  test("runtime registration rejects duplicate rule ids", () => {
-    const rule1 = defineRule("duplicate-rule")
-      .on(Transaction)
-      .where((tx) => tx.l.document.exists())
-    const rule2 = defineRule("duplicate-rule")
-      .on(Transaction)
-      .where((tx) => tx.l.document.isMissing())
-
-    expect(() => createRuntimeWithRules([rule1, rule2])).toThrow(RuleValidationError)
-  })
-
-  test("runtime registration rejects predicates for unknown properties", () => {
-    const rule: RuleDefinition = {
-      kind: "rule",
-      id: "transaction.unknown-property",
-      subject: { kind: "object", objectTypeId: "transaction" },
-      predicate: { kind: "property", propertyId: "missing", op: "isPresent" },
-    }
-
-    expect(() => createRuntimeWithRules([rule])).toThrow('unknown property "missing"')
-  })
-
-  test("runtime registration rejects predicates for unknown links", () => {
-    const rule: RuleDefinition = {
-      kind: "rule",
-      id: "transaction.unknown-link",
-      subject: { kind: "object", objectTypeId: "transaction" },
-      predicate: { kind: "link", linkId: "missing", op: "isMissing" },
-    }
-
-    expect(() => createRuntimeWithRules([rule])).toThrow('unknown link "missing"')
-  })
-
-  test("runtime registration rejects empty predicate groups", () => {
-    const rule: RuleDefinition = {
-      kind: "rule",
-      id: "transaction.empty-group",
-      subject: { kind: "object", objectTypeId: "transaction" },
-      predicate: { kind: "all", predicates: [] },
-    }
-
-    expect(() => createRuntimeWithRules([rule])).toThrow(
-      "all predicate must contain at least one predicate"
-    )
+  test.each([
+    [
+      "duplicate rule ids",
+      [
+        defineRule("duplicate-rule")
+          .on(Transaction)
+          .where((tx) => tx.l.document.exists()),
+        defineRule("duplicate-rule")
+          .on(Transaction)
+          .where((tx) => tx.l.document.isMissing()),
+      ],
+      "Duplicate rule id",
+    ],
+    [
+      "predicates for unknown properties",
+      [subjectRule({ kind: "property", propertyId: "missing", op: "isPresent" })],
+      'unknown property "missing"',
+    ],
+    [
+      "predicates for unknown links",
+      [subjectRule({ kind: "link", linkId: "missing", op: "isMissing" })],
+      'unknown link "missing"',
+    ],
+    [
+      "empty predicate groups",
+      [subjectRule({ kind: "all", predicates: [] })],
+      "all predicate must contain at least one predicate",
+    ],
+  ] as const)("runtime registration rejects %s", (_name, rules, message) => {
+    expect(() => createRuntimeWithRules(rules)).toThrow(RuleValidationError)
+    expect(() => createRuntimeWithRules(rules)).toThrow(message)
   })
 
   test("rule transition events use the rules topic and stable partition key", async () => {
@@ -294,6 +273,15 @@ async function createTempProjectRoot(): Promise<string> {
   const projectRoot = await mkdtemp(join(tmpdir(), "sixb-core-rules-"))
   tempRoots.add(projectRoot)
   return projectRoot
+}
+
+function subjectRule(predicate: RuleDefinition["predicate"]): RuleDefinition {
+  return {
+    kind: "rule",
+    id: "transaction.invalid",
+    subject: { kind: "object", objectTypeId: "transaction" },
+    predicate,
+  }
 }
 
 function createRuntimeWithRules(rules: readonly RuleDefinition[]): SixbHost {

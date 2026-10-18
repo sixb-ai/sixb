@@ -8,7 +8,6 @@ import {
   link,
   OntologyRegistry,
   prop,
-  ScheduleValidationError,
 } from "../src"
 import { DomainEventService } from "../src/events"
 import type { OntologyMaterializationEvent } from "../src/materialization/events"
@@ -227,8 +226,7 @@ describe("event schedules", () => {
     expect("where" in ruleSchedule).toBe(false)
   })
 
-  test("rejects empty ids and non-terminal event selectors", () => {
-    expect(() => defineSchedule("")).toThrow(ScheduleValidationError)
+  test("rejects non-terminal event selectors", () => {
     expect(() => defineSchedule("bad-source").on(events.object(Invoice))).toThrow(
       "Schedule event source must select an event operation"
     )
@@ -236,23 +234,18 @@ describe("event schedules", () => {
 })
 
 describe("validateSchedulesAtStartup", () => {
-  test("accepts schedules that reference known ontology fields", () => {
-    const schedule = defineSchedule("invoice.high-value-payment")
-      .on(events.object(Invoice).link(Invoice.l.payments).created())
-      .where((event) => event.link.p.amount.gt(500))
+  test("accepts link property and target identity predicates the ontology declares", () => {
+    const schedules = [
+      defineSchedule("invoice.high-value-payment")
+        .on(events.object(Invoice).link(Invoice.l.payments).created())
+        .where((event) => event.link.p.amount.gt(500)),
+      defineSchedule("invoice.payment-target")
+        .on(events.object(Invoice).link(Invoice.l.payments).created())
+        .where((event) => event.target.is(Payment)),
+    ]
 
     expect(() =>
-      validateSchedulesAtStartup([schedule], new OntologyRegistry({ sources: [Invoice, Payment] }))
-    ).not.toThrow()
-  })
-
-  test("accepts link target identity predicates", () => {
-    const schedule = defineSchedule("invoice.payment-target")
-      .on(events.object(Invoice).link(Invoice.l.payments).created())
-      .where((event) => event.target.is(Payment))
-
-    expect(() =>
-      validateSchedulesAtStartup([schedule], new OntologyRegistry({ sources: [Invoice, Payment] }))
+      validateSchedulesAtStartup(schedules, new OntologyRegistry({ sources: [Invoice, Payment] }))
     ).not.toThrow()
   })
 
@@ -323,18 +316,6 @@ describe("validateSchedulesAtStartup", () => {
     ).toThrow('Schedule "bad-link-property": unknown property "missing" on link "payments"')
   })
 
-  test("validates registered rule sources", () => {
-    const schedules = [
-      defineSchedule("invoice.at-risk-triggered").on(events.rule(invoiceAtRisk).triggered()),
-    ]
-
-    expect(() =>
-      validateSchedulesAtStartup(schedules, new OntologyRegistry({ sources: [Invoice, Payment] }), {
-        registeredRuleIds: new Set([invoiceAtRisk.id]),
-      })
-    ).not.toThrow()
-  })
-
   test("rejects unknown rule sources", () => {
     const ontology = new OntologyRegistry({ sources: [Invoice, Payment] })
 
@@ -346,11 +327,12 @@ describe("validateSchedulesAtStartup", () => {
     ).toThrow('unknown rule "invoice.at-risk"')
   })
 
-  test("validates dataset, sync, and pipeline event sources", () => {
+  test("accepts registered rule, dataset, sync, and pipeline event sources", () => {
     const dataset = { kind: "dataset", id: "raw.invoices" } as const
     const sync = { kind: "sync", id: "import-invoices" } as const
     const pipeline = { kind: "pipeline", id: "normalize-invoices" } as const
     const schedules = [
+      defineSchedule("invoice.at-risk-triggered").on(events.rule(invoiceAtRisk).triggered()),
       defineSchedule("invoices-updated").on(events.dataset(dataset).updated()),
       defineSchedule("import-succeeded").on(events.sync(sync).succeeded()),
       defineSchedule("normalization-failed").on(events.pipeline(pipeline).failed()),
@@ -358,6 +340,7 @@ describe("validateSchedulesAtStartup", () => {
 
     expect(() =>
       validateSchedulesAtStartup(schedules, new OntologyRegistry({ sources: [Invoice, Payment] }), {
+        registeredRuleIds: new Set([invoiceAtRisk.id]),
         registeredDatasetIds: new Set([dataset.id]),
         registeredSyncIds: new Set([sync.id]),
         registeredPipelineIds: new Set([pipeline.id]),

@@ -9,8 +9,6 @@ const STABLE_RUN_MS = 60_000
 
 /** Base worker lifecycle with bounded restart supervision. */
 export abstract class Worker {
-  /** Base restart backoff. Overridable so budget-exhaustion tests do not wait out real backoffs. */
-  protected readonly restartBackoffMs: number = RESTART_BACKOFF_MS
   private controller: AbortController | null = null
   private running: Promise<void> | null = null
 
@@ -66,7 +64,7 @@ export abstract class Worker {
         throw new WorkerUnhealthyError(this.constructor.name, restartCount, { cause: failure })
       }
 
-      const delayMs = Math.min(this.restartBackoffMs * 2 ** restartCount, MAX_RESTART_BACKOFF_MS)
+      const delayMs = Math.min(RESTART_BACKOFF_MS * 2 ** restartCount, MAX_RESTART_BACKOFF_MS)
       restartCount += 1
       await waitForAbort(delayMs, signal)
     }

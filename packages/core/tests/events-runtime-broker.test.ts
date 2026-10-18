@@ -119,22 +119,18 @@ describe("DomainEventService broker backing", () => {
     expect(limited.map(runIds)).toEqual(["run-1"])
   })
 
-  test("surfaces retained range errors for explicit afterCursor reads", async () => {
-    const runtime = new DomainEventService({
-      projectId: "project-a",
-      broker: new InMemoryBroker(),
-      stream: { id: "__events", retention: { maxRecords: 2 } },
-    })
-    await runtime.append({
-      events: [
-        syncRunStarted("run-1"),
-        syncRunStarted("run-2"),
-        syncRunStarted("run-3"),
-        syncRunStarted("run-4"),
-      ],
+  test("returns the latest event cursor without reading retained events", async () => {
+    const broker = new LatestCursorRecordingBroker()
+    const runtime = new DomainEventService({ projectId: "project-a", broker })
+
+    expect(await runtime.latestCursor()).toBeUndefined()
+    const appended = await runtime.append({
+      events: [syncRunStarted("run-1"), syncRunStarted("run-2")],
     })
 
-    await expect(runtime.read({ afterCursor: "1" })).rejects.toThrow("outside the retained range")
+    expect(await runtime.latestCursor()).toBe(appended.at(-1)?.cursor)
+    expect(broker.latestCursorCalls).toBe(2)
+    expect(broker.readCalls).toBe(0)
   })
 
   test("isolates projects", async () => {
@@ -293,6 +289,23 @@ describe("DomainEventService broker backing", () => {
 
 function runIds(event: StoredDomainEvent): string | undefined {
   return event.type === "sync.run.started" ? event.payload.runId : undefined
+}
+
+class LatestCursorRecordingBroker extends InMemoryBroker {
+  latestCursorCalls = 0
+  readCalls = 0
+
+  override latestCursor(
+    params: Parameters<InMemoryBroker["latestCursor"]>[0]
+  ): ReturnType<InMemoryBroker["latestCursor"]> {
+    this.latestCursorCalls += 1
+    return super.latestCursor(params)
+  }
+
+  override read(params: Parameters<InMemoryBroker["read"]>[0]): ReturnType<InMemoryBroker["read"]> {
+    this.readCalls += 1
+    return super.read(params)
+  }
 }
 
 class RecordingBroker extends InMemoryBroker {

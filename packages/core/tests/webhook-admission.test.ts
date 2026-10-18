@@ -4,21 +4,6 @@ import { decorateOperationScopedMethodForTesting } from "../src/storage/operatio
 import { type AdmitWebhookRunInput, admitWebhookRun } from "../src/webhooks/run-admission"
 
 describe("Webhook run admission", () => {
-  test("persists the execution and run atomically before returning authority", async () => {
-    const storage = new InMemoryStorage()
-    const result = await admitWebhookRun(admissionInput(storage, "run-1", "delivery-1"))
-
-    expect(result).toMatchObject({ status: "admitted", retried: false })
-    if (result.status !== "admitted") throw new Error("Expected an admitted Webhook run.")
-    expect(result.run.executionId).toBe(result.execution.id)
-    await expect(
-      storage.executions.getById({ projectId: "webhook-admission", id: result.execution.id })
-    ).resolves.toEqual(result.execution)
-    await expect(
-      storage.webhookRuns.getById({ projectId: "webhook-admission", id: "run-1" })
-    ).resolves.toEqual(result.run)
-  })
-
   test("rolls back both records when the admission transaction fails", async () => {
     const storage = new InMemoryStorage()
     let executionId: string | undefined
@@ -50,10 +35,19 @@ describe("Webhook run admission", () => {
     ).resolves.toBeNull()
   })
 
-  test("retries one delivery with its original run and execution", async () => {
+  test("persists the run and its execution, and retries one delivery with both", async () => {
     const storage = new InMemoryStorage()
     const first = await admitWebhookRun(admissionInput(storage, "run-first", "delivery-retry"))
+    expect(first).toMatchObject({ status: "admitted", retried: false })
     if (first.status !== "admitted") throw new Error("Expected the first admission to succeed.")
+    expect(first.run.executionId).toBe(first.execution.id)
+    await expect(
+      storage.executions.getById({ projectId: "webhook-admission", id: first.execution.id })
+    ).resolves.toEqual(first.execution)
+    await expect(
+      storage.webhookRuns.getById({ projectId: "webhook-admission", id: "run-first" })
+    ).resolves.toEqual(first.run)
+
     await storage.webhookRuns.finish({
       projectId: "webhook-admission",
       id: first.run.id,

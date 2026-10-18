@@ -1,36 +1,27 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import { Worker, WorkerUnhealthyError } from "../src/workers"
 
-function createDeferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void
-  let reject!: (reason?: unknown) => void
+afterEach(() => {
+  jest.useRealTimers()
+})
 
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
-
-  return { promise, resolve, reject }
-}
-
-async function waitFor(check: () => boolean, timeoutMs = 2_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (!check()) {
-    if (Date.now() >= deadline) throw new Error("Timed out waiting for worker state")
-    await Bun.sleep(1)
-  }
+/** `setImmediate` stays real under Bun's fake timers, so this drains every pending microtask. */
+function flush(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
 }
 
 describe("Worker", () => {
   test("starts and stops idempotently", async () => {
-    const loop = createDeferred<void>()
     let runs = 0
+    let runSignal: AbortSignal | undefined
 
     class TestWorker extends Worker {
       protected async run(signal: AbortSignal): Promise<void> {
         runs += 1
-        signal.addEventListener("abort", () => loop.resolve(), { once: true })
-        await loop.promise
+        runSignal = signal
+        await new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true })
+        })
       }
     }
 
@@ -40,31 +31,7 @@ describe("Worker", () => {
     await Promise.all([worker.stop(), worker.stop()])
 
     expect(runs).toBe(1)
-  })
-
-  test("propagates abort on stop", async () => {
-    let aborted = false
-
-    class TestWorker extends Worker {
-      protected async run(signal: AbortSignal): Promise<void> {
-        await new Promise<void>((resolve) => {
-          signal.addEventListener(
-            "abort",
-            () => {
-              aborted = true
-              resolve()
-            },
-            { once: true }
-          )
-        })
-      }
-    }
-
-    const worker = new TestWorker()
-    await worker.start()
-    await worker.stop()
-
-    expect(aborted).toBe(true)
+    expect(runSignal?.aborted).toBe(true)
   })
 
   test("can be restarted after stop", async () => {
@@ -88,7 +55,8 @@ describe("Worker", () => {
     expect(runs).toBe(2)
   })
 
-  test("restarts transient loop failures with bounded backoff", async () => {
+  test("restarts transient loop failures after an exponential backoff", async () => {
+    jest.useFakeTimers()
     let runs = 0
 
     class TestWorker extends Worker {
@@ -103,21 +71,32 @@ describe("Worker", () => {
 
     const worker = new TestWorker()
     await worker.start()
-    await waitFor(() => runs === 3)
+    await flush()
+    expect(runs).toBe(1)
+
+    for (const [backoffMs, runsAfter] of [
+      [100, 2],
+      [200, 3],
+    ] as const) {
+      jest.advanceTimersByTime(backoffMs - 1)
+      await flush()
+      expect(runs).toBe(runsAfter - 1)
+      jest.advanceTimersByTime(1)
+      await flush()
+      expect(runs).toBe(runsAfter)
+    }
 
     await worker.stop()
     expect(runs).toBe(3)
   })
 
-  test("becomes unhealthy after exhausting the restart budget", async () => {
-    let runs = 0
+  test("becomes unhealthy after exhausting the capped restart budget", async () => {
+    jest.useFakeTimers()
+    const runStartedAt: number[] = []
 
     class TestWorker extends Worker {
-      // Skip real exponential backoffs so exhausting the 10-restart budget stays instant.
-      protected override readonly restartBackoffMs = 0
-
       protected async run(): Promise<void> {
-        runs += 1
+        runStartedAt.push(Date.now())
         throw new Error("persistent failure")
       }
     }
@@ -125,19 +104,32 @@ describe("Worker", () => {
     const worker = new TestWorker()
     await worker.start()
 
-    const exit = worker.wait()
-    await expect(exit).rejects.toBeInstanceOf(WorkerUnhealthyError)
-    await expect(exit).rejects.toMatchObject({
+    let failure: unknown
+    const exit = worker.wait().catch((error: unknown) => {
+      failure = error
+    })
+    for (let step = 0; step < 20 && failure === undefined; step++) {
+      await flush()
+      jest.advanceTimersToNextTimer()
+    }
+    await exit
+
+    expect(failure).toBeInstanceOf(WorkerUnhealthyError)
+    expect(failure).toMatchObject({
       name: "WorkerUnhealthyError",
       restartCount: 10,
       cause: expect.objectContaining({ message: "persistent failure" }),
     })
-    expect(runs).toBe(11)
+    // Ten restarts double from 100ms and cap at 30s, riding out ~80s of continuous failure.
+    expect(runStartedAt.slice(1).map((at, index) => at - runStartedAt[index]!)).toEqual([
+      100, 200, 400, 800, 1_600, 3_200, 6_400, 12_800, 25_600, 30_000,
+    ])
 
     await worker.stop()
   })
 
   test("stop cancels a pending restart", async () => {
+    jest.useFakeTimers()
     let runs = 0
 
     class TestWorker extends Worker {
@@ -149,14 +141,20 @@ describe("Worker", () => {
 
     const worker = new TestWorker()
     await worker.start()
-    await waitFor(() => runs === 1)
+    await flush()
+    expect(runs).toBe(1)
+    expect(jest.getTimerCount()).toBe(1)
+
     await worker.stop()
-    await Bun.sleep(300)
+    expect(jest.getTimerCount()).toBe(0)
+    jest.advanceTimersByTime(60_000)
+    await flush()
 
     expect(runs).toBe(1)
   })
 
   test("stop waits for run() to complete", async () => {
+    const release = Promise.withResolvers<void>()
     let finished = false
 
     class TestWorker extends Worker {
@@ -164,15 +162,23 @@ describe("Worker", () => {
         await new Promise<void>((resolve) => {
           signal.addEventListener("abort", () => resolve(), { once: true })
         })
-        await new Promise((resolve) => setTimeout(resolve, 20))
+        await release.promise
         finished = true
       }
     }
 
     const worker = new TestWorker()
     await worker.start()
-    await worker.stop()
 
+    let stopped = false
+    const stopping = worker.stop().then(() => {
+      stopped = true
+    })
+    await flush()
+    expect(stopped).toBe(false)
+
+    release.resolve()
+    await stopping
     expect(finished).toBe(true)
   })
 })

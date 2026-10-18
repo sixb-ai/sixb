@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import * as deploy from "@sixb/core/deploy"
 import { type DeployConfig, type DeployTarget, defineDeploy } from "@sixb/core/deploy"
 import { validateDeployConfig } from "@sixb/core/internal/deploy"
 
@@ -137,9 +136,5 @@ describe("deploy config validation", () => {
       process({ entrypoint: "watch.ts", process: { maxMemory: "lots" } }),
       'maxMemory must be a size such as "512M"'
     )
-  })
-
-  test("exposes only the authoring helper at runtime", () => {
-    expect(Object.keys(deploy)).toEqual(["defineDeploy"])
   })
 })

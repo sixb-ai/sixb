@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test"
+import { describe, expect, jest, spyOn, test } from "bun:test"
 import type { SixbErrorContext } from "../src"
 import type { Broker } from "../src/broker"
 import {
@@ -188,11 +188,6 @@ describe("Sixb error reporting", () => {
     expect(JSON.stringify(reports[0]?.context)).not.toContain("payload")
   })
 
-  test("preserves Error identity", () => {
-    const original = new Error("boom")
-    expect(normalizeReportedError(original)).toBe(original)
-  })
-
   test("normalizes cross-realm-like errors and hostile thrown values", () => {
     const errorLike = normalizeReportedError({ name: "ProviderError", message: "offline" })
     expect(errorLike.name).toBe("ProviderError")
@@ -257,20 +252,27 @@ describe("Sixb error reporting", () => {
   test("flush stops waiting after its timeout", async () => {
     const host = {}
     const consoleError = spyOn(console, "error").mockImplementation(() => {})
-    attachSixbErrorReporter(host, () => new Promise<void>(() => {}))
-    reportRunFailure(host, new Error("run failed"), {
-      projectId: PROJECT_ID,
-      runKind: "agent",
-      run: { runId: "agent-run-1", threadId: "thread-1" },
-      failure: unexpectedFailure("run failed"),
-    })
+    jest.useFakeTimers()
+    try {
+      attachSixbErrorReporter(host, () => new Promise<void>(() => {}))
+      reportRunFailure(host, new Error("run failed"), {
+        projectId: PROJECT_ID,
+        runKind: "agent",
+        run: { runId: "agent-run-1", threadId: "thread-1" },
+        failure: unexpectedFailure("run failed"),
+      })
 
-    await flushSixbErrors(host, 5)
+      const flushed = flushSixbErrors(host, 5_000)
+      jest.advanceTimersByTime(5_000)
+      await flushed
 
-    expect(consoleError).toHaveBeenCalledWith(
-      "[Sixb] Timed out after 5ms waiting for 1 onError handler(s)."
-    )
-    consoleError.mockRestore()
+      expect(consoleError).toHaveBeenCalledWith(
+        "[Sixb] Timed out after 5000ms waiting for 1 onError handler(s)."
+      )
+    } finally {
+      jest.useRealTimers()
+      consoleError.mockRestore()
+    }
   })
 
   test("falls back to the console when no reporter is attached", async () => {

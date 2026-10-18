@@ -33,6 +33,6 @@ export async function waitFor<T>(
     if (Date.now() - startedAt >= timeoutMs) {
       throw new Error("Timed out waiting for condition.")
     }
-    await Bun.sleep(10)
+    await Bun.sleep(1)
   }
 }

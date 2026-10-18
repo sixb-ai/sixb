@@ -30,6 +30,13 @@ function createTestClock(initial: Date) {
   }
 }
 
+async function firedOccurrences(events: DomainEventService): Promise<string[]> {
+  return (await events.read({ types: ["schedule.triggered"] })).map((event) => {
+    const { scheduleId, occurrenceAt } = (event as StoredScheduleTriggeredEvent).payload
+    return `${scheduleId}@${occurrenceAt}`
+  })
+}
+
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
 
@@ -42,29 +49,36 @@ describe("SchedulerRuntime", () => {
     jest.useRealTimers()
   })
 
-  test("emits at the correct time", async () => {
+  test("emits each occurrence with its schedule id and key, then re-arms for the next", async () => {
     const eventsRuntime = createEvents()
     const clock = createTestClock(new Date("2026-01-01T10:30:00Z"))
-
-    const schedule = defineSchedule("hourly").cron("0 * * * *")
-
     const runtime = new SchedulerRuntime({
-      schedules: [schedule],
+      schedules: [defineSchedule("hourly").cron("0 * * * *")],
       events: eventsRuntime,
       now: clock.now,
     })
 
     await runtime.start()
-
-    // Advance 30 minutes to 11:00
     clock.advance(30 * MINUTE)
     jest.advanceTimersByTime(30 * MINUTE)
 
-    const events = await eventsRuntime.read({ types: ["schedule.triggered"] })
-    expect(events).toHaveLength(1)
-    const event = events[0] as StoredScheduleTriggeredEvent
-    expect(event.payload.occurrenceAt).toBe("2026-01-01T11:00:00.000Z")
-    expect(event.payload.scheduleId).toBe("hourly")
+    const [first] = (await eventsRuntime.read({
+      types: ["schedule.triggered"],
+    })) as StoredScheduleTriggeredEvent[]
+    expect(first?.payload).toEqual({
+      scheduleId: "hourly",
+      occurrenceAt: "2026-01-01T11:00:00.000Z",
+      triggeredAt: "2026-01-01T11:00:00.000Z",
+      occurrenceKey: "hourly:2026-01-01T11:00:00.000Z",
+    })
+
+    clock.advance(60 * MINUTE)
+    jest.advanceTimersByTime(60 * MINUTE)
+
+    expect(await firedOccurrences(eventsRuntime)).toEqual([
+      "hourly@2026-01-01T11:00:00.000Z",
+      "hourly@2026-01-01T12:00:00.000Z",
+    ])
 
     await runtime.stop()
   })
@@ -87,11 +101,7 @@ describe("SchedulerRuntime", () => {
     clock.advance(24 * HOUR)
     jest.advanceTimersByTime(24 * HOUR)
 
-    const fired = (await eventsRuntime.read({ types: ["schedule.triggered"] })).map((event) => {
-      const { scheduleId, occurrenceAt } = (event as StoredScheduleTriggeredEvent).payload
-      return `${scheduleId}@${occurrenceAt}`
-    })
-    expect(fired.sort()).toEqual([
+    expect((await firedOccurrences(eventsRuntime)).sort()).toEqual([
       "project-morning@2026-01-01T07:00:00.000Z",
       "tokyo-morning@2026-01-01T23:00:00.000Z",
     ])
@@ -99,135 +109,63 @@ describe("SchedulerRuntime", () => {
     await runtime.stop()
   })
 
-  test("next occurrence after fire", async () => {
-    const eventsRuntime = createEvents()
-    const clock = createTestClock(new Date("2026-01-01T10:30:00Z"))
-
-    const schedule = defineSchedule("hourly").cron("0 * * * *")
-
-    const runtime = new SchedulerRuntime({
-      schedules: [schedule],
-      events: eventsRuntime,
-      now: clock.now,
-    })
-
-    await runtime.start()
-
-    // First fire at 11:00
-    clock.advance(30 * MINUTE)
-    jest.advanceTimersByTime(30 * MINUTE)
-
-    // Second fire at 12:00
-    clock.advance(60 * MINUTE)
-    jest.advanceTimersByTime(60 * MINUTE)
-
-    const events = await eventsRuntime.read({ types: ["schedule.triggered"] })
-    expect(events).toHaveLength(2)
-    expect((events[0] as StoredScheduleTriggeredEvent).payload.occurrenceAt).toBe(
-      "2026-01-01T11:00:00.000Z"
-    )
-    expect((events[1] as StoredScheduleTriggeredEvent).payload.occurrenceAt).toBe(
-      "2026-01-01T12:00:00.000Z"
-    )
-
-    await runtime.stop()
-  })
-
-  test("multiple schedules with different frequencies", async () => {
+  test("emits every schedule due at the same instant", async () => {
     const eventsRuntime = createEvents()
     const clock = createTestClock(new Date("2026-01-01T10:00:00Z"))
-
-    const every15 = defineSchedule("every-15").cron("*/15 * * * *")
-    const hourly = defineSchedule("hourly").cron("0 * * * *")
-
     const runtime = new SchedulerRuntime({
-      schedules: [every15, hourly],
+      schedules: [
+        defineSchedule("every-15").cron("*/15 * * * *"),
+        defineSchedule("hourly").cron("0 * * * *"),
+      ],
       events: eventsRuntime,
       now: clock.now,
     })
 
     await runtime.start()
+    for (let quarter = 0; quarter < 4; quarter += 1) {
+      clock.advance(15 * MINUTE)
+      jest.advanceTimersByTime(15 * MINUTE)
+    }
 
-    // At 10:15 — only every-15 fires
-    clock.advance(15 * MINUTE)
-    jest.advanceTimersByTime(15 * MINUTE)
-
-    let events = await eventsRuntime.read({ types: ["schedule.triggered"] })
-    const at1015 = events.filter(
-      (e) => (e as StoredScheduleTriggeredEvent).payload.scheduleId === "every-15"
-    )
-    expect(at1015).toHaveLength(1)
-
-    // At 11:00 — both fire
-    clock.advance(45 * MINUTE)
-    jest.advanceTimersByTime(45 * MINUTE)
-
-    events = await eventsRuntime.read({ types: ["schedule.triggered"] })
-    const hourlyEvents = events.filter(
-      (e) => (e as StoredScheduleTriggeredEvent).payload.scheduleId === "hourly"
-    )
-    expect(hourlyEvents.length).toBeGreaterThanOrEqual(1)
-
-    await runtime.stop()
-  })
-
-  test("occurrenceKey is deterministic", async () => {
-    const eventsRuntime = createEvents()
-    const clock = createTestClock(new Date("2026-01-01T10:30:00Z"))
-
-    const schedule = defineSchedule("my-schedule").cron("0 * * * *")
-
-    const runtime = new SchedulerRuntime({
-      schedules: [schedule],
-      events: eventsRuntime,
-      now: clock.now,
-    })
-
-    await runtime.start()
-
-    clock.advance(30 * MINUTE)
-    jest.advanceTimersByTime(30 * MINUTE)
-
-    const events = await eventsRuntime.read({ types: ["schedule.triggered"] })
-    const event = events[0] as StoredScheduleTriggeredEvent
-    expect(event.payload.occurrenceKey).toBe(`my-schedule:${event.payload.occurrenceAt}`)
+    expect(await firedOccurrences(eventsRuntime)).toEqual([
+      "every-15@2026-01-01T10:15:00.000Z",
+      "every-15@2026-01-01T10:30:00.000Z",
+      "every-15@2026-01-01T10:45:00.000Z",
+      "every-15@2026-01-01T11:00:00.000Z",
+      "hourly@2026-01-01T11:00:00.000Z",
+    ])
 
     await runtime.stop()
   })
 
   test("duplicate schedule ids throws SchedulerValidationError", async () => {
-    const eventsRuntime = createEvents()
-    const schedule1 = defineSchedule("dup").cron("0 * * * *")
-    const schedule2 = defineSchedule("dup").cron("*/5 * * * *")
-
     const runtime = new SchedulerRuntime({
-      schedules: [schedule1, schedule2],
-      events: eventsRuntime,
+      schedules: [
+        defineSchedule("dup").cron("0 * * * *"),
+        defineSchedule("dup").cron("*/5 * * * *"),
+      ],
+      events: createEvents(),
     })
 
-    expect(runtime.start()).rejects.toThrow(SchedulerValidationError)
+    await expect(runtime.start()).rejects.toThrow(SchedulerValidationError)
   })
 
   test("start() is idempotent", async () => {
     const eventsRuntime = createEvents()
     const clock = createTestClock(new Date("2026-01-01T10:00:00Z"))
-
-    const schedule = defineSchedule("s1").cron("0 * * * *")
-
     const runtime = new SchedulerRuntime({
-      schedules: [schedule],
+      schedules: [defineSchedule("s1").cron("0 * * * *")],
       events: eventsRuntime,
       now: clock.now,
     })
 
     await runtime.start()
-    await runtime.start() // second call is no-op
+    await runtime.start()
 
     clock.advance(HOUR)
     jest.advanceTimersByTime(HOUR)
 
-    const events = await eventsRuntime.read({ types: ["schedule.triggered"] })
-    expect(events).toHaveLength(1) // no duplicates from double start
+    expect(await firedOccurrences(eventsRuntime)).toEqual(["s1@2026-01-01T11:00:00.000Z"])
 
     await runtime.stop()
   })
@@ -235,11 +173,8 @@ describe("SchedulerRuntime", () => {
   test("stop() prevents further events", async () => {
     const eventsRuntime = createEvents()
     const clock = createTestClock(new Date("2026-01-01T10:30:00Z"))
-
-    const schedule = defineSchedule("s1").cron("0 * * * *")
-
     const runtime = new SchedulerRuntime({
-      schedules: [schedule],
+      schedules: [defineSchedule("s1").cron("0 * * * *")],
       events: eventsRuntime,
       now: clock.now,
     })
@@ -250,75 +185,38 @@ describe("SchedulerRuntime", () => {
     clock.advance(HOUR)
     jest.advanceTimersByTime(HOUR)
 
-    const events = await eventsRuntime.read({ types: ["schedule.triggered"] })
-    expect(events).toHaveLength(0)
+    expect(await firedOccurrences(eventsRuntime)).toEqual([])
   })
 
-  test("no schedules is a clean no-op", async () => {
-    const eventsRuntime = createEvents()
-
-    const runtime = new SchedulerRuntime({
-      schedules: [],
-      events: eventsRuntime,
-    })
+  test("no schedules arms no timer", async () => {
+    const runtime = new SchedulerRuntime({ schedules: [], events: createEvents() })
 
     await runtime.start()
-    await runtime.stop()
-    // No errors thrown
-  })
-
-  test("timezone-aware scheduling", async () => {
-    const eventsRuntime = createEvents()
-    // 21:30 UTC = 23:30 Paris (CEST, summer)
-    const clock = createTestClock(new Date("2026-07-15T21:30:00Z"))
-
-    const schedule = defineSchedule("paris-midnight").cron("0 0 * * *", {
-      timezone: "Europe/Paris",
-    })
-
-    const runtime = new SchedulerRuntime({
-      schedules: [schedule],
-      events: eventsRuntime,
-      now: clock.now,
-    })
-
-    await runtime.start()
-
-    // Midnight Paris (CEST) = 22:00 UTC, 30 minutes from now
-    clock.advance(30 * MINUTE)
-    jest.advanceTimersByTime(30 * MINUTE)
-
-    const events = await eventsRuntime.read({ types: ["schedule.triggered"] })
-    expect(events).toHaveLength(1)
-    expect((events[0] as StoredScheduleTriggeredEvent).payload.occurrenceAt).toBe(
-      "2026-07-15T22:00:00.000Z"
-    )
-
+    expect(jest.getTimerCount()).toBe(0)
     await runtime.stop()
   })
 
-  test("timer lag emits multiple events in a single tick", async () => {
+  // Proven by removal: compute the next occurrence from `now` instead of `occurrenceAt` in `tick()`;
+  // the late timer then skips 12:00 and only 11:00 fires.
+  test("a late timer catches up every missed occurrence", async () => {
     const eventsRuntime = createEvents()
     const clock = createTestClock(new Date("2026-01-01T10:00:00Z"))
-
-    const schedule = defineSchedule("hourly").cron("0 * * * *")
-
     const runtime = new SchedulerRuntime({
-      schedules: [schedule],
+      schedules: [defineSchedule("hourly").cron("0 * * * *")],
       events: eventsRuntime,
       now: clock.now,
     })
 
     await runtime.start()
 
-    // Jump 2.5 hours — timer fires once but clock shows 2 occurrences have passed
+    // The process slept through two occurrences: the timer fires once, after the clock moved on.
     clock.advance(150 * MINUTE)
     jest.advanceTimersByTime(150 * MINUTE)
 
-    const events = await eventsRuntime.read({ types: ["schedule.triggered"] })
-    // At minimum, the tick should emit at least the first due occurrence
-    // Multiple occurrences may be caught up in subsequent timer ticks
-    expect(events.length).toBeGreaterThanOrEqual(1)
+    expect(await firedOccurrences(eventsRuntime)).toEqual([
+      "hourly@2026-01-01T11:00:00.000Z",
+      "hourly@2026-01-01T12:00:00.000Z",
+    ])
 
     await runtime.stop()
   })
