@@ -41,6 +41,11 @@ import type {
 } from "../src/types"
 import { OrchestratorWorker } from "../src/worker"
 
+// A fake-timer test that times out never reaches its own cleanup; keep it from leaking.
+afterEach(() => {
+  jest.useRealTimers()
+})
+
 const PROJECT_ID = "test-project"
 
 const Invoice = defineObjectType({

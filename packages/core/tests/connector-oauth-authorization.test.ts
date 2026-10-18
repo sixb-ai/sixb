@@ -1,4 +1,4 @@
-import { describe, expect, jest, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import { createHash } from "node:crypto"
 import { AuthorizationError, defineConnector, SixbHost } from "../src"
 import { ConnectorService } from "../src/connectors/service"
@@ -23,6 +23,11 @@ import {
   startAuthorization,
 } from "./connector-connections.fixture"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
+
+// A fake-timer test that times out never reaches its own cleanup; keep it from leaking.
+afterEach(() => {
+  jest.useRealTimers()
+})
 
 describe("connector OAuth lifecycle", () => {
   test("persists the initiating execution and stores only its id on the attempt", async () => {

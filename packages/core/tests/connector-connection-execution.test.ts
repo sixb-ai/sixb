@@ -1,4 +1,4 @@
-import { describe, expect, jest, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import { AuthorizationError, SixbHost } from "../src"
 import { createConnectorRuntime } from "../src/connectors/execution"
 import { ConnectorService } from "../src/connectors/service"
@@ -22,6 +22,11 @@ import {
   seedConnectorActors,
 } from "./connector-connections.fixture"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
+
+// A fake-timer test that times out never reaches its own cleanup; keep it from leaking.
+afterEach(() => {
+  jest.useRealTimers()
+})
 
 describe("connector connection execution boundary", () => {
   test("binds trusted connector access to the exact primitive execution", () => {

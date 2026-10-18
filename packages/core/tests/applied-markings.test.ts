@@ -12,6 +12,11 @@ import {
 import { getDatasetVersionMarkings } from "../src/security/internal"
 import { createAppliedProject, type InvoiceProjection, projectId } from "./applied-markings-fixture"
 
+// A fake-timer test that times out never reaches its own cleanup; keep it from leaking.
+afterEach(() => {
+  jest.useRealTimers()
+})
+
 // What the dataset versions projections applied add to the ontology's markings, and how the host
 // keeps that snapshot current: read when reads need it, with one storage query, and reclassified
 // only where an applied version changed.

@@ -17,6 +17,11 @@ import { createMaterializerTestFixture, type MaterializerTestFixture } from "@si
 import type { RulesWorkerHost } from "../src"
 import { RulesWorker } from "../src"
 
+// A fake-timer test that times out never reaches its own cleanup; keep it from leaking.
+afterEach(() => {
+  jest.useRealTimers()
+})
+
 const projectId = "project-a"
 
 const postedRule: RuleDefinition = {
