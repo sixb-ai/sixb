@@ -1,5 +1,13 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import {
@@ -10,7 +18,7 @@ import {
   type Principal,
 } from "@sixb/core"
 import { createTestAgentExecution } from "@sixb/core/testing"
-import { materializeThreadArtifacts } from "../src/artifacts/materialize"
+import { type InstalledArtifacts, materializeThreadArtifacts } from "../src/artifacts/materialize"
 import { createPublishArtifactTools } from "../src/artifacts/publish-tool"
 import { AgentExecutionLostError } from "../src/errors"
 import { BUILT_IN_SKILLS } from "../src/skills/built-in"
@@ -55,17 +63,38 @@ function write(path: string, contents: string): void {
   writeFileSync(join(root, path), contents)
 }
 
-type ToolOptions = { readonly budget?: AgentFileBudget; readonly executionToken?: string }
+type ToolOptions = {
+  readonly budget?: AgentFileBudget
+  readonly executionToken?: string
+  /** The run's install; each call is a run of its own without one. */
+  readonly installed?: Promise<InstalledArtifacts>
+}
+
+/** What a run installs in its sandbox before it publishes. */
+function install(options: { readonly maxBytes?: number } = {}): Promise<InstalledArtifacts> {
+  return materializeThreadArtifacts({
+    projectId,
+    threadId: run.threadId,
+    owner,
+    storage: storage.artifacts,
+    blobStorage,
+    directory: ".sixb/agent/artifacts",
+    manifestPath: ".sixb/agent/context/artifacts.json",
+    ...options,
+  })
+}
 
 function tools(options: ToolOptions = {}) {
   const [create, version] = createPublishArtifactTools({
     projectId,
     storage,
+    artifacts: storage.artifacts,
     blobStorage,
     run: { ...run, executionToken: options.executionToken ?? run.executionToken },
     owner,
     budget: options.budget ?? new AgentFileBudget(),
     resolveSandbox: async () => ({ sandbox: new LocalBashSandbox(root) }),
+    installed: options.installed ?? install(),
   })
   return { create, version }
 }
@@ -77,9 +106,16 @@ async function publish(input: Record<string, unknown>, options?: ToolOptions): P
 }
 
 /** `publish_artifact_version`: the next version of one. */
-async function publishVersion(input: Record<string, unknown>): Promise<JsonValue> {
-  const { version } = tools()
+async function publishVersion(
+  input: Record<string, unknown>,
+  options?: ToolOptions
+): Promise<JsonValue> {
+  const { version } = tools(options)
   return version.execute(version.parseInput(input), context)
+}
+
+function read(path: string): string {
+  return readFileSync(join(root, path), "utf8")
 }
 
 async function refusal(
@@ -190,6 +226,7 @@ describe("publish_artifact", () => {
   test("says what to fix and stores nothing when the version is invalid", async () => {
     write("work/review/document.md", "# Q3 review\n\n![Chart](figures/missing.svg)\n")
     write("empty/.keep", "")
+    mkdirSync(join(root, "blank"))
 
     expect(await refusal({ path: "work/review", kind: "document", title: "Q3" })).toBe(
       "[SixbAgentWorker] publish_artifact refused: document.md shows the image 'figures/missing.svg', which is not one of the artifact's files."
@@ -199,6 +236,9 @@ describe("publish_artifact", () => {
     )
     expect(await refusal({ path: "empty", kind: "document", title: "Q3" })).toBe(
       "[SixbAgentWorker] publish_artifact refused: 'empty' holds no files to publish."
+    )
+    expect(await refusal({ path: "blank", kind: "document", title: "Q3" })).toBe(
+      "[SixbAgentWorker] publish_artifact refused: 'blank' is an empty directory."
     )
     expect(await refusal({ path: "../outside", kind: "document", title: "Q3" })).toContain(
       "path must stay inside the sandbox working directory"
@@ -225,25 +265,58 @@ describe("publish_artifact", () => {
     ).rejects.toThrow("exceed the 1024-byte run limit")
   })
 
+  test("counts a file once per run, however many versions keep it", async () => {
+    // The publish, look, fix loop the layout check asks for: each version keeps the figure.
+    // Reproduce by reserving each version's whole size: the third version exceeds the budget.
+    const figure = `<svg xmlns='http://www.w3.org/2000/svg'><desc>${"x".repeat(600)}</desc></svg>`
+    write("work/review/figures/chart.svg", figure)
+    write("work/review/document.md", "# Q3 review\n\n![Chart](figures/chart.svg)\n")
+    const budget = new AgentFileBudget(1024)
+    const installed = install()
+    const first = (await publish(
+      { path: "work/review", kind: "document", title: "Q3 review" },
+      { budget, installed }
+    )) as { artifactId: string }
+    const firstBytes = budget.reservedBytes
+
+    for (const draft of ["Second draft", "Third draft"]) {
+      write("work/review/document.md", `# Q3 review\n\n${draft}.\n\n![Chart](figures/chart.svg)\n`)
+      await publishVersion(
+        { id: first.artifactId, path: "work/review", title: "Q3 review" },
+        { budget, installed }
+      )
+    }
+    expect(budget.reservedBytes).toBe(
+      firstBytes +
+        "# Q3 review\n\nSecond draft.\n\n![Chart](figures/chart.svg)\n".length +
+        "# Q3 review\n\nThird draft.\n\n![Chart](figures/chart.svg)\n".length
+    )
+  })
+
   test("publishes nothing once the run no longer owns its execution", async () => {
     write("work/review/document.md", "# Q3 review\n\nRevenue grew.\n")
 
-    await expect(
-      publish(
-        { path: "work/review", kind: "document", title: "Q3 review" },
-        { executionToken: "exec_stale" }
-      )
-    ).rejects.toBeInstanceOf(AgentExecutionLostError)
+    const stale = await publish(
+      { path: "work/review", kind: "document", title: "Q3 review" },
+      { executionToken: "exec_stale" }
+    ).catch((error: unknown) => error)
+    expect(stale).toBeInstanceOf(AgentExecutionLostError)
+    // The trace says why, not "An error occurred."
+    expect(tools().create.errorText(stale)).toBe(
+      "[SixbAgentWorker] publish_artifact refused: this run no longer holds its conversation, so nothing was published."
+    )
 
     // The run ends while its files are read: the commit is fenced too. Reproduce by removing
-    // `assertRunIsCurrent` from the publish transaction; the ended run publishes.
+    // `assertRunExecutionOwned` from the publish transaction; the ended run publishes.
     const [publisher] = createPublishArtifactTools({
       projectId,
       storage,
+      artifacts: storage.artifacts,
       blobStorage,
       run,
       owner,
       budget: new AgentFileBudget(),
+      installed: install(),
       resolveSandbox: async () => {
         await storage.agents.runs.finish({
           projectId,
@@ -261,6 +334,61 @@ describe("publish_artifact", () => {
       )
     ).rejects.toBeInstanceOf(AgentExecutionLostError)
     expect((await storage.artifacts.list({ projectId })).artifacts).toEqual([])
+  })
+
+  test("keeps the installed copy and the manifest at the version it just published", async () => {
+    // Reproduce by not replacing the install after a publish: the copy and the manifest stay at
+    // the version before, and revising from the copy publishes over this one.
+    write("work/review/document.md", "# Q3 review\n\n![Chart](figures/chart.svg)\n")
+    write("work/review/figures/chart.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>")
+    const installed = install()
+    const { artifactId } = (await publish(
+      { path: "work/review", kind: "document", title: "Q3 review" },
+      { installed }
+    )) as { artifactId: string }
+    const copy = `.sixb/agent/artifacts/${artifactId}`
+    expect(read(`${copy}/document.md`)).toBe("# Q3 review\n\n![Chart](figures/chart.svg)\n")
+
+    write("work/review/document.md", "# Q3 review\n\nNo chart.\n")
+    rmSync(join(root, "work/review/figures"), { recursive: true })
+    await publishVersion({ id: artifactId, path: "work/review", title: "Q3, final" }, { installed })
+
+    expect(read(`${copy}/document.md`)).toBe("# Q3 review\n\nNo chart.\n")
+    // The copy holds that version alone.
+    expect(existsSync(join(root, copy, "figures"))).toBe(false)
+    expect(JSON.parse(read(".sixb/agent/context/artifacts.json")).artifacts).toEqual([
+      expect.objectContaining({
+        id: artifactId,
+        title: "Q3, final",
+        version: 2,
+        pinned: `artifact:${artifactId}@2`,
+        directory: copy,
+        files: ["document.md"],
+      }),
+    ])
+    expect(JSON.parse((await installed).manifestJson)).toEqual(
+      JSON.parse(read(".sixb/agent/context/artifacts.json"))
+    )
+  })
+
+  test("lays a deck out with the files it publishes, and only those", async () => {
+    write(
+      "work/q3/index.html",
+      '<!doctype html><html><head><title>Q3</title></head><body><section class="slide"><h2>Q3</h2><img src="img/fleet.svg" alt=""></section></body></html>'
+    )
+    write("work/q3/img/fleet.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>")
+    write("work/q3/.notes", "a working note")
+
+    // One file publishes alone, so its folder's images are not the reader's.
+    const single = (await publish({ path: "work/q3/index.html", kind: "slides", title: "Q3" })) as {
+      artifactId: string
+    }
+    const whole = (await publish({ path: "work/q3", kind: "slides", title: "Q3" })) as {
+      artifactId: string
+    }
+    const served = (id: string) => JSON.parse(read(`.sixb/agent/checks/${id}-v1/files.json`))
+    expect(served(single.artifactId)).toEqual(["index.html"])
+    expect(served(whole.artifactId)).toEqual(["img/fleet.svg", "index.html"])
   })
 
   test("refuses input outside its schema", () => {
@@ -294,6 +422,10 @@ describe("the sixb-artifacts skill's examples", () => {
       "examples/sheet/service-metrics",
       "examples/sheet/parts-inventory",
     ])
+    // slides.md says the decks use its layouts and classes alone; a legend's swatch is one.
+    for (const deck of examples.filter((file) => file.path.endsWith(".html"))) {
+      expect(String(deck.contents)).not.toMatch(/<style|style="(?!--swatch:)/)
+    }
     for (const directory of directories) {
       const kind = directory.split("/")[1] as "document" | "sheet" | "slides"
       expect(await publish({ path: directory, kind, title: directory })).toMatchObject({
@@ -318,14 +450,7 @@ describe("materializeThreadArtifacts", () => {
       artifactId: string
     }
 
-    const installed = await materializeThreadArtifacts({
-      projectId,
-      threadId: run.threadId,
-      owner,
-      storage: storage.artifacts,
-      blobStorage,
-      directory: ".sixb/agent/artifacts",
-    })
+    const installed = await install()
 
     expect(JSON.parse(installed.manifestJson)).toEqual({
       artifacts: [
@@ -377,15 +502,7 @@ describe("materializeThreadArtifacts", () => {
     ])
 
     // Past the budget, an older artifact is listed without its files.
-    const bounded = await materializeThreadArtifacts({
-      projectId,
-      threadId: run.threadId,
-      owner,
-      storage: storage.artifacts,
-      blobStorage,
-      directory: ".sixb/agent/artifacts",
-      maxBytes: "# Second\n\nTwo.\n".length,
-    })
+    const bounded = await install({ maxBytes: "# Second\n\nTwo.\n".length })
     expect(JSON.parse(bounded.manifestJson).artifacts[1]).toEqual({
       id: first.artifactId,
       kind: "document",
@@ -411,7 +528,94 @@ describe("materializeThreadArtifacts", () => {
       storage: storage.artifacts,
       blobStorage,
       directory: ".sixb/agent/artifacts",
+      manifestPath: ".sixb/agent/context/artifacts.json",
     })
     expect(JSON.parse(elsewhere.manifestJson)).toEqual({ artifacts: [] })
+  })
+
+  test("lists a deck's slides with their addresses", async () => {
+    write(
+      "deck/index.html",
+      '<!doctype html><html><head><title>Q3</title></head><body><section class="slide"><h1>Q3 review</h1></section><section class="slide"><p>No heading</p></section></body></html>'
+    )
+    const { artifactId } = (await publish({ path: "deck", kind: "slides", title: "Q3" })) as {
+      artifactId: string
+    }
+    expect(JSON.parse((await install()).manifestJson).artifacts[0].parts).toEqual([
+      {
+        address: `artifact:${artifactId}#1`,
+        pinned: `artifact:${artifactId}@1#1`,
+        name: "Slide 1: Q3 review",
+      },
+      {
+        address: `artifact:${artifactId}#2`,
+        pinned: `artifact:${artifactId}@1#2`,
+        name: "Slide 2",
+      },
+    ])
+  })
+
+  test("lists an artifact whose files cannot be read without them, and installs the rest", async () => {
+    write("a/document.md", "# First\n\nOne.\n")
+    write("b/document.md", "# Second\n\nTwo.\n")
+    const first = (await publish({ path: "a", kind: "document", title: "First" })) as {
+      artifactId: string
+    }
+    const second = (await publish({ path: "b", kind: "document", title: "Second" })) as {
+      artifactId: string
+    }
+    const unreadable = (await storage.artifacts.getVersion({
+      projectId,
+      artifactId: first.artifactId,
+      version: 1,
+    }))!.files[0]!.file.blobId
+    const open = blobStorage.open.bind(blobStorage)
+    blobStorage.open = async (blobId) => {
+      if (blobId === unreadable) throw new Error("the blob is gone")
+      return open(blobId)
+    }
+    // One lost blob would otherwise fail every later run of the thread as its sandbox starts.
+    // Reproduce by letting the read throw out of materializeThreadArtifacts.
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const installed = await install()
+      const entries = JSON.parse(installed.manifestJson).artifacts
+      expect(entries.map((entry: { directory?: string }) => entry.directory)).toEqual([
+        `.sixb/agent/artifacts/${second.artifactId}`,
+        undefined,
+      ])
+      expect(installed.files.map((file) => file.path)).toEqual([
+        `.sixb/agent/artifacts/${second.artifactId}/document.md`,
+      ])
+      expect(String(warn.mock.calls[0]?.[0])).toStartWith(
+        `[SixbAgentWorker] Could not install version 1 of artifact '${first.artifactId}'`
+      )
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  test("stops downloading when the run is cancelled", async () => {
+    write("a/document.md", "# First\n\nOne.\n")
+    await publish({ path: "a", kind: "document", title: "First" })
+    // A blob that never finishes arriving, as a stalled download does.
+    blobStorage.open = async () =>
+      new ReadableStream<Uint8Array>({ pull: () => new Promise(() => {}) })
+    const cancel = new AbortController()
+    const installing = materializeThreadArtifacts({
+      projectId,
+      threadId: run.threadId,
+      owner,
+      storage: storage.artifacts,
+      blobStorage,
+      directory: ".sixb/agent/artifacts",
+      manifestPath: ".sixb/agent/context/artifacts.json",
+      signal: cancel.signal,
+    })
+    // Reproduce by dropping the signal: the install is still waiting on the blob.
+    setTimeout(() => cancel.abort(new Error("cancelled")), 10)
+    await expect(
+      Promise.race([installing, Bun.sleep(1_000).then(() => "still downloading")])
+    ).rejects.toThrow("cancelled")
   })
 })

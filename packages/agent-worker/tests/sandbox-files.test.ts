@@ -69,13 +69,27 @@ describe("listSandboxFiles", () => {
     })
 
     expect(listing).toEqual({
+      directory: true,
       files: [
         { relativePath: "figures/chart one.svg", sizeBytes: 6 },
         { relativePath: "report.md", sizeBytes: 8 },
       ],
       truncated: false,
-      malformed: 0,
     })
+  })
+
+  test("refuses output it cannot parse rather than leave a file out", async () => {
+    // Reproduce by skipping the line: the listing succeeds without the file.
+    const sandbox = new LocalBashSandbox(root)
+    sandbox.runCommand = async () => ({
+      exitCode: 0,
+      stdout: `DIRECTORY\n8\t${Buffer.from("report.md").toString("base64")}\nsize?\tZmlndXJlLnN2Zw==\n`,
+      stderr: "",
+      durationMs: 1,
+    })
+    await expect(
+      listSandboxFiles({ sandbox }, { directory: root, maxFiles: 10, signal, timeoutMs: 10_000 })
+    ).rejects.toMatchObject({ reason: "failed" })
   })
 
   test("stops at the file limit and says so", async () => {
@@ -93,14 +107,20 @@ describe("listSandboxFiles", () => {
     expect(listing.truncated).toBe(true)
   })
 
-  test("lists nothing for a missing directory", async () => {
-    const listing = await listSandboxFiles(handle(), {
-      directory: join(root, "missing"),
-      maxFiles: 10,
-      signal,
-      timeoutMs: 10_000,
+  test("lists nothing for a missing directory, and says an empty one is a directory", async () => {
+    mkdirSync(join(root, "empty"))
+    const list = (directory: string) =>
+      listSandboxFiles(handle(), { directory, maxFiles: 10, signal, timeoutMs: 10_000 })
+    expect(await list(join(root, "missing"))).toEqual({
+      directory: false,
+      files: [],
+      truncated: false,
     })
-    expect(listing).toEqual({ files: [], truncated: false, malformed: 0 })
+    expect(await list(join(root, "empty"))).toEqual({
+      directory: true,
+      files: [],
+      truncated: false,
+    })
   })
 })
 

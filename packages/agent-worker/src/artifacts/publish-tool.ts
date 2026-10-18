@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { posix } from "node:path"
 import {
   AgentToolPublicError,
@@ -21,7 +22,7 @@ import {
 import { inferFileMediaType } from "@sixb/core/internal/blob-storage"
 import type { JsonObject, ModelTool } from "@sixb/core/models"
 import type { ArtifactFile, ArtifactRecord, ArtifactStorage } from "@sixb/core/storage"
-import { AgentExecutionLostError } from "../errors"
+import { AgentExecutionLostError, assertRunExecutionOwned } from "../errors"
 import { agentToolErrorText } from "../model-adapters"
 import {
   listSandboxFiles,
@@ -32,6 +33,7 @@ import {
 import type { AgentSandboxHandle } from "../sandbox-handle"
 import type { AgentFileBudget } from "../tools/tool-files"
 import { checkDeckLayout, type LayoutCheck } from "./layout-check/layout-check"
+import type { InstalledArtifacts, PublishedArtifactFile } from "./materialize"
 
 const CREATE_TOOL = "publish_artifact"
 const VERSION_TOOL = "publish_artifact_version"
@@ -107,7 +109,9 @@ export interface PublishingRun {
 
 interface PublishToolsInput {
   readonly projectId: string
+  /** For the transaction that publishes. */
   readonly storage: Storage
+  readonly artifacts: ArtifactStorage
   readonly blobStorage: BlobStorage
   readonly run: PublishingRun
   /** The thread's owner, who owns what the Agent publishes. */
@@ -115,6 +119,8 @@ interface PublishToolsInput {
   /** Shared with every other file the run stores. */
   readonly budget: AgentFileBudget
   readonly resolveSandbox: () => Promise<AgentSandboxHandle>
+  /** The conversation's artifacts in the sandbox, which each publish keeps current. */
+  readonly installed: Promise<InstalledArtifacts>
 }
 
 /**
@@ -134,7 +140,7 @@ export function createPublishArtifactTools(
       execute: (request, { signal }) =>
         publish(input, CREATE_TOOL, { ...request, target: { kind: request.kind } }, signal),
       toModelOutput: (output) => ({ type: "text", value: publishSummary(output, CREATE_TOOL) }),
-      errorText: agentToolErrorText,
+      errorText: (error) => publishErrorText(error, CREATE_TOOL),
     },
     {
       ...PUBLISH_ARTIFACT_VERSION_TOOL_SPEC,
@@ -142,9 +148,17 @@ export function createPublishArtifactTools(
       execute: (request, { signal }) =>
         publish(input, VERSION_TOOL, { ...request, target: { artifactId: request.id } }, signal),
       toModelOutput: (output) => ({ type: "text", value: publishSummary(output, VERSION_TOOL) }),
-      errorText: agentToolErrorText,
+      errorText: (error) => publishErrorText(error, VERSION_TOOL),
     },
   ]
+}
+
+/** A run that lost its conversation stores nothing, and the trace says so instead of "an error". */
+function publishErrorText(error: unknown, tool: PublishToolName): string {
+  return error instanceof AgentExecutionLostError
+    ? publishError(tool, "this run no longer holds its conversation, so nothing was published")
+        .message
+    : agentToolErrorText(error)
 }
 
 interface PublishRequest {
@@ -161,11 +175,13 @@ async function publish(
   signal: AbortSignal
 ): Promise<JsonValue> {
   signal.throwIfAborted()
-  await assertRunIsCurrent(input.storage, input.projectId, input.run)
+  const { artifacts } = input
+  const ownership = { projectId: input.projectId, ...input.run }
+  await assertRunExecutionOwned(input.storage, ownership)
   const kind: ArtifactKind =
     "kind" in request.target
       ? request.target.kind
-      : (await ownedArtifact(input, input.storage.artifacts, request.target.artifactId, tool)).kind
+      : (await ownedArtifact(input, artifacts, request.target.artifactId, tool)).kind
   const handle = await input.resolveSandbox()
   const sources = await listSources(handle, request.path, kind, tool, signal)
 
@@ -176,10 +192,8 @@ async function publish(
       `the files hold ${totalBytes} bytes; a version may hold at most ${ARTIFACT_LIMITS.maxVersionBytes}`
     )
   }
-  const artifacts = input.storage.artifacts
-  if (!artifacts) throw publishError(tool, "artifacts need storage that supports them")
-  const reservation = input.budget.reserve(totalBytes, tool)
-  let entry: { readonly directory: string; readonly bytes: Uint8Array } | undefined
+  const reservation = input.budget.reserve(0, tool)
+  const contents: PublishedArtifactFile[] = []
   let published: Awaited<ReturnType<typeof storeArtifactVersion>>
   let prepared: Awaited<ReturnType<typeof prepareArtifactVersion>>
   try {
@@ -198,9 +212,9 @@ async function publish(
       if (bytes.byteLength !== source.sizeBytes) {
         throw publishError(tool, `'${source.path}' changed while it was being read; publish again`)
       }
-      if (kind === "slides" && source.path === SLIDES_ENTRY) {
-        entry = { directory: posix.dirname(source.absolutePath), bytes }
-      }
+      // Blob storage keeps identical bytes once, so a file the run already stored, such as one a
+      // next version keeps, costs the budget nothing again.
+      reservation.addContent(createHash("sha256").update(bytes).digest("hex"), bytes.byteLength)
       const fileName = posix.basename(source.path)
       const fileRef = await input.blobStorage.put({
         body: bytes,
@@ -210,6 +224,7 @@ async function publish(
         mediaType: inferFileMediaType(fileName, bytes),
       })
       files.push({ path: source.path, file: fileRef })
+      contents.push({ path: source.path, bytes })
     }
     signal.throwIfAborted()
 
@@ -227,9 +242,9 @@ async function publish(
       }
     )
     published = await input.storage.transaction(async (tx) => {
-      await assertRunIsCurrent(tx, input.projectId, input.run)
+      await assertRunExecutionOwned(tx, ownership)
       const stored = tx.artifacts
-      if (!stored) throw publishError(tool, "artifacts need storage that supports them")
+      if (!stored) throw new Error("[SixbAgentWorker] Storage transactions hold no artifacts.")
       // The owner may have deleted it since the check above.
       if ("artifactId" in request.target) {
         await ownedArtifact(input, stored, request.target.artifactId, tool)
@@ -245,21 +260,36 @@ async function publish(
     throw toPublishError(error, tool)
   }
 
+  // The version exists by now: nothing below may read as a failed publish, which the Agent would
+  // publish again.
   const warnings = await artifactVersionWarnings(
     { projectId: input.projectId, storage: artifacts, blobStorage: input.blobStorage },
     prepared,
     published
   )
+  try {
+    // Revising from $SIXB_ARTIFACTS_DIR must start from this version, not the one before.
+    await (await input.installed).replace(handle.sandbox, published, contents, signal)
+  } catch (error) {
+    if (signal.aborted) throw error
+    console.warn(
+      `[SixbAgentWorker] Could not install version ${published.version.version} of artifact '${published.artifact.id}':`,
+      error
+    )
+  }
   // A published deck is laid out in the sandbox's browser, so the Agent sees what the reader
-  // will, and fixes it in its next version. The version exists by now: a check that fails says
-  // so, and never reads as a failed publish, which the Agent would publish again.
+  // will, and fixes it in its next version.
+  const deck =
+    kind === "slides" ? sources.find((source) => source.path === SLIDES_ENTRY) : undefined
+  const deckEntry = contents.find((file) => file.path === SLIDES_ENTRY)
   let check: LayoutCheck | undefined
-  if (entry) {
+  if (deck && deckEntry) {
     try {
       check = await checkDeckLayout({
         handle,
-        directory: entry.directory,
-        entry: entry.bytes,
+        directory: posix.dirname(deck.absolutePath),
+        files: contents.map((file) => file.path),
+        entry: deckEntry.bytes,
         name: `${published.artifact.id}-v${published.version.version}`,
         signal,
       })
@@ -291,11 +321,10 @@ async function publish(
 /** The artifact to publish a version of: one the thread's owner has. */
 async function ownedArtifact(
   input: PublishToolsInput,
-  artifacts: ArtifactStorage | undefined,
+  artifacts: ArtifactStorage,
   artifactId: string,
   tool: PublishToolName
 ): Promise<ArtifactRecord> {
-  if (!artifacts) throw publishError(tool, "artifacts need storage that supports them")
   const artifact = await artifacts.get({ projectId: input.projectId, id: artifactId })
   if (!artifact || !principalsEqual(artifact.owner, input.owner)) {
     throw publishError(
@@ -343,6 +372,7 @@ async function listSources(
   })
 
   if (listing.files.length === 0 && !listing.truncated) {
+    if (listing.directory) throw publishError(tool, `'${path}' is an empty directory`)
     // A missing path lists nothing as well; reading it says which.
     const bytes = await readSandboxFile(handle, {
       path: absolutePath,
@@ -385,23 +415,6 @@ async function listSources(
     absolutePath: posix.join(absolutePath, file.relativePath),
     sizeBytes: file.sizeBytes,
   }))
-}
-
-/** A run reclaimed by another delivery, or already finished, must not publish. */
-async function assertRunIsCurrent(
-  storage: Storage,
-  projectId: string,
-  run: PublishingRun
-): Promise<void> {
-  const stored = await storage.agents?.runs.getById({ projectId, id: run.id })
-  if (
-    !stored ||
-    stored.status !== "running" ||
-    stored.execution?.token !== run.executionToken ||
-    stored.execution.queueLeaseExpiresAt.getTime() <= Date.now()
-  ) {
-    throw new AgentExecutionLostError(run.id)
-  }
 }
 
 function publishSummary(output: JsonValue, tool: PublishToolName): string {

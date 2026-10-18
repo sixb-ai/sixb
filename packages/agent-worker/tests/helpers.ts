@@ -24,7 +24,8 @@ export async function waitFor<T>(
 
 /**
  * Runs the worker's sandbox scripts in a real local bash against a directory, so symlink, escape,
- * and size checks run as a sandbox would run them. Written files land in the directory.
+ * and size checks run as a sandbox would run them. Written files land in the directory. A command
+ * past its `timeout` is killed, as a sandbox kills it.
  */
 export class LocalBashSandbox implements Sandbox {
   readonly id = "local-bash"
@@ -56,12 +57,20 @@ export class LocalBashSandbox implements Sandbox {
       stdout: "pipe",
       stderr: "pipe",
     })
+    let timedOut = false
+    const timer =
+      options.timeout === undefined
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true
+            child.kill("SIGKILL")
+          }, options.timeout)
     const [stdout, stderr, exitCode] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
       child.exited,
-    ])
-    return { exitCode, stdout, stderr, durationMs: 0 }
+    ]).finally(() => clearTimeout(timer))
+    return { exitCode, stdout, stderr, durationMs: 0, ...(timedOut ? { timedOut } : {}) }
   }
 
   async stop(): Promise<void> {}

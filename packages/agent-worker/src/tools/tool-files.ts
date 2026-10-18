@@ -9,10 +9,12 @@ import type {
   FileRef,
 } from "@sixb/core"
 import { AgentToolPublicError } from "@sixb/core"
+import { ARTIFACT_LIMITS } from "@sixb/core/artifacts"
 import { sniffFileMediaType } from "@sixb/core/internal/blob-storage"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 
-const DEFAULT_FILE_MAX_BYTES = 25 * 1024 * 1024
+/** The most a file a tool stores, or one `view_file` reads, may hold: an artifact's file limit. */
+export const AGENT_FILE_MAX_BYTES = ARTIFACT_LIMITS.maxFileBytes
 const DEFAULT_RUN_MAX_BYTES = 100 * 1024 * 1024
 const MAX_FILE_NAME_BYTES = 255
 const MAX_MEDIA_TYPE_LENGTH = 255
@@ -28,13 +30,18 @@ interface CreateAgentToolFilesInput {
   readonly onPublished?: (file: AgentToolFile) => void
   /** Shared across every tool call in one run so parallel publishers cannot oversubscribe it. */
   readonly budget?: AgentFileBudget
-  /** Test seam; production allows 25 MB per file. */
+  /** Test seam; production allows {@link AGENT_FILE_MAX_BYTES}. */
   readonly fileMaxBytes?: number
 }
 
 /** Atomic byte budget shared by every file publisher in one agent run. */
 export class AgentFileBudget {
   #reservedBytes = 0
+  /**
+   * Content held by reservations, by digest. Blob storage keeps identical bytes once, so content a
+   * run stores again, such as the unchanged files of an artifact's next version, counts once.
+   */
+  readonly #contents = new Map<string, { readonly sizeBytes: number; holders: number }>()
 
   constructor(readonly maxBytes = DEFAULT_RUN_MAX_BYTES) {
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
@@ -66,10 +73,31 @@ export class AgentFileBudget {
   release(bytes: number): void {
     this.#reservedBytes -= bytes
   }
+
+  /** Counts content's bytes when no reservation holds the same digest yet, and nothing after. */
+  holdContent(digest: string, sizeBytes: number, toolName: string): void {
+    const held = this.#contents.get(digest)
+    if (held) {
+      held.holders += 1
+      return
+    }
+    this.add(sizeBytes, toolName)
+    this.#contents.set(digest, { sizeBytes, holders: 1 })
+  }
+
+  releaseContent(digest: string): void {
+    const held = this.#contents.get(digest)
+    if (!held) return
+    held.holders -= 1
+    if (held.holders > 0) return
+    this.#contents.delete(digest)
+    this.release(held.sizeBytes)
+  }
 }
 
 class AgentFileReservation {
   #bytes: number
+  readonly #contents: string[] = []
   #released = false
 
   constructor(
@@ -85,16 +113,23 @@ class AgentFileReservation {
     this.#bytes += bytes
   }
 
+  /** Reserves bytes whose SHA-256 is `digest`, unless the run already counts the same content. */
+  addContent(digest: string, sizeBytes: number): void {
+    this.budget.holdContent(digest, sizeBytes, this.toolName)
+    this.#contents.push(digest)
+  }
+
   release(): void {
     if (this.#released) return
     this.#released = true
     this.budget.release(this.#bytes)
+    for (const digest of this.#contents) this.budget.releaseContent(digest)
   }
 }
 
 /** Build the file publisher scoped to one tool call. */
 export function createAgentToolFiles(input: CreateAgentToolFilesInput): AgentToolFiles {
-  const fileMaxBytes = input.fileMaxBytes ?? DEFAULT_FILE_MAX_BYTES
+  const fileMaxBytes = input.fileMaxBytes ?? AGENT_FILE_MAX_BYTES
   const budget = input.budget ?? new AgentFileBudget()
 
   return Object.freeze({

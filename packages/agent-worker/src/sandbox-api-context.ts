@@ -5,8 +5,13 @@ import { AGENT_RUNTIME_PROFILE } from "./agent-runtime/profile"
 import type { MaterializedArtifacts } from "./artifacts/materialize"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 
-/** Where a conversation's artifacts are installed, relative to the sandbox working directory. */
+/**
+ * Where a conversation's artifacts are installed, and their manifest, relative to the sandbox
+ * working directory. Both are under `.sixb/agent`, which a sandbox that outlives the run clears
+ * when it opens, so each run's install starts empty.
+ */
 export const AGENT_ARTIFACTS_DIRECTORY = ".sixb/agent/artifacts"
+export const AGENT_ARTIFACTS_MANIFEST = ".sixb/agent/context/artifacts.json"
 
 export interface AgentSandboxApiContext {
   readonly env: Readonly<Record<string, string>>
@@ -25,8 +30,6 @@ export interface PrepareAgentSandboxApiContextInput {
   readonly ontologyFiles: readonly AgentProjectFile[]
   /** A conversation's published artifacts, under {@link AGENT_ARTIFACTS_DIRECTORY}. */
   readonly artifacts?: MaterializedArtifacts
-  /** The sandbox outlives the run, so an earlier install is removed before this one. */
-  readonly replaceArtifacts?: boolean
 }
 
 export async function prepareAgentSandboxApiContext(
@@ -43,7 +46,7 @@ export async function prepareAgentSandboxApiContext(
   const attachmentsManifestPath = join(contextDir, "context", "attachments.json")
   const attachmentsDir = join(contextDir, "attachments")
   const artifactsDir = join(input.sandbox.workingDirectory, AGENT_ARTIFACTS_DIRECTORY)
-  const artifactsManifestPath = join(contextDir, "context", "artifacts.json")
+  const artifactsManifestPath = join(input.sandbox.workingDirectory, AGENT_ARTIFACTS_MANIFEST)
   const cli = await loadAgentCliAssets()
 
   // apiBaseUrl arrives already normalized + wrapped as the run's gateway URL (see worker.ts /
@@ -63,11 +66,6 @@ export async function prepareAgentSandboxApiContext(
     null,
     2
   )
-
-  if (input.artifacts && input.replaceArtifacts) {
-    // A version's directory holds exactly that version: files an older one had must not linger.
-    await input.sandbox.runCommand("rm", ["-rf", artifactsDir])
-  }
 
   // Materialize skills, ontology docs + run context through the sandbox capability rather than the host
   // filesystem, so any provider (including non-host-path ones like smolvm) places the bytes in the

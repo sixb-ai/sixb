@@ -22,7 +22,11 @@ import { waitForAbort } from "./abort"
 import { type AgentExecutionMode, agentRuntimeFacts, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
-import { type MaterializedArtifacts, materializeThreadArtifacts } from "./artifacts/materialize"
+import {
+  type InstalledArtifacts,
+  type MaterializedArtifacts,
+  materializeThreadArtifacts,
+} from "./artifacts/materialize"
 import { createPublishArtifactTools } from "./artifacts/publish-tool"
 import {
   modelSupportsInlineImages,
@@ -34,7 +38,11 @@ import { prepareAgentConversationContext } from "./context-compaction"
 import { AgentExecutionLostError } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type AgentErrorDetails, modelToolsFromAgentDefinitions } from "./model-adapters"
-import { AGENT_ARTIFACTS_DIRECTORY, prepareAgentSandboxApiContext } from "./sandbox-api-context"
+import {
+  AGENT_ARTIFACTS_DIRECTORY,
+  AGENT_ARTIFACTS_MANIFEST,
+  prepareAgentSandboxApiContext,
+} from "./sandbox-api-context"
 import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import { type AgentSandboxLifecycle, openThreadSandbox } from "./sandbox-lifecycle"
@@ -168,6 +176,7 @@ export async function createConversationAgentEnvironment(
     environment = startAgentEnvironment({
       mode: "conversation",
       persistentSandbox,
+      signal: sandboxSignal,
       failureSignal: failure.signal,
       context,
       plan,
@@ -378,15 +387,32 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   const resolveSandbox = () => ready
   appendBuiltInTool(tools, createReadTool(resolveSandbox))
   appendBuiltInTool(tools, createBashTool(resolveSandbox))
-  if (input.publishing && threadId) {
+  const artifactStorage = context.storage.artifacts
+  let installedArtifacts: Promise<InstalledArtifacts> | undefined
+  if (input.publishing && threadId && artifactStorage) {
+    // Read concurrently with sandbox creation; both run while the model starts.
+    installedArtifacts = materializeThreadArtifacts({
+      projectId: context.id,
+      threadId,
+      owner: input.publishing.owner,
+      storage: artifactStorage,
+      blobStorage: context.blobStorage,
+      directory: AGENT_ARTIFACTS_DIRECTORY,
+      manifestPath: AGENT_ARTIFACTS_MANIFEST,
+      signal: input.signal,
+    })
+    // Surfaced where provisioning awaits it.
+    installedArtifacts.catch(() => {})
     const publishTools = createPublishArtifactTools({
       projectId: context.id,
       storage: context.storage,
+      artifacts: artifactStorage,
       blobStorage: context.blobStorage,
       run: { id: runId, threadId, executionToken: input.publishing.executionToken },
       owner: input.publishing.owner,
       budget: fileBudget,
       resolveSandbox,
+      installed: installedArtifacts,
     })
     for (const tool of publishTools) appendBuiltInTool(tools, tool)
   }
@@ -402,7 +428,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     attachmentContext,
     skills: plan.skills,
     ontologyFiles: input.ontologyDocs?.files ?? [],
-    ...(input.publishing && threadId ? { artifactsOwner: input.publishing.owner } : {}),
+    ...(installedArtifacts ? { artifacts: installedArtifacts } : {}),
   })
   // Creation failure is surfaced where it is awaited (turn / sandbox tool / dispose); attach a no-op
   // catch so a rejection observed by none of them is not reported as unhandled.
@@ -524,25 +550,12 @@ interface ProvisionSandboxInput {
   readonly attachmentContext: PreparedAgentAttachmentContext
   readonly skills: ResolvedAgentExecutionPlan["skills"]
   readonly ontologyFiles: RenderedOntologyDocs["files"]
-  /** Install the thread's artifacts this principal owns. */
-  readonly artifactsOwner?: Principal
+  /** The conversation's artifacts, read while the sandbox starts. */
+  readonly artifacts?: Promise<MaterializedArtifacts>
 }
 
 async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSandboxHandle> {
   const { context, actorId, run, apiBaseUrl, apiOrigin, skills, ontologyFiles } = input
-  // Read concurrently with sandbox creation; both run while the model starts.
-  const artifacts: Promise<MaterializedArtifacts> | undefined =
-    input.artifactsOwner && run.threadId
-      ? materializeThreadArtifacts({
-          projectId: context.id,
-          threadId: run.threadId,
-          owner: input.artifactsOwner,
-          storage: context.storage.artifacts,
-          blobStorage: context.blobStorage,
-          directory: AGENT_ARTIFACTS_DIRECTORY,
-        })
-      : undefined
-  artifacts?.catch(() => {})
   let sandbox: Sandbox | null = null
   try {
     sandbox =
@@ -561,9 +574,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSand
       attachments: input.attachmentContext,
       skills,
       ontologyFiles,
-      ...(artifacts
-        ? { artifacts: await artifacts, replaceArtifacts: Boolean(input.persistentSandbox) }
-        : {}),
+      ...(input.artifacts ? { artifacts: await input.artifacts } : {}),
     })
     await assertAgentRuntimeProfile({
       sandbox,

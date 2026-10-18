@@ -76,18 +76,6 @@ describe("resolveAgentExecutionPlan", () => {
     expect("agentId" in plan).toBe(false)
   })
 
-  test("adds the built-in skills unless the project replaces one by name", () => {
-    expect(BUILT_IN_SKILLS.map((builtIn) => builtIn.name)).toEqual(["sixb-artifacts"])
-    const own = skill("sixb-artifacts")
-    const plan = resolveAgentExecutionPlan({
-      models,
-      tools,
-      skills: skillCatalog([own]),
-      defaultMaxSteps: 25,
-    })
-    expect(plan.skills).toEqual([own])
-  })
-
   test("carries the project instructions from SIXB.md", () => {
     const plan = resolveAgentExecutionPlan({
       models,

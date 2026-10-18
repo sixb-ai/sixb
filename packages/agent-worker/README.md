@@ -113,17 +113,22 @@ attachments and file-producing tool results retain their model-input projections
 `publish_artifact` creates an artifact and `publish_artifact_version` publishes the next version of
 one (`src/artifacts/publish-tool.ts`). They are two tools so that every argument of each is required:
 a mode carried by an optional or null argument is where models differ, and with every property
-required each model adapter sends both schemas strict. Offered only to conversations, each reads a
-file or directory from the sandbox, stores its bytes against the run's file budget, and publishes it
-through `publishArtifact` as the thread's owner, with the thread and run as its origin. The version commits
-in a transaction that first checks the run still holds its execution token, so a run reclaimed by
-another delivery publishes nothing. The version exists when the tool returns: the conversation shows
-it mid-turn, a cancelled run keeps it, and retrying the run deletes it with the run's messages.
+required each model adapter sends both schemas strict. Offered only to conversations whose storage
+holds artifacts, each reads a file or directory from the sandbox, stores its bytes against the run's
+file budget, which counts identical content once, and publishes it as the thread's owner, with the
+thread and run as its origin. Validation runs first; the version commits in a transaction that
+checks the run still holds its execution token, so a run reclaimed by another delivery publishes
+nothing. The version exists when the tool returns: the conversation shows it mid-turn, a cancelled
+run keeps it, and retrying the run deletes it with the run's messages. After a deck publishes, the
+layout check (`src/artifacts/layout-check/`) lays it out in the sandbox's Chromium, serving only
+the files the version holds; it bounds every wait on the page and exits before its command's
+timeout, so a deck that hangs costs a partial report rather than a browser left running.
 
 Before each conversation run, `src/artifacts/materialize.ts` installs the latest version of each
 artifact the thread published under `$SIXB_ARTIFACTS_DIR/<id>/` and lists them in `$SIXB_ARTIFACTS`,
-newest first within a byte budget; a sandbox that outlives the run is cleared there first. The
-built-in `sixb-artifacts` skill (`src/skills/`) describes the formats the publisher accepts; its
+newest first within a byte budget; an artifact whose files cannot be read is listed without them.
+Each publish replaces its artifact's copy and entry, so both stay the latest version during the run.
+The built-in `sixb-artifacts` skill (`src/skills/`) describes the formats the publisher accepts; its
 examples are published in the tests.
 
 ## Live Stream

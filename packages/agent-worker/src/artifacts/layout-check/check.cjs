@@ -2,19 +2,29 @@
 // serves its frame, with the kit and the runtime, opens it in the sandbox's headless Chromium at
 // 1280×720 with each slide filling the page, measures every slide in Sixb's light and dark
 // themes with the layout probe, and screenshots every slide in light. It writes one line of JSON:
-// { slides, problems, errors, screenshots } or { skipped }.
+// { slides, problems, errors, screenshots, stopped? } or { skipped }.
 //
-//   node check.cjs <deck directory> <output directory> <library directory>
+//   node check.cjs <deck directory> <output directory> <library directory> <deadline in ms>
 //
 // The library holds what the worker installs beside this script: kit.css, runtime.js, probe.js,
-// themes.json; the output directory holds entry.html, the deck's entry with the kit and runtime.
+// themes.json. The output directory holds entry.html, the deck's entry with the kit and runtime,
+// and files.json, the paths the version publishes: only those are served, since the reader gets
+// only those.
+//
+// A deck can stop answering, with a script that never yields or a font that never loads, and a
+// browser outlives a node that is killed. So every wait on the page is bounded, and when one runs
+// out, or the deadline passes, the check reports what it found so far and exits: Playwright kills
+// the browser it launched when node exits.
 "use strict"
 
 const http = require("node:http")
 const fs = require("node:fs")
 const path = require("node:path")
 
-const [deck, out, lib] = process.argv.slice(2)
+const [deck, out, lib, deadline] = process.argv.slice(2)
+const DEADLINE_MS = Number(deadline) || 100_000
+/** The most one step waits on the page: its fonts, a slide's measure, a screenshot. */
+const STEP_MS = 10_000
 const PROTOCOL = "sixb-frame/1"
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -35,8 +45,32 @@ const TYPES = {
   ".otf": "font/otf",
 }
 
-function finish(result) {
-  process.stdout.write(`${JSON.stringify(result)}\n`)
+/** What the check has found so far, which a check that stops early reports. */
+const found = { slides: 0, problems: [], errors: [], screenshots: [] }
+const findings = () => ({ ...found, errors: [...new Set(found.errors)].slice(0, 10) })
+
+let reported = false
+/** Writes the report, then exits once it is written. */
+function report(result, code = 0) {
+  if (reported) return process.exit(code)
+  reported = true
+  process.stdout.write(`${JSON.stringify(result)}\n`, () => process.exit(code))
+}
+
+class Stalled extends Error {}
+
+/** `promise`, or a {@link Stalled} naming `what` once it has taken `ms`. */
+function within(what, promise, ms = STEP_MS) {
+  let timer
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Stalled(`${what} did not respond within ${ms / 1000} seconds`)),
+        ms
+      )
+    }),
+  ]).finally(() => clearTimeout(timer))
 }
 
 function loadPlaywright() {
@@ -53,6 +87,7 @@ function loadPlaywright() {
 
 function serve() {
   const entry = fs.readFileSync(path.join(out, "entry.html"))
+  const published = new Set(JSON.parse(fs.readFileSync(path.join(out, "files.json"), "utf8")))
   const root = path.resolve(deck)
   const server = http.createServer((request, response) => {
     const pathname = decodeURIComponent(new URL(request.url, "http://deck").pathname)
@@ -65,10 +100,7 @@ function serve() {
     if (pathname === "/" || pathname === "/index.html") body = entry
     else if (pathname === "/__sixb/kit.css") file = path.join(lib, "kit.css")
     else if (pathname === "/__sixb/runtime.js") file = path.join(lib, "runtime.js")
-    else {
-      const resolved = path.resolve(root, `.${pathname}`)
-      if (resolved.startsWith(`${root}${path.sep}`)) file = resolved
-    }
+    else if (published.has(pathname.slice(1))) file = path.join(root, pathname.slice(1))
     try {
       if (file) body = fs.readFileSync(file)
     } catch {
@@ -86,7 +118,7 @@ function serve() {
 
 async function main() {
   const playwright = loadPlaywright()
-  if (!playwright) return finish({ skipped: "no_browser" })
+  if (!playwright) return { skipped: "no_browser" }
   const probe = fs.readFileSync(path.join(lib, "probe.js"), "utf8")
   const themes = JSON.parse(fs.readFileSync(path.join(lib, "themes.json"), "utf8"))
   const server = await serve()
@@ -98,11 +130,13 @@ async function main() {
     })
   } catch (error) {
     server.close()
-    return finish({ skipped: "no_browser", detail: String(error?.message ?? error).slice(0, 300) })
+    return { skipped: "no_browser", detail: String(error?.message ?? error).slice(0, 300) }
   }
+  let step = "the deck"
+  let stalled = false
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })
-    const errors = []
+    const { errors, problems, screenshots } = found
     page.on("pageerror", (error) => errors.push(error.message))
     // A file that fails names itself; Chromium's console line for it does not.
     const local = (url) => url.replace(/^http:\/\/127\.0\.0\.1:\d+\//, "")
@@ -122,44 +156,72 @@ async function main() {
     await page
       .goto(`http://127.0.0.1:${port}/index.html#sixb-fill`, { waitUntil: "load", timeout: 15_000 })
       .catch((error) => errors.push(`the deck did not finish loading: ${error.message}`))
-    await page.evaluate(() => document.fonts?.ready).catch(() => {})
-    const slides = await page.evaluate(() => document.querySelectorAll("section.slide").length)
+    await within("the deck's fonts", page.evaluate(() => document.fonts?.ready)).catch(() => {})
+    found.slides = await within(
+      step,
+      page.evaluate(() => document.querySelectorAll("section.slide").length)
+    )
     const send = (method, params) =>
-      page.evaluate(
-        ({ protocol, method, params }) =>
-          window.postMessage({ protocol, id: 0, method, params }, "*"),
-        { protocol: PROTOCOL, method, params }
+      within(
+        step,
+        page.evaluate(
+          ({ protocol, method, params }) =>
+            window.postMessage({ protocol, id: 0, method, params }, "*"),
+          { protocol: PROTOCOL, method, params }
+        )
       )
-    const problems = []
-    const screenshots = []
     for (const name of ["light", "dark"]) {
+      step = `the deck in ${name} mode`
       await send("theme", themes[name])
-      for (let slide = 1; slide <= slides; slide++) {
+      for (let slide = 1; slide <= found.slides; slide++) {
+        step = `slide ${slide} in ${name} mode`
         await send("goto", { slide })
         await page.waitForFunction(
           (slide) => document.querySelectorAll("section.slide")[slide - 1]?.hasAttribute("data-current"),
           slide,
           { timeout: 5_000 }
         )
-        await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
-        for (const problem of await page.evaluate(`(${probe})(${slide})`)) {
+        await within(
+          step,
+          page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
+        )
+        for (const problem of await within(step, page.evaluate(`(${probe})(${slide})`))) {
           problems.push({ ...problem, slide, theme: name })
         }
         if (name === "light") {
           const file = path.join(out, `slide-${String(slide).padStart(2, "0")}.png`)
-          await page.screenshot({ path: file })
+          await page.screenshot({ path: file, timeout: STEP_MS })
           screenshots.push(file)
         }
       }
     }
-    finish({ slides, problems, errors: [...new Set(errors)].slice(0, 10), screenshots })
+    return findings()
+  } catch (error) {
+    // Playwright's own timeouts, for a slide that never shows or a screenshot never taken, are
+    // stalls too.
+    if (!(error instanceof Stalled) && error?.name !== "TimeoutError") throw error
+    stalled = true
+    return {
+      ...findings(),
+      stopped: error instanceof Stalled ? error.message : `${step} did not respond in time`,
+    }
   } finally {
-    await browser.close().catch(() => {})
+    // A page that stalled may not let its browser close; exiting kills it.
+    if (!stalled) await within("the browser", browser.close(), 5_000).catch(() => {})
     server.close()
   }
 }
 
-main().catch((error) => {
-  finish({ failed: String(error?.stack ?? error).slice(0, 1000) })
-  process.exitCode = 1
-})
+setTimeout(
+  () =>
+    report({
+      ...findings(),
+      stopped: `the check took longer than ${Math.round(DEADLINE_MS / 1000)} seconds`,
+    }),
+  DEADLINE_MS
+).unref()
+
+main().then(
+  (result) => report(result),
+  (error) => report({ failed: String(error?.stack ?? error).slice(0, 1000) }, 1)
+)
