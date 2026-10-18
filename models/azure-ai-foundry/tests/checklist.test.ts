@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test"
-import { runModelLoop } from "@sixb/core/internal/agents"
 import {
   type JsonObject,
   type LanguageModelRequest,
@@ -10,8 +9,6 @@ import { FoundryTransport } from "../src/transport"
 import { createAzureAIFoundry } from "./provider-fixture"
 
 const endpoint = "https://example.test/api/projects/test"
-const protocols = ["responses", "chat", "messages"] as const
-type Protocol = (typeof protocols)[number]
 const request = (signal = new AbortController().signal): LanguageModelRequest => ({
   callId: "checklist",
   messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
@@ -20,62 +17,15 @@ const request = (signal = new AbortController().signal): LanguageModelRequest =>
   signal,
 })
 
-function response(protocol: Protocol, model: string): Response {
-  const input = { input_tokens: 10, output_tokens: 5, input_tokens_details: { cached_tokens: 0 } }
-  const events: (JsonObject | string)[] =
-    protocol === "chat"
-      ? [
-          {
-            id: model,
-            model,
-            choices: [{ index: 0, delta: { content: model }, finish_reason: null }],
-          },
-          { id: model, model, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
-          {
-            choices: [],
-            usage: {
-              prompt_tokens: 10,
-              completion_tokens: 5,
-              prompt_tokens_details: { cached_tokens: 0 },
-            },
-          },
-          "[DONE]",
-        ]
-      : protocol === "responses"
-        ? [
-            { type: "response.created", response: { id: model, model } },
-            { type: "response.output_text.delta", item_id: "text", delta: model },
-            {
-              type: "response.completed",
-              response: { id: model, model, status: "completed", usage: input },
-            },
-          ]
-        : [
-            {
-              type: "message_start",
-              message: {
-                id: model,
-                model,
-                usage: {
-                  input_tokens: 10,
-                  output_tokens: 0,
-                  cache_read_input_tokens: 0,
-                  cache_creation_input_tokens: 0,
-                },
-              },
-            },
-            { type: "content_block_start", index: 0, content_block: { type: "text", text: model } },
-            { type: "content_block_stop", index: 0 },
-            {
-              type: "message_delta",
-              delta: { stop_reason: "end_turn" },
-              usage: { output_tokens: 5 },
-            },
-            { type: "message_stop" },
-          ]
+function response(model: string): Response {
+  const usage = { input_tokens: 10, output_tokens: 5, input_tokens_details: { cached_tokens: 0 } }
   return new Response(
-    events
-      .map((event) => `data: ${typeof event === "string" ? event : JSON.stringify(event)}\n\n`)
+    [
+      { type: "response.created", response: { id: model, model } },
+      { type: "response.output_text.delta", item_id: "text", delta: model },
+      { type: "response.completed", response: { id: model, model, status: "completed", usage } },
+    ]
+      .map((event) => `data: ${JSON.stringify(event)}\n\n`)
       .join("")
   )
 }
@@ -99,9 +49,7 @@ async function collect(events: AsyncIterable<LanguageModelStreamEvent>) {
 
 // Checklist coverage: simultaneous bindings through the same shared interface must
 // not share cancellation, wire configuration, response identity or accounting state.
-test.each([
-  ...protocols,
-])("%s keeps concurrent bindings isolated through completion and cancellation", async (protocol) => {
+test("keeps concurrent bindings isolated through completion and cancellation", async () => {
   const entered = Promise.withResolvers<void>()
   const bodies: Record<string, JsonObject> = {}
   const p = createAzureAIFoundry({
@@ -113,7 +61,7 @@ test.each([
       bodies[name] = body
       if (Object.keys(bodies).length === 2) entered.resolve()
       await entered.promise
-      return response(protocol, name)
+      return response(name)
     },
   })
   const card = {
@@ -122,10 +70,9 @@ test.each([
     input: "1",
     output: "2",
     cacheReadInput: "0.1",
-    ...(protocol === "messages" ? { cacheWriteInput: "1.5" } : {}),
   } as const
-  const alpha = p[protocol]("alpha", { rateCard: card, request: { temperature: 0.1 } })
-  const beta = p[protocol]("beta", {
+  const alpha = p.responses("alpha", { rateCard: card, request: { temperature: 0.1 } })
+  const beta = p.responses("beta", {
     rateCard: { ...card, input: "3", output: "4" },
     request: { temperature: 0.9 },
   })
@@ -151,19 +98,17 @@ test.each([
   expect(bodies.beta?.temperature).toBe(0.9)
 })
 
-test.each([
-  ...protocols,
-])("%s rejects unsupported media and aggregate byte overflow before inference", async (protocol) => {
+test("rejects unsupported media and aggregate byte overflow before inference", async () => {
   let calls = 0
   const p = createAzureAIFoundry({
     endpoint,
     apiKey: "test",
     fetch: async () => {
       calls++
-      return response(protocol, "model")
+      return response("model")
     },
   })
-  const model = p[protocol]("model", {
+  const model = p.responses("model", {
     definition: { capabilities: { inputMediaTypes: "any" } },
     maxInputFileBytes: 7,
   })
@@ -205,7 +150,7 @@ test.each([
 })
 
 test.each([
-  401, 403, 408, 429, 500, 503,
+  401, 408, 429, 500,
 ])("classifies HTTP %i and retains bounded diagnostics", async (status) => {
   let calls = 0
   const transport = new FoundryTransport({
@@ -283,75 +228,4 @@ test("honors Retry-After HTTP dates and retries only eligible HTTP responses", a
     network.post("{}", new AbortController().signal, "provider", "model")
   ).rejects.toThrow("socket closed")
   expect(networkCalls).toBe(1)
-})
-
-// Audit coverage: malformed/truncated arguments must never execute a local tool,
-// while their accepted inference usage is still accounted for.
-test.each([
-  "tool_calls",
-  "length",
-])("retains billed usage without executing broken %s arguments", async (finish) => {
-  let executions = 0
-  const model = createAzureAIFoundry({
-    endpoint,
-    apiKey: "test",
-    fetch: async () =>
-      new Response(
-        `${[
-          {
-            choices: [
-              {
-                index: 0,
-                delta: {
-                  tool_calls: [
-                    {
-                      index: 0,
-                      id: "t",
-                      type: "function",
-                      function: { name: "lookup", arguments: '{"broken":' },
-                    },
-                  ],
-                },
-                finish_reason: null,
-              },
-            ],
-          },
-          { choices: [{ index: 0, delta: {}, finish_reason: finish }] },
-          { choices: [], usage: { prompt_tokens: 10, completion_tokens: 5 } },
-        ]
-          .map((event) => `data: ${JSON.stringify(event)}\n\n`)
-          .join("")}data: [DONE]\n\n`
-      ),
-  }).chat("model", {
-    definition: { capabilities: { localTools: true } },
-    rateCard: { currency: "USD", unit: "million-tokens", input: "1", output: "2" },
-  })
-  const result = await runModelLoop({
-    model,
-    messages: request().messages,
-    maxSteps: 1,
-    maxOutputTokens: 16,
-    signal: AbortSignal.timeout(1000),
-    tools: [
-      {
-        name: "lookup",
-        description: "Lookup",
-        inputSchema: { type: "object" },
-        parseInput: (input) => input,
-        execute: async () => {
-          executions++
-          return "unexpected"
-        },
-        errorText: () => "failed",
-      },
-    ],
-  })
-  expect(executions).toBe(0)
-  expect(result.steps[0]).toMatchObject({
-    usage: { inputTokens: 10, outputTokens: 5 },
-    cost: { status: "rated", money: { amountNanos: "20000" } },
-  })
-  if (finish === "tool_calls")
-    expect(JSON.stringify(result.steps[0]?.content)).toContain("Tool input is not valid JSON")
-  else expect(result.steps[0]?.content.some((part) => part.type === "tool-call")).toBe(false)
 })

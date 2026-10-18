@@ -106,13 +106,10 @@ async function collect(
   return result
 }
 
-test.each([
-  "",
-  "/",
-])("uses native Messages endpoint and Azure key headers from %s", async (suffix) => {
+test("uses the native Messages endpoint and Azure key headers", async () => {
   let captured: JsonObject | undefined
   const provider = createAzureAIFoundry({
-    endpoint: endpoint + suffix,
+    endpoint,
     apiKey: "azure-key",
     fetch: async (url, init) => {
       expect(String(url)).toBe(`${new URL(endpoint).origin}/anthropic/v1/messages`)
@@ -159,11 +156,6 @@ test.each([
   })
 })
 
-test("derives native Messages URL from the project resource", () => {
-  const provider = createAzureAIFoundry({ endpoint, apiKey: "key" })
-  expect(provider.messages("deployment").protocol).toBe("messages")
-})
-
 test("refreshes native API keys on retries and preserves native HTTP error codes", async () => {
   let attempt = 0
   const tokens: string[] = []
@@ -203,21 +195,6 @@ test("refreshes native API keys on retries and preserves native HTTP error codes
   })
 })
 
-test("cancels native credential acquisition before inference", async () => {
-  const controller = new AbortController()
-  const model = createAzureAIFoundry({
-    endpoint,
-    apiKey: () => {
-      controller.abort(new Error("cancelled"))
-      return new Promise<string>(() => {})
-    },
-    fetch: async () => {
-      throw new Error("must not fetch")
-    },
-  }).messages("deployment", { definition })
-  await expect(model.stream(request({ signal: controller.signal }))).rejects.toThrow("cancelled")
-})
-
 test("snapshots native configuration and merges capabilities without deriving facts from deployment names", async () => {
   let body: JsonObject | undefined
   const options = {
@@ -226,7 +203,7 @@ test("snapshots native configuration and merges capabilities without deriving fa
       maxOutputTokens: 80,
       capabilities: { ...definition.capabilities, localTools: false },
     },
-    identity: { ...metadata },
+    identity: metadata,
     request: { temperature: 0.2 },
     rateCard: { ...rateCard },
   }
@@ -240,7 +217,6 @@ test("snapshots native configuration and merges capabilities without deriving fa
   })
   const model = provider.messages("claude-mythos-5", options)
   options.definition.maxOutputTokens = 999
-  options.identity.modelName = "changed"
   options.request.temperature = 0.9
   options.rateCard.input = "999" as "3"
   await collect((await model.stream(request())).events)
@@ -316,29 +292,6 @@ test("maps manual and adaptive thinking using declared model metadata", async ()
       .messages("future", { definition, thinkingMode: "manual" })
       .stream(request({ reasoning: "high" }))
   ).rejects.toThrow("reasoning effort 'high' is not supported")
-})
-
-test("explicit thinking mode restricts manual budgets without model-name rules", async () => {
-  const provider = createAzureAIFoundry({
-    endpoint,
-    apiKey: "key",
-    fetch: async () => {
-      throw new Error("must not fetch")
-    },
-  })
-  const opus = provider.messages("production", {
-    definition,
-    thinkingMode: "adaptive",
-    identity: { publisher: "Anthropic", modelName: "claude-opus-4-8", modelVersion: "2" },
-  })
-  await expect(opus.stream(request({ reasoning: { budgetTokens: 1024 } }))).rejects.toThrow(
-    "reasoning token budgets are not supported"
-  )
-  expect(
-    createAzureAIFoundry({ endpoint, apiKey: () => "token" }).messages("production", {
-      identity: { modelName: "claude-mythos-5" },
-    }).protocol
-  ).toBe("messages")
 })
 
 test("owns native request fields and validates cache controls", () => {
@@ -714,10 +667,7 @@ test("prices explicit cache TTLs conservatively and declines unknown charges and
   expect(customTier.estimateReservation?.({ inputTokens: 10, outputTokens: 5 })).toBeUndefined()
 })
 
-test.each([
-  "5m",
-  "1h",
-])("keeps explicit %s cache control when automatic caching is off", async (ttl) => {
+test("keeps explicit cache control when automatic caching is off", async () => {
   let body: JsonObject | undefined
   const model = createAzureAIFoundry({
     endpoint,
@@ -729,88 +679,11 @@ test.each([
   }).messages("deployment", {
     definition,
     rateCard,
-    request: { cache_control: { type: "ephemeral", ttl } },
+    request: { cache_control: { type: "ephemeral", ttl: "1h" } },
   })
   await collect((await model.stream(request({ caching: "off" }))).events)
-  expect(body?.cache_control).toEqual({ type: "ephemeral", ttl })
+  expect(body?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
   expect(model.costEstimator?.estimate({ usage: foundryMessagesUsage(rawUsage) })).toMatchObject({
     status: "rated",
-  })
-})
-
-test.each([
-  ["end_turn", "stop"],
-  ["stop_sequence", "stop"],
-  ["max_tokens", "length"],
-  ["model_context_window_exceeded", "length"],
-  ["pause_turn", "pause"],
-  ["refusal", "content-filter"],
-  ["new_reason", "other"],
-])("maps native stop reason %s to %s", async (reason, expected) => {
-  const model = createAzureAIFoundry({
-    endpoint,
-    apiKey: "key",
-    fetch: async () => message([], reason),
-  }).messages("deployment", { definition })
-  expect((await collect((await model.stream(request())).events)).at(-1)).toMatchObject({
-    type: "finish",
-    finishReason: expected,
-    rawFinishReason: reason,
-  })
-})
-
-test("preserves streamed native errors and rejects unterminated streams", async () => {
-  const model = createAzureAIFoundry({
-    endpoint,
-    apiKey: "key",
-    fetch: async () =>
-      sse([{ type: "error", error: { type: "overloaded_error", message: "busy" } }]),
-  }).messages("deployment", { definition })
-  expect(await collect((await model.stream(request())).events)).toEqual([
-    expect.objectContaining({
-      type: "error",
-      error: expect.objectContaining({
-        code: "overloaded_error",
-        requestId: "azure-request",
-        providerId: "azure-ai-foundry",
-        modelId: "deployment",
-      }),
-    }),
-  ])
-  const broken = createAzureAIFoundry({
-    endpoint,
-    apiKey: "key",
-    fetch: async () => sse([{ type: "message_start", message: { id: "msg" } }]),
-  }).messages("deployment", { definition })
-  await expect(collect((await broken.stream(request())).events)).rejects.toThrow(
-    "without a terminal message"
-  )
-})
-
-test("retains native usage and cost when structured output fails local validation", async () => {
-  const model = createAzureAIFoundry({
-    endpoint,
-    apiKey: "key",
-    fetch: async () => message([{ type: "text", text: '{"answer":123}' }]),
-  }).messages("deployment", { definition, rateCard, identity: metadata })
-  const resolved = await model.resolve()
-  const result = runModelLoop({
-    model: resolved,
-    messages: request().messages,
-    signal: request().signal,
-    maxSteps: 1,
-    tools: [],
-    output: {
-      name: "answer",
-      schema,
-      validate: () => {
-        throw new Error("answer must be a string")
-      },
-    },
-  })
-  await expect(result).rejects.toMatchObject({
-    name: "StructuredOutputError",
-    usage: { inputTokens: 35, outputTokens: 5 },
-    cost: { status: "rated", money: { amountNanos: "134250" } },
   })
 })

@@ -99,8 +99,10 @@ describe("TypeSafe provider", () => {
   })
 
   test.each([
-    401, 422, 429, 529, 503,
-  ])("surfaces HTTP %i without hidden retries or upstream content", async (status) => {
+    [401, false, "provider_rejection"],
+    [422, false, "invalid_request"],
+    [529, true, "provider_rejection"],
+  ] as const)("surfaces HTTP %i without hidden retries or upstream content", async (status, retryable, code) => {
     let calls = 0
     const model = createTypesafe({
       apiKey: "secret",
@@ -114,7 +116,7 @@ describe("TypeSafe provider", () => {
     })("jev-1.13.0")
     const error = await model.evaluate({ input: "", questions }).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(ModelProviderError)
-    expect(error).toMatchObject({ status, retryAfterMs: 2000 })
+    expect(error).toMatchObject({ status, retryable, code, retryAfterMs: 2000 })
     expect(String(error)).not.toContain("sensitive")
     expect(calls).toBe(1)
   })

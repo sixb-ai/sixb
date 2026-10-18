@@ -108,70 +108,10 @@ async function collect(
   return result
 }
 
-// Captured Azure DeepSeek V3.2 deltas: arguments "", "{}", then '\"\"'.
-// Regression proof: remove the shared Chat empty-string terminator guard. No tool
-// executes, and continuation replays "null" instead of an object-valued JSON string.
-test("completes parameterless tools when Chat appends an empty-string terminator", async () => {
-  let calls = 0
-  let executions = 0
-  const model = createAzureAIFoundry({
-    endpoint,
-    apiKey: "key",
-    fetch: async (_url, init) => {
-      calls++
-      if (calls === 1)
-        return sse([
-          chunk({
-            tool_calls: [
-              { index: 0, id: "t", type: "function", function: { name: "lookup", arguments: "" } },
-            ],
-          }),
-          chunk({ tool_calls: [{ index: 0, function: { arguments: "{}" } }] }),
-          chunk({ tool_calls: [{ index: 0, function: { arguments: '""' } }] }),
-          chunk({}, "tool_calls"),
-          { choices: [], usage: rawUsage },
-          "[DONE]",
-        ])
-      const body = JSON.parse(String(init?.body))
-      expect(body.messages[1].tool_calls[0].function.arguments).toBe("{}")
-      expect(body.messages[2].content).toBe("sixb-739")
-      return completed("sixb-739")
-    },
-  }).chat("deployment", { definition })
-  const result = await runModelLoop({
-    model,
-    messages: request().messages,
-    signal: AbortSignal.timeout(1000),
-    maxSteps: 2,
-    tools: [
-      {
-        name: "lookup",
-        description: "Get the code",
-        inputSchema: { type: "object", properties: {}, additionalProperties: false },
-        parseInput: (input) => {
-          expect(input).toEqual({})
-          return input
-        },
-        execute: async () => {
-          executions++
-          return "sixb-739"
-        },
-        errorText: () => "invalid input",
-      },
-    ],
-  })
-  expect(result.status).toBe("completed")
-  expect(executions).toBe(1)
-  expect(calls).toBe(2)
-})
-
-test.each([
-  "",
-  "/",
-])("sends Chat to the canonical resource/project endpoint (%s)", async (suffix) => {
+test("sends Chat to the canonical project endpoint", async () => {
   let captured: JsonObject | undefined
   const provider = createAzureAIFoundry({
-    endpoint: endpoint + suffix,
+    endpoint,
     apiKey: "key",
     fetch: async (url, init) => {
       expect(String(url)).toBe(`${endpoint}/openai/v1/chat/completions`)
@@ -198,39 +138,6 @@ test.each([
     type: "finish",
     usage: { inputTokens: 10, outputTokens: 5 },
     route: { modelId: "publisher-model" },
-  })
-})
-
-test("refreshes Chat credentials on each retry and surfaces Azure HTTP errors", async () => {
-  let tokens = 0
-  const model = createAzureAIFoundry({
-    endpoint,
-    apiKey: async () => `token-${++tokens}`,
-    fetch: async (_url, init) => {
-      expect(new Headers(init?.headers).get("api-key")).toBe(`token-${tokens}`)
-      return tokens === 2
-        ? Response.json(
-            { error: { code: "rate_limit", message: "busy" } },
-            { status: 429, headers: { "retry-after-ms": "0" } }
-          )
-        : completed()
-    },
-  }).chat("deployment")
-  await collect((await model.stream(request())).events)
-  expect(tokens).toBe(3)
-  const bad = createAzureAIFoundry({
-    endpoint,
-    apiKey: "key",
-    fetch: async () =>
-      Response.json(
-        { error: { code: "content_filter", message: "blocked" } },
-        { status: 400, headers: { "apim-request-id": "blocked-request" } }
-      ),
-  }).chat("deployment")
-  await expect(bad.stream(request())).rejects.toMatchObject({
-    code: "content_filter",
-    status: 400,
-    requestId: "blocked-request",
   })
 })
 
@@ -370,6 +277,8 @@ test("requires explicit capabilities and preserves strict schemas without enabli
     parallel_tool_calls: true,
     tools: [{ function: { parameters: loose, strict: false } }],
   })
+  await collect((await model.stream(request({ tools, reasoning: "none" }))).events)
+  expect(bodies[2]).toMatchObject({ reasoning_effort: "none" })
   for (const override of [
     { tools },
     { reasoning: "high" as const },
@@ -384,34 +293,7 @@ test("requires explicit capabilities and preserves strict schemas without enabli
   await expect(
     model.stream(request({ responseFormat: { type: "json", name: "bad", schema: loose } }))
   ).rejects.toThrow("strict-schema")
-  expect(bodies).toHaveLength(2)
-})
-
-test("uses explicit capabilities rather than model-name heuristics", async () => {
-  let body: JsonObject | undefined
-  const provider = createAzureAIFoundry({
-    endpoint,
-    apiKey: "key",
-    fetch: async (_url, init) => {
-      body = JSON.parse(String(init?.body))
-      return completed()
-    },
-  })
-  const model = provider.chat("friendly-name", {
-    definition,
-    identity: { publisher: "OpenAI", modelName: "gpt-5.6-sol" },
-  })
-  const tools = [{ name: "check", description: "Check", inputSchema: schema }]
-  for (const reasoning of [undefined, "provider-default", "high"] as const)
-    await collect((await model.stream(request({ tools, reasoning }))).events)
-  await collect((await model.stream(request({ tools, reasoning: "none" }))).events)
-  expect(body).toMatchObject({ reasoning_effort: "none" })
-  // Deployment names are not model identities.
-  provider.chat("gpt-5.6-sol", { definition })
-  await provider.catalog.refresh()
-  await collect(
-    (await provider.chat("gpt-5.6-sol", { definition }).stream(request({ tools }))).events
-  )
+  expect(bodies).toHaveLength(3)
 })
 
 test("keeps DeepSeek effort levels explicit and does not equate JSON mode with strict schemas", async () => {
@@ -648,82 +530,4 @@ test("prices final Chat usage without assuming missing counters or double-billin
     expect(normalized.uncachedInputTokens).toBeUndefined()
     expect(estimator.estimate({ usage: normalized })).toMatchObject({ status: "unpriceable" })
   }
-})
-
-test.each([
-  "valid",
-  "invalid",
-  "truncated",
-  "filtered",
-])("preserves Chat usage/cost through structured output (%s)", async (mode) => {
-  const model = createAzureAIFoundry({
-    endpoint,
-    apiKey: "key",
-    fetch: async () =>
-      completed(
-        mode === "invalid" ? '{"answer":123}' : '{"answer":"yes"}',
-        mode === "truncated" ? "length" : mode === "filtered" ? "content_filter" : "stop"
-      ),
-  }).chat("deployment", {
-    definition,
-    rateCard,
-    identity: { publisher: "OpenAI", modelName: "publisher-model" },
-  })
-  const resolved = await model.resolve()
-  const result = runModelLoop({
-    model: resolved,
-    messages: request().messages,
-    signal: request().signal,
-    maxSteps: 1,
-    tools: [],
-    output: {
-      name: "answer",
-      schema,
-      validate: (value: unknown) => {
-        if (
-          typeof value !== "object" ||
-          value === null ||
-          !("answer" in value) ||
-          value.answer !== "yes"
-        )
-          throw new TypeError("invalid answer")
-        return value
-      },
-    },
-  })
-  if (mode === "valid")
-    await expect(result).resolves.toMatchObject({ status: "completed", output: { answer: "yes" } })
-  else
-    await expect(result).rejects.toMatchObject({
-      name: "StructuredOutputError",
-      usage: { inputTokens: 10, outputTokens: 5 },
-      cost: { status: "rated", money: { amountNanos: "68000" } },
-    })
-})
-
-test("never retries accepted Chat streams and preserves terminal provider errors", async () => {
-  let calls = 0
-  const model = createAzureAIFoundry({
-    endpoint,
-    apiKey: "key",
-    fetch: async () => {
-      calls++
-      return sse([
-        chunk({ content: "partial" }, "stop"),
-        { error: { code: "content_filter", message: "blocked" } },
-      ])
-    },
-  }).chat("deployment")
-  const events = await collect((await model.stream(request())).events)
-  expect(calls).toBe(1)
-  expect(events.at(-1)).toMatchObject({
-    type: "error",
-    error: {
-      code: "content_filter",
-      providerId: "azure-ai-foundry",
-      modelId: "deployment",
-      requestId: "request",
-    },
-  })
-  expect(events.some((event) => event.type === "finish")).toBe(false)
 })

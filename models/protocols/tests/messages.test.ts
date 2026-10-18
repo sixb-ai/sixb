@@ -288,6 +288,33 @@ test("maps portable documents and provider-owned system blocks without mutating 
   expect(JSON.stringify(history)).toBe(before)
 })
 
+test.each([
+  ["end_turn", "stop"],
+  ["stop_sequence", "stop"],
+  ["max_tokens", "length"],
+  ["model_context_window_exceeded", "length"],
+  ["pause_turn", "pause"],
+  ["refusal", "content-filter"],
+  ["new_reason", "other"],
+])("maps stop reason %s to %s", async (reason, expected) => {
+  const events = await collect(
+    messagesEvents(
+      stream([
+        { type: "message_start", message: { id: "msg" } },
+        { type: "message_delta", delta: { stop_reason: reason } },
+        { type: "message_stop" },
+      ]),
+      new AbortController().signal,
+      options
+    )
+  )
+  expect(events.at(-1)).toMatchObject({
+    type: "finish",
+    finishReason: expected,
+    rawFinishReason: reason,
+  })
+})
+
 const malformedStreams: [JsonObject[], string][] = [
   [[], "Provider stream ended without a terminal message event."],
   [

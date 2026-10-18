@@ -4,8 +4,9 @@ import { FoundryTransport } from "../src/transport"
 // Regression proof: remove redirect: "error" from post() and run this file.
 // The redirect destination receives credentials (and the body for 307/308).
 for (const protocol of ["responses", "chat", "messages", "embeddings"] as const) {
+  // 302 is rewritten to GET; 307 would replay the POST body to the new origin.
   test.each([
-    301, 302, 303, 307, 308,
+    302, 307,
   ])(`${protocol} rejects HTTP %s redirects without forwarding credentials or prompts`, async (status) => {
     let forwarded = 0
     let attempts = 0

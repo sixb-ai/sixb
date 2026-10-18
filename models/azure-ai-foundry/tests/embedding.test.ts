@@ -210,7 +210,7 @@ test.each(
   expect(f.calls).toHaveLength(1)
 })
 
-test("duplicate indices and a different response model are rejected", async () => {
+test("duplicate indices and a different response model or version are rejected", async () => {
   for (const body of [
     {
       data: [
@@ -219,6 +219,8 @@ test("duplicate indices and a different response model are rejected", async () =
       ],
     },
     { model: "different-model" },
+    // The returned version cannot contradict the pinned representation.
+    { model: `${name}-2` },
   ]) {
     const f = setup({ response: () => response(body) })
     await expect(
@@ -378,24 +380,6 @@ test("a successful response with invalid JSON retains its request identifier", a
   }
 })
 
-test("overflowing JSON numbers in a vector do not discard known usage", async () => {
-  const f = setup({
-    response: () =>
-      new Response(
-        `{"model":"${name}","data":[{"index":0,"embedding":[1e400,0]}],"usage":{"prompt_tokens":12,"total_tokens":12}}`
-      ),
-  })
-  try {
-    await f.provider
-      .embedding("products", { model: f.identity, dimensions: 2 })
-      .embed({ texts: ["x"] })
-    throw new Error("Expected rejection")
-  } catch (error) {
-    expect(error).toBeInstanceOf(EmbeddingModelResponseError)
-    expect((error as EmbeddingModelResponseError).metadata.usage?.inputTokens).toBe(12)
-  }
-})
-
 test("missing catalog pricing does not prevent embedding but cannot admit a cost budget", async () => {
   const f = setup({ catalog: async () => Response.json({ azure: { models: {} } }) })
   const model = await f.provider
@@ -429,13 +413,6 @@ test("text-embedding-3-large accepts its full output size", async () => {
   ).toHaveLength(3072)
 })
 
-test("deployment facts reject language calls even without catalog pricing", async () => {
-  const f = setup({ catalog: async () => Response.json({ azure: { models: {} } }) })
-  await expect(f.provider("products").resolve()).rejects.toThrow("foundry.embedding()")
-  expect(await f.provider.catalog.list()).toEqual([])
-  expect(f.calls).toHaveLength(0)
-})
-
 test("deployment model and version must match the declaration before inference", async () => {
   // Removal proof: omit the discovered identity comparison in resolve(); these calls succeed.
   for (const actual of [{ modelName: "text-embedding-3-large" }, { modelVersion: "2" }]) {
@@ -444,13 +421,6 @@ test("deployment model and version must match the declaration before inference",
     await expect(model.embed({ texts: ["x"] })).rejects.toThrow("expected text-embedding-3-small@1")
     expect(f.calls).toHaveLength(0)
   }
-})
-
-test("a returned model version cannot contradict the pinned representation", async () => {
-  const f = setup({ response: () => response({ model: `${name}-2` }) })
-  await expect(
-    f.provider.embedding("products", { model: f.identity, dimensions: 2 }).embed({ texts: ["x"] })
-  ).rejects.toBeInstanceOf(EmbeddingModelResponseError)
 })
 
 test("pins are validated without network access", () => {

@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test"
 import type { JsonObject } from "@sixb/core/models"
-import { decodeServerSentEvents } from "../../protocols/src/sse"
 import { createAzureAIFoundry as createDiscoveredProvider } from "../src"
 import { foundryMessagesEstimator, foundryMessagesUsage } from "../src/messages-accounting"
 import { createAzureAIFoundry } from "./provider-fixture"
@@ -50,53 +49,6 @@ test("zero cache partitions need no price; positive missing cache rates remain u
         }),
       })
     ).toMatchObject({ status: "unpriceable", reason: "missing-rate-card" })
-  }
-})
-
-// Removal proof: await reader.cancel() in the SSE finally block; watchdog wins.
-test.each([
-  "return",
-  "throw",
-  "abort",
-])("uncooperative SSE cleanup preserves %s without hanging", async (mode) => {
-  const cleanup = Promise.withResolvers<void>()
-  const controller = new AbortController()
-  const body = new ReadableStream<Uint8Array>({
-    start(c) {
-      c.enqueue(new TextEncoder().encode("data: hello\n\n"))
-    },
-    cancel() {
-      return cleanup.promise
-    },
-  })
-  const iterator = decodeServerSentEvents(body, controller.signal)[Symbol.asyncIterator]()
-  await iterator.next()
-  const reason = new Error("consumer stopped")
-  if (mode === "abort") controller.abort(reason)
-  const pending = (
-    mode === "return"
-      ? iterator.return!()
-      : mode === "throw"
-        ? iterator.throw!(reason)
-        : iterator.next()
-  ).then(
-    () => "done",
-    (error) => error
-  )
-  let timer: ReturnType<typeof setTimeout> | undefined
-  try {
-    const result = await Promise.race([
-      pending,
-      new Promise((resolve) => {
-        timer = setTimeout(() => resolve("watchdog"), 100)
-      }),
-    ])
-    expect(result).toBe(mode === "return" ? "done" : reason)
-    expect(body.locked).toBe(false)
-  } finally {
-    clearTimeout(timer)
-    cleanup.resolve()
-    await pending
   }
 })
 

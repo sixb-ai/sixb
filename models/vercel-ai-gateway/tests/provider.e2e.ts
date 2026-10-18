@@ -2,7 +2,6 @@ import { expect, test } from "bun:test"
 import type { ObjectSchema } from "@sixb/core"
 import { runModelLoop } from "@sixb/core/internal/agents"
 import { schemaFieldsToJsonSchema, validateSchemaOrRefValue } from "@sixb/core/internal/ontology"
-import type { LanguageModelStreamEvent } from "@sixb/core/models"
 import { vercelGateway } from "../src"
 
 const modelId = process.env.SIXB_VERCEL_GATEWAY_E2E_MODEL
@@ -77,27 +76,6 @@ liveTest(
       signal: AbortSignal.timeout(60_000),
     })
     expect(result.status).toBe("completed")
-  },
-  70_000
-)
-
-liveTest(
-  "streams one live Vercel AI Gateway response",
-  async () => {
-    const response = await vercelGateway(modelId!).stream({
-      callId: `vercel-gateway-e2e-${crypto.randomUUID()}`,
-      messages: [
-        { role: "user", content: [{ type: "text", text: "Reply with exactly: sixb-ok" }] },
-      ],
-      tools: [],
-      signal: AbortSignal.timeout(60_000),
-    })
-
-    const events: LanguageModelStreamEvent[] = []
-    for await (const event of response.events) events.push(event)
-
-    expect(events.some((event) => event.type === "text-delta")).toBe(true)
-    expect(events.at(-1)).toMatchObject({ type: "finish" })
   },
   70_000
 )

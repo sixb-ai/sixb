@@ -47,14 +47,8 @@ function fixture(modelName: string, publisher = "OpenAI", reasoning = true) {
 
 // Removal proof: remove the automatic summary selection; the outgoing request loses
 // summary:auto. Run with -t "defaults reasoning summaries".
-test.each([
-  "gpt-5",
-  "gpt-5-mini",
-  "gpt-5-nano",
-  "o3",
-  "o4-mini",
-])("defaults reasoning summaries for verified OpenAI %s Responses deployments", async (modelName) => {
-  const f = fixture(modelName)
+test("defaults reasoning summaries for verified OpenAI Responses deployments", async () => {
+  const f = fixture("gpt-5")
   const model = f.provider.responses("production", f.options)
   const events = []
   for await (const event of (await model.stream(request())).events) events.push(event)

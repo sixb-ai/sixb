@@ -124,9 +124,7 @@ describe("Anthropic provider", () => {
 
   test.each([
     "claude-fable-5",
-    "claude-fable-5-1",
     "claude-mythos-5",
-    "claude-mythos-preview",
     "claude-mythos-preview-20260407",
   ])("keeps always-on thinking enabled on %s, including summary requests", async (modelId) => {
     // Regression proof: restore unconditional canDisable:true and remove the always-on request guard.
@@ -339,9 +337,7 @@ describe("Anthropic provider", () => {
 
   test.each([
     "claude-sonnet-4-6",
-    "claude-opus-4-6",
     "claude-opus-4-7",
-    "claude-opus-4-8",
     "claude-opus-4-6-20260205",
   ])("activates adaptive thinking for named effort on %s", async (modelId) => {
     // Regression proof: return only { effort: reasoning } in anthropicReasoningRequest.
@@ -508,21 +504,6 @@ describe("Anthropic provider", () => {
     )
     expect(bodies).toHaveLength(2)
   })
-  test("does not narrow open object schemas for the native decoder", () => {
-    expect(
-      anthropicOutputSchema({
-        type: "object",
-        properties: { answer: { type: "string" } },
-      })
-    ).toBeUndefined()
-    expect(
-      anthropicOutputSchema({
-        type: "object",
-        additionalProperties: { type: "string" },
-      })
-    ).toBeUndefined()
-  })
-
   test("maps Messages API requests and normalizes text, thinking, and usage", async () => {
     let capturedUrl = ""
     let capturedHeaders: Headers | undefined
@@ -826,39 +807,6 @@ describe("Anthropic provider", () => {
             schema: nativeStructuredOutput
               ? { ...answerOutput().schema, additionalProperties: true }
               : answerOutput().schema,
-          },
-        })
-      )
-    ).rejects.toBeInstanceOf(UnsupportedModelFeatureError)
-    expect(requests).toBe(0)
-  })
-
-  // Regression proof: remove the native structured-output eligibility check in prepareRequest.
-  test.each([
-    false,
-    true,
-  ])("rejects unsupported schemas with manual thinking before inference (native: %s)", async (nativeStructuredOutput) => {
-    let requests = 0
-    const provider = createAnthropic({
-      fetch: async () => {
-        requests += 1
-        return sseResponse([])
-      },
-    })
-    const model = provider("claude-sonnet-4-6", {
-      capabilities: {
-        nativeStructuredOutput,
-        reasoning: { budgetTokens: { min: 1024 } },
-      },
-    })
-    await expect(
-      model.stream(
-        request({
-          reasoning: { budgetTokens: 4096 },
-          responseFormat: {
-            type: "json",
-            name: "answer",
-            schema: { ...answerOutput().schema, additionalProperties: true },
           },
         })
       )

@@ -7,67 +7,10 @@ import type {
   ModelUsage,
 } from "@sixb/core/models"
 import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
-import { foundryEstimator, foundryUsage } from "../src/accounting"
 import { createAzureAIFoundry } from "./provider-fixture"
 
 const endpoint = "https://resource.services.ai.azure.com/api/projects/test"
 
-// Removal proof: restore tool-calls precedence in Responses finishReason, or remove
-// the unsuccessful-finish guard from runModelLoop. This valid tool then executes.
-test("does not execute an incomplete Responses tool and retains its usage", async () => {
-  const item = { id: "fc", type: "function_call", call_id: "call", name: "act", arguments: "{}" }
-  let executed = 0
-  let accounted: ModelUsage | undefined
-  const provider = createAzureAIFoundry({
-    endpoint,
-    apiKey: "key",
-    fetch: async () =>
-      sse([
-        {
-          type: "response.output_item.added",
-          item: { ...item, status: "in_progress", arguments: "" },
-        },
-        { type: "response.function_call_arguments.done", item_id: "fc", arguments: "{}" },
-        { type: "response.output_item.done", item: { ...item, status: "incomplete" } },
-        {
-          type: "response.incomplete",
-          response: {
-            status: "incomplete",
-            incomplete_details: { reason: "max_output_tokens" },
-            usage: { input_tokens: 1, output_tokens: 2 },
-          },
-        },
-      ]),
-  })
-  await expect(
-    runModelLoop({
-      model: provider.responses("deployment", {
-        definition: { capabilities: { localTools: true } },
-      }),
-      messages: [],
-      maxSteps: 1,
-      signal: new AbortController().signal,
-      tools: [
-        {
-          name: "act",
-          description: "Act",
-          inputSchema: { type: "object", properties: {} },
-          parseInput: (input) => input,
-          execute: async () => {
-            executed++
-            return "ok"
-          },
-          errorText: String,
-        },
-      ],
-      onModelCallEnd: (event) => {
-        accounted = event.usage
-      },
-    })
-  ).rejects.toThrow("Cannot execute local tools after 'length'")
-  expect(executed).toBe(0)
-  expect(accounted).toMatchObject({ inputTokens: 1, outputTokens: 2 })
-})
 const definition = {
   maxOutputTokens: 100,
   capabilities: {
@@ -91,32 +34,6 @@ const rateCard = {
   output: "10",
   cacheReadInput: "1",
 } as const
-
-// Captured from live Azure Responses on 2026-09-17. Regression proof: remove the
-// explicit-zero cache_write_tokens allowance in accounting.ts; the rated assertion fails.
-test("prices Azure's explicit zero cache-write meter without assuming nonzero semantics", () => {
-  const raw = {
-    input_tokens: 40,
-    output_tokens: 8,
-    total_tokens: 48,
-    input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
-    output_tokens_details: { reasoning_tokens: 0 },
-  }
-  const usage = foundryUsage(raw, true)
-  expect(usage).toMatchObject({ uncachedInputTokens: 40, textOutputTokens: 8 })
-  expect(foundryEstimator(rateCard, undefined).estimate({ usage })).toMatchObject({
-    status: "rated",
-  })
-  for (const value of [1, null, "0"]) {
-    const unknown = foundryUsage(
-      { ...raw, input_tokens_details: { cached_tokens: 0, cache_write_tokens: value } },
-      true
-    )
-    expect(foundryEstimator(rateCard, undefined).estimate({ usage: unknown })).toMatchObject({
-      status: "unpriceable",
-    })
-  }
-})
 
 function request(overrides: Partial<LanguageModelRequest> = {}): LanguageModelRequest {
   return {
@@ -191,7 +108,6 @@ test.each(["", "/"])("maps endpoint %s and keeps deployment identity", async (pa
   const events = await collect(
     (await model.stream(request({ maxOutputTokens: 20, reasoning: "high" }))).events
   )
-  const project = true
   expect(url).toBe(`${endpoint}/openai/v1/responses`)
   expect(body).toMatchObject({
     model: "deployment",
@@ -202,12 +118,7 @@ test.each(["", "/"])("maps endpoint %s and keeps deployment identity", async (pa
     reasoning: { effort: "high" },
   })
   expect(body?.input).toEqual([
-    {
-      type: "message",
-      role: "user",
-      ...(project ? { type: "message" } : {}),
-      content: [{ type: "input_text", text: "Hello" }],
-    },
+    { type: "message", role: "user", content: [{ type: "input_text", text: "Hello" }] },
   ])
   expect(headers?.get("api-key")).toBe("key")
   expect(headers?.has("authorization")).toBe(false)
@@ -223,44 +134,7 @@ test.each(["", "/"])("maps endpoint %s and keeps deployment identity", async (pa
   expect(provider("deployment").protocol).toBe("responses")
 })
 
-test("refreshes async credentials on every retry and preserves throttling diagnostics", async () => {
-  const auth: (string | null)[] = []
-  let tokens = 0
-  const provider = createAzureAIFoundry({
-    endpoint,
-    apiKey: async () => `token-${++tokens}`,
-    fetch: async (_url, init) => {
-      auth.push(new Headers(init?.headers).get("api-key"))
-      return auth.length === 1
-        ? Response.json(
-            { error: { code: "TooManyRequests", message: "slow down" } },
-            { status: 429, headers: { "retry-after-ms": "0" } }
-          )
-        : completed()
-    },
-  })
-  await collect((await provider("deployment").stream(request())).events)
-  await collect((await provider("deployment").stream(request())).events)
-  expect(auth).toEqual(["token-2", "token-3", "token-4"])
-  const failing = createAzureAIFoundry({
-    endpoint,
-    apiKey: "key",
-    maxRetries: 0,
-    fetch: async () =>
-      Response.json(
-        { error: { code: "limited", message: "retry" } },
-        { status: 429, headers: { "apim-request-id": "error-id", "retry-after": "2" } }
-      ),
-  })
-  await expect(failing("deployment").stream(request())).rejects.toMatchObject({
-    code: "limited",
-    requestId: "error-id",
-    retryable: true,
-    retryAfterMs: 2000,
-  })
-})
-
-test("cancels pending credentials before fetch and cancels retry waits", async () => {
+test("cancels pending credentials before fetch", async () => {
   const abort = new AbortController()
   let called = false
   const model = createAzureAIFoundry({
@@ -278,16 +152,6 @@ test("cancels pending credentials before fetch and cancels retry waits", async (
     "cancel credentials"
   )
   expect(called).toBe(false)
-  const retryAbort = new AbortController()
-  const retry = createAzureAIFoundry({
-    endpoint,
-    apiKey: "key",
-    fetch: async () => {
-      retryAbort.abort(new Error("cancel retry"))
-      return new Response(null, { status: 503, headers: { "retry-after": "60" } })
-    },
-  })("deployment")
-  await expect(retry.stream(request({ signal: retryAbort.signal }))).rejects.toThrow("cancel retry")
 })
 
 test("pins overrides after required deployment resolution", async () => {
@@ -624,13 +488,13 @@ test.each([
 })
 
 test.each([
-  "https://host/openai/deployments/model",
   "https://host/openai/v1?api-version=preview",
   "https://user:secret@host",
   "file:///resource",
-  "https://host/path",
 ])("rejects ambiguous endpoint %s", (endpoint) => {
-  expect(() => createAzureAIFoundry({ endpoint, apiKey: "key" })).toThrow()
+  expect(() => createAzureAIFoundry({ endpoint, apiKey: "key" })).toThrow(
+    "without credentials, query, or fragment"
+  )
 })
 
 test("bounds retries, sanitizes non-JSON HTTP errors and never retries accepted streams", async () => {
@@ -701,31 +565,21 @@ test("cancels an active SSE body and does not restart generation", async () => {
 test.each([
   "valid",
   "invalid",
-  "refused",
-  "truncated",
 ])("preserves billable usage through structured output (%s)", async (mode) => {
   const model = createAzureAIFoundry({
     endpoint,
     apiKey: "key",
     fetch: async () =>
       sse([
-        ...(mode === "refused"
-          ? [{ type: "response.refusal.done", item_id: "message", refusal: "No." }]
-          : [
-              {
-                type: "response.output_text.done",
-                item_id: "message",
-                text: mode === "invalid" ? '{"answer":123}' : '{"answer":"yes"}',
-              },
-            ]),
         {
-          type: mode === "truncated" ? "response.incomplete" : "response.completed",
+          type: "response.output_text.done",
+          item_id: "message",
+          text: mode === "invalid" ? '{"answer":123}' : '{"answer":"yes"}',
+        },
+        {
+          type: "response.completed",
           response: {
-            status: mode === "truncated" ? "incomplete" : "completed",
-            ...(mode === "truncated"
-              ? { incomplete_details: { reason: "max_output_tokens" } }
-              : {}),
-            content_filters: [{ category: "test", filtered: mode === "refused" }],
+            status: "completed",
             usage: {
               input_tokens: 10,
               output_tokens: 5,

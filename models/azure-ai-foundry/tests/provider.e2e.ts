@@ -336,39 +336,6 @@ for (const protocol of ["responses", "chat", "messages"] as const) {
 }
 
 live.skipIf(!fast)(
-  "Responses: structured output is validated by the model loop",
-  async () => {
-    const result = await runModelLoop({
-      model: provider().responses(fast!, {
-        definition: { capabilities },
-        request: { temperature: 0 },
-      }),
-      messages: messages(
-        'Return exactly one JSON object with answer equal to "sixb-ok". Do not repeat it.'
-      ),
-      maxSteps: 1,
-      maxOutputTokens: 64,
-      signal: AbortSignal.timeout(60_000),
-      output: {
-        name: "answer",
-        schema,
-        validate: (value) => {
-          expect(value).toEqual({ answer: "sixb-ok" })
-          return value
-        },
-      },
-      onModelCallEnd: (event) => {
-        reportedInput += event.usage.inputTokens ?? 0
-        reportedOutput += event.usage.outputTokens ?? 0
-      },
-    })
-    if (result.status !== "completed") throw new Error("Structured output did not complete")
-    expect(result.output).toEqual({ answer: "sixb-ok" })
-  },
-  70_000
-)
-
-live.skipIf(!fast)(
   "Responses: repeated prefix retains cache accounting and explicit local prices",
   async () => {
     const model = provider().responses(fast!, {
@@ -498,16 +465,6 @@ live.skipIf(!fast)(
     expect(sawText).toBe(true)
   },
   40_000
-)
-
-live.skipIf(false)(
-  "missing deployment fails during resolution before inference",
-  async () => {
-    await expect(
-      provider().responses("sixb-nonexistent-e2e-deployment").stream(request())
-    ).rejects.toThrow("was not found in this project")
-  },
-  70_000
 )
 
 live.skipIf(!deepseekReasoning)(

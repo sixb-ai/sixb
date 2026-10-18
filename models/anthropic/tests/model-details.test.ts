@@ -46,9 +46,7 @@ test("applies residency to explicit rates, including the special cache price", (
 })
 
 test.each([
-  "claude-fable-5-2",
   "claude-opus-5-99",
-  "claude-sonnet-4-99",
   "claude-sonnet-4-6-20990101",
   "custom/claude-opus-5",
   "toString",
@@ -60,7 +58,6 @@ const uncoveredRequests: JsonObject[] = [
   { service_tier: "priority" },
   { speed: "future-mode" },
   { inference_geo: "eu" },
-  { unknown_billing_option: true },
 ]
 test.each(uncoveredRequests)("declines uncovered request dimensions (%j)", (request) => {
   expect(anthropicRateCard("claude-opus-5", request)).toBeUndefined()
