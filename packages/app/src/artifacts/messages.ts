@@ -1,3 +1,4 @@
+import type { ArtifactKind } from "@sixb/core/artifacts"
 import { defineMessages, type MessageTree, type Translation } from "@sixb/ui/lib/i18n"
 
 const number = (value: number) => value.toLocaleString("en")
@@ -58,7 +59,7 @@ export const en = {
     filter: "Filter by kind",
     all: "All",
     kinds: { document: "Documents", sheet: "Sheets", slides: "Slides", file: "Files" },
-    count: (count: number, kind?: "document" | "sheet" | "slides" | "file") => {
+    count: (count: number, kind?: ArtifactKind) => {
       const [one, many] = {
         all: ["artifact", "artifacts"],
         document: ["document", "documents"],
@@ -71,7 +72,7 @@ export const en = {
     empty: "No artifacts yet",
     emptyDescription:
       "Ask the agent for a report, a spreadsheet, or a deck. What it publishes appears here.",
-    emptyKind: (kind: "document" | "sheet" | "slides" | "file") =>
+    emptyKind: (kind: ArtifactKind) =>
       `No ${{ document: "documents", sheet: "sheets", slides: "decks", file: "files" }[kind]} yet`,
     showAll: "Show all",
     loadFailed: "Artifacts could not be loaded.",
