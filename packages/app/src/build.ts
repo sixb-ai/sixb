@@ -343,10 +343,12 @@ export function restoreAppStaticUrls(html: string): string {
 
 /**
  * Applies the theme chosen in the app (`ThemeProvider` stores it under `sixb-theme`) before the
- * first paint, so a page loaded in dark mode never paints its light shell first.
+ * first paint, so a page loaded in dark mode never paints its light shell first. Only a stored
+ * choice applies: an app without a `ThemeProvider` has none and stays light, and with no choice
+ * made the shell follows the system through its own media query until the provider mounts.
  */
 const THEME_BOOTSTRAP =
-  'try{var t=localStorage.getItem("sixb-theme"),d=t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.add(d?"dark":"light")}catch(e){}'
+  'try{var t=localStorage.getItem("sixb-theme");if(t==="dark"||t==="light")document.documentElement.classList.add(t)}catch(e){}'
 
 function withLoadingShell(html: string): string {
   const styles = `<style data-sixb-loading-shell>
