@@ -73,7 +73,6 @@ export {
   type StableEventEnvelope,
   type StableEventPublisher,
 } from "./service"
-export { toStoredEvent } from "./toStoredEvent"
 export type {
   ActionEventOrigin,
   AuthorableDomainEvent,
