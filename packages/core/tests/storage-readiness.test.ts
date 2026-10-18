@@ -194,11 +194,11 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 1_000): Promise<void> {
-  const startedAt = Date.now()
-  while (Date.now() - startedAt < timeoutMs) {
+/** Validation is a promise chain over in-memory fakes: a few event-loop turns settle it. */
+async function waitFor(predicate: () => Promise<boolean>): Promise<void> {
+  for (let turn = 0; turn < 100; turn++) {
     if (await predicate()) return
-    await Bun.sleep(0)
+    await new Promise((resolve) => setImmediate(resolve))
   }
   throw new Error("Timed out waiting for readiness condition.")
 }

@@ -38,6 +38,10 @@ const packagesUnderTest = ["packages/core", "packages/client", "packages/ui"] as
  * this is not a performance allowance — it is the line past which the bundler is presumed stuck.
  */
 const BUNDLE_CHECK_BUDGET_MS = 60_000
+/** `bun pm pack` runs `prepack`, which may build the package from scratch. */
+const PACK_BUDGET_MS = 240_000
+const TYPECHECK_BUDGET_MS = 240_000
+const EXTRACT_BUDGET_MS = 60_000
 
 type PackageJson = {
   name: string
@@ -79,8 +83,8 @@ beforeAll(async () => {
 
     // `bun pm pack` runs `prepack`, so this builds whatever is missing instead of depending on a
     // root build having happened first.
-    const tarball = packPackage(join(repoRoot, packageDir), artifactsDir)
-    extractPackage(tarball, destination)
+    const tarball = await packPackage(join(repoRoot, packageDir), artifactsDir)
+    await extractPackage(tarball, destination)
 
     extracted.push({
       name: manifest.name,
@@ -196,13 +200,14 @@ void mergeSession
 `
     )
 
-    const result = Bun.spawnSync(
+    const result = await runBounded(
       [process.execPath, "x", "tsc", "--noEmit", "-p", join(consumerDir, "tsconfig.json")],
-      { cwd: repoRoot, stdout: "pipe", stderr: "pipe" }
+      repoRoot,
+      TYPECHECK_BUDGET_MS
     )
 
-    const output = `${result.stdout.toString()}${result.stderr.toString()}`.trim()
-    expect(output).toBe("")
+    expect(result.timedOut).toBe(false)
+    expect(`${result.stdout}${result.stderr}`.trim()).toBe("")
     expect(result.exitCode).toBe(0)
   }, 300_000)
 })
@@ -226,7 +231,7 @@ async function bundleInSubprocess(input: {
   packageDir: string
   outdir: string
 }): Promise<string[]> {
-  const proc = Bun.spawn(
+  const result = await runBounded(
     [
       process.execPath,
       "build",
@@ -245,33 +250,46 @@ async function bundleInSubprocess(input: {
       "bun",
     ],
     // Same working directory the in-process build ran under, so resolution is unchanged.
-    { cwd: repoRoot, stdout: "ignore", stderr: "pipe" }
+    repoRoot,
+    BUNDLE_CHECK_BUDGET_MS
   )
 
-  // Read stderr *while* the child runs. Waiting on `exited` first leaves the pipe unread, and a
-  // child that fills its buffer blocks on write while we wait for the exit that write prevents.
+  if (result.timedOut) {
+    return [
+      `bun build did not finish within ${BUNDLE_CHECK_BUDGET_MS}ms and was killed. The bundler is stuck, not slow.`,
+    ]
+  }
+  if (result.exitCode === 0) return []
+  return [result.stderr.trim() || `bun build exited with code ${result.exitCode} and said nothing.`]
+}
+
+/**
+ * Runs a child process to completion and kills it past `budgetMs`.
+ *
+ * Never `Bun.spawnSync`: inside a parallel test worker it has missed its child's exit and hung the
+ * run. Both pipes are read *while* the child runs — waiting on `exited` first leaves them unread,
+ * and a child that fills its buffer blocks on write while we wait for the exit that write prevents.
+ */
+async function runBounded(
+  command: string[],
+  cwd: string,
+  budgetMs: number
+): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }> {
+  const proc = Bun.spawn(command, { cwd, stdout: "pipe", stderr: "pipe" })
+  const stdout = new Response(proc.stdout).text()
   const stderr = new Response(proc.stderr).text()
 
   let timedOut = false
   const killTimer = setTimeout(() => {
     timedOut = true
     proc.kill()
-  }, BUNDLE_CHECK_BUDGET_MS)
+  }, budgetMs)
 
   try {
     const exitCode = await proc.exited
-    if (timedOut) {
-      return [
-        `bun build did not finish within ${BUNDLE_CHECK_BUDGET_MS}ms and was killed. The bundler is stuck, not slow.`,
-      ]
-    }
-    if (exitCode === 0) return []
-    const output = (await stderr).trim()
-    return [output || `bun build exited with code ${exitCode} and said nothing.`]
+    return { exitCode, stdout: await stdout, stderr: await stderr, timedOut }
   } finally {
     clearTimeout(killTimer)
-    // Settle the read either way, so a killed child leaves nothing pending behind this test.
-    await stderr.catch(() => "")
   }
 }
 
@@ -365,32 +383,36 @@ async function listFiles(directory: string, prefix = ""): Promise<string[]> {
   return files
 }
 
-function packPackage(packageDir: string, destination: string): string {
-  const result = Bun.spawnSync(
+async function packPackage(packageDir: string, destination: string): Promise<string> {
+  const result = await runBounded(
     [process.execPath, "pm", "pack", "--destination", destination, "--quiet"],
-    { cwd: packageDir, stdout: "pipe", stderr: "pipe" }
+    packageDir,
+    PACK_BUDGET_MS
   )
-  const stdout = result.stdout.toString()
-  const stderr = result.stderr.toString()
-  if (result.exitCode !== 0) {
-    throw new Error(`Failed to pack ${packageDir}:\n${stdout}${stderr}`)
+  if (result.timedOut || result.exitCode !== 0) {
+    throw new Error(
+      `Failed to pack ${packageDir}${result.timedOut ? ` within ${PACK_BUDGET_MS}ms` : ""}:\n${result.stdout}${result.stderr}`
+    )
   }
 
-  const tarball = stdout
+  const tarball = result.stdout
     .split(/\r?\n/)
     .map((line) => line.trim())
     .reverse()
     .find((line) => line.endsWith(".tgz"))
-  if (!tarball) throw new Error(`Pack output did not contain a tarball path:\n${stdout}${stderr}`)
+  if (!tarball) {
+    throw new Error(`Pack output did not contain a tarball path:\n${result.stdout}${result.stderr}`)
+  }
   return resolve(dirname(packageDir), tarball)
 }
 
-function extractPackage(tarball: string, destination: string): void {
-  const result = Bun.spawnSync(
+async function extractPackage(tarball: string, destination: string): Promise<void> {
+  const result = await runBounded(
     ["tar", "-xzf", tarball, "--strip-components=1", "-C", destination],
-    { stdout: "pipe", stderr: "pipe" }
+    repoRoot,
+    EXTRACT_BUDGET_MS
   )
-  if (result.exitCode !== 0) {
-    throw new Error(`Failed to extract ${tarball}:\n${result.stderr.toString()}`)
+  if (result.timedOut || result.exitCode !== 0) {
+    throw new Error(`Failed to extract ${tarball}:\n${result.stderr}`)
   }
 }

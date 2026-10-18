@@ -1,9 +1,9 @@
-import { describe, expect, mock, test } from "bun:test"
-import { defineObjectType, link, prop, SixbHost } from "../src"
-import type { DomainEventService } from "../src/events"
+import { describe, expect, test } from "bun:test"
+import { defineObjectType, link, prop } from "../src"
 import { objectBatchKey } from "../src/storage"
+import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { createTestSixb } from "../src/testing"
-import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
+import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Target = defineObjectType({
   id: "noop-target",
@@ -26,160 +26,139 @@ const Source = defineObjectType({
   ],
 })
 
+/**
+ * Every published event is first a durable outbox fact, so the facts a mutation adds are exactly
+ * the events it will emit. Reading them needs no wait for asynchronous delivery.
+ */
 function createRuntime() {
   const deps = createTestRuntimeDeps()
-  const host = new SixbHost({ ontology: [Source, Target], ...deps })
-  const sixb = createTestSixb(host)
-  // Mutations write durable outbox facts, so publication is the observable delivery boundary.
-  const events = host.events as DomainEventService
-  const publish = events.publishEnvelopes.bind(events)
-  const publishSpy = mock(publish)
-  events.publishEnvelopes = publishSpy
-  return { publishSpy, deps, sixb }
+  const sixb = createTestSixb({ ontology: [Source, Target], ...deps })
+  const facts = () => [
+    ...getInMemoryOntologyStorageTestingAdapter(deps.storage.ontology).snapshot().outbox.values(),
+  ]
+  /** The event types, sorted, that the mutations since the last call added to the outbox. */
+  let seen = 0
+  const newFacts = () => {
+    const all = facts()
+    const added = all.slice(seen).map((row) => row.event.type)
+    seen = all.length
+    return added.sort()
+  }
+  const listTargets = () =>
+    deps.storage.objects.listLinks({
+      projectId: sixb.execution.projectId,
+      objectTypeId: "noop-source",
+      objectId: "source-1",
+      linkId: "targets",
+    })
+  return { deps, sixb, newFacts, listTargets }
 }
 
 describe("upsert no-op suppression", () => {
-  test("a repeated object upsert preserves state and emits no update", async () => {
-    const { publishSpy, deps, sixb } = createRuntime()
-    const created = await sixb.objects.upsert("noop-source", { id: "source-1", name: "Source" })
-
-    await waitFor(
-      () => sixb.events.read(),
-      (published) => published.length === 1
-    )
-    publishSpy.mockClear()
-    const replayed = await sixb.objects.upsert("noop-source", {
-      id: "source-1",
-      name: "Source",
-    })
-
-    expect(publishSpy).not.toHaveBeenCalled()
-    expect(replayed).toEqual(created)
-    expect(
-      await deps.storage.objects.getByPrimaryId({
-        projectId: sixb.execution.projectId,
-        objectTypeId: "noop-source",
-        primaryId: "source-1",
-      })
-    ).toEqual(created)
-    expect(await sixb.events.read({ types: ["object.updated"] })).toHaveLength(0)
-  })
-
-  test("an object batch emits only real changes and preserves result order", async () => {
-    const { publishSpy, deps, sixb } = createRuntime()
+  test("repeated object upserts preserve state and emit only real changes, in result order", async () => {
+    const { deps, sixb, newFacts } = createRuntime()
     const source1 = await sixb.objects.upsert("noop-source", { id: "source-1", name: "One" })
     await sixb.objects.upsert("noop-source", { id: "source-2", name: "Before" })
+    expect(newFacts()).toEqual(["object.created", "object.created"])
 
-    await waitFor(
-      () => sixb.events.read(),
-      (published) => published.length === 2
+    expect(await sixb.objects.upsert("noop-source", { id: "source-1", name: "One" })).toEqual(
+      source1
     )
-    publishSpy.mockClear()
-    const results = await sixb.objects.upsertBatch("noop-source", [
+    expect(newFacts()).toEqual([])
+
+    const batch = [
       { properties: { id: "source-1", name: "One" } },
       { properties: { id: "source-2", name: "After" } },
       { properties: { id: "source-3", name: "Three" } },
-    ])
-
-    await waitFor(
-      () => sixb.events.read(),
-      (published) => published.length === 4
-    )
-    expect(publishSpy).toHaveBeenCalledTimes(1)
-    expect(publishSpy.mock.calls[0]?.[0]).toHaveLength(2)
-    expect(results.every((result) => result.ok)).toBe(true)
+    ]
+    const results = await sixb.objects.upsertBatch("noop-source", batch)
     expect(results.map((result) => (result.ok ? result.value.primaryId : undefined))).toEqual([
       "source-1",
       "source-2",
       "source-3",
     ])
     if (results[0].ok) expect(results[0].value).toEqual(source1)
-    expect(await sixb.events.read({ types: ["object.updated"] })).toHaveLength(1)
+    expect(newFacts()).toEqual(["object.created", "object.updated"])
 
     const rowsBeforeReplay = await deps.storage.objects.getByPrimaryIdBatch({
       projectId: sixb.execution.projectId,
-      items: [
-        { objectTypeId: "noop-source", primaryId: "source-1" },
-        { objectTypeId: "noop-source", primaryId: "source-2" },
-        { objectTypeId: "noop-source", primaryId: "source-3" },
-      ],
+      items: ["source-1", "source-2", "source-3"].map((primaryId) => ({
+        objectTypeId: "noop-source",
+        primaryId,
+      })),
     })
-
-    publishSpy.mockClear()
-    const replayed = await sixb.objects.upsertBatch("noop-source", [
-      { properties: { id: "source-1", name: "One" } },
-      { properties: { id: "source-2", name: "After" } },
-      { properties: { id: "source-3", name: "Three" } },
-    ])
-
-    expect(publishSpy).not.toHaveBeenCalled()
+    const replayed = await sixb.objects.upsertBatch("noop-source", batch)
+    expect(newFacts()).toEqual([])
     expect(replayed.map((result) => result.ok)).toEqual([true, true, true])
     for (const result of replayed) {
       if (!result.ok) continue
-      const rowBeforeReplay = rowsBeforeReplay.get(
-        objectBatchKey("noop-source", result.value.primaryId)
+      expect(result.value).toEqual(
+        rowsBeforeReplay.get(objectBatchKey("noop-source", result.value.primaryId))!
       )
-      expect(rowBeforeReplay).toBeDefined()
-      if (rowBeforeReplay) expect(result.value).toEqual(rowBeforeReplay)
     }
   })
 
-  test("a repeated link upsert preserves state and emits no update", async () => {
-    const { publishSpy, deps, sixb } = createRuntime()
-    await sixb.objects.upsert("noop-source", { id: "source-1", name: "Source" })
-    await sixb.objects.upsert("noop-target", { id: "target-1" })
-    await sixb.objects.upsertLink("noop-source", "source-1", "targets", {
-      targetTypeId: "noop-target",
-      targetId: "target-1",
-      properties: { role: "primary" },
-    })
-    const [created] = await deps.storage.objects.listLinks({
-      projectId: sixb.execution.projectId,
-      objectTypeId: "noop-source",
-      objectId: "source-1",
-      linkId: "targets",
-    })
-
-    await waitFor(
-      () => sixb.events.read(),
-      (published) => published.length === 3
-    )
-    publishSpy.mockClear()
-    await sixb.objects.upsertLink("noop-source", "source-1", "targets", {
-      targetTypeId: "noop-target",
-      targetId: "target-1",
-      properties: { role: "primary" },
-    })
-
-    expect(publishSpy).not.toHaveBeenCalled()
-    expect(
-      await deps.storage.objects.listLinks({
-        projectId: sixb.execution.projectId,
-        objectTypeId: "noop-source",
-        objectId: "source-1",
-        linkId: "targets",
-      })
-    ).toEqual([created])
-    expect(await sixb.events.read({ types: ["link.updated"] })).toHaveLength(0)
-  })
-
-  test("canonicalizes decimal link properties before no-op detection and persistence", async () => {
-    const { publishSpy, deps, sixb } = createRuntime()
+  test("repeated link upserts preserve state and emit only real changes", async () => {
+    const { sixb, newFacts, listTargets } = createRuntime()
     await sixb.objects.upsert("noop-source", { id: "source-1", name: "Source" })
     await sixb.objects.upsert("noop-target", { id: "target-1" })
     await sixb.objects.upsert("noop-target", { id: "target-2" })
+    const toTarget1 = { targetTypeId: "noop-target", targetId: "target-1" }
+    await sixb.objects.upsertLink("noop-source", "source-1", "targets", {
+      ...toTarget1,
+      properties: { role: "primary" },
+    })
+    newFacts()
+    const created = await listTargets()
 
+    await sixb.objects.upsertLink("noop-source", "source-1", "targets", {
+      ...toTarget1,
+      properties: { role: "primary" },
+    })
+    expect(newFacts()).toEqual([])
+    expect(await listTargets()).toEqual(created)
+
+    const batch = [
+      {
+        objectTypeId: "noop-source",
+        sourceId: "source-1",
+        linkId: "targets",
+        target: { ...toTarget1, properties: { role: "primary" } },
+      },
+      {
+        objectTypeId: "noop-source",
+        sourceId: "source-1",
+        linkId: "targets",
+        target: { targetTypeId: "noop-target", targetId: "target-2" },
+      },
+    ] as const
+    expect((await sixb.objects.upsertLinkBatch(batch)).map((result) => result.ok)).toEqual([
+      true,
+      true,
+    ])
+    expect(newFacts()).toEqual(["link.created"])
+
+    const linksBeforeReplay = await listTargets()
+    expect((await sixb.objects.upsertLinkBatch(batch)).map((result) => result.ok)).toEqual([
+      true,
+      true,
+    ])
+    expect(newFacts()).toEqual([])
+    expect(await listTargets()).toEqual(linksBeforeReplay)
+  })
+
+  test("canonicalizes decimal link properties before no-op detection and persistence", async () => {
+    const { sixb, newFacts, listTargets } = createRuntime()
+    await sixb.objects.upsert("noop-source", { id: "source-1", name: "Source" })
+    await sixb.objects.upsert("noop-target", { id: "target-1" })
+    await sixb.objects.upsert("noop-target", { id: "target-2" })
     await sixb.objects.upsertLink("noop-source", "source-1", "targets", {
       targetTypeId: "noop-target",
       targetId: "target-1",
       properties: { amount: "+001.2300" },
     })
+    newFacts()
 
-    await waitFor(
-      () => sixb.events.read(),
-      (published) => published.length === 4
-    )
-    publishSpy.mockClear()
     const results = await sixb.objects.upsertLinkBatch([
       {
         objectTypeId: "noop-source",
@@ -203,91 +182,15 @@ describe("upsert no-op suppression", () => {
       },
     ])
 
-    await waitFor(
-      () => sixb.events.read(),
-      (published) => published.length === 5
-    )
     expect(results.map((result) => result.ok)).toEqual([true, true])
-    expect(publishSpy).toHaveBeenCalledTimes(1)
-    expect(publishSpy.mock.calls[0]?.[0]).toHaveLength(1)
-
-    const links = await deps.storage.objects.listLinks({
-      projectId: sixb.execution.projectId,
-      objectTypeId: "noop-source",
-      objectId: "source-1",
-      linkId: "targets",
-    })
+    expect(newFacts()).toEqual(["link.created"])
     expect(
-      links
+      (await listTargets())
         .map((row) => [row.targetId, row.properties?.amount])
         .sort(([left], [right]) => String(left).localeCompare(String(right)))
     ).toEqual([
       ["target-1", "1.23"],
       ["target-2", "2.5"],
     ])
-  })
-
-  test("a link batch emits only real changes and skips an unchanged replay", async () => {
-    const { publishSpy, deps, sixb } = createRuntime()
-    await sixb.objects.upsert("noop-source", { id: "source-1", name: "Source" })
-    await sixb.objects.upsert("noop-target", { id: "target-1" })
-    await sixb.objects.upsert("noop-target", { id: "target-2" })
-    await sixb.objects.upsertLink("noop-source", "source-1", "targets", {
-      targetTypeId: "noop-target",
-      targetId: "target-1",
-    })
-
-    const batch = [
-      {
-        objectTypeId: "noop-source",
-        sourceId: "source-1",
-        linkId: "targets",
-        target: { targetTypeId: "noop-target", targetId: "target-1" },
-      },
-      {
-        objectTypeId: "noop-source",
-        sourceId: "source-1",
-        linkId: "targets",
-        target: { targetTypeId: "noop-target", targetId: "target-2" },
-      },
-    ] as const
-
-    await waitFor(
-      () => sixb.events.read(),
-      (published) => published.length === 4
-    )
-    publishSpy.mockClear()
-    const results = await sixb.objects.upsertLinkBatch(batch)
-
-    await waitFor(
-      () => sixb.events.read(),
-      (published) => published.length === 5
-    )
-    expect(results.map((result) => result.ok)).toEqual([true, true])
-    expect(publishSpy).toHaveBeenCalledTimes(1)
-    expect(publishSpy.mock.calls[0]?.[0]).toHaveLength(1)
-    expect(await sixb.events.read({ types: ["link.updated"] })).toHaveLength(0)
-
-    const linksBeforeReplay = await deps.storage.objects.listLinks({
-      projectId: sixb.execution.projectId,
-      objectTypeId: "noop-source",
-      objectId: "source-1",
-      linkId: "targets",
-    })
-
-    publishSpy.mockClear()
-    expect((await sixb.objects.upsertLinkBatch(batch)).map((result) => result.ok)).toEqual([
-      true,
-      true,
-    ])
-    expect(publishSpy).not.toHaveBeenCalled()
-    expect(
-      await deps.storage.objects.listLinks({
-        projectId: sixb.execution.projectId,
-        objectTypeId: "noop-source",
-        objectId: "source-1",
-        linkId: "targets",
-      })
-    ).toEqual(linksBeforeReplay)
   })
 })
