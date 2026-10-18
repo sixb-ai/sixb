@@ -220,7 +220,7 @@ export const en = {
       boolean: "Checkbox",
       tag: "Tag",
     },
-    charts: { bar: "Bar", line: "Line", area: "Area", pie: "Pie" },
+    charts: { bar: "Bar", line: "Line", area: "Area", pie: "Pie", scatter: "Scatter" },
     chartOf: (kind: string, sheet: string) => `${kind} · ${sheet}`,
   },
   files: {
@@ -462,7 +462,13 @@ export const fr: Translation<ArtifactMessages> = {
       boolean: "Case à cocher",
       tag: "Étiquette",
     },
-    charts: { bar: "Barres", line: "Courbe", area: "Aires", pie: "Secteurs" },
+    charts: {
+      bar: "Barres",
+      line: "Courbe",
+      area: "Aires",
+      pie: "Secteurs",
+      scatter: "Nuage de points",
+    },
     chartOf: (kind, sheet) => `${kind} · ${sheet}`,
   },
   files: {

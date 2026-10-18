@@ -134,9 +134,12 @@ Central,962,0.934,-0.013,141950
   `#DIV/0!` or `#VALUE!`. The `.xlsx` keeps each cell's formula.
 - `frozenRows` (default 1, the header) and `frozenColumns` (default 0) stay in view while the
   sheet scrolls; `widths` sets columns' widths in pixels.
-- A chart is a `bar`, `line`, `area`, or `pie` chart of up to five `y` columns against an `x`
-  column. Its `name` is its address, so keep it across versions and rename it by its `title`. Bar
-  and area charts can be `stacked`; a pie has one `y` column and at most five rows.
+- A chart is a `bar`, `line`, `area`, `pie`, or `scatter` chart of up to five `y` columns against
+  an `x` column. Its `name` is its address, so keep it across versions and rename it by its
+  `title`. Bar and area charts can be `stacked`; a pie has one `y` column and at most five rows.
+  A bar chart's `line` columns draw over its bars, on a right axis when their type differs; a
+  scatter places a point per row by two numbers; and `aggregate` charts raw rows by their `x`
+  value: the `sum` or `average` of `y`, or the `count` of rows.
 
 Publishing reads every typed cell and every chart against its sheet and refuses the version with
 the file, row, and column to fix. A sheet holds at most 200 columns and 100,000 rows, and a

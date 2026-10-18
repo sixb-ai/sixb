@@ -34,6 +34,14 @@
       "x": "Category",
       "y": "Q3 spend",
       "title": "Parts spend by category, Q3"
+    },
+    {
+      "name": "parts-by-category",
+      "type": "bar",
+      "sheet": "Inventory",
+      "x": "Category",
+      "aggregate": "count",
+      "title": "Parts stocked, by category"
     }
   ]
 }

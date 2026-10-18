@@ -20,6 +20,7 @@ export function MiniChart({
   if (!data) return null
   const series = data.series.map((entry) => ({
     color: entry.color,
+    line: entry.line,
     values: data.rows.map((row) => {
       const value = row[entry.key]
       return typeof value === "number" ? value : null
@@ -38,8 +39,17 @@ export function MiniChart({
       className="block size-full overflow-visible"
       aria-hidden="true"
     >
-      {chart.type === "bar" ? (
-        <Bars series={series} stacked={chart.stacked} />
+      {chart.type === "scatter" ? (
+        <Points
+          xs={data.rows.map((row) => (typeof row.x === "number" ? row.x : null))}
+          series={series}
+        />
+      ) : chart.type === "bar" ? (
+        <>
+          <Bars series={series.filter((entry) => !entry.line)} stacked={chart.stacked} />
+          {/* Lines over the bars, on their own scale as the full chart's right axis is. */}
+          <Lines series={series.filter((entry) => entry.line)} area={false} stacked={false} />
+        </>
       ) : (
         <Lines series={series} area={chart.type === "area"} stacked={chart.stacked} />
       )}
@@ -50,6 +60,56 @@ export function MiniChart({
 interface Series {
   readonly color: string
   readonly values: readonly (number | null)[]
+}
+
+/** A scatter's points, each series' values against the shared x values, both fitted to the box. */
+function Points({
+  xs,
+  series,
+}: {
+  readonly xs: readonly (number | null)[]
+  readonly series: readonly Series[]
+}) {
+  const known = xs.filter((value): value is number => value !== null)
+  const ys = series.flatMap((entry) =>
+    entry.values.filter((value): value is number => value !== null)
+  )
+  if (known.length === 0 || ys.length === 0) return null
+  const scale = (values: number[], size: number, flip: boolean) => {
+    const min = Math.min(...values)
+    const span = Math.max(...values) - min || 1
+    return (value: number) => {
+      const share = 0.08 + ((value - min) / span) * 0.84
+      return (flip ? 1 - share : share) * size
+    }
+  }
+  const x = scale(known, WIDTH, false)
+  const y = scale(ys, HEIGHT, true)
+  return (
+    <>
+      {series.flatMap((entry, position) =>
+        entry.values.map((value, index) => {
+          const at = xs[index]
+          return value === null || at === null || at === undefined ? null : (
+            // A round dot however the card stretches the drawing: a line with no length, its
+            // round cap drawn at a fixed width.
+            <line
+              key={`${position}:${index}`}
+              x1={x(at)}
+              y1={y(value)}
+              x2={x(at)}
+              y2={y(value)}
+              stroke={entry.color}
+              strokeOpacity={0.85}
+              strokeWidth={5}
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          )
+        })
+      )}
+    </>
+  )
 }
 
 function Bars({

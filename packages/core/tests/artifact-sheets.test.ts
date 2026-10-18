@@ -93,6 +93,7 @@ describe("parseWorkbook", () => {
             sheet: "Summary",
             x: "Quarter",
             y: ["Revenue"],
+            line: [],
             stacked: false,
           },
         ],
@@ -179,6 +180,43 @@ describe("parseWorkbook", () => {
         charts: [{ name: "r", type: "bar", sheet: "A", x: "x", y: ["a", "b", "c", "d", "e", "f"] }],
       },
       "at most 5",
+    ],
+    [
+      {
+        sheets: [{ name: "A" }],
+        charts: [{ name: "r", type: "line", sheet: "A", x: "x", y: "y", line: "z" }],
+      },
+      'only a bar chart draws "line" columns over its bars',
+    ],
+    [
+      {
+        sheets: [{ name: "A" }],
+        charts: [
+          { name: "r", type: "bar", sheet: "A", x: "x", y: ["a", "b", "c"], line: ["d", "e", "f"] },
+        ],
+      },
+      "plots 6 columns",
+    ],
+    [
+      {
+        sheets: [{ name: "A" }],
+        charts: [{ name: "r", type: "bar", sheet: "A", x: "x", y: "y", aggregate: "count" }],
+      },
+      'counts rows, which needs no "y"',
+    ],
+    [
+      {
+        sheets: [{ name: "A" }],
+        charts: [{ name: "r", type: "scatter", sheet: "A", x: "x", y: "y", aggregate: "sum" }],
+      },
+      'leave out "aggregate"',
+    ],
+    [
+      {
+        sheets: [{ name: "A" }],
+        charts: [{ name: "r", type: "bar", sheet: "A", x: "x", y: "y", aggregate: "median" }],
+      },
+      '"aggregate" is "median"; use one of sum, average, count',
     ],
   ])("refuses %j: %s", (input, message) => {
     const parsed = parseWorkbook(typeof input === "string" ? input : JSON.stringify(input))
@@ -363,6 +401,73 @@ describe("publishing a sheet", () => {
             charts: [{ name: "r", type: "pie", sheet: "Summary", x: "Quarter", y: "Revenue" }],
           }),
           "sheets/Summary.csv": `Quarter,Revenue,Margin\n${Array.from({ length: 6 }, (_, i) => `Q${i},1,0.1`).join("\n")}\n`,
+        },
+        "a pie with 6 slices",
+      ],
+      [
+        {
+          "workbook.json": JSON.stringify({
+            ...WORKBOOK,
+            charts: [{ name: "r", type: "scatter", sheet: "Summary", x: "Quarter", y: "Revenue" }],
+          }),
+        },
+        "plots column 'Quarter', which is text",
+      ],
+      [
+        {
+          "workbook.json": JSON.stringify({
+            ...WORKBOOK,
+            charts: [
+              {
+                name: "r",
+                type: "bar",
+                sheet: "Summary",
+                x: "Quarter",
+                y: "Revenue",
+                line: "Cost",
+              },
+            ],
+          }),
+        },
+        "plots column 'Cost', which sheet 'Summary' does not have",
+      ],
+      [
+        {
+          "workbook.json": JSON.stringify({
+            ...WORKBOOK,
+            sheets: [
+              {
+                ...WORKBOOK.sheets[0],
+                columns: { Revenue: "currency", Margin: "percent", Units: "number" },
+              },
+              WORKBOOK.sheets[1],
+            ],
+            charts: [
+              {
+                name: "r",
+                type: "bar",
+                sheet: "Summary",
+                x: "Quarter",
+                y: "Revenue",
+                line: ["Margin", "Units"],
+              },
+            ],
+          }),
+          "sheets/Summary.csv": "Quarter,Revenue,Margin,Units\nQ3,1,0.1,4\n",
+        },
+        "draws lines of percent and number over currency bars; the right axis reads one kind",
+      ],
+      [
+        {
+          // A summarized pie's slices are its x values: seven rows, six quarters. Reproduce by
+          // counting rows instead: the refusal names 7 slices.
+          "workbook.json": JSON.stringify({
+            ...WORKBOOK,
+            charts: [
+              { name: "r", type: "pie", sheet: "Summary", x: "Quarter", aggregate: "count" },
+            ],
+          }),
+          "sheets/Summary.csv": `Quarter,Revenue,Margin\n${["Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q1"].map((q) => `${q},1,0.1`).join("\n")}\n`,
         },
         "a pie with 6 slices",
       ],

@@ -147,15 +147,25 @@ Do not draw chart images for a sheet.
 | Key | Means |
 | --- | --- |
 | `name` | Lowercase letters, digits, and hyphens: `revenue`. It is the chart's address: keep it in every version, and change `title` to rename the chart |
-| `type` | `line` for a trend over time, `bar` to compare categories, `area` for parts of a total over time, `pie` for the share of a whole |
+| `type` | `line` for a trend over time, `bar` to compare categories, `area` for parts of a total over time, `pie` for the share of a whole, `scatter` for how two numbers move together, a point per row |
 | `sheet` | The sheet it plots |
-| `x` | The column along the x axis, or a pie's slice labels |
+| `x` | The column along the x axis, or a pie's slice labels; a number column for a scatter |
 | `y` | A column to plot, or a list of up to five; each is a number, currency, or percent column |
+| `line` | A bar chart's columns drawn as lines over its bars: a rate over amounts. A line of another type than the bars reads on a right axis |
+| `aggregate` | `sum` or `average` of `y` for each `x` value, or `count` of rows with no `y`: charts raw rows, such as one per job, by region |
 | `title` | What it shows, at most 120 characters: `Service revenue by quarter` |
 | `stacked` | `true` stacks a bar or area chart's series |
 
-A pie has one `y` column and at most five rows. Series in one chart share an axis, so plot columns of
-the same type and scale together.
+A pie has one `y` column and at most five rows, or five `x` values when it aggregates. Series in one
+chart share an axis, so plot columns of the same type and scale together; a bar chart's `line`
+columns of another type share one right axis, so give them one type. Bars and lines together plot at
+most five columns.
+
+```json
+{ "name": "revenue-margin", "type": "bar", "sheet": "Quarters", "x": "Quarter", "y": "Revenue", "line": "Margin" },
+{ "name": "jobs-by-region", "type": "bar", "sheet": "Jobs", "x": "Region", "aggregate": "count" },
+{ "name": "cost-visits", "type": "scatter", "sheet": "Regions", "x": "Visits", "y": "Parts cost" }
+```
 
 ## Check before publishing
 
@@ -168,5 +178,7 @@ Open each CSV and check its header and a few rows. A refusal names the file, row
 ## Examples
 
 `examples/sheet/` holds two finished workbooks to start from: service metrics with two sheets,
-totals, descriptions, compact and signed numbers, a computed margin, a line chart, and a bar chart; and a parts
-inventory with a frozen first column, a status tag, bars, a checkbox, dates, links, and a pie.
+totals, descriptions, compact and signed numbers, a computed margin, and line, bar, bar-and-line,
+and scatter charts; and a parts
+inventory with a frozen first column, a status tag, bars, a checkbox, dates, links, a pie, and a
+chart that counts rows by category.

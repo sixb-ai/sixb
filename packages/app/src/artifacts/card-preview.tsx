@@ -1,7 +1,6 @@
 import { type CsvTable, parseCsv, type WorkbookChart } from "@sixb/core/artifacts"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { AreaChart as AreaIcon, ChartColumn, ChartLine, ChartPie } from "lucide-react"
 import { type ReactNode, useMemo } from "react"
 import { fileExtension, versionSummary } from "./card-details"
 import { formatFileSize } from "./file-size"
@@ -12,6 +11,7 @@ import { useArtifactMessages } from "./messages"
 import { type ArtifactVersion, useArtifactTheme, useFileText, versionFileSource } from "./queries"
 import { PageScreen } from "./renderers/page"
 import { chartData } from "./renderers/sheet/chart-data"
+import { CHART_ICONS } from "./renderers/sheet/chart-icon"
 import { previewFormatter } from "./renderers/sheet/format"
 import { MiniChart } from "./renderers/sheet/mini-chart"
 import { fileSheetModel, type SheetModel } from "./renderers/sheet/model"
@@ -326,7 +326,7 @@ function WorkbookPreview({ version }: { readonly version: ArtifactVersion }) {
 
 /** A chart's latest value, as its full view labels it: the last row's first series, for a glance. */
 function latestValue(chart: WorkbookChart, model: SheetModel, locale: string): string | undefined {
-  if (chart.type === "pie") return undefined
+  if (chart.type === "pie" || chart.type === "scatter") return undefined
   const data = chartData(chart, model)
   const series = data?.series[0]
   const value = series ? data.rows.at(-1)?.[series.key] : undefined
@@ -336,14 +336,7 @@ function latestValue(chart: WorkbookChart, model: SheetModel, locale: string): s
 }
 
 function ChartGlyph({ type }: { readonly type: WorkbookChart["type"] }) {
-  const Icon =
-    type === "line"
-      ? ChartLine
-      : type === "area"
-        ? AreaIcon
-        : type === "pie"
-          ? ChartPie
-          : ChartColumn
+  const Icon = CHART_ICONS[type]
   return <Icon className="size-3 shrink-0" aria-hidden="true" />
 }
 
