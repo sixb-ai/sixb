@@ -2,8 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { client, type GetActionRunResponse } from "@sixb/client"
 import { getAuthSessionQueryKey } from "@sixb/client/hooks"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react"
-import { Window } from "happy-dom"
+import { fireEvent, render, waitFor } from "@testing-library/react"
 import { MemoryRouter, useLocation } from "react-router-dom"
 import { SectionsProvider } from "../src/pages"
 import {
@@ -14,12 +13,10 @@ import {
 import { ObservabilityAiUsagePage } from "../src/pages/observability/ai-usage/page"
 import { ObservabilityLogsPage } from "../src/pages/observability/logs"
 import { ObservabilityRunsPage } from "../src/pages/observability/runs"
+import { installDom } from "./helpers/dom"
 import { stubWebSockets } from "./helpers/offline-sockets"
 
-const browser = new Window({ url: "https://app.sixb.test" })
-const globals = [
-  "window",
-  "self",
+installDom([
   "document",
   "navigator",
   "Node",
@@ -36,9 +33,7 @@ const globals = [
   "matchMedia",
   "requestAnimationFrame",
   "cancelAnimationFrame",
-  "IS_REACT_ACT_ENVIRONMENT",
-] as const
-const previous = new Map<string, PropertyDescriptor | undefined>()
+])
 const originalConfig = client.getConfig()
 // Generated query keys carry the client's base URL, so it is set before any key is built.
 client.setConfig({ baseUrl: "https://api.sixb.test" })
@@ -46,36 +41,15 @@ let sockets: ReturnType<typeof stubWebSockets> | undefined
 
 beforeAll(() => {
   sockets = stubWebSockets()
-  const values = browser as unknown as Record<string, unknown>
-  for (const key of globals) {
-    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key))
-    Object.defineProperty(globalThis, key, {
-      configurable: true,
-      writable: true,
-      value:
-        key === "window" || key === "self"
-          ? browser
-          : key === "IS_REACT_ACT_ENVIRONMENT"
-            ? true
-            : values[key],
-    })
-  }
 })
 
 afterEach(() => {
-  cleanup()
   client.setConfig({ fetch: originalConfig.fetch })
 })
 
 afterAll(() => {
   client.setConfig({ baseUrl: originalConfig.baseUrl })
   sockets?.restore()
-  for (const key of globals) {
-    const descriptor = previous.get(key)
-    if (descriptor) Object.defineProperty(globalThis, key, descriptor)
-    else Reflect.deleteProperty(globalThis, key)
-  }
-  browser.close()
 })
 
 describe("an action run's effects", () => {

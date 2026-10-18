@@ -1,67 +1,31 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import type { ListArtifactsResponse } from "@sixb/client"
 import { listArtifactsInfiniteQueryKey } from "@sixb/client/hooks"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, cleanup, fireEvent, render } from "@testing-library/react"
-import { Window } from "happy-dom"
+import { act, fireEvent, render } from "@testing-library/react"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom"
 import { ArtifactsPage } from "../src/artifacts/gallery"
+import { installDom } from "./helpers/dom"
 
-const browser = new Window({ url: "https://app.sixb.test" })
-const globals = [
-  "window",
-  "self",
-  "document",
-  "navigator",
-  "Node",
-  "Element",
-  "HTMLElement",
-  "Event",
-  "MouseEvent",
-  "EventTarget",
-  "getComputedStyle",
-  "IS_REACT_ACT_ENVIRONMENT",
-] as const
-const previous = new Map<string, PropertyDescriptor | undefined>()
 // Cards never near the screen here, so none of them reads its version over a network there is not.
 class QuietObserver {
   observe() {}
   disconnect() {}
 }
-beforeAll(() => {
-  previous.set(
-    "IntersectionObserver",
-    Object.getOwnPropertyDescriptor(globalThis, "IntersectionObserver")
-  )
-  Object.defineProperty(globalThis, "IntersectionObserver", {
-    configurable: true,
-    writable: true,
-    value: QuietObserver,
-  })
-  const values = browser as unknown as Record<string, unknown>
-  for (const key of globals) {
-    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key))
-    Object.defineProperty(globalThis, key, {
-      configurable: true,
-      writable: true,
-      value:
-        key === "window" || key === "self"
-          ? browser
-          : key === "IS_REACT_ACT_ENVIRONMENT"
-            ? true
-            : values[key],
-    })
-  }
-})
-afterEach(() => cleanup())
-afterAll(() => {
-  for (const key of [...globals, "IntersectionObserver"]) {
-    const descriptor = previous.get(key)
-    if (descriptor) Object.defineProperty(globalThis, key, descriptor)
-    else Reflect.deleteProperty(globalThis, key)
-  }
-  browser.close()
-})
+installDom(
+  [
+    "document",
+    "navigator",
+    "Node",
+    "Element",
+    "HTMLElement",
+    "Event",
+    "MouseEvent",
+    "EventTarget",
+    "getComputedStyle",
+  ],
+  { values: { IntersectionObserver: QuietObserver } }
+)
 
 const artifact = (
   id: string,

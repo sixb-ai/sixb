@@ -1,46 +1,32 @@
 import { describe, expect, test } from "bun:test"
 import type { GetArtifactVersionResponse } from "@sixb/client"
-import { getArtifactVersionQueryKey } from "@sixb/client/hooks"
 import { Markdown } from "@sixb/ui/components"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
-import { artifactFileSource } from "../src/artifacts/file-source"
 import { artifactUrlTransform, rehypeKeepSection } from "../src/artifacts/references/embed-tree"
 import {
   ArtifactReferencesProvider,
   ReferencingMarkdown,
 } from "../src/artifacts/references/references"
 import { rehypeArtifactDocument } from "../src/artifacts/renderers/document-tree"
+import { artifactVersion, seedVersion, textFiles } from "./helpers/artifacts"
 
 const NUMBERS = "art_q3n4mbers0"
 const REVIEW = "art_rev1ew0000"
-const digest = (seed: string) => `sha256:${seed.padEnd(64, "0").slice(0, 64)}`
-
 function version(
   artifactId: string,
   outline: GetArtifactVersionResponse["outline"],
   texts: Record<string, string>,
   entry: string
 ): GetArtifactVersionResponse {
-  return {
+  return artifactVersion({
     artifactId,
     version: 2,
     title: artifactId === NUMBERS ? "Q3 numbers" : "Q3 review",
     entry,
-    files: Object.entries(texts).map(([path, text]) => ({
-      path,
-      file: {
-        blobId: `${artifactId}/${path}`,
-        digest: digest(`${artifactId}${path}`.replace(/[^0-9a-f]/g, "a")),
-        sizeBytes: text.length,
-        mediaType: path.endsWith(".csv") ? "text/csv" : "text/plain",
-      },
-    })),
+    files: textFiles(texts, artifactId),
     outline,
-    references: [],
-    author: { type: "user", id: "user-1" },
-    createdAt: "2026-10-02T12:00:00.000Z",
-  }
+  })
 }
 
 const sheet = {
@@ -71,21 +57,8 @@ function render(markdown: string): string {
   const cache = new QueryClient({
     defaultOptions: { queries: { enabled: false, retry: false, staleTime: Infinity } },
   })
-  const seed = (record: GetArtifactVersionResponse, texts: Record<string, string>) => {
-    cache.setQueryData(
-      getArtifactVersionQueryKey({ path: { artifactId: record.artifactId, version: "latest" } }),
-      record
-    )
-    for (const file of record.files) {
-      const source = artifactFileSource({
-        artifactId: record.artifactId,
-        version: record.version,
-        path: file.path,
-        fileRef: file.file,
-      })
-      cache.setQueryData([...source.queryKey, "text"], texts[file.path])
-    }
-  }
+  const seed = (record: GetArtifactVersionResponse, texts: Record<string, string>) =>
+    seedVersion(cache, record, texts, { as: "latest" })
   seed(
     version(
       NUMBERS,
