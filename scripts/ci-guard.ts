@@ -167,15 +167,23 @@ export async function main(argv: readonly string[]): Promise<number> {
 
     // Snapshot the process state before killing anything, but stop the tree before writing the
     // report: a closed parent pipe must not throw or SIGPIPE before cleanup gets its chance.
-    const report = await diagnose(child.pid, {
-      reason: verdict.reason,
-      elapsedSeconds: (performance.now() - started) / 1000,
-      silentSeconds: (performance.now() - lastOutputAt) / 1000,
-      lastTestFile,
-      tail,
-    })
+    const elapsedSeconds = (performance.now() - started) / 1000
+    const silentSeconds = (performance.now() - lastOutputAt) / 1000
+    const snapshot = await captureTree(child.pid)
     await stopChild()
-    process.stderr.write(report)
+    // Under `--parallel` the last file that printed is one that finished; the stuck one is still
+    // running. bun names those when SIGTERM interrupts it, so let that output arrive, briefly.
+    await Promise.race([forwarding.catch(() => {}), Bun.sleep(TERM_GRACE_MS)])
+    process.stderr.write(
+      renderReport(snapshot, {
+        reason: verdict.reason,
+        elapsedSeconds,
+        silentSeconds,
+        lastTestFile,
+        stillRunning: stillRunningFiles(tail),
+        tail,
+      })
+    )
     return STALL_EXIT_CODE
   } catch (error) {
     await stopChild()
@@ -212,20 +220,52 @@ interface StallContext {
   readonly elapsedSeconds: number
   readonly silentSeconds: number
   readonly lastTestFile: string | null
+  /** Files bun reported as still running when the guard interrupted it. */
+  readonly stillRunning: readonly string[]
   readonly tail: readonly string[]
 }
 
-async function diagnose(pid: number, context: StallContext): Promise<string> {
-  const processes = await processTable()
-  const tree = descendants(processes, pid)
+/** The stalled tree as it was before the kill: thread states are gone once the processes are. */
+interface TreeSnapshot {
+  readonly tree: readonly ProcessEntry[]
+  readonly threads: ReadonlyMap<number, readonly ThreadState[]>
+  readonly sockets: ReadonlyMap<number, { total: number; sockets: number } | null>
+}
+
+async function captureTree(pid: number): Promise<TreeSnapshot> {
+  const tree = descendants(await processTable(), pid)
+  return {
+    tree,
+    threads: new Map(tree.map((entry) => [entry.pid, threadStates(entry.pid)])),
+    sockets: new Map(tree.map((entry) => [entry.pid, socketCount(entry.pid)])),
+  }
+}
+
+/** bun lists the files it was running, one per line, after "Interrupted while still running:". */
+function stillRunningFiles(lines: readonly string[]): string[] {
+  const start = lines.findLastIndex((line) => line.trim() === "Interrupted while still running:")
+  if (start === -1) return []
+  const files: string[] = []
+  for (const line of lines.slice(start + 1)) {
+    const match = line.match(/^\s+([\w./@-]+\.(?:test|e2e|spec)\.[jt]sx?)\s+\(/)
+    if (!match) break
+    files.push(match[1])
+  }
+  return files
+}
+
+function renderReport(snapshot: TreeSnapshot, context: StallContext): string {
+  const { tree } = snapshot
   const lines: string[] = []
+  const where =
+    context.stillRunning.length > 0
+      ? ` — still running: ${context.stillRunning.join(", ")}`
+      : context.lastTestFile
+        ? ` — last test file: ${context.lastTestFile}`
+        : ""
 
   // An Actions `error` annotation surfaces this at the top of the run instead of line 4000 of a log.
-  lines.push(
-    `::error title=CI guard: stalled::${context.reason}${
-      context.lastTestFile ? ` — last test file: ${context.lastTestFile}` : ""
-    }`
-  )
+  lines.push(`::error title=CI guard: stalled::${context.reason}${where}`)
   lines.push("")
   lines.push("=".repeat(78))
   lines.push(`CI guard: the command stopped producing output and was killed.`)
@@ -234,6 +274,9 @@ async function diagnose(pid: number, context: StallContext): Promise<string> {
   lines.push(`  total elapsed:   ${context.elapsedSeconds.toFixed(0)}s`)
   lines.push(`  silent for:      ${context.silentSeconds.toFixed(0)}s`)
   lines.push(`  last test file:  ${context.lastTestFile ?? "(none seen)"}`)
+  if (context.stillRunning.length > 0) {
+    lines.push(`  still running:   ${context.stillRunning.join(", ")}`)
+  }
   lines.push("")
   lines.push(`-- last ${context.tail.length} output lines ------------------------------------`)
   for (const line of context.tail) lines.push(`  ${line}`)
@@ -255,14 +298,14 @@ async function diagnose(pid: number, context: StallContext): Promise<string> {
   lines.push("   blocked on the network; 'running' means it is genuinely working, just slowly.")
   let sawThreads = false
   for (const entry of tree) {
-    const threads = threadStates(entry.pid)
+    const threads = snapshot.threads.get(entry.pid) ?? []
     if (threads.length === 0) continue
     sawThreads = true
     lines.push(`  pid ${entry.pid}:`)
     for (const thread of threads) {
       lines.push(`    tid ${thread.tid} [${thread.state}] ${thread.name} wchan=${thread.wchan}`)
     }
-    const sockets = socketCount(entry.pid)
+    const sockets = snapshot.sockets.get(entry.pid) ?? null
     if (sockets !== null) lines.push(`    open fds: ${sockets.total} (${sockets.sockets} sockets)`)
   }
   if (!sawThreads) {

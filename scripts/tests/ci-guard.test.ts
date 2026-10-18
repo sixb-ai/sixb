@@ -76,9 +76,11 @@ describe("ci-guard", () => {
     expect(result.exitCode).toBe(3)
   })
 
-  test("kills a silent command and names the last test file it saw", async () => {
-    // Mirrors the real failure: output flows, a test file opens, then the process goes quiet past
-    // the guard's bound. The fixture itself is capped so an infrastructure failure cannot leak it.
+  test("kills a silent command and names the test file it was still running", async () => {
+    // Mirrors the real failure: output flows, a test file reports, then the process goes quiet past
+    // the guard's bound. Under `--parallel` the file that reported last had finished; bun names
+    // the stuck one when SIGTERM interrupts it, as this fixture does. The fixture itself is capped
+    // so an infrastructure failure cannot leak it.
     const result = await runGuard([
       "--stall",
       "1",
@@ -88,15 +90,17 @@ describe("ci-guard", () => {
       [
         'process.stderr.write("(pass) something\\n")',
         'process.stderr.write("::group::packages/app/tests/manifest.test.ts:\\n")',
+        'process.on("SIGTERM", () => { process.stderr.write("Interrupted while still running:\\n  packages/cli/tests/lake.test.ts (61s)\\n"); process.exit(143) })',
         // A timer creates the required silence without making a leaked Bun fixture busy-spin.
         boundedFixture(),
       ].join("; "),
     ])
 
     expect(result.exitCode).toBe(124)
-    expect(result.stderr).toContain("::error title=CI guard: stalled::")
-    expect(result.stderr).toContain("packages/app/tests/manifest.test.ts")
-    expect(result.stderr).toContain("no output for")
+    expect(result.stderr).toMatch(
+      /::error title=CI guard: stalled::no output for [^\n]* — still running: packages\/cli\/tests\/lake\.test\.ts\n/
+    )
+    expect(result.stderr).toContain("last test file:  packages/app/tests/manifest.test.ts")
     // The tail is what turns "it hung" into "it hung here".
     expect(result.stderr).toContain("(pass) something")
     expect(result.stderr).toContain("-- process tree ---")
