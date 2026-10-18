@@ -1,40 +1,45 @@
-import type { ListArtifactsResponse } from "@sixb/client"
+import { isSixbApiError, type ListArtifactsResponse } from "@sixb/client"
 import { getArtifactVersionOptions, listArtifactsInfiniteOptions } from "@sixb/client/hooks"
+import { ARTIFACT_KINDS, type ArtifactKind } from "@sixb/core/artifacts"
+import { ToggleGroup, ToggleGroupItem } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { Layers } from "lucide-react"
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react"
+import {
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { artifactHref } from "../pages/routes"
+import { useFormat } from "../pages/section-ui"
 import { versionSummary } from "./card-details"
-import { ArtifactPreview } from "./card-preview"
+import { ArtifactLabel, ArtifactPreview, SlideFace } from "./card-preview"
 import { ArtifactFrame } from "./frame"
-import { ArtifactKindIcon, type ArtifactKindName } from "./kind-icon"
+import { ArtifactKindIcon } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
 import { type ArtifactVersion, useArtifactTheme } from "./queries"
 import { artifactThemeAttributes } from "./theme"
 
 type ArtifactSummary = ListArtifactsResponse["artifacts"][number]
 
-/** The kinds the gallery filters by, in the order the Agent's skill presents them. */
-const GALLERY_KINDS = [
-  "document",
-  "sheet",
-  "slides",
-  "file",
-] as const satisfies readonly ArtifactKindName[]
-type GalleryKind = (typeof GALLERY_KINDS)[number]
 const PAGE_SIZE = 24
+/** The filter's value for every kind; a kind's value is its name. */
+const ALL = "all"
 
 /**
  * Every artifact the reader can open, most recently updated first, as cards with a preview of
  * each, filtered by kind (`?kind=sheet`). More load as the reader scrolls to the end.
  */
 export function ArtifactsPage() {
-  const messages = useArtifactMessages().gallery
+  const { gallery: messages, viewer } = useArtifactMessages()
   const [params, setParams] = useSearchParams()
-  const kind = GALLERY_KINDS.find((candidate) => candidate === params.get("kind"))
+  const kind = ARTIFACT_KINDS.find((candidate) => candidate === params.get("kind"))
   const list = useInfiniteQuery({
     ...listArtifactsInfiniteOptions({
       query: { limit: String(PAGE_SIZE), ...(kind ? { kind } : {}) },
@@ -44,10 +49,18 @@ export function ArtifactsPage() {
     getNextPageParam: (last: ListArtifactsResponse, pages: readonly ListArtifactsResponse[]) =>
       last.hasMore ? String(pages.length * PAGE_SIZE) : undefined,
   })
-  const artifacts = list.data?.pages.flatMap((page) => page.artifacts) ?? []
+  // Pages are offsets into a list that changes while the reader scrolls: an artifact updated in
+  // the meantime moves up, and can be on two pages at once. It shows once, where it came first.
+  const artifacts = useMemo(() => {
+    const byId = new Map<string, ArtifactSummary>()
+    for (const artifact of list.data?.pages.flatMap((page) => page.artifacts) ?? []) {
+      if (!byId.has(artifact.id)) byId.set(artifact.id, artifact)
+    }
+    return [...byId.values()]
+  }, [list.data])
   const total = list.data?.pages[0]?.total
 
-  const choose = (next: GalleryKind | undefined) => {
+  const choose = (next: ArtifactKind | undefined) => {
     const updated = new URLSearchParams(params)
     if (next) updated.set("kind", next)
     else updated.delete("kind")
@@ -71,15 +84,19 @@ export function ArtifactsPage() {
       </div>
 
       {list.isError ? (
-        <Message
-          title={messages.loadFailed}
-          action={messages.retry}
-          onAction={() => list.refetch()}
-        />
+        isSixbApiError(list.error) && list.error.status === 501 ? (
+          // Trying again cannot help until the server is given artifact storage.
+          <Message title={messages.loadFailed} description={viewer.storageUnavailable} />
+        ) : (
+          <Message
+            title={messages.loadFailed}
+            action={messages.retry}
+            onAction={() => list.refetch()}
+          />
+        )
       ) : list.isPending ? (
         <Grid>
           {Array.from({ length: 8 }, (_, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: placeholders have nothing else to key by
             <CardSkeleton key={index} />
           ))}
         </Grid>
@@ -100,10 +117,7 @@ export function ArtifactsPage() {
               <GalleryCard key={artifact.id} artifact={artifact} />
             ))}
             {list.isFetchingNextPage
-              ? Array.from({ length: 4 }, (_, index) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: placeholders have nothing else to key by
-                  <CardSkeleton key={`more-${index}`} />
-                ))
+              ? Array.from({ length: 4 }, (_, index) => <CardSkeleton key={`more-${index}`} />)
               : null}
           </Grid>
           {list.hasNextPage ? (
@@ -115,51 +129,51 @@ export function ArtifactsPage() {
   )
 }
 
+/** One choice of kind, or all of them: a single tab stop, stepped through with the arrow keys. */
 function KindFilter({
   kind,
   onChange,
 }: {
-  readonly kind: GalleryKind | undefined
-  readonly onChange: (kind: GalleryKind | undefined) => void
+  readonly kind: ArtifactKind | undefined
+  readonly onChange: (kind: ArtifactKind | undefined) => void
 }) {
   const messages = useArtifactMessages().gallery
-  const options: readonly { value: GalleryKind | undefined; label: string }[] = [
-    { value: undefined, label: messages.all },
-    ...GALLERY_KINDS.map((value) => ({ value, label: messages.kinds[value] })),
+  const value = kind ?? ALL
+  const options: readonly { value: ArtifactKind | typeof ALL; label: string }[] = [
+    { value: ALL, label: messages.all },
+    ...ARTIFACT_KINDS.map((option) => ({ value: option, label: messages.kinds[option] })),
   ]
   return (
-    <div
-      role="radiogroup"
-      aria-label={messages.filter}
-      className="-mx-4 flex max-w-[calc(100%+2rem)] overflow-x-auto px-4 sm:mx-0 sm:max-w-full sm:px-0"
-    >
-      <div className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border/70 bg-muted/50 p-1">
-        {options.map((option) => {
-          const selected = option.value === kind
-          return (
-            <button
-              key={option.value ?? "all"}
-              type="button"
-              role="radio"
-              aria-checked={selected}
-              onClick={() => onChange(option.value)}
-              className={cn(
-                "inline-flex h-8 items-center gap-1.5 rounded-full px-3.5 text-[13px] whitespace-nowrap outline-none transition-[background-color,color,box-shadow] focus-visible:ring-2 focus-visible:ring-ring",
-                selected
-                  ? "bg-background font-medium text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.08)] ring-1 ring-border/60"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {option.value ? (
-                <ArtifactKindIcon kind={option.value} className="size-3.5 shrink-0" />
-              ) : (
-                <Layers className="size-3.5 shrink-0" aria-hidden="true" />
-              )}
-              {option.label}
-            </button>
-          )
-        })}
-      </div>
+    <div className="-mx-4 flex max-w-[calc(100%+2rem)] overflow-x-auto px-4 sm:mx-0 sm:max-w-full sm:px-0">
+      <ToggleGroup
+        type="single"
+        value={value}
+        // Choosing the chosen kind again would clear the group; the filter always has a choice.
+        onValueChange={(next) => {
+          if (next) onChange(ARTIFACT_KINDS.find((option) => option === next))
+        }}
+        aria-label={messages.filter}
+        spacing={0.5}
+        className="shrink-0 rounded-full border border-border/70 bg-muted/50 p-1"
+      >
+        {options.map((option) => (
+          <ToggleGroupItem
+            key={option.value}
+            value={option.value}
+            className={cn(
+              "h-8 gap-1.5 rounded-full px-3.5 text-[13px] font-normal text-muted-foreground transition-[background-color,color,box-shadow] hover:bg-transparent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=on]:bg-background data-[state=on]:font-medium data-[state=on]:text-foreground",
+              option.value === value && "shadow-[0_1px_2px_rgb(0_0_0/0.08)] ring-1 ring-border/60"
+            )}
+          >
+            {option.value === ALL ? (
+              <Layers className="size-3.5 shrink-0" aria-hidden="true" />
+            ) : (
+              <ArtifactKindIcon kind={option.value} className="size-3.5 shrink-0" />
+            )}
+            {option.label}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
     </div>
   )
 }
@@ -176,8 +190,10 @@ function Grid({ children }: { readonly children: ReactNode }) {
 function GalleryCard({ artifact }: { readonly artifact: ArtifactSummary }) {
   const locale = useLocale()
   const messages = useArtifactMessages()
+  const format = useFormat()
   const pane = useRef<HTMLDivElement | null>(null)
-  const seen = useSeen(pane)
+  const [seen, setSeen] = useState(() => typeof IntersectionObserver === "undefined")
+  useNearScreen(pane, "400px 0px", () => setSeen(true), !seen)
   const version = useQuery({
     ...getArtifactVersionOptions({
       path: { artifactId: artifact.id, version: String(artifact.latestVersion) },
@@ -208,27 +224,22 @@ function GalleryCard({ artifact }: { readonly artifact: ArtifactSummary }) {
           </ScaledPreview>
         )}
       </div>
-      <div className="flex min-w-0 items-start gap-2.5 px-1 pt-3">
-        <ArtifactKindIcon
-          kind={artifact.kind}
-          className="mt-[3px] size-4 shrink-0 text-muted-foreground"
-        />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span
-            className="truncate text-[14px] leading-snug font-medium text-foreground"
-            title={artifact.title}
-          >
-            {artifact.title}
-          </span>
-          <span className="flex min-w-0 items-center gap-1.5 text-[12.5px] leading-snug text-muted-foreground tabular-nums">
-            <span className="truncate">
-              {version.data
-                ? versionSummary(version.data, messages, locale)
-                : messages.kinds[artifact.kind]}
-            </span>
+      <ArtifactLabel
+        title={artifact.title}
+        detail={
+          version.data
+            ? versionSummary(version.data, messages, locale)
+            : messages.kinds[artifact.kind]
+        }
+        after={
+          <>
             <span aria-hidden="true">·</span>
-            <time dateTime={artifact.updatedAt} className="shrink-0" title={artifact.updatedAt}>
-              {relativeTime(artifact.updatedAt, locale)}
+            <time
+              dateTime={artifact.updatedAt}
+              className="shrink-0"
+              title={format.dateTime(artifact.updatedAt)}
+            >
+              {format.relative(artifact.updatedAt)}
             </time>
             {artifact.latestVersion > 1 ? (
               <>
@@ -236,9 +247,17 @@ function GalleryCard({ artifact }: { readonly artifact: ArtifactSummary }) {
                 <span className="shrink-0">{messages.viewer.version(artifact.latestVersion)}</span>
               </>
             ) : null}
-          </span>
-        </div>
-      </div>
+          </>
+        }
+        icon={
+          <ArtifactKindIcon
+            kind={artifact.kind}
+            className="mt-[3px] size-4 shrink-0 text-muted-foreground"
+          />
+        }
+        large
+        className="items-start px-1 pt-3"
+      />
     </Link>
   )
 }
@@ -280,7 +299,7 @@ function ScaledPreview({ children }: { readonly children: ReactNode }) {
 
 /**
  * A deck's real first slide, live in a frame that fills it, on the ground a deck's card sets it
- * on, in the deck's own theme. It fades in over a blank slide once its theme applies.
+ * on, in the deck's own theme. It fades in over the slide's title, which stays if it never loads.
  */
 function FirstSlide({ version }: { readonly version: ArtifactVersion }) {
   const theme = artifactThemeAttributes(useArtifactTheme(version))
@@ -298,6 +317,7 @@ function FirstSlide({ version }: { readonly version: ArtifactVersion }) {
           title={version.title}
           start={{ slide: 1, fill: true }}
           decorative
+          fallback={<SlideFace version={version} />}
           className="absolute inset-0"
         />
       </div>
@@ -354,51 +374,32 @@ function Message({
 /** Asks for the next page when the end of the grid nears the screen. */
 function LoadMore({ onVisible, busy }: { readonly onVisible: () => void; readonly busy: boolean }) {
   const sentinel = useRef<HTMLDivElement | null>(null)
-  const callback = useRef(onVisible)
-  callback.current = onVisible
+  useNearScreen(sentinel, "600px 0px", onVisible, !busy)
+  return <div ref={sentinel} className="h-px" aria-hidden="true" />
+}
+
+/**
+ * Calls `onNear` each time an element comes within `margin` of the screen, while `active`. Where
+ * the browser cannot tell, it never calls it.
+ */
+function useNearScreen(
+  element: RefObject<Element | null>,
+  margin: string,
+  onNear: () => void,
+  active: boolean
+): void {
+  const callback = useRef(onNear)
+  callback.current = onNear
   useEffect(() => {
-    const element = sentinel.current
-    if (!element || busy || typeof IntersectionObserver === "undefined") return
+    const target = element.current
+    if (!active || !target || typeof IntersectionObserver === "undefined") return
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) callback.current()
       },
-      { rootMargin: "600px 0px" }
-    )
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [busy])
-  return <div ref={sentinel} className="h-px" aria-hidden="true" />
-}
-
-/** Whether an element has come within a screen of view; once it has, it stays seen. */
-function useSeen(element: { readonly current: Element | null }): boolean {
-  const [seen, setSeen] = useState(() => typeof IntersectionObserver === "undefined")
-  useEffect(() => {
-    const target = element.current
-    if (seen || !target) return
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) setSeen(true)
-      },
-      { rootMargin: "400px 0px" }
+      { rootMargin: margin }
     )
     observer.observe(target)
     return () => observer.disconnect()
-  }, [element, seen])
-  return seen
-}
-
-/** "3 hours ago", "yesterday", or a date past a week, in the reader's language. */
-function relativeTime(iso: string, locale: string): string {
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return ""
-  const seconds = Math.round((then - Date.now()) / 1000)
-  const format = new Intl.RelativeTimeFormat(locale, { numeric: "auto" })
-  const abs = Math.abs(seconds)
-  if (abs < 60) return format.format(0, "second")
-  if (abs < 3600) return format.format(Math.round(seconds / 60), "minute")
-  if (abs < 86_400) return format.format(Math.round(seconds / 3600), "hour")
-  if (abs < 7 * 86_400) return format.format(Math.round(seconds / 86_400), "day")
-  return new Date(then).toLocaleDateString(locale, { month: "short", day: "numeric" })
+  }, [element, margin, active])
 }
