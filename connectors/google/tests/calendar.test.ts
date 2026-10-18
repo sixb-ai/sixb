@@ -354,6 +354,29 @@ test.each<[string, (client: GoogleClient) => AsyncIterable<{ id?: string }>, str
   ])
 })
 
+test("listAll refuses a page token it already followed instead of looping forever", async () => {
+  // Regression check: drop the seen-token check in pagination.ts; the third page then ends the
+  // listing normally and nothing rejects.
+  const pages = [
+    { items: [{ id: "1" }], nextPageToken: "p2" },
+    { items: [{ id: "2" }], nextPageToken: "p2" },
+    { items: [{ id: "3" }] },
+  ]
+  mockFetch(async (input, init) => {
+    record(input, init)
+    return json(pages[requests.length - 1])
+  })
+
+  const client = await connect()
+  const error = await collect(client.calendar.events.listAll("primary")).catch((e: unknown) => e)
+
+  expect(error).toBeInstanceOf(Error)
+  expect((error as Error).message).toBe(
+    '[SixbGoogle] Pagination repeated page token "p2"; refusing to loop forever.'
+  )
+  expect(requests).toHaveLength(2)
+})
+
 test("maps a Google error envelope to GoogleApiError", async () => {
   mockFetch(async () =>
     json({ error: { code: 404, message: "Not Found", status: "NOT_FOUND" } }, { status: 404 })
