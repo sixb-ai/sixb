@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises"
-import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { brotliCompressSync, gzipSync } from "node:zlib"
@@ -25,25 +24,6 @@ async function linkDependencies(projectRoot: string, packages: readonly string[]
     await mkdir(dirname(target), { recursive: true })
     await symlink(packageDir, target)
   }
-}
-
-async function getFreePort(): Promise<number> {
-  return await new Promise<number>((resolvePromise, reject) => {
-    const server = createServer()
-    server.on("error", reject)
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address()
-      if (!address || typeof address === "string") {
-        reject(new Error("Could not resolve an open port"))
-        return
-      }
-
-      server.close((error) => {
-        if (error) reject(error)
-        else resolvePromise(address.port)
-      })
-    })
-  })
 }
 
 async function mtimes(paths: readonly string[]): Promise<readonly number[]> {
@@ -108,7 +88,7 @@ describe("createCustomApp.start", () => {
       process.env.SIXB_PRIVATE_TEST_KEY = "server-only-sentinel"
       for (const value of ['quotes" \n </script><script>alert(1)</script> $& $` ', "restarted"]) {
         process.env.SIXB_PUBLIC_TEST_KEY = value
-        const server = await app.start({ host: "127.0.0.1", port: await getFreePort() })
+        const server = await app.start({ host: "127.0.0.1", port: 0 })
         try {
           process.env.SIXB_PUBLIC_TEST_KEY = "changed-after-start"
           for (const path of [
@@ -150,14 +130,28 @@ describe("createCustomApp.start", () => {
     }
   })
 
+  // Reproduce: return the requested `port` from start(); it reports 0 and its url answers nothing.
+  test("reports the port it bound when asked for port 0", async () => {
+    const app = await createCustomApp({ rootDir: tempRoot })
+    const server = await app.start({ host: "127.0.0.1", port: 0 })
+
+    try {
+      expect(server.port).toBeGreaterThan(0)
+      expect(server.url).toBe(`http://127.0.0.1:${server.port}`)
+      expect(await (await fetch(server.url)).text()).toContain("Fixture App")
+    } finally {
+      await server.stop()
+    }
+  })
+
   test("serves the built app and injects the runtime API base URL", async () => {
-    const port = await getFreePort()
     const app = await createCustomApp({ rootDir: tempRoot })
     const server = await app.start({
       host: "127.0.0.1",
-      port,
+      port: 0,
       apiBaseUrl: "http://127.0.0.1:3000",
     })
+    const { port } = server
 
     try {
       const rootResponse = await fetch(`http://127.0.0.1:${port}/`)
@@ -200,9 +194,9 @@ describe("createCustomApp.start", () => {
   // Regression proof: drop the `/__sixb/assets/` branch from start() and the icon request is
   // answered as a missing asset.
   test("serves the built-in pages' connector icons from the package", async () => {
-    const port = await getFreePort()
     const app = await createCustomApp({ rootDir: tempRoot })
-    const server = await app.start({ host: "127.0.0.1", port })
+    const server = await app.start({ host: "127.0.0.1", port: 0 })
+    const { port } = server
 
     try {
       const icon = await fetch(`http://127.0.0.1:${port}/__sixb/assets/connector-icons/github.svg`)
@@ -233,9 +227,9 @@ describe("createCustomApp.start", () => {
   })
 
   test("serves the manifest with revalidation headers for GET and HEAD", async () => {
-    const port = await getFreePort()
     const app = await createCustomApp({ rootDir: tempRoot })
-    const server = await app.start({ host: "127.0.0.1", port })
+    const server = await app.start({ host: "127.0.0.1", port: 0 })
+    const { port } = server
 
     try {
       const manifest = await fetch(`http://127.0.0.1:${port}/app.webmanifest`)
@@ -263,13 +257,13 @@ describe("createCustomApp.start", () => {
     await writeFile(join(outdir, "chunk-ab12cd34.css"), stylesheet)
     await writeFile(join(outdir, "chunk-ab12cd34.css.gz"), gzipSync(stylesheet))
 
-    const port = await getFreePort()
     const app = await createCustomApp({ rootDir: tempRoot })
     const server = await app.start({
       host: "127.0.0.1",
-      port,
+      port: 0,
       apiBaseUrl: "http://127.0.0.1:3000",
     })
+    const { port } = server
 
     try {
       const immutable = "public, max-age=31536000, immutable"
@@ -303,13 +297,13 @@ describe("createCustomApp.start", () => {
   })
 
   test("serves only canonical shared deep links through a nonce-secured shell", async () => {
-    const port = await getFreePort()
     const app = await createCustomApp({ rootDir: tempRoot })
     const server = await app.start({
       host: "127.0.0.1",
-      port,
+      port: 0,
       apiBaseUrl: "https://api.example.test/base",
     })
+    const { port } = server
 
     try {
       const shared = await fetch(`http://127.0.0.1:${port}/shared/shr_1/reports/report-1`)
@@ -429,7 +423,7 @@ describe("createCustomApp.dev", () => {
         join(tempRoot, "app/page.tsx"),
         'import { publicEnv } from "@sixb/app"\nconst key = publicEnv.SIXB_PUBLIC_TEST_KEY\nexport default function Page() { return <main>{key}</main> }\n'
       )
-      server = await app.dev({ host: "127.0.0.1", port: await getFreePort() })
+      server = await app.dev({ host: "127.0.0.1", port: 0 })
       process.env.SIXB_PUBLIC_TEST_KEY = "changed-after-start"
       const html = await (await fetch(`http://127.0.0.1:${server.port}/`)).text()
       const encoded = html.match(/window\.__SIXB_RUNTIME__ = (.*);<\/script>/)?.[1]
@@ -458,6 +452,24 @@ describe("createCustomApp.dev", () => {
     }
   })
 
+  // Reproduce: return the requested `port` from dev(); it reports 0 and its url answers nothing.
+  test("reports the port it bound when asked for port 0", async () => {
+    const app = await createCustomApp({
+      rootDir: tempRoot,
+      authEnabled: false,
+      builtInPages: false,
+    })
+    const server = await app.dev({ host: "127.0.0.1", port: 0 })
+
+    try {
+      expect(server.port).toBeGreaterThan(0)
+      expect(server.url).toBe(`http://127.0.0.1:${server.port}`)
+      expect((await fetch(`${server.url}/app.webmanifest`)).status).toBe(200)
+    } finally {
+      await server.stop()
+    }
+  })
+
   test("serves the generated manifest and public icons, and keeps API-owned routes off the dev origin", async () => {
     const publicDir = join(tempRoot, "app", "public")
     await mkdir(publicDir, { recursive: true })
@@ -465,13 +477,13 @@ describe("createCustomApp.dev", () => {
     await writeFile(join(publicDir, "icon-192.png"), "fixture png")
     await writeFile(join(publicDir, "app.webmanifest"), '{"name":"Shadow"}\n')
 
-    const port = await getFreePort()
     const app = await createCustomApp({
       rootDir: tempRoot,
       authEnabled: false,
       builtInPages: false,
     })
-    const server = await app.dev({ host: "127.0.0.1", port })
+    const server = await app.dev({ host: "127.0.0.1", port: 0 })
+    const { port } = server
 
     try {
       const generatedHtml = await readFile(
@@ -797,7 +809,6 @@ describe("createCustomApp.dev", () => {
       apiBaseUrl: "http://127.0.0.1:3000",
       authEnabled: false,
     })
-    // Nothing here is fetched, so the server may bind any free port.
     const server = await app.dev({ host: "127.0.0.1", port: 0 })
 
     try {

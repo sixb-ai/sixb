@@ -30,7 +30,7 @@ import {
   parseAgentStreamMessage,
 } from "../src/routes/ws/agents"
 import { SixbServer } from "../src/server"
-import { createTestBrowserPolicy, getFreePort, nextWsMessage } from "./helpers"
+import { createTestBrowserPolicy, nextWsMessage } from "./helpers"
 
 const projectId = "agent-ws-test-project"
 const runId = "agt_run_ws_1"
@@ -410,8 +410,6 @@ async function withAgentWsServer(
     throw new Error("withAgentWsServer requires a run callback")
   }
 
-  const port = await getFreePort()
-  const baseUrl = `http://127.0.0.1:${port}`
   const sixb = createSixbInstance({
     id: projectId,
     ontology: [],
@@ -425,14 +423,14 @@ async function withAgentWsServer(
   const server = new SixbServer({
     host: sixb,
     hostname: "127.0.0.1",
-    port,
+    port: 0,
     quiet: true,
-    browser: createTestBrowserPolicy({ apiOrigin: baseUrl, appOrigin: baseUrl }),
+    browser: createTestBrowserPolicy(),
   })
 
   await server.start()
   try {
-    await run({ baseUrl, sixb })
+    await run({ baseUrl: `http://127.0.0.1:${server.getPort()}`, sixb })
   } finally {
     await server.stop()
   }

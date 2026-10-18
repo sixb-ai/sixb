@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import {
   col,
   defineDataset,
@@ -20,6 +20,41 @@ import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy, getFreePort } from "./helpers"
 
 describe("SixbServer start", () => {
+  // Reproduce: return `this.port` from `getPort()` and log it; both report 0 and nothing answers.
+  test("reports the port it bound when asked for port 0", async () => {
+    const server = new SixbServer({
+      host: new SixbHost({
+        id: "test-project",
+        ontology: [],
+        broker: new InMemoryBroker(),
+        storage: new InMemoryStorage(),
+        lakeStorage: new InMemoryLakeStorage(),
+        blobStorage: new InMemoryBlobStorage(),
+        queues: new InMemoryQueues(),
+      }),
+      hostname: "127.0.0.1",
+      port: 0,
+      browser: createTestBrowserPolicy(),
+    })
+    const log = spyOn(console, "log").mockImplementation(() => {})
+    let logged: unknown[] = []
+    try {
+      await server.start()
+      logged = log.mock.calls.map(([line]) => line)
+    } finally {
+      log.mockRestore()
+    }
+
+    try {
+      const port = server.getPort()
+      expect(port).toBeGreaterThan(0)
+      expect(logged[0]).toBe(`Sixb server running at http://127.0.0.1:${port}`)
+      expect((await fetch(`http://127.0.0.1:${port}/health`)).status).toBe(200)
+    } finally {
+      await server.stop()
+    }
+  })
+
   // Reproduce: remove `checkPipelineMarkings` from `SixbServer.start()`; the server listens.
   test("refuses to start when a SQL step gives a projected column undeclared markings", async () => {
     const financial = defineMarking("financial")

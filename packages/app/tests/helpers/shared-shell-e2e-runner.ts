@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs"
 import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises"
-import { createServer } from "node:net"
 import { dirname, join, resolve } from "node:path"
 import { createCustomApp } from "../../src/createCustomApp"
 
@@ -26,10 +25,10 @@ async function runDev(root: string): Promise<void> {
     authEnabled: false,
     builtInPages: false,
   })
-  const { port, server } = await onFreePort((port) => app.dev({ host: "127.0.0.1", port }))
+  const server = await app.dev({ host: "127.0.0.1", port: 0 })
 
   try {
-    const origin = `http://127.0.0.1:${port}`
+    const origin = server.url
     const normal = await fetch(`${origin}/`)
     const sharedDevRoot = join(root, ".sixb", "generated", "shared-dev")
     assert(
@@ -140,11 +139,14 @@ async function runProduction(root: string): Promise<void> {
     "initial production shared entry"
   )
 
-  const { port, server } = await onFreePort((port) =>
-    app.start({ host: "127.0.0.1", port, outdir, apiBaseUrl: "https://api.example.test/v1" })
-  )
+  const server = await app.start({
+    host: "127.0.0.1",
+    port: 0,
+    outdir,
+    apiBaseUrl: "https://api.example.test/v1",
+  })
   try {
-    const origin = `http://127.0.0.1:${port}`
+    const origin = server.url
     const shared = await fetch(`${origin}/shared/shr_1/reports/report-1`)
     assertEqual(shared.status, 200, "production shared shell status")
     assertSafeSharedDocument(shared, await shared.text(), false)
@@ -289,38 +291,6 @@ async function linkDependencies(root: string): Promise<void> {
     await mkdir(dirname(destination), { recursive: true })
     await symlink(source, destination, "dir")
   }
-}
-
-/**
- * The app's servers answer with the port they were asked for, not one they bound, so a port is
- * reserved right before use and picked again when a parallel process takes it in between.
- */
-async function onFreePort<T>(
-  start: (port: number) => Promise<T>
-): Promise<{ readonly port: number; readonly server: T }> {
-  for (let attempt = 1; ; attempt += 1) {
-    const port = await getFreePort()
-    try {
-      return { port, server: await start(port) }
-    } catch (error) {
-      if (attempt === 5 || (error as { code?: unknown }).code !== "EADDRINUSE") throw error
-    }
-  }
-}
-
-async function getFreePort(): Promise<number> {
-  return await new Promise<number>((resolvePort, reject) => {
-    const server = createServer()
-    server.on("error", reject)
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address()
-      if (!address || typeof address === "string") {
-        reject(new Error("Could not resolve an open port"))
-        return
-      }
-      server.close((error) => (error ? reject(error) : resolvePort(address.port)))
-    })
-  })
 }
 
 function assert(value: unknown, message: string): asserts value {

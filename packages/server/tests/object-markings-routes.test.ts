@@ -16,7 +16,7 @@ import {
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
-import { createTestBrowserPolicy, getFreePort } from "./helpers"
+import { createTestBrowserPolicy } from "./helpers"
 
 const projectId = "object-markings-tests"
 const financial = defineMarking("financial")
@@ -194,20 +194,18 @@ describe("event stream with markings", () => {
   test("replayed and live object events omit marked properties", async () => {
     const { host, storage, trusted } = await createHost()
     const headers = await seedSession(storage, "usr_staff", [staff.id])
-    const port = await getFreePort()
-    const baseUrl = `http://127.0.0.1:${port}`
     const server = new SixbServer({
       host,
       hostname: "127.0.0.1",
-      port,
+      port: 0,
       quiet: true,
-      browser: createTestBrowserPolicy({ apiOrigin: baseUrl, appOrigin: baseUrl }),
+      browser: createTestBrowserPolicy(),
     })
 
     await server.start()
     // Bun's WebSocket accepts an options object with `headers`; the DOM lib types only model the
     // subprotocols argument, so widen at the call site.
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/events`, {
+    const ws = new WebSocket(`ws://127.0.0.1:${server.getPort()}/ws/events`, {
       headers,
     } as unknown as string[])
     const messages = wsMessages(ws)

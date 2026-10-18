@@ -87,24 +87,14 @@ const api = Bun.serve({
       : new Response(null, { status: 404 }),
 })
 const app = await createCustomApp({ rootDir: ${JSON.stringify(root)}, authEnabled: false })
-// app.start answers with the port it was asked for, not one it bound, so the port is reserved
-// here, right before use, and another pick is made when a parallel process took it meanwhile.
-async function startOnFreePort() {
-  for (let attempt = 1; ; attempt += 1) {
-    const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(null) })
-    const port = probe.port
-    probe.stop(true)
-    try {
-      return await app.start({ host: "127.0.0.1", port, apiBaseUrl: "http://127.0.0.1:" + api.port })
-    } catch (error) {
-      if (attempt === 5 || error?.code !== "EADDRINUSE") throw error
-    }
-  }
-}
-const server = await startOnFreePort()
+const server = await app.start({
+  host: "127.0.0.1",
+  port: 0,
+  apiBaseUrl: "http://127.0.0.1:" + api.port,
+})
 let html
 try {
-  html = await (await fetch("http://127.0.0.1:" + server.port)).text()
+  html = await (await fetch(server.url)).text()
 } finally {
   await server.stop()
 }
