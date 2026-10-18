@@ -2,6 +2,14 @@ import * as React from "react"
 
 const MOBILE_BREAKPOINT = 768
 
+/**
+ * Whether the window is a phone's width now. `useIsMobile` answers false until its effect runs, so
+ * code that acts on the first render asks this instead.
+ */
+export function isMobileViewport(): boolean {
+  return typeof window !== "undefined" && window.innerWidth < MOBILE_BREAKPOINT
+}
+
 export function useIsMobile() {
   const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined)
 

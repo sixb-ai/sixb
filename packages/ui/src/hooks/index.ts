@@ -7,7 +7,7 @@ export {
 } from "./use-address-lookup"
 export { useDebouncedValue } from "./use-debounced-value"
 export { type UseDictationOptions, useDictation } from "./use-dictation"
-export { useIsMobile } from "./use-mobile"
+export { isMobileViewport, useIsMobile } from "./use-mobile"
 export {
   SpeechRecognitionProvider,
   type SpeechRecognitionState,
