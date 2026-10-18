@@ -60,6 +60,7 @@ export {
   parseSheetDate,
   parseSheetNumber,
   parseWorkbook,
+  type SheetChartAggregate,
   type SheetChartType,
   type SheetColumnFormat,
   type SheetColumnType,

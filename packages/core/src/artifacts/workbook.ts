@@ -53,8 +53,12 @@ export type SheetHighlight = (typeof SHEET_HIGHLIGHTS)[number]
 export const SHEET_TOTALS = ["sum", "average", "min", "max", "count"] as const
 export type SheetTotal = (typeof SHEET_TOTALS)[number]
 
-export const SHEET_CHART_TYPES = ["bar", "line", "area", "pie"] as const
+export const SHEET_CHART_TYPES = ["bar", "line", "area", "pie", "scatter"] as const
 export type SheetChartType = (typeof SHEET_CHART_TYPES)[number]
+
+/** How a chart summarizes rows that share an x value: one point or slice for each value. */
+export const SHEET_CHART_AGGREGATES = ["sum", "average", "count"] as const
+export type SheetChartAggregate = (typeof SHEET_CHART_AGGREGATES)[number]
 
 export interface SheetColumnFormat {
   readonly type: SheetColumnType
@@ -97,8 +101,15 @@ export interface WorkbookChart {
   readonly sheet: string
   /** The column along the x axis, or a pie's slice labels. */
   readonly x: string
-  /** The plotted columns: one series each, or a pie's one value column. */
+  /**
+   * The plotted columns: one series each, or a pie's one value column. Empty for a chart that
+   * counts rows.
+   */
   readonly y: readonly string[]
+  /** A bar chart's columns drawn as lines over its bars. */
+  readonly line: readonly string[]
+  /** Rows summarized by their x value, in the order the values first appear. */
+  readonly aggregate?: SheetChartAggregate
   readonly title?: string
   /** Stack a bar or area chart's series. */
   readonly stacked: boolean
@@ -416,6 +427,8 @@ function readChart(value: unknown, index: number, sheets: readonly WorkbookSheet
     "sheet",
     "x",
     "y",
+    "line",
+    "aggregate",
     "title",
     "stacked",
   ])
@@ -437,20 +450,49 @@ function readChart(value: unknown, index: number, sheets: readonly WorkbookSheet
     )
   }
   if (typeof input.x !== "string" || !input.x) throw new WorkbookError(`${at} needs an "x" column.`)
-  const y = typeof input.y === "string" ? [input.y] : input.y
   if (
-    !Array.isArray(y) ||
-    y.length === 0 ||
-    !y.every((column) => typeof column === "string" && column)
+    input.aggregate !== undefined &&
+    !(SHEET_CHART_AGGREGATES as readonly unknown[]).includes(input.aggregate)
   ) {
-    throw new WorkbookError(`${at} needs a "y" column, or a list of them.`)
-  }
-  if (y.length > ARTIFACT_LIMITS.maxChartSeries) {
     throw new WorkbookError(
-      `${at} plots ${y.length} columns; a chart reads well with at most ${ARTIFACT_LIMITS.maxChartSeries}. Split it, or chart the ones that matter.`
+      `${at} "aggregate" is ${JSON.stringify(input.aggregate)}; use one of ${SHEET_CHART_AGGREGATES.join(", ")}.`
     )
   }
-  if (type === "pie" && y.length !== 1)
+  const aggregate = input.aggregate as SheetChartAggregate | undefined
+  if (aggregate && type === "scatter") {
+    throw new WorkbookError(
+      `${at} is a scatter chart, which plots every row; leave out "aggregate".`
+    )
+  }
+  const columns = (key: "y" | "line") => {
+    const value = input[key]
+    const list = typeof value === "string" ? [value] : (value ?? [])
+    if (!Array.isArray(list) || !list.every((column) => typeof column === "string" && column)) {
+      throw new WorkbookError(`${at} "${key}" must be a column, or a list of them.`)
+    }
+    return list as string[]
+  }
+  const y = columns("y")
+  const line = columns("line")
+  // Counting rows plots how many there are for each x value: there is no column to plot.
+  if (aggregate === "count") {
+    if (y.length > 0 || line.length > 0) {
+      throw new WorkbookError(`${at} counts rows, which needs no "y"; leave it out.`)
+    }
+  } else if (y.length === 0) {
+    throw new WorkbookError(`${at} needs a "y" column, or a list of them.`)
+  }
+  if (line.length > 0 && type !== "bar") {
+    throw new WorkbookError(
+      `${at} is a ${type} chart; only a bar chart draws "line" columns over its bars.`
+    )
+  }
+  if (y.length + line.length > ARTIFACT_LIMITS.maxChartSeries) {
+    throw new WorkbookError(
+      `${at} plots ${y.length + line.length} columns; a chart reads well with at most ${ARTIFACT_LIMITS.maxChartSeries}. Split it, or chart the ones that matter.`
+    )
+  }
+  if (type === "pie" && aggregate !== "count" && y.length !== 1)
     throw new WorkbookError(`${at} is a pie: give it one "y" column.`)
   if (input.stacked !== undefined && typeof input.stacked !== "boolean") {
     throw new WorkbookError(`${at} "stacked" must be true or false.`)
@@ -466,7 +508,9 @@ function readChart(value: unknown, index: number, sheets: readonly WorkbookSheet
     type,
     sheet: input.sheet,
     x: input.x,
-    y: y as string[],
+    y,
+    line,
+    ...(aggregate ? { aggregate } : {}),
     ...(typeof input.title === "string" && input.title.trim() ? { title: input.title.trim() } : {}),
     stacked: input.stacked === true,
   }

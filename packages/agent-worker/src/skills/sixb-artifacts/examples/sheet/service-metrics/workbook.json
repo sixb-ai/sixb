@@ -56,6 +56,23 @@
       "x": "Quarter",
       "y": ["Service revenue", "Parts cost"],
       "title": "Service revenue and parts cost by quarter"
+    },
+    {
+      "name": "revenue-margin",
+      "type": "bar",
+      "sheet": "Quarters",
+      "x": "Quarter",
+      "y": "Service revenue",
+      "line": "Margin",
+      "title": "Service revenue, and its margin after parts"
+    },
+    {
+      "name": "visits-cost",
+      "type": "scatter",
+      "sheet": "Regions",
+      "x": "Visits",
+      "y": "Parts cost",
+      "title": "Parts cost against visits, by region"
     }
   ]
 }

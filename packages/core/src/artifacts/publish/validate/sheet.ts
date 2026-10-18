@@ -293,14 +293,16 @@ function checkCharts(workbook: Workbook, tables: ReadonlyMap<string, CsvTable>):
     const sheet = workbook.sheets.find((candidate) => candidate.name === chart.sheet)
     const table = tables.get(chart.sheet)
     if (!sheet || !table) continue
-    for (const column of [chart.x, ...chart.y]) {
+    const plotted = [...chart.y, ...chart.line]
+    for (const column of [chart.x, ...plotted]) {
       if (!table.header.includes(column)) {
         throw invalidArtifact(
           `${WORKBOOK_FILE} chart '${chart.name}' plots column '${column}', which sheet '${chart.sheet}' does not have.`
         )
       }
     }
-    for (const column of chart.y) {
+    // A scatter places each row by its x, so x is a number too.
+    for (const column of chart.type === "scatter" ? [chart.x, ...plotted] : plotted) {
       const type = sheet.columns[column]?.type ?? "text"
       if (!NUMERIC_COLUMN_TYPES.includes(type)) {
         throw invalidArtifact(
@@ -308,10 +310,27 @@ function checkCharts(workbook: Workbook, tables: ReadonlyMap<string, CsvTable>):
         )
       }
     }
-    if (chart.type === "pie" && table.rows.length > ARTIFACT_LIMITS.maxPieSlices) {
+    // Lines of another kind than the bars read on one right axis, which reads one kind.
+    const barType = sheet.columns[chart.y[0] ?? ""]?.type
+    const rightTypes = new Set(
+      chart.line.map((column) => sheet.columns[column]?.type).filter((type) => type !== barType)
+    )
+    if (rightTypes.size > 1) {
       throw invalidArtifact(
-        `${WORKBOOK_FILE} chart '${chart.name}' is a pie with ${table.rows.length} slices; a pie reads well with at most ${ARTIFACT_LIMITS.maxPieSlices}. Use a bar chart instead.`
+        `${WORKBOOK_FILE} chart '${chart.name}' draws lines of ${[...rightTypes].join(" and ")} over ${barType ?? "its"} bars; the right axis reads one kind. Chart the others separately.`
       )
+    }
+    if (chart.type === "pie") {
+      // A pie's slices are its rows, or its x values when it summarizes them.
+      const index = table.header.indexOf(chart.x)
+      const slices = chart.aggregate
+        ? new Set(table.rows.map((row) => (row[index] ?? "").trim())).size
+        : table.rows.length
+      if (slices > ARTIFACT_LIMITS.maxPieSlices) {
+        throw invalidArtifact(
+          `${WORKBOOK_FILE} chart '${chart.name}' is a pie with ${slices} slices; a pie reads well with at most ${ARTIFACT_LIMITS.maxPieSlices}. Use a bar chart instead.`
+        )
+      }
     }
   }
 }

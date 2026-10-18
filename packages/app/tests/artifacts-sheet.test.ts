@@ -713,3 +713,93 @@ describe("checkboxes, tags, and highlights", () => {
     expect(at(4, "n/a")).toBeUndefined()
   })
 })
+
+describe("charts that summarize, combine, and scatter", () => {
+  const parsed = parseWorkbook(
+    JSON.stringify({
+      sheets: [
+        {
+          name: "Jobs",
+          columns: { Hours: "number", Cost: "currency", Margin: "percent", Crew: "currency" },
+        },
+      ],
+      charts: [
+        { name: "hours", type: "bar", sheet: "Jobs", x: "Region", y: "Hours", aggregate: "sum" },
+        { name: "cost", type: "line", sheet: "Jobs", x: "Region", y: "Cost", aggregate: "average" },
+        { name: "jobs", type: "pie", sheet: "Jobs", x: "Region", aggregate: "count" },
+        {
+          name: "combo",
+          type: "bar",
+          sheet: "Jobs",
+          x: "Job",
+          y: "Cost",
+          line: ["Margin", "Crew"],
+        },
+        { name: "spread", type: "scatter", sheet: "Jobs", x: "Hours", y: "Cost" },
+      ],
+    })
+  )
+  if (!("workbook" in parsed)) throw new Error(parsed.error)
+  const jobs = sheetModel(
+    parsed.workbook.sheets[0] as Workbook["sheets"][number],
+    parseCsv(
+      [
+        "Job,Region,Hours,Cost,Margin,Crew",
+        "J1,North,4,400,0.2,2",
+        "J2,South,2,,0.1,1",
+        "J3,North,6,800,0.3,3",
+        "J4,,3,100,0.4,1",
+        "J5,South,n/a,200,0.5,2",
+      ].join("\n")
+    )
+  )
+  const data = (name: string) => {
+    const chart = parsed.workbook.charts.find((candidate) => candidate.name === name)
+    if (!chart) throw new Error(`No chart ${name}`)
+    const result = chartData(chart, jobs, "Jobs")
+    if (!result) throw new Error(`No data for ${name}`)
+    return result
+  }
+
+  test("summarize rows by their x value, in the order values first appear", () => {
+    // North first, as the sheet has it; a row with no region is left out; a gap is not a zero.
+    expect(data("hours").rows).toEqual([
+      { x: "North", s0: 10 },
+      { x: "South", s0: 2 },
+    ])
+    expect(data("cost").rows).toEqual([
+      { x: "North", s0: 600 },
+      { x: "South", s0: 200 },
+    ])
+    const counted = data("jobs")
+    expect(counted.series.map((series) => series.label)).toEqual(["Jobs"])
+    expect(counted.rows).toEqual([
+      { x: "North", s0: 2 },
+      { x: "South", s0: 2 },
+    ])
+  })
+
+  test("draw lines over bars, on the right axis when they are another kind", () => {
+    const combo = data("combo")
+    // Lines take the strongest colors and bars lighter ones, so a line reads across a bar.
+    expect(
+      combo.series.map(({ label, line, right, color }) => ({ label, line, right, color }))
+    ).toEqual([
+      { label: "Cost", line: false, right: false, color: "var(--chart-4)" },
+      { label: "Margin", line: true, right: true, color: "var(--chart-1)" },
+      // A line of the bars' own kind reads on their axis.
+      { label: "Crew", line: true, right: false, color: "var(--chart-2)" },
+    ])
+    // The label at the last point is the bars', not a line's.
+    expect(latestValue(combo, false)).toBe(200)
+  })
+
+  test("place each row by two numbers, named by its first column", () => {
+    expect(data("spread").rows).toEqual([
+      { x: 4, name: "J1", s0: 400 },
+      { x: 2, name: "J2", s0: null },
+      { x: 6, name: "J3", s0: 800 },
+      { x: 3, name: "J4", s0: 100 },
+    ])
+  })
+})

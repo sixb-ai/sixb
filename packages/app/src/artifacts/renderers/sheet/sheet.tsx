@@ -7,21 +7,14 @@ import {
 import { Button } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import {
-  AreaChart as AreaIcon,
-  ChartColumn,
-  ChartLine,
-  ChartPie,
-  Download,
-  ListFilter,
-  Search,
-} from "lucide-react"
+import { Download, ListFilter, Search } from "lucide-react"
 import { lazy, Suspense, useId, useRef, useState } from "react"
 import { formatFileSize } from "../../file-size"
 import { useArtifactMessages } from "../../messages"
 import { type ArtifactVersion, versionImageSource } from "../../queries"
 import { useArtifactThemeAttributes } from "../../theme"
 import { ViewerLoading, ViewerNotice } from "../notice"
+import { CHART_ICONS } from "./chart-icon"
 import { useSheetFind } from "./find-bar"
 import {
   CommandBar,
@@ -349,14 +342,7 @@ export function SheetTable({ model }: { readonly model: SheetModel }) {
 }
 
 function ChartIcon({ type }: { readonly type: WorkbookChart["type"] }) {
-  const Icon =
-    type === "line"
-      ? ChartLine
-      : type === "area"
-        ? AreaIcon
-        : type === "pie"
-          ? ChartPie
-          : ChartColumn
+  const Icon = CHART_ICONS[type]
   return <Icon className="size-3.5" aria-hidden="true" />
 }
 

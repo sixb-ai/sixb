@@ -15,14 +15,18 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   LabelList,
   Line,
   LineChart,
   Pie,
   PieChart,
+  Scatter,
+  ScatterChart,
   XAxis,
   YAxis,
 } from "recharts"
+import { useArtifactMessages } from "../../messages"
 import { chartData, latestValue } from "./chart-data"
 import { cellFormatter, compactFormatter } from "./format"
 import type { SheetModel } from "./model"
@@ -30,7 +34,8 @@ import type { SheetModel } from "./model"
 /**
  * Every chart in a sheet, drawn by Sixb from the sheet's data: the theme's chart colors, axes and
  * tooltips formatted as the columns are, a legend only when there are several series, and the
- * latest value labelled. Loaded on demand, so a sheet without charts never fetches it, and drawn
+ * latest value labelled. A bar chart draws its line columns over the bars, on a right axis when
+ * they are of another kind; a scatter places each row by two numbers and names it on hover. Loaded on demand, so a sheet without charts never fetches it, and drawn
  * again only when its data changes: the grid beside it re-renders on every move of the selection.
  */
 export default memo(function SheetChart({
@@ -42,7 +47,8 @@ export default memo(function SheetChart({
   readonly model: SheetModel
   readonly locale: string
 }) {
-  const data = useMemo(() => chartData(chart, model), [chart, model])
+  const countLabel = useArtifactMessages().sheet.count
+  const data = useMemo(() => chartData(chart, model, countLabel), [chart, model, countLabel])
   const config = useMemo<ChartConfig>(
     () =>
       Object.fromEntries(
@@ -216,6 +222,143 @@ export default memo(function SheetChart({
           ))}
         </ul>
       </div>
+    )
+  }
+
+  if (chart.type === "scatter") {
+    const formatY = compactFormatter(first.column, locale)
+    const xAxis = compactFormatter(data.x, locale)
+    return (
+      <ChartContainer config={config} className="aspect-auto h-full w-full">
+        <ScatterChart margin={{ top: 16, right: 12, bottom: 0, left: 0 }} accessibilityLayer>
+          <CartesianGrid strokeDasharray="0" />
+          <XAxis
+            type="number"
+            dataKey="x"
+            name={data.x.name}
+            domain={["auto", "auto"]}
+            tickLine={false}
+            axisLine={false}
+            tickMargin={10}
+            tickFormatter={xAxis}
+          />
+          <YAxis
+            type="number"
+            tickLine={false}
+            axisLine={false}
+            tickMargin={6}
+            width={56}
+            domain={["auto", "auto"]}
+            tickFormatter={formatY}
+          />
+          <ChartTooltip
+            cursor={{ strokeDasharray: "3 3" }}
+            content={({ active, payload }) => {
+              const point = payload?.[0]?.payload as Record<string, unknown> | undefined
+              if (!active || !point) return null
+              return (
+                <div className="grid min-w-36 gap-1 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
+                  {point.name ? <span className="font-medium">{String(point.name)}</span> : null}
+                  {[
+                    { label: data.x.name, text: formatX(point.x) },
+                    ...data.series.map((series) => ({
+                      label: series.label,
+                      text: formatValue(point[series.key], series.key),
+                    })),
+                  ].map((entry) => (
+                    <span key={entry.label} className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">{entry.label}</span>
+                      <span className="font-medium tabular-nums">{entry.text}</span>
+                    </span>
+                  ))}
+                </div>
+              )
+            }}
+          />
+          {legend}
+          {data.series.map((series) => (
+            <Scatter
+              key={series.key}
+              name={series.label}
+              data={data.rows as Record<string, string | number | null>[]}
+              dataKey={series.key}
+              fill={`var(--color-${series.key})`}
+              fillOpacity={0.85}
+              isAnimationActive={false}
+            />
+          ))}
+        </ScatterChart>
+      </ChartContainer>
+    )
+  }
+
+  const lines = data.series.filter((series) => series.line)
+  if (chart.type === "bar" && lines.length > 0) {
+    const bars = data.series.filter((series) => !series.line)
+    const right = lines.find((series) => series.right)
+    return (
+      <ChartContainer config={config} className="aspect-auto h-full w-full">
+        <ComposedChart {...cartesian} barCategoryGap="22%">
+          <CartesianGrid vertical={false} strokeDasharray="0" />
+          <XAxis
+            dataKey="x"
+            tickLine={false}
+            axisLine={false}
+            tickMargin={10}
+            minTickGap={4}
+            tickFormatter={formatX}
+          />
+          <YAxis
+            yAxisId="left"
+            tickLine={false}
+            axisLine={false}
+            tickMargin={6}
+            width={56}
+            tickFormatter={axis}
+          />
+          {/* Lines of another kind than the bars, a percent over amounts, read on their own axis. */}
+          {right ? (
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              tickLine={false}
+              axisLine={false}
+              tickMargin={6}
+              width={48}
+              domain={["auto", "auto"]}
+              tickFormatter={compactFormatter(right.column, locale)}
+            />
+          ) : null}
+          {tooltip}
+          {legend}
+          {bars.map((series, index) => (
+            <Bar
+              key={series.key}
+              yAxisId="left"
+              dataKey={series.key}
+              fill={`var(--color-${series.key})`}
+              radius={chart.stacked && index < bars.length - 1 ? 0 : [4, 4, 0, 0]}
+              maxBarSize={56}
+              isAnimationActive={false}
+              {...(chart.stacked ? { stackId: "stack" } : {})}
+            />
+          ))}
+          {lines.map((series) => (
+            <Line
+              key={series.key}
+              yAxisId={series.right ? "right" : "left"}
+              dataKey={series.key}
+              type="linear"
+              stroke={`var(--color-${series.key})`}
+              strokeWidth={2.25}
+              dot={{ r: 3, strokeWidth: 2, fill: "var(--background)" }}
+              activeDot={{ r: 4 }}
+              connectNulls={false}
+              isAnimationActive={false}
+            />
+          ))}
+        </ComposedChart>
+      </ChartContainer>
     )
   }
 
