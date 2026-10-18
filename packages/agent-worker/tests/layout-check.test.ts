@@ -278,13 +278,23 @@ exports.chromium = {
 `
       )
       // A 600ms timeout puts the check's deadline at 500ms. The sandbox kills the command only
-      // after five seconds, so a slow start of node never reads as the deadline.
+      // after five seconds, so a slow start of node never reads as the deadline. That stretch would
+      // pass any deadline under five seconds, so what production asked for is recorded first:
+      // reproduce by setting layout-check.ts's deadline to `timeoutMs * 2`.
       const sandbox = new LocalBashSandbox(root)
       const run = sandbox.runCommand.bind(sandbox)
-      sandbox.runCommand = (command, args, options) =>
-        run(command, args, { ...options, timeout: 5_000 })
+      const requested: { deadline?: string; timeout?: number }[] = []
+      sandbox.runCommand = (command, args, options) => {
+        requested.push({
+          deadline: options?.env?.SIXB_CHECK_DEADLINE_MS,
+          timeout: options?.timeout,
+        })
+        return run(command, args, { ...options, timeout: 5_000 })
+      }
       const handle = { sandbox, env: { SIXB_PLAYWRIGHT: playwright } }
-      expect(await check(handle, { timeoutMs: 600 })).toEqual({
+      const result = await check(handle, { timeoutMs: 600 })
+      expect(requested).toEqual([{ deadline: "500", timeout: 600 }])
+      expect(result).toEqual({
         status: "checked",
         screenshots: [".sixb/agent/checks/art_0000000000-v1/slide-01.png"],
         warnings: [
