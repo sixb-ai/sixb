@@ -47,19 +47,23 @@ From outside the server, use `POST /api/artifacts` and
 ## The Agent publishes
 
 In a conversation, the Agent publishes what you ask it to make, such as a report, a brief, a table
-of data, or a file in a format you name, as an artifact. Each artifact gets a card under the reply and opens beside the
-conversation as soon as it is published, while the Agent is still working. Ask for a change and the
-Agent publishes the next version of the same artifact; the version menu keeps the earlier ones. The
-conversation's header lists every artifact it published.
+of data, or a file in a format you name, as an artifact. Each new artifact gets a card under the
+reply. The first one a reply publishes opens beside the conversation as soon as it is published,
+while the Agent is still working; on a phone, where it would open over the conversation, it waits
+on its card instead.
+
+Ask for a change and the Agent publishes the next version of the same artifact. The reply shows it
+as a line with the version number and what changed, such as a sheet or section added, and the
+version menu keeps the earlier versions. The conversation's header lists every artifact it
+published.
 
 A cancelled reply keeps what it already published. Retrying a reply that failed removes what it
 published along with what it said.
 
-The Agent learns the formats from a built-in skill, `sixb-artifacts`. To change how it writes, add a
-skill with the same name under `skills/`: yours replaces the built-in one.
+The Agent learns the formats from a built-in skill, `sixb-artifacts`.
 
-A file one of your tools returns stays with that tool's step in the conversation. The Agent publishes
-it when it is what you asked for.
+A file one of your tools returns stays with that tool's step in the conversation. The Agent
+publishes it when it is what you asked for.
 
 ## Write a document
 
@@ -103,13 +107,14 @@ Central,962,0.934,141950
 ```
 
 - A column is `text` unless the workbook gives it a type: `number`, `currency`, `percent` (written
-  as a fraction, `0.961`), `date` (`2026-09-30`), `link` (a full `https://` address), or `image`
-  (the path of an image file in the artifact).
+  as a fraction, `0.961`), `date` (`2026-09-30`), `link` (a full `https://` or `http://` address),
+  or `image` (the path of an image file in the artifact).
 - Values are formatted in the reader's locale, so write them without symbols or separators.
 - `frozenRows` (default 1, the header) and `frozenColumns` (default 0) stay in view while the
   sheet scrolls; `widths` sets columns' widths in pixels.
 - A chart is a `bar`, `line`, `area`, or `pie` chart of up to five `y` columns against an `x`
-  column. Its `name` is its address, so keep it across versions and rename it by its `title`. Bar and area charts can be `stacked`; a pie has one `y` column and at most five rows.
+  column. Its `name` is its address, so keep it across versions and rename it by its `title`. Bar
+  and area charts can be `stacked`; a pie has one `y` column and at most five rows.
 
 Publishing reads every typed cell and every chart against its sheet and refuses the version with
 the file, row, and column to fix. A sheet holds at most 200 columns and 100,000 rows, and a
@@ -163,22 +168,23 @@ previous and next, an overview of every slide, and present, where the slide fill
 ## Reference another artifact
 
 A document, a sheet, or an agent's reply can show another artifact, or a part of it, by its
-address. A report that shows a sheet's chart stays current when the sheet changes. The Agent's
-replies pin the version they describe (`@2`), so what a reply shows never changes under its words.
+address. A report that shows a sheet's chart stays current when the sheet changes. The Agent is
+told to pin the version a reply describes (`@2`), so that what the reply shows matches its words;
+an address it writes without a version follows the latest one.
 
 ```text
 artifact:<id>[@<version>][/<file>][#<part>]
 ```
 
-| Address | Points at |
-| --- | --- |
-| `artifact:art_k3m9q2x7tp` | The artifact, at its latest version |
-| `artifact:art_k3m9q2x7tp@2` | Version 2, which never changes |
-| `artifact:art_k3m9q2x7tp/figures/revenue.svg` | A file inside it |
-| `artifact:art_k3m9q2x7tp#Regions` | A sheet |
-| `artifact:art_k3m9q2x7tp#Regions!A1:D5` | A range of a sheet; row 1 is its header row |
-| `artifact:art_k3m9q2x7tp#chart=revenue` | A chart in a workbook |
-| `artifact:art_k3m9q2x7tp#methodology` | A document's section, by its heading's slug |
+| Address                                       | Points at                                   |
+| --------------------------------------------- | ------------------------------------------- |
+| `artifact:art_k3m9q2x7tp`                     | The artifact, at its latest version         |
+| `artifact:art_k3m9q2x7tp@2`                   | Version 2, which never changes              |
+| `artifact:art_k3m9q2x7tp/figures/revenue.svg` | A file inside it                            |
+| `artifact:art_k3m9q2x7tp#Regions`             | A sheet                                     |
+| `artifact:art_k3m9q2x7tp#Regions!A1:D5`       | A range of a sheet; row 1 is its header row |
+| `artifact:art_k3m9q2x7tp#chart=revenue`       | A chart in a workbook                       |
+| `artifact:art_k3m9q2x7tp#methodology`         | A document's section, by its heading's slug |
 
 In Markdown, an image alone in its paragraph shows the target in place, with the image's alt text
 as its caption; a link opens it:
@@ -203,8 +209,8 @@ can't open a target sees it as unavailable.
 
 Every artifact has a page at `/artifacts/{artifactId}` that fills the window, over your app's
 navigation. Add `?v=2` for a version and `?part=revenue` to open at a document's section, a
-sheet (`?part=Regions`), or a chart (`?part=chart=sla`). In an agent
-conversation, artifacts open beside the chat.
+sheet (`?part=Regions`), or a chart (`?part=chart=sla`). In an agent conversation, artifacts open
+beside the chat.
 
 `/artifacts` lists every artifact you can open, most recently updated first, each with a preview
 of its latest version: a sheet's first chart, a document's title and lede, a deck's first slide,
@@ -229,12 +235,14 @@ the app, scope token overrides in `app/globals.css`:
 }
 ```
 
-An artifact can carry its own `theme.json` at its root to pin a mode or override tokens:
+A document, a sheet, or a deck can carry its own `theme.json` at its root to pin a mode or override
+tokens:
 
 ```json
 { "mode": "light", "tokens": { "--primary": "#0f766e", "--radius": "6px" } }
 ```
 
-It can set colors (`--background`, `--foreground`, `--card`, `--muted`, `--primary`, `--accent`,
-`--border`, `--chart-1` to `--chart-5`, and their `-foreground` pairs), fonts (`--font-sans`,
-`--font-serif`, `--font-mono`), and `--radius`.
+It can set colors (`--background`, `--foreground`, `--border`, `--chart-1` to `--chart-5`, and
+`--card`, `--muted`, `--primary`, and `--accent` with their `-foreground` pairs), fonts
+(`--font-sans`, `--font-serif`, `--font-mono`), and `--radius`. A `file` artifact holds one file,
+so a `theme.json` there is that file, not a theme.
