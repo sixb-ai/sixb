@@ -197,6 +197,57 @@ describe("a deck's frame", () => {
     expect(await data.json()).toEqual([{ unit: "V-12" }])
   })
 
+  test("serves each of a canvas's boards as a page under one link, and its shared files as they are", async () => {
+    // Reproduce by listing only a version's entry in frames/entries.ts: a canvas's entry is its
+    // canvas.json, so its boards are served without the kit and the runtime.
+    const fixture = createApp()
+    const alice = await session(fixture.storage, "alice")
+    const board = (id: string, x: number) => ({
+      id,
+      type: "board",
+      file: `boards/${id}.html`,
+      x,
+      y: 0,
+      w: 390,
+      h: 844,
+    })
+    const canvas = await publish(fixture, alice, "canvas", [
+      await fixture.put(
+        "canvas.json",
+        JSON.stringify({ items: [board("welcome", 0), board("region", 550)] }),
+        "application/json"
+      ),
+      await fixture.put(
+        "boards/welcome.html",
+        "<html><head></head><body>Welcome</body></html>",
+        "text/html"
+      ),
+      await fixture.put(
+        "boards/region.html",
+        "<html><head></head><body>Region</body></html>",
+        "text/html"
+      ),
+      await fixture.put("boards/shared.css", "body { margin: 0 }", "text/css"),
+    ])
+    const minted = await mint(fixture, alice, canvas.artifact.id)
+    expect(minted.status).toBe(200)
+    const { path } = (await minted.json()) as { path: string }
+    for (const id of ["welcome", "region"]) {
+      const html = await (
+        await fixture.app.fetch(new Request(url(`${path}boards/${id}.html`)))
+      ).text()
+      expect(html).toContain(
+        '<head><link rel="stylesheet" href="../__sixb/page.css"><script src="../__sixb/runtime.js" data-sixb-layout="page"></script></head>'
+      )
+    }
+    // A board in a folder finds the kit at the frame's root, where it is served. Reproduce by
+    // injecting __sixb/ relative to the board: the browser asks for boards/__sixb/page.css.
+    const kit = await fixture.app.fetch(new Request(url(`${path}__sixb/page.css`)))
+    expect(kit.status).toBe(200)
+    const css = await fixture.app.fetch(new Request(url(`${path}boards/shared.css`)))
+    expect(await css.text()).toBe("body { margin: 0 }")
+  })
+
   test("serves the version's files, and nothing else, under its policy", async () => {
     const { app, frame } = await deck()
     const base = `http://api.localhost${frame.path}`

@@ -2,7 +2,7 @@ import { posix } from "node:path"
 import type { ArtifactFile } from "../../../storage/artifacts/types"
 import { CANVAS_FILE, parseCanvas } from "../../canvas"
 import { ARTIFACT_LIMITS } from "../../limits"
-import type { CanvasOutline } from "../../outline"
+import type { CanvasOutline, CanvasOutlineItem } from "../../outline"
 import { type ArtifactBlobStorage, invalidArtifact, readArtifactText } from "../files"
 import type { FoundReference } from "../references"
 import { readHtmlReferences, refuseFrameAssetPaths } from "./html"
@@ -55,11 +55,16 @@ export async function validateCanvas(
     entry: CANVAS_FILE,
     outline: {
       kind: "canvas",
-      items: canvas.items.flatMap((item) =>
-        item.type === "board" || item.type === "section"
-          ? [{ id: item.id, type: item.type, ...(item.title ? { title: item.title } : {}) }]
-          : []
-      ),
+      items: canvas.items.flatMap((item): CanvasOutlineItem[] => {
+        const title = item.type === "board" || item.type === "section" ? item.title : undefined
+        const named = { id: item.id, ...(title ? { title } : {}) }
+        if (item.type === "board") {
+          return [
+            { ...named, type: "board", file: posix.normalize(item.file), w: item.w, h: item.h },
+          ]
+        }
+        return item.type === "section" ? [{ ...named, type: "section" }] : []
+      }),
     },
     references,
   }

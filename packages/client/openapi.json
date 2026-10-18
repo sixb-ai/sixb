@@ -35481,21 +35481,51 @@
                                 "items": {
                                   "type": "array",
                                   "items": {
-                                    "type": "object",
-                                    "properties": {
-                                      "id": {
-                                        "type": "string"
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["board"]
+                                          },
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "file": {
+                                            "type": "string"
+                                          },
+                                          "w": {
+                                            "type": "number"
+                                          },
+                                          "h": {
+                                            "type": "number"
+                                          }
+                                        },
+                                        "required": ["id", "type", "file", "w", "h"],
+                                        "additionalProperties": false
                                       },
-                                      "type": {
-                                        "type": "string",
-                                        "enum": ["board", "section"]
-                                      },
-                                      "title": {
-                                        "type": "string"
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["section"]
+                                          },
+                                          "title": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["id", "type"],
+                                        "additionalProperties": false
                                       }
-                                    },
-                                    "required": ["id", "type"],
-                                    "additionalProperties": false
+                                    ]
                                   }
                                 }
                               },
@@ -36454,21 +36484,51 @@
                                 "items": {
                                   "type": "array",
                                   "items": {
-                                    "type": "object",
-                                    "properties": {
-                                      "id": {
-                                        "type": "string"
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["board"]
+                                          },
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "file": {
+                                            "type": "string"
+                                          },
+                                          "w": {
+                                            "type": "number"
+                                          },
+                                          "h": {
+                                            "type": "number"
+                                          }
+                                        },
+                                        "required": ["id", "type", "file", "w", "h"],
+                                        "additionalProperties": false
                                       },
-                                      "type": {
-                                        "type": "string",
-                                        "enum": ["board", "section"]
-                                      },
-                                      "title": {
-                                        "type": "string"
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["section"]
+                                          },
+                                          "title": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["id", "type"],
+                                        "additionalProperties": false
                                       }
-                                    },
-                                    "required": ["id", "type"],
-                                    "additionalProperties": false
+                                    ]
                                   }
                                 }
                               },
@@ -37039,21 +37099,51 @@
                             "items": {
                               "type": "array",
                               "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["board"]
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      },
+                                      "file": {
+                                        "type": "string"
+                                      },
+                                      "w": {
+                                        "type": "number"
+                                      },
+                                      "h": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": ["id", "type", "file", "w", "h"],
+                                    "additionalProperties": false
                                   },
-                                  "type": {
-                                    "type": "string",
-                                    "enum": ["board", "section"]
-                                  },
-                                  "title": {
-                                    "type": "string"
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["section"]
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["id", "type"],
+                                    "additionalProperties": false
                                   }
-                                },
-                                "required": ["id", "type"],
-                                "additionalProperties": false
+                                ]
                               }
                             }
                           },

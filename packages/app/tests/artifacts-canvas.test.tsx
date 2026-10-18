@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
+import type { GetArtifactVersionResponse } from "@sixb/client"
 import { type Canvas, parseCanvas } from "@sixb/core/artifacts"
-import { act, render } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { act, fireEvent, render } from "@testing-library/react"
+import { liveBoards, MAX_LIVE_BOARDS } from "../src/artifacts/renderers/canvas/board"
+import { BoardFocus } from "../src/artifacts/renderers/canvas/focus"
 import { canvasExtent, canvasGraph } from "../src/artifacts/renderers/canvas/layout"
 import { CanvasThumbnail } from "../src/artifacts/renderers/canvas/thumbnail"
 import { installDom } from "./helpers/dom"
@@ -144,7 +148,7 @@ describe("a canvas's board", () => {
     const node = (id: string) => view.container.querySelector(`.react-flow__node[data-id="${id}"]`)
     expect(node("flow")?.textContent).toBe("Flow")
     expect(node("home")?.textContent).toContain("Home")
-    // A board without a title is named by its id.
+    // A board without a title is named by its id; until its page runs, it is a bare outline.
     expect(node("pay")?.textContent).toBe("pay")
     expect(node("ask")?.textContent).toBe("Annual first?")
     expect(node("title")?.textContent).toBe("Checkout")
@@ -165,5 +169,131 @@ describe("a canvas's board", () => {
     expect(flow?.classList.contains("dark")).toBe(true)
     expect(flow?.classList.contains("light")).toBe(false)
     view.unmount()
+  })
+})
+
+describe("live boards", () => {
+  const row = Array.from({ length: 8 }, (_, index) => ({
+    id: `b${index}`,
+    x: index * 500,
+    y: 0,
+    w: 390,
+    h: 844,
+  }))
+  const view = (panX: number, zoom: number) => ({
+    transform: [panX, 0, zoom] as const,
+    width: 1600,
+    height: 1000,
+  })
+
+  test("run the boards on screen, and keep running those that are as the view zooms out", () => {
+    // At 100% from the origin, boards 0 to 3 are on screen; board 4 starts past the right edge.
+    const near = liveBoards(row, view(0, 1))
+    expect([...near].sort()).toEqual(["b0", "b1", "b2", "b3"])
+    // Panned along, the ones that left the screen stop and the ones that came on start.
+    expect([...liveBoards(row, view(-2000, 1))].sort()).toEqual(["b4", "b5", "b6", "b7"])
+    // At 10%, a board is 39 pixels wide on screen: none starts there, but those running keep
+    // running, so zooming out never reloads a page. Reproduce by dropping the running set.
+    expect(liveBoards(row, view(0, 0.1)).size).toBe(0)
+    expect([...liveBoards(row, view(0, 0.1), near)].sort()).toEqual(["b0", "b1", "b2", "b3"])
+  })
+
+  test("run at most twelve, those nearest the middle of the view", () => {
+    // Twenty boards in four rows of five, all on screen at 42%: twelve run, the corners don't.
+    const grid = Array.from({ length: 20 }, (_, index) => ({
+      id: `g${index}`,
+      x: (index % 5) * 420,
+      y: Math.floor(index / 5) * 560,
+      w: 390,
+      h: 520,
+    }))
+    const live = liveBoards(grid, { transform: [40, 20, 0.42], width: 1000, height: 1000 })
+    expect(live.size).toBe(MAX_LIVE_BOARDS)
+    for (const corner of ["g0", "g4", "g15", "g19"]) expect(live.has(corner)).toBe(false)
+    expect(live.has("g7")).toBe(true)
+    // A corner already running keeps its place over a board nearer the middle.
+    expect(
+      liveBoards(grid, { transform: [40, 20, 0.42], width: 1000, height: 1000 }, new Set(["g0"]))
+    ).toContain("g0")
+  })
+})
+
+describe("a board opened over its canvas", () => {
+  const version = {
+    artifactId: "art_0nb0ard1ng",
+    version: 1,
+    title: "Onboarding",
+    entry: "canvas.json",
+    files: [],
+    outline: { kind: "canvas", items: [] },
+    references: [],
+    author: { type: "user", id: "user-1" },
+    createdAt: "2026-10-18T12:00:00.000Z",
+  } as unknown as GetArtifactVersionResponse
+  const boards = CANVAS.items.filter((item) => item.type === "board")
+  const client = () =>
+    new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
+
+  test("steps through the boards with ← and →, and goes back with Esc", async () => {
+    const opened: string[] = []
+    let closed = 0
+    const view = render(
+      <QueryClientProvider client={client()}>
+        <BoardFocus
+          version={version}
+          boards={boards}
+          id="home"
+          onOpen={(id) => opened.push(id)}
+          onClose={() => {
+            closed += 1
+          }}
+        />
+      </QueryClientProvider>
+    )
+    expect(view.getByRole("dialog").getAttribute("aria-label")).toBe("Home, opened from the canvas")
+    expect(view.getByText("1 of 2")).toBeTruthy()
+    // The first board has nothing before it.
+    fireEvent.keyDown(window, { key: "ArrowLeft" })
+    fireEvent.keyDown(window, { key: "ArrowRight" })
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(opened).toEqual(["pay"])
+    expect(closed).toBe(1)
+    view.unmount()
+  })
+
+  test("opens focused when an address names a board", async () => {
+    const { default: CanvasBoard } = await import("../src/artifacts/renderers/canvas/canvas")
+    let view: ReturnType<typeof render> | undefined
+    await act(async () => {
+      view = render(
+        <QueryClientProvider client={client()}>
+          <CanvasBoard
+            canvas={CANVAS}
+            version={version}
+            title="Checkout"
+            mode="light"
+            focus="pay"
+          />
+        </QueryClientProvider>
+      )
+    })
+    expect(view?.getByRole("dialog").getAttribute("aria-label")).toBe("pay, opened from the canvas")
+    view?.unmount()
+    // A section an address names opens the board on it, with nothing over it.
+    await act(async () => {
+      view = render(
+        <QueryClientProvider client={client()}>
+          <CanvasBoard
+            canvas={CANVAS}
+            version={version}
+            title="Checkout"
+            mode="light"
+            focus="flow"
+          />
+        </QueryClientProvider>
+      )
+    })
+    expect(view?.queryByRole("dialog")).toBeNull()
+    view?.unmount()
   })
 })

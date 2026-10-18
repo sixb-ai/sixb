@@ -8,15 +8,17 @@ import type {
 } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
 import { Handle, type NodeProps, type NodeTypes, Position, useStore } from "@xyflow/react"
-import { AppWindow, Link2 } from "lucide-react"
+import { AppWindow, Link2, Maximize2 } from "lucide-react"
 import type { ReactNode } from "react"
 import { useArtifactMessages } from "../../messages"
 import { TONE_COLORS } from "../../tones"
+import { LiveBoard, useLiveBoards } from "./board"
 import { type CanvasFlowNode, TEXT_SIZES } from "./layout"
 
 /**
- * Every item's look on the board. Boards and embeds are outlines under their names; sections are
- * headings; the rest draw as they are, in the theme's colors.
+ * Every item's look on the board. Boards are pages under their names, live where the board shows
+ * them, and embeds outlines; sections are headings; the rest draw as they are, in the theme's
+ * colors.
  */
 export const CANVAS_NODE_TYPES: NodeTypes = {
   board: BoardNode,
@@ -101,11 +103,23 @@ function itemOf<Item>(props: NodeProps<CanvasFlowNode>): Item {
   return props.data.item as Item
 }
 
-/** A screen of the canvas: its outline under its name. */
+/**
+ * A screen of the canvas: its page, live where the board shows it large enough, under its name
+ * and the button that opens it.
+ */
 function BoardNode(props: NodeProps<CanvasFlowNode>) {
   const board = itemOf<CanvasBoard>(props)
+  const messages = useArtifactMessages().canvas
+  const { open } = useLiveBoards()
   const scale = useNameScale()
   const named = useNamed(board.w)
+  const title = board.title ?? board.id
+  // Until the page runs, its outline: the name above says which it is.
+  const tile = (
+    <div className="flex size-full items-center justify-center bg-card">
+      <AppWindow className="size-12 text-muted-foreground/30" strokeWidth={1} aria-hidden="true" />
+    </div>
+  )
   return (
     <div className="relative size-full">
       <Ends />
@@ -114,15 +128,25 @@ function BoardNode(props: NodeProps<CanvasFlowNode>) {
           width={board.w}
           scale={scale}
           icon={<AppWindow />}
-          name={board.title ?? board.id}
+          name={title}
+          action={
+            open ? (
+              <button
+                type="button"
+                // React Flow leaves a press on it to the button: no pan, no drag.
+                className="nodrag nopan pointer-events-auto -my-1 flex size-6 shrink-0 items-center justify-center rounded-md outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={messages.openBoard(title)}
+                title={messages.openBoard(title)}
+                onClick={() => open(board.id)}
+              >
+                <Maximize2 className="size-3.5" aria-hidden="true" />
+              </button>
+            ) : null
+          }
         />
       ) : null}
-      <div className="sixb-canvas-surface flex size-full items-center justify-center overflow-hidden">
-        <AppWindow
-          className="size-12 text-muted-foreground/30"
-          strokeWidth={1}
-          aria-hidden="true"
-        />
+      <div className="sixb-canvas-surface size-full overflow-hidden">
+        <LiveBoard id={board.id} file={board.file} title={title} tile={tile} />
       </div>
     </div>
   )

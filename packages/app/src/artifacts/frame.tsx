@@ -47,6 +47,7 @@ const READY_TIMEOUT_MS = 20_000
  */
 export function ArtifactFrame({
   version,
+  entry = version.entry,
   title,
   onEvent,
   className,
@@ -58,6 +59,8 @@ export function ArtifactFrame({
   overlay,
 }: {
   readonly version: ArtifactVersion
+  /** The page it opens, one of the version's frame entries: its entry, or a canvas's board. */
+  readonly entry?: string
   readonly title: string
   /** How it opens; a change loads the frame again, so this is for where it starts. */
   readonly start?: FrameStart
@@ -115,7 +118,7 @@ export function ArtifactFrame({
   )
   if (frame.data && kept?.identity !== identity) setKept({ identity, path: frame.data.path })
   const path = kept?.identity === identity ? kept.path : undefined
-  const source = path ? `${frameUrl(path, version.entry)}${frameStartHash(start ?? {})}` : undefined
+  const source = path ? `${frameUrl(path, entry)}${frameStartHash(start ?? {})}` : undefined
   const sourceRef = useRef(source)
   sourceRef.current = source
 

@@ -176,9 +176,11 @@ describe("frames", () => {
       null,
       null,
     ])
-    const outline = { kind: "slides" as const }
+    const outline = { kind: "slides" as const, slides: [] }
     expect(frameEntries({ entry: "index.html", outline })).toEqual(["index.html"])
-    expect(frameEntries({ entry: "document.md", outline: { kind: "document" } })).toEqual([])
+    expect(
+      frameEntries({ entry: "document.md", outline: { kind: "document", headings: [] } })
+    ).toEqual([])
   })
 })
 

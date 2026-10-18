@@ -364,9 +364,45 @@ function EmbedBody({
         <CardEmbed version={version} address={address} />
       )
     case "board":
+      return <BoardEmbed version={version} id={part.id} address={address} fill={fill} />
     case "region":
       return <CardEmbed version={version} address={address} />
   }
+}
+
+/** A canvas's board, live in its frame, at the board's own shape unless it fills a box. */
+function BoardEmbed({
+  version,
+  id,
+  address,
+  fill = false,
+}: {
+  readonly version: ArtifactVersion
+  readonly id: string
+  readonly address: string
+  readonly fill?: boolean
+}) {
+  const { outline } = version
+  const board =
+    outline.kind === "canvas"
+      ? outline.items.find((item) => item.id === id && item.type === "board")
+      : undefined
+  if (!board || board.type !== "board") return <CardEmbed version={version} address={address} />
+  const frame = (
+    <ArtifactFrame
+      version={version}
+      entry={board.file}
+      title={board.title ?? version.title}
+      className="size-full bg-background"
+    />
+  )
+  return fill ? (
+    frame
+  ) : (
+    <div className="w-full overflow-hidden" style={{ aspectRatio: `${board.w} / ${board.h}` }}>
+      {frame}
+    </div>
+  )
 }
 
 function SheetEmbed({

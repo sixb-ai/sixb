@@ -53,11 +53,17 @@ export interface CanvasOutline {
   readonly items: readonly CanvasOutlineItem[]
 }
 
-export interface CanvasOutlineItem {
-  readonly id: string
-  readonly type: "board" | "section"
-  readonly title?: string
-}
+export type CanvasOutlineItem =
+  | {
+      readonly id: string
+      readonly type: "board"
+      readonly title?: string
+      /** The HTML file it shows, and its size: what its frame serves, and the shape it embeds at. */
+      readonly file: string
+      readonly w: number
+      readonly h: number
+    }
+  | { readonly id: string; readonly type: "section"; readonly title?: string }
 
 export interface FileOutline {
   readonly kind: "file"
