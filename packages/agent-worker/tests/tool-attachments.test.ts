@@ -10,11 +10,7 @@ import {
 } from "@sixb/core"
 import type { AgentStorage } from "@sixb/core/storage"
 import { attachmentKey, toolResultAttachmentKey } from "../src/attachments"
-import {
-  NO_TOOL_ATTACHMENTS,
-  threadToolAttachments,
-  workflowInputToolAttachments,
-} from "../src/tools/attachments"
+import { threadToolAttachments, workflowInputToolAttachments } from "../src/tools/attachments"
 
 const PROJECT_ID = "tool-attachments"
 const OWNER = { type: "user", id: "usr_owner" } as const
@@ -177,9 +173,5 @@ describe("tool attachments", () => {
       text: "invoice",
     })
     await expectRejected(attachments, "input.pages[1]")
-  })
-
-  test("gives a child Agent no attachments", async () => {
-    await expectRejected(NO_TOOL_ATTACHMENTS, attachmentKey("msg-1", 1))
   })
 })

@@ -32,14 +32,23 @@ describe("subagent model guidance", () => {
       warning.mockRestore()
     }
   })
-  test("identifies the default and uses provider-declared metadata without inventing prices", async () => {
+  test("lists each model by its exact reference with provider-declared metadata only", async () => {
+    // The default declares nothing; the other model's slash-joined label would equal its own.
     const catalog = createModelCatalog({
       language: [
         new WorkerTestModel({
           definition: {
             kind: "language",
+            providerId: "gateway/private",
+            modelId: "specialist",
+            capabilities: {},
+          },
+        }),
+        new WorkerTestModel({
+          definition: {
+            kind: "language",
             providerId: "gateway",
-            modelId: "model",
+            modelId: "private/specialist",
             contextWindow: 400_000,
             capabilities: { reasoning: { efforts: ["high"] }, localTools: true },
           },
@@ -49,38 +58,9 @@ describe("subagent model guidance", () => {
     expect(await renderSubagentModelGuide(catalog.language)).toBe(
       [
         "Available models (provider-declared metadata when available):",
-        '- {"provider":"gateway","modelId":"model"} (default; context 400k tokens; reasoning; tools)',
+        '- {"provider":"gateway/private","modelId":"specialist"} (default; metadata unavailable)',
+        '- {"provider":"gateway","modelId":"private/specialist"} (context 400k tokens; reasoning; tools)',
       ].join("\n")
     )
-  })
-  test("keeps unknown metadata explicit", async () => {
-    const catalog = createModelCatalog({
-      language: [
-        new WorkerTestModel({
-          definition: {
-            kind: "language",
-            providerId: "private",
-            modelId: "specialist",
-            capabilities: {},
-          },
-        }),
-      ],
-    })
-    expect(await renderSubagentModelGuide(catalog.language)).toContain(
-      '- {"provider":"private","modelId":"specialist"} (default; metadata unavailable)'
-    )
-  })
-
-  test("distinguishes references with identical slash-joined labels", async () => {
-    const catalog = createModelCatalog({
-      language: [
-        new WorkerTestModel({ providerId: "gateway", modelId: "private/specialist" }),
-        new WorkerTestModel({ providerId: "gateway/private", modelId: "specialist" }),
-      ],
-    }).language
-
-    const guide = await renderSubagentModelGuide(catalog)
-    expect(guide).toContain('{"provider":"gateway","modelId":"private/specialist"}')
-    expect(guide).toContain('{"provider":"gateway/private","modelId":"specialist"}')
   })
 })

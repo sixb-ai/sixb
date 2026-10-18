@@ -1,13 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryBlobStorage, type JsonValue } from "@sixb/core"
+import { InMemoryBlobStorage } from "@sixb/core"
 import { agentToolResultToModelOutput } from "../src/tools/result-output"
-
-const PNG_BYTES = Uint8Array.from(
-  Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
-    "base64"
-  )
-)
 
 describe("agent tool model output", () => {
   test("keeps plain JSON tool output unchanged", async () => {
@@ -17,33 +10,6 @@ describe("agent tool model output", () => {
         blobStorage: new InMemoryBlobStorage(),
       })
     ).resolves.toEqual({ type: "json", value: { ok: true } })
-  })
-
-  test("projects a rich image result without changing its durable FileRef", async () => {
-    const blobStorage = new InMemoryBlobStorage()
-    const fileRef = await blobStorage.put({
-      body: PNG_BYTES,
-      fileName: "generated.png",
-      mediaType: "image/png",
-    })
-    const output: JsonValue = {
-      kind: "agentToolResult",
-      content: [
-        { type: "text", text: "Created the image." },
-        { type: "file", fileRef: { ...fileRef } },
-      ],
-    }
-
-    const projected = await agentToolResultToModelOutput({
-      output,
-      blobStorage,
-    })
-
-    expect(projected.type).toBe("text")
-    expect(projected.value).toContain("Created the image.")
-    expect(projected.value).toContain("generated.png")
-    expect(projected.value).not.toContain("data:image")
-    expect(JSON.stringify(output)).not.toContain("data:image")
   })
 
   test("keeps a bounded prefix for oversized text files", async () => {

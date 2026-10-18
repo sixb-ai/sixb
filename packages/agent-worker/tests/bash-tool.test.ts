@@ -4,17 +4,14 @@ import { compressStdout } from "../src/tools/bash"
 const CAP = 200
 
 describe("compressStdout", () => {
-  test("leaves output under the cap untouched", () => {
-    const text = `[{"id":"Customer"}]`
-    expect(compressStdout(text, CAP)).toEqual({ text, truncated: false })
-  })
-
-  test("compacts pretty-printed JSON that fits once whitespace is dropped", () => {
+  test("leaves output that fits untouched and compacts JSON that fits once whitespace is dropped", () => {
     const value = Array.from({ length: 6 }, (_, index) => ({
       id: `type-${index}`,
       name: `Type ${index}`,
     }))
     const pretty = JSON.stringify(value, null, 2)
+    expect(compressStdout(pretty, pretty.length)).toEqual({ text: pretty, truncated: false })
+
     const cap = 250
     // The pretty form overflows the cap purely on whitespace; the compact form fits.
     expect(pretty.length).toBeGreaterThan(cap)

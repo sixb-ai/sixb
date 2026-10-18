@@ -31,6 +31,7 @@ describe("agent tool-result media bridge", () => {
     })
 
     expect(projected.type).toBe("text")
+    expect(JSON.stringify(projected)).toContain("Created the image.")
     expect(JSON.stringify(projected)).not.toContain('"type":"file"')
     expect(JSON.stringify(projected)).toContain("sandboxPath")
     expect(JSON.stringify(projected)).toContain("not embedded in the tool-result message")

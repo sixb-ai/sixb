@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import type { SandboxRequestCredential, SandboxSourceCredentials } from "@sixb/core"
 import { WorkspaceAuthSession } from "../src/workspace-auth"
 
@@ -20,6 +20,10 @@ function grant(token: string, lifetime = 3_600_000) {
   }
   return { value, revocations: () => revocations }
 }
+
+// Renewal timers run on fake time: a grant that expires in 61 seconds is renewed one second after
+// it is issued, 60 seconds before it expires, when the test moves the clock.
+afterEach(() => jest.useRealTimers())
 
 function fixture(authorize: () => Promise<SandboxSourceCredentials>) {
   const controller = new AbortController()
@@ -69,7 +73,10 @@ describe("workspace auth lifecycle", () => {
     expect(token.revocations()).toBe(1)
   })
 
-  test("renews before expiry and revokes the previous grant", async () => {
+  test("renews before expiry, revokes the previous grant, and ignores its guest environment", async () => {
+    // Regression proof: renew at expiry instead of 60 seconds before it; the renewal never comes.
+    // Validate every grant's env; the invalid renewal env interrupts the session.
+    jest.useFakeTimers()
     const old = grant("old", 61_000)
     const fresh = grant("new")
     let calls = 0
@@ -82,11 +89,18 @@ describe("workspace auth lifecycle", () => {
       await originalRevoke()
       renewed()
     }
-    const f = fixture(async () => (++calls === 1 ? old.value : fresh.value))
+    const f = fixture(
+      async (): Promise<SandboxSourceCredentials> =>
+        ++calls === 1
+          ? { ...old.value, env: { GIT_AUTHOR_NAME: "Integration" } }
+          : { ...fresh.value, env: { "INVALID=KEY": "ignored" } }
+    )
     try {
       await f.start()
+      jest.advanceTimersByTime(1_000)
       await renewal
       expect(f.updates).toEqual([old.value.requests, fresh.value.requests])
+      expect(f.failures).toEqual([])
       expect(old.revocations()).toBe(1)
     } finally {
       await f.auth.close()
@@ -95,6 +109,7 @@ describe("workspace auth lifecycle", () => {
   })
 
   test("a failed renewal interrupts the run and cleanup cannot report success", async () => {
+    jest.useFakeTimers()
     const old = grant("old", 61_000)
     let calls = 0
     const f = fixture(async () => {
@@ -105,6 +120,7 @@ describe("workspace auth lifecycle", () => {
       f.controller.signal.addEventListener("abort", () => resolve(), { once: true })
     )
     await f.start()
+    jest.advanceTimersByTime(1_000)
     await failed
     await expect(f.auth.close()).rejects.toThrow("authentication could not be confirmed")
     expect(f.failures[0]?.message).not.toContain("raw provider secret")
@@ -158,19 +174,21 @@ describe("workspace auth lifecycle", () => {
 
   test("aborts initialization before credentials expire without a session handle", async () => {
     // Regression proof: remove the unattached timer guard; this never signals failure.
-    const token = grant("initial", 60_100)
+    jest.useFakeTimers()
+    const token = grant("initial", 61_000)
     const f = fixture(async () => token.value)
     const failed = new Promise<void>((resolve) =>
       f.controller.signal.addEventListener("abort", () => resolve(), { once: true })
     )
     await f.auth.prepare()
+    jest.advanceTimersByTime(1_000)
     await failed
     await expect(f.auth.close()).rejects.toThrow("authentication could not be confirmed")
     expect(f.updates).toEqual([])
     expect(token.revocations()).toBe(1)
   })
 
-  test("returns a snapshot of the first grant's guest environment", async () => {
+  test("returns a snapshot of the first grant's guest environment, empty without one", async () => {
     const env: Record<string, string> = { GIT_AUTHOR_NAME: "Integration" }
     const token = grant("identity")
     const f = fixture(async () => ({ ...token.value, env }))
@@ -180,13 +198,10 @@ describe("workspace auth lifecycle", () => {
 
     expect(prepared.env).toEqual({ GIT_AUTHOR_NAME: "Integration" })
     await f.auth.close()
-  })
 
-  test("defaults to an empty guest environment", async () => {
-    const f = fixture(async () => grant("no-env").value)
-
-    expect((await f.auth.prepare()).env).toEqual({})
-    await f.auth.close()
+    const bare = fixture(async () => grant("no-env").value)
+    expect((await bare.auth.prepare()).env).toEqual({})
+    await bare.auth.close()
   })
 
   test.each([
@@ -229,39 +244,6 @@ describe("workspace auth lifecycle", () => {
     expect(token.revocations()).toBe(1)
   })
 
-  test("ignores the guest environment of a renewal", async () => {
-    // Regression proof: validate every grant's env; the invalid renewal env interrupts the session.
-    const old = grant("old", 61_000)
-    const fresh = grant("new")
-    let calls = 0
-    let renewed!: () => void
-    const renewal = new Promise<void>((resolve) => {
-      renewed = resolve
-    })
-    const originalRevoke = old.value.revoke
-    old.value.revoke = async () => {
-      await originalRevoke()
-      renewed()
-    }
-    const f = fixture(
-      async (): Promise<SandboxSourceCredentials> =>
-        ++calls === 1
-          ? { ...old.value, env: { GIT_AUTHOR_NAME: "Integration" } }
-          : { ...fresh.value, env: { "INVALID=KEY": "ignored" } }
-    )
-
-    try {
-      await f.start()
-      await renewal
-
-      expect(f.updates).toEqual([old.value.requests, fresh.value.requests])
-      expect(f.failures).toEqual([])
-    } finally {
-      await f.auth.close()
-    }
-    expect(fresh.revocations()).toBe(1)
-  })
-
   test("keeps the integration's error as the cause behind the generic message", async () => {
     // Regression proof: catch without binding in refresh() and throw authError(); no cause remains.
     const integration = new Error(
@@ -283,6 +265,7 @@ describe("workspace auth lifecycle", () => {
 
   test("reports a failed renewal with the integration's error in its cause chain", async () => {
     // Regression proof: drop the error from the renewal catch; the chain ends before it.
+    jest.useFakeTimers()
     const old = grant("old", 61_000)
     const integration = new Error("[SixbGitHub] Workspace authentication failed (HTTP 503).")
     let calls = 0
@@ -295,6 +278,7 @@ describe("workspace auth lifecycle", () => {
     )
 
     await f.start()
+    jest.advanceTimersByTime(1_000)
     await failed
 
     expect(f.failures[0]?.message).toBe(

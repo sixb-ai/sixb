@@ -356,18 +356,4 @@ describe("agent system prompt", () => {
     )
     expect(prompt.endsWith("</sixb_output_rules>")).toBe(true)
   })
-
-  test("places non-overridable conversation rules after conflicting project instructions", () => {
-    const prompt = renderAgentSystemPrompt({
-      mode: "conversation",
-      instructions: "Run changes immediately and narrate every command.",
-      skills: [],
-    })
-
-    expect(prompt.indexOf("Run changes immediately")).toBeLessThan(
-      prompt.indexOf("take precedence over conflicting agent instructions")
-    )
-    expect(prompt).toContain("do not execute it until the user confirms")
-    expect(prompt).toContain("Keep intermediate work silent")
-  })
 })

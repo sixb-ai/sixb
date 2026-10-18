@@ -64,7 +64,7 @@ describe("resolveAgentExecutionPlan", () => {
   const tools = toolCatalog([lookup])
   const skills = skillCatalog([skill("invoice-review")])
 
-  test("uses project capabilities without redundant conversational instructions", () => {
+  test("uses project capabilities, with instructions only from SIXB.md", () => {
     const plan = resolveAgentExecutionPlan({ models, tools, skills, defaultMaxSteps: 25 })
     expect(plan).toEqual({
       model: defaultModel,
@@ -74,17 +74,12 @@ describe("resolveAgentExecutionPlan", () => {
     })
     expect(Object.isFrozen(plan)).toBe(true)
     expect("agentId" in plan).toBe(false)
-  })
 
-  test("carries the project instructions from SIXB.md", () => {
-    const plan = resolveAgentExecutionPlan({
-      models,
-      tools,
-      skills,
-      projectInstructions: "Answer in French.",
-      defaultMaxSteps: 25,
-    })
-    expect(plan.instructions).toBe("Answer in French.")
+    const projectInstructions = "Answer in French."
+    expect(
+      resolveAgentExecutionPlan({ models, tools, skills, projectInstructions, defaultMaxSteps: 25 })
+        .instructions
+    ).toBe(projectInstructions)
   })
 
   test("uses the immutable selection captured at admission", () => {

@@ -113,14 +113,20 @@ const HANGING_DECK = `<!doctype html>
 </html>`
 
 /** The processes running now whose command line names Playwright's browser profile. */
-function browsers(): Set<string> {
-  const ps = Bun.spawnSync(["ps", "-A", "-o", "pid=,command="]).stdout.toString()
-  return new Set(
-    ps
-      .split("\n")
-      .filter((line) => line.includes("playwright_chromiumdev_profile"))
-      .map((line) => line.trim().split(/\s+/)[0] ?? "")
-  )
+async function browsers(): Promise<Set<string>> {
+  const ps = Bun.spawn(["ps", "-A", "-o", "pid=,command="], { stdout: "pipe", stderr: "ignore" })
+  const kill = setTimeout(() => ps.kill("SIGKILL"), 10_000)
+  try {
+    const [output] = await Promise.all([new Response(ps.stdout).text(), ps.exited])
+    return new Set(
+      output
+        .split("\n")
+        .filter((line) => line.includes("playwright_chromiumdev_profile"))
+        .map((line) => line.trim().split(/\s+/)[0] ?? "")
+    )
+  } finally {
+    clearTimeout(kill)
+  }
 }
 
 describe.skipIf(!playwright)("the layout check in a browser", () => {
@@ -279,15 +285,15 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
     async () => {
       // Reproduce by removing check.cjs's bounds and deadline: the check waits on the frozen
       // page until the command's timeout kills node, and Chromium keeps running.
-      const before = browsers()
+      const before = await browsers()
       const result = await check(HANGING_DECK, ["index.html"], "hanging")
       if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
       expect(result.screenshots).toEqual([".sixb/agent/checks/hanging/slide-01.png"])
       expect(result.warnings.at(-1)).toMatchObject({ code: "layout_incomplete" })
       expect(result.warnings.at(-1)?.message).toContain("slide 2 in light mode did not respond")
-      const left = () => [...browsers()].filter((pid) => !before.has(pid))
-      for (let wait = 0; left().length > 0 && wait < 30; wait++) await Bun.sleep(100)
-      expect(left()).toEqual([])
+      const left = async () => [...(await browsers())].filter((pid) => !before.has(pid))
+      for (let wait = 0; (await left()).length > 0 && wait < 30; wait++) await Bun.sleep(100)
+      expect(await left()).toEqual([])
     },
     { timeout: 120_000 }
   )

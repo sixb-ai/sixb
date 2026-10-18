@@ -84,6 +84,20 @@ function install(options: { readonly maxBytes?: number } = {}): Promise<Installe
   })
 }
 
+/**
+ * The run's sandbox: a real bash in the directory, without the agent image's browser, so a deck's
+ * layout check skips at once on any host. layout-check.test.ts runs the check itself.
+ */
+function sandbox(): LocalBashSandbox {
+  const local = new LocalBashSandbox(root)
+  const run = local.runCommand.bind(local)
+  local.runCommand = async (command, args, options) =>
+    options?.env?.SIXB_CHECK_DECK === undefined
+      ? run(command, args, options)
+      : { exitCode: 0, stdout: '{"skipped":"no_browser"}\n', stderr: "", durationMs: 0 }
+  return local
+}
+
 function tools(options: ToolOptions = {}) {
   const [create, version] = createPublishArtifactTools({
     projectId,
@@ -93,7 +107,7 @@ function tools(options: ToolOptions = {}) {
     run: { ...run, executionToken: options.executionToken ?? run.executionToken },
     owner,
     budget: options.budget ?? new AgentFileBudget(),
-    resolveSandbox: async () => ({ sandbox: new LocalBashSandbox(root) }),
+    resolveSandbox: async () => ({ sandbox: sandbox() }),
     installed: options.installed ?? install(),
   })
   return { create, version }
@@ -355,7 +369,7 @@ describe("publish_artifact", () => {
           executionToken: run.executionToken,
           status: "failed",
         })
-        return { sandbox: new LocalBashSandbox(root) }
+        return { sandbox: sandbox() }
       },
     })
     await expect(
@@ -636,9 +650,19 @@ describe("materializeThreadArtifacts", () => {
   test("stops downloading when the run is cancelled", async () => {
     write("a/document.md", "# First\n\nOne.\n")
     await publish({ path: "a", kind: "document", title: "First" })
-    // A blob that never finishes arriving, as a stalled download does.
+    // A blob that never finishes arriving, as a stalled download does. It is pulled once the
+    // install reads it.
+    const downloading = Promise.withResolvers<void>()
     blobStorage.open = async () =>
-      new ReadableStream<Uint8Array>({ pull: () => new Promise(() => {}) })
+      new ReadableStream<Uint8Array>(
+        {
+          pull: () => {
+            downloading.resolve()
+            return new Promise(() => {})
+          },
+        },
+        { highWaterMark: 0 }
+      )
     const cancel = new AbortController()
     const installing = materializeThreadArtifacts({
       projectId,
@@ -651,9 +675,12 @@ describe("materializeThreadArtifacts", () => {
       signal: cancel.signal,
     })
     // Reproduce by dropping the signal: the install is still waiting on the blob.
-    setTimeout(() => cancel.abort(new Error("cancelled")), 10)
-    await expect(
-      Promise.race([installing, Bun.sleep(1_000).then(() => "still downloading")])
-    ).rejects.toThrow("cancelled")
+    await downloading.promise
+    cancel.abort(new Error("cancelled"))
+    const outcome = await Promise.race([
+      installing.catch((error: unknown) => error),
+      Bun.sleep(1_000).then(() => "still downloading"),
+    ])
+    expect(outcome).toEqual(new Error("cancelled"))
   })
 })
