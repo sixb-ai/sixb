@@ -10,7 +10,7 @@ import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { AreaChart as AreaIcon, ChartColumn, ChartLine, ChartPie } from "lucide-react"
 import { type ReactNode, useMemo } from "react"
-import { versionSummary } from "./card-details"
+import { fileExtension, versionSummary } from "./card-details"
 import { formatFileSize } from "./file-size"
 import type { FileSource } from "./file-source"
 import { fileView } from "./file-view"
@@ -23,7 +23,10 @@ import { MiniChart } from "./renderers/sheet/mini-chart"
 import { fileSheetModel, type SheetModel, sheetModel } from "./renderers/sheet/model"
 import { artifactThemeAttributes } from "./theme"
 
-/** Only the start of a file is read for a preview. */
+/**
+ * How much of a text a preview reads: a table's first rows, a document's opening, or a text's
+ * first lines. The file itself is fetched whole, so a chart, which draws every row, reads it all.
+ */
 const EXCERPT_CHARACTERS = 2_000
 const PREVIEW_COLUMNS = 3
 const TAB_LIMIT = 4
@@ -71,21 +74,61 @@ export function ArtifactCardFace({
       >
         <ArtifactPreview kind={kind} version={version} loading={loading} />
       </span>
-      <span className="flex min-w-0 items-center gap-2.5 px-3.5 py-3">
-        <ArtifactKindIcon kind={kind} className="size-4 shrink-0 text-muted-foreground" />
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span
-            className="truncate text-[13.5px] leading-snug font-medium text-foreground"
-            title={title}
-          >
-            {title}
-          </span>
-          <span className="truncate text-[12px] leading-snug text-muted-foreground tabular-nums">
-            {version ? versionSummary(version, messages, locale) : messages.kinds[kind]}
-          </span>
+      <ArtifactLabel
+        title={title}
+        detail={version ? versionSummary(version, messages, locale) : messages.kinds[kind]}
+        icon={<ArtifactKindIcon kind={kind} className="size-4 shrink-0 text-muted-foreground" />}
+        className="px-3.5 py-3"
+      />
+    </>
+  )
+}
+
+/**
+ * An artifact's title over a line about it, beside an icon, as its cards and lines show it. What
+ * comes `after` the line, such as a date, stays whole where the line itself is cut off.
+ */
+export function ArtifactLabel({
+  title,
+  detail,
+  after,
+  icon,
+  large = false,
+  className,
+}: {
+  readonly title: string
+  readonly detail: string
+  readonly after?: ReactNode
+  readonly icon: ReactNode
+  /** The gallery's size, a step up from a conversation's. */
+  readonly large?: boolean
+  readonly className?: string
+}) {
+  return (
+    <span className={cn("flex min-w-0 items-center gap-2.5", className)}>
+      {icon}
+      <span className={cn("flex min-w-0 flex-1 flex-col", large && "gap-0.5")}>
+        {/* `cn` drops a line height that comes before a font size, so each size comes first. */}
+        <span
+          className={cn(
+            large ? "text-[14px]" : "text-[13.5px]",
+            "truncate leading-snug font-medium text-foreground"
+          )}
+          title={title}
+        >
+          {title}
+        </span>
+        <span
+          className={cn(
+            large ? "text-[12.5px]" : "text-[12px]",
+            "flex min-w-0 items-center gap-1.5 leading-snug text-muted-foreground tabular-nums"
+          )}
+        >
+          <span className="truncate">{detail}</span>
+          {after}
         </span>
       </span>
-    </>
+    </span>
   )
 }
 
@@ -96,8 +139,10 @@ function VersionPreview({
   readonly version: ArtifactVersion
   readonly kind: ArtifactKindName
 }) {
-  // The artifact's own theme, so a dark or branded document previews the way it opens.
-  const theme = artifactThemeAttributes(useArtifactTheme(version))
+  // The artifact's own theme, so a dark or branded document previews the way it opens. A file
+  // artifact named `theme.json` is that file, not a theme.
+  const ownTheme = useArtifactTheme(version)
+  const theme = artifactThemeAttributes(kind === "file" ? null : ownTheme)
   const source = versionFileSource(version, version.entry)
   return (
     <div
@@ -120,16 +165,19 @@ function VersionPreview({
 }
 
 function DocumentPreview({ version }: { readonly version: ArtifactVersion }) {
-  const { text } = useFileText(versionFileSource(version, "document.md"))
+  const { text, loading } = useFileText(versionFileSource(version, "document.md"))
   const opening = useMemo(() => (text === undefined ? null : documentOpening(text)), [text])
-  if (!opening) return <Skeleton pulse={text === undefined} />
+  if (loading) return <Skeleton pulse />
   const sections =
     version.outline.kind === "document"
       ? version.outline.headings
           .filter((heading) => heading.depth === 2)
           .map((heading) => heading.text)
       : []
-  return <Opening title={opening.title ?? version.title} lede={opening.lede} sections={sections} />
+  // A document too large to preview, or one that did not load, still has its title and outline.
+  return (
+    <Opening title={opening?.title ?? version.title} lede={opening?.lede} sections={sections} />
+  )
 }
 
 /**
@@ -167,20 +215,34 @@ function Opening({
   )
 }
 
-/** A deck's first slide in miniature: its title, set as a title slide, and how many follow. */
+/** A deck's first slide in miniature, on the ground a deck's card sets it on. */
 function DeckPreview({ version }: { readonly version: ArtifactVersion }) {
+  return (
+    <span className="flex h-full items-center justify-center bg-muted/70 p-3">
+      <span className="relative aspect-video h-full max-w-full overflow-hidden rounded-[4px] bg-background shadow-[0_1px_2px_rgb(0_0_0/0.08),0_4px_14px_rgb(0_0_0/0.07)] ring-1 ring-black/[0.05] dark:ring-white/10">
+        <SlideFace version={version} />
+      </span>
+    </span>
+  )
+}
+
+/**
+ * A deck's first slide set as a title slide, from what publishing read of the deck: its title, and
+ * how many slides there are. It fills the slide it is put in, with type scaled to that slide's
+ * width, so it also stands in for a deck's live first slide until, or unless, that shows.
+ */
+export function SlideFace({ version }: { readonly version: ArtifactVersion }) {
+  const messages = useArtifactMessages().slides
   const slides = version.outline.kind === "slides" ? version.outline.slides : []
   const title = slides.find((slide) => slide.title)?.title ?? version.title
   return (
-    <span className="flex h-full items-center justify-center bg-muted/70 p-3">
-      <span className="relative flex aspect-video h-full max-w-full flex-col justify-center overflow-hidden rounded-[4px] bg-background px-[9%] shadow-[0_1px_2px_rgb(0_0_0/0.08),0_4px_14px_rgb(0_0_0/0.07)] ring-1 ring-black/[0.05] dark:ring-white/10">
-        <span className="line-clamp-3 text-[13px] leading-[1.15] font-semibold tracking-[-0.015em] text-foreground">
-          {title}
-        </span>
-        <span className="mt-1.5 h-[3px] w-1/3 rounded-full bg-foreground/15" />
-        <span className="absolute right-[6%] bottom-[7%] text-[8px] text-muted-foreground tabular-nums">
-          1 / {slides.length}
-        </span>
+    <span className="@container absolute inset-0 flex flex-col justify-center px-[9%]">
+      <span className="line-clamp-3 text-[7.3cqw] leading-[1.15] font-semibold tracking-[-0.015em] text-foreground">
+        {title}
+      </span>
+      <span className="mt-[3.4cqw] h-[1.7cqw] w-1/3 rounded-full bg-foreground/15" />
+      <span className="absolute right-[6%] bottom-[7%] text-[4.5cqw] text-muted-foreground tabular-nums">
+        {messages.position(1, slides.length)}
       </span>
     </span>
   )
@@ -192,24 +254,29 @@ function DeckPreview({ version }: { readonly version: ArtifactVersion }) {
  */
 function WorkbookPreview({ version }: { readonly version: ArtifactVersion }) {
   const locale = useLocale()
-  const workbookText = useFileText(versionFileSource(version, WORKBOOK_FILE)).text
+  const workbookFile = useFileText(versionFileSource(version, WORKBOOK_FILE))
   const workbook = useMemo(() => {
-    if (workbookText === undefined) return undefined
-    const parsed = parseWorkbook(workbookText)
+    if (workbookFile.text === undefined) return undefined
+    const parsed = parseWorkbook(workbookFile.text)
     return "workbook" in parsed ? parsed.workbook : null
-  }, [workbookText])
+  }, [workbookFile.text])
   const chart = workbook?.charts[0]
   const sheet = workbook?.sheets.find((entry) => entry.name === chart?.sheet) ?? workbook?.sheets[0]
-  const csv = useFileText(sheet ? versionFileSource(version, sheetFilePath(sheet.name)) : null).text
+  const sheetFile = useFileText(
+    sheet ? versionFileSource(version, sheetFilePath(sheet.name)) : null
+  )
+  const csv = sheetFile.text
   const model = useMemo(() => {
-    const table = csv === undefined ? null : tableStart(csv, "csv")
-    return sheet && table ? sheetModel(sheet, table) : null
-  }, [sheet, csv])
+    if (!sheet || csv === undefined) return null
+    // A chart draws every row, and its latest value is the last row's; a table shows the first.
+    const table = chart ? parseTable(csv, "csv") : tableStart(csv, "csv")
+    return table ? sheetModel(sheet, table) : null
+  }, [sheet, chart, csv])
   const latest = useMemo(
     () => (chart && model ? latestValue(chart, model, locale) : undefined),
     [chart, model, locale]
   )
-  if (!workbook || !model) return <Skeleton pulse={workbook === undefined || csv === undefined} />
+  if (!workbook || !model) return <Skeleton pulse={workbookFile.loading || sheetFile.loading} />
 
   const tabs = [
     ...workbook.sheets.map((entry) => ({
@@ -388,13 +455,14 @@ function FileTablePreview({
   readonly source: FileSource
   readonly kind: "csv" | "tsv"
 }) {
-  const { text } = useFileText(source)
+  const { text, loading } = useFileText(source)
   const model = useMemo(() => {
     const table = text === undefined ? null : tableStart(text, kind)
     return table ? fileSheetModel(source.name, table) : null
   }, [text, kind, source.name])
   if (model) return <TablePreview model={model} rows={4} />
-  return text === undefined ? <Skeleton pulse /> : <FormatPreview source={source} />
+  // A file too large to preview, or one that did not load, shows as its format.
+  return loading ? <Skeleton pulse /> : <FormatPreview source={source} />
 }
 
 function TextPreview({
@@ -404,12 +472,12 @@ function TextPreview({
   readonly source: FileSource
   readonly markdown: boolean
 }) {
-  const { text } = useFileText(source)
+  const { text, loading } = useFileText(source)
   const opening = useMemo(
     () => (markdown && text !== undefined ? documentOpening(text) : null),
     [markdown, text]
   )
-  if (text === undefined) return <Skeleton pulse />
+  if (text === undefined) return loading ? <Skeleton pulse /> : <FormatPreview source={source} />
   if (opening?.title) return <Opening title={opening.title} lede={opening.lede} />
   return (
     <Faded>
@@ -516,13 +584,19 @@ function plainText(markdown: string): string {
     .trim()
 }
 
-/** The first rows of a table, read from the start of its text. */
+/**
+ * The first rows of a table, read from the start of its text. The start can end inside a quoted
+ * field and read as no table, though the file itself is fine.
+ */
 function tableStart(text: string, kind: "csv" | "tsv"): CsvTable | null {
+  return parseTable(excerpt(text), kind)
+}
+
+function parseTable(text: string, kind: "csv" | "tsv"): CsvTable | null {
   try {
-    const table = parseCsv(excerpt(text), { delimiter: kind === "tsv" ? "\t" : "," })
+    const table = parseCsv(text, { delimiter: kind === "tsv" ? "\t" : "," })
     return table.header.length > 0 ? table : null
   } catch {
-    // The excerpt can end inside a quoted field; the file itself may be fine.
     return null
   }
 }
@@ -547,7 +621,7 @@ const FORMAT_COLORS: readonly [RegExp, string][] = [
 function fileFormat(
   name: string
 ): { readonly text: string; readonly className: string } | undefined {
-  const extension = /\.([a-z0-9]{1,5})$/i.exec(name)?.[1]?.toLowerCase()
+  const extension = fileExtension(name)
   if (!extension) return undefined
   const color =
     FORMAT_COLORS.find(([pattern]) => pattern.test(extension))?.[1] ?? "bg-foreground/50"

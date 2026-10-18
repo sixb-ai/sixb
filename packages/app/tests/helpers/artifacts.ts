@@ -53,15 +53,31 @@ export function seedVersion(
     version
   )
   for (const [path, text] of Object.entries(texts)) {
-    const file = version.files.find((candidate) => candidate.path === path)
-    if (!file) throw new Error(`[SixbAppTest] Version ${version.version} has no file at ${path}.`)
-    const source = artifactFileSource({
-      artifactId: version.artifactId,
-      version: version.version,
-      path,
-      fileRef: file.file,
-    })
-    // The key `useFileText` reads a file's text under.
-    cache.setQueryData([...source.queryKey, "text"], text)
+    cache.setQueryData(fileTextKey(version, path), text)
   }
+}
+
+/** Leaves a version's file as one whose text could not be read. */
+export function failFileText(
+  cache: QueryClient,
+  version: GetArtifactVersionResponse,
+  path: string
+): void {
+  cache
+    .getQueryCache()
+    .build(cache, { queryKey: fileTextKey(version, path) })
+    .setState({ status: "error", error: new Error("[SixbAppTest] The file could not be read.") })
+}
+
+/** The key `useFileText` reads a file's text under. */
+function fileTextKey(version: GetArtifactVersionResponse, path: string): readonly unknown[] {
+  const file = version.files.find((candidate) => candidate.path === path)
+  if (!file) throw new Error(`[SixbAppTest] Version ${version.version} has no file at ${path}.`)
+  const source = artifactFileSource({
+    artifactId: version.artifactId,
+    version: version.version,
+    path,
+    fileRef: file.file,
+  })
+  return [...source.queryKey, "text"]
 }
