@@ -28,6 +28,7 @@ import {
 import {
   hideColumn,
   INITIAL_SHEET_VIEW,
+  setAutoFilter,
   setColumnFilter,
   visibleColumn,
 } from "../src/artifacts/renderers/sheet/view"
@@ -436,6 +437,13 @@ describe("filtering a sheet", () => {
 })
 
 describe("a reader's view of a sheet", () => {
+  test("takes every filter off when filter mode is turned off", () => {
+    const on = setAutoFilter(INITIAL_SHEET_VIEW, true)
+    const filtered = setColumnFilter(on, 0, { kind: "values", excluded: ["Q1 2026"] })
+    expect(filtered).toMatchObject({ autoFilter: true, filters: { 0: {} } })
+    expect(setAutoFilter(filtered, false)).toMatchObject({ autoFilter: false, filters: {} })
+  })
+
   test("keeps its hidden columns in order, once each", () => {
     const view = hideColumn(hideColumn(hideColumn(INITIAL_SHEET_VIEW, 4), 1), 4)
     expect(view.hidden).toEqual([1, 4])

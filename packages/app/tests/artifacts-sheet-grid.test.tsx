@@ -427,6 +427,25 @@ describe("the sheet grid", () => {
     expect(last() ? rangeLabel(last()!.range) : null).toBe("A3")
   })
 
+  test("shows filter buttons on the headers only in filter mode, and keeps each name whole", () => {
+    // Reproduce by drawing the filter button outside `view.autoFilter`: every header carries it.
+    const off = mount()
+    expect(document.querySelector('button[aria-label^="Filter "]')).toBeNull()
+    // A header holds its name and type mark, nothing that takes its room.
+    expect(off.cell(0, 1).querySelectorAll("button")).toHaveLength(0)
+    off.grid.ownerDocument.body.replaceChildren()
+
+    const on = mount({ ...INITIAL_SHEET_VIEW, autoFilter: true })
+    expect(on.cell(0, 1).querySelector('button[aria-label="Filter Revenue"]')).not.toBeNull()
+    expect(document.querySelectorAll('button[aria-label^="Filter "]')).toHaveLength(3)
+  })
+
+  test("offers each column's menu from its letter, and names the column's type on its header", () => {
+    const { cell } = mount()
+    expect(cell(-1, 1).querySelector('button[aria-label="Revenue column options"]')).not.toBeNull()
+    expect(cell(0, 1).getAttribute("title")).toBe("Revenue · Currency · USD")
+  })
+
   test("freezes the columns the reader froze", () => {
     const { cell } = mount({ ...INITIAL_SHEET_VIEW, frozenColumns: 2 })
     expect(cell(1, 0).className).toContain("sticky")
@@ -434,12 +453,12 @@ describe("the sheet grid", () => {
     expect(cell(1, 2).className).not.toContain("sticky")
   })
 
-  test("leaves the keys pressed on a column's menu to the menu", async () => {
-    // Reproduce by dropping the target check at the top of onKeyDown: ArrowDown on the menu's
-    // button also moves the active cell to A3.
-    const { status } = mount()
-    const trigger = document.querySelector('button[aria-label="Revenue column options"]')
-    if (!trigger) throw new Error("No menu for Revenue.")
+  test("leaves the keys pressed on a header's filter button to the button", async () => {
+    // Reproduce by dropping the target check at the top of onKeyDown: ArrowDown on the button
+    // also moves the active cell to A3.
+    const { status } = mount({ ...INITIAL_SHEET_VIEW, autoFilter: true })
+    const trigger = document.querySelector('button[aria-label="Filter Revenue"]')
+    if (!trigger) throw new Error("No filter button for Revenue.")
     await act(async () => {
       fireEvent.keyDown(trigger, { key: "ArrowDown" })
     })

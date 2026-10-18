@@ -10,6 +10,11 @@ import type { SortDirection } from "./selection"
  */
 export interface SheetView {
   readonly sort: { readonly column: number; readonly direction: SortDirection } | null
+  /**
+   * Whether every column's header shows its filter button, as a spreadsheet's filter mode does.
+   * Filters exist only while it is on.
+   */
+  readonly autoFilter: boolean
   /** Filters by column; a row shows when every one keeps it. */
   readonly filters: Readonly<Record<number, ColumnFilter>>
   readonly hidden: readonly number[]
@@ -21,7 +26,13 @@ export interface SheetView {
 
 export type SheetViewUpdate = (update: (view: SheetView) => SheetView) => void
 
-export const INITIAL_SHEET_VIEW: SheetView = { sort: null, filters: {}, hidden: [], widths: {} }
+export const INITIAL_SHEET_VIEW: SheetView = {
+  sort: null,
+  autoFilter: false,
+  filters: {},
+  hidden: [],
+  widths: {},
+}
 
 /** One view per sheet of a workbook, so each keeps its own as the reader moves between tabs. */
 export function useSheetViews(): {
@@ -39,6 +50,11 @@ export function useSheetViews(): {
     []
   )
   return { viewOf: (sheet) => views[sheet] ?? INITIAL_SHEET_VIEW, updateOf }
+}
+
+/** Filter mode on or off; turning it off takes every filter off, as a spreadsheet does. */
+export function setAutoFilter(view: SheetView, on: boolean): SheetView {
+  return on ? { ...view, autoFilter: true } : { ...view, autoFilter: false, filters: {} }
 }
 
 /** The view with a column's filter set, or taken off when it is null or would keep every row. */

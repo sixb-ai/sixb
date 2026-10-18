@@ -1,10 +1,21 @@
-import { Popover, PopoverContent, PopoverTrigger } from "@sixb/ui/components"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { Filter } from "lucide-react"
+import { ArrowDown, ArrowUp, ChevronDown, Copy, Filter } from "lucide-react"
 import {
   type CSSProperties,
   type KeyboardEvent,
+  type MouseEvent,
   type PointerEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useId,
@@ -14,8 +25,8 @@ import {
   useState,
 } from "react"
 import { useArtifactMessages } from "../../messages"
-import { CellContent, GridCell, HeaderContent, selectionEdges } from "./cells"
-import { ColumnMenu } from "./column-menu"
+import { CellContent, columnTypeLabel, GridCell, HeaderContent, selectionEdges } from "./cells"
+import { CONTEXT_PARTS, type ColumnActions, ColumnMenu, ColumnMenuItems } from "./column-menu"
 import { filteredOrder } from "./filter"
 import { FilterPanel } from "./filter-panel"
 import { findMatches } from "./find"
@@ -43,6 +54,7 @@ import {
   INITIAL_SHEET_VIEW,
   type SheetView,
   type SheetViewUpdate,
+  setAutoFilter,
   setColumnFilter,
   visibleColumn,
 } from "./view"
@@ -70,9 +82,10 @@ export interface SheetGridStatus {
 
 /**
  * A read-only spreadsheet grid: column letters and row numbers, the header row and any frozen rows
- * and columns kept in view, a menu on each column that sorts, filters, fits, freezes, and hides it,
- * and a selection of cells, rows, or columns by pointer, Shift, and keyboard that copies as TSV and
- * as a table. Only the cells in view are drawn, so a sheet of 100,000 rows scrolls like a short one.
+ * and columns kept in view, a menu on each column's letter and on a right-click that sorts,
+ * filters, fits, freezes, and hides it, filter buttons on the headers in filter mode, and a
+ * selection of cells, rows, or columns by pointer, Shift, and keyboard that copies as TSV and as a
+ * table. Only the cells in view are drawn, so a sheet of 100,000 rows scrolls like a short one.
  */
 export function SheetGrid({
   model,
@@ -143,6 +156,10 @@ export function SheetGrid({
   )
   /** The column whose filter is open. */
   const [filtering, setFiltering] = useState<number | null>(null)
+  /** What the reader right-clicked, which decides what the context menu offers. */
+  const [contextTarget, setContextTarget] = useState<ContextTarget>(null)
+  /** Whether the context menu's Filter item closed it, so focus stays with the filter. */
+  const contextFiltering = useRef(false)
   const formatters = useMemo(
     () => model.columns.map((column) => cellFormatter(column, locale)),
     [model, locale]
@@ -489,12 +506,61 @@ export function SheetGrid({
   const canFreeze = (column: number) =>
     rowNumberWidth + (offsets[column + 1] ?? 0) <= viewport.width * FROZEN_SHARE
 
+  /** Filter mode on, the header in view, and the column's filter open. */
+  const openFilter = (column: number) => {
+    updateView((current) => setAutoFilter(current, true))
+    reveal({ row: 0, column })
+    setFiltering(column)
+  }
+
   const hide = (column: number) => {
     updateView((current) => hideColumn(current, column))
     // The active cell leaves the column it was in for the nearest one still shown.
     const shown = new Set([...hidden, column])
     const next = { ...focus, column: visibleColumn(column, column - 1, columnCount, shown) }
     if (focus.column === column) select(next, false)
+  }
+
+  const columnActions = (column: number): ColumnActions => ({
+    sort: sort?.column === column ? sort.direction : null,
+    onSort: (direction) => sortBy(column, direction),
+    onFilter: () => openFilter(column),
+    onFit: () => setWidth(column, fit(column)),
+    frozen: column < frozenColumns,
+    ...(canFreeze(column)
+      ? { onFreeze: () => updateView((current) => ({ ...current, frozenColumns: column + 1 })) }
+      : {}),
+    ...(frozenColumns > 0
+      ? { onUnfreeze: () => updateView((current) => ({ ...current, frozenColumns: 0 })) }
+      : {}),
+    ...(hidden.size < columnCount - 1 ? { onHide: () => hide(column) } : {}),
+  })
+
+  /**
+   * A right-click names what the menu is for, and selects it first when it is outside the
+   * selection, as a spreadsheet does: a column from its letter, a row from its number, or a cell.
+   */
+  const onContextMenu = (event: MouseEvent<HTMLDivElement>) => {
+    const target = (event.target as HTMLElement).closest<HTMLElement>("[data-cell]")
+    const point = target ? cellPoint(target) : null
+    if (!point) {
+      setContextTarget(null)
+      return
+    }
+    gridRef.current?.focus({ preventScroll: true })
+    if (point.row < 0) {
+      setContextTarget({ kind: "column", column: point.column })
+      const whole = range.top === 0 && range.bottom === rowCount - 1
+      if (!whole || point.column < range.left || point.column > range.right) {
+        selectColumns(point.column, point.column)
+      }
+    } else if (point.column < 0) {
+      setContextTarget({ kind: "row" })
+      if (point.row < range.top || point.row > range.bottom) selectRows(point.row, point.row)
+    } else {
+      setContextTarget({ kind: "column", column: point.column, cell: true })
+      if (!inRange(range, point.row, point.column)) select(point, false)
+    }
   }
 
   const valueAt = (row: number, column: number): string =>
@@ -525,6 +591,14 @@ export function SheetGrid({
           selected={inRange(range, row, column)}
           active={row === focus.row && column === focus.column}
           sort={header && sort?.column === column ? sort.direction : undefined}
+          {...(header && model.columns[column]
+            ? {
+                title: `${model.columns[column]?.name} · ${columnTypeLabel(
+                  model.columns[column] as SheetColumn,
+                  messages
+                )}`,
+              }
+            : {})}
           matched={matched.has(`${row}:${column}`)}
           style={style}
         >
@@ -532,28 +606,15 @@ export function SheetGrid({
             <HeaderContent
               column={model.columns[column]}
               sort={sort?.column === column ? sort.direction : null}
-              filter={
-                <Popover
-                  open={filtering === column}
-                  onOpenChange={(open) => setFiltering(open ? column : null)}
-                >
-                  <PopoverTrigger
-                    aria-label={messages.filterColumn(model.columns[column]?.name ?? "")}
-                    title={messages.filterColumn(model.columns[column]?.name ?? "")}
-                    data-filtered={view.filters[column] ? "" : undefined}
-                    className={cn(
-                      "flex size-5 shrink-0 items-center justify-center rounded outline-none transition-opacity hover:bg-muted focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:opacity-100",
-                      view.filters[column]
-                        ? "text-primary opacity-100"
-                        : "text-muted-foreground opacity-0 hover:text-foreground [[role=columnheader]:hover_&]:opacity-100 [@media(hover:none)]:opacity-100"
-                    )}
+              filterButton={
+                view.autoFilter ? (
+                  <FilterButton
+                    name={model.columns[column]?.name ?? ""}
+                    filtered={!!view.filters[column]}
+                    sort={sort?.column === column ? sort.direction : null}
+                    open={filtering === column}
+                    onOpenChange={(open) => setFiltering(open ? column : null)}
                   >
-                    <Filter
-                      className={cn("size-3", view.filters[column] && "fill-current")}
-                      aria-hidden="true"
-                    />
-                  </PopoverTrigger>
-                  <PopoverContent align="end" className="w-auto p-3">
                     <FilterPanel
                       model={model}
                       column={column}
@@ -562,30 +623,11 @@ export function SheetGrid({
                       onChange={(filter) =>
                         updateView((current) => setColumnFilter(current, column, filter))
                       }
+                      sort={sort?.column === column ? sort.direction : null}
+                      onSort={(direction) => sortBy(column, direction)}
                     />
-                  </PopoverContent>
-                </Popover>
-              }
-              menu={
-                <ColumnMenu
-                  name={model.columns[column]?.name ?? ""}
-                  sort={sort?.column === column ? sort.direction : null}
-                  onSort={(direction) => sortBy(column, direction)}
-                  onFilter={() => setFiltering(column)}
-                  onFit={() => setWidth(column, fit(column))}
-                  frozen={column < frozenColumns}
-                  onFreeze={
-                    canFreeze(column)
-                      ? () => updateView((current) => ({ ...current, frozenColumns: column + 1 }))
-                      : undefined
-                  }
-                  onUnfreeze={
-                    frozenColumns > 0
-                      ? () => updateView((current) => ({ ...current, frozenColumns: 0 }))
-                      : undefined
-                  }
-                  onHide={hidden.size < columnCount - 1 ? () => hide(column) : undefined}
-                />
+                  </FilterButton>
+                ) : undefined
               }
             />
           ) : (
@@ -642,6 +684,7 @@ export function SheetGrid({
       <div
         key={column}
         data-cell=""
+        data-letter=""
         data-row={-1}
         data-column={column}
         className={cn(
@@ -656,6 +699,7 @@ export function SheetGrid({
         }}
       >
         <span aria-hidden="true">{columnLetter(column)}</span>
+        <ColumnMenu name={name} actions={columnActions(column)} />
         <span
           role="separator"
           aria-orientation="vertical"
@@ -684,59 +728,156 @@ export function SheetGrid({
     (point.column < frozenColumns || (point.column >= firstColumn && point.column <= columns.last))
 
   return (
-    <div
-      ref={scrollRef}
-      className={cn(
-        "relative min-h-0 min-w-0 overflow-auto bg-background text-[13px] text-foreground has-[[role=grid]:focus-visible]:ring-2 has-[[role=grid]:focus-visible]:ring-ring has-[[role=grid]:focus-visible]:ring-inset",
-        className
-      )}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-    >
-      <div
-        className="flex flex-col"
-        style={{ width: totalWidth, height: headerHeight + bodyRows * ROW_HEIGHT }}
-      >
+    <ContextMenu modal={false}>
+      <ContextMenuTrigger asChild>
         <div
-          ref={gridRef}
-          role="grid"
-          aria-label={messages.grid(model.name)}
-          aria-rowcount={rowCount}
-          // The row numbers are the first column.
-          aria-colcount={columnCount + 1}
-          aria-multiselectable="true"
-          aria-activedescendant={drawn(focus) ? cellId(focus.row, focus.column) : undefined}
-          tabIndex={0}
-          className="flex-1 outline-none"
-          onKeyDown={onKeyDown}
+          ref={scrollRef}
+          onContextMenu={onContextMenu}
+          className={cn(
+            "relative min-h-0 min-w-0 overflow-auto bg-background text-[13px] text-foreground has-[[role=grid]:focus-visible]:ring-2 has-[[role=grid]:focus-visible]:ring-ring has-[[role=grid]:focus-visible]:ring-inset",
+            className
+          )}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
         >
           <div
-            role="rowgroup"
-            className="sticky z-[3] shadow-[0_1px_0_var(--border)]"
-            style={{ top: LETTER_HEIGHT }}
+            className="flex flex-col"
+            style={{ width: totalWidth, height: headerHeight + bodyRows * ROW_HEIGHT }}
           >
-            {frozen.map(renderRow)}
-          </div>
-          <div role="rowgroup" style={{ paddingTop: rows.first * ROW_HEIGHT }}>
-            {body.map(renderRow)}
-          </div>
-        </div>
-        {/* The letters lead the grid on screen and follow it in the tab order: they are not
+            <div
+              ref={gridRef}
+              role="grid"
+              aria-label={messages.grid(model.name)}
+              aria-rowcount={rowCount}
+              // The row numbers are the first column.
+              aria-colcount={columnCount + 1}
+              aria-multiselectable="true"
+              aria-activedescendant={drawn(focus) ? cellId(focus.row, focus.column) : undefined}
+              tabIndex={0}
+              className="flex-1 outline-none"
+              onKeyDown={onKeyDown}
+            >
+              <div
+                role="rowgroup"
+                className="sticky z-[3] shadow-[0_1px_0_var(--border)]"
+                style={{ top: LETTER_HEIGHT }}
+              >
+                {frozen.map(renderRow)}
+              </div>
+              <div role="rowgroup" style={{ paddingTop: rows.first * ROW_HEIGHT }}>
+                {body.map(renderRow)}
+              </div>
+            </div>
+            {/* The letters lead the grid on screen and follow it in the tab order: they are not
             cells, only the columns' names and the handles that resize them. */}
-        <div
-          className="sticky top-0 z-[4] order-first flex"
-          style={{ width: totalWidth, height: LETTER_HEIGHT }}
-        >
-          <div
-            className={cn("sticky left-0 z-[3] shrink-0 border-r border-b border-border", GUTTER)}
-            style={{ width: rowNumberWidth }}
-          />
-          {fixedColumns.map((column) => letter(column, true))}
-          {leadingSpace > 0 ? <div className="shrink-0" style={{ width: leadingSpace }} /> : null}
-          {scrollingColumns.map((column) => letter(column, false))}
+            <div
+              className="sticky top-0 z-[4] order-first flex"
+              style={{ width: totalWidth, height: LETTER_HEIGHT }}
+            >
+              <div
+                className={cn(
+                  "sticky left-0 z-[3] shrink-0 border-r border-b border-border",
+                  GUTTER
+                )}
+                style={{ width: rowNumberWidth }}
+              />
+              {fixedColumns.map((column) => letter(column, true))}
+              {leadingSpace > 0 ? (
+                <div className="shrink-0" style={{ width: leadingSpace }} />
+              ) : null}
+              {scrollingColumns.map((column) => letter(column, false))}
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent
+        className="min-w-52"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          // Choosing Filter leaves focus with the filter it opened; anything else, with the grid.
+          if (!contextFiltering.current) gridRef.current?.focus({ preventScroll: true })
+          contextFiltering.current = false
+        }}
+      >
+        {contextTarget?.kind === "column" && !contextTarget.cell ? null : (
+          <ContextMenuItem onSelect={() => void copy()}>
+            <Copy aria-hidden="true" />
+            {messages.copy}
+          </ContextMenuItem>
+        )}
+        {contextTarget?.kind === "column" ? (
+          <>
+            {contextTarget.cell ? <ContextMenuSeparator /> : null}
+            <ColumnMenuItems
+              actions={{
+                ...columnActions(contextTarget.column),
+                onFilter: () => {
+                  contextFiltering.current = true
+                  openFilter(contextTarget.column)
+                },
+              }}
+              parts={CONTEXT_PARTS}
+              messages={messages}
+            />
+          </>
+        ) : null}
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+}
+
+/** What a right-click landed on: a column's letter or a cell in it, a row's number, or neither. */
+type ContextTarget =
+  | { readonly kind: "column"; readonly column: number; readonly cell?: boolean }
+  | { readonly kind: "row" }
+  | null
+
+/**
+ * A header's filter button in filter mode, at the cell's right edge as a spreadsheet's is: it
+ * shows the column's filter or sort when it has one, and opens its sort and filter.
+ */
+function FilterButton({
+  name,
+  filtered,
+  sort,
+  open,
+  onOpenChange,
+  children,
+}: {
+  readonly name: string
+  readonly filtered: boolean
+  readonly sort: SortDirection | null
+  readonly open: boolean
+  readonly onOpenChange: (open: boolean) => void
+  readonly children: ReactNode
+}) {
+  const messages = useArtifactMessages().sheet
+  const Icon = filtered
+    ? Filter
+    : sort === "ascending"
+      ? ArrowUp
+      : sort === "descending"
+        ? ArrowDown
+        : ChevronDown
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger
+        aria-label={messages.filterColumn(name)}
+        title={messages.filterColumn(name)}
+        data-filtered={filtered ? "" : undefined}
+        className={cn(
+          "absolute top-1/2 right-1 flex size-[18px] -translate-y-1/2 items-center justify-center rounded-[4px] border bg-card shadow-[0_1px_1px_rgb(0_0_0/0.05)] outline-none transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-primary",
+          filtered || sort
+            ? "border-primary/40 text-primary"
+            : "border-border text-muted-foreground"
+        )}
+      >
+        <Icon className={cn("size-3", filtered && "size-2.5 fill-current")} aria-hidden="true" />
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-auto p-3">
+        {children}
+      </PopoverContent>
+    </Popover>
   )
 }
 

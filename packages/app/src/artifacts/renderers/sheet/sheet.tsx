@@ -13,6 +13,7 @@ import {
   ChartLine,
   ChartPie,
   Download,
+  ListFilter,
   Search,
 } from "lucide-react"
 import { type KeyboardEvent, lazy, type ReactNode, Suspense, useId, useRef, useState } from "react"
@@ -25,9 +26,15 @@ import { SheetDownloads } from "./downloads"
 import { FindBar, useSheetFind } from "./find-bar"
 import { cellFormatter, numberFormat } from "./format"
 import { SheetGrid, type SheetGridStatus } from "./grid"
-import type { SheetColumn, SheetModel } from "./model"
+import type { SheetModel } from "./model"
 import { rangeLabel } from "./selection"
-import { INITIAL_SHEET_VIEW, type SheetView, type SheetViewUpdate, useSheetViews } from "./view"
+import {
+  INITIAL_SHEET_VIEW,
+  type SheetView,
+  type SheetViewUpdate,
+  setAutoFilter,
+  useSheetViews,
+} from "./view"
 import { useSheetModel, useWorkbook } from "./workbook"
 
 const SheetChart = lazy(() => import("./chart"))
@@ -169,6 +176,21 @@ function WorkbookView({
         {tab.kind === "sheet" && model ? (
           <button
             type="button"
+            aria-pressed={view.autoFilter}
+            onClick={() => updateView((current) => setAutoFilter(current, !current.autoFilter))}
+            title={messages.sheet.filterMode}
+            className={cn(
+              "flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+              view.autoFilter ? "bg-muted text-foreground" : "text-muted-foreground"
+            )}
+          >
+            <ListFilter className="size-3.5" aria-hidden="true" />
+            <span className="hidden @md:inline">{messages.sheet.filterMode}</span>
+          </button>
+        ) : null}
+        {tab.kind === "sheet" && model ? (
+          <button
+            type="button"
             onClick={finder.show}
             aria-label={messages.sheet.find}
             title={messages.sheet.find}
@@ -192,9 +214,7 @@ function WorkbookView({
         aria-labelledby={tabId(current)}
         className="flex min-h-0 flex-1 flex-col"
       >
-        {tab.kind === "sheet" ? (
-          <NameBox status={status} messages={messages} finder={finder} />
-        ) : null}
+        {tab.kind === "sheet" ? <NameBox status={status} finder={finder} /> : null}
 
         <div className="flex min-h-0 flex-1">
           {!model ? (
@@ -282,7 +302,7 @@ export function SheetTable({ model }: { readonly model: SheetModel }) {
       onKeyDown={finder.onKeyDown}
       className="@container flex min-h-0 flex-1 flex-col bg-background"
     >
-      <NameBox status={status} messages={messages} finder={finder} />
+      <NameBox status={status} finder={finder} />
       <SheetGrid
         model={model}
         locale={locale}
@@ -372,15 +392,13 @@ function ChartIcon({ type }: { readonly type: WorkbookChart["type"] }) {
 
 /**
  * The selection's address and the active cell's whole value, as a spreadsheet's formula bar shows
- * them, then the column's name and what type it holds where there is room.
+ * them.
  */
 function NameBox({
   status,
-  messages,
   finder,
 }: {
   readonly status: SheetGridStatus | null
-  readonly messages: ArtifactMessages
   readonly finder: ReturnType<typeof useSheetFind>
 }) {
   return (
@@ -392,45 +410,15 @@ function NameBox({
       {finder.open ? (
         <FindBar state={finder} />
       ) : (
-        <ActiveValue status={status} messages={messages} />
+        <span
+          data-sheet-value=""
+          className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap select-text [scrollbar-width:none]"
+        >
+          {status?.value}
+        </span>
       )}
     </div>
   )
-}
-
-function ActiveValue({
-  status,
-  messages,
-}: {
-  readonly status: SheetGridStatus | null
-  readonly messages: ArtifactMessages
-}) {
-  const column = status?.column
-  return (
-    <>
-      <span
-        data-sheet-value=""
-        className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap select-text [scrollbar-width:none]"
-      >
-        {status?.value}
-      </span>
-      {column ? (
-        <span className="hidden max-w-[40%] shrink-0 items-center gap-2 @2xl:flex">
-          <span className="truncate text-muted-foreground">{column.name}</span>
-          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-            {typeLabel(column, messages)}
-          </span>
-        </span>
-      ) : null}
-    </>
-  )
-}
-
-function typeLabel(column: SheetColumn, messages: ArtifactMessages): string {
-  const types = messages.sheet.types
-  return column.format.type === "currency"
-    ? types.currency(column.format.currency ?? "USD")
-    : types[column.format.type]
 }
 
 function StatusBar({

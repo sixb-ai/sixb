@@ -1,5 +1,7 @@
 import { Button, Checkbox, NativeSelect, NativeSelectOption } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
+import { cn } from "@sixb/ui/lib/utils"
+import { ArrowDown, ArrowUp } from "lucide-react"
 import { useId, useMemo, useState } from "react"
 import { type ArtifactMessages, useArtifactMessages } from "../../messages"
 import {
@@ -11,10 +13,12 @@ import {
 } from "./filter"
 import type { FormattedCell } from "./format"
 import type { SheetModel } from "./model"
+import type { SortDirection } from "./selection"
 
 /**
  * What a column's filter keeps, set as the reader changes it: a checklist of its values, or, for
- * numbers and dates, a condition. Each change applies at once.
+ * numbers and dates, a condition. Each change applies at once. Given `onSort`, it opens with the
+ * column's sort, as a spreadsheet's filter button does.
  */
 export function FilterPanel({
   model,
@@ -22,6 +26,8 @@ export function FilterPanel({
   format,
   filter,
   onChange,
+  sort,
+  onSort,
 }: {
   readonly model: SheetModel
   readonly column: number
@@ -29,12 +35,37 @@ export function FilterPanel({
   readonly filter: ColumnFilter | undefined
   /** Null takes the filter off. */
   readonly onChange: (filter: ColumnFilter | null) => void
+  readonly sort?: SortDirection | null
+  readonly onSort?: (direction: SortDirection | null) => void
 }) {
   const messages = useArtifactMessages().sheet
   const entry = model.columns[column]
   if (!entry) return null
   return (
     <div className="flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-3 text-[13px]">
+      {onSort ? (
+        <div className="-mx-1 flex flex-col border-b border-border/70 pb-2">
+          {(["ascending", "descending"] as const).map((direction) => {
+            const Icon = direction === "ascending" ? ArrowUp : ArrowDown
+            const active = sort === direction
+            return (
+              <button
+                key={direction}
+                type="button"
+                aria-pressed={active}
+                onClick={() => onSort(active ? null : direction)}
+                className={cn(
+                  "flex h-8 items-center gap-2 rounded-md px-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+                  active && "font-medium text-primary"
+                )}
+              >
+                <Icon className="size-3.5" aria-hidden="true" />
+                {direction === "ascending" ? messages.sortAscending : messages.sortDescending}
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
       <p className="truncate font-medium">{messages.filterColumn(entry.name)}</p>
       {filtersByCondition(entry) ? (
         <ConditionFilter
