@@ -1,13 +1,17 @@
 import { useCallback, useState } from "react"
+import { type ColumnFilter, isInactiveFilter } from "./filter"
 import type { SortDirection } from "./selection"
 
 /**
- * How the reader has arranged one sheet: its sort, the columns they hid, how many columns they
- * froze, and the widths they gave columns. It lasts while the artifact is open and changes nothing
- * in it. Columns are the sheet's own, by index, so letters and addresses keep naming them.
+ * How the reader has arranged one sheet: its sort and filters, the columns they hid, how many
+ * columns they froze, and the widths they gave columns. It lasts while the artifact is open and
+ * changes nothing in it. Columns are the sheet's own, by index, so letters and addresses keep
+ * naming them.
  */
 export interface SheetView {
   readonly sort: { readonly column: number; readonly direction: SortDirection } | null
+  /** Filters by column; a row shows when every one keeps it. */
+  readonly filters: Readonly<Record<number, ColumnFilter>>
   readonly hidden: readonly number[]
   /** Columns kept in view as the sheet scrolls sideways; absent, the workbook's. */
   readonly frozenColumns?: number
@@ -17,7 +21,7 @@ export interface SheetView {
 
 export type SheetViewUpdate = (update: (view: SheetView) => SheetView) => void
 
-export const INITIAL_SHEET_VIEW: SheetView = { sort: null, hidden: [], widths: {} }
+export const INITIAL_SHEET_VIEW: SheetView = { sort: null, filters: {}, hidden: [], widths: {} }
 
 /** One view per sheet of a workbook, so each keeps its own as the reader moves between tabs. */
 export function useSheetViews(): {
@@ -35,6 +39,19 @@ export function useSheetViews(): {
     []
   )
   return { viewOf: (sheet) => views[sheet] ?? INITIAL_SHEET_VIEW, updateOf }
+}
+
+/** The view with a column's filter set, or taken off when it is null or would keep every row. */
+export function setColumnFilter(
+  view: SheetView,
+  column: number,
+  filter: ColumnFilter | null
+): SheetView {
+  const { [column]: _, ...others } = view.filters
+  return {
+    ...view,
+    filters: filter && !isInactiveFilter(filter) ? { ...others, [column]: filter } : others,
+  }
 }
 
 export function hideColumn(view: SheetView, column: number): SheetView {

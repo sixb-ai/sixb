@@ -6,6 +6,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { artifactFileSource } from "../src/artifacts/file-source"
+import { FilterPanel } from "../src/artifacts/renderers/sheet/filter-panel"
+import { cellFormatter } from "../src/artifacts/renderers/sheet/format"
 import { SheetGrid, type SheetGridStatus } from "../src/artifacts/renderers/sheet/grid"
 import { sheetModel } from "../src/artifacts/renderers/sheet/model"
 import { rangeLabel } from "../src/artifacts/renderers/sheet/selection"
@@ -119,6 +121,7 @@ function mount(sheetView?: SheetView) {
       column: last.column?.name,
       ...last.stats,
       value: last.value,
+      rows: last.rows,
     }
   }
   const press = async (
@@ -144,6 +147,7 @@ describe("the sheet grid", () => {
       range: "B2:B4",
       column: "Revenue",
       value: "$5,560,000",
+      rows: 3,
       count: 3,
       numericCount: 3,
       sum: 13_580_000,
@@ -381,6 +385,48 @@ describe("the sheet grid", () => {
     expect(copied).toEqual(["Q4 2025\t0.269"])
   })
 
+  test("shows only the rows its filters keep, and sums and copies within them", async () => {
+    // Reproduce by ordering the grid by `sorted` instead of `order`: Q1 2026 stays in the grid.
+    const { cell, status, press } = mount({
+      ...INITIAL_SHEET_VIEW,
+      filters: { 1: { kind: "condition", op: "gt", value: "4,000,000" } },
+    })
+    expect([cell(1, 0).textContent, cell(2, 0).textContent]).toEqual(["Q4 2025", "Q2 2026"])
+    expect(document.querySelector('[data-row="3"][data-column="0"]')).toBeNull()
+    await press("ArrowRight")
+    await press("ArrowDown", { shiftKey: true })
+    expect(status()).toMatchObject({ range: "B2:B3", rows: 2, sum: 9_680_000 })
+    await press("c", { metaKey: true })
+    expect(copied).toEqual(["4120000\n5560000"])
+  })
+
+  test("pulls the selection up into the rows a new filter keeps", async () => {
+    // Reproduce by dropping the effect that clamps the selection to `rowCount`: it stays on A4,
+    // a row the grid no longer has.
+    const statuses: SheetGridStatus[] = []
+    const grid = (view: SheetView) => (
+      <SheetGrid
+        model={model}
+        locale="en-US"
+        view={view}
+        onStatusChange={(status) => statuses.push(status)}
+      />
+    )
+    const ui = render(grid(INITIAL_SHEET_VIEW))
+    for (const _ of [1, 2]) {
+      await act(async () => {
+        fireEvent.keyDown(ui.getByRole("grid"), { key: "ArrowDown" })
+      })
+    }
+    const last = () => statuses.at(-1)
+    expect(last() ? rangeLabel(last()!.range) : null).toBe("A4")
+    ui.rerender(
+      grid({ ...INITIAL_SHEET_VIEW, filters: { 0: { kind: "values", excluded: ["Q4 2025"] } } })
+    )
+    expect(last()?.rows).toBe(2)
+    expect(last() ? rangeLabel(last()!.range) : null).toBe("A3")
+  })
+
   test("freezes the columns the reader froze", () => {
     const { cell } = mount({ ...INITIAL_SHEET_VIEW, frozenColumns: 2 })
     expect(cell(1, 0).className).toContain("sticky")
@@ -398,6 +444,56 @@ describe("the sheet grid", () => {
       fireEvent.keyDown(trigger, { key: "ArrowDown" })
     })
     expect(status().range).toBe("A2")
+  })
+})
+
+describe("a column's filter", () => {
+  const formatters = model.columns.map((column) => cellFormatter(column, "en-US"))
+
+  test("hides the values the reader unchecks, or every one listed", async () => {
+    const changes: unknown[] = []
+    const ui = render(
+      <FilterPanel
+        model={model}
+        column={0}
+        format={formatters[0] ?? ((value) => ({ text: value }))}
+        filter={undefined}
+        onChange={(filter) => changes.push(filter)}
+      />
+    )
+    expect(ui.getAllByRole("checkbox")).toHaveLength(3)
+    const box = ui.getByText("Q1 2026").closest("label")?.querySelector('[role="checkbox"]')
+    if (!box) throw new Error("No checkbox for Q1 2026.")
+    await act(async () => fireEvent.click(box))
+    expect(changes.at(-1)).toEqual({ kind: "values", excluded: ["Q1 2026"] })
+    await act(async () => fireEvent.click(ui.getByRole("button", { name: "Select none" })))
+    expect(changes.at(-1)).toEqual({
+      kind: "values",
+      excluded: ["Q1 2026", "Q2 2026", "Q4 2025"].sort(),
+    })
+  })
+
+  test("sets a condition on a number column as the reader picks and types it", async () => {
+    const changes: unknown[] = []
+    const ui = render(
+      <FilterPanel
+        model={model}
+        column={1}
+        format={formatters[1] ?? ((value) => ({ text: value }))}
+        filter={undefined}
+        onChange={(filter) => changes.push(filter)}
+      />
+    )
+    expect(ui.queryAllByRole("checkbox")).toHaveLength(0)
+    await act(async () => {
+      fireEvent.change(ui.getByRole("combobox", { name: "Condition" }), {
+        target: { value: "lt" },
+      })
+    })
+    const input = ui.getByRole("textbox", { name: "Value" })
+    input.focus()
+    await act(async () => typeInto(input, "4,000,000"))
+    expect(changes.at(-1)).toEqual({ kind: "condition", op: "lt", value: "4,000,000" })
   })
 })
 

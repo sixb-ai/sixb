@@ -464,7 +464,21 @@ function StatusBar({
   return (
     <div className="flex min-h-9 shrink-0 flex-wrap items-center justify-between gap-x-6 gap-y-1 border-t border-border/70 px-4 py-1.5 text-xs text-muted-foreground tabular-nums">
       <span>
-        {model.name} · {messages.sheet.rows(model.rows.length)}
+        {model.name} ·{" "}
+        {status && status.rows < model.rows.length ? (
+          <>
+            {messages.sheet.filteredRows(status.rows, model.rows.length)} ·{" "}
+            <button
+              type="button"
+              onClick={() => onViewChange((current) => ({ ...current, filters: {} }))}
+              className="rounded-sm font-medium text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {messages.sheet.clearFilters}
+            </button>
+          </>
+        ) : (
+          messages.sheet.rows(model.rows.length)
+        )}
         {model.frozenRows > 0 ? ` · ${messages.sheet.frozenRows(model.frozenRows)}` : ""}
         {view.hidden.length > 0 ? (
           <>
