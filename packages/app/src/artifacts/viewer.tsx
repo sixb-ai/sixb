@@ -28,15 +28,18 @@ import {
 import type { ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { useCopyFeedback } from "./copy-feedback"
+import { DownloadMenu } from "./downloads"
 import { formatFileSize } from "./file-size"
 import { useFileName } from "./file-source"
-import type { ArtifactKindName } from "./kind-icon"
+import { FileTypeIcon, fileTypeOf } from "./file-type-icon"
+import { type ArtifactKindName, ArtifactKindTile } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
 import { type ArtifactVersion, versionFileSource } from "./queries"
 import { ArtifactReferencesProvider } from "./references/references"
 import { DocumentRenderer } from "./renderers/document"
 import { FileRenderer } from "./renderers/file"
 import { ViewerLoading, ViewerNotice } from "./renderers/notice"
+import { useWorkbookDownloads } from "./renderers/sheet/downloads"
 import { SheetRenderer } from "./renderers/sheet/sheet"
 import { SlidesRenderer } from "./renderers/slides/slides"
 import { type ArtifactTarget, artifactLink, type ViewerTarget } from "./target"
@@ -221,67 +224,122 @@ function ArtifactHeader({
   readonly onVersionChange: (version: number) => void
 }) {
   const messages = useArtifactMessages()
-  const locale = useLocale()
   const { artifact } = detail
-  // A sheet downloads each sheet as CSV from its tabs, and a deck's entry is only its slides'
-  // markup: neither is a file the reader wants on its own.
-  const download =
-    artifact.kind === "sheet" || artifact.kind === "slides"
-      ? null
-      : versionFileSource(version, version.entry)
-  const date = (iso: string) =>
-    new Date(iso).toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric" })
-
   return (
     <ViewerBar
       chrome={chrome}
+      leading={<ArtifactKindTile kind={artifact.kind} label={messages.kinds[artifact.kind]} />}
       title={version.title}
-      meta={
-        <>
-          <span>{messages.kinds[artifact.kind]}</span>
-          <span aria-hidden="true">·</span>
-          <DropdownMenu>
-            <DropdownMenuTrigger className="-mx-1 inline-flex items-center gap-0.5 rounded-md px-1 tabular-nums outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:text-foreground">
-              {messages.viewer.versionLabel(version.version)}
-              <ChevronDown className="size-3 opacity-70" aria-hidden="true" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="min-w-60">
-              <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
-                {messages.viewer.versions}
-              </DropdownMenuLabel>
-              <DropdownMenuRadioGroup
-                value={String(version.version)}
-                onValueChange={(value) => onVersionChange(Number(value))}
-              >
-                {detail.versions.map((entry) => (
-                  <DropdownMenuRadioItem key={entry.version} value={String(entry.version)}>
-                    <span className="flex-1 tabular-nums">
-                      {messages.viewer.versionItem(entry.version, date(entry.createdAt))}
-                    </span>
-                    {entry.version === artifact.latestVersion ? (
-                      <span className="text-xs text-muted-foreground">
-                        {messages.viewer.latest}
-                      </span>
-                    ) : null}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </>
+      accessory={
+        <VersionPicker detail={detail} version={version} onVersionChange={onVersionChange} />
       }
     >
+      {artifact.kind === "sheet" ? (
+        <SheetDownloadMenu version={version} />
+      ) : (
+        <EntryDownloadMenu version={version} kind={artifact.kind} />
+      )}
       <CopyLinkButton link={() => artifactLink(target, artifact.latestVersion, location.origin)} />
-      {download ? (
-        <HeaderLink
-          href={download.downloadUrl}
-          download={download.name}
-          label={messages.viewer.download(download.name)}
-        >
-          <ArrowDownToLine />
-        </HeaderLink>
-      ) : null}
     </ViewerBar>
+  )
+}
+
+/**
+ * The version shown, as a pill beside the title that opens every version with its date. An
+ * earlier version than the latest carries a dot, so the reader knows there is a newer one.
+ */
+function VersionPicker({
+  detail,
+  version,
+  onVersionChange,
+}: {
+  readonly detail: ArtifactDetail
+  readonly version: ArtifactVersion
+  readonly onVersionChange: (version: number) => void
+}) {
+  const messages = useArtifactMessages().viewer
+  const locale = useLocale()
+  const latest = detail.artifact.latestVersion
+  const date = (iso: string) =>
+    new Date(iso).toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric" })
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={`${messages.versionLabel(version.version)} · ${messages.versions}`}
+        className="inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-border/80 bg-card pr-1.5 pl-2 text-xs font-medium text-muted-foreground tabular-nums shadow-[0_1px_1px_rgb(0_0_0/0.03)] outline-none transition-colors hover:border-border hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-border data-[state=open]:text-foreground"
+      >
+        {version.version === latest ? null : (
+          <span className="size-1.5 rounded-full bg-warning" aria-hidden="true" />
+        )}
+        {messages.version(version.version)}
+        <ChevronDown className="size-3 opacity-70" aria-hidden="true" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" sideOffset={6} className="max-h-80 w-64 p-1.5">
+        <DropdownMenuLabel className="px-2 pt-1 pb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+          {messages.versions}
+        </DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={String(version.version)}
+          onValueChange={(value) => onVersionChange(Number(value))}
+        >
+          {detail.versions.map((entry) => (
+            <DropdownMenuRadioItem
+              key={entry.version}
+              value={String(entry.version)}
+              className="rounded-md py-1.5"
+            >
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="text-[13px] font-medium tabular-nums">
+                  {messages.versionLabel(entry.version)}
+                </span>
+                <span className="text-xs text-muted-foreground">{date(entry.createdAt)}</span>
+              </span>
+              {entry.version === latest ? (
+                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                  {messages.latest}
+                </span>
+              ) : null}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/** A sheet downloads as its workbook, built in the browser, or any of its sheets as CSV. */
+function SheetDownloadMenu({ version }: { readonly version: ArtifactVersion }) {
+  return <DownloadMenu options={useWorkbookDownloads(version, version.title)} />
+}
+
+/**
+ * A document or a file downloads as its entry. A deck's entry is only its slides' markup, which is
+ * no file the reader wants on its own.
+ */
+function EntryDownloadMenu({
+  version,
+  kind,
+}: {
+  readonly version: ArtifactVersion
+  readonly kind: ArtifactKindName
+}) {
+  const messages = useArtifactMessages()
+  const locale = useLocale()
+  const source = kind === "slides" ? null : versionFileSource(version, version.entry)
+  if (!source) return null
+  return (
+    <DownloadMenu
+      options={[
+        {
+          key: "entry",
+          type: fileTypeOf(source.name),
+          title: source.name,
+          detail: formatFileSize(source.fileRef.sizeBytes, locale, messages.files),
+          href: source.downloadUrl,
+          fileName: source.name,
+        },
+      ]}
+    />
   )
 }
 
@@ -299,9 +357,10 @@ function FileHeader({
   return (
     <ViewerBar
       chrome={chrome}
+      leading={<FileTypeIcon type={fileTypeOf(name)} height={24} />}
       title={name}
-      meta={
-        <span className="tabular-nums">
+      accessory={
+        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
           {formatFileSize(source.fileRef.sizeBytes, locale, messages.files)}
         </span>
       }
@@ -321,45 +380,44 @@ function FileHeader({
 }
 
 /**
- * The header: back on the full page, the title over a quiet line of what it is, then the actions,
- * full page, and close.
+ * The header, on one line: back on the full page, what the artifact is, its title, and its version,
+ * then its actions, full page, and close.
  */
 function ViewerBar({
   chrome,
+  leading,
   title,
-  meta,
+  accessory,
   children,
 }: {
   readonly chrome: ViewerChrome
+  /** What leads the title: an artifact's kind, or a file's type. */
+  readonly leading?: ReactNode
   readonly title?: string
-  readonly meta?: ReactNode
+  /** What follows the title: an artifact's version, or a file's size. */
+  readonly accessory?: ReactNode
   readonly children?: ReactNode
 }) {
   const messages = useArtifactMessages().viewer
   return (
     <TooltipProvider delayDuration={400}>
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/60 px-3">
+      <header className="@container flex h-13 shrink-0 items-center gap-2 border-b border-border/60 px-2.5">
         {chrome.onBack ? (
           <HeaderButton label={messages.back} onClick={chrome.onBack}>
             <ArrowLeft />
           </HeaderButton>
         ) : null}
-        <div
-          className={cn("flex min-w-0 flex-1 flex-col justify-center", !chrome.onBack && "pl-1.5")}
-        >
+        <div className={cn("flex min-w-0 flex-1 items-center gap-2.5", !chrome.onBack && "pl-1")}>
+          {leading}
           {title ? (
             <h2
-              className="truncate text-[14.5px] leading-tight font-semibold tracking-[-0.01em] text-foreground"
+              className="min-w-0 truncate text-[14.5px] leading-tight font-semibold tracking-[-0.01em] text-foreground"
               title={title}
             >
               {title}
             </h2>
           ) : null}
-          {meta ? (
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12.5px] leading-tight text-muted-foreground">
-              {meta}
-            </div>
-          ) : null}
+          {accessory}
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
           {children}

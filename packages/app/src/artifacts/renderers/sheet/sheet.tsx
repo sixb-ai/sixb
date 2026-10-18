@@ -22,7 +22,6 @@ import { useArtifactMessages } from "../../messages"
 import { type ArtifactVersion, versionImageSource } from "../../queries"
 import { useArtifactThemeAttributes } from "../../theme"
 import { ViewerLoading, ViewerNotice } from "../notice"
-import { SheetDownloads } from "./downloads"
 import { useSheetFind } from "./find-bar"
 import {
   CommandBar,
@@ -164,34 +163,23 @@ function WorkbookView({
             }
           : {})}
         tools={
-          <>
-            {onSheet ? (
-              <>
-                <CommandButton
-                  label={messages.sheet.find}
-                  icon={<Search aria-hidden="true" />}
-                  pressed={finder.open}
-                  onClick={finder.open ? finder.close : finder.show}
-                />
-                <CommandButton
-                  label={messages.sheet.filterMode}
-                  icon={<ListFilter aria-hidden="true" />}
-                  pressed={view.autoFilter}
-                  onClick={() =>
-                    updateView((current) => setAutoFilter(current, !current.autoFilter))
-                  }
-                  showLabel
-                />
-              </>
-            ) : null}
-            <SheetDownloads
-              version={version}
-              workbook={workbook}
-              sheet={sheetName}
-              source={source}
-              title={version.title}
-            />
-          </>
+          onSheet ? (
+            <>
+              <CommandButton
+                label={messages.sheet.find}
+                icon={<Search aria-hidden="true" />}
+                pressed={finder.open}
+                onClick={finder.open ? finder.close : finder.show}
+              />
+              <CommandButton
+                label={messages.sheet.filterMode}
+                icon={<ListFilter aria-hidden="true" />}
+                pressed={view.autoFilter}
+                onClick={() => updateView((current) => setAutoFilter(current, !current.autoFilter))}
+                showLabel
+              />
+            </>
+          ) : null
         }
       />
 

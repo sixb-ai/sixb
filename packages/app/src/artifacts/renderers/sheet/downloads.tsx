@@ -1,91 +1,55 @@
-import type { Workbook } from "@sixb/core/artifacts"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@sixb/ui/components"
+import { sheetFilePath } from "@sixb/core/artifacts"
 import { useQueryClient } from "@tanstack/react-query"
-import { Download, FileSpreadsheet, FileText, LoaderCircle } from "lucide-react"
-import { useState } from "react"
-import type { FileSource } from "../../file-source"
+import type { DownloadOption } from "../../downloads"
 import { useArtifactMessages } from "../../messages"
-import type { ArtifactVersion } from "../../queries"
-import { readWorkbookModels } from "./workbook"
+import { type ArtifactVersion, versionFileSource } from "../../queries"
+import { readWorkbookModels, useWorkbook } from "./workbook"
 import { workbookXlsx, XLSX_MEDIA_TYPE } from "./xlsx"
 
 /**
- * A sheet's downloads: the open sheet as its CSV, or the whole workbook as an `.xlsx` built in the
- * browser from the sheets' files, typed and formatted as the grid shows them.
+ * What a sheet artifact downloads as: the whole workbook as an `.xlsx`, built in the browser from
+ * the sheets' files, typed and formatted as the grid shows them; then each sheet as its CSV.
  */
-export function SheetDownloads({
-  version,
-  workbook,
-  sheet,
-  source,
-  title,
-}: {
-  readonly version: ArtifactVersion
-  readonly workbook: Workbook
-  /** The open sheet's name, and its CSV. */
-  readonly sheet: string
-  readonly source: FileSource | null
-  /** The artifact's title, which names the `.xlsx`. */
-  readonly title: string
-}) {
+export function useWorkbookDownloads(
+  version: ArtifactVersion,
+  title: string
+): readonly DownloadOption[] {
   const messages = useArtifactMessages().sheet
   const client = useQueryClient()
-  const [state, setState] = useState<"idle" | "working" | "failed">("idle")
-
-  const downloadXlsx = async () => {
-    setState("working")
-    try {
-      const bytes = await workbookXlsx(await readWorkbookModels(client, version, workbook))
-      saveFile(new Blob([bytes as BlobPart], { type: XLSX_MEDIA_TYPE }), `${fileStem(title)}.xlsx`)
-      setState("idle")
-    } catch (error) {
-      console.warn("[SixbApp] Could not build the workbook's .xlsx:", error)
-      setState("failed")
-    }
-  }
-
-  return (
-    <span className="flex shrink-0 items-center gap-2">
-      {state === "failed" ? (
-        <span role="status" className="text-xs text-destructive">
-          {messages.xlsxFailed}
-        </span>
-      ) : null}
-      <DropdownMenu modal={false}>
-        <DropdownMenuTrigger
-          aria-label={messages.download}
-          title={messages.download}
-          className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-muted data-[state=open]:text-foreground"
-        >
-          {state === "working" ? (
-            <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
-          ) : (
-            <Download className="size-3.5" aria-hidden="true" />
-          )}
-          <span className="hidden @lg:inline">{messages.download}</span>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-56">
-          {source ? (
-            <DropdownMenuItem asChild>
-              <a href={source.downloadUrl} download={`${sheet}.csv`}>
-                <FileText aria-hidden="true" />
-                {messages.sheetAsCsv(sheet)}
-              </a>
-            </DropdownMenuItem>
-          ) : null}
-          <DropdownMenuItem disabled={state === "working"} onSelect={() => void downloadXlsx()}>
-            <FileSpreadsheet aria-hidden="true" />
-            {messages.downloadXlsx}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </span>
-  )
+  const { workbook } = useWorkbook(version)
+  if (!workbook) return []
+  const outline = version.outline.kind === "sheet" ? version.outline.sheets : []
+  return [
+    {
+      key: "xlsx",
+      type: "xlsx",
+      title: messages.excelWorkbook,
+      detail: messages.workbookDetail(workbook.sheets.length),
+      run: async () => {
+        const bytes = await workbookXlsx(await readWorkbookModels(client, version, workbook))
+        saveFile(
+          new Blob([bytes as BlobPart], { type: XLSX_MEDIA_TYPE }),
+          `${fileStem(title)}.xlsx`
+        )
+      },
+    },
+    ...workbook.sheets.flatMap((sheet): DownloadOption[] => {
+      const source = versionFileSource(version, sheetFilePath(sheet.name))
+      return source
+        ? [
+            {
+              key: `csv:${sheet.name}`,
+              type: "csv",
+              title: sheet.name,
+              detail: messages.csvDetail(outline.find((entry) => entry.name === sheet.name)?.rows),
+              section: messages.sheetsAsCsv,
+              href: source.downloadUrl,
+              fileName: `${sheet.name}.csv`,
+            },
+          ]
+        : []
+    }),
+  ]
 }
 
 function saveFile(blob: Blob, name: string) {
