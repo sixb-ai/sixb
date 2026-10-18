@@ -10,19 +10,16 @@ import {
 import type { FileRef } from "@sixb/core/blob-storage"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react"
-import { Window } from "happy-dom"
 import type { ReactNode } from "react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { SyncButton } from "../src"
 import { DataConnectorPage, SectionsProvider } from "../src/pages"
 import { DatasetCell, datasetColumnNames } from "../src/pages/data/datasets"
 import { projectionRunsPollInterval } from "../src/pages/data/projections"
+import { installDom } from "./helpers/dom"
 import { stubWebSockets } from "./helpers/offline-sockets"
 
-const browser = new Window({ url: "https://app.sixb.test" })
-const globals = [
-  "window",
-  "self",
+installDom([
   "document",
   "navigator",
   "Node",
@@ -37,9 +34,7 @@ const globals = [
   "matchMedia",
   "requestAnimationFrame",
   "cancelAnimationFrame",
-  "IS_REACT_ACT_ENVIRONMENT",
-] as const
-const previous = new Map<string, PropertyDescriptor | undefined>()
+])
 const apiUrl = "https://api.sixb.test"
 const originalConfig = client.getConfig()
 let sockets: ReturnType<typeof stubWebSockets> | undefined
@@ -48,36 +43,15 @@ client.setConfig({ baseUrl: apiUrl })
 
 beforeAll(() => {
   sockets = stubWebSockets()
-  const values = browser as unknown as Record<string, unknown>
-  for (const key of globals) {
-    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key))
-    Object.defineProperty(globalThis, key, {
-      configurable: true,
-      writable: true,
-      value:
-        key === "window" || key === "self"
-          ? browser
-          : key === "IS_REACT_ACT_ENVIRONMENT"
-            ? true
-            : values[key],
-    })
-  }
 })
 
 afterEach(() => {
-  cleanup()
   client.setConfig({ fetch: originalConfig.fetch })
 })
 
 afterAll(() => {
   client.setConfig({ baseUrl: originalConfig.baseUrl })
   sockets?.restore()
-  for (const key of globals) {
-    const descriptor = previous.get(key)
-    if (descriptor) Object.defineProperty(globalThis, key, descriptor)
-    else Reflect.deleteProperty(globalThis, key)
-  }
-  browser.close()
 })
 
 function renderPage(

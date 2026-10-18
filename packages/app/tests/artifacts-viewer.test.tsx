@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { GetArtifactResponse, GetArtifactVersionResponse } from "@sixb/client"
-import { getArtifactQueryKey, getArtifactVersionQueryKey } from "@sixb/client/hooks"
+import { getArtifactQueryKey } from "@sixb/client/hooks"
 import { Markdown } from "@sixb/ui/components"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
@@ -9,7 +9,6 @@ import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { validateDocument } from "../../core/src/artifacts/publish/validate/document"
 import type { ArtifactFile } from "../../core/src/storage/artifacts/types"
 import { ArtifactPage } from "../src/artifacts/artifact-page"
-import { artifactFileSource } from "../src/artifacts/file-source"
 import { fileView } from "../src/artifacts/file-view"
 import { rehypeArtifactDocument } from "../src/artifacts/renderers/document-tree"
 import {
@@ -21,9 +20,9 @@ import {
 import { artifactThemeAttributes } from "../src/artifacts/theme"
 import { Viewer } from "../src/artifacts/viewer"
 import { artifactHref } from "../src/pages/routes"
+import { seedVersion } from "./helpers/artifacts"
 
 const ARTIFACT_ID = "art_0123456789"
-const BASE_URL = "https://app.sixb.test"
 
 describe("artifact targets", () => {
   test("round-trip through the conversation URL beside other parameters", () => {
@@ -224,22 +223,7 @@ describe("the viewer", () => {
       author: { type: "user", id: "user-1" },
       createdAt: "2026-10-02T12:00:00.000Z",
     }
-    cache.setQueryData(
-      getArtifactVersionQueryKey({ path: { artifactId: ARTIFACT_ID, version: "2" } }),
-      version
-    )
-    for (const [path, text] of Object.entries(input.texts ?? {})) {
-      const file = input.files.find((candidate) => candidate.path === path)
-      if (!file) throw new Error(`No file at ${path}`)
-      const source = artifactFileSource({
-        artifactId: ARTIFACT_ID,
-        version: 2,
-        path,
-        fileRef: file.file,
-        baseUrl: BASE_URL,
-      })
-      cache.setQueryData([...source.queryKey, "text"], text)
-    }
+    seedVersion(cache, version, input.texts)
     return renderToStaticMarkup(
       <Wrap cache={cache}>
         <Viewer

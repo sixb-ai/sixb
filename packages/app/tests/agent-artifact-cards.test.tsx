@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import type { GetArtifactVersionResponse } from "@sixb/client"
-import { getArtifactVersionQueryKey } from "@sixb/client/hooks"
 import { parseCsv } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
@@ -13,9 +12,9 @@ import { turnArtifacts, unpublishedTitles } from "../src/agent/publish-artifact/
 import { PublishArtifactToolView } from "../src/agent/publish-artifact/publish-artifact-tool-view"
 import { versionChanges, versionSummary } from "../src/artifacts/card-details"
 import { documentOpening, previewColumns } from "../src/artifacts/card-preview"
-import { artifactFileSource } from "../src/artifacts/file-source"
 import { en as artifactsEn } from "../src/artifacts/messages"
 import { fileSheetModel } from "../src/artifacts/renderers/sheet/model"
+import { artifactVersion, seedVersion, textFiles } from "./helpers/artifacts"
 
 function publish(artifactId: string, version: number, title: string): NormalizedPart {
   return {
@@ -169,33 +168,17 @@ describe("an artifact card's preview", () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { enabled: false, staleTime: Number.POSITIVE_INFINITY } },
     })
-    const files = Object.keys(texts).map((path, index) => ({
-      path,
-      file: {
-        blobId: `blob-${index}`,
-        digest: `sha256:${String(index).padStart(64, "0")}`,
-        sizeBytes: texts[path]?.length ?? 0,
-        mediaType: path.endsWith(".csv") ? "text/csv" : "text/plain",
-      },
-    }))
-    queryClient.setQueryData(getArtifactVersionQueryKey({ path: { artifactId, version: "1" } }), {
+    const version = artifactVersion({
       artifactId,
-      version: 1,
       title: "Q3 numbers",
       entry: kind === "sheet" ? "workbook.json" : "document.md",
-      files,
+      files: textFiles(texts),
       outline:
         kind === "sheet"
           ? { kind, sheets: [{ name: "Summary", rows: 2, columns: [] }], charts: [] }
           : { kind, headings: [] },
-      references: [],
-      author: { type: "user", id: "user-1" },
-      createdAt: "2026-10-02T12:00:00.000Z",
-    } satisfies GetArtifactVersionResponse)
-    for (const { path, file } of files) {
-      const source = artifactFileSource({ artifactId, version: 1, path, fileRef: file })
-      queryClient.setQueryData([...source.queryKey, "text"], texts[path])
-    }
+    })
+    seedVersion(queryClient, version, texts)
     const parts: NormalizedPart[] = [
       {
         kind: "tool",
@@ -272,17 +255,7 @@ describe("an artifact a turn revised", () => {
     outline: GetArtifactVersionResponse["outline"],
     files: GetArtifactVersionResponse["files"] = [],
     entry = "workbook.json"
-  ): GetArtifactVersionResponse => ({
-    artifactId: "art_preview001",
-    version: 1,
-    title: "Q3 numbers",
-    entry,
-    files,
-    outline,
-    references: [],
-    author: { type: "user", id: "user-1" },
-    createdAt: "2026-10-02T12:00:00.000Z",
-  })
+  ) => artifactVersion({ artifactId: "art_preview001", title: "Q3 numbers", entry, files, outline })
   const sheets = (names: string[], charts: string[] = []) =>
     version({
       kind: "sheet",

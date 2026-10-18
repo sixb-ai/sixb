@@ -1,50 +1,34 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react"
-import { Window } from "happy-dom"
+import { fireEvent, render, waitFor } from "@testing-library/react"
 import { MemoryRouter, type RouteObject, useRoutes } from "react-router-dom"
 import { generateRouteManifest } from "../src/codegen"
 import { scanAppRoutes } from "../src/scanner"
+import { installDom } from "./helpers/dom"
 
-const browserWindow = new Window({ url: "https://app.sixb.test/" })
-const installedBrowserGlobals = [
-  "window",
-  "self",
-  "document",
-  "location",
-  "history",
-  "navigator",
-  "Node",
-  "Element",
-  "HTMLElement",
-  "HTMLAnchorElement",
-  "Event",
-  "EventTarget",
-  "MouseEvent",
-  "MutationObserver",
-  "getComputedStyle",
-  "requestAnimationFrame",
-  "cancelAnimationFrame",
-  "IS_REACT_ACT_ENVIRONMENT",
-] as const
-const previousBrowserGlobals = new Map<string, PropertyDescriptor | undefined>()
-
-beforeAll(() => {
-  const values = browserWindow as unknown as Record<string, unknown>
-  for (const key of installedBrowserGlobals) {
-    previousBrowserGlobals.set(key, Object.getOwnPropertyDescriptor(globalThis, key))
-    const value =
-      key === "window" || key === "self"
-        ? browserWindow
-        : key === "IS_REACT_ACT_ENVIRONMENT"
-          ? true
-          : values[key]
-    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value })
-  }
-})
+const browserWindow = installDom(
+  [
+    "document",
+    "location",
+    "history",
+    "navigator",
+    "Node",
+    "Element",
+    "HTMLElement",
+    "HTMLAnchorElement",
+    "Event",
+    "EventTarget",
+    "MouseEvent",
+    "MutationObserver",
+    "getComputedStyle",
+    "requestAnimationFrame",
+    "cancelAnimationFrame",
+  ],
+  { url: "https://app.sixb.test/" }
+)
 
 beforeEach(() => {
   browserWindow.history.replaceState({}, "", "/")
@@ -52,18 +36,7 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
-  cleanup()
   await Bun.sleep(0)
-})
-
-afterAll(async () => {
-  await Bun.sleep(0)
-  for (const key of installedBrowserGlobals) {
-    const previous = previousBrowserGlobals.get(key)
-    if (previous) Object.defineProperty(globalThis, key, previous)
-    else Reflect.deleteProperty(globalThis, key)
-  }
-  browserWindow.close()
 })
 
 describe("generated nested layouts", () => {

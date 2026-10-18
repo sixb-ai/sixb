@@ -1,7 +1,6 @@
-import { afterAll, afterEach, beforeAll, expect, test } from "bun:test"
+import { afterEach, expect, test } from "bun:test"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react"
-import { Window } from "happy-dom"
+import { fireEvent, render, waitFor } from "@testing-library/react"
 import { useState } from "react"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom"
 import { OperationsAssistant } from "../../../examples/northline/app/_components/operations-assistant"
@@ -11,7 +10,6 @@ import {
   getAgentQueryKey,
   getAgentThreadQueryKey,
   getArtifactQueryKey,
-  getArtifactVersionQueryKey,
   listAgentThreadMessagesQueryKey,
   listAgentThreadRunsQueryKey,
   SixbProvider,
@@ -21,18 +19,13 @@ import { AgentSurface } from "../src/agent/agent-surface"
 import { ArtifactPanelRoot, useArtifactPanel } from "../src/agent/artifact-panel"
 import { AgentChatPage } from "../src/agent/react-router"
 import { ArtifactPage } from "../src/artifacts/artifact-page"
-import {
-  artifactFileSource,
-  type FileSource,
-  messageFileSource,
-} from "../src/artifacts/file-source"
+import { type FileSource, messageFileSource } from "../src/artifacts/file-source"
+import { artifactVersion, seedVersion, textFiles } from "./helpers/artifacts"
+import { installDom } from "./helpers/dom"
 
-const browser = new Window({ url: "https://app.sixb.test" })
-const globals = [
+const browser = installDom([
   "localStorage",
   "sessionStorage",
-  "window",
-  "self",
   "document",
   "navigator",
   "Node",
@@ -48,38 +41,11 @@ const globals = [
   "getComputedStyle",
   "requestAnimationFrame",
   "cancelAnimationFrame",
-  "IS_REACT_ACT_ENVIRONMENT",
-] as const
-const previous = new Map<string, PropertyDescriptor | undefined>()
-beforeAll(() => {
-  const values = browser as unknown as Record<string, unknown>
-  for (const key of globals) {
-    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key))
-    Object.defineProperty(globalThis, key, {
-      configurable: true,
-      writable: true,
-      value:
-        key === "window" || key === "self"
-          ? browser
-          : key === "IS_REACT_ACT_ENVIRONMENT"
-            ? true
-            : values[key],
-    })
-  }
-})
+])
 afterEach(async () => {
-  cleanup()
   await Bun.sleep(0)
   browser.localStorage.clear()
   browser.sessionStorage.clear()
-})
-afterAll(() => {
-  for (const key of globals) {
-    const descriptor = previous.get(key)
-    if (descriptor) Object.defineProperty(globalThis, key, descriptor)
-    else Reflect.deleteProperty(globalThis, key)
-  }
-  browser.close()
 })
 const file: FileSource = messageFileSource({
   threadId: "thread",
@@ -314,15 +280,6 @@ function referencingCache(): QueryClient {
   for (const [artifactId, texts] of Object.entries(files)) {
     const title = artifactId === report ? "Q3 report" : "Q3 numbers"
     const kind = artifactId === report ? "document" : "sheet"
-    const versionFiles = Object.entries(texts).map(([path, text], index) => ({
-      path,
-      file: {
-        blobId: `${artifactId}-${index}`,
-        digest: `sha256:${String(index).repeat(64)}`,
-        sizeBytes: text.length,
-        mediaType: path.endsWith(".csv") ? "text/csv" : "text/plain",
-      },
-    }))
     cache.setQueryData(getArtifactQueryKey({ path: { artifactId } }), {
       artifact: {
         id: artifactId,
@@ -343,12 +300,11 @@ function referencingCache(): QueryClient {
         },
       ],
     })
-    cache.setQueryData(getArtifactVersionQueryKey({ path: { artifactId, version: "1" } }), {
+    const version = artifactVersion({
       artifactId,
-      version: 1,
       title,
       entry: kind === "sheet" ? "workbook.json" : "document.md",
-      files: versionFiles,
+      files: textFiles(texts, artifactId),
       outline:
         kind === "sheet"
           ? {
@@ -357,14 +313,9 @@ function referencingCache(): QueryClient {
               charts: [],
             }
           : { kind, headings: [{ depth: 1, text: "Q3 report", slug: "q3-report" }] },
-      references: [],
-      author: { type: "user", id: "user-1" },
       createdAt: "2026-10-01T12:00:00.000Z",
     })
-    for (const { path, file } of versionFiles) {
-      const source = artifactFileSource({ artifactId, version: 1, path, fileRef: file })
-      cache.setQueryData([...source.queryKey, "text"], texts[path])
-    }
+    seedVersion(cache, version, texts)
   }
   return cache
 }
