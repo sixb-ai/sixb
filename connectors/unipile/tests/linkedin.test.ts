@@ -33,7 +33,19 @@ test("people search posts the copied URL with account pagination", async () => {
   expect(jsonBody(calls[0] as NonNullable<(typeof calls)[number]>)).toEqual({ url: searchUrl })
 })
 
-test("people search accepts Sales Navigator and Recruiter people-search URLs", async () => {
+const NOT_PEOPLE = "must represent a people search"
+
+test.each<[string, string | null]>([
+  ["https://www.linkedin.com/sales/search/people?query=founder", null],
+  ["https://www.linkedin.com/talent/search?keywords=engineer", null],
+  ["https://example.com/search", "must use linkedin.com"],
+  // Regression: hostname-only validation accepts the URLs below and gives a people-only return
+  // type to company, job, or post payloads.
+  ["https://www.linkedin.com/search/results/companies/?keywords=sixb", NOT_PEOPLE],
+  ["https://www.linkedin.com/jobs/search/?keywords=engineer", NOT_PEOPLE],
+  ["https://www.linkedin.com/search/results/content/?keywords=outreach", NOT_PEOPLE],
+  ["https://www.linkedin.com/sales/search/company?query=sixb", NOT_PEOPLE],
+])("people search validates %s", async (url, error) => {
   const calls = recorder(() =>
     json({
       object: "LinkedinSearch",
@@ -44,45 +56,14 @@ test("people search accepts Sales Navigator and Recruiter people-search URLs", a
     })
   )
   const client = await createTestClient()
-  const urls = [
-    "https://www.linkedin.com/sales/search/people?query=founder",
-    "https://www.linkedin.com/talent/search?keywords=engineer",
-  ]
+  const search = () => client.linkedin.searchPeople({ account_id: "account-1", url })
 
-  await Promise.all(
-    urls.map((url) => client.linkedin.searchPeople({ account_id: "account-1", url }))
-  )
-
-  expect(calls).toHaveLength(2)
-})
-
-test("people search rejects non-LinkedIn URLs", async () => {
-  const client = await createTestClient()
-
-  expect(() =>
-    client.linkedin.searchPeople({
-      account_id: "account-1",
-      url: "https://example.com/search",
-    })
-  ).toThrow("must use linkedin.com")
-})
-
-test("people search rejects LinkedIn searches for non-people categories", async () => {
-  // Regression: hostname-only validation accepts these URLs and gives a people-only return type to
-  // company, job, or post payloads.
-  const client = await createTestClient()
-  const urls = [
-    "https://www.linkedin.com/search/results/companies/?keywords=sixb",
-    "https://www.linkedin.com/jobs/search/?keywords=engineer",
-    "https://www.linkedin.com/search/results/content/?keywords=outreach",
-    "https://www.linkedin.com/sales/search/company?query=sixb",
-  ]
-
-  for (const url of urls) {
-    expect(() => client.linkedin.searchPeople({ account_id: "account-1", url })).toThrow(
-      "must represent a people search"
-    )
+  if (error) {
+    expect(search).toThrow(error)
+  } else {
+    await search()
   }
+  expect(calls).toHaveLength(error ? 0 : 1)
 })
 
 test("getProfile encodes the identifier and selected sections", async () => {

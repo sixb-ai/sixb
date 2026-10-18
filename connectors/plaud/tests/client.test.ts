@@ -48,17 +48,22 @@ describe("Plaud data access", () => {
     expect(pages).toEqual([1, 2, 3, 4, 5, 6, 7])
   })
   test("uses the server page size if it caps the requested size", async () => {
+    // A full page at the server's cap of 10 is not the last page, though 10 < the requested 100.
+    const pages: number[] = []
     mockFetch((url) => {
       const page = Number(url.searchParams.get("page"))
+      pages.push(page)
+      const size = page === 1 ? 10 : page === 2 ? 3 : 0
       return json({
         page,
         page_size: 10,
-        data: page === 1 ? Array.from({ length: 10 }, (_, i) => recording(String(i))) : [],
+        data: Array.from({ length: size }, (_, i) => recording(`${page}-${i}`)),
       })
     })
     const found = []
     for await (const file of (await client()).recordings.iterate()) found.push(file)
-    expect(found).toHaveLength(10)
+    expect(found).toHaveLength(13)
+    expect(pages).toEqual([1, 2])
   })
   test("fails on repeated pages instead of hanging or claiming a complete export", async () => {
     mockFetch((url) =>
@@ -185,15 +190,18 @@ describe("Plaud data access", () => {
     mockFetch(() => json(details({ presigned_url: null })))
     await expect((await client()).recordings.downloadAudio("r1")).rejects.toThrow("not available")
   })
-  test("IDs stay in one encoded path segment", async () => {
+  test("IDs stay in one encoded path segment and dot segments are rejected before a request", async () => {
+    const paths: string[] = []
     mockFetch((url) => {
-      expect(url.pathname).toBe(
-        "/developer/api/open/third-party/files/id%2Fwith%3Fquery%23fragment"
-      )
-      expect(url.search).toBe("")
+      paths.push(url.pathname + url.search)
       return json(details())
     })
-    await (await client()).recordings.get("id/with?query#fragment")
+    const c = await client()
+    await c.recordings.get("id/with?query#fragment")
+    expect(paths).toEqual(["/developer/api/open/third-party/files/id%2Fwith%3Fquery%23fragment"])
+    await expect(c.recordings.get("..")).rejects.toThrow("Invalid recording id")
+    await expect(c.recordings.get(".")).rejects.toThrow("Invalid recording id")
+    expect(paths).toHaveLength(1)
   })
   test("rejects malformed successful responses and reports HTTP errors without body data", async () => {
     mockFetch(() => json({ data: "wrong" }))
@@ -218,18 +226,6 @@ describe("Plaud data access", () => {
     ).rejects.toThrow()
     expect(requests).toBe(0)
   })
-})
-
-test("rejects dot-segment IDs before URL normalization", async () => {
-  let calls = 0
-  mockFetch(() => {
-    calls++
-    return json(details())
-  })
-  const c = await client()
-  await expect(c.recordings.get("..")).rejects.toThrow("Invalid recording id")
-  await expect(c.recordings.get(".")).rejects.toThrow("Invalid recording id")
-  expect(calls).toBe(0)
 })
 
 test("parses transcript segments with nullable speaker fields", async () => {

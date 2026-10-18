@@ -42,19 +42,26 @@ export interface TestSftpServer {
   readonly rootDir: string
   configureReads(behavior?: TestSftpReadBehavior): void
   readMetrics(): TestSftpReadMetrics
+  /** Resolves once `count` reads have been answered since the last `configureReads()`. */
+  readsFinished(count: number): Promise<void>
+  /** Remote file handles that are open across all connections. */
+  openFileCount(): number
   waitForIdle(): Promise<void>
   close(): Promise<void>
 }
 
 export type TestSftpReadBehavior = {
-  readonly delayMs?: (offset: number) => number
+  /**
+   * Holds the read at `offset` until the returned promise settles. A held read is released when
+   * its connection closes, as a real server drops a closed session's pending requests.
+   */
+  readonly holdUntil?: (offset: number) => Promise<void> | undefined
   readonly failAtOffset?: number
   readonly maxResponseBytes?: number
 }
 
 export type TestSftpReadMetrics = {
   readonly maxConcurrentRequests: number
-  readonly offsets: readonly number[]
   readonly totalRequests: number
 }
 
@@ -70,7 +77,10 @@ export async function startTestSftpServer(): Promise<TestSftpServer> {
   let readBehavior: TestSftpReadBehavior = {}
   let activeReadRequests = 0
   let maxConcurrentReadRequests = 0
-  let readOffsets: number[] = []
+  let totalReadRequests = 0
+  let finishedReadRequests = 0
+  let finishedReadWaiters: Array<{ count: number; resolve: () => void }> = []
+  const connectionFileHandles = new Set<Set<OpenFileHandle["handle"]>>()
   const resolveIdleWaiters = () => {
     if (activeConnections !== 0 || activeReadRequests !== 0) {
       return
@@ -94,6 +104,8 @@ export async function startTestSftpServer(): Promise<TestSftpServer> {
   const server = new Server({ hostKeys: [hostKey] }, (client) => {
     activeConnections += 1
     const openFileHandles = new Set<OpenFileHandle["handle"]>()
+    const connectionClosed = Promise.withResolvers<void>()
+    connectionFileHandles.add(openFileHandles)
 
     client
       .on("authentication", (context) => {
@@ -116,25 +128,36 @@ export async function startTestSftpServer(): Promise<TestSftpServer> {
             const sftp = acceptSftp()
             bindSftpHandlers(sftp, rootDir, openFileHandles, {
               behavior: () => readBehavior,
+              connectionClosed: connectionClosed.promise,
               finishRequest() {
                 activeReadRequests -= 1
+                finishedReadRequests += 1
+                finishedReadWaiters = finishedReadWaiters.filter((waiter) => {
+                  if (finishedReadRequests < waiter.count) {
+                    return true
+                  }
+                  waiter.resolve()
+                  return false
+                })
                 resolveIdleWaiters()
               },
-              startRequest(offset) {
+              startRequest() {
                 activeReadRequests += 1
+                totalReadRequests += 1
                 maxConcurrentReadRequests = Math.max(maxConcurrentReadRequests, activeReadRequests)
-                readOffsets.push(offset)
               },
             })
           })
         })
       })
       .on("close", () => {
+        connectionClosed.resolve()
         // A transport can disappear before the client sends SFTP CLOSE (the disconnect/read-ahead
         // test does this deliberately). Real SFTP servers release session handles with the
         // connection; mirror that lifecycle explicitly so Node 26/Bun 1.4 does not have to close a
         // FileHandle from its garbage-collection finalizer.
         void closeFileHandles(openFileHandles).finally(() => {
+          connectionFileHandles.delete(openFileHandles)
           activeConnections -= 1
           resolveIdleWaiters()
         })
@@ -163,14 +186,31 @@ export async function startTestSftpServer(): Promise<TestSftpServer> {
       }
       readBehavior = behavior
       maxConcurrentReadRequests = 0
-      readOffsets = []
+      totalReadRequests = 0
+      finishedReadRequests = 0
+      finishedReadWaiters = []
     },
     readMetrics() {
       return {
         maxConcurrentRequests: maxConcurrentReadRequests,
-        offsets: [...readOffsets],
-        totalRequests: readOffsets.length,
+        totalRequests: totalReadRequests,
       }
+    },
+    readsFinished(count) {
+      if (finishedReadRequests >= count) {
+        return Promise.resolve()
+      }
+
+      return new Promise<void>((resolveFinished) => {
+        finishedReadWaiters.push({ count, resolve: resolveFinished })
+      })
+    },
+    openFileCount() {
+      let count = 0
+      for (const handles of connectionFileHandles) {
+        count += handles.size
+      }
+      return count
     },
     waitForIdle,
     async close() {
@@ -198,8 +238,9 @@ function bindSftpHandlers(
   openFileHandles: Set<OpenFileHandle["handle"]>,
   readControl: {
     readonly behavior: () => TestSftpReadBehavior
+    readonly connectionClosed: Promise<void>
     readonly finishRequest: () => void
-    readonly startRequest: (offset: number) => void
+    readonly startRequest: () => void
   }
 ): void {
   const handles = new Map<number, OpenHandle>()
@@ -271,7 +312,7 @@ function bindSftpHandlers(
       }
     })
     .on("READ", async (reqid, handle, offset, length) => {
-      readControl.startRequest(offset)
+      readControl.startRequest()
       try {
         const entry = getHandle(handle)
         if (!entry || entry.kind !== "file") {
@@ -280,9 +321,9 @@ function bindSftpHandlers(
         }
 
         const behavior = readControl.behavior()
-        const delayMs = behavior.delayMs?.(offset) ?? 0
-        if (delayMs > 0) {
-          await delay(delayMs)
+        const hold = behavior.holdUntil?.(offset)
+        if (hold) {
+          await Promise.race([hold, readControl.connectionClosed])
         }
         if (behavior.failAtOffset === offset) {
           sftp.status(reqid, utils.sftp.STATUS_CODE.FAILURE)
@@ -425,10 +466,6 @@ async function closeFileHandles(handles: Set<OpenFileHandle["handle"]>): Promise
   const openHandles = [...handles]
   handles.clear()
   await Promise.allSettled(openHandles.map((handle) => handle.close()))
-}
-
-function delay(durationMs: number): Promise<void> {
-  return new Promise((resolveDelay) => setTimeout(resolveDelay, durationMs))
 }
 
 async function respondWithStats(

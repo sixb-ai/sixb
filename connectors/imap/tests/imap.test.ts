@@ -20,7 +20,7 @@ import {
   imap,
 } from "../src"
 import { createImapClient, type ImapTransport } from "../src/client"
-import type { ImapConnection, ImapMailboxSession } from "../src/types"
+import type { ImapConnection, ImapListMessagesInput, ImapMailboxSession } from "../src/types"
 
 const CONNECTION: ImapConnection = {
   host: "imap.example.com",
@@ -48,9 +48,12 @@ describe("imap connector", () => {
     const controller = new AbortController()
     controller.abort()
 
-    await expect(
-      adapter.connect({ projectId: "demo", connectorId: "mail", signal: controller.signal })
-    ).rejects.toBeInstanceOf(ImapAbortedError)
+    const error = await Promise.resolve()
+      .then(() =>
+        adapter.connect({ projectId: "demo", connectorId: "mail", signal: controller.signal })
+      )
+      .catch((cause: unknown) => cause)
+    expect(error).toBeInstanceOf(ImapAbortedError)
   })
 
   test("uses secure, non-idling ImapFlow options and normalizes mailbox status", async () => {
@@ -240,41 +243,35 @@ describe("imap connector", () => {
     expect(messages[0]?.references).toEqual(["<root@example.com>"])
   })
 
-  test("validates page inputs before issuing a search", async () => {
+  test.each<[string, ImapListMessagesInput, string]>([
+    [
+      "a page limit above 1000",
+      { afterUid: 0, limit: 1_001 },
+      "Message page limit must be between 1 and 1000",
+    ],
+    [
+      "a header name carrying a value",
+      { limit: 1, headers: ["List-Id: injected"] },
+      "valid RFC 5322 field names",
+    ],
+    [
+      "more than 64 header names",
+      { limit: 1, headers: Array.from({ length: 65 }, (_, index) => `X-Test-${index}`) },
+      "No more than 64 message headers",
+    ],
+  ])("rejects %s before issuing a search", async (_case, input, message) => {
     const fixture = clientFixture()
 
     await expect(
-      fixture.client.withMailbox("INBOX", (mailbox) =>
-        mailbox.listMessages({ afterUid: 0, limit: 1_001 })
-      )
-    ).rejects.toThrow("Message page limit must be between 1 and 1000")
+      fixture.client.withMailbox("INBOX", (mailbox) => mailbox.listMessages(input))
+    ).rejects.toThrow(message)
     expect(fixture.transports[0]?.searchQuery).toBeUndefined()
   })
 
-  test("rejects invalid or excessive requested header names before searching", async () => {
-    const fixture = clientFixture()
-
-    await expect(
-      fixture.client.withMailbox("INBOX", (mailbox) =>
-        mailbox.listMessages({ limit: 1, headers: ["List-Id: injected"] })
-      )
-    ).rejects.toThrow("valid RFC 5322 field names")
-    expect(fixture.transports[0]?.searchQuery).toBeUndefined()
-
-    await expect(
-      fixture.client.withMailbox("INBOX", (mailbox) =>
-        mailbox.listMessages({
-          limit: 1,
-          headers: Array.from({ length: 65 }, (_, index) => `X-Test-${index}`),
-        })
-      )
-    ).rejects.toThrow("No more than 64 message headers")
-  })
-
-  test("streams a MIME part within the byte limit", async () => {
+  test("streams a MIME part within the byte limit, not the message-level expected size", async () => {
     const fixture = clientFixture()
     fixture.configure = (transport) => {
-      transport.downloadResult = download(["ab", "cd"], 4)
+      transport.downloadResult = download(["ab", "cd"], 10)
     }
 
     const result = await fixture.client.withMailbox("INBOX", async (mailbox) => {
@@ -283,7 +280,7 @@ describe("imap connector", () => {
     })
 
     expect(result.body.toString("utf8")).toBe("abcd")
-    expect(result.meta).toMatchObject({ expectedSize: 4, contentType: "application/pdf" })
+    expect(result.meta).toMatchObject({ expectedSize: 10, contentType: "application/pdf" })
     expect(fixture.transports[0]?.downloadRequest).toEqual({
       uid: 7,
       part: "2",
@@ -339,20 +336,6 @@ describe("imap connector", () => {
     expect(result.content.toString("utf8")).toBe("à l’étage\nEnvoyé")
   })
 
-  test("does not use the message-level expected size as the MIME part limit", async () => {
-    const fixture = clientFixture()
-    fixture.configure = (transport) => {
-      transport.downloadResult = download(["abcd"], 10)
-    }
-
-    const body = await fixture.client.withMailbox("INBOX", async (mailbox) => {
-      const part = await mailbox.downloadPart({ uid: 7, part: "2", maxBytes: 5 })
-      return readAll(part.content)
-    })
-
-    expect(body.toString("utf8")).toBe("abcd")
-  })
-
   test("enforces the byte limit while consuming an inaccurately-sized stream", async () => {
     const fixture = clientFixture()
     fixture.configure = (transport) => {
@@ -383,16 +366,24 @@ describe("imap connector", () => {
     expect(source.destroyed).toBe(true)
   })
 
-  test("reports an unavailable part when the server returns no content", async () => {
+  test.each<[string, string, Partial<DownloadObject>]>([
+    // ImapFlow resolves an empty object when the requested part is absent.
+    ["an empty download result", "2", {}],
+    // The `part === "1"` fetch-miss path resolves { response: false, chunk: false }.
+    [
+      "a partial download result",
+      "1",
+      { response: false, chunk: false } as Partial<DownloadObject>,
+    ],
+  ])("reports an unavailable part for %s", async (_case, part, downloadResult) => {
     const fixture = clientFixture()
     fixture.configure = (transport) => {
-      // ImapFlow resolves an empty object when the requested part is absent.
-      transport.downloadResult = {}
+      transport.downloadResult = downloadResult
     }
 
     await expect(
       fixture.client.withMailbox("INBOX", (mailbox) =>
-        mailbox.downloadPart({ uid: 7, part: "2", maxBytes: 5 })
+        mailbox.downloadPart({ uid: 7, part, maxBytes: 5 })
       )
     ).rejects.toBeInstanceOf(ImapPartUnavailableError)
 
@@ -405,20 +396,6 @@ describe("imap connector", () => {
       "release:INBOX",
       "logout",
     ])
-  })
-
-  test("reports an unavailable part for a partial download result", async () => {
-    const fixture = clientFixture()
-    fixture.configure = (transport) => {
-      // The `part === "1"` fetch-miss path resolves { response: false, chunk: false }.
-      transport.downloadResult = { response: false, chunk: false } as Partial<DownloadObject>
-    }
-
-    await expect(
-      fixture.client.withMailbox("INBOX", (mailbox) =>
-        mailbox.downloadPart({ uid: 7, part: "1", maxBytes: 5 })
-      )
-    ).rejects.toBeInstanceOf(ImapPartUnavailableError)
   })
 
   test("makes a mailbox session unusable after its callback", async () => {
@@ -450,9 +427,11 @@ describe("imap connector", () => {
     await fixture.client.close()
     await fixture.client.close()
 
-    await expect(operation).rejects.toBeInstanceOf(ImapAbortedError)
+    expect(await operation.catch((error: unknown) => error)).toBeInstanceOf(ImapAbortedError)
     expect(fixture.transports[0]?.events.filter((event) => event === "close")).toHaveLength(1)
-    await expect(fixture.client.listMailboxes()).rejects.toBeInstanceOf(ImapAbortedError)
+    expect(await fixture.client.listMailboxes().catch((error: unknown) => error)).toBeInstanceOf(
+      ImapAbortedError
+    )
   })
 
   test("an operation signal aborts only its session and leaves the gateway reusable", async () => {
@@ -480,7 +459,7 @@ describe("imap connector", () => {
     await searchStarted
     controller.abort()
 
-    await expect(operation).rejects.toBeInstanceOf(ImapAbortedError)
+    expect(await operation.catch((error: unknown) => error)).toBeInstanceOf(ImapAbortedError)
     expect(await fixture.client.listMailboxes()).toHaveLength(1)
   })
 
@@ -489,7 +468,9 @@ describe("imap connector", () => {
 
     fixture.lifecycle.abort()
 
-    await expect(fixture.client.listMailboxes()).rejects.toBeInstanceOf(ImapAbortedError)
+    expect(await fixture.client.listMailboxes().catch((error: unknown) => error)).toBeInstanceOf(
+      ImapAbortedError
+    )
     expect(fixture.transports).toHaveLength(0)
   })
 

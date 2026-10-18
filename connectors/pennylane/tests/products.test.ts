@@ -8,69 +8,37 @@ afterEach(() => {
 })
 
 describe("pennylane products", () => {
-  test("lists products with bearer auth and typed filters", async () => {
-    let requestUrl = ""
-    let requestHeaders = new Headers()
+  test("sends documented product list, read, and write requests", async () => {
+    const requests: Array<{
+      method: string
+      path: string
+      query: Record<string, string>
+      body: unknown
+    }> = []
     mockFetch((input, init) => {
-      requestUrl = String(input)
-      requestHeaders = new Headers(init?.headers)
-      return Promise.resolve(json({ items: [], has_more: false, next_cursor: null }))
-    })
-
-    const client = await createTestClient()
-    await client.products.list({
-      limit: 50,
-      sort: "-id",
-      filter: [
-        { field: "label", operator: "in", value: ["Consulting", "Support"] },
-        { field: "external_reference", operator: "eq", value: "SKU-1" },
-      ],
-    })
-
-    const url = new URL(requestUrl)
-    expect(url.pathname).toBe("/api/external/v2/products")
-    expect(url.searchParams.get("limit")).toBe("50")
-    expect(url.searchParams.get("sort")).toBe("-id")
-    expect(JSON.parse(url.searchParams.get("filter") ?? "")).toEqual([
-      { field: "label", operator: "in", value: ["Consulting", "Support"] },
-      { field: "external_reference", operator: "eq", value: "SKU-1" },
-    ])
-    expect(requestHeaders.get("authorization")).toBe("Bearer pl-token")
-  })
-
-  test("listAll follows opaque cursors", async () => {
-    const cursors: (string | null)[] = []
-    mockFetch((input) => {
-      const cursor = new URL(String(input)).searchParams.get("cursor")
-      cursors.push(cursor)
+      const url = new URL(String(input))
+      requests.push({
+        method: init?.method ?? "",
+        path: url.pathname,
+        query: Object.fromEntries(url.searchParams),
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      })
       return Promise.resolve(
         json(
-          cursor === null
-            ? { items: [{ id: 1 }], has_more: true, next_cursor: "next" }
-            : { items: [{ id: 2 }], has_more: false, next_cursor: null }
+          url.pathname.endsWith("/products")
+            ? { items: [{ id: 7 }], has_more: false, next_cursor: null }
+            : { id: 7 }
         )
       )
     })
 
     const client = await createTestClient()
-    const products = await collect(client.products.listAll({ limit: 1 }))
-
-    expect(products.map((product) => product.id)).toEqual([1, 2])
-    expect(cursors).toEqual([null, "next"])
-  })
-
-  test("sends documented product write payloads and paths", async () => {
-    const requests: Array<{ path: string; method: string; body: unknown }> = []
-    mockFetch((input, init) => {
-      requests.push({
-        path: new URL(String(input)).pathname,
-        method: init?.method ?? "",
-        body: init?.body ? JSON.parse(String(init.body)) : undefined,
-      })
-      return Promise.resolve(json({ id: 7 }))
-    })
-
-    const client = await createTestClient()
+    const filter = [
+      { field: "label", operator: "in", value: ["Consulting", "Support"] },
+      { field: "external_reference", operator: "eq", value: "SKU-1" },
+    ] as const
+    const products = await collect(client.products.listAll({ limit: 50, sort: "-id", filter }))
+    expect(products.map((product) => product.id)).toEqual([7])
     await client.products.get(7)
     await client.products.create({
       label: "Consulting",
@@ -82,10 +50,17 @@ describe("pennylane products", () => {
     await client.products.update(7, { price_before_tax: "1200.00" })
 
     expect(requests).toEqual([
-      { path: "/api/external/v2/products/7", method: "GET", body: undefined },
       {
+        method: "GET",
         path: "/api/external/v2/products",
+        query: { limit: "50", sort: "-id", filter: JSON.stringify(filter) },
+        body: undefined,
+      },
+      { method: "GET", path: "/api/external/v2/products/7", query: {}, body: undefined },
+      {
         method: "POST",
+        path: "/api/external/v2/products",
+        query: {},
         body: {
           label: "Consulting",
           price_before_tax: "1000.00",
@@ -95,8 +70,9 @@ describe("pennylane products", () => {
         },
       },
       {
-        path: "/api/external/v2/products/7",
         method: "PUT",
+        path: "/api/external/v2/products/7",
+        query: {},
         body: { price_before_tax: "1200.00" },
       },
     ])

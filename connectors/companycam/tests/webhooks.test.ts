@@ -29,15 +29,15 @@ describe("companycam webhooks resource", () => {
     globalThis.fetch = originalFetch
   })
 
-  test("create posts the subscription and defaults token to webhookSecret", async () => {
-    let url = ""
-    let method = ""
-    let payload: Record<string, unknown> = {}
+  test("create posts the subscription, defaulting enabled and token to webhookSecret", async () => {
+    const calls: { method: string; path: string; payload: Record<string, unknown> }[] = []
     mockFetch((input, init) => {
-      url = String(input)
-      method = init?.method ?? ""
-      payload = JSON.parse(String(init?.body))
-      return Promise.resolve(json({ id: "wh1", url: payload.url, enabled: true }, { status: 201 }))
+      calls.push({
+        method: init?.method ?? "",
+        path: new URL(String(input)).pathname,
+        payload: JSON.parse(String(init?.body)),
+      })
+      return Promise.resolve(json({ id: "wh1" }, { status: 201 }))
     })
 
     const cc = await companycam({ token: "tok", webhookSecret: "s3cret" }).connect(CONTEXT)
@@ -45,23 +45,6 @@ describe("companycam webhooks resource", () => {
       url: "https://app.example/api/webhooks/companycam/events",
       scopes: ["project.created", "photo.created"],
     })
-
-    expect(new URL(url).pathname).toBe("/v2/webhooks")
-    expect(method).toBe("POST")
-    expect(payload.scopes).toEqual(["project.created", "photo.created"])
-    expect(payload.enabled).toBe(true)
-    expect(payload.token).toBe("s3cret")
-    expect(webhook.id).toBe("wh1")
-  })
-
-  test("create respects an explicit token and enabled flag", async () => {
-    let payload: Record<string, unknown> = {}
-    mockFetch((_, init) => {
-      payload = JSON.parse(String(init?.body))
-      return Promise.resolve(json({ id: "wh2" }, { status: 201 }))
-    })
-
-    const cc = await companycam({ token: "tok", webhookSecret: "s3cret" }).connect(CONTEXT)
     await cc.webhooks.create({
       url: "https://app.example/hook",
       scopes: ["project.created"],
@@ -69,8 +52,29 @@ describe("companycam webhooks resource", () => {
       token: "override",
     })
 
-    expect(payload.token).toBe("override")
-    expect(payload.enabled).toBe(false)
+    expect(calls).toEqual([
+      {
+        method: "POST",
+        path: "/v2/webhooks",
+        payload: {
+          url: "https://app.example/api/webhooks/companycam/events",
+          scopes: ["project.created", "photo.created"],
+          enabled: true,
+          token: "s3cret",
+        },
+      },
+      {
+        method: "POST",
+        path: "/v2/webhooks",
+        payload: {
+          url: "https://app.example/hook",
+          scopes: ["project.created"],
+          enabled: false,
+          token: "override",
+        },
+      },
+    ])
+    expect(webhook.id).toBe("wh1")
   })
 
   test("update issues a PUT and delete issues a DELETE", async () => {

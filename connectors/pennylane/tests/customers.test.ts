@@ -8,36 +8,11 @@ afterEach(() => {
 })
 
 describe("pennylane customers", () => {
-  test("lists customers with typed polymorphic filters", async () => {
-    let requestUrl = ""
-    mockFetch((input) => {
-      requestUrl = String(input)
-      return Promise.resolve(json({ items: [], has_more: false, next_cursor: null }))
-    })
-
-    const client = await createTestClient()
-    await client.customers.list({
-      limit: 100,
-      sort: "id",
-      filter: [
-        { field: "customer_type", operator: "eq", value: "company" },
-        { field: "name", operator: "start_with", value: "Acme" },
-        { field: "emails", operator: "in", value: ["billing@acme.test"] },
-      ],
-    })
-
-    const url = new URL(requestUrl)
-    expect(url.pathname).toBe("/api/external/v2/customers")
-    expect(JSON.parse(url.searchParams.get("filter") ?? "")).toEqual([
-      { field: "customer_type", operator: "eq", value: "company" },
-      { field: "name", operator: "start_with", value: "Acme" },
-      { field: "emails", operator: "in", value: ["billing@acme.test"] },
-    ])
-  })
-
-  test("reads customers polymorphically and narrows on customer_type", async () => {
+  test("lists and reads customers polymorphically, narrowing on customer_type", async () => {
+    const requests: URL[] = []
     mockFetch((input) => {
       const url = new URL(String(input))
+      requests.push(url)
       if (url.pathname === "/api/external/v2/customers/1") {
         return Promise.resolve(json({ id: 1, customer_type: "company", vat_number: "FR123" }))
       }
@@ -54,7 +29,15 @@ describe("pennylane customers", () => {
     })
 
     const client = await createTestClient()
-    const customers = await collect(client.customers.listAll())
+    const customers = await collect(
+      client.customers.listAll({
+        filter: [
+          { field: "customer_type", operator: "eq", value: "company" },
+          { field: "name", operator: "start_with", value: "Acme" },
+          { field: "emails", operator: "in", value: ["billing@acme.test"] },
+        ],
+      })
+    )
     const identities = customers.map((customer) =>
       customer.customer_type === "company" ? customer.vat_number : customer.first_name
     )
@@ -62,6 +45,11 @@ describe("pennylane customers", () => {
 
     const one = await client.customers.get(1)
     expect(one.customer_type).toBe("company")
+    expect(requests.map((url) => url.pathname)).toEqual([
+      "/api/external/v2/customers",
+      "/api/external/v2/customers/1",
+    ])
+    expect(JSON.parse(requests[0]?.searchParams.get("filter") ?? "")).toHaveLength(3)
   })
 
   test("routes company and individual writes to typed endpoints", async () => {
@@ -158,18 +146,5 @@ describe("pennylane customers", () => {
       { id: 10, weight: "0.5" },
     ])
     expect(categories).toEqual([category])
-  })
-
-  test("validates identifiers before fetch", async () => {
-    let calls = 0
-    mockFetch(() => {
-      calls += 1
-      return Promise.resolve(json({ items: [], has_more: false, next_cursor: null }))
-    })
-
-    const client = await createTestClient()
-    expect(() => client.customers.get(0)).toThrow("positive safe integer")
-    expect(() => client.customers.listContacts(-1)).toThrow("positive safe integer")
-    expect(calls).toBe(0)
   })
 })

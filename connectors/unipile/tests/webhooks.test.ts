@@ -186,8 +186,11 @@ describe("webhook verification policy", () => {
 })
 
 describe("remote webhook management", () => {
-  test("create injects and replaces the connector's secret header", async () => {
-    const calls = recorder([json({ object: "WebhookCreated", webhook_id: "webhook-1" })])
+  test("create injects the connector's secret header and preserves explicit events", async () => {
+    const calls = recorder([
+      json({ object: "WebhookCreated", webhook_id: "webhook-1" }),
+      json({ object: "WebhookCreated", webhook_id: "webhook-2" }),
+    ])
     const client = await createTestClient({ webhookSecret: "secret" })
 
     const created = await client.webhooks.create({
@@ -196,32 +199,20 @@ describe("remote webhook management", () => {
       events: ["message_received"],
       headers: [{ key: "x-sixb-unipile-secret", value: "wrong" }],
     })
-
-    expect(created.webhook_id).toBe("webhook-1")
-    const payload = jsonBody(calls[0] as NonNullable<(typeof calls)[number]>)
-    expect(payload.format).toBe("json")
-    expect(payload.headers).toEqual([
-      { key: "Content-Type", value: "application/json" },
-      { key: UNIPILE_WEBHOOK_SECRET_HEADER, value: "secret" },
-    ])
-  })
-
-  test("account-status registrations preserve explicit lifecycle events", async () => {
-    const calls = recorder([json({ object: "WebhookCreated", webhook_id: "webhook-1" })])
-    const client = await createTestClient()
-
     await client.webhooks.create({
       source: "account_status",
       request_url: "https://app.example/api/webhooks/unipile/events",
       events: ["CONNECTING", "OK", "STOPPED", "CREDENTIALS"],
     })
 
-    expect(jsonBody(calls[0] as NonNullable<(typeof calls)[number]>).events).toEqual([
-      "CONNECTING",
-      "OK",
-      "STOPPED",
-      "CREDENTIALS",
+    expect(created.webhook_id).toBe("webhook-1")
+    const [messaging, accountStatus] = calls.map(jsonBody)
+    expect(messaging?.format).toBe("json")
+    expect(messaging?.headers).toEqual([
+      { key: "Content-Type", value: "application/json" },
+      { key: UNIPILE_WEBHOOK_SECRET_HEADER, value: "secret" },
     ])
+    expect(accountStatus?.events).toEqual(["CONNECTING", "OK", "STOPPED", "CREDENTIALS"])
   })
 
   test("listAll and delete use the documented endpoints", async () => {

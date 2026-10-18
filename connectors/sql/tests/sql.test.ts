@@ -10,7 +10,7 @@ function createContext() {
 }
 
 describe("sql connector", () => {
-  test("creates a sql adapter and runs queries", async () => {
+  test("creates a sql adapter, runs queries, and closes the client on disconnect", async () => {
     const adapter = sql(":memory:")
     const client = await adapter.connect(createContext())
 
@@ -24,6 +24,10 @@ describe("sql connector", () => {
     expect(rows[0]?.name).toBe("Alice")
 
     await adapter.disconnect?.(client)
+
+    const closed = await client`select 1 as value`.catch((error: unknown) => error)
+    expect(closed).toBeInstanceOf(Error)
+    expect((closed as Error).message).toContain("Connection closed")
   })
 
   test("supports Bun SQL constructor options", async () => {
@@ -39,20 +43,5 @@ describe("sql connector", () => {
 
   test("rejects an empty connection string", () => {
     expect(() => sql("   ")).toThrow("[SixbSql] connection must not be empty.")
-  })
-
-  test("closes the Bun SQL client on disconnect", async () => {
-    const adapter = sql(":memory:")
-    const client = await adapter.connect(createContext())
-
-    await adapter.disconnect?.(client)
-
-    try {
-      await client`select 1 as value`
-      throw new Error("Expected querying a closed SQL client to fail.")
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error)
-      expect((error as Error).message).toContain("Connection closed")
-    }
   })
 })

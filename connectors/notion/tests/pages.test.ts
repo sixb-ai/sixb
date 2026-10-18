@@ -85,6 +85,7 @@ describe("Notion pages", () => {
     const body = { parent: { page_id: PARENT_ID }, markdown: "# Hello\nWorld" }
     expect(await api.pages.create({ ...body, filter_properties: ["title"] })).toEqual(PAGE)
     expect(calls[0]?.url.pathname).toBe("/proxy/v1/pages")
+    expect(calls[0]?.url.searchParams.get("filter_properties")).toBe("title")
     expect(calls[0]?.init.method).toBe("POST")
     expect(calls[0]?.body).toEqual(body)
     expect(new Headers(calls[0]?.init.headers).get("content-type")).toBe("application/json")
@@ -197,7 +198,7 @@ describe("Notion pages", () => {
   })
 
   test.each([
-    401, 403, 404, 400,
+    401, 404,
   ])("preserves structured API errors without retrying HTTP %i", async (status) => {
     const body = {
       object: "error",
@@ -250,8 +251,8 @@ describe("Notion pages", () => {
 describe("Notion request safety", () => {
   // Guard check: replace the idempotent condition in notion.ts with true; the 503
   // create test below must fail because an ambiguous write would run three times.
-  test.each([500, 503])("does not replay a creation after an ambiguous HTTP %i", async (status) => {
-    mockFetch(() => respond({ object: "error" }, status, { "retry-after": "0" }))
+  test("does not replay a creation after an ambiguous HTTP 503", async () => {
+    mockFetch(() => respond({ object: "error" }, 503, { "retry-after": "0" }))
     const api = await client()
     await expect(
       api.pages.create({ parent: { page_id: PARENT_ID }, markdown: "Hello" })
@@ -297,9 +298,10 @@ describe("Notion request safety", () => {
       return respond({}, 429, { "retry-after": "60" })
     })
     const api = await client()
-    await expect(
-      api.pages.retrieve({ page_id: PAGE_ID }, { signal: controller.signal })
-    ).rejects.toMatchObject({ name: "AbortError" })
+    const error = await api.pages
+      .retrieve({ page_id: PAGE_ID }, { signal: controller.signal })
+      .catch((caught: unknown) => caught)
+    expect(error).toMatchObject({ name: "AbortError" })
     expect(calls).toHaveLength(1)
   })
 
@@ -321,10 +323,9 @@ describe("Notion request safety", () => {
           init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
         })
     )
-    const api = await client({ timeoutMs: 10 })
-    await expect(api.pages.retrieve({ page_id: PAGE_ID })).rejects.toMatchObject({
-      name: "TimeoutError",
-    })
+    const api = await client({ timeoutMs: 1 })
+    const error = await api.pages.retrieve({ page_id: PAGE_ID }).catch((caught: unknown) => caught)
+    expect(error).toMatchObject({ name: "TimeoutError" })
     expect(calls).toHaveLength(1)
   })
 

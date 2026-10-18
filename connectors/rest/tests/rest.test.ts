@@ -1,11 +1,17 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import { defineWebhook } from "@sixb/core"
-import { parseRetryAfter, readResponseBody, rest, withQuery } from "../src"
+import { parseRetryAfter, type RestClient, readResponseBody, rest, withQuery } from "../src"
 
 function mockFetch(
   implementation: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 ): void {
   globalThis.fetch = implementation as unknown as typeof fetch
+}
+
+// setImmediate is not faked by jest.useFakeTimers(), so awaiting it drains every pending
+// microtask: a request that only waits on promises reaches its next timer or settles.
+function flush(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
 }
 
 describe("rest connector", () => {
@@ -19,22 +25,7 @@ describe("rest connector", () => {
     globalThis.fetch = originalFetch
   })
 
-  test("creates a rest adapter", async () => {
-    mockFetch(() => Promise.resolve(new Response("ok", { status: 200 })))
-
-    const adapter = rest({ baseUrl: "https://api.example.com" })
-    const client = await adapter.connect({
-      projectId: "demo",
-      connectorId: "hubspot",
-      signal: new AbortController().signal,
-    })
-
-    const response = await client.get("/status")
-    expect(adapter.type).toBe("rest")
-    expect(response.status).toBe(200)
-  })
-
-  test("forwards webhook definitions", () => {
+  test("creates a rest adapter that forwards webhook definitions", () => {
     const webhook = defineWebhook("events")
       .post()
       .json()
@@ -44,10 +35,11 @@ describe("rest connector", () => {
       webhooks: [webhook],
     })
 
+    expect(adapter.type).toBe("rest")
     expect(adapter.webhooks).toEqual([webhook])
   })
 
-  test("resolves relative paths against baseUrl and merges async headers", async () => {
+  test("resolves relative paths against baseUrl and sends async resolver headers", async () => {
     let requestUrl = ""
     let authHeader = ""
     let connectorId = ""
@@ -60,7 +52,7 @@ describe("rest connector", () => {
 
     const adapter = rest({
       baseUrl: "https://api.example.com/v1/",
-      headers(context) {
+      async headers(context) {
         connectorId = context.connectorId
         return {
           Authorization: "Bearer test-token",
@@ -74,24 +66,26 @@ describe("rest connector", () => {
       signal: new AbortController().signal,
     })
 
-    await client.get("contacts")
+    const response = await client.get("contacts")
 
+    expect(response.status).toBe(200)
     expect(requestUrl).toBe("https://api.example.com/v1/contacts")
     expect(authHeader).toBe("Bearer test-token")
     expect(connectorId).toBe("hubspot")
   })
 
-  test("retries once after unauthorized refresh callback", async () => {
+  test("refreshes once after a 401 and replays with the refreshed credentials", async () => {
     let token = "expired"
-    let attempts = 0
+    let refreshes = 0
+    const authorizations: string[] = []
 
     mockFetch((_, init) => {
-      attempts += 1
-      const authorization = new Headers(init?.headers).get("authorization")
+      authorizations.push(new Headers(init?.headers).get("authorization") ?? "")
+      // A third attempt (a refresh loop) would succeed, so the regression fails fast.
       return Promise.resolve(
-        authorization === "Bearer refreshed"
-          ? new Response("ok", { status: 200 })
-          : new Response("unauthorized", { status: 401 })
+        authorizations.length <= 2
+          ? new Response("unauthorized", { status: 401 })
+          : new Response("ok", { status: 200 })
       )
     })
 
@@ -101,6 +95,7 @@ describe("rest connector", () => {
         return { Authorization: `Bearer ${token}` }
       },
       async onUnauthorized() {
+        refreshes += 1
         token = "refreshed"
       },
     })
@@ -113,8 +108,10 @@ describe("rest connector", () => {
 
     const response = await client.get("/contacts")
 
-    expect(response.status).toBe(200)
-    expect(attempts).toBe(2)
+    // A second 401 is returned instead of refreshing again: no bad-credential loop.
+    expect(response.status).toBe(401)
+    expect(authorizations).toEqual(["Bearer expired", "Bearer refreshed"])
+    expect(refreshes).toBe(1)
   })
 
   test("does not charge an unauthorized refresh against the transient retry budget", async () => {
@@ -143,100 +140,6 @@ describe("rest connector", () => {
     expect(attempts).toBe(4)
   })
 
-  test("retries based on retry policy", async () => {
-    let attempts = 0
-
-    mockFetch(() => {
-      attempts += 1
-      return Promise.resolve(
-        attempts === 1 ? new Response("busy", { status: 503 }) : new Response("ok", { status: 200 })
-      )
-    })
-
-    const adapter = rest({
-      baseUrl: "https://api.example.com",
-      retry: {
-        maxRetries: 1,
-        delayMs() {
-          return 0
-        },
-      },
-    })
-
-    const client = await adapter.connect({
-      projectId: "demo",
-      connectorId: "hubspot",
-      signal: new AbortController().signal,
-    })
-
-    const response = await client.get("/contacts")
-
-    expect(response.status).toBe(200)
-    expect(attempts).toBe(2)
-  })
-
-  test("allows an individual request to opt out of retries", async () => {
-    let attempts = 0
-
-    mockFetch(() => {
-      attempts += 1
-      return Promise.resolve(new Response("busy", { status: 503 }))
-    })
-
-    const client = await rest({
-      baseUrl: "https://api.example.com",
-      retry: { maxRetries: 3, delayMs: () => 0 },
-    }).connect({
-      projectId: "demo",
-      connectorId: "hubspot",
-      signal: new AbortController().signal,
-    })
-
-    const response = await client.get("/read", { retry: false })
-
-    expect(response.status).toBe(503)
-    expect(attempts).toBe(1)
-  })
-
-  test("aborts while waiting for retry backoff", async () => {
-    const controller = new AbortController()
-    let attempts = 0
-    let markFetched: (() => void) | undefined
-    const fetched = new Promise<void>((resolve) => {
-      markFetched = resolve
-    })
-
-    mockFetch(() => {
-      attempts += 1
-      markFetched?.()
-      return Promise.resolve(new Response("busy", { status: 503 }))
-    })
-
-    const client = await rest({
-      baseUrl: "https://api.example.com",
-      retry: { maxRetries: 1, delayMs: () => 1_000 },
-    }).connect({
-      projectId: "demo",
-      connectorId: "hubspot",
-      signal: controller.signal,
-    })
-
-    const request = client.get("/contacts", { signal: controller.signal })
-    await fetched
-    await Promise.resolve()
-    controller.abort(new DOMException("Stopped", "AbortError"))
-
-    const settled = Promise.race([
-      request.then(
-        () => "resolved",
-        (error: unknown) => error
-      ),
-      new Promise<string>((resolve) => setTimeout(() => resolve("timed-out"), 50)),
-    ])
-    expect(await settled).toBeInstanceOf(DOMException)
-    expect(attempts).toBe(1)
-  })
-
   test("spaces concurrent requests when minDelayMs is configured", async () => {
     const starts: number[] = []
     mockFetch(() => {
@@ -258,67 +161,6 @@ describe("rest connector", () => {
     expect(starts).toHaveLength(3)
     expect((starts[1] ?? 0) - (starts[0] ?? 0)).toBeGreaterThanOrEqual(15)
     expect((starts[2] ?? 0) - (starts[1] ?? 0)).toBeGreaterThanOrEqual(15)
-  })
-
-  test("never retries a request with a stream body — it cannot be replayed", async () => {
-    let attempts = 0
-
-    mockFetch(() => {
-      attempts += 1
-      return Promise.resolve(new Response("busy", { status: 503 }))
-    })
-
-    const adapter = rest({
-      baseUrl: "https://api.example.com",
-      retry: { maxRetries: 3, delayMs: () => 0 },
-    })
-    const client = await adapter.connect({
-      projectId: "demo",
-      connectorId: "hubspot",
-      signal: new AbortController().signal,
-    })
-
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(new Uint8Array([1, 2, 3]))
-        controller.close()
-      },
-    })
-    const response = await client.post("/upload", body)
-
-    // The real 503 surfaces instead of a masked "stream already used" error.
-    expect(response.status).toBe(503)
-    expect(attempts).toBe(1)
-  })
-
-  test("never replays a stream body after a 401 refresh", async () => {
-    let attempts = 0
-
-    mockFetch(() => {
-      attempts += 1
-      return Promise.resolve(new Response("unauthorized", { status: 401 }))
-    })
-
-    const adapter = rest({
-      baseUrl: "https://api.example.com",
-      onUnauthorized: () => Promise.resolve(),
-    })
-    const client = await adapter.connect({
-      projectId: "demo",
-      connectorId: "hubspot",
-      signal: new AbortController().signal,
-    })
-
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(new Uint8Array([1]))
-        controller.close()
-      },
-    })
-    const response = await client.post("/upload", body)
-
-    expect(response.status).toBe(401)
-    expect(attempts).toBe(1)
   })
 
   test("serializes json bodies for post requests", async () => {
@@ -354,38 +196,68 @@ describe("rest reliability contract", () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch
+    jest.useRealTimers()
   })
 
-  test("does not retry an unsafe method by default", async () => {
-    let attempts = 0
-    mockFetch(() => {
-      attempts += 1
-      return Promise.resolve(new Response("busy", { status: 503 }))
+  const streamBody = () =>
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1]))
+        controller.close()
+      },
     })
-    const client = await rest({
-      baseUrl: "https://api.example.com",
-      retry: { maxRetries: 2, delayMs: () => 0 },
-    }).connect({
-      projectId: "demo",
-      connectorId: "contract",
-      signal: new AbortController().signal,
-    })
+  // An always-true policy proves the mechanical gates win over any policy decision.
+  const alwaysRetry = { maxRetries: 2, shouldRetry: () => true, delayMs: () => 0 }
+  const defaultPolicy = { maxRetries: 2, delayMs: () => 0 }
 
-    const response = await client.post("/commands", { action: "run" })
-
-    expect(response.status).toBe(503)
-    expect(attempts).toBe(1)
-  })
-
-  test("does not refresh and replay an unsafe method after a 401", async () => {
+  test.each([
+    {
+      request: "a stream body after a 503",
+      status: 503,
+      retry: alwaysRetry,
+      send: (client: RestClient) => client.post("/upload", streamBody()),
+    },
+    {
+      request: "an idempotent stream body after a 401",
+      status: 401,
+      retry: alwaysRetry,
+      send: (client: RestClient) =>
+        client.post("/upload", streamBody(), undefined, { idempotent: true }),
+    },
+    {
+      request: "an unsafe method after a 503 by default",
+      status: 503,
+      retry: defaultPolicy,
+      send: (client: RestClient) => client.post("/commands", { action: "run" }),
+    },
+    {
+      request: "an unsafe method after a 401",
+      status: 401,
+      retry: defaultPolicy,
+      send: (client: RestClient) => client.post("/commands", { action: "run" }),
+    },
+    {
+      request: "a request marked retryable: false",
+      status: 503,
+      retry: alwaysRetry,
+      send: (client: RestClient) => client.get("/read", undefined, { retryable: false }),
+    },
+    {
+      request: "a request with the deprecated retry: false",
+      status: 503,
+      retry: alwaysRetry,
+      send: (client: RestClient) => client.get("/read", { retry: false }),
+    },
+  ])("returns the first response without replaying $request", async ({ status, retry, send }) => {
     let attempts = 0
     let refreshes = 0
     mockFetch(() => {
       attempts += 1
-      return Promise.resolve(new Response("unauthorized", { status: 401 }))
+      return Promise.resolve(new Response(String(status), { status }))
     })
     const client = await rest({
       baseUrl: "https://api.example.com",
+      retry,
       onUnauthorized() {
         refreshes += 1
       },
@@ -395,9 +267,9 @@ describe("rest reliability contract", () => {
       signal: new AbortController().signal,
     })
 
-    const response = await client.post("/commands", { action: "run" })
+    const response = await send(client)
 
-    expect(response.status).toBe(401)
+    expect(response.status).toBe(status)
     expect(attempts).toBe(1)
     expect(refreshes).toBe(0)
   })
@@ -484,35 +356,6 @@ describe("rest reliability contract", () => {
     expect(await response.json()).toEqual({ ok: true })
   })
 
-  test("a hard retry gate wins over a custom policy", async () => {
-    let attempts = 0
-    let decisions = 0
-    mockFetch(() => {
-      attempts += 1
-      return Promise.resolve(new Response("busy", { status: 503 }))
-    })
-    const client = await rest({
-      baseUrl: "https://api.example.com",
-      retry: {
-        maxRetries: 2,
-        shouldRetry() {
-          decisions += 1
-          return true
-        },
-        delayMs: () => 0,
-      },
-    }).connect({
-      projectId: "demo",
-      connectorId: "contract",
-      signal: new AbortController().signal,
-    })
-
-    await client.get("/unsafe-read", undefined, { retryable: false })
-
-    expect(attempts).toBe(1)
-    expect(decisions).toBe(0)
-  })
-
   test("never retries an abort", async () => {
     let attempts = 0
     mockFetch(() => {
@@ -533,6 +376,7 @@ describe("rest reliability contract", () => {
   })
 
   test("an abort interrupts retry backoff", async () => {
+    // Guard check: drop the abort listener in rest.ts sleep(); this test then times out.
     const controller = new AbortController()
     let attempts = 0
     mockFetch(() => {
@@ -549,35 +393,16 @@ describe("rest reliability contract", () => {
     })
 
     const request = client.get("/items")
-    setTimeout(() => controller.abort(new DOMException("cancelled", "AbortError")), 10)
+    await flush()
+    controller.abort(new DOMException("cancelled", "AbortError"))
 
-    await expect(request).rejects.toThrow("cancelled")
+    const error = await request.catch((caught: unknown) => caught)
+    expect(error).toMatchObject({ name: "AbortError", message: "cancelled" })
     expect(attempts).toBe(1)
   })
 
-  test("serializes concurrent request starts", async () => {
-    const starts: number[] = []
-    mockFetch(() => {
-      starts.push(Date.now())
-      return Promise.resolve(new Response("ok"))
-    })
-    const client = await rest({
-      baseUrl: "https://api.example.com",
-      minDelayMs: 20,
-    }).connect({
-      projectId: "demo",
-      connectorId: "contract",
-      signal: new AbortController().signal,
-    })
-
-    await Promise.all([client.get("/one"), client.get("/two"), client.get("/three")])
-
-    expect(starts).toHaveLength(3)
-    expect((starts[1] ?? 0) - (starts[0] ?? 0)).toBeGreaterThanOrEqual(15)
-    expect((starts[2] ?? 0) - (starts[1] ?? 0)).toBeGreaterThanOrEqual(15)
-  })
-
   test("rejects an aborted request while it is queued behind another pacing slot", async () => {
+    jest.useFakeTimers()
     const controller = new AbortController()
     let attempts = 0
     mockFetch(() => {
@@ -595,12 +420,18 @@ describe("rest reliability contract", () => {
 
     await client.get("/one")
     const blocker = client.get("/two")
-    const startedAt = Date.now()
     const queued = client.get("/three", { signal: controller.signal })
-    setTimeout(() => controller.abort(new DOMException("cancelled", "AbortError")), 10)
+    let queuedSettled = false
+    queued.catch(() => {
+      queuedSettled = true
+    })
+    controller.abort(new DOMException("cancelled", "AbortError"))
+    await flush()
 
-    await expect(queued).rejects.toThrow("cancelled")
-    expect(Date.now() - startedAt).toBeLessThan(100)
+    // Rejected while /two still holds its pacing slot: no fake time has passed.
+    expect(queuedSettled).toBe(true)
+    expect(await queued.catch((error: unknown) => error)).toMatchObject({ message: "cancelled" })
+    jest.advanceTimersByTime(200)
     await blocker
     expect(attempts).toBe(2)
   })
@@ -624,8 +455,9 @@ describe("rest reliability contract", () => {
       signal: new AbortController().signal,
     })
 
-    await client.get("/items")
+    const response = await client.get("/items")
 
+    expect(response.status).toBe(200)
     expect(authorizations).toEqual(["Bearer 1", "Bearer 2"])
   })
 

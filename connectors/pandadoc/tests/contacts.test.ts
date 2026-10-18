@@ -1,74 +1,33 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { pandadoc } from "../src"
 import { CONTEXT, json, mockFetch } from "./helpers"
 
 describe("pandadoc contacts", () => {
   const originalFetch = globalThis.fetch
 
-  beforeEach(() => {
-    globalThis.fetch = originalFetch
-  })
-
   afterEach(() => {
     globalThis.fetch = originalFetch
   })
 
-  test("list reads contacts with a single unpaginated request", async () => {
+  test("list reads contacts in one unpaginated request, optionally filtered by exact email", async () => {
     const calls: { method: string; path: string; search: string }[] = []
-    const contact = {
-      id: "c1",
-      email: "buyer@example.com",
-      first_name: "Buyer",
-      last_name: "Person",
-      company: "ExampleCo",
-      job_title: "Purchasing Manager",
-      phone: "+1-555-123-4567",
-      country: "USA",
-      state: "NY",
-      street_address: "123 Main St",
-      city: "Albany",
-      postal_code: "12207",
-    }
+    const contact = { id: "c1", email: "buyer@example.com", first_name: "Buyer" }
 
     mockFetch((input, init) => {
       const url = new URL(String(input))
-      calls.push({
-        method: init?.method ?? "",
-        path: url.pathname,
-        search: url.search,
-      })
+      calls.push({ method: init?.method ?? "", path: url.pathname, search: url.search })
       return Promise.resolve(json({ results: [contact] }))
     })
 
     const client = await pandadoc({ apiKey: "pd-key" }).connect(CONTEXT)
     const response = await client.contacts.list()
-
-    expect(calls).toEqual([{ method: "GET", path: "/public/v1/contacts", search: "" }])
-    expect(response.results).toEqual([contact])
-  })
-
-  test("list supports exact email filtering without pagination params", async () => {
-    const calls: { method: string; path: string; searchParams: Record<string, string> }[] = []
-    mockFetch((input, init) => {
-      const url = new URL(String(input))
-      calls.push({
-        method: init?.method ?? "",
-        path: url.pathname,
-        searchParams: Object.fromEntries(url.searchParams.entries()),
-      })
-      return Promise.resolve(json({ results: [] }))
-    })
-
-    const client = await pandadoc({ apiKey: "pd-key" }).connect(CONTEXT)
     await client.contacts.list({ email: "buyer@example.com" })
 
     expect(calls).toEqual([
-      {
-        method: "GET",
-        path: "/public/v1/contacts",
-        searchParams: { email: "buyer@example.com" },
-      },
+      { method: "GET", path: "/public/v1/contacts", search: "" },
+      { method: "GET", path: "/public/v1/contacts", search: "?email=buyer%40example.com" },
     ])
+    expect(response.results).toEqual([contact])
   })
 
   test("CRUD methods hit exact paths and methods", async () => {

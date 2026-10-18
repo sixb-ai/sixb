@@ -47,7 +47,7 @@ test("SFTP abort preserves its reason even when closing the remote handle fails"
   expect((await reader.read()).done).toBe(false)
   const reason = new Error("stop sftp read")
   abort.abort(reason)
-  await expect(reader.read()).rejects.toBe(reason)
+  expect(await reader.read().catch((error: unknown) => error)).toBe(reason)
   await f.closed
   expect(f.destroyed()).toBe(true)
 })
@@ -60,7 +60,7 @@ test("SFTP stream still propagates remote read errors without an abort", async (
   expect((await reader.read()).done).toBe(false)
   const failure = new Error("remote read failed")
   f.source.destroy(failure)
-  await expect(reader.read()).rejects.toBe(failure)
+  expect(await reader.read().catch((error: unknown) => error)).toBe(failure)
 })
 
 test("canceling the SFTP consumer still closes the remote handle", async () => {

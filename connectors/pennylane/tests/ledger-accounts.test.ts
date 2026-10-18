@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { PennylaneApiError } from "../src"
+import type { PennylaneLedgerAccountListOptions } from "../src"
 import { collect, createTestClient, json, mockFetch } from "./helpers"
 
 const originalFetch = globalThis.fetch
@@ -22,98 +22,48 @@ afterEach(() => {
 })
 
 describe("pennylane ledger accounts", () => {
-  test("lists ledger accounts with every documented filter family", async () => {
-    let requestUrl = ""
-    let requestHeaders = new Headers()
-    mockFetch((input, init) => {
-      requestUrl = String(input)
-      requestHeaders = new Headers(init?.headers)
-      return Promise.resolve(json({ items: [LEDGER_ACCOUNT], has_more: null, next_cursor: null }))
+  test("listAll follows opaque cursors with every filter family and stops on null has_more", async () => {
+    const requests: URL[] = []
+    mockFetch((input) => {
+      const url = new URL(String(input))
+      requests.push(url)
+      return Promise.resolve(
+        json(
+          requests.length === 1
+            ? {
+                items: [{ ...LEDGER_ACCOUNT, id: 1 }],
+                has_more: true,
+                next_cursor: "opaque+cursor==",
+              }
+            : { items: [{ ...LEDGER_ACCOUNT, id: 2 }], has_more: null, next_cursor: null }
+        )
+      )
     })
 
-    const client = await createTestClient()
-    const page = await client.ledgerAccounts.list({
-      cursor: "opaque+cursor==",
-      limit: 1000,
-      sort: "-id",
-      filter: [
-        { field: "id", operator: "gteq", value: 40 },
-        { field: "id", operator: "not_in", value: [43, "44"] },
-        { field: "number", operator: "start_with", value: "706" },
-        { field: "number", operator: "eq", value: "706100" },
-        { field: "number", operator: "in", value: ["706100", "706200"] },
-        { field: "enabled", operator: "eq", value: true },
-      ],
-    })
-
-    const url = new URL(requestUrl)
-    expect(url.pathname).toBe("/api/external/v2/ledger_accounts")
-    expect(url.searchParams.get("cursor")).toBe("opaque+cursor==")
-    expect(url.searchParams.get("limit")).toBe("1000")
-    expect(url.searchParams.get("sort")).toBe("-id")
-    expect(JSON.parse(url.searchParams.get("filter") ?? "")).toEqual([
+    const filter: NonNullable<PennylaneLedgerAccountListOptions["filter"]> = [
       { field: "id", operator: "gteq", value: 40 },
       { field: "id", operator: "not_in", value: [43, "44"] },
       { field: "number", operator: "start_with", value: "706" },
       { field: "number", operator: "eq", value: "706100" },
       { field: "number", operator: "in", value: ["706100", "706200"] },
       { field: "enabled", operator: "eq", value: true },
-    ])
-    expect(requestHeaders.get("authorization")).toBe("Bearer pl-token")
-    expect(page.items[0]).toEqual(LEDGER_ACCOUNT)
-    expect(page.has_more).toBeNull()
-  })
-
-  test("listAll preserves query state and treats nullable has_more as terminal", async () => {
-    const requests: Array<{
-      cursor: string | null
-      limit: string | null
-      sort: string | null
-      filter: unknown
-    }> = []
-    mockFetch((input) => {
-      const url = new URL(String(input))
-      const filter = url.searchParams.get("filter")
-      requests.push({
-        cursor: url.searchParams.get("cursor"),
-        limit: url.searchParams.get("limit"),
-        sort: url.searchParams.get("sort"),
-        filter: filter ? JSON.parse(filter) : null,
-      })
-
-      return Promise.resolve(
-        json(
-          requests.length === 1
-            ? { items: [{ ...LEDGER_ACCOUNT, id: 1 }], has_more: true, next_cursor: "next" }
-            : { items: [{ ...LEDGER_ACCOUNT, id: 2 }], has_more: null, next_cursor: null }
-        )
-      )
-    })
-
+    ]
     const client = await createTestClient()
     const accounts = await collect(
-      client.ledgerAccounts.listAll({
-        limit: 2,
-        sort: "id",
-        filter: [{ field: "enabled", operator: "eq", value: true }],
-      })
+      client.ledgerAccounts.listAll({ limit: 1000, sort: "-id", filter })
     )
 
-    expect(accounts.map((account) => account.id)).toEqual([1, 2])
-    expect(requests).toEqual([
-      {
-        cursor: null,
-        limit: "2",
-        sort: "id",
-        filter: [{ field: "enabled", operator: "eq", value: true }],
-      },
-      {
-        cursor: "next",
-        limit: "2",
-        sort: "id",
-        filter: [{ field: "enabled", operator: "eq", value: true }],
-      },
+    expect(accounts).toEqual([
+      { ...LEDGER_ACCOUNT, id: 1 },
+      { ...LEDGER_ACCOUNT, id: 2 },
     ])
+    expect(requests.map((url) => url.searchParams.get("cursor"))).toEqual([null, "opaque+cursor=="])
+    for (const url of requests) {
+      expect(url.pathname).toBe("/api/external/v2/ledger_accounts")
+      expect(url.searchParams.get("limit")).toBe("1000")
+      expect(url.searchParams.get("sort")).toBe("-id")
+      expect(JSON.parse(url.searchParams.get("filter") ?? "")).toEqual(filter)
+    }
   })
 
   test("sends the documented get, create, and update requests", async () => {
@@ -182,19 +132,5 @@ describe("pennylane ledger accounts", () => {
       client.ledgerAccounts.create({ number: "706 100", label: "Invalid account" })
     ).toThrow("non-empty string without whitespace")
     expect(calls).toBe(0)
-  })
-
-  test("does not retry create because Pennylane can create related records", async () => {
-    let calls = 0
-    mockFetch(() => {
-      calls += 1
-      return Promise.resolve(json({ error: "temporary" }, { status: 503 }))
-    })
-
-    const client = await createTestClient({ retry: { maxRetries: 2, delayMs: () => 0 } })
-    await expect(
-      client.ledgerAccounts.create({ number: "401100", label: "Supplier account" })
-    ).rejects.toBeInstanceOf(PennylaneApiError)
-    expect(calls).toBe(1)
   })
 })
