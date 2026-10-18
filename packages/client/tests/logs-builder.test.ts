@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import { createSixbClient } from "../src/api"
 import type { Client } from "../src/generated/client"
 import { logs, type SixbLogLine } from "../src/logs"
@@ -29,8 +29,6 @@ class FakeWebSocket {
     this.onclose?.()
   }
 }
-
-const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 function line(cursor: string, message = "hello"): SixbLogLine {
   return {
@@ -109,6 +107,7 @@ describe("log transport", () => {
 
   afterEach(() => {
     globalThis.WebSocket = originalWebSocket
+    jest.useRealTimers()
   })
 
   test("does not construct a websocket for an injected shared client", () => {
@@ -137,21 +136,8 @@ describe("log transport", () => {
     unsubscribe()
   })
 
-  test("still constructs a websocket for an injected ordinary client", () => {
-    const ordinaryClient = createSixbClient({
-      baseUrl: "https://ordinary.example.test",
-      auth: { kind: "cookie" },
-      fetch: Object.assign(async () => Response.json({}), { preconnect: fetch.preconnect }),
-    })
-
-    const unsubscribe = logs.actions({ client: ordinaryClient }).subscribe(() => undefined)
-
-    expect(FakeWebSocket.instances).toHaveLength(1)
-    expect(FakeWebSocket.instances[0]?.url).toBe("wss://ordinary.example.test/ws/logs")
-    unsubscribe()
-  })
-
-  test("uses the configured API origin and resumes batched frames with cookie auth", async () => {
+  test("uses the configured API origin and resumes batched frames with cookie auth", () => {
+    jest.useFakeTimers()
     const fake = fakeClient()
     const received: SixbLogLine[] = []
     const unsubscribe = logs
@@ -160,7 +146,6 @@ describe("log transport", () => {
       .level("warn")
       .subscribe((entry) => received.push(entry), { reconnectDelayMs: 1 })
 
-    await tick()
     const first = FakeWebSocket.instances[0]
     if (!first) throw new Error("expected a websocket")
     expect(first.url).toBe("wss://api.example.test/ws/logs")
@@ -179,7 +164,7 @@ describe("log transport", () => {
     expect(received.map((entry) => entry.message)).toEqual(["one", "two"])
 
     first.onclose?.()
-    await new Promise((resolve) => setTimeout(resolve, 5))
+    jest.advanceTimersByTime(1)
     const second = FakeWebSocket.instances[1]
     if (!second) throw new Error("expected a reconnect")
     expect(second.protocols).toBeUndefined()

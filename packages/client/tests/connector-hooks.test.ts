@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { QueryClient } from "@tanstack/react-query"
-import {
-  connectorConnectionReturnTo,
-  readConnectorConnectionCallback,
-} from "../src/connectors/connection"
+import { readConnectorConnectionCallback } from "../src/connectors/connection"
 import {
   getConnectorConnectionRunQueryKey,
   listConnectorConnectionsQueryKey,
@@ -22,8 +19,6 @@ import type {
 import {
   addConnectorConnectionMutationOptions,
   connectConnectorMutationOptions,
-  connectorConnectionRunQueryOptions,
-  connectorConnectionsQueryOptions,
   disconnectConnectorMutationOptions,
   reauthorizeConnectorMutationOptions,
   revokeConnectorMutationOptions,
@@ -116,19 +111,10 @@ function createConnectorTestClient() {
           return Response.json(startedRun, { status: 201 })
         }
         if (
-          request.method === "GET" &&
-          url.pathname === "/api/connectors/github/connection-runs/ccr_1"
-        ) {
-          return Response.json(waitingRun)
-        }
-        if (
           request.method === "POST" &&
           url.pathname === "/api/connectors/github/connection-runs/ccr_1/selection"
         ) {
           return Response.json(succeededRun)
-        }
-        if (request.method === "GET" && url.pathname === "/api/connectors/github/connections") {
-          return Response.json(connections)
         }
         if (
           request.method === "DELETE" &&
@@ -157,30 +143,7 @@ function createConnectorTestClient() {
 }
 
 describe("connector connection hooks", () => {
-  test("starts a run from domain inputs without exposing the generated request shape", async () => {
-    const { client, requests } = createConnectorTestClient()
-    const options = connectConnectorMutationOptions({
-      client,
-      connectorId: "github",
-      slot: "default",
-      returnTo: "https://app.sixb.test/settings/connectors",
-    })
-    const mutationFn = options.mutationFn as () => Promise<StartConnectorConnectionRunResponse>
-
-    expect(await mutationFn()).toEqual(startedRun)
-    expect(requests).toEqual([
-      {
-        method: "POST",
-        path: "/api/connectors/github/connection-runs",
-        body: {
-          slot: "default",
-          returnTo: "https://app.sixb.test/settings/connectors",
-        },
-      },
-    ])
-  })
-
-  test("resolves an app-relative return target against the current browser URL", async () => {
+  test("starts a run from domain inputs, resolving an app-relative return target", async () => {
     const { client, requests } = createConnectorTestClient()
     Object.defineProperty(globalThis, "location", {
       configurable: true,
@@ -196,11 +159,14 @@ describe("connector connection hooks", () => {
       })
       const mutationFn = options.mutationFn as () => Promise<StartConnectorConnectionRunResponse>
 
-      await mutationFn()
-      expect(requests[0]?.body).toEqual({
-        slot: "default",
-        returnTo: "https://app.sixb.test/settings/connectors",
-      })
+      expect(await mutationFn()).toEqual(startedRun)
+      expect(requests).toEqual([
+        {
+          method: "POST",
+          path: "/api/connectors/github/connection-runs",
+          body: { slot: "default", returnTo: "https://app.sixb.test/settings/connectors" },
+        },
+      ])
     } finally {
       Reflect.deleteProperty(globalThis, "location")
     }
@@ -236,23 +202,6 @@ describe("connector connection hooks", () => {
         })
       )
     ).toEqual(additionalConnectionRun)
-  })
-
-  test("lists connector connections through a connector-scoped query", async () => {
-    const { client, requests } = createConnectorTestClient()
-    const options = connectorConnectionsQueryOptions({ client, connectorId: "github" })
-    const queryFn = options.queryFn as unknown as (context: {
-      signal?: AbortSignal
-    }) => Promise<ListConnectorConnectionsResponse>
-
-    expect(await queryFn({})).toEqual(connections)
-    expect(requests).toEqual([
-      {
-        method: "GET",
-        path: "/api/connectors/github/connections",
-        body: undefined,
-      },
-    ])
   })
 
   test("disconnects and revokes through concise intents that invalidate connection state", async () => {
@@ -319,40 +268,6 @@ describe("connector connection hooks", () => {
     ])
   })
 
-  test("reads the resumed run through the generated cache key", async () => {
-    const { client, requests } = createConnectorTestClient()
-    const options = connectorConnectionRunQueryOptions({
-      client,
-      connectorId: "github",
-      runId: "ccr_1",
-    })
-    const queryFn = options.queryFn as unknown as (context: {
-      signal?: AbortSignal
-    }) => Promise<GetConnectorConnectionRunResponse>
-
-    expect(options.queryKey as unknown).toEqual([
-      {
-        _id: "getConnectorConnectionRun",
-        path: { connectorId: "github", runId: "ccr_1" },
-      },
-    ])
-    expect(await queryFn({})).toEqual(waitingRun)
-    expect(requests[0]).toEqual({
-      method: "GET",
-      path: "/api/connectors/github/connection-runs/ccr_1",
-      body: undefined,
-    })
-  })
-
-  test("keeps the run query idle before the callback provides a run id", () => {
-    const options = connectorConnectionRunQueryOptions({
-      connectorId: "github",
-      runId: null,
-    })
-
-    expect(options.enabled).toBe(false)
-  })
-
   test("selects an account and converges the related caches", async () => {
     const { client, requests } = createConnectorTestClient()
     const queryClient = new QueryClient()
@@ -410,25 +325,9 @@ describe("connector connection hooks", () => {
 })
 
 describe("connector connection callback", () => {
-  test("reads the namespaced connector and run identity", () => {
-    expect(
-      readConnectorConnectionCallback(
-        "https://app.sixb.test/settings?connectionConnectorId=tiktok&connectionRunId=ccr_123"
-      )
-    ).toEqual({ connectorId: "tiktok", runId: "ccr_123" })
-  })
-
   test("ignores an incomplete callback identity", () => {
     expect(
       readConnectorConnectionCallback("https://app.sixb.test/settings?connectionRunId=ccr_123")
     ).toBeNull()
-  })
-
-  test("preserves application URL state while removing callback parameters", () => {
-    expect(
-      connectorConnectionReturnTo(
-        "https://app.sixb.test/settings?tab=connectors&connectionConnectorId=tiktok&connectionRunId=ccr_123#oauth"
-      )
-    ).toBe("https://app.sixb.test/settings?tab=connectors#oauth")
   })
 })

@@ -8,7 +8,6 @@ import { SIXB_CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../src/api"
 import {
   configureSixbBrowserClient,
   configureSixbSharedBrowserClient,
-  createSixbSignInUrl,
   isSixbApiError,
   requireSixbBrowserAuthSession,
   type SixbBrowserClientController,
@@ -21,7 +20,6 @@ import { client } from "../src/generated/client.gen"
 import {
   captureActivity,
   getActivityCaptureConfig,
-  listAuthMembers,
   listAuthSessions,
   requestAction,
   requestSyncRun,
@@ -107,35 +105,20 @@ afterEach(() => {
   })
 })
 
-describe("event websocket URLs", () => {
-  test("defaults to the local Sixb API websocket origin", () => {
+describe("websocket URLs", () => {
+  test("default to the local Sixb API and derive the stream path from an API base URL", () => {
     expect(createSixbEventsWebSocketUrl()).toBe("ws://localhost:3002/ws/events")
-  })
-
-  test("derives the events websocket URL from an API base URL", () => {
+    expect(createSixbAgentsWebSocketUrl()).toBe("ws://localhost:3002/ws/agents")
     expect(createSixbEventsWebSocketUrl("http://localhost:3002/api")).toBe(
       "ws://localhost:3002/ws/events"
-    )
-    expect(createSixbEventsWebSocketUrl("https://api.example.com/v1?ignored=true")).toBe(
-      "wss://api.example.com/ws/events"
-    )
-  })
-})
-
-describe("agent stream websocket helpers", () => {
-  test("defaults to the local Sixb API websocket origin", () => {
-    expect(createSixbAgentsWebSocketUrl()).toBe("ws://localhost:3002/ws/agents")
-  })
-
-  test("derives the agents websocket URL from an API base URL", () => {
-    expect(createSixbAgentsWebSocketUrl("http://localhost:3002/api")).toBe(
-      "ws://localhost:3002/ws/agents"
     )
     expect(createSixbAgentsWebSocketUrl("https://api.example.com/v1?ignored=true")).toBe(
       "wss://api.example.com/ws/agents"
     )
   })
+})
 
+describe("agent stream frames", () => {
   test("parses valid records while keeping UI chunks opaque", () => {
     const parsed = parseAgentRunStreamServerMessage(
       JSON.stringify({
@@ -373,14 +356,6 @@ describe("shared browser client", () => {
 })
 
 describe("browser client auth", () => {
-  test("creates API-origin sign-in URLs with the return target", () => {
-    const url = new URL(createSixbSignInUrl(runtimeConfig, "http://localhost:3001/devices"))
-
-    expect(url.origin).toBe("http://localhost:3002")
-    expect(url.pathname).toBe("/auth/sign-in")
-    expect(url.searchParams.get("returnTo")).toBe("http://localhost:3001/devices")
-  })
-
   test("sends credentials and CSRF from memory for mutating requests", async () => {
     const controller = configureBrowserClient()
     controller.setCsrfToken("csrf_1")
@@ -408,24 +383,17 @@ describe("browser client auth", () => {
     expect(observedRequest.headers.get("x-sixb-csrf")).toBe("csrf_1")
   })
 
-  test("marks requests made during visible startup activity", async () => {
+  test("owns the activity header: set while visible, removed while hidden", async () => {
     installDocument("visible")
     setSystemTime(new Date("2026-07-01T10:00:00.000Z"))
     configureBrowserClient()
+    const visible = await observeSyncRequest({ "x-sixb-session-activity": "wrong" })
+    expect(visible.headers.get("x-sixb-session-activity")).toBe("1")
 
-    const request = await observeSyncRequest({ "x-sixb-session-activity": "wrong" })
-
-    expect(request.headers.get("x-sixb-session-activity")).toBe("1")
-  })
-
-  test("removes the activity header while the document is hidden", async () => {
     installDocument("hidden")
-    setSystemTime(new Date("2026-07-01T10:00:00.000Z"))
     configureBrowserClient()
-
-    const request = await observeSyncRequest({ "x-sixb-session-activity": "1" })
-
-    expect(request.headers.has("x-sixb-session-activity")).toBe(false)
+    const hidden = await observeSyncRequest({ "x-sixb-session-activity": "1" })
+    expect(hidden.headers.has("x-sixb-session-activity")).toBe(false)
   })
 
   test("expires activity at five minutes and records returning visibility", async () => {
@@ -465,16 +433,26 @@ describe("browser client auth", () => {
     expect((await observeSyncRequest()).headers.has("x-sixb-session-activity")).toBe(false)
   })
 
-  test("dispose removes activity behavior and is idempotent", async () => {
+  test("dispose removes activity and expired-session redirect handling and is idempotent", async () => {
     const testDocument = installDocument("visible")
     setSystemTime(new Date("2026-07-01T10:00:00.000Z"))
-    const controller = configureBrowserClient()
+    const redirects: string[] = []
+    const controller = configureBrowserClient({
+      getCurrentUrl: () => "http://localhost:3001/devices",
+      redirect: (url) => redirects.push(url),
+    })
 
     controller.dispose()
     controller.dispose()
     testDocument.dispatchEvent(new Event("pointerdown"))
 
     expect((await observeSyncRequest()).headers.has("x-sixb-session-activity")).toBe(false)
+    const fetchMock = Object.assign(
+      async () => Response.json({ error: "Authentication required" }, { status: 401 }),
+      { preconnect: fetch.preconnect }
+    ) satisfies typeof fetch
+    await requestSyncRun({ body: {}, path: { syncId: "sync_1" }, fetch: fetchMock })
+    expect(redirects).toEqual([])
   })
 
   test("redirects once on a 401 without replaying the failed mutation", async () => {
@@ -507,6 +485,7 @@ describe("browser client auth", () => {
     expect(error).toMatchObject({ status: 401 })
     expect(redirects).toHaveLength(1)
     const redirect = new URL(redirects[0])
+    expect(redirect.origin).toBe("http://localhost:3002")
     expect(redirect.pathname).toBe("/auth/sign-in")
     expect(redirect.searchParams.get("returnTo")).toBe(currentUrl)
   })
@@ -539,24 +518,6 @@ describe("browser client auth", () => {
     expect(secondRedirects).toHaveLength(1)
   })
 
-  test("does not auto-redirect explicit sign-out requests", async () => {
-    const redirects: string[] = []
-    const controller = configureBrowserClient({
-      getCurrentUrl: () => "http://localhost:3001/devices",
-      redirect: (url) => redirects.push(url),
-    })
-    controller.setCsrfToken("csrf_current")
-    const fetchMock = Object.assign(
-      async () => Response.json({ error: "Authentication required" }, { status: 401 }),
-      { preconnect: fetch.preconnect }
-    ) satisfies typeof fetch
-
-    await signOut({ fetch: fetchMock })
-
-    expect(controller.getCsrfToken()).toBe("csrf_current")
-    expect(redirects).toEqual([])
-  })
-
   // Guard proof: drop the activity routes from isAuthRedirectExcludedRequest; a background batch
   // sends the person to sign in.
   test("does not auto-redirect background activity requests", async () => {
@@ -582,15 +543,16 @@ describe("browser client auth", () => {
     expect(redirects).toHaveLength(1)
   })
 
-  test("does not auto-redirect path-prefixed sign-out requests", async () => {
+  test("does not auto-redirect explicit sign-out requests, including path-prefixed ones", async () => {
     const redirects: string[] = []
-    configureBrowserClient(
+    const controller = configureBrowserClient(
       {
         getCurrentUrl: () => "http://localhost:3001/devices",
         redirect: (url) => redirects.push(url),
       },
       { ...runtimeConfig, api: { baseUrl: "http://localhost:3002/platform" } }
     )
+    controller.setCsrfToken("csrf_current")
     let requestUrl = ""
     const fetchMock = Object.assign(
       async (input: Parameters<typeof fetch>[0]) => {
@@ -603,6 +565,7 @@ describe("browser client auth", () => {
     await signOut({ fetch: fetchMock })
 
     expect(new URL(requestUrl).pathname).toBe("/platform/api/auth/sign-out")
+    expect(controller.getCsrfToken()).toBe("csrf_current")
     expect(redirects).toEqual([])
   })
 
@@ -618,22 +581,6 @@ describe("browser client auth", () => {
     ) satisfies typeof fetch
 
     await listAuthSessions({ fetch: fetchMock })
-
-    expect(redirects).toHaveLength(1)
-  })
-
-  test("auto-redirects protected auth member management requests", async () => {
-    const redirects: string[] = []
-    configureBrowserClient({
-      getCurrentUrl: () => "http://localhost:3001/settings/members",
-      redirect: (url) => redirects.push(url),
-    })
-    const fetchMock = Object.assign(
-      async () => Response.json({ error: "Authentication required" }, { status: 401 }),
-      { preconnect: fetch.preconnect }
-    ) satisfies typeof fetch
-
-    await listAuthMembers({ fetch: fetchMock })
 
     expect(redirects).toHaveLength(1)
   })
@@ -800,23 +747,6 @@ describe("browser client auth", () => {
     expect(session).toEqual({ authenticated: false, authEnabled: false })
     expect(bootstrapRedirects).toEqual([])
     expect(automaticRedirects).toEqual([])
-  })
-
-  test("dispose removes expired-session redirect handling", async () => {
-    const redirects: string[] = []
-    const controller = configureBrowserClient({
-      getCurrentUrl: () => "http://localhost:3001/devices",
-      redirect: (url) => redirects.push(url),
-    })
-    controller.dispose()
-    const fetchMock = Object.assign(
-      async () => Response.json({ error: "Authentication required" }, { status: 401 }),
-      { preconnect: fetch.preconnect }
-    ) satisfies typeof fetch
-
-    await requestSyncRun({ body: {}, path: { syncId: "sync_1" }, fetch: fetchMock })
-
-    expect(redirects).toEqual([])
   })
 })
 

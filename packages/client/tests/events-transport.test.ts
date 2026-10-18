@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import type { SixbEvent } from "../src/events"
 import { createEventSocket } from "../src/events-transport"
 
@@ -44,18 +44,6 @@ class FakeWebSocket {
   }
 }
 
-const tick = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms))
-
-async function waitFor(condition: () => boolean, timeoutMs = 1_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (!condition()) {
-    if (Date.now() >= deadline) {
-      throw new Error("Timed out waiting for websocket state.")
-    }
-    await tick(1)
-  }
-}
-
 describe("createEventSocket", () => {
   let originalWebSocket: typeof WebSocket
   let activeSocket: ReturnType<typeof createEventSocket> | null
@@ -65,14 +53,16 @@ describe("createEventSocket", () => {
     activeSocket = null
     FakeWebSocket.instances = []
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+    jest.useFakeTimers()
   })
 
   afterEach(() => {
     activeSocket?.close()
     globalThis.WebSocket = originalWebSocket
+    jest.useRealTimers()
   })
 
-  test("reconnects after the socket closes and resumes from the last cursor", async () => {
+  test("reconnects after the socket closes and resumes from the last cursor", () => {
     const received: SixbEvent[] = []
     const socket = createEventSocket({
       topic: "telemetry",
@@ -95,7 +85,7 @@ describe("createEventSocket", () => {
 
     // The server drops the connection; the socket should reconnect on its own.
     ws1.onclose?.()
-    await tick()
+    jest.advanceTimersByTime(1)
 
     const ws2 = FakeWebSocket.instances[1]
     if (!ws2) throw new Error("expected a reconnect")
@@ -108,31 +98,7 @@ describe("createEventSocket", () => {
     socket.close()
   })
 
-  test("subscribes once after the event server announces readiness", () => {
-    const socket = createEventSocket({
-      topic: "telemetry",
-      reconnect: false,
-      onEvent: () => {},
-    })
-    activeSocket = socket
-
-    const ws = FakeWebSocket.instances[0]
-    if (!ws) throw new Error("expected a websocket")
-    ws.onopen?.()
-    expect(ws.sent).toHaveLength(0)
-
-    ws.onmessage?.({ data: JSON.stringify({ type: "connected", channel: "events" }) })
-    ws.onmessage?.({ data: JSON.stringify({ type: "connected", channel: "events" }) })
-
-    expect(ws.sent).toHaveLength(1)
-    expect(JSON.parse(ws.sent[0])).toMatchObject({
-      type: "subscribe",
-      topic: "telemetry",
-    })
-    socket.close()
-  })
-
-  test("reports connected only after the server acknowledges the subscription", () => {
+  test("subscribes once after readiness and reports connected only once acknowledged", () => {
     const states: { connected: boolean }[] = []
     const socket = createEventSocket({
       topic: "telemetry",
@@ -149,7 +115,9 @@ describe("createEventSocket", () => {
     expect(states.at(-1)).toMatchObject({ connected: false })
 
     ws.onmessage?.({ data: JSON.stringify({ type: "connected", channel: "events" }) })
+    ws.onmessage?.({ data: JSON.stringify({ type: "connected", channel: "events" }) })
     expect(ws.sent).toHaveLength(1)
+    expect(JSON.parse(ws.sent[0])).toMatchObject({ type: "subscribe", topic: "telemetry" })
     expect(states.at(-1)).toMatchObject({ connected: false })
 
     ws.onmessage?.({ data: JSON.stringify({ type: "subscribed" }) })
@@ -158,7 +126,7 @@ describe("createEventSocket", () => {
     socket.close()
   })
 
-  test("closes and reconnects when the protocol handshake times out", async () => {
+  test("closes and reconnects when the protocol handshake times out", () => {
     const errors: string[] = []
     const socket = createEventSocket({
       reconnect: true,
@@ -172,15 +140,19 @@ describe("createEventSocket", () => {
     const ws1 = FakeWebSocket.instances[0]
     if (!ws1) throw new Error("expected a websocket")
     ws1.onopen?.()
-    await waitFor(() => ws1.closed)
-    await waitFor(() => FakeWebSocket.instances.length === 2)
+    jest.advanceTimersByTime(4)
+    expect(ws1.closed).toBe(false)
+    jest.advanceTimersByTime(1)
+    expect(ws1.closed).toBe(true)
+    jest.advanceTimersByTime(1)
+    expect(FakeWebSocket.instances).toHaveLength(2)
 
     expect(errors).toEqual(["Event websocket handshake timed out."])
 
     socket.close()
   })
 
-  test("does not reconnect when reconnect is disabled", async () => {
+  test("does not reconnect when reconnect is disabled", () => {
     const socket = createEventSocket({
       topic: "telemetry",
       reconnect: false,
@@ -193,13 +165,14 @@ describe("createEventSocket", () => {
     if (!ws1) throw new Error("expected a websocket")
     ws1.onopen?.()
     ws1.onclose?.()
-    await tick(10)
 
+    expect(jest.getTimerCount()).toBe(0)
+    jest.runAllTimers()
     expect(FakeWebSocket.instances).toHaveLength(1)
     socket.close()
   })
 
-  test("stops reconnecting once closed", async () => {
+  test("stops reconnecting once closed", () => {
     const socket = createEventSocket({
       topic: "telemetry",
       reconnect: true,
@@ -214,8 +187,9 @@ describe("createEventSocket", () => {
 
     socket.close()
     ws1.onclose?.()
-    await tick()
 
+    expect(jest.getTimerCount()).toBe(0)
+    jest.runAllTimers()
     expect(FakeWebSocket.instances).toHaveLength(1)
   })
 })

@@ -48,7 +48,7 @@ function objectPage(count: number, hasMore: boolean): ListObjectSummariesPage {
 }
 
 describe("listObjectsInfiniteOptions", () => {
-  test("keeps the initial offset when calculating the next page", () => {
+  test("pages from the initial offset and stops when a page has no more results", () => {
     const options = listObjectsInfiniteOptions({
       query: {
         limit: "50",
@@ -60,16 +60,6 @@ describe("listObjectsInfiniteOptions", () => {
     expect(
       options.getNextPageParam?.(objectPage(50, true), [objectPage(50, true)], "100", ["100"])
     ).toBe("150")
-  })
-
-  test("stops pagination when the current page has no more results", () => {
-    const options = listObjectsInfiniteOptions({
-      query: {
-        limit: "50",
-        offset: "100",
-      },
-    })
-
     expect(
       options.getNextPageParam?.(objectPage(20, false), [objectPage(20, false)], "100", ["100"])
     ).toBeUndefined()

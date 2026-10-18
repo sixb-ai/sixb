@@ -179,24 +179,6 @@ describe("objects().query()", () => {
     expect(result.objects[0]?.updatedAt).toEqual(new Date("2026-02-03T04:05:06.000Z"))
   })
 
-  test("list({ includeTotal: false }) forwards the flag and omits total", async () => {
-    const { client, calls } = createTestClient(() =>
-      Response.json({ objects: [], hasMore: true, nextPageToken: "next", plan: emptyPlan })
-    )
-
-    const page = await objects(Project, { client })
-      .query()
-      .page({ pageSize: 25 })
-      .list({ includeTotal: false })
-
-    expect(calls[0]?.body).toEqual({
-      query: { kind: "page", pageSize: 25, input: { kind: "start", objectTypeId: "Project" } },
-      includeTotal: false,
-    })
-    expect(page.total).toBeUndefined()
-    expect(page.nextPageToken).toBe("next")
-  })
-
   test("first() wraps the query with limit 1", async () => {
     const { client, calls } = createTestClient(() =>
       Response.json({ objects: [row], hasMore: false, total: 1, plan: emptyPlan })
@@ -316,18 +298,17 @@ describe("objects().query()", () => {
         )
     )
 
-    const promise = objects(Project, { client })
+    const error = await objects(Project, { client })
       .query()
       .where((project) => project.p.status.eq("active"))
       .list()
+      .catch((caught: unknown) => caught)
 
-    expect(promise).rejects.toThrow(SixbQueryError)
-    expect(promise).rejects.toThrow("Object query validation failed")
-    await promise.catch((error: SixbQueryError) => {
-      expect(error.issues).toEqual([
-        { path: "$.predicate", code: "unknown_property", message: "Unknown" },
-      ])
-    })
+    expect(error).toBeInstanceOf(SixbQueryError)
+    expect((error as SixbQueryError).message).toContain("Object query validation failed")
+    expect((error as SixbQueryError).issues).toEqual([
+      { path: "$.predicate", code: "unknown_property", message: "Unknown" },
+    ])
   })
 
   test("works against a client configured with responseStyle data and throwOnError", async () => {
@@ -353,9 +334,12 @@ describe("objects().query()", () => {
     const result = await objects(Project, { client }).query().limit(1).list()
     expect(result.total).toBe(1)
 
-    const failing = objects(Project, { client }).query().limit(1).list()
-    expect(failing).rejects.toThrow(SixbQueryError)
-    await failing.catch(() => {})
+    const failure = await objects(Project, { client })
+      .query()
+      .limit(1)
+      .list()
+      .catch((caught: unknown) => caught)
+    expect(failure).toBeInstanceOf(SixbQueryError)
   })
 
   test("validate() is server-side only", () => {

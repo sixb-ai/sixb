@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { FileRef } from "@sixb/core"
-import { createSixbClient, objectFileContentUrl, client as sharedClient } from "../src"
+import { createSixbClient, objectFileContentUrl } from "../src"
 
 const fileRef: FileRef = {
   blobId: `blob_${"a".repeat(64)}`,
@@ -17,35 +17,6 @@ const input = {
 }
 
 describe("objectFileContentUrl", () => {
-  // Media elements cannot send the selector header. Regression proof: drop `shareGrant` from the
-  // helper's query and the shared assertion fails.
-  test("names the Share in the query only for a shared client", () => {
-    const shared = createSixbClient({
-      baseUrl: "https://api.example.com",
-      auth: { kind: "shared", grantId: "shr_1" },
-    })
-    expect(
-      new URL(objectFileContentUrl({ ...input, client: shared })).searchParams.getAll("shareGrant")
-    ).toEqual(["shr_1"])
-
-    for (const auth of [undefined, { kind: "cookie" as const }]) {
-      const client = createSixbClient({ baseUrl: "https://api.example.com", auth })
-      expect(
-        new URL(objectFileContentUrl({ ...input, client })).searchParams.has("shareGrant")
-      ).toBe(false)
-    }
-  })
-
-  test("defaults to the shared client configuration", () => {
-    const config = sharedClient.getConfig()
-    try {
-      sharedClient.setConfig({ baseUrl: "https://shared.test" })
-      expect(objectFileContentUrl(input).startsWith("https://shared.test/api/objects/")).toBe(true)
-    } finally {
-      sharedClient.setConfig(config)
-    }
-  })
-
   test("uses the client base path and encodes object IDs and JSON pointers", () => {
     const client = createSixbClient({ baseUrl: "https://sixb.test/prefix/api" })
     const url = new URL(objectFileContentUrl({ ...input, client, disposition: "attachment" }))

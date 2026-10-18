@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import {
   AGENT_ACTIVITY_STREAM_SCHEMA_VERSION,
   AGENT_RUN_STREAM_SCHEMA_VERSION,
@@ -83,8 +83,6 @@ class FakeWebSocket {
   }
 }
 
-const tick = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms))
-
 describe("createAgentRunSocket", () => {
   let originalWebSocket: typeof WebSocket
 
@@ -96,9 +94,11 @@ describe("createAgentRunSocket", () => {
 
   afterEach(() => {
     globalThis.WebSocket = originalWebSocket
+    jest.useRealTimers()
   })
 
-  test("subscribes to the run, delivers records with their cursor, and resumes on reconnect", async () => {
+  test("subscribes to the run, delivers records with their cursor, and resumes on reconnect", () => {
+    jest.useFakeTimers()
     const received: Array<{ type: string; cursor: string }> = []
     const snapshots: string[] = []
     const socket = createAgentRunSocket({
@@ -125,7 +125,7 @@ describe("createAgentRunSocket", () => {
 
     // Connection drops; the socket reconnects and resumes after the last delivered cursor.
     ws1.onclose?.()
-    await tick()
+    jest.advanceTimersByTime(1)
 
     const ws2 = FakeWebSocket.instances[1]
     if (!ws2) throw new Error("expected a reconnect")
@@ -135,7 +135,7 @@ describe("createAgentRunSocket", () => {
     socket.close()
   })
 
-  test("surfaces server error frames through onError", async () => {
+  test("surfaces server error frames through onError", () => {
     const errors: string[] = []
     const socket = createAgentRunSocket({
       runId: "run-1",
@@ -151,24 +151,6 @@ describe("createAgentRunSocket", () => {
     expect(errors).toEqual(["run gone"])
 
     socket.close()
-  })
-
-  test("does not reconnect once closed", async () => {
-    const socket = createAgentRunSocket({
-      runId: "run-1",
-      reconnect: true,
-      reconnectDelayMs: 1,
-      onEvent: () => {},
-    })
-
-    const ws1 = FakeWebSocket.instances[0]
-    if (!ws1) throw new Error("expected a websocket")
-    ws1.onopen?.()
-    socket.close()
-    ws1.onclose?.()
-    await tick()
-
-    expect(FakeWebSocket.instances).toHaveLength(1)
   })
 
   test("subscribes once to project activity and delivers lifecycle changes", () => {

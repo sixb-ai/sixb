@@ -11,7 +11,6 @@ import {
 import { createClient, createConfig } from "../src/generated/client"
 import { objects } from "../src/query"
 import {
-  type ActionRunMutationRequest,
   actionRunMutationOptions,
   invalidateObjectCountQuery,
   invalidateObjectExistsQuery,
@@ -127,7 +126,7 @@ describe("objectQueryOptions", () => {
     )
   })
 
-  test("query keys are stable across separately built identical queries", () => {
+  test("query keys are stable for identical queries and distinct across queries and kinds", () => {
     const first = objectQueryOptions(activeProjects().limit(10))
     const second = objectQueryOptions(activeProjects().limit(10))
     const different = objectQueryOptions(activeProjects().limit(20))
@@ -135,9 +134,7 @@ describe("objectQueryOptions", () => {
     expect(first.queryKey).toEqual(second.queryKey)
     expect(JSON.stringify(first.queryKey)).toBe(JSON.stringify(second.queryKey))
     expect(first.queryKey).not.toEqual(different.queryKey)
-  })
-
-  test("count keys do not collide with list keys for the same IR", () => {
+    // A count of the same IR must not read a cached list.
     const query = activeProjects()
     expect(objectQueryOptions(query).queryKey).not.toEqual(objectQueryCountOptions(query).queryKey)
   })
@@ -233,69 +230,49 @@ describe("actionRunMutationOptions", () => {
     },
   }
 
-  test("configured mutations send variables as action params and resolve with the run", async () => {
-    const { client, requests } = createActionTestClient()
-    const options = actionRunMutationOptions<{ note: string }>({
-      client,
-      actionId: "approveQuote",
-      subject: { objectType: Project, primaryId: "p_1" },
-    })
-
-    const mutationFn = options.mutationFn as (params: { note: string }) => Promise<ActionRunDetail>
-    const run = await mutationFn({ note: "Approved" })
-
-    expect(run).toEqual(createActionRun())
-    expect(requests).toEqual([expectedRequest])
-  })
-
-  test("configured mutations still accept the generated object subject shape", async () => {
-    const { client, requests } = createActionTestClient()
-    const options = actionRunMutationOptions<{ note: string }>({
-      client,
-      actionId: "approveQuote",
-      subject: { kind: "object", objectTypeId: "Project", primaryId: "p_1" },
-    })
-
-    const mutationFn = options.mutationFn as (params: { note: string }) => Promise<ActionRunDetail>
-    await mutationFn({ note: "Approved" })
-
-    expect(requests).toEqual([expectedRequest])
-  })
-
-  test("dynamic mutations accept the full generated request shape", async () => {
-    const { client, requests } = createActionTestClient()
-    const options = actionRunMutationOptions({ client })
-
-    const mutationFn = options.mutationFn as (
-      request: ActionRunMutationRequest
-    ) => Promise<ActionRunDetail>
-    const run = await mutationFn({
-      path: { actionId: "approveQuote" },
-      body: {
+  // Configured mutations take the params as variables; dynamic ones take the whole request. Both
+  // accept an ontology subject or the generated object subject shape.
+  test.each([
+    {
+      name: "configured, ontology subject",
+      options: { subject: { objectType: Project, primaryId: "p_1" }, actionId: "approveQuote" },
+      variables: { note: "Approved" },
+    },
+    {
+      name: "configured, generated subject",
+      options: {
         subject: { kind: "object", objectTypeId: "Project", primaryId: "p_1" },
-        params: { note: "Approved" },
+        actionId: "approveQuote",
       },
-    })
-
-    expect(run).toEqual(createActionRun())
-    expect(requests).toEqual([expectedRequest])
-  })
-
-  test("dynamic mutations accept ontology object subjects", async () => {
+      variables: { note: "Approved" },
+    },
+    {
+      name: "dynamic, generated subject",
+      options: {},
+      variables: {
+        path: { actionId: "approveQuote" },
+        body: {
+          subject: { kind: "object", objectTypeId: "Project", primaryId: "p_1" },
+          params: { note: "Approved" },
+        },
+      },
+    },
+    {
+      name: "dynamic, ontology subject",
+      options: {},
+      variables: {
+        path: { actionId: "approveQuote" },
+        body: { subject: { objectType: Project, primaryId: "p_1" }, params: { note: "Approved" } },
+      },
+    },
+  ] as const)("sends the action request and resolves with the run ($name)", async (row) => {
     const { client, requests } = createActionTestClient()
-    const options = actionRunMutationOptions({ client })
+    const options = actionRunMutationOptions({ client, ...row.options } as Parameters<
+      typeof actionRunMutationOptions
+    >[0])
 
-    const mutationFn = options.mutationFn as (
-      request: ActionRunMutationRequest
-    ) => Promise<ActionRunDetail>
-    await mutationFn({
-      path: { actionId: "approveQuote" },
-      body: {
-        subject: { objectType: Project, primaryId: "p_1" },
-        params: { note: "Approved" },
-      },
-    })
-
+    const mutationFn = options.mutationFn as (variables: unknown) => Promise<ActionRunDetail>
+    expect(await mutationFn(row.variables)).toEqual(createActionRun())
     expect(requests).toEqual([expectedRequest])
   })
 

@@ -50,23 +50,13 @@ const objectType: ObjectTypeDefinition = {
 }
 
 describe("client object models", () => {
-  test("preserves nullable action parameter metadata", () => {
-    const summary = toObjectSummary(object, objectType)
+  test("maps action parameter types and preserves nullable metadata", () => {
+    const params = toObjectSummary(object, objectType).actions.updateCategory?.params
 
-    expect(summary.actions.updateCategory?.params?.category).toMatchObject({
-      required: false,
-      nullable: true,
-    })
-    expect(summary.actions.updateCategory?.params?.amount).toMatchObject({
-      type: "string",
-      required: true,
-    })
-  })
-
-  test("keeps user reference params distinct from strings", () => {
-    const summary = toObjectSummary(object, objectType)
-
-    expect(summary.actions.updateCategory?.params?.owner?.type).toBe("userRef")
+    expect(params?.category).toMatchObject({ required: false, nullable: true })
+    expect(params?.amount).toMatchObject({ type: "string", required: true })
+    // User references stay distinct from strings.
+    expect(params?.owner?.type).toBe("userRef")
   })
 
   // Regression proof: drop the title property from toObjectSummary and the deal reads as its id.

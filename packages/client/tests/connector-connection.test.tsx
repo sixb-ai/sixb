@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query"
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
+import { act, cleanup, renderHook, waitFor as waitForCallback } from "@testing-library/react"
 import { Window } from "happy-dom"
 import type { PropsWithChildren } from "react"
 import { SixbProvider } from "../src/client-provider"
@@ -40,6 +40,12 @@ const installedBrowserGlobals = [
   "IS_REACT_ACT_ENVIRONMENT",
 ] as const
 const previousBrowserGlobals = new Map<string, PropertyDescriptor | undefined>()
+
+// Hook state changes never touch the DOM, so Testing Library only re-checks on its interval (50ms by
+// default). The checks are in-memory reads, so poll them every millisecond.
+function waitFor<T>(callback: () => T | Promise<T>): Promise<T> {
+  return waitForCallback(callback, { interval: 1 })
+}
 
 const connection = {
   id: "ccn_1",
@@ -182,15 +188,25 @@ describe("useConnectorConnection", () => {
     expect(browserWindow.location.search).toBe("")
     expect(rendered.result.current.accounts).toEqual(waitingRun.accounts)
     expect(rendered.result.current.canConnect).toBe(false)
+    // A pending selection must not start another authorization.
+    await act(async () => rendered.result.current.connect())
+    expect(rendered.result.current.status).toBe("selecting_account")
     await act(async () => {
       await rendered.result.current.selectAccount("octocat")
     })
     await waitFor(() => expect(rendered.result.current.status).toBe("connected"))
-    expect(
+    const paths = (method: string) =>
       requests
-        .filter((request) => request.method === "POST")
+        .filter((request) => request.method === method)
         .map((request) => new URL(request.url).pathname)
-    ).toEqual(["/api/connectors/github/connection-runs/ccr_1/selection"])
+    expect(new Set(paths("GET"))).toEqual(
+      new Set([
+        "/api/connectors/github/connection-runs",
+        "/api/connectors/github/connection-runs/ccr_1",
+        "/api/connectors/github/connections",
+      ])
+    )
+    expect(paths("POST")).toEqual(["/api/connectors/github/connection-runs/ccr_1/selection"])
   })
 
   test("surfaces a failed recovery lookup before offering another authorization", async () => {
@@ -245,30 +261,6 @@ describe("useConnectorConnection", () => {
     await waitFor(() => expect(rendered.result.current.status).toBe("connected"))
     expect(connectionReads).toBe(2)
     expect(browserWindow.location.href).toBe("https://app.sixb.test/settings?tab=connectors#oauth")
-  })
-
-  test("does not start another authorization while account selection is pending", async () => {
-    browserWindow.history.replaceState(
-      {},
-      "",
-      "/settings?connectionConnectorId=github&connectionRunId=ccr_1"
-    )
-    const { client, requests } = createHookClient(async () =>
-      Response.json({ error: "Unexpected request" }, { status: 500 })
-    )
-    const queryClient = connectorQueryClient()
-    seedConnectorQueries(queryClient, waitingRun, [])
-    const rendered = renderHook(
-      () => useConnectorConnection({ connectorId: "github", slot: "default" }),
-      { wrapper: connectorWrapper(client, queryClient) }
-    )
-
-    expect(rendered.result.current.status).toBe("selecting_account")
-    expect(rendered.result.current.canConnect).toBe(false)
-    await act(async () => rendered.result.current.connect())
-
-    expect(requests).toEqual([])
-    expect(rendered.result.current.status).toBe("selecting_account")
   })
 
   test("coalesces concurrent connect calls into one authorization request", async () => {
