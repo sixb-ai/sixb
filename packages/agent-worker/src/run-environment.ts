@@ -3,12 +3,10 @@ import type {
   AgentToolRunInfo,
   OntologyDocsCatalog,
   Principal,
-  Sandbox,
   SandboxDefinition,
 } from "@sixb/core"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type RenderedOntologyDocs, renderOntologyDocs } from "@sixb/core/internal/ontology"
-import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { ModelTool } from "@sixb/core/models"
 import type {
@@ -35,9 +33,12 @@ import {
 } from "./attachments"
 import type { AgentContextBudget } from "./context-budget"
 import { prepareAgentConversationContext } from "./context-compaction"
-import { AgentExecutionLostError } from "./errors"
+import { ephemeralRunSandbox } from "./ephemeral-run-sandbox"
+import { isLostExecution } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type AgentErrorDetails, modelToolsFromAgentDefinitions } from "./model-adapters"
+import { persistentRunSandbox } from "./persistent-run-sandbox"
+import type { AcquiredRunSandbox, RunSandbox } from "./run-sandbox"
 import {
   AGENT_ARTIFACTS_DIRECTORY,
   AGENT_ARTIFACTS_MANIFEST,
@@ -45,7 +46,6 @@ import {
 } from "./sandbox-api-context"
 import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import type { AgentSandboxHandle } from "./sandbox-handle"
-import { type AgentSandboxLifecycle, openThreadSandbox } from "./sandbox-lifecycle"
 import type { LoadedAgentThreadModelContext } from "./thread-context"
 import {
   NO_TOOL_ATTACHMENTS,
@@ -123,8 +123,8 @@ export async function createConversationAgentEnvironment(
   const sandboxSignal = input.signal
     ? AbortSignal.any([input.signal, failure.signal])
     : failure.signal
-  const persistentSandbox = input.thread?.sandboxParams
-    ? await openThreadSandbox({
+  const sandbox = input.thread?.sandboxParams
+    ? await persistentRunSandbox({
         context,
         definition: input.sandboxDefinition,
         thread: input.thread,
@@ -132,7 +132,7 @@ export async function createConversationAgentEnvironment(
         signal: sandboxSignal,
         onAuthFailure: (error) => failure.abort(error),
       })
-    : undefined
+    : ephemeralRunSandbox({ context })
   let environment: AgentExecutionEnvironment | undefined
   try {
     const ontologyDocs = renderRunOntologyDocs(context)
@@ -173,10 +173,10 @@ export async function createConversationAgentEnvironment(
       inlineImages,
       signal: sandboxSignal,
     })
-    environment = startAgentEnvironment({
+    environment = await startAgentEnvironment({
       mode: "conversation",
-      persistentSandbox,
-      signal: sandboxSignal,
+      sandbox,
+      sandboxSignal,
       failureSignal: failure.signal,
       context,
       plan,
@@ -203,21 +203,12 @@ export async function createConversationAgentEnvironment(
       frameworkTools: input.frameworkTools,
       onDetachedTeardown: input.onDetachedTeardown,
     })
-    if (persistentSandbox) {
-      const ready = environment.turnContext.sandboxReady
-      if (ready) await waitForAbort(ready, sandboxSignal)
-    }
     return { ...environment, threadContext: prepared?.threadContext }
   } catch (error) {
     // Preparation can fail before the worker receives this environment. Preserve here, before
     // the worker records the run's terminal outcome; a lost execution must touch nothing.
     try {
-      if (
-        !(error instanceof AgentExecutionLostError) &&
-        !(error instanceof QueueDeliveryLeaseLostError) &&
-        !(input.signal?.reason instanceof QueueDeliveryLeaseLostError)
-      )
-        await persistentSandbox?.save()
+      if (!isLostExecution(error, input.signal)) await sandbox.beforeFinalize?.()
     } finally {
       await environment?.dispose()
     }
@@ -237,6 +228,7 @@ export async function createSubagentEnvironment(
 
   return startAgentEnvironment({
     mode: "subagent",
+    sandbox: ephemeralRunSandbox({ context }),
     context,
     plan,
     runId: run.id,
@@ -274,6 +266,7 @@ export async function createWorkflowAgentNodeEnvironment(
 
   return startAgentEnvironment({
     mode: "workflow-task",
+    sandbox: ephemeralRunSandbox({ context }),
     context,
     actorId: run.actorId,
     plan,
@@ -301,9 +294,15 @@ export async function createWorkflowAgentNodeEnvironment(
   })
 }
 
-interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
+interface AgentEnvironmentSetup extends Omit<CreateAgentEnvironmentInput, "signal"> {
+  readonly sandbox: RunSandbox
+  /**
+   * Run end or environment failure: stops waiting for a sandbox the first model call needs, and
+   * stops reading the artifacts it installs.
+   */
+  readonly sandboxSignal?: AbortSignal
+  /** Environment-owned failure, such as lost source credentials. */
   readonly failureSignal?: AbortSignal
-  readonly persistentSandbox?: AgentSandboxLifecycle
   readonly toolRun: AgentToolRunInfo
   readonly toolAttachments: AgentToolAttachments
   readonly actorId?: string
@@ -326,10 +325,14 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
 
 /**
  * Start the shared tools, sandbox, and teardown lifecycle after source-specific preparation.
- * Sandbox boot stays concurrent with the model call; sandbox tools await it only when used.
+ * A blank sandbox boots concurrently with the model call and tools await it only when used; a
+ * thread's workspace is ready first, so the system prompt describes the one the run got.
  */
-function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvironment {
-  const { mode, context, actorId, plan, runId, threadId, apiBaseUrl, attachmentContext } = input
+async function startAgentEnvironment(
+  input: AgentEnvironmentSetup
+): Promise<AgentExecutionEnvironment> {
+  const { mode, sandbox, context, actorId, plan, runId, threadId, apiBaseUrl, attachmentContext } =
+    input
 
   const logSession = resolveLoggingService(context.id, context.logging).startExecution({
     kind: "agent",
@@ -340,7 +343,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId }),
     ...(threadId ? { threadId } : {}),
   })
-  let ready: Promise<AgentSandboxHandle>
+  let ready: Promise<AcquiredRunSandbox>
   const fileRegistry = new AgentSandboxFileRegistry()
   const fileBudget = new AgentFileBudget()
   const mediaBridge = new AgentToolResultMediaBridge({
@@ -399,7 +402,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       blobStorage: context.blobStorage,
       directory: AGENT_ARTIFACTS_DIRECTORY,
       manifestPath: AGENT_ARTIFACTS_MANIFEST,
-      signal: input.signal,
+      signal: input.sandboxSignal,
     })
     // Surfaced where provisioning awaits it.
     installedArtifacts.catch(() => {})
@@ -419,12 +422,11 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   for (const frameworkTool of input.frameworkTools ?? []) appendBuiltInTool(tools, frameworkTool)
 
   ready = provisionSandbox({
-    persistentSandbox: input.persistentSandbox,
+    sandbox,
     context,
     actorId,
     run: { id: runId, ...(threadId ? { threadId } : {}) },
     apiBaseUrl,
-    apiOrigin: new URL(apiBaseUrl).origin,
     attachmentContext,
     skills: plan.skills,
     ontologyFiles: input.ontologyDocs?.files ?? [],
@@ -440,14 +442,43 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   }
   ready.then(markSettled, markSettled)
 
-  const facts = agentRuntimeFacts(plan, context)
+  const dispose = async () => {
+    await Promise.all([
+      disposeEnvironment(ready, () => settled, sandbox, input.onDetachedTeardown),
+      logSession.flush(),
+    ])
+  }
 
-  const beforeFinalize = () => input.persistentSandbox?.save() ?? Promise.resolve()
+  let systemPrompt: string
+  try {
+    const workspace = sandbox.waitBeforeModel
+      ? await waitForAbort(ready, input.sandboxSignal)
+      : undefined
+
+    systemPrompt = renderAgentSystemPrompt({
+      mode,
+      instructions: plan.instructions,
+      skills: plan.skills,
+      // Workflow prompts are kept lean: their steps get the files without the index.
+      ...(mode === "conversation" && input.ontologyDocs
+        ? { ontologyIndex: input.ontologyDocs.index }
+        : {}),
+      sandboxResetAt: workspace?.resetAt,
+      workspace: workspace?.promptContext,
+      facts: agentRuntimeFacts(plan, context),
+    })
+  } catch (error) {
+    // Provisioning has started: give back what it acquires, or the sandbox outlives the run.
+    await dispose()
+    throw error
+  }
+
+  const beforeFinalize = () => sandbox.beforeFinalize?.() ?? Promise.resolve()
   return {
     beforeFinalize,
     turnContext: {
       environmentFailureSignal: input.failureSignal,
-      ...(input.persistentSandbox ? { beforeFinalize } : {}),
+      ...(sandbox.beforeFinalize ? { beforeFinalize } : {}),
       id: context.id,
       ...(context.authorPrincipal === undefined
         ? {}
@@ -458,32 +489,14 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       attachmentContext,
       tools,
       prepareStep: mediaBridge.prepareStep,
-      systemPrompt: renderAgentSystemPrompt({
-        mode,
-        instructions: plan.instructions,
-        skills: plan.skills,
-        // Workflow prompts are kept lean: their steps get the files without the index.
-        ...(mode === "conversation" && input.ontologyDocs
-          ? { ontologyIndex: input.ontologyDocs.index }
-          : {}),
-        sandboxResetAt: input.persistentSandbox?.resetAt,
-        workspace: input.persistentSandbox?.promptContext,
-        facts,
-      }),
+      systemPrompt,
       projectTimeZone: context.timeZone,
       sandboxReady: ready,
       streamSink: context.streamSink,
       recoverAiModelCall: context.recoverAiModelCall,
       turnTimeoutMs: context.turnTimeoutMs,
     },
-    async dispose() {
-      await Promise.all([
-        input.persistentSandbox
-          ? Promise.resolve()
-          : disposeEnvironment(ready, () => settled, input.onDetachedTeardown),
-        logSession.flush(),
-      ])
-    },
+    dispose,
   }
 }
 
@@ -541,12 +554,11 @@ function emptyAttachmentContext(projectId: string): PreparedAgentAttachmentConte
 }
 
 interface ProvisionSandboxInput {
-  readonly persistentSandbox?: AgentSandboxLifecycle
+  readonly sandbox: RunSandbox
   readonly context: AgentExecutionContext
   readonly actorId?: string
   readonly run: { readonly id: string; readonly threadId?: string }
   readonly apiBaseUrl: string
-  readonly apiOrigin: string
   readonly attachmentContext: PreparedAgentAttachmentContext
   readonly skills: ResolvedAgentExecutionPlan["skills"]
   readonly ontologyFiles: RenderedOntologyDocs["files"]
@@ -554,16 +566,11 @@ interface ProvisionSandboxInput {
   readonly artifacts?: Promise<MaterializedArtifacts>
 }
 
-async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSandboxHandle> {
-  const { context, actorId, run, apiBaseUrl, apiOrigin, skills, ontologyFiles } = input
-  let sandbox: Sandbox | null = null
+async function provisionSandbox(input: ProvisionSandboxInput): Promise<AcquiredRunSandbox> {
+  const { context, actorId, run, apiBaseUrl, skills, ontologyFiles } = input
+  const acquired = await input.sandbox.acquire()
+  const { sandbox } = acquired
   try {
-    sandbox =
-      input.persistentSandbox?.sandbox ??
-      (await context.sandboxes.create({
-        environment: {},
-        network: { mode: "restricted", allow: [{ name: "sixb-api", origin: apiOrigin }] },
-      }))
     const apiContext = await prepareAgentSandboxApiContext({
       sandbox,
       apiBaseUrl,
@@ -581,10 +588,10 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSand
       env: apiContext.env,
       projectId: context.id,
     })
-    return { sandbox, env: { ...input.persistentSandbox?.env, ...apiContext.env } }
+    return { ...acquired, env: { ...acquired.env, ...apiContext.env } }
   } catch (error) {
-    // Reclaim a half-created sandbox before propagating to the awaiter.
-    if (!input.persistentSandbox) await sandbox?.destroy().catch(() => {})
+    // Give back a half-provisioned sandbox before propagating to the awaiter.
+    await input.sandbox.release?.(acquired).catch(() => {})
     throw error
   }
 }
@@ -592,24 +599,26 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSand
 function disposeEnvironment(
   ready: Promise<AgentSandboxHandle>,
   isSettled: () => boolean,
+  sandbox: RunSandbox,
   onDetachedTeardown?: (teardown: Promise<void>) => void
 ): Promise<void> {
-  // Destroy the sandbox once provisioning settles. A rejection means provisionSandbox already
-  // reclaimed whatever it half-created, so there is nothing left to destroy.
+  // Nothing to give back: teardown, and a worker's stop(), must not wait on provisioning.
+  const release = sandbox.release?.bind(sandbox)
+  if (!release) return Promise.resolve()
+
+  // Release the sandbox once provisioning settles. A rejection means provisionSandbox already
+  // released whatever it acquired, so there is nothing left to give back.
   const teardown = ready
-    .then(
-      (handle) => handle.sandbox.destroy(),
-      () => undefined
-    )
+    .then(release, () => undefined)
     .catch((error) => {
-      console.error("[SixbAgentWorker] Could not destroy agent run sandbox:", error)
+      console.error("[SixbAgentWorker] Could not release agent run sandbox:", error)
     })
-  // Once provisioning has settled, await the (now-fast) destroy so cleanup completes inline.
+  // Once provisioning has settled, await the release so cleanup completes inline.
   if (isSettled()) {
     return teardown
   }
   // Boot still in flight (the model answered before it finished and never used bash): don't stall
-  // run teardown on it. Hand the chained destroy to the worker so a graceful stop() can drain it
+  // run teardown on it. Hand the chained release to the worker so a graceful stop() can drain it
   // rather than orphaning a machine that is still being torn down.
   onDetachedTeardown?.(teardown)
   return Promise.resolve()

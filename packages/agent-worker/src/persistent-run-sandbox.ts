@@ -1,38 +1,21 @@
 import { createHash } from "node:crypto"
-import type {
-  Sandbox,
-  SandboxDefinition,
-  SandboxEnvironment,
-  SandboxFactory,
-  SandboxSessionOptions,
-} from "@sixb/core"
+import type { Sandbox, SandboxDefinition, SandboxEnvironment, SandboxFactory } from "@sixb/core"
 import { createAgentThreadSandboxName } from "@sixb/core/internal/agents"
-import { createSixbError } from "@sixb/core/internal/errors"
 import { SandboxStateUnavailableError, sandboxProjectDirectory } from "@sixb/core/sandboxes"
 import type { AgentThreadRecord, ConversationAgentRunRecord } from "@sixb/core/storage"
 import { waitForAbort } from "./abort"
-import type { AgentWorkspacePromptContext } from "./agent-prompt"
 import {
   AgentEnvironmentSaveError,
   AgentExecutionLostError,
   assertRunExecutionOwned,
 } from "./errors"
+import type { AcquiredRunSandbox, RunSandbox } from "./run-sandbox"
+import { bounded, sandboxError } from "./sandbox-operation"
 import type { AgentExecutionContext } from "./types"
-import { WorkspaceAuthSession, type WorkspaceGrant } from "./workspace-auth"
-import { workspaceRunFilesScript } from "./workspace-files"
-import { workspaceNetwork } from "./workspace-network"
+import { WorkspaceAccess } from "./workspace-access"
+import { prepareWorkspaceRunFiles } from "./workspace-files"
 
-const OPERATION_TIMEOUT_MS = 120_000
-
-export interface AgentSandboxLifecycle {
-  readonly promptContext: AgentWorkspacePromptContext
-  readonly sandbox: Sandbox
-  readonly env: Readonly<Record<string, string>>
-  readonly resetAt?: string
-  save(): Promise<void>
-}
-
-interface OpenThreadSandboxInput {
+interface PersistentRunSandboxInput {
   readonly context: AgentExecutionContext
   readonly definition?: SandboxDefinition
   readonly thread: AgentThreadRecord
@@ -41,10 +24,13 @@ interface OpenThreadSandboxInput {
   readonly onAuthFailure: (error: Error) => void
 }
 
-/** Resolve current authority before taking any provider action; never trust guest metadata. */
-export async function openThreadSandbox(
-  input: OpenThreadSandboxInput
-): Promise<AgentSandboxLifecycle> {
+/**
+ * A thread's workspace, kept across its runs: created by the first run from the resolved recipe,
+ * resumed by each later one, and saved before every run's terminal write. Never destroyed.
+ *
+ * Resolve current authority before taking any provider action; never trust guest metadata.
+ */
+export async function persistentRunSandbox(input: PersistentRunSandboxInput): Promise<RunSandbox> {
   const { context, definition, thread, signal } = input
   const factory = context.sandboxes
   if (!definition || !thread.sandboxParams || typeof factory.resume !== "function") {
@@ -57,41 +43,42 @@ export async function openThreadSandbox(
     )
   )
   signal.throwIfAborted()
-  return new ThreadSandboxSession(input, recipe, factory.resume.bind(factory)).open()
+  return new PersistentSandboxSession(input, recipe, factory.resume.bind(factory)).open()
 }
 
 /** One execution owns acquisition, guarded operations and preservation of its provider session. */
-class ThreadSandboxSession {
-  private readonly sourceUrl: URL | undefined
+class PersistentSandboxSession {
+  private readonly access: WorkspaceAccess
   private readonly sourceFingerprint: string
   private readonly executionToken: string
-  private options: SandboxSessionOptions
-  private credentialOrigins: readonly string[] = []
   private name: string
   private initialized = false
   private resetAt: string | undefined
-  private auth: WorkspaceAuthSession | undefined
-  private requestCredentials: SandboxSessionOptions["requestCredentials"]
   private readonly pending = new Set<Promise<unknown>>()
   private saving: Promise<void> | undefined
   private closed = false
   private uncertainOperation = false
 
   constructor(
-    private readonly input: OpenThreadSandboxInput,
+    private readonly input: PersistentRunSandboxInput,
     private readonly recipe: SandboxEnvironment,
     private readonly resume: NonNullable<SandboxFactory["resume"]>
   ) {
-    const { context, thread, run } = input
-    this.sourceUrl = recipe.source ? new URL(recipe.source.url) : undefined
-    // Reject an unusable policy before any token is issued. Authorization only adds credential
-    // origins to the network, so it cannot make this check pass or fail.
-    this.options = { env: recipe.env, network: this.network() }
+    const { context, definition, thread, run, signal, onAuthFailure } = input
+    this.access = new WorkspaceAccess({
+      recipe,
+      auth: definition?.auth,
+      factory: context.sandboxes,
+      apiOrigin: new URL(context.apiBaseUrl).origin,
+      signal,
+      assertOwner: () => this.assertOwner(),
+      onAuthFailure,
+    })
     // Compare recipe identity, not the mutable branch/remote in the guest.
     this.sourceFingerprint = createHash("sha256")
       .update(
         JSON.stringify({
-          url: this.sourceUrl?.href ?? null,
+          url: this.access.sourceUrl?.href ?? null,
           revision: recipe.source?.revision ?? null,
         })
       )
@@ -109,8 +96,8 @@ class ThreadSandboxSession {
     }
   }
 
-  async open(): Promise<AgentSandboxLifecycle> {
-    await this.prepareAuthentication()
+  async open(): Promise<RunSandbox> {
+    await this.access.authorize()
     await this.acquireOwnership()
     let session: Sandbox | undefined
     try {
@@ -119,48 +106,15 @@ class ThreadSandboxSession {
         ? sandboxProjectDirectory(acquired, this.recipe.source !== undefined)
         : acquired
       await this.assertCanContinue()
-      this.auth?.attach(session)
+      this.access.attach(session)
       this.initialized = true
-      await cleanRunFiles(session, this.recipe.source !== undefined)
+      await prepareWorkspaceRunFiles(session, this.recipe.source !== undefined)
       await this.assertCanContinue()
     } catch (error) {
       await this.quarantineAcquisition(error, session)
       throw acquisitionError(error)
     }
-    return this.lifecycle(session)
-  }
-
-  private async prepareAuthentication(): Promise<void> {
-    const { context, definition, signal, onAuthFailure } = this.input
-    if (!this.recipe.source || !definition?.auth) {
-      if (this.recipe.source?.access === "write") {
-        throw sandboxError("write access requires source authentication.")
-      }
-      return
-    }
-    if (!context.sandboxes.supportsRequestCredentials) {
-      throw sandboxError("authentication requires a provider with secure credential injection.")
-    }
-    this.auth = new WorkspaceAuthSession({
-      auth: definition.auth,
-      source: this.recipe.source,
-      signal,
-      assertOwner: () => this.assertOwner(),
-      onFailure: onAuthFailure,
-    })
-    let grant: WorkspaceGrant
-    try {
-      grant = await this.auth.prepare()
-    } catch (error) {
-      await this.closeAuthenticationAfterFailure("before acquisition")
-      throw error
-    }
-
-    // Credential origins are known only now; the network opens every one of them, so the
-    // provider receives the grant's requests as issued.
-    this.credentialOrigins = grant.requests.map((request) => request.origin)
-    this.options = { env: { ...grant.env, ...this.recipe.env }, network: this.network() }
-    this.requestCredentials = grant.requests
+    return this.runSandbox(session)
   }
 
   private async acquireOwnership(): Promise<void> {
@@ -178,7 +132,7 @@ class ThreadSandboxSession {
       this.initialized = state.initialized
       this.resetAt = state.resetAt
     } catch {
-      await this.closeAuthenticationAfterFailure("before acquisition")
+      await this.access.closeAfterFailure("before acquisition")
       throw sandboxError(
         "could not be acquired. Reload the thread; recovery or source verification may be required."
       )
@@ -191,10 +145,10 @@ class ThreadSandboxSession {
       return await this.wait(
         this.initialized
           ? this.resume(this.name, {
-              ...this.options,
+              ...this.access.sessionOptions,
               // An empty list confirms that this run's recipe needs no source auth.
               requestCredentials:
-                this.requestCredentials ?? (this.input.definition?.auth ? [] : undefined),
+                this.access.requestCredentials ?? (this.input.definition?.auth ? [] : undefined),
             })
           : this.create()
       )
@@ -208,8 +162,8 @@ class ThreadSandboxSession {
 
   private create(): Promise<Sandbox> {
     return this.input.context.sandboxes.create({
-      ...this.options,
-      requestCredentials: this.requestCredentials,
+      ...this.access.sessionOptions,
+      requestCredentials: this.access.requestCredentials,
       signal: this.input.signal,
       environment: { source: this.recipe.source, setup: this.recipe.setup },
       persistence: { name: this.name },
@@ -235,7 +189,7 @@ class ThreadSandboxSession {
   }
 
   private async quarantineAcquisition(error: unknown, session?: Sandbox): Promise<void> {
-    await this.closeAuthenticationAfterFailure("during acquisition")
+    await this.access.closeAfterFailure("during acquisition")
     // Never destroy persistent state. Lost/uncertain acquisition is quarantined, not retried.
     try {
       await this.assertOwner()
@@ -249,24 +203,19 @@ class ThreadSandboxSession {
     }
   }
 
-  private lifecycle(session: Sandbox): AgentSandboxLifecycle {
-    return {
+  private runSandbox(session: Sandbox): RunSandbox {
+    const acquired: AcquiredRunSandbox = {
       sandbox: this.guard(session),
-      promptContext: {
-        workingDirectory: session.workingDirectory,
-        ...(this.recipe.source && this.sourceUrl
-          ? {
-              source: {
-                type: this.recipe.source.type,
-                url: this.sourceUrl.href,
-                ...(this.auth ? { authenticatedAccess: this.recipe.source.access ?? "read" } : {}),
-              },
-            }
-          : {}),
-      },
-      env: this.options.env ?? {},
+      env: this.access.sessionOptions.env ?? {},
+      promptContext: this.access.promptContext(session),
       resetAt: this.resetAt,
-      save: () => {
+    }
+    // No release: the thread keeps its sandbox. beforeFinalize saves or quarantines it; a lost
+    // execution leaves it to the run's current owner.
+    return {
+      waitBeforeModel: true,
+      acquire: async () => acquired,
+      beforeFinalize: () => {
         if (!this.saving) {
           this.closed = true
           this.saving = this.preserve(session)
@@ -325,16 +274,16 @@ class ThreadSandboxSession {
     try {
       await bounded(Promise.allSettled([...this.pending]))
       await this.assertOwner()
-      await this.auth?.close()
+      await this.access.close()
       if (this.uncertainOperation) throw sandboxError("has an unconfirmed sandbox operation.")
-      await cleanRunFiles(session, this.recipe.source !== undefined)
+      await prepareWorkspaceRunFiles(session, this.recipe.source !== undefined)
       await this.assertOwner()
       stopAttempted = true
       await bounded(session.stop())
       await this.settle("ready")
     } catch (error) {
       try {
-        await this.auth?.close()
+        await this.access.close()
       } catch {
         // close is memoized and the sandbox remains quarantined below.
       }
@@ -381,25 +330,8 @@ class ThreadSandboxSession {
     this.input.signal.throwIfAborted()
   }
 
-  private network() {
-    return workspaceNetwork(
-      this.recipe.network,
-      new URL(this.input.context.apiBaseUrl).origin,
-      this.sourceUrl?.origin,
-      this.credentialOrigins
-    )
-  }
-
   private wait(operation: Promise<Sandbox>): Promise<Sandbox> {
     return waitForAbort(bounded(operation), this.input.signal)
-  }
-
-  private async closeAuthenticationAfterFailure(phase: string): Promise<void> {
-    try {
-      await this.auth?.close()
-    } catch {
-      console.error(`[SixbAgentWorker] Sandbox authentication cleanup failed ${phase}.`)
-    }
   }
 }
 
@@ -410,31 +342,4 @@ function acquisitionError(error: unknown): Error {
       ? "saved files are unavailable. Recreate explicitly to start fresh."
       : "initialization or resume failed. Existing state was not deleted; explicit recovery is required."
   )
-}
-
-function sandboxError(message: string): Error {
-  return createSixbError("agent.execution_failed", `[SixbAgentWorker] Sandbox ${message}`)
-}
-
-/** Remove only framework-owned transient files. Refuse a redirected parent directory. */
-async function cleanRunFiles(sandbox: Sandbox, hasSource: boolean): Promise<void> {
-  const result = await bounded(
-    sandbox.runCommand("bash", ["-c", workspaceRunFilesScript(hasSource)], {
-      timeout: OPERATION_TIMEOUT_MS,
-    })
-  )
-  if (result.exitCode !== 0 || result.timedOut) throw sandboxError("command failed.")
-}
-
-function bounded<T>(operation: Promise<T>): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>
-  return Promise.race([
-    operation,
-    new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(sandboxError("operation timed out; its outcome is uncertain.")),
-        OPERATION_TIMEOUT_MS
-      )
-    }),
-  ]).finally(() => clearTimeout(timer))
 }

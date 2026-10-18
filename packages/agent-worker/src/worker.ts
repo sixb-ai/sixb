@@ -17,7 +17,7 @@ import {
   recordRecoveredAiModelCall,
 } from "@sixb/core/internal/model-execution"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
-import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
+import { isAbortError, QueueWorker } from "@sixb/core/internal/workers"
 import type { AgentQueueJob, ClaimedQueueJob, SubagentQueueJob } from "@sixb/core/queues"
 import type {
   AgentRunExecution,
@@ -42,6 +42,7 @@ import {
   AgentRunOwnedElsewhereError,
   AgentTurnInterruptedError,
   AgentTurnTimeoutError,
+  isLostExecution,
   WorkflowResumeDispatchError,
 } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
@@ -338,13 +339,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       let environmentSaveFailed = error instanceof AgentEnvironmentSaveError
       // Queue ownership or the durable execution token was lost. Touch nothing; the current
       // delivery will reconcile the run.
-      if (
-        error instanceof AgentExecutionLostError ||
-        error instanceof QueueDeliveryLeaseLostError ||
-        signal.reason instanceof QueueDeliveryLeaseLostError
-      ) {
-        return
-      }
+      if (isLostExecution(error, signal)) return
       // The turn succeeded but its finalize could not be recorded (storage down). Don't ack: let the
       // job redeliver so a later delivery finalizes the run — onExecutionError turns this into retry.
       if (error instanceof AgentFinalizationError) {
@@ -604,13 +599,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       })
       await runSubagent({ context: environment.turnContext, plan, run, runtime })
     } catch (error) {
-      if (
-        error instanceof AgentExecutionLostError ||
-        error instanceof QueueDeliveryLeaseLostError ||
-        signal.reason instanceof QueueDeliveryLeaseLostError
-      ) {
-        return
-      }
+      if (isLostExecution(error, signal)) return
       if (error instanceof AgentFinalizationError) throw error
       if (
         !preparationComplete &&

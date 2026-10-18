@@ -1,3 +1,6 @@
+import type { Sandbox } from "@sixb/core"
+import { bounded, SANDBOX_OPERATION_TIMEOUT_MS, sandboxError } from "./sandbox-operation"
+
 /** Run before materialization and before saving. Git exclusions prevent accidental staging,
  * not deliberate publication; tracked runtime files must still block cleanup.
  */
@@ -32,4 +35,20 @@ git check-ignore -q -- .sixb/agent/
 test ! -L .sixb
 ${git}
 rm -rf -- .sixb/agent`
+}
+
+/**
+ * Remove only framework-owned transient files and, in a Git checkout, exclude them before any
+ * run file is written. Refuse a redirected parent directory.
+ */
+export async function prepareWorkspaceRunFiles(
+  sandbox: Sandbox,
+  hasSource: boolean
+): Promise<void> {
+  const result = await bounded(
+    sandbox.runCommand("bash", ["-c", workspaceRunFilesScript(hasSource)], {
+      timeout: SANDBOX_OPERATION_TIMEOUT_MS,
+    })
+  )
+  if (result.exitCode !== 0 || result.timedOut) throw sandboxError("command failed.")
 }
