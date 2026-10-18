@@ -243,7 +243,7 @@ export function SheetTable({ model }: { readonly model: SheetModel }) {
   const locale = useLocale()
   const [status, setStatus] = useState<SheetGridStatus | null>(null)
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
+    <div className="@container flex min-h-0 flex-1 flex-col bg-background">
       <NameBox status={status} messages={messages} />
       <SheetGrid model={model} locale={locale} onStatusChange={setStatus} className="flex-1" />
       <StatusBar model={model} status={status} locale={locale} messages={messages} />
@@ -316,7 +316,10 @@ function ChartIcon({ type }: { readonly type: WorkbookChart["type"] }) {
   return <Icon className="size-3.5" aria-hidden="true" />
 }
 
-/** The selection's address, its column's name, and what type the column holds. */
+/**
+ * The selection's address and the active cell's whole value, as a spreadsheet's formula bar shows
+ * them, then the column's name and what type it holds where there is room.
+ */
 function NameBox({
   status,
   messages,
@@ -330,13 +333,20 @@ function NameBox({
       <span className="flex h-6 min-w-14 items-center justify-center rounded-md border border-border px-2 font-mono text-xs tabular-nums">
         {status ? rangeLabel(status.range) : "A1"}
       </span>
+      <span className="h-4 w-px shrink-0 bg-border" aria-hidden="true" />
+      <span
+        data-sheet-value=""
+        className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap select-text [scrollbar-width:none]"
+      >
+        {status?.value}
+      </span>
       {column ? (
-        <>
-          <span className="truncate font-medium">{column.name}</span>
+        <span className="hidden max-w-[40%] shrink-0 items-center gap-2 @2xl:flex">
+          <span className="truncate text-muted-foreground">{column.name}</span>
           <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
             {typeLabel(column, messages)}
           </span>
-        </>
+        </span>
       ) : null}
     </div>
   )
@@ -381,6 +391,12 @@ function StatusBar({
               <Stat label={messages.sheet.sum} value={format(stats.sum)} />
               {stats.average !== undefined ? (
                 <Stat label={messages.sheet.average} value={format(stats.average)} />
+              ) : null}
+              {stats.min !== undefined && stats.max !== undefined ? (
+                <>
+                  <Stat label={messages.sheet.min} value={format(stats.min)} />
+                  <Stat label={messages.sheet.max} value={format(stats.max)} />
+                </>
               ) : null}
             </>
           ) : null}
