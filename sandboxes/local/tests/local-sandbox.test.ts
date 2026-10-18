@@ -10,6 +10,8 @@ runSandboxesContractSuite("LocalSandbox (none)", {
     readOnlyEnforcement: false,
     isolation: false,
   },
+  // The timer starts after the spawn, so any bound below `sleep`'s runtime proves the kill.
+  shortTimeoutMs: 50,
 })
 
 describe("LocalSandbox shell-injection regression", () => {

@@ -94,12 +94,13 @@ describe("topologicalPublishOrder", () => {
 })
 
 describe("the real workspace", () => {
-  test("orders every publishable package after its dependencies", async () => {
+  test("orders every publishable package once, after its dependencies", async () => {
     const packages = await discoverPublishablePackages(repoRoot)
     expect(packages.length).toBeGreaterThan(40)
 
     const ordered = topologicalPublishOrder(packages)
     expect(ordered.length).toBe(packages.length)
+    expect(new Set(ordered.map(packageName)).size).toBe(ordered.length)
 
     const publishable = new Set(packages.map(packageName))
     const seen = new Set<string>()
@@ -113,10 +114,5 @@ describe("the real workspace", () => {
       })
       seen.add(packageName(packageInfo))
     }
-  })
-
-  test("never lists a package twice", async () => {
-    const ordered = topologicalPublishOrder(await discoverPublishablePackages(repoRoot))
-    expect(new Set(ordered.map(packageName)).size).toBe(ordered.length)
   })
 })

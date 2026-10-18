@@ -14,10 +14,11 @@ describe("createAwsS3Api", () => {
       port: 0,
       fetch() {
         attempts += 1
+        // A transient server error, not throttling: the SDK backs off from 100ms instead of 500ms.
         if (attempts < 3) {
           return new Response(
-            "<Error><Code>SlowDown</Code><Message>retry this request</Message></Error>",
-            { status: 503, headers: { "content-type": "application/xml" } }
+            "<Error><Code>InternalError</Code><Message>retry this request</Message></Error>",
+            { status: 500, headers: { "content-type": "application/xml" } }
           )
         }
         return new Response(null, { status: 200 })

@@ -193,18 +193,8 @@ describe("oidc auth strategy", () => {
       createdAt: new Date("2026-05-17T09:57:00.000Z"),
       expiresAt: new Date("2026-05-24T09:57:00.000Z"),
     })
-    const { strategy, redirectTo } = await startSignIn({ authStorage, client })
 
-    const result = await strategy.completeOidcSignIn({
-      projectId,
-      authStorage,
-      requestUrl: `http://localhost/auth/callback?code=code&state=${redirectTo.searchParams.get(
-        "state"
-      )}`,
-      requestOrigin: "http://localhost",
-      session: sessionInput(),
-      now: new Date("2026-05-17T10:00:00.000Z"),
-    })
+    const result = await signIn({ authStorage, client })
 
     expect(result.returnTo).toBe("/dashboard")
     expect(result.user).toMatchObject({
@@ -234,21 +224,10 @@ describe("oidc auth strategy", () => {
       email: "founder@acme.com",
       email_verified: true,
     }
-    const { strategy, redirectTo } = await startSignIn({
+    const result = await signIn({
       authStorage,
       client,
       bootstrapUsers: ["founder@acme.com", "second@acme.com"],
-    })
-
-    const result = await strategy.completeOidcSignIn({
-      projectId,
-      authStorage,
-      requestUrl: `http://localhost/auth/callback?code=code&state=${redirectTo.searchParams.get(
-        "state"
-      )}`,
-      requestOrigin: "http://localhost",
-      session: sessionInput("ses_founder"),
-      now: new Date("2026-05-17T10:00:00.000Z"),
     })
 
     expect(result.user.email).toBe("founder@acme.com")
@@ -269,21 +248,11 @@ describe("oidc auth strategy", () => {
       email: "second@acme.com",
       email_verified: true,
     }
-    const second = await startSignIn({
+    const secondResult = await signIn({
       authStorage,
       client: secondClient,
       bootstrapUsers: ["founder@acme.com", "second@acme.com"],
-    })
-
-    const secondResult = await second.strategy.completeOidcSignIn({
-      projectId,
-      authStorage,
-      requestUrl: `http://localhost/auth/callback?code=code&state=${second.redirectTo.searchParams.get(
-        "state"
-      )}`,
-      requestOrigin: "http://localhost",
-      session: sessionInput("ses_second"),
-      now: new Date("2026-05-17T10:02:00.000Z"),
+      sessionId: "ses_second",
     })
 
     expect(secondResult.user.email).toBe("second@acme.com")
@@ -301,21 +270,7 @@ describe("oidc auth strategy", () => {
       email_verified: true,
     }
     founderClient.userInfo = founderClient.tokenClaims
-    const founder = await startSignIn({
-      authStorage,
-      client: founderClient,
-      bootstrapUsers: ["founder@acme.com"],
-    })
-    await founder.strategy.completeOidcSignIn({
-      projectId,
-      authStorage,
-      requestUrl: `http://localhost/auth/callback?code=code&state=${founder.redirectTo.searchParams.get(
-        "state"
-      )}`,
-      requestOrigin: "http://localhost",
-      session: sessionInput("ses_founder"),
-      now: new Date("2026-05-17T10:00:00.000Z"),
-    })
+    await signIn({ authStorage, client: founderClient, bootstrapUsers: ["founder@acme.com"] })
 
     // Same allowed domain, but not on the bootstrap allowlist → needs an invite.
     const strangerClient = new FakeOidcClient()
@@ -325,22 +280,12 @@ describe("oidc auth strategy", () => {
       email_verified: true,
     }
     strangerClient.userInfo = strangerClient.tokenClaims
-    const stranger = await startSignIn({
-      authStorage,
-      client: strangerClient,
-      bootstrapUsers: ["founder@acme.com"],
-    })
-
     await expect(
-      stranger.strategy.completeOidcSignIn({
-        projectId,
+      signIn({
         authStorage,
-        requestUrl: `http://localhost/auth/callback?code=code&state=${stranger.redirectTo.searchParams.get(
-          "state"
-        )}`,
-        requestOrigin: "http://localhost",
-        session: sessionInput("ses_stranger"),
-        now: new Date("2026-05-17T10:02:00.000Z"),
+        client: strangerClient,
+        bootstrapUsers: ["founder@acme.com"],
+        sessionId: "ses_stranger",
       })
     ).rejects.toMatchObject({ reason: "not_invited", email: "stranger@acme.com" })
   })
@@ -351,21 +296,11 @@ describe("oidc auth strategy", () => {
     client.tokenClaims = { sub: "00u-founder", email: "founder@acme.com", email_verified: true }
     client.userInfo = client.tokenClaims
 
-    const first = await startSignIn({
+    const created = await signIn({
       authStorage,
       client,
       bootstrapUsers: ["founder@acme.com"],
       bootstrapGroups: ["security-admins"],
-    })
-    const created = await first.strategy.completeOidcSignIn({
-      projectId,
-      authStorage,
-      requestUrl: `http://localhost/auth/callback?code=code&state=${first.redirectTo.searchParams.get(
-        "state"
-      )}`,
-      requestOrigin: "http://localhost",
-      session: sessionInput("ses_founder"),
-      now: new Date("2026-05-17T10:00:00.000Z"),
     })
     expect(created.groupMemberships).toMatchObject([
       { groupId: "security-admins", source: "manual" },
@@ -373,21 +308,12 @@ describe("oidc auth strategy", () => {
 
     // A newly-added bootstrap group must reach the already-existing bootstrap user
     // on their next sign-in, not only at first creation.
-    const second = await startSignIn({
+    const reSignIn = await signIn({
       authStorage,
       client,
       bootstrapUsers: ["founder@acme.com"],
       bootstrapGroups: ["security-admins", "billing-admins"],
-    })
-    const reSignIn = await second.strategy.completeOidcSignIn({
-      projectId,
-      authStorage,
-      requestUrl: `http://localhost/auth/callback?code=code&state=${second.redirectTo.searchParams.get(
-        "state"
-      )}`,
-      requestOrigin: "http://localhost",
-      session: sessionInput("ses_founder_2"),
-      now: new Date("2026-05-17T10:05:00.000Z"),
+      sessionId: "ses_2",
     })
 
     expect(reSignIn.user.id).toBe(created.user.id)

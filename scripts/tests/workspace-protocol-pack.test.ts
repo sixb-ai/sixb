@@ -29,21 +29,14 @@ test("Bun packs exact and compatible workspace protocols to registry ranges", as
       devDependencies: { "@sixb-fixture/core": "workspace:*" },
     })
 
-    const installed = Bun.spawnSync([process.execPath, "install", "--lockfile-only"], {
-      cwd: root,
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    if (installed.exitCode !== 0) {
-      throw new Error(`Could not install workspace fixture:\n${installed.stderr.toString()}`)
-    }
+    await run([process.execPath, "install", "--lockfile-only"], root)
 
-    expect((await packManifest(root, "compatible")).dependencies).toEqual({
-      "@sixb-fixture/core": "^0.1.7",
-    })
-    expect((await packManifest(root, "exact")).peerDependencies).toEqual({
-      "@sixb-fixture/core": "0.1.7",
-    })
+    const [compatible, exact] = await Promise.all([
+      packManifest(root, "compatible"),
+      packManifest(root, "exact"),
+    ])
+    expect(compatible.dependencies).toEqual({ "@sixb-fixture/core": "^0.1.7" })
+    expect(exact.peerDependencies).toEqual({ "@sixb-fixture/core": "0.1.7" })
 
     // Bun 1.3.14 reproduces this with a version-only bump followed by a frozen install:
     // the manifest advances but packed workspace ranges still use the old lockfile version.
@@ -52,13 +45,7 @@ test("Bun packs exact and compatible workspace protocols to registry ranges", as
     const core = { name: "@sixb-fixture/core", version: "0.1.8" }
     await writePackage(root, "core", core)
     const packages = [{ dir: "packages/core", packageJson: core }]
-    const frozen = Bun.spawnSync([process.execPath, "install", "--frozen-lockfile"], {
-      cwd: root,
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: 10_000,
-    })
-    expect(frozen.exitCode).toBe(0)
+    await run([process.execPath, "install", "--frozen-lockfile"], root)
     expect((await packManifest(root, "exact")).peerDependencies).toEqual({
       "@sixb-fixture/core": "0.1.7",
     })
@@ -66,20 +53,14 @@ test("Bun packs exact and compatible workspace protocols to registry ranges", as
       "manifest 0.1.8, lockfile 0.1.7"
     )
 
-    const refreshed = Bun.spawnSync([process.execPath, "install", "--lockfile-only"], {
-      cwd: root,
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: 10_000,
-    })
-    expect(refreshed.exitCode).toBe(0)
+    await run([process.execPath, "install", "--lockfile-only"], root)
     await assertWorkspaceLockfileVersions(root, packages)
-    expect((await packManifest(root, "exact")).peerDependencies).toEqual({
-      "@sixb-fixture/core": "0.1.8",
-    })
-    expect((await packManifest(root, "compatible")).dependencies).toEqual({
-      "@sixb-fixture/core": "^0.1.8",
-    })
+    const [refreshedExact, refreshedCompatible] = await Promise.all([
+      packManifest(root, "exact"),
+      packManifest(root, "compatible"),
+    ])
+    expect(refreshedExact.peerDependencies).toEqual({ "@sixb-fixture/core": "0.1.8" })
+    expect(refreshedCompatible.dependencies).toEqual({ "@sixb-fixture/core": "^0.1.8" })
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -111,26 +92,32 @@ async function packManifest(
   const destination = join(root, "artifacts", directory)
   await mkdir(destination, { recursive: true })
 
-  const packed = Bun.spawnSync(
-    [process.execPath, "pm", "pack", "--destination", destination, "--quiet"],
-    { cwd: packageRoot, stdout: "pipe", stderr: "pipe" }
-  )
-  if (packed.exitCode !== 0) {
-    throw new Error(`Could not pack ${directory}:\n${packed.stderr.toString()}`)
-  }
+  await run([process.execPath, "pm", "pack", "--destination", destination, "--quiet"], packageRoot)
 
   const tarball = (await readdir(destination)).find((file) => file.endsWith(".tgz"))
   if (!tarball) throw new Error(`Pack output for ${directory} did not contain a tarball.`)
 
-  const manifest = Bun.spawnSync(
-    ["tar", "-xOf", join(destination, tarball), "package/package.json"],
-    {
-      stdout: "pipe",
-      stderr: "pipe",
-    }
+  return JSON.parse(
+    await run(["tar", "-xOf", join(destination, tarball), "package/package.json"], root)
   )
-  if (manifest.exitCode !== 0) {
-    throw new Error(`Could not inspect ${tarball}:\n${manifest.stderr.toString()}`)
+}
+
+/**
+ * Async and bounded: a synchronous spawn in a parallel test worker can miss its child's exit and
+ * leave the worker spinning with a zombie `bun` or `tar` until the CI guard kills the run.
+ */
+async function run(command: string[], cwd: string): Promise<string> {
+  const proc = Bun.spawn(command, { cwd, stdout: "pipe", stderr: "pipe" })
+  const timer = setTimeout(() => proc.kill("SIGKILL"), 4_000)
+  try {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    if (exitCode !== 0) throw new Error(`${command.join(" ")} exited ${exitCode}:\n${stderr}`)
+    return stdout
+  } finally {
+    clearTimeout(timer)
   }
-  return JSON.parse(manifest.stdout.toString())
 }

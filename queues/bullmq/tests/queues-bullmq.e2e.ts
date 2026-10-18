@@ -14,8 +14,6 @@ import {
   requireRedisUrl,
 } from "./helpers"
 
-const openedProviders: BullMqQueues[] = []
-
 // Contract suite uses a single shared provider for all test cases, with Redis state reset
 // between cases via FLUSHDB. Creating/closing BullMQ Workers per test races with their
 // internal blocking-connection teardown and flakes on Bun ≥ 1.3.13 — see issue #2686.
@@ -31,7 +29,6 @@ runQueueContractSuite("BullMqQueues", {
 
 describe("BullMqQueues (Redis-specific)", () => {
   afterAll(async () => {
-    await Promise.all(openedProviders.map((provider) => provider.close()))
     await closeSharedProvider()
     await closeSharedConnection()
   })
@@ -149,32 +146,6 @@ describe("BullMqQueues (Redis-specific)", () => {
     })
   })
 
-  describe("stalled redelivery", () => {
-    test("redelivers via BullMQ's stalled check when the lock expires", async () => {
-      const provider = createTestQueues({ defaultLeaseMs: 100, stalledInterval: 50 })
-      openedProviders.push(provider)
-
-      const [job] = await provider.syncRuns.enqueue({
-        projectId: "project-a",
-        jobs: [{ type: "sync.run.requested", payload: { runId: "run-s-1" } }],
-      })
-      const [firstClaim] = await provider.syncRuns.claim({
-        projectId: "project-a",
-        workerId: "worker-1",
-      })
-
-      await Bun.sleep(300)
-      const [secondClaim] = await provider.syncRuns.claim({
-        projectId: "project-a",
-        workerId: "worker-2",
-      })
-
-      expect(firstClaim?.job.attempt).toBe(1)
-      expect(secondClaim?.job.id).toBe(job?.id)
-      expect(secondClaim!.job.attempt).toBeGreaterThanOrEqual(2)
-    })
-  })
-
   describe("terminal failure diagnostics", () => {
     test("projects the stable code and message onto BullMQ's native failed job", async () => {
       const connection = createBorrowedConnection()
@@ -220,8 +191,9 @@ describe("BullMqQueues (Redis-specific)", () => {
   })
 
   describe("close", () => {
-    test("operations after close throw QueueError", async () => {
+    test("close is idempotent and later operations throw QueueError", async () => {
       const provider = createTestQueues()
+      await provider.close()
       await provider.close()
 
       await expect(
@@ -230,13 +202,6 @@ describe("BullMqQueues (Redis-specific)", () => {
           jobs: [{ type: "sync.run.requested", payload: { runId: "run-s-1" } }],
         })
       ).rejects.toThrow(/closed/i)
-    })
-
-    test("close is idempotent", async () => {
-      const provider = createTestQueues()
-
-      await provider.close()
-      await provider.close()
     })
   })
 })

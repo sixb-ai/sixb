@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { chmod, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -12,11 +12,33 @@ import type { AppleContainerCliConfig } from "../src/cli"
 import * as preflight from "../src/preflight"
 
 let dir: string
+let binDir: string
+let bin: string
 let logPath: string
+let configPath: string
+let failOncePath: string
+
+// The fake CLI is written once per file: macOS scans each newly written executable on its first
+// run (~150ms), so a fresh script per test made every test that slow. Tests configure it through
+// a data file instead.
+beforeAll(async () => {
+  binDir = await realpath(await mkdtemp(join(tmpdir(), "sixb-apple-container-bin-")))
+  bin = join(binDir, "fake-container.sh")
+  logPath = join(binDir, "container-calls.log")
+  configPath = join(binDir, "config")
+  failOncePath = join(binDir, "fake-container-fail-once")
+  await writeFile(bin, fakeCliSource(), "utf8")
+  await chmod(bin, 0o755)
+})
+
+afterAll(async () => {
+  await rm(binDir, { recursive: true, force: true })
+})
 
 beforeEach(async () => {
   dir = await realpath(await mkdtemp(join(tmpdir(), "sixb-apple-container-test-")))
-  logPath = join(dir, "container-calls.ndjson")
+  await rm(logPath, { force: true })
+  await rm(failOncePath, { force: true })
 })
 
 afterEach(async () => {
@@ -26,7 +48,6 @@ afterEach(async () => {
 describe("AppleContainerSandbox lifecycle", () => {
   test.each([
     undefined,
-    {},
     { setup: ["touch override-marker"] },
   ])("factory applies only the selected setup: %j", async (environment) => {
     // Regression proof: initialize only options.environment; the default-marker case fails.
@@ -235,94 +256,7 @@ describe("AppleContainerSandbox lifecycle", () => {
 async function fakeCli(
   options: { readonly failOn?: "create" | "start"; readonly failOnceOn?: "network-delete" } = {}
 ): Promise<AppleContainerCliConfig> {
-  const bin = join(dir, "fake-container.js")
-  const failOncePath = join(dir, "fake-container-fail-once")
-  const source = `#!${process.execPath}
-import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
-
-const logPath = ${JSON.stringify(logPath)};
-const failOn = ${JSON.stringify(options.failOn ?? "")};
-const failOnceOn = ${JSON.stringify(options.failOnceOn ?? "")};
-const failOncePath = ${JSON.stringify(failOncePath)};
-const args = process.argv.slice(2);
-appendFileSync(logPath, JSON.stringify(args) + "\\n");
-
-const command = args[0];
-if (command === "network") {
-  if (args[1] === "delete" && failOnceOn === "network-delete" && !existsSync(failOncePath)) {
-    writeFileSync(failOncePath, "1");
-    console.error("forced network delete failure");
-    process.exit(9);
-  }
-  process.exit(0);
-}
-if (command === "create") {
-  if (failOn === "create") {
-    console.error("forced create failure");
-    process.exit(7);
-  }
-  process.exit(0);
-}
-if (command === "start") {
-  if (failOn === "start") {
-    console.error("forced start failure");
-    process.exit(8);
-  }
-  process.exit(0);
-}
-if (command === "stop" || command === "delete") {
-  process.exit(0);
-}
-if (command !== "exec") {
-  console.error("unsupported command: " + command);
-  process.exit(2);
-}
-
-let index = 1;
-let interactive = false;
-let cwd = process.cwd();
-const env = { ...process.env };
-
-while (args[index]?.startsWith("-")) {
-  const option = args[index++];
-  if (option === "--interactive" || option === "-i") {
-    interactive = true;
-  } else if (option === "--env" || option === "-e") {
-    const assignment = args[index++];
-    const split = assignment.indexOf("=");
-    env[assignment.slice(0, split)] = assignment.slice(split + 1);
-  } else if (option === "--workdir" || option === "--cwd" || option === "-w") {
-    cwd = args[index++];
-    mkdirSync(cwd, { recursive: true });
-  } else {
-    console.error("unsupported exec option: " + option);
-    process.exit(2);
-  }
-}
-
-index += 1;
-const processArgs = args.slice(index);
-const child = spawn(processArgs[0], processArgs.slice(1), {
-  cwd,
-  env,
-  stdio: [interactive ? "pipe" : "ignore", "pipe", "pipe"],
-});
-
-if (interactive) {
-  process.stdin.pipe(child.stdin);
-}
-
-child.stdout.pipe(process.stdout);
-child.stderr.pipe(process.stderr);
-child.on("error", (error) => {
-  console.error(error.message);
-  process.exit(1);
-});
-child.on("close", (code) => process.exit(code ?? 1));
-`
-  await writeFile(bin, source, "utf8")
-  await chmod(bin, 0o755)
+  await writeFile(configPath, `${options.failOn ?? "none"} ${options.failOnceOn ?? "none"}\n`)
   return {
     bin,
     image: "node:test",
@@ -333,10 +267,46 @@ child.on("close", (code) => process.exit(code ?? 1));
   }
 }
 
+/**
+ * A POSIX shell stand-in for the `container` CLI. It logs each call as unit-separated arguments,
+ * and `exec` applies --env/--workdir and then execs the command on the host, so stdin (writeFiles)
+ * and signals (timeouts) reach it directly.
+ */
+function fakeCliSource(): string {
+  return `#!/bin/sh
+{ printf '%s\\037' "$@"; printf '\\036'; } >> ${JSON.stringify(logPath)}
+read -r failOn failOnceOn < ${JSON.stringify(configPath)}
+case "$1" in
+  network)
+    if [ "$2" = delete ] && [ "$failOnceOn" = network-delete ] && [ ! -e ${JSON.stringify(failOncePath)} ]; then
+      : > ${JSON.stringify(failOncePath)}
+      echo "forced network delete failure" >&2; exit 9
+    fi
+    exit 0 ;;
+  create) if [ "$failOn" = create ]; then echo "forced create failure" >&2; exit 7; fi; exit 0 ;;
+  start) if [ "$failOn" = start ]; then echo "forced start failure" >&2; exit 8; fi; exit 0 ;;
+  stop|delete) exit 0 ;;
+  exec) shift ;;
+  *) echo "unsupported command: $1" >&2; exit 2 ;;
+esac
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --interactive) shift ;;
+    --env) export "$2"; shift 2 ;;
+    --workdir) mkdir -p "$2" && cd "$2" || exit 1; shift 2 ;;
+    -*) echo "unsupported exec option: $1" >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
+shift
+exec "$@"
+`
+}
+
 async function readCalls(): Promise<string[][]> {
   const text = await readFile(logPath, "utf8").catch(() => "")
   return text
-    .split("\n")
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as string[])
+    .split("\x1e")
+    .filter((call) => call.length > 0)
+    .map((call) => call.split("\x1f").slice(0, -1))
 }

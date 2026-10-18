@@ -136,7 +136,7 @@ describe("Azure block upload", () => {
     })
     await started.promise
     failure.resolve()
-    await expect(upload).rejects.toThrow("block failed")
+    expect(await upload.catch((error: unknown) => error)).toEqual(new Error("block failed"))
     expect(cancelled).toBe(true)
     expect(otherAborted).toBe(true)
   })
@@ -163,7 +163,7 @@ describe("Azure block upload", () => {
     })
     await reading.promise
     controller.abort(new Error("caller cancelled"))
-    await expect(upload).rejects.toThrow("caller cancelled")
+    expect(await upload.catch((error: unknown) => error)).toEqual(new Error("caller cancelled"))
     expect(cancelled).toBe(true)
   })
 

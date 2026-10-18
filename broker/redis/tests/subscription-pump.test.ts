@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from "bun:test"
+import { afterEach, expect, jest, spyOn, test } from "bun:test"
 import type { RedisBrokerClient } from "../src/connection"
 import { encodeRecord } from "../src/serialization"
 import type { EnsuredStream } from "../src/stream-manager"
@@ -13,6 +13,10 @@ const stream: EnsuredStream = {
     dedupeKey: (idempotencyKey) => `dedupe:${idempotencyKey ?? "_"}`,
   },
 }
+
+afterEach(() => {
+  jest.useRealTimers()
+})
 
 // Removing the awaited handler in RedisSubscriptionPump makes this read twice while blocked.
 test("does not read ahead of an async handler and can stop while it is blocked", async () => {
@@ -49,7 +53,10 @@ test("does not read ahead of an async handler and can stop while it is blocked",
   }
 })
 
+// Fake timers step through the watchdog bound and the first reconnect delay. Removing the
+// watchdog race from `xread`, or raising its bound past the budget, leaves `received` empty.
 test("replaces a client when the XREAD watchdog expires", async () => {
+  jest.useFakeTimers()
   const errors = spyOn(console, "error").mockImplementation(() => undefined)
   const closedClients = new Set<RedisBrokerClient>()
   const initialClient = fakeClient(() => new Promise<unknown>(() => undefined))
@@ -93,7 +100,7 @@ test("replaces a client when the XREAD watchdog expires", async () => {
 
   try {
     pump.start("0-0")
-    await waitUntil(() => received.length === 1, 2_500)
+    await advanceTimersUntil(() => received.length === 1, 2_500)
 
     expect(received).toEqual(["after-watchdog"])
     expect(replacementCount).toBe(1)
@@ -104,7 +111,7 @@ test("replaces a client when the XREAD watchdog expires", async () => {
   } finally {
     pump.stop()
     try {
-      await withTimeout(pump.drain(), 250)
+      await pump.drain()
     } finally {
       errors.mockRestore()
     }
@@ -112,6 +119,7 @@ test("replaces a client when the XREAD watchdog expires", async () => {
 })
 
 test("drains promptly when stopped during a pending reconnect", async () => {
+  jest.useFakeTimers()
   const errors = spyOn(console, "error").mockImplementation(() => undefined)
   const initialClient = fakeClient(async () => {
     throw new Error("connection lost")
@@ -142,12 +150,15 @@ test("drains promptly when stopped during a pending reconnect", async () => {
   })
 
   try {
+    let signal: AbortSignal | undefined
+    void reconnectStarted.then((started) => {
+      signal = started
+    })
     pump.start("0-0")
-    const signal = await withTimeout(reconnectStarted, 500)
-    expect(signal).toBeDefined()
+    await advanceTimersUntil(() => signal !== undefined, 500)
 
     pump.stop()
-    await withTimeout(pump.drain(), 250)
+    await pump.drain()
   } finally {
     pump.stop()
     errors.mockRestore()
@@ -171,6 +182,16 @@ async function waitUntil(predicate: () => boolean, timeoutMs: number): Promise<v
     await Bun.sleep(10)
   }
   throw new Error(`Timed out after ${timeoutMs}ms`)
+}
+
+/** Under fake timers: advances the clock in 50ms steps, settling work between them. */
+async function advanceTimersUntil(predicate: () => boolean, budgetMs: number): Promise<void> {
+  for (let elapsed = 0; elapsed <= budgetMs; elapsed += 50) {
+    await new Promise((resolve) => setImmediate(resolve))
+    if (predicate()) return
+    jest.advanceTimersByTime(50)
+  }
+  throw new Error(`Condition did not hold within ${budgetMs}ms of fake time`)
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {

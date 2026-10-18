@@ -10,5 +10,7 @@ if (process.platform === "darwin" && detectIsolation().backend === "seatbelt") {
       readOnlyEnforcement: true,
       isolation: true,
     },
+    // The timer starts after the spawn, so any bound below `sleep`'s runtime proves the kill.
+    shortTimeoutMs: 50,
   })
 }

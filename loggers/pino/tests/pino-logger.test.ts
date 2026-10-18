@@ -27,19 +27,10 @@ function entry(overrides: Partial<LogEntry> = {}): LogEntry {
 }
 
 describe("PinoLogger", () => {
-  test("maps a complete provider entry to Pino without flattening framework context", () => {
+  test("maps provider entries to Pino levels without flattening framework context", () => {
     const { provider, lines } = capture()
     provider.write(entry({ fields: { step: "load", sixb: "user-value" } }))
-
-    expect(lines).toHaveLength(1)
-    expect(lines[0]?.msg).toBe("started")
-    expect(lines[0]?.step).toBe("load")
-    expect(lines[0]?.sixb).toEqual({ run: { kind: "sync", id: "s_1" } })
-    expect(lines[0]?.level).toBe(30)
-  })
-
-  test("preserves normalized error fields produced by the handler facade", () => {
-    const { provider, lines } = capture()
+    // Error fields arrive already normalized by the handler facade and pass through unchanged.
     provider.write(
       entry({
         level: "error",
@@ -48,10 +39,15 @@ describe("PinoLogger", () => {
       })
     )
 
-    expect(lines[0]?.msg).toBe("boom")
-    expect(lines[0]?.where).toBe("commit")
-    expect(lines[0]?.error).toEqual({ name: "Error", stack: "stack" })
-    expect(lines[0]?.level).toBe(50)
+    expect(lines).toHaveLength(2)
+    expect(lines[0]?.msg).toBe("started")
+    expect(lines[0]?.step).toBe("load")
+    expect(lines[0]?.sixb).toEqual({ run: { kind: "sync", id: "s_1" } })
+    expect(lines[0]?.level).toBe(30)
+    expect(lines[1]?.msg).toBe("boom")
+    expect(lines[1]?.where).toBe("commit")
+    expect(lines[1]?.error).toEqual({ name: "Error", stack: "stack" })
+    expect(lines[1]?.level).toBe(50)
   })
 
   test("honors the configured Pino instance level", () => {

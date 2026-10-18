@@ -57,68 +57,49 @@ describe("createPackageReleasePlan", () => {
     expect(plan.alreadyPublished).toBe(1)
   })
 
-  test("rejects a release that would move latest backwards", () => {
-    // Regression proof: without assertReleaseAdvancesTags this returns a publish plan for 0.1.1.
+  test.each<{
+    name: string
+    versions: string[]
+    tags: Record<string, string>
+    tag: string
+    error: RegExp
+  }>([
+    {
+      // Regression proof: without assertReleaseAdvancesTags this returns a publish plan for 0.1.1.
+      name: "rejects a release that would move latest backwards",
+      versions: ["0.1.0", "0.2.0"],
+      tags: { latest: "0.2.0" },
+      tag: "latest",
+      error: /would move the "latest" tag backwards from 0\.2\.0/,
+    },
+    {
+      name: "rejects a staged release that would move next backwards",
+      versions: ["0.1.0", "0.2.0"],
+      tags: { latest: "0.1.0", next: "0.2.0" },
+      tag: "next",
+      error: /would move the "next" tag backwards from 0\.2\.0/,
+    },
+    {
+      name: "rejects staging a stable release below the current latest version",
+      versions: ["0.1.0", "0.2.0"],
+      tags: { latest: "0.2.0", next: "0.1.0" },
+      tag: "next",
+      error: /would move the "latest" tag backwards from 0\.2\.0/,
+    },
+    {
+      name: "rejects promoting an already-staged version below latest after a resumed run",
+      versions: ["0.1.0", "0.1.1", "0.2.0"],
+      tags: { latest: "0.2.0", next: "0.1.1" },
+      tag: "next",
+      error: /would move the "latest" tag backwards from 0\.2\.0/,
+    },
+  ])("$name", ({ versions, tags, tag, error }) => {
     const core = stub("@sixb/core", "0.1.1")
+    const state = registry(Object.fromEntries(versions.map((version) => [version, {}])), tags)
 
-    expect(() =>
-      createPackageReleasePlan(
-        [core],
-        new Map([["@sixb/core", registry({ "0.1.0": {}, "0.2.0": {} }, { latest: "0.2.0" })]]),
-        "latest"
-      )
-    ).toThrow(/would move the "latest" tag backwards from 0\.2\.0/)
-  })
-
-  test("rejects a staged release that would move next backwards", () => {
-    const core = stub("@sixb/core", "0.1.1")
-
-    expect(() =>
-      createPackageReleasePlan(
-        [core],
-        new Map([
-          [
-            "@sixb/core",
-            registry({ "0.1.0": {}, "0.2.0": {} }, { latest: "0.1.0", next: "0.2.0" }),
-          ],
-        ]),
-        "next"
-      )
-    ).toThrow(/would move the "next" tag backwards from 0\.2\.0/)
-  })
-
-  test("rejects staging a stable release below the current latest version", () => {
-    const core = stub("@sixb/core", "0.1.1")
-
-    expect(() =>
-      createPackageReleasePlan(
-        [core],
-        new Map([
-          [
-            "@sixb/core",
-            registry({ "0.1.0": {}, "0.2.0": {} }, { latest: "0.2.0", next: "0.1.0" }),
-          ],
-        ]),
-        "next"
-      )
-    ).toThrow(/would move the "latest" tag backwards from 0\.2\.0/)
-  })
-
-  test("rejects promoting an already-staged version below latest after a resumed run", () => {
-    const core = stub("@sixb/core", "0.1.1")
-
-    expect(() =>
-      createPackageReleasePlan(
-        [core],
-        new Map([
-          [
-            "@sixb/core",
-            registry({ "0.1.0": {}, "0.1.1": {}, "0.2.0": {} }, { latest: "0.2.0", next: "0.1.1" }),
-          ],
-        ]),
-        "next"
-      )
-    ).toThrow(/would move the "latest" tag backwards from 0\.2\.0/)
+    expect(() => createPackageReleasePlan([core], new Map([["@sixb/core", state]]), tag)).toThrow(
+      error
+    )
   })
 
   test("allows a release that advances both the staging and latest lines", () => {
@@ -260,82 +241,54 @@ describe("createPackageReleasePlan", () => {
     expect(plan.publish.map(packageReleaseId)).toEqual(["@sixb/core@0.1.1"])
   })
 
-  test("requires an exact consumer bump when its dependency version changes", () => {
-    const core = stub("@sixb/core", "0.1.1")
-    const server = stub("@sixb/server", "0.1.0", {
-      peerDependencies: { "@sixb/core": "workspace:*" },
-    })
-
-    expect(() =>
-      createPackageReleasePlan(
-        [core, server],
-        new Map([
-          ["@sixb/core", registry({ "0.1.0": {} })],
-          ["@sixb/server", registry({ "0.1.0": { peerDependencies: { "@sixb/core": "0.1.0" } } })],
-        ]),
-        "next"
-      )
-    ).toThrow(/Bump @sixb\/server/)
-  })
-
-  test("requires a caret consumer bump at an incompatible version boundary", () => {
-    const core = stub("@sixb/core", "0.2.0")
-    const connector = stub("@sixb/connector-example", "0.1.0", {
-      peerDependencies: { "@sixb/core": "workspace:^" },
-    })
-
-    expect(() =>
-      createPackageReleasePlan(
-        [core, connector],
-        new Map([
-          ["@sixb/core", registry({ "0.1.0": {} })],
-          [
-            "@sixb/connector-example",
-            registry({ "0.1.0": { peerDependencies: { "@sixb/core": "^0.1.0" } } }),
-          ],
-        ]),
-        "next"
-      )
-    ).toThrow(/Bump @sixb\/connector-example/)
-  })
-
-  test("requires a bump when a dependency moves to peerDependencies", () => {
-    const core = stub("@sixb/core", "0.1.0")
-    const connector = stub("@sixb/connector-example", "0.1.0", {
-      peerDependencies: { "@sixb/core": "workspace:^" },
-    })
+  test.each<{
+    name: string
+    coreVersion: string
+    local: { peerDependencies?: Record<string, string> }
+    published: PublishedPackageManifest
+    error: RegExp
+  }>([
+    {
+      name: "requires an exact consumer bump when its dependency version changes",
+      coreVersion: "0.1.1",
+      local: { peerDependencies: { "@sixb/core": "workspace:*" } },
+      published: { peerDependencies: { "@sixb/core": "0.1.0" } },
+      error: /Bump @sixb\/connector-example/,
+    },
+    {
+      name: "requires a caret consumer bump at an incompatible version boundary",
+      coreVersion: "0.2.0",
+      local: { peerDependencies: { "@sixb/core": "workspace:^" } },
+      published: { peerDependencies: { "@sixb/core": "^0.1.0" } },
+      error: /Bump @sixb\/connector-example/,
+    },
+    {
+      name: "requires a bump when a dependency moves to peerDependencies",
+      coreVersion: "0.1.0",
+      local: { peerDependencies: { "@sixb/core": "workspace:^" } },
+      published: { dependencies: { "@sixb/core": "0.1.0" } },
+      error: /workspace requires peerDependencies \^0\.1\.0/,
+    },
+    {
+      name: "requires a bump when a published workspace dependency is removed",
+      coreVersion: "0.1.0",
+      local: {},
+      published: { dependencies: { "@sixb/core": "0.1.0" } },
+      error: /workspace requires nothing/,
+    },
+  ])("$name", ({ coreVersion, local, published, error }) => {
+    const core = stub("@sixb/core", coreVersion)
+    const connector = stub("@sixb/connector-example", "0.1.0", local)
 
     expect(() =>
       createPackageReleasePlan(
         [core, connector],
         new Map([
           ["@sixb/core", registry({ "0.1.0": {} })],
-          [
-            "@sixb/connector-example",
-            registry({ "0.1.0": { dependencies: { "@sixb/core": "0.1.0" } } }),
-          ],
+          ["@sixb/connector-example", registry({ "0.1.0": published })],
         ]),
         "next"
       )
-    ).toThrow(/workspace requires peerDependencies \^0\.1\.0/)
-  })
-
-  test("requires a bump when a published workspace dependency is removed", () => {
-    const core = stub("@sixb/core", "0.1.0")
-    const connector = stub("@sixb/connector-example", "0.1.0")
-
-    expect(() =>
-      createPackageReleasePlan(
-        [core, connector],
-        new Map([
-          ["@sixb/core", registry({ "0.1.0": {} })],
-          [
-            "@sixb/connector-example",
-            registry({ "0.1.0": { dependencies: { "@sixb/core": "0.1.0" } } }),
-          ],
-        ]),
-        "next"
-      )
-    ).toThrow(/workspace requires nothing/)
+    ).toThrow(error)
   })
 })

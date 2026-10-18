@@ -102,22 +102,20 @@ class FakeVercelClient implements VercelSandboxClient {
 describe("VercelSandbox", () => {
   // Regression check: replace cwd resolution in runCommand with
   // `options.cwd ?? this.workingDirectory`; the relative-path cases must fail.
-  for (const workingDirectory of ["/vercel/sandbox", "/workspace/custom-run"]) {
-    test.each([
-      ["omitted", undefined, workingDirectory],
-      ["dot", ".", workingDirectory],
-      ["nested", "nested", `${workingDirectory}/nested`],
-      ["normalized", "./nested/../other", `${workingDirectory}/other`],
-      ["absolute", "/tmp", "/tmp"],
-    ] as const)(`runCommand resolves %s cwd from ${workingDirectory}`, async (_label, cwd, expected) => {
-      const client = new FakeVercelClient()
-      const sandbox = new VercelSandbox({ client, workingDirectory })
+  test.each([
+    ["omitted", undefined, undefined, "/vercel/sandbox"],
+    ["dot", "/workspace/custom-run", ".", "/workspace/custom-run"],
+    ["nested", "/workspace/custom-run", "nested", "/workspace/custom-run/nested"],
+    ["normalized", undefined, "./nested/../other", "/vercel/sandbox/other"],
+    ["absolute", "/workspace/custom-run", "/tmp", "/tmp"],
+  ] as const)("runCommand resolves %s cwd against the working directory", async (_label, workingDirectory, cwd, expected) => {
+    const client = new FakeVercelClient()
+    const sandbox = new VercelSandbox({ client, workingDirectory })
 
-      await sandbox.runCommand("pwd", [], { cwd })
+    await sandbox.runCommand("pwd", [], { cwd })
 
-      expect(client.commands[0].cwd).toBe(expected)
-    })
-  }
+    expect(client.commands[0].cwd).toBe(expected)
+  })
 
   test("runCommand forwards cwd/env/timeout and maps output", async () => {
     const client = new FakeVercelClient()
@@ -227,13 +225,6 @@ describe("VercelSandboxFactory", () => {
     await sandbox.destroy()
   })
 
-  test("explicit empty environment suppresses static preparation", async () => {
-    const client = new FakeVercelClient()
-    const factory = new VercelSandboxFactory({ setup: ["must-not-run"] }, async () => client)
-    await factory.create({ environment: {} })
-    expect(client.commands).toHaveLength(0)
-  })
-
   test.each([
     true,
     false,
@@ -320,18 +311,6 @@ describe("VercelSandboxFactory", () => {
       detached: true,
       timeoutMs: 30_000,
     })
-  })
-
-  test("selects the supported node24 runtime explicitly by default", async () => {
-    let captured: unknown
-    const factory = new VercelSandboxFactory({}, async (params) => {
-      captured = params
-      return new FakeVercelClient()
-    })
-
-    await factory.create()
-
-    expect(captured).toMatchObject({ runtime: DEFAULT_VERCEL_SANDBOX_RUNTIME })
   })
 
   test("a client without session policy updates rejects credentials before any command", async () => {

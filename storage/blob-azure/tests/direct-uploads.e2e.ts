@@ -380,12 +380,23 @@ describe("Azure SAS uploads", () => {
   })
 
   test("a completion deadline cancels a stalled verification stream and frees capacity", async () => {
+    // The deadline is AbortSignal.timeout(completionTimeoutMillis). The first completion gets a
+    // signal this test aborts once verification starts reading the stalled stream; later ones get
+    // a signal that never fires, so no real 250ms timer races the final completion.
     const storage = new AzureBlobStorage(
       config({ completionConcurrency: 1, completionTimeoutMillis: 250 })
     )
     const bytes = encoder.encode("timeout")
     const { upload, completion } = await session(storage, bytes)
     await put(upload, bytes)
+    const deadline = new AbortController()
+    const timeout = AbortSignal.timeout
+    const deadlines: number[] = []
+    const timeoutMock = spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+      if (milliseconds !== 250) return timeout.call(AbortSignal, milliseconds)
+      deadlines.push(milliseconds)
+      return deadlines.length === 1 ? deadline.signal : new AbortController().signal
+    })
     const download = BlockBlobClient.prototype.download
     let destroyed = false
     const mock = spyOn(BlockBlobClient.prototype, "download").mockImplementation(async function (
@@ -399,7 +410,9 @@ describe("Azure SAS uploads", () => {
       return {
         ...response,
         readableStreamBody: new Readable({
-          read() {},
+          read() {
+            deadline.abort(new DOMException("The operation timed out.", "TimeoutError"))
+          },
           destroy(error, callback) {
             destroyed = true
             callback(error)
@@ -408,13 +421,20 @@ describe("Azure SAS uploads", () => {
       }
     })
     try {
-      await expect(storage.completeUpload(completion)).rejects.toThrow()
+      try {
+        expect(await storage.completeUpload(completion).catch((error: unknown) => error)).toEqual(
+          expect.objectContaining({ name: "TimeoutError" })
+        )
+      } finally {
+        mock.mockRestore()
+      }
+      expect(destroyed).toBe(true)
+      expect(await storage.stat(blobIdFromDigest(completion.expectedDigest))).toBeNull()
+      expect((await storage.completeUpload(completion)).digest).toBe(completion.expectedDigest)
+      expect(deadlines).toEqual([250, 250])
     } finally {
-      mock.mockRestore()
+      timeoutMock.mockRestore()
     }
-    expect(destroyed).toBe(true)
-    expect(await storage.stat(blobIdFromDigest(completion.expectedDigest))).toBeNull()
-    expect((await storage.completeUpload(completion)).digest).toBe(completion.expectedDigest)
   })
 
   test("an abort wins a race against completion's durable receipt", async () => {

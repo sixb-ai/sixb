@@ -48,31 +48,18 @@ describe("LocalBlobStorage", () => {
     expect(third.blobId).not.toBe(first.blobId)
   })
 
-  test("open streams the stored bytes", async () => {
+  test("opens whole blobs and byte ranges from disk and stats the stored size", async () => {
     const fileRef = await store.put({ body: encoder.encode("stored body") })
-
-    const stream = await store.open(fileRef.blobId)
-
-    expect(await new Response(stream).text()).toBe("stored body")
-  })
-
-  test("openRange streams a byte range from disk", async () => {
-    const fileRef = await store.put({ body: encoder.encode("stored body") })
-
-    const stream = await store.openRange(fileRef.blobId, {
-      start: 7,
-      endInclusive: 10,
-    })
-
-    expect(await new Response(stream).text()).toBe("body")
-  })
-
-  test("stat returns blob info without reading payload through the API", async () => {
-    const fileRef = await store.put({ body: encoder.encode("blob info") })
     const hex = fileRef.digest.slice("sha256:".length)
     const contentStat = await stat(join(basePath, "blobs", "sha256", hex))
 
-    await expect(store.stat(fileRef.blobId)).resolves.toEqual({
+    expect(await new Response(await store.open(fileRef.blobId)).text()).toBe("stored body")
+    expect(
+      await new Response(
+        await store.openRange(fileRef.blobId, { start: 7, endInclusive: 10 })
+      ).text()
+    ).toBe("body")
+    expect(await store.stat(fileRef.blobId)).toEqual({
       blobId: fileRef.blobId,
       digest: fileRef.digest,
       sizeBytes: contentStat.size,

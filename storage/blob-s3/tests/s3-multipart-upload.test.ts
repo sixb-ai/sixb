@@ -129,7 +129,9 @@ describe("uploadBlobStreamToS3", () => {
       concurrency: 1,
     })
 
-    await expect(upload).rejects.toThrow("forbidden")
+    // An unawaited part failure must stop a source that never ends on its own.
+    const error = await upload.catch((caught: unknown) => caught)
+    expect(error).toMatchObject({ message: "forbidden" })
     expect(sourceCancelled).toBe(true)
     expect(api.aborts).toEqual([{ key: "sixb/uploads/put-4/object", uploadId: "upload-1" }])
   })
@@ -163,7 +165,7 @@ describe("uploadBlobStreamToS3", () => {
     await Bun.sleep(0)
     abort.abort(new Error("cancel upload"))
 
-    await expect(upload).rejects.toThrow("cancel upload")
+    expect(await upload.catch((caught: unknown) => caught)).toEqual(new Error("cancel upload"))
     expect(sourceCancelled).toBe(true)
     expect(api.aborts).toEqual([{ key: "sixb/uploads/put-5/object", uploadId: "upload-1" }])
   })

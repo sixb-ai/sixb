@@ -10,9 +10,11 @@ runBrokerContractSuite("RedisBroker", {
   teardown: async (broker) => {
     await broker.close()
   },
-  maxAgeMs: 1_000,
-  maxAgeWaitMs: 1_500,
-  subscriptionSetupMs: 150,
+  // Age retention compares Redis server timestamps, so the wait only has to exceed the age. The
+  // margin above it keeps the newer record retained while a loaded machine reads it back.
+  maxAgeMs: 300,
+  maxAgeWaitMs: 400,
+  // subscribe() resolves its starting cursor before returning, so no setup wait is needed.
   subscriptionDeliveryTimeoutMs: 5_000,
   subscriptionPollIntervalMs: 25,
 })
@@ -218,9 +220,10 @@ describe("RedisBroker", () => {
       })
 
       await waitUntil(() => received.includes("after-reconnect"), 5_000)
-      // Observe another pair of BLOCK cycles so a late replay from the replaced client cannot pass.
-      await Bun.sleep(250)
-      expect(received).toEqual(["before-reconnect", "after-reconnect"])
+      // A later record proves another read cycle, so a late replay from the replaced client fails.
+      await broker.append({ projectId, streamId: stream.id, records: [{ payload: "sentinel" }] })
+      await waitUntil(() => received.includes("sentinel"), 5_000)
+      expect(received).toEqual(["before-reconnect", "after-reconnect", "sentinel"])
       expect(errors.some((message) => message.includes("reconnecting"))).toBe(true)
     } finally {
       console.error = originalError
@@ -269,7 +272,6 @@ describe("RedisBroker", () => {
       unsubscribe = await broker.subscribe({ projectId, streamId: stream.id }, (records) => {
         received.push(...records.map((record) => String(record.payload)))
       })
-      await Bun.sleep(150)
 
       await broker.append({
         projectId,
@@ -346,7 +348,8 @@ describe("RedisBroker", () => {
         records: [{ payload: { label: "old", body: "x".repeat(600) } }],
       })
 
-      await Bun.sleep(250)
+      // Redis compares server timestamps, so any wait past maxAgeMs expires the old record.
+      await Bun.sleep(150)
 
       await broker.append({
         projectId,
@@ -375,7 +378,6 @@ describe("RedisBroker", () => {
     await broker.subscribe({ projectId, streamId: stream.id }, (records) => {
       received.push(...records.map((record) => record.payload))
     })
-    await Bun.sleep(150)
 
     await broker.append({
       projectId,
@@ -505,7 +507,7 @@ describe("RedisBroker", () => {
         records: [{ payload: "old" }],
       })
 
-      await Bun.sleep(250)
+      await Bun.sleep(150)
 
       await expect(
         broker.read({
@@ -542,7 +544,7 @@ describe("RedisBroker", () => {
         records: [{ payload: "old" }],
       })
 
-      await Bun.sleep(250)
+      await Bun.sleep(150)
 
       await expect(
         broker.subscribe({ projectId, streamId: stream.id, afterCursor: "0-0" }, () => undefined)
@@ -554,10 +556,12 @@ describe("RedisBroker", () => {
           received.push(...records.map((record) => record.payload))
         }
       )
-      await Bun.sleep(250)
+      // Delivery is ordered, so an expired record replayed from earliest would arrive first.
+      await broker.append({ projectId, streamId: stream.id, records: [{ payload: "new" }] })
+      await waitUntil(() => received.length > 0, 5_000)
       unsubscribe()
 
-      expect(received).toEqual([])
+      expect(received).toEqual(["new"])
     } finally {
       await cleanup()
     }

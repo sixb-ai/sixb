@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { afterEach, expect, jest, test } from "bun:test"
 import {
   type RedisBrokerClient,
   type RedisBrokerCommandClient,
@@ -8,6 +8,10 @@ import { RedisBrokerError } from "../src/errors"
 import { streamKeysFor } from "../src/keys"
 import { RedisBroker } from "../src/redis-broker"
 import type { EnsuredStream, StreamManager } from "../src/stream-manager"
+
+afterEach(() => {
+  jest.useRealTimers()
+})
 
 test("aborts a pending subscription client connection", async () => {
   let closeCount = 0
@@ -102,47 +106,13 @@ function settle<T>(promise: Promise<T>): Promise<T | unknown> {
 }
 
 // The tests below guard the fix for #217. To prove they still guard it, drop the
-// `boundedCommandClient(client)` wrapper in `useCommandClient` and pass `client` directly. All
-// four timeout tests then hang until bun's per-test timeout, because without a bound nothing ever
-// settles them -- including the first, which never reaches its assertion.
+// `boundedCommandClient(client)` wrapper in `useCommandClient` and pass `client` directly. Both
+// timeout tests then hang until bun's per-test timeout, because without a bound nothing ever
+// settles them.
 
-test("a command that is never answered fails once the bound elapses", async () => {
-  const manager = new RedisConnectionManager({ url: "redis://unused", commandTimeoutMs: 25 }, () =>
-    fakeClient({ send: neverResponds })
-  )
-
-  const error = await settle(manager.useCommandClient((client) => client.send("EVAL", [])))
-
-  expect(error).toBeInstanceOf(RedisBrokerError)
-  if (!(error instanceof Error)) throw new Error("Expected the command to fail")
-  expect(error.message).toContain("command EVAL did not respond within 25ms")
-
-  await manager.close()
-})
-
-test("an unanswered command does not block later commands", async () => {
+test("an unanswered command fails at the bound and its client is replaced for queued commands", async () => {
   // #217: one unanswered append held the shared command queue and stopped all event publication.
-  let clientCount = 0
-  const manager = new RedisConnectionManager(
-    { url: "redis://unused", commandTimeoutMs: 25 },
-    () => {
-      clientCount += 1
-      const wedges = clientCount === 1
-      return fakeClient({ send: wedges ? neverResponds : async () => "PONG" })
-    }
-  )
-
-  const wedged = settle(manager.useCommandClient((client) => client.send("EVAL", [])))
-  const next = manager.useCommandClient((client) => client.send("PING", []))
-
-  expect(await wedged).toBeInstanceOf(RedisBrokerError)
-  expect(await next).toBe("PONG")
-
-  await manager.close()
-})
-
-test("a timed-out client is closed and replaced for the next command", async () => {
-  // A missing reply may still arrive, so the connection cannot be reused for another command.
+  // A missing reply may still arrive, so the timed-out connection cannot be reused either.
   let clientCount = 0
   let closeCount = 0
   const manager = new RedisConnectionManager(
@@ -159,10 +129,15 @@ test("a timed-out client is closed and replaced for the next command", async () 
     }
   )
 
-  await settle(manager.useCommandClient((client) => client.send("EVAL", [])))
-  expect(closeCount).toBe(1)
+  const wedged = settle(manager.useCommandClient((client) => client.send("EVAL", [])))
+  const next = manager.useCommandClient((client) => client.send("PING", []))
 
-  expect(await manager.useCommandClient((client) => client.send("PING", []))).toBe("PONG")
+  const error = await wedged
+  expect(error).toBeInstanceOf(RedisBrokerError)
+  if (!(error instanceof Error)) throw new Error("Expected the command to fail")
+  expect(error.message).toContain("command EVAL did not respond within 25ms")
+  expect(await next).toBe("PONG")
+  expect(closeCount).toBe(1)
   expect(clientCount).toBe(2)
 
   await manager.close()
@@ -211,25 +186,32 @@ test("the command bound is ours and never reaches the Redis client", async () =>
 test("each command in one operation gets its own timeout", async () => {
   // To prove this guards command-level granularity, also race the complete operation against
   // `commandTimeoutMs` in `useCommandClient`; the second command then fails this test.
+  jest.useFakeTimers()
   let callCount = 0
   const manager = new RedisConnectionManager({ url: "redis://unused", commandTimeoutMs: 30 }, () =>
     fakeClient({
       send: async () => {
         callCount += 1
         const call = callCount
-        await Bun.sleep(20)
+        await new Promise((resolve) => setTimeout(resolve, 20))
         return `reply-${call}`
       },
     })
   )
 
-  const replies = await manager.useCommandClient(async (client) => {
-    const first = await client.send("ONE", [])
-    const second = await client.send("TWO", [])
-    return [first, second]
-  })
+  const replies = settle(
+    manager.useCommandClient(async (client) => {
+      const first = await client.send("ONE", [])
+      const second = await client.send("TWO", [])
+      return [first, second]
+    })
+  )
+  for (const _command of ["ONE", "TWO"]) {
+    await new Promise((resolve) => setImmediate(resolve))
+    jest.advanceTimersByTime(20)
+  }
 
-  expect(replies).toEqual(["reply-1", "reply-2"])
+  expect(await replies).toEqual(["reply-1", "reply-2"])
   await manager.close()
 })
 
@@ -239,12 +221,8 @@ test("rejects a command bound that setTimeout cannot represent", () => {
     expect(() => new RedisBroker({ connection: { commandTimeoutMs } })).toThrow(RedisBrokerError)
   }
 
-  expect(() => new RedisBroker({ connection: { commandTimeoutMs: 25 } })).not.toThrow()
-})
-
-test("keeps the caller-owned dedupe window independent from the command timeout", () => {
-  // Reintroducing a constructor check between these values fails this test while still being
-  // unable to account for later commands or the caller's retry delay.
+  // The caller-owned dedupe window stays independent from the command timeout. A constructor
+  // check between them could not account for later commands or the caller's retry delay.
   expect(
     () => new RedisBroker({ connection: { commandTimeoutMs: 25 }, dedupeTtlMs: 1 })
   ).not.toThrow()
@@ -298,45 +276,49 @@ function failedConnection(): Error {
 
 // Regression proof: restore connection.ts from 3a9a076c and run this file. Recovery cases
 // fail on Bun 1.4.2; connection-recovery.e2e.ts exercises the same failure with native clients.
-for (const method of ["exists", "hmget", "send"] as const) {
-  for (const synchronous of [false, true]) {
-    test(`replaces a terminal client for ${method} (${synchronous ? "throw" : "rejection"})`, async () => {
-      let created = 0
-      let closed = 0
-      let rejectedCalls = 0
-      const failed = fakeClient({
-        [method]: () => {
-          rejectedCalls++
-          if (synchronous) throw failedConnection()
-          return Promise.reject(failedConnection())
-        },
-        close: () => closed++,
-      })
-      const healthy = fakeClient({
-        exists: async () => true,
-        hmget: async () => ["value"],
-        send: async () => "PONG",
-      })
-      const manager = new RedisConnectionManager({}, () => (++created === 1 ? failed : healthy))
-      try {
-        const call = (client: RedisBrokerCommandClient) => {
-          if (method === "exists") return client.exists("key")
-          if (method === "hmget") return client.hmget("key", ["field"])
-          return client.send("PING", [])
-        }
-        const expected = method === "exists" ? true : method === "hmget" ? ["value"] : "PONG"
-        // Calls queued behind the failed command must share the replacement.
-        expect(
-          await Promise.all([manager.useCommandClient(call), manager.useCommandClient(call)])
-        ).toEqual([expected, expected])
-        expect(created).toBe(2)
-        expect(closed).toBe(1)
-        expect(rejectedCalls).toBe(1)
-      } finally {
-        await manager.close()
-      }
+// Each method must retry on the replacement; a synchronous throw takes the same path for all three.
+for (const [method, synchronous] of [
+  ["exists", false],
+  ["hmget", false],
+  ["send", false],
+  ["send", true],
+] as const) {
+  test(`replaces a terminal client for ${method} (${synchronous ? "throw" : "rejection"})`, async () => {
+    let created = 0
+    let closed = 0
+    let rejectedCalls = 0
+    const failed = fakeClient({
+      [method]: () => {
+        rejectedCalls++
+        if (synchronous) throw failedConnection()
+        return Promise.reject(failedConnection())
+      },
+      close: () => closed++,
     })
-  }
+    const healthy = fakeClient({
+      exists: async () => true,
+      hmget: async () => ["value"],
+      send: async () => "PONG",
+    })
+    const manager = new RedisConnectionManager({}, () => (++created === 1 ? failed : healthy))
+    try {
+      const call = (client: RedisBrokerCommandClient) => {
+        if (method === "exists") return client.exists("key")
+        if (method === "hmget") return client.hmget("key", ["field"])
+        return client.send("PING", [])
+      }
+      const expected = method === "exists" ? true : method === "hmget" ? ["value"] : "PONG"
+      // Calls queued behind the failed command must share the replacement.
+      expect(
+        await Promise.all([manager.useCommandClient(call), manager.useCommandClient(call)])
+      ).toEqual([expected, expected])
+      expect(created).toBe(2)
+      expect(closed).toBe(1)
+      expect(rejectedCalls).toBe(1)
+    } finally {
+      await manager.close()
+    }
+  })
 }
 
 test("retries only the unsent command and keeps its replacement for the rest of the operation", async () => {
@@ -382,14 +364,11 @@ test("bounds terminal recovery to one retry and discards a failed replacement", 
     })
   })
   try {
-    await expect(manager.useCommandClient((client) => client.send("PING", []))).rejects.toThrow(
-      "Connection has failed"
-    )
+    const ping = () => settle(manager.useCommandClient((client) => client.send("PING", [])))
+    expect(await ping()).toEqual(failedConnection())
     expect(created).toBe(2)
     expect(closed).toBe(2)
-    await expect(manager.useCommandClient((client) => client.send("PING", []))).rejects.toThrow(
-      "Connection has failed"
-    )
+    expect(await ping()).toEqual(failedConnection())
     expect(created).toBe(4)
   } finally {
     await manager.close()
@@ -423,9 +402,9 @@ for (const error of [
       })
     })
     try {
-      await expect(
-        manager.useCommandClient((client) => client.send("INCR", ["counter"]))
-      ).rejects.toBe(error)
+      expect(
+        await settle(manager.useCommandClient((client) => client.send("INCR", ["counter"])))
+      ).toBe(error)
       expect(calls).toBe(1)
       expect(created).toBe(1)
     } finally {
@@ -484,9 +463,11 @@ test("subscription commands leave terminal recovery to their pump", async () => 
   })
   const subscription = await manager.createSubscriptionClient()
   try {
-    await expect(
-      manager.boundedCommandClient(subscription).send("XREVRANGE", ["stream", "+", "-"])
-    ).rejects.toBe(error)
+    expect(
+      await settle(
+        manager.boundedCommandClient(subscription).send("XREVRANGE", ["stream", "+", "-"])
+      )
+    ).toBe(error)
     expect(created).toBe(1)
     expect(closed).toBe(0)
   } finally {

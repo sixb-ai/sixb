@@ -56,8 +56,8 @@ test("an existing broker resumes event and log writes after exhausting idle reco
     }
     await cut()
     // No broker commands during the outage, matching an idle hourly worker. With one retry,
-    // native reconnection is exhausted well inside this one-second bound.
-    await Bun.sleep(1_000)
+    // native reconnection is exhausted well inside this bound (200ms reproduced it reliably).
+    await Bun.sleep(300)
     await listen(address.port)
     await probe.connect()
     expect(await probe.send("PING", [])).toBe("PONG")

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type { DeployStatus } from "@sixb/core/deploy"
@@ -29,8 +29,12 @@ async function startSupervisor(
         name: "api",
         processName: "northline-api",
         command: process.execPath,
-        // Printed on an interval: Bun may hold a single write to a pipe in its buffer.
-        args: ["-e", 'setInterval(() => console.log("listening"), 100)'],
+        // Printed on an interval: Bun may hold a single write to a pipe in its buffer. It exits
+        // once orphaned, because cleanup kills the supervisor rather than waiting on its shutdown.
+        args: [
+          "-e",
+          'const parent = process.ppid; setInterval(() => { if (process.ppid !== parent) process.exit(); console.log("listening") }, 100)',
+        ],
         env: {},
         instances: 1,
         killTimeoutMs: 2_000,
@@ -77,7 +81,9 @@ async function startSupervisor(
     }
   )
   cleanups.push(async () => {
-    supervisor.kill("SIGTERM")
+    // Not SIGTERM: shutdown waits killTimeoutMs plus 2s for a restarting worker whose exit Bun
+    // never reports, and no test here is about shutdown.
+    supervisor.kill("SIGKILL")
     await supervisor.exited
     await rm(root, { recursive: true, force: true })
   })
@@ -102,16 +108,16 @@ async function status(manifestPath: string): Promise<DeployStatus> {
 }
 
 async function until<T>(read: () => Promise<T>, done: (value: T) => boolean): Promise<T> {
-  for (let attempt = 0; attempt < 50; attempt++) {
+  for (let attempt = 0; attempt < 200; attempt++) {
     const value = await read().catch(() => undefined)
     if (value !== undefined && done(value)) return value
-    await Bun.sleep(100)
+    await Bun.sleep(25)
   }
   throw new Error("Timed out waiting for the supervisor.")
 }
 
 describe("supervisor", () => {
-  test("runs every instance, restarts what exits, and reports the release", async () => {
+  test("runs every instance, restarts what exits, logs its output, and reports the release", async () => {
     const { manifestPath } = await startSupervisor()
 
     const report = await until(
@@ -131,6 +137,12 @@ describe("supervisor", () => {
     expect(check.exitCode).toBe(1)
     expect(check.stderr).toContain("workers")
     expect(check.stderr).not.toContain("api")
+
+    const logs = await until(
+      () => ctl(manifestPath, "logs", "api"),
+      (value) => value.stdout.includes("listening")
+    )
+    expect(logs.stdout).toMatch(/^\d\d:\d\d:\d\d api {1}listening$/m)
   })
 
   test("stops, starts, and restarts one service on request", async () => {
@@ -151,15 +163,6 @@ describe("supervisor", () => {
     expect(unknown.stderr).toContain("No service named 'sentinel'")
   })
 
-  test("writes each process's output to its log", async () => {
-    const { manifestPath } = await startSupervisor()
-    const logs = await until(
-      () => ctl(manifestPath, "logs", "api"),
-      (value) => value.stdout.includes("listening")
-    )
-    expect(logs.stdout).toMatch(/^\d\d:\d\d:\d\d api {1}listening$/m)
-  }, 10_000)
-
   // Reproduce: remove the final awaited writeState() in stopManaged(). The stop response then
   // overtakes the held state write, leaving status at "stopping" after a successful command.
   test("publishes the stopped state before acknowledging stop", async () => {
@@ -177,8 +180,10 @@ describe("supervisor", () => {
     try {
       await until(() => Bun.file(join(root, "run", "state-write-held")).exists(), Boolean)
       expect((await status(manifestPath)).processes[0]?.status).toBe("stopping")
-      // Leave the control client's 100ms response poll time to observe an early acknowledgment.
-      await Bun.sleep(300)
+      // An early acknowledgment is written within milliseconds of the exit, then either still
+      // waits in run/responses or has already been read by the client.
+      await Bun.sleep(100)
+      expect(await readdir(join(root, "run", "responses"))).toEqual([])
       expect(answered).toBe(false)
     } finally {
       await writeFile(join(root, "run", "release-state-write"), "")

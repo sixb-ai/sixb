@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { chmod, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -21,14 +21,15 @@ import { SmolvmSandboxFactory } from "../src/smolvm-sandbox-factory"
  * smolvm-integration.test.ts).
  */
 
+let binDir: string
+let bin: string
 let workspace: string
 let guest: string
-let bin: string
 
-beforeEach(async () => {
-  workspace = await mkdtemp(join(tmpdir(), "sixb-smolvm-fn-"))
-  guest = join(workspace, "guest")
-  bin = join(workspace, "fake-smolvm.sh")
+// One script per file: macOS scans each newly written executable on its first run (~150ms).
+beforeAll(async () => {
+  binDir = await mkdtemp(join(tmpdir(), "sixb-smolvm-fn-bin-"))
+  bin = join(binDir, "fake-smolvm.sh")
   // Faithful emulator: bookkeeping subcommands are no-ops; `machine exec` parses
   // --workdir/--env (as real smolvm does), then runs the command after `--`.
   const script = `#!/bin/sh
@@ -52,6 +53,15 @@ esac
 `
   await writeFile(bin, script, "utf-8")
   await chmod(bin, 0o755)
+})
+
+afterAll(async () => {
+  await rm(binDir, { recursive: true, force: true })
+})
+
+beforeEach(async () => {
+  workspace = await mkdtemp(join(tmpdir(), "sixb-smolvm-fn-"))
+  guest = join(workspace, "guest")
 })
 
 afterEach(async () => {
@@ -84,14 +94,27 @@ describe("SmolvmSandbox functional (faithful guest emulation)", () => {
 
   // Regression check: pass `files` to buildWriteFilesScript without resolving their paths in
   // writeFiles; the script then runs from "/" and the relative file lands outside the workspace.
-  test("writes relative file paths into workingDirectory", async () => {
+  test("writes relative and absolute files into workingDirectory and runs commands there", async () => {
     const sandbox = await factory().create({ workingDirectory: guest })
     try {
-      await sandbox.writeFiles([{ path: "nested/relative.txt", contents: "in-workspace" }])
+      // Mirror what the agent worker's sandbox-api-context does: materialize the run context
+      // through the sandbox capability rather than writing to the host filesystem directly.
+      const runContextPath = join(sandbox.workingDirectory, ".sixb", "agent", "context", "run.json")
+      await sandbox.writeFiles([
+        { path: "nested/relative.txt", contents: "in-workspace" },
+        { path: runContextPath, contents: '{"runId":"run-1"}' },
+      ])
 
-      const cat = await sandbox.runCommand("cat", ["nested/relative.txt"])
+      const pwd = await sandbox.runCommand("bash", ["-lc", "pwd"])
+      expect(await realpath(pwd.stdout.trim())).toBe(await realpath(sandbox.workingDirectory))
+
+      const relative = await sandbox.runCommand("cat", ["nested/relative.txt"])
+      expect(relative.exitCode).toBe(0)
+      expect(relative.stdout).toBe("in-workspace")
+
+      const cat = await sandbox.runCommand("bash", ["-lc", "cat .sixb/agent/context/run.json"])
       expect(cat.exitCode).toBe(0)
-      expect(cat.stdout).toBe("in-workspace")
+      expect(cat.stdout).toContain('"runId":"run-1"')
     } finally {
       await sandbox.destroy()
     }
@@ -109,73 +132,51 @@ describe("SmolvmSandbox functional (faithful guest emulation)", () => {
     }
   })
 
-  test("runs commands in workingDirectory and reads files materialized via writeFiles", async () => {
-    const sandbox = await factory().create({ workingDirectory: guest })
-    try {
-      // Mirror what the agent worker's sandbox-api-context does: materialize the run context
-      // through the sandbox capability rather than writing to the host filesystem directly.
-      const runContextPath = join(sandbox.workingDirectory, ".sixb", "agent", "context", "run.json")
-      await sandbox.writeFiles([{ path: runContextPath, contents: '{"runId":"run-1"}' }])
-
-      const pwd = await sandbox.runCommand("bash", ["-lc", "pwd"])
-      expect(await realpath(pwd.stdout.trim())).toBe(await realpath(sandbox.workingDirectory))
-
-      const cat = await sandbox.runCommand("bash", ["-lc", "cat .sixb/agent/context/run.json"])
-      expect(cat.exitCode).toBe(0)
-      expect(cat.stdout).toContain('"runId":"run-1"')
-    } finally {
-      await sandbox.destroy()
-    }
-  })
-
-  test("propagates factory env and the gateway capability URL into the guest", async () => {
+  test("propagates factory env and the gateway capability URL, with per-call overrides", async () => {
     const sandbox = await factory({
       SIXB_API_BASE_URL: "http://127.0.0.1:3002/__sixb/agent-api/run-1/cap",
       SIXB_RUN_ID: "run-1",
+      TOKEN: "base",
     }).create({ workingDirectory: guest })
     try {
-      const result = await sandbox.runCommand("bash", [
-        "-lc",
-        'echo "$SIXB_RUN_ID@$SIXB_API_BASE_URL"',
-      ])
-      expect(result.stdout.trim()).toBe("run-1@http://127.0.0.1:3002/__sixb/agent-api/run-1/cap")
+      const result = await sandbox.runCommand(
+        "bash",
+        ["-lc", 'echo "$SIXB_RUN_ID@$SIXB_API_BASE_URL $TOKEN"'],
+        { env: { TOKEN: "override" } }
+      )
+      expect(result.stdout.trim()).toBe(
+        "run-1@http://127.0.0.1:3002/__sixb/agent-api/run-1/cap override"
+      )
     } finally {
       await sandbox.destroy()
     }
   })
 
-  test("per-call env overrides the sandbox default", async () => {
-    const sandbox = await factory({ TOKEN: "base" }).create({ workingDirectory: guest })
+  test("warns that a loopback gateway is unreachable from the VM under restricted egress", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
     try {
-      const result = await sandbox.runCommand("bash", ["-lc", 'echo "$TOKEN"'], {
-        env: { TOKEN: "override" },
+      const sandbox = await factory().create({
+        workingDirectory: guest,
+        network: {
+          mode: "restricted",
+          allow: [{ name: "sixb-api", origin: "http://127.0.0.1:3002" }],
+        },
       })
-      expect(result.stdout.trim()).toBe("override")
-    } finally {
       await sandbox.destroy()
-    }
-  })
-
-  test("a network-restricted sandbox still executes local commands", async () => {
-    const sandbox = await factory().create({
-      workingDirectory: guest,
-      network: {
-        mode: "restricted",
-        allow: [{ name: "sixb-api", origin: "http://127.0.0.1:3002" }],
-      },
-    })
-    try {
-      const result = await sandbox.runCommand("bash", ["-lc", "echo ok"])
-      expect(result.stdout.trim()).toBe("ok")
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0]?.[0])).toContain(
+        "cannot reach the gateway at http://127.0.0.1:3002 over localhost"
+      )
     } finally {
-      await sandbox.destroy()
+      warn.mockRestore()
     }
   })
 
   test("times out a runaway command and flags it", async () => {
     const sandbox = await factory().create({ workingDirectory: guest })
     try {
-      const result = await sandbox.runCommand("bash", ["-lc", "sleep 30"], { timeout: 500 })
+      // The fake execs `sleep` in place, so the SIGKILL reaches it whenever the timer fires.
+      const result = await sandbox.runCommand("sleep", ["30"], { timeout: 50 })
       expect(result.timedOut).toBe(true)
       expect(result.exitCode).not.toBe(0)
     } finally {
