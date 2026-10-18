@@ -9,6 +9,8 @@ export async function* listAllPages<TPage extends { nextPageToken?: string }, TI
   initialPageToken?: string
 ): AsyncIterable<TItem> {
   let pageToken = initialPageToken
+  // A response that hands back a token already followed would otherwise loop forever.
+  const seen = new Set<string>(initialPageToken ? [initialPageToken] : [])
 
   for (;;) {
     const page = await list(pageToken)
@@ -20,5 +22,11 @@ export async function* listAllPages<TPage extends { nextPageToken?: string }, TI
     if (!pageToken) {
       break
     }
+    if (seen.has(pageToken)) {
+      throw new Error(
+        `[SixbGoogle] Pagination repeated page token "${pageToken}"; refusing to loop forever.`
+      )
+    }
+    seen.add(pageToken)
   }
 }
