@@ -815,10 +815,25 @@ describe("server auth guard", () => {
     }
   })
 
-  test("sign-out revokes the session and clears cookies", async () => {
+  test("sign-out requires CSRF for a cookie session, then revokes it and clears cookies", async () => {
+    // Sign-out is public, so the auth guard's CSRF check never runs for it; the route checks itself.
+    // Regression check: drop the verifyDoubleSubmitCsrf condition in routes/auth.ts sign-out.
     const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
     const app = createApp(sixb)
+    const session = () => storage.auth.sessions.getById({ projectId: "test-project", id: "ses_1" })
+
+    const forged = await app.fetch(
+      new Request("http://localhost/api/auth/sign-out", {
+        method: "POST",
+        headers: { cookie: `${seeded.cookie}; ${seeded.csrfCookie}` },
+      })
+    )
+    expect(forged.status).toBe(403)
+    expect(await forged.json()).toEqual({ error: "CSRF verification failed" })
+    const kept = await session()
+    expect(kept?.id).toBe("ses_1")
+    expect(kept?.revokedAt).toBeUndefined()
 
     const response = await app.fetch(
       new Request("http://localhost/api/auth/sign-out", {
