@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { GetArtifactResponse, GetArtifactVersionResponse } from "@sixb/client"
 import { getArtifactQueryKey } from "@sixb/client/hooks"
+import { ARTIFACT_LIMITS } from "@sixb/core/artifacts"
 import { Markdown } from "@sixb/ui/components"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
@@ -260,7 +261,7 @@ describe("the viewer", () => {
     expect(html).toContain(
       `/api/artifacts/${ARTIFACT_ID}/versions/2/content?path=figures%2Frevenue.png&amp;disposition=inline`
     )
-    expect(html).toMatch(/data-sixb-artifact="" data-sixb-artifact-print="" class="[^"]* dark"/)
+    expect(html).toMatch(/data-sixb-artifact="" class="[^"]* dark"/)
     expect(html).toContain('style="--primary:#0f766e"')
     expect(html).toContain('<nav aria-label="On this page"')
     expect(html).toContain('aria-label="Copy a link to “Revenue”"')
@@ -301,14 +302,33 @@ describe("the viewer", () => {
     })
 
     expect(html).toContain('role="tablist"')
-    expect(html).toMatch(/role="tab" aria-selected="true"[^>]*>Summary</)
-    expect(html).toMatch(/role="tab" aria-selected="false"[^>]*>Regions</)
+    expect(html).toMatch(/role="tab"[^>]*aria-selected="true"[^>]*>Summary</)
+    expect(html).toMatch(/role="tab"[^>]*aria-selected="false"[^>]*>Regions</)
     expect(html).toContain('aria-label="Download Summary as CSV"')
     expect(html).toContain("$5,560,000")
     expect(html).toContain("35.1%")
     expect(html).toContain("Summary · 2 rows · Row 1 frozen")
     // The workbook's entry is not a file a reader wants; each sheet downloads as CSV instead.
     expect(html).not.toContain("workbook.json")
+  })
+
+  test("offers a sheet too large to read as its CSV, rather than saying it could not be read", () => {
+    // Reproduce by dropping the `tooLarge` notice in WorkbookView: the sheet "could not be read".
+    const html = render({
+      kind: "sheet",
+      entry: "workbook.json",
+      files: [
+        { path: "workbook.json", file: fileRef("workbook", 200, "application/json") },
+        {
+          path: "sheets/Visits.csv",
+          file: fileRef("visits", ARTIFACT_LIMITS.maxSheetFileBytes + 1, "text/csv"),
+        },
+      ],
+      texts: { "workbook.json": JSON.stringify({ sheets: [{ name: "Visits" }] }) },
+    })
+    expect(html).toContain("This sheet is too large to show here")
+    expect(html).not.toContain("This sheet could not be read.")
+    expect(html).toMatch(/download="Visits.csv"[^>]*>.*Download Visits as CSV/)
   })
 
   test("pins the version a link asked for", () => {

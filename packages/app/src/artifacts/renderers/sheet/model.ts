@@ -51,7 +51,9 @@ export function sheetModel(sheet: SheetLayout, table: CsvTable): SheetModel {
  * as text, and rows longer than the header add unnamed columns.
  */
 export function fileSheetModel(name: string, table: CsvTable): SheetModel {
-  const width = Math.max(table.header.length, ...table.rows.map((row) => row.length))
+  // A loop, not a spread: a long file's rows are more arguments than a call can take.
+  let width = table.header.length
+  for (const row of table.rows) width = Math.max(width, row.length)
   const header = Array.from({ length: width }, (_, index) => table.header[index] ?? "")
   const columns = header.map((columnName, index) => {
     const values = table.rows.map((row) => row[index] ?? "").filter((value) => value.trim())

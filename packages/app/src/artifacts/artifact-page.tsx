@@ -1,6 +1,10 @@
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
-import { artifactHref } from "../pages/routes"
-import { type ArtifactTarget, artifactTargetFromSearch, withArtifactTarget } from "./target"
+import {
+  type ArtifactTarget,
+  artifactTargetFromSearch,
+  artifactTargetHref,
+  withArtifactTarget,
+} from "./target"
 import { Viewer } from "./viewer"
 
 /**
@@ -38,14 +42,7 @@ export function ArtifactPage() {
           setSearchParams(nextParams, { replace: true })
         }}
         // Another artifact is another page, so back returns to this one.
-        onOpenReference={(next) =>
-          navigate(
-            artifactHref(next.artifactId, {
-              ...(next.version === undefined ? {} : { version: next.version }),
-              ...(next.part === undefined ? {} : { part: next.part }),
-            })
-          )
-        }
+        onOpenReference={(next) => navigate(artifactTargetHref(next))}
       />
     </div>
   )

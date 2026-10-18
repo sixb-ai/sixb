@@ -1,21 +1,12 @@
 import { createHeadingSlugger } from "@sixb/core/artifacts"
-
-// The HTML tree react-markdown renders from, typed only as far as this plugin reads it.
-interface TreeText {
-  readonly type: "text"
-  value: string
-}
-interface TreeElement {
-  readonly type: "element"
-  tagName: string
-  properties: Record<string, unknown>
-  children: TreeNode[]
-}
-type TreeNode = TreeElement | TreeText | { readonly type: string; children?: TreeNode[] }
-interface TreeRoot {
-  readonly type: "root"
-  children: TreeNode[]
-}
+import {
+  isElement,
+  meaningfulChildren,
+  type TreeElement,
+  type TreeNode,
+  type TreeRoot,
+  type TreeText,
+} from "../markdown-tree"
 
 export const CALLOUT_KINDS = ["note", "tip", "important", "warning", "caution"] as const
 export type CalloutKind = (typeof CALLOUT_KINDS)[number]
@@ -80,9 +71,7 @@ function shapeCallout(blockquote: TreeElement): void {
 }
 
 function shapeFigure(paragraph: TreeElement, parent: TreeElement | TreeRoot, index: number): void {
-  const meaningful = paragraph.children.filter(
-    (child) => !(child.type === "text" && !(child as TreeText).value.trim())
-  )
+  const meaningful = meaningfulChildren(paragraph)
   const image = meaningful.length === 1 && isElement(meaningful[0]) ? meaningful[0] : undefined
   const caption = image?.tagName === "img" ? image.properties.title : undefined
   if (!image || typeof caption !== "string" || !caption.trim()) return
@@ -108,7 +97,9 @@ function markNumericColumns(table: TreeElement): void {
   const rows = collect(table, "tr")
   const header = rows.find((row) => row.children.some((cell) => isCell(cell, "th")))
   const body = rows.filter((row) => row !== header)
-  const width = Math.max(0, ...rows.map((row) => row.children.filter(isCellElement).length))
+  // A loop, not a spread: a long table's rows are more arguments than a call can take.
+  let width = 0
+  for (const row of rows) width = Math.max(width, row.children.filter(isCellElement).length)
 
   for (let column = 0; column < width; column += 1) {
     const values = body
@@ -155,10 +146,6 @@ function addClass(element: TreeElement, className: string): void {
   const current = element.properties.className
   const classes = Array.isArray(current) ? current : typeof current === "string" ? [current] : []
   element.properties.className = [...classes, className]
-}
-
-function isElement(node: TreeNode | undefined): node is TreeElement {
-  return node?.type === "element"
 }
 
 function isCellElement(node: TreeNode): node is TreeElement {

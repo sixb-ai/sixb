@@ -7,6 +7,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -14,7 +15,7 @@ import {
 } from "react"
 import { useArtifactMessages } from "../../messages"
 import { ArtifactAddressLabel, ArtifactLink } from "../../references/references"
-import { cellFormatter, type FormattedCell } from "./format"
+import { cellFormatter, currencySymbol, type FormattedCell } from "./format"
 import type { SheetColumn, SheetModel } from "./model"
 import {
   type CellPoint,
@@ -38,6 +39,8 @@ const MIN_COLUMN_WIDTH = 48
 const MAX_COLUMN_WIDTH = 800
 const OVERSCAN_ROWS = 8
 const OVERSCAN_COLUMNS = 2
+/** How far an arrow key moves a column's edge from its separator. */
+const RESIZE_STEP = 16
 
 export interface SheetGridStatus {
   readonly range: CellRange
@@ -71,6 +74,9 @@ export function SheetGrid({
 }) {
   const messages = useArtifactMessages().sheet
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const gridRef = useRef<HTMLDivElement | null>(null)
+  const idPrefix = useId()
+  const cellId = (row: number, column: number) => `${idPrefix}-${row}-${column}`
   const [viewport, setViewport] = useState({ top: 0, left: 0, width: 960, height: 640 })
   const [widths, setWidths] = useState(() => model.columns.map((column) => column.width))
   const [sort, setSort] = useState<{ column: number; direction: SortDirection } | null>(null)
@@ -217,7 +223,7 @@ export function SheetGrid({
     const point = cellPoint(target)
     if (!point) return
     event.preventDefault()
-    scrollRef.current?.focus({ preventScroll: true })
+    gridRef.current?.focus({ preventScroll: true })
     dragging.current = true
     if (point.column < 0) {
       // A row number selects its row.
@@ -281,17 +287,18 @@ export function SheetGrid({
     reveal(next)
   }
 
+  const setWidth = (column: number, width: number) => {
+    const clamped = Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, width))
+    setWidths((current) => current.map((value, index) => (index === column ? clamped : value)))
+  }
+
   const resize = (column: number, event: PointerEvent<HTMLSpanElement>) => {
     event.preventDefault()
     event.stopPropagation()
     const startX = event.clientX
     const startWidth = widths[column] ?? 0
     const move = (moveEvent: globalThis.PointerEvent) => {
-      const width = Math.min(
-        MAX_COLUMN_WIDTH,
-        Math.max(MIN_COLUMN_WIDTH, startWidth + moveEvent.clientX - startX)
-      )
-      setWidths((current) => current.map((value, index) => (index === column ? width : value)))
+      setWidth(column, startWidth + moveEvent.clientX - startX)
     }
     const up = () => {
       window.removeEventListener("pointermove", move)
@@ -299,6 +306,17 @@ export function SheetGrid({
     }
     window.addEventListener("pointermove", move)
     window.addEventListener("pointerup", up)
+  }
+
+  /** The arrows widen and narrow a column from its separator; Enter fits it as it opened. */
+  const resizeWithKey = (column: number, event: KeyboardEvent<HTMLSpanElement>) => {
+    const width = widths[column] ?? 0
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      setWidth(column, width + (event.key === "ArrowRight" ? RESIZE_STEP : -RESIZE_STEP))
+    } else if (event.key === "Enter") {
+      setWidth(column, model.columns[column]?.width ?? width)
+    } else return
+    event.preventDefault()
   }
 
   const cycleSort = (column: number) =>
@@ -329,6 +347,7 @@ export function SheetGrid({
       return (
         <GridCell
           key={column}
+          id={cellId(row, column)}
           row={row}
           column={column}
           header={header}
@@ -375,6 +394,7 @@ export function SheetGrid({
           )}
           style={{ width: rowNumberWidth }}
           role="rowheader"
+          aria-colindex={1}
         >
           {row + 1}
         </div>
@@ -385,16 +405,20 @@ export function SheetGrid({
     )
   }
 
+  /**
+   * A column's letter, and the separator that resizes it: by dragging, or from the keyboard on
+   * the active cell's column, whose separator is the one in the tab order.
+   */
   const letter = (column: number, fixed: boolean) => {
     const selected = column >= range.left && column <= range.right
     const name = model.columns[column]?.name ?? ""
+    const width = widths[column] ?? 0
     return (
       <div
         key={column}
         data-cell=""
         data-row={-1}
         data-column={column}
-        role="columnheader"
         className={cn(
           "relative flex shrink-0 items-center justify-center border-r border-b border-border text-[11px] text-muted-foreground select-none",
           GUTTER,
@@ -402,24 +426,23 @@ export function SheetGrid({
           selected && "bg-muted font-medium text-foreground"
         )}
         style={{
-          width: widths[column] ?? 0,
+          width,
           ...(fixed ? { left: rowNumberWidth + (offsets[column] ?? 0) } : {}),
         }}
       >
-        {columnLetter(column)}
+        <span aria-hidden="true">{columnLetter(column)}</span>
         <span
           role="separator"
           aria-orientation="vertical"
           aria-label={messages.resize(name)}
-          className="absolute inset-y-0 -right-[3px] z-[3] w-[6px] cursor-col-resize after:absolute after:inset-y-1 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent hover:after:bg-primary"
+          aria-valuenow={width}
+          aria-valuemin={MIN_COLUMN_WIDTH}
+          aria-valuemax={MAX_COLUMN_WIDTH}
+          tabIndex={column === focus.column ? 0 : -1}
+          className="absolute inset-y-0 -right-[3px] z-[3] w-[6px] cursor-col-resize outline-none after:absolute after:inset-y-1 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent hover:after:bg-primary focus-visible:after:w-0.5 focus-visible:after:bg-ring"
           onPointerDown={(event) => resize(column, event)}
-          onDoubleClick={() =>
-            setWidths((current) =>
-              current.map((value, index) =>
-                index === column ? (model.columns[column]?.width ?? value) : value
-              )
-            )
-          }
+          onDoubleClick={() => setWidth(column, model.columns[column]?.width ?? width)}
+          onKeyDown={(event) => resizeWithKey(column, event)}
         />
       </div>
     )
@@ -428,39 +451,65 @@ export function SheetGrid({
   const frozen: number[] = Array.from({ length: frozenRows }, (_, index) => index)
   const body: number[] = []
   for (let index = rows.first; index <= rows.last; index += 1) body.push(frozenRows + index)
+  // Focus stays on the grid while the arrows move the active cell, which assistive technology
+  // follows by its id: only while it is drawn, since only the cells in view are.
+  const drawn = (point: CellPoint) =>
+    (point.row < frozenRows ||
+      (point.row >= frozenRows + rows.first && point.row <= frozenRows + rows.last)) &&
+    (point.column < frozenColumns || (point.column >= firstColumn && point.column <= columns.last))
 
   return (
     <div
       ref={scrollRef}
-      role="grid"
-      aria-label={messages.grid(model.name)}
-      aria-rowcount={rowCount}
-      aria-colcount={columnCount}
-      aria-multiselectable="true"
-      tabIndex={0}
       className={cn(
-        "relative min-h-0 min-w-0 overflow-auto bg-background text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+        "relative min-h-0 min-w-0 overflow-auto bg-background text-[13px] text-foreground has-[[role=grid]:focus-visible]:ring-2 has-[[role=grid]:focus-visible]:ring-ring has-[[role=grid]:focus-visible]:ring-inset",
         className
       )}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onKeyDown={onKeyDown}
     >
-      <div style={{ width: totalWidth, height: headerHeight + bodyRows * ROW_HEIGHT }}>
-        <div className="sticky top-0 z-[4]" style={{ width: totalWidth }}>
-          <div className="flex" style={{ width: totalWidth, height: LETTER_HEIGHT }}>
-            <div
-              className={cn("sticky left-0 z-[3] shrink-0 border-r border-b border-border", GUTTER)}
-              style={{ width: rowNumberWidth }}
-            />
-            {fixedColumns.map((column) => letter(column, true))}
-            {leadingSpace > 0 ? <div className="shrink-0" style={{ width: leadingSpace }} /> : null}
-            {scrollingColumns.map((column) => letter(column, false))}
+      <div
+        className="flex flex-col"
+        style={{ width: totalWidth, height: headerHeight + bodyRows * ROW_HEIGHT }}
+      >
+        <div
+          ref={gridRef}
+          role="grid"
+          aria-label={messages.grid(model.name)}
+          aria-rowcount={rowCount}
+          // The row numbers are the first column.
+          aria-colcount={columnCount + 1}
+          aria-multiselectable="true"
+          aria-activedescendant={drawn(focus) ? cellId(focus.row, focus.column) : undefined}
+          tabIndex={0}
+          className="flex-1 outline-none"
+          onKeyDown={onKeyDown}
+        >
+          <div
+            role="rowgroup"
+            className="sticky z-[3] shadow-[0_1px_0_var(--border)]"
+            style={{ top: LETTER_HEIGHT }}
+          >
+            {frozen.map(renderRow)}
           </div>
-          <div className="shadow-[0_1px_0_var(--border)]">{frozen.map(renderRow)}</div>
+          <div role="rowgroup" style={{ paddingTop: rows.first * ROW_HEIGHT }}>
+            {body.map(renderRow)}
+          </div>
         </div>
-        <div style={{ height: rows.first * ROW_HEIGHT }} />
-        {body.map(renderRow)}
+        {/* The letters lead the grid on screen and follow it in the tab order: they are not
+            cells, only the columns' names and the handles that resize them. */}
+        <div
+          className="sticky top-0 z-[4] order-first flex"
+          style={{ width: totalWidth, height: LETTER_HEIGHT }}
+        >
+          <div
+            className={cn("sticky left-0 z-[3] shrink-0 border-r border-b border-border", GUTTER)}
+            style={{ width: rowNumberWidth }}
+          />
+          {fixedColumns.map((column) => letter(column, true))}
+          {leadingSpace > 0 ? <div className="shrink-0" style={{ width: leadingSpace }} /> : null}
+          {scrollingColumns.map((column) => letter(column, false))}
+        </div>
       </div>
     </div>
   )
@@ -493,6 +542,7 @@ function selectionEdges(range: CellRange, row: number, column: number): CSSPrope
 }
 
 function GridCell({
+  id,
   row,
   column,
   header,
@@ -503,6 +553,7 @@ function GridCell({
   style,
   children,
 }: {
+  readonly id: string
   readonly row: number
   readonly column: number
   readonly header: boolean
@@ -515,10 +566,13 @@ function GridCell({
 }) {
   return (
     <div
+      id={id}
       data-cell=""
       data-row={row}
       data-column={column}
       role={header ? "columnheader" : "gridcell"}
+      // Columns are drawn only in view, so each says where it is; the row numbers come first.
+      aria-colindex={column + 2}
       aria-selected={selected}
       className={cn(
         "flex shrink-0 items-center overflow-hidden border-r border-b border-border/70 px-2.5 whitespace-nowrap",
@@ -599,14 +653,6 @@ function TypeGlyph({ column }: { readonly column: SheetColumn | undefined }) {
       {glyph}
     </span>
   ) : null
-}
-
-function currencySymbol(currency: string): string {
-  return (
-    new Intl.NumberFormat("en", { style: "currency", currency, currencyDisplay: "narrowSymbol" })
-      .formatToParts(0)
-      .find((part) => part.type === "currency")?.value ?? currency
-  )
 }
 
 function CellContent({

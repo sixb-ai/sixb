@@ -1,8 +1,20 @@
 import { describe, expect, test } from "bun:test"
 import { SixbApiError } from "@sixb/client"
+import { LocaleProvider } from "@sixb/ui/lib/i18n"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 import { artifactPanelPresentation } from "../src/agent/artifact-panel-state"
-import { artifactFileSource, messageFileSource } from "../src/artifacts/file-source"
+import {
+  artifactFileSource,
+  type FileSource,
+  messageFileSource,
+  useFileName,
+} from "../src/artifacts/file-source"
 import { fileLoadError } from "../src/artifacts/file-view"
+
+function FileName({ source }: { readonly source: FileSource }) {
+  return useFileName(source)
+}
 
 const fileRef = {
   blobId: "blob",
@@ -29,13 +41,23 @@ describe("file sources", () => {
     expect(source.downloadUrl).toContain("disposition=attachment")
   })
 
-  test("name a message file that has no name of its own", () => {
+  test("name a message file that has no name of its own in the reader's language", () => {
+    // Reproduce by naming the source in English where it is made, as `en.files.file` did: the
+    // French reader sees "File".
     const { fileName: _fileName, ...unnamed } = fileRef
-    const input = { threadId: "thread", messageId: "message", path: "/parts/0/fileRef" }
-    expect(messageFileSource({ ...input, fileRef: unnamed }).name).toBe("File")
-    expect(messageFileSource({ ...input, fileRef: unnamed, fallbackName: "Fichier" }).name).toBe(
-      "Fichier"
-    )
+    const source = messageFileSource({
+      threadId: "thread",
+      messageId: "message",
+      path: "/parts/0/fileRef",
+      fileRef: unnamed,
+    })
+    expect(source.name).toBe("")
+    const name = (locale: string) =>
+      renderToStaticMarkup(
+        createElement(LocaleProvider, { locale }, createElement(FileName, { source }))
+      )
+    expect(name("en")).toBe("File")
+    expect(name("fr")).toBe("Fichier")
   })
 
   test("read an artifact file through its version", () => {

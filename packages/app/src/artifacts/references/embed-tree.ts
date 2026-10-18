@@ -1,22 +1,12 @@
 import { isArtifactAddress } from "@sixb/core/artifacts"
 import { defaultUrlTransform } from "@sixb/ui/components"
-
-// The HTML tree react-markdown hands to rehype plugins, as far as this plugin reads it.
-interface TreeText {
-  readonly type: "text"
-  readonly value: string
-}
-interface TreeElement {
-  readonly type: "element"
-  tagName: string
-  properties: Record<string, unknown>
-  children: TreeNode[]
-}
-interface TreeRoot {
-  readonly type: "root"
-  children: TreeNode[]
-}
-type TreeNode = TreeElement | TreeText | { readonly type: string }
+import {
+  isElement,
+  meaningfulChildren,
+  type TreeElement,
+  type TreeNode,
+  type TreeRoot,
+} from "../markdown-tree"
 
 /** The attribute that marks an embed in the tree, read back by the `div` that renders it. */
 export const EMBED_ATTRIBUTE = "data-artifact-embed"
@@ -53,19 +43,13 @@ function visit(parent: TreeRoot | TreeElement): void {
 function loneArtifactImage(
   paragraph: TreeElement
 ): { readonly address: string; readonly caption: string } | undefined {
-  const meaningful = paragraph.children.filter(
-    (child) => !(child.type === "text" && !(child as TreeText).value.trim())
-  )
+  const meaningful = meaningfulChildren(paragraph)
   const [image] = meaningful
   if (meaningful.length !== 1 || !isElement(image) || image.tagName !== "img") return undefined
   const source = image.properties.src
   if (typeof source !== "string" || !isArtifactAddress(source)) return undefined
   const alt = image.properties.alt
   return { address: source.trim(), caption: typeof alt === "string" ? alt.trim() : "" }
-}
-
-function isElement(node: TreeNode | undefined): node is TreeElement {
-  return node?.type === "element"
 }
 
 /** `data-artifact-embed` as hast names it: `dataArtifactEmbed`. */
@@ -77,9 +61,6 @@ function toProperty(attribute: string): string {
 export function artifactUrlTransform(url: string): string {
   return isArtifactAddress(url) ? url : defaultUrlTransform(url)
 }
-
-/** Embeds come first, so a lone `artifact:` image is an embed rather than a captioned figure. */
-export const ARTIFACT_REHYPE_PLUGINS = [rehypeArtifactEmbeds]
 
 /**
  * Keeps one section of a document: its heading and what follows, up to the next heading at its

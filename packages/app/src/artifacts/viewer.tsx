@@ -25,9 +25,11 @@ import {
   Maximize2,
   X,
 } from "lucide-react"
-import { type ReactNode, useState } from "react"
+import type { ReactNode } from "react"
 import { Link } from "react-router-dom"
+import { useCopyFeedback } from "./copy-feedback"
 import { formatFileSize } from "./file-size"
+import { useFileName } from "./file-source"
 import type { ArtifactKindName } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
 import { type ArtifactVersion, versionFileSource } from "./queries"
@@ -135,6 +137,7 @@ function ArtifactView({
   }
 
   const version = versionQuery.data
+  const kind = detail.artifact.kind
   return (
     <>
       <ArtifactHeader
@@ -151,13 +154,24 @@ function ArtifactView({
         }
       />
       <ArtifactBody
+        key={bodyKey(version, kind, target.part)}
         version={version}
-        kind={detail.artifact.kind}
+        kind={kind}
         latestVersion={detail.artifact.latestVersion}
         part={target.part}
       />
     </>
   )
+}
+
+/**
+ * A renderer holds the reader's place in what it shows, so another artifact or version starts
+ * afresh, and so does another part of a sheet or deck, which opens at its part. A document
+ * scrolls to its part in place.
+ */
+function bodyKey(version: ArtifactVersion, kind: ArtifactKindName, part?: string): string {
+  const at = `${version.artifactId}@${version.version}`
+  return kind === "document" ? at : `${at}#${part ?? ""}`
 }
 
 /** The kind's renderer for one version. */
@@ -281,10 +295,11 @@ function FileHeader({
   const messages = useArtifactMessages()
   const locale = useLocale()
   const { source } = target
+  const name = useFileName(source)
   return (
     <ViewerBar
-      chrome={{ ...(chrome.onClose ? { onClose: chrome.onClose } : {}) }}
-      title={source.name}
+      chrome={chrome}
+      title={name}
       meta={
         <span className="tabular-nums">
           {formatFileSize(source.fileRef.sizeBytes, locale, messages.files)}
@@ -294,15 +309,11 @@ function FileHeader({
       <HeaderLink
         href={source.inlineUrl}
         target="_blank"
-        label={messages.viewer.openInNewTab(source.name)}
+        label={messages.viewer.openInNewTab(name)}
       >
         <ArrowUpRight />
       </HeaderLink>
-      <HeaderLink
-        href={source.downloadUrl}
-        download={source.name}
-        label={messages.viewer.download(source.name)}
-      >
+      <HeaderLink href={source.downloadUrl} download={name} label={messages.viewer.download(name)}>
         <ArrowDownToLine />
       </HeaderLink>
     </ViewerBar>
@@ -327,7 +338,7 @@ function ViewerBar({
   const messages = useArtifactMessages().viewer
   return (
     <TooltipProvider delayDuration={400}>
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/60 px-3 print:hidden">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/60 px-3">
         {chrome.onBack ? (
           <HeaderButton label={messages.back} onClick={chrome.onBack}>
             <ArrowLeft />
@@ -450,19 +461,13 @@ function HeaderLink({
 /** Copies a link to the artifact's page, and says so for a moment. */
 function CopyLinkButton({ link }: { readonly link: () => string }) {
   const messages = useArtifactMessages().viewer
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopyFeedback()
   const label = copied ? messages.linkCopied : messages.copyLink
   return (
     <HeaderButton
       label={label}
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(link())
-          setCopied(true)
-          setTimeout(() => setCopied(false), 1600)
-        } catch {
-          // The clipboard can be unavailable, such as on an insecure origin.
-        }
+      onClick={() => {
+        copy(link())
       }}
     >
       {copied ? <Check /> : <Link2 />}

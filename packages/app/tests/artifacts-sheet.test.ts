@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { parseCsv, parseWorkbook, type Workbook } from "@sixb/core/artifacts"
-import { chartData } from "../src/artifacts/renderers/sheet/chart-data"
+import { chartData, MAX_CHART_POINTS } from "../src/artifacts/renderers/sheet/chart-data"
 import { cellFormatter, compactFormatter } from "../src/artifacts/renderers/sheet/format"
 import { fileSheetModel, sheetModel } from "../src/artifacts/renderers/sheet/model"
 import {
@@ -87,6 +87,18 @@ describe("a sheet's columns", () => {
       ["North", "1284", "extra"],
       ["South", "962", ""],
     ])
+  })
+
+  test("of a long CSV are measured without spreading its rows into one call", () => {
+    // Reproduce with `Math.max(header, ...rows.map(...))` in fileSheetModel: a call takes about
+    // 125,000 arguments in V8 and 500,000 in Bun's JavaScriptCore, so this goes past both. A 5 MB
+    // file of one short column holds over two million rows.
+    const rows = Array.from({ length: 1_000_000 }, (_, index) =>
+      index === 999_999 ? ["9", "wide"] : ["1"]
+    )
+    const file = fileSheetModel("long.csv", { header: ["n"], rows })
+    expect(file.columns.map((column) => column.name)).toEqual(["n", ""])
+    expect(file.rows.length).toBe(1_000_000)
   })
 })
 
@@ -211,5 +223,27 @@ describe("a chart's data", () => {
     ])
     expect(data?.rows[1]).toEqual({ x: "Q1 2026", s0: 4380000.5, s1: null })
     expect(data?.x.name).toBe("Quarter")
+  })
+
+  test("of a long sheet is sampled evenly to what a chart can draw, its ends kept", () => {
+    // Reproduce by mapping every row in chartData: a chart of 100,000 rows draws 100,000 points
+    // on every render.
+    const chart = workbook.charts[0]
+    if (!chart) throw new Error("Expected a chart.")
+    const long = sheetModel(
+      sheet,
+      parseCsv(
+        [
+          "Quarter,Revenue,Margin,Units,Closed,Site",
+          ...Array.from({ length: 100_000 }, (_, index) => `Day ${index + 1},${index},0.3,1,,`),
+        ].join("\n")
+      )
+    )
+    const data = chartData(chart, long)
+    expect(data?.rows.length).toBe(MAX_CHART_POINTS)
+    expect(data?.rows[0]?.x).toBe("Day 1")
+    expect(data?.rows.at(-1)?.x).toBe("Day 100000")
+    // A pie keeps every row: publishing caps its slices.
+    expect(chartData({ ...chart, type: "pie" }, long)?.rows.length).toBe(100_000)
   })
 })
