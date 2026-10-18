@@ -83,82 +83,33 @@ const reviewDraftDocument = defineIntervention("review-draft-document")
   })
 
 describe("workflow runtime validation", () => {
-  test("validates workflow input with object refs", () => {
+  test("validates workflow input fields with object refs", () => {
     const input = {
       transaction: { objectTypeId: "Transaction", primaryId: "txn_123" },
     }
+    const validate = (value: unknown) => () =>
+      validateWorkflowInput({ workflow, value, valueTypesById })
 
-    const validated = validateWorkflowInput({
-      workflow,
-      value: input,
-      valueTypesById,
-    })
-
-    expect(validated).toBe(input)
+    expect(validate(input)()).toBe(input)
+    for (const [value, message] of [
+      [{}, "Missing required field 'Workflow \"reconcile-transaction\" input.transaction'"],
+      [{ ...input, extra: true }, "Unknown field 'Workflow \"reconcile-transaction\" input.extra'"],
+      [
+        { transaction: { objectTypeId: "Invoice", primaryId: "invoice:1" } },
+        'Property Workflow "reconcile-transaction" input.transaction.objectTypeId',
+      ],
+    ] as const) {
+      expect(validate(value)).toThrow(WorkflowValidationError)
+      expect(validate(value)).toThrow(message)
+    }
   })
 
-  test("rejects missing, unknown, and invalid workflow input fields", () => {
-    expect(() =>
-      validateWorkflowInput({
-        workflow,
-        value: {},
-        valueTypesById,
-      })
-    ).toThrow(WorkflowValidationError)
-    expect(() =>
-      validateWorkflowInput({
-        workflow,
-        value: {},
-        valueTypesById,
-      })
-    ).toThrow("Missing required field 'Workflow \"reconcile-transaction\" input.transaction'")
-
-    expect(() =>
-      validateWorkflowInput({
-        workflow,
-        value: {
-          transaction: { objectTypeId: "Transaction", primaryId: "txn_123" },
-          extra: true,
-        },
-        valueTypesById,
-      })
-    ).toThrow(WorkflowValidationError)
-    expect(() =>
-      validateWorkflowInput({
-        workflow,
-        value: {
-          transaction: { objectTypeId: "Transaction", primaryId: "txn_123" },
-          extra: true,
-        },
-        valueTypesById,
-      })
-    ).toThrow("Unknown field 'Workflow \"reconcile-transaction\" input.extra'")
-
-    expect(() =>
-      validateWorkflowInput({
-        workflow,
-        value: {
-          transaction: { objectTypeId: "Invoice", primaryId: "invoice:1" },
-        },
-        valueTypesById,
-      })
-    ).toThrow(WorkflowValidationError)
-    expect(() =>
-      validateWorkflowInput({
-        workflow,
-        value: {
-          transaction: { objectTypeId: "Invoice", primaryId: "invoice:1" },
-        },
-        valueTypesById,
-      })
-    ).toThrow('Property Workflow "reconcile-transaction" input.transaction.objectTypeId')
-  })
-
-  test("validates step input and output contracts", () => {
+  test("validates step input and output contracts, timestamps included", () => {
     const [node] = workflow.nodes
     if (!node || node.type !== "step") {
       throw new Error("Expected workflow step node")
     }
+    const reviewedAt = new Date("2026-05-08T10:00:00.000Z")
 
     const stepInput = validateWorkflowStepInput({
       workflowId: workflow.id,
@@ -177,6 +128,12 @@ describe("workflow runtime validation", () => {
       },
       valueTypesById,
     })
+    const timestampInput = validateWorkflowStepInput({
+      workflowId: "review-workflow",
+      step: timestampStep,
+      value: { reviewedAt },
+      valueTypesById,
+    })
 
     expect(stepInput.transaction).toEqual({
       objectTypeId: "Transaction",
@@ -186,15 +143,9 @@ describe("workflow runtime validation", () => {
       objectTypeId: "Invoice",
       primaryId: "invoice:1",
     })
-  })
+    expect(timestampInput.reviewedAt).toBe(reviewedAt)
 
-  test("rejects invalid step output contracts", () => {
-    const [node] = workflow.nodes
-    if (!node || node.type !== "step") {
-      throw new Error("Expected workflow step node")
-    }
-
-    expect(() =>
+    const invalidOutput = () =>
       validateWorkflowStepOutput({
         workflowId: workflow.id,
         step: node.step,
@@ -204,18 +155,10 @@ describe("workflow runtime validation", () => {
         },
         valueTypesById,
       })
-    ).toThrow(WorkflowValidationError)
-    expect(() =>
-      validateWorkflowStepOutput({
-        workflowId: workflow.id,
-        step: node.step,
-        value: {
-          invoice: { objectTypeId: "Transaction", primaryId: "txn_123" },
-          confidence: 0.98,
-        },
-        valueTypesById,
-      })
-    ).toThrow('Workflow "reconcile-transaction" step "find-best-invoice" output.invoice')
+    expect(invalidOutput).toThrow(WorkflowValidationError)
+    expect(invalidOutput).toThrow(
+      'Workflow "reconcile-transaction" step "find-best-invoice" output.invoice'
+    )
   })
 
   test("validates intervention input, response, and default response contracts", () => {
@@ -228,101 +171,40 @@ describe("workflow runtime validation", () => {
       },
       valueTypesById,
     })
-    const response = validateWorkflowInterventionResponse({
-      workflowId: "draft-invoice-proposal",
-      intervention: reviewDraftDocument,
-      value: {
-        decision: "approve",
-        finalTotalCents: 12500,
-      },
-      valueTypesById,
-    })
-    const defaultResponse = validateWorkflowInterventionDefaultResponse({
-      workflowId: "draft-invoice-proposal",
-      intervention: reviewDraftDocument,
-      value: {
-        finalTotalCents: 12500,
-      },
-      valueTypesById,
-    })
+    const response = (value: unknown) =>
+      validateWorkflowInterventionResponse({
+        workflowId: "draft-invoice-proposal",
+        intervention: reviewDraftDocument,
+        value,
+        valueTypesById,
+      })
+    const defaultResponse = (value: unknown) =>
+      validateWorkflowInterventionDefaultResponse({
+        workflowId: "draft-invoice-proposal",
+        intervention: reviewDraftDocument,
+        value,
+        valueTypesById,
+      })
 
     expect(interventionInput.invoice).toEqual({
       objectTypeId: "Invoice",
       primaryId: "invoice:1",
     })
-    expect(response).toEqual({
+    expect(response({ decision: "approve", finalTotalCents: 12500 })).toEqual({
       decision: "approve",
       finalTotalCents: 12500,
     })
-    expect(defaultResponse).toEqual({
-      finalTotalCents: 12500,
-    })
+    expect(defaultResponse({ finalTotalCents: 12500 })).toEqual({ finalTotalCents: 12500 })
+
+    expect(() => response({ decision: "approve" })).toThrow("Missing required field")
+    expect(() => response({ decision: "approve", finalTotalCents: 12500, unknown: true })).toThrow(
+      "Unknown field"
+    )
+    expect(() => defaultResponse({ decision: "escalate" })).toThrow(WorkflowValidationError)
+    expect(() => defaultResponse({ extra: true })).toThrow("Unknown field")
   })
 
-  test("rejects invalid intervention responses and defaults", () => {
-    expect(() =>
-      validateWorkflowInterventionResponse({
-        workflowId: "draft-invoice-proposal",
-        intervention: reviewDraftDocument,
-        value: {
-          decision: "approve",
-        },
-        valueTypesById,
-      })
-    ).toThrow("Missing required field")
-
-    expect(() =>
-      validateWorkflowInterventionResponse({
-        workflowId: "draft-invoice-proposal",
-        intervention: reviewDraftDocument,
-        value: {
-          decision: "approve",
-          finalTotalCents: 12500,
-          unknown: true,
-        },
-        valueTypesById,
-      })
-    ).toThrow("Unknown field")
-
-    expect(() =>
-      validateWorkflowInterventionDefaultResponse({
-        workflowId: "draft-invoice-proposal",
-        intervention: reviewDraftDocument,
-        value: {
-          decision: "escalate",
-        },
-        valueTypesById,
-      })
-    ).toThrow(WorkflowValidationError)
-
-    expect(() =>
-      validateWorkflowInterventionDefaultResponse({
-        workflowId: "draft-invoice-proposal",
-        intervention: reviewDraftDocument,
-        value: {
-          extra: true,
-        },
-        valueTypesById,
-      })
-    ).toThrow("Unknown field")
-  })
-
-  test("accepts Date values for timestamp contracts", () => {
-    const reviewedAt = new Date("2026-05-08T10:00:00.000Z")
-
-    const validated = validateWorkflowStepInput({
-      workflowId: "review-workflow",
-      step: timestampStep,
-      value: {
-        reviewedAt,
-      },
-      valueTypesById,
-    })
-
-    expect(validated.reviewedAt).toBe(reviewedAt)
-  })
-
-  test("snapshots workflow IO as compact JSON-safe values", () => {
+  test("snapshots workflow IO as compact JSON-safe values, and rejects what is not JSON", () => {
     const reviewedAt = new Date("2026-05-08T10:00:00.000Z")
 
     const inputSnapshot = snapshotWorkflowInput({
@@ -409,25 +291,15 @@ describe("workflow runtime validation", () => {
       decision: "approve",
       reviewedAt: "2026-05-08T10:00:00.000Z",
     })
-  })
 
-  test("rejects non-JSON workflow IO snapshots with path context", () => {
-    expect(() =>
+    const nonJson = () =>
       snapshotWorkflowActionInput({
         subject: { kind: "object", objectTypeId: "Transaction", primaryId: "txn_123" },
         params: {
           callback: () => undefined,
         },
       })
-    ).toThrow(WorkflowValidationError)
-
-    expect(() =>
-      snapshotWorkflowActionInput({
-        subject: { kind: "object", objectTypeId: "Transaction", primaryId: "txn_123" },
-        params: {
-          callback: () => undefined,
-        },
-      })
-    ).toThrow("Workflow action params.callback cannot be serialized as workflow IO")
+    expect(nonJson).toThrow(WorkflowValidationError)
+    expect(nonJson).toThrow("Workflow action params.callback cannot be serialized as workflow IO")
   })
 })

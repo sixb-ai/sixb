@@ -107,7 +107,7 @@ function actionDefinition(action: unknown): ActionDefinition {
 }
 
 describe("defineAction", () => {
-  test("builds an inert typed action definition", () => {
+  test("builds inert typed action definitions", () => {
     expect(setTemperature.kind).toBe("action")
     expect(setTemperature.binding.kind).toBe("object")
     expect(setTemperature.id).toBe("setTemperature")
@@ -117,21 +117,31 @@ describe("defineAction", () => {
     expect(setTemperature.phases.validate).toHaveLength(1)
     expect(typeof setTemperature.phases.writeback).toBe("function")
     expect(setTemperature.description).toBe("Set room temperature.")
-  })
 
-  test("preserves nullable action param metadata", () => {
-    expect(updateRoomCategory.params.category).toMatchObject({
-      required: false,
-      nullable: true,
-    })
-  })
-
-  test("builds global action definitions without a target", () => {
-    expect(createRoom.kind).toBe("action")
     expect(createRoom.binding.kind).toBe("global")
     expect(createRoom.params.id.required).toBe(true)
-    expect(createRoom.phases.validate).toHaveLength(1)
     expect(typeof createRoom.phases.edits).toBe("function")
+
+    expect(updateRoomCategory.params.category).toMatchObject({ required: false, nullable: true })
+    expect(attachRelatedRoom.params.relatedRoom.schema).toEqual({
+      type: "objectRef",
+      objectTypeId: "Room",
+    })
+    expect(
+      optional(
+        param("double", {
+          description: "Requested temperature",
+          semanticType: "Temperature",
+          nullable: true,
+        })
+      )
+    ).toEqual({
+      schema: "double",
+      required: false,
+      description: "Requested temperature",
+      semanticType: "Temperature",
+      nullable: true,
+    })
   })
 
   test("validates empty action ids", () => {
@@ -192,214 +202,240 @@ describe("ActionRegistry", () => {
     ])
   })
 
-  test("rejects duplicate action ids", () => {
-    const duplicate = defineAction("reboot")
-      .on(Room)
-      .params({})
-      .writeback(async () => {})
-
-    expect(() => {
-      createTestSixb({
-        ontology: [Room],
-        actions: [actionDefinition(reboot), actionDefinition(duplicate)],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow(ActionDefinitionError)
-    expect(() => {
-      createTestSixb({
-        ontology: [Room],
-        actions: [actionDefinition(reboot), actionDefinition(duplicate)],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow('Duplicate action id "reboot"')
+  const Unregistered = defineObjectType({
+    id: "Unknown",
+    name: "Unknown",
+    properties: [prop("id", "string", { required: true, primary: true })],
   })
 
-  test("rejects duplicate action ids in inheritance chains with a precise error", () => {
-    const suiteOverride = defineAction("setTemperature")
-      .on(SuiteRoom)
-      .params({})
-      .writeback(async () => {})
-
-    expect(() => {
+  test.each([
+    {
+      name: "a duplicate id",
+      ontology: [Room],
+      actions: [
+        reboot,
+        defineAction("reboot")
+          .on(Room)
+          .params({})
+          .writeback(async () => {}),
+      ],
+      message: 'Duplicate action id "reboot" declared in multiple files.',
+    },
+    {
+      name: "a duplicate id in an inheritance chain",
+      ontology: [Room, SuiteRoom],
+      actions: [
+        setTemperature,
+        defineAction("setTemperature")
+          .on(SuiteRoom)
+          .params({})
+          .writeback(async () => {}),
+      ],
+      message:
+        'Duplicate action id "setTemperature" in inheritance chain of "SuiteRoom": defined on both "Room" and "SuiteRoom".',
+    },
+    {
+      name: "an unregistered target type",
+      ontology: [Room],
+      actions: [
+        defineAction("unknown")
+          .on(Unregistered)
+          .params({})
+          .writeback(async () => {}),
+      ],
+      message: 'Action "unknown" targets unknown object type "Unknown".',
+    },
+    {
+      name: "no writeback or edits",
+      ontology: [Room],
+      actions: [
+        {
+          kind: "action",
+          id: "noMutation",
+          binding: { kind: "global" },
+          params: {},
+          phases: { validate: [] },
+        },
+      ],
+      message: 'Action "noMutation" must declare .writeback(...) or .edits(...).',
+    },
+    {
+      name: "effects but no edits",
+      ontology: [Room],
+      actions: [
+        {
+          kind: "action",
+          id: "effectsOnly",
+          binding: { kind: "global" },
+          params: {},
+          phases: { validate: [], writeback: () => {}, effects: () => {} },
+        },
+      ],
+      message: 'Action "effectsOnly" cannot declare .effects(...) without .edits(...).',
+    },
+  ])("rejects an action with $name", ({ ontology, actions, message }) => {
+    const register = () =>
       createTestSixb({
-        ontology: [Room, SuiteRoom],
-        actions: [actionDefinition(setTemperature), actionDefinition(suiteOverride)],
+        ontology,
+        actions: actions.map(actionDefinition),
         ...createTestRuntimeDeps(),
       })
-    }).toThrow(
-      'Duplicate action id "setTemperature" in inheritance chain of "SuiteRoom": defined on both "Room" and "SuiteRoom".'
-    )
-  })
 
-  test("rejects actions targeting unregistered object types", () => {
-    const Unknown = defineObjectType({
-      id: "Unknown",
-      name: "Unknown",
-      properties: [prop("id", "string", { required: true, primary: true })],
-    })
-    const unknownAction = defineAction("unknown")
-      .on(Unknown)
-      .params({})
-      .writeback(async () => {})
-
-    expect(() => {
-      createTestSixb({
-        ontology: [Room],
-        actions: [actionDefinition(unknownAction)],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow(ActionDefinitionError)
-  })
-
-  test("rejects action definitions without writeback or edits", () => {
-    const invalidAction = {
-      kind: "action",
-      id: "noMutation",
-      binding: { kind: "global" },
-      params: {},
-      phases: { validate: [] },
-    } as unknown as ActionDefinition
-
-    expect(() => {
-      createTestSixb({
-        ontology: [Room],
-        actions: [invalidAction],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow(ActionDefinitionError)
-    expect(() => {
-      createTestSixb({
-        ontology: [Room],
-        actions: [invalidAction],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow('Action "noMutation" must declare .writeback(...) or .edits(...).')
-  })
-
-  test("rejects action definitions with effects but no edits", () => {
-    const invalidAction = {
-      kind: "action",
-      id: "effectsOnly",
-      binding: { kind: "global" },
-      params: {},
-      phases: {
-        validate: [],
-        writeback: () => {},
-        effects: () => {},
-      },
-    } as unknown as ActionDefinition
-
-    expect(() => {
-      createTestSixb({
-        ontology: [Room],
-        actions: [invalidAction],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow(ActionDefinitionError)
-    expect(() => {
-      createTestSixb({
-        ontology: [Room],
-        actions: [invalidAction],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow('Action "effectsOnly" cannot declare .effects(...) without .edits(...).')
+    expect(register).toThrow(ActionDefinitionError)
+    expect(register).toThrow(message)
   })
 })
 
 describe("requestAction", () => {
-  test("rejects unknown action", async () => {
-    const sixb = createTestSixb({
-      id: "action-test",
-      ontology: [Room],
-      actions: [actionDefinition(setTemperature), actionDefinition(reboot)],
-      ...createTestRuntimeDeps(),
-    })
+  const room1 = { kind: "object", objectTypeId: "Room", primaryId: "room:1" } as const
 
-    await sixb.objects(Room).upsert({
-      properties: { id: "room:1", externalId: "R1", name: "Room 1" },
-    })
-
-    await expect(
-      sixb.objects(Room).requestAction({
-        id: "room:1",
-        actionId: "nonexistent",
-      })
-    ).rejects.toBeInstanceOf(OntologyValidationError)
-    await expect(
-      sixb.objects(Room).requestAction({
-        id: "room:1",
-        actionId: "nonexistent",
-      })
-    ).rejects.toThrow("Unknown action 'nonexistent'")
-  })
-
-  test("rejects actions that are not valid for the object type", async () => {
-    const sixb = createTestSixb({
-      id: "action-test",
-      ontology: [Room, SuiteRoom],
-      actions: [actionDefinition(setTemperature), actionDefinition(prepareSuite)],
-      ...createTestRuntimeDeps(),
-    })
-
-    await sixb.objects(Room).upsert({
-      properties: { id: "room:1", externalId: "R1", name: "Room 1" },
-    })
-
-    await expect(
-      sixb.objects(Room).requestAction({
-        id: "room:1",
-        actionId: "prepareSuite",
-      })
-    ).rejects.toThrow("Action 'prepareSuite' is not valid for object type 'Room'")
-  })
-
-  test("rejects missing required param", async () => {
-    const sixb = createTestSixb({
-      id: "action-test",
-      ontology: [Room],
-      actions: [actionDefinition(setTemperature)],
-      ...createTestRuntimeDeps(),
-    })
-
-    await sixb.objects(Room).upsert({
-      properties: { id: "room:1", externalId: "R1", name: "Room 1" },
-    })
-
-    await expect(
-      sixb.objects(Room).requestAction({
-        id: "room:1",
+  test.each([
+    {
+      name: "an unknown action",
+      request: { actionId: "nonexistent", subject: room1 },
+      message: "Unknown action 'nonexistent'",
+    },
+    {
+      name: "an action that is not valid for the object type",
+      request: { actionId: "prepareSuite", subject: room1 },
+      message: "Action 'prepareSuite' is not valid for object type 'Room'",
+    },
+    {
+      name: "an object action without an object subject",
+      request: { actionId: "setTemperature", params: { target: 72 } },
+      message: "Action 'setTemperature' requires an object subject.",
+    },
+    {
+      name: "a global action with an object subject",
+      request: { actionId: "createRoom", subject: room1, params: { id: "room:2", name: "Room 2" } },
+      message: "Action 'createRoom' does not accept an object subject.",
+    },
+    {
+      name: "a missing required param",
+      request: { actionId: "setTemperature", subject: room1, params: {} },
+      message: "Missing required param 'target'",
+    },
+    {
+      name: "a missing required nullable param",
+      request: { actionId: "recordNullableNote", params: {} },
+      message: "Missing required param 'note'",
+    },
+    {
+      name: "an unknown param",
+      request: {
         actionId: "setTemperature",
-        params: {},
-      })
-    ).rejects.toBeInstanceOf(OntologyValidationError)
-    await expect(
-      sixb.objects(Room).requestAction({
-        id: "room:1",
-        actionId: "setTemperature",
-        params: {},
-      })
-    ).rejects.toThrow("Missing required param 'target'")
-  })
-
-  test("rejects unknown param", async () => {
-    const sixb = createTestSixb({
-      id: "action-test",
-      ontology: [Room],
-      actions: [actionDefinition(setTemperature)],
-      ...createTestRuntimeDeps(),
-    })
-
-    await sixb.objects(Room).upsert({
-      properties: { id: "room:1", externalId: "R1", name: "Room 1" },
-    })
-
-    await expect(
-      sixb.objects(Room).requestAction({
-        id: "room:1",
-        actionId: "setTemperature",
+        subject: room1,
         params: { target: 72, bogus: "nope" },
+      },
+      message: "Unknown param 'bogus'",
+    },
+    {
+      name: "a null non-nullable param",
+      request: { actionId: "setTemperature", subject: room1, params: { target: null } },
+      message: "Action param Room.setTemperature.target cannot be null",
+    },
+    {
+      name: "a param of the wrong type",
+      request: { actionId: "createRoom", params: { id: "room:1", name: 42 } },
+      message: "Property createRoom.name must be a string",
+    },
+    {
+      name: "an enum param outside its values",
+      request: {
+        actionId: "updateRoomCategory",
+        subject: room1,
+        params: { category: "unsupported" },
+      },
+      message: "must be one of: general_services, construction",
+    },
+    {
+      name: "a JS number for a decimal param",
+      request: { actionId: "recordExactAmount", params: { amount: 1.1 } },
+      message: "must be an exact decimal string",
+    },
+    {
+      name: "an object ref param of the wrong object type",
+      request: {
+        actionId: "attachRelatedRoom",
+        subject: room1,
+        params: { relatedRoom: { objectTypeId: "SuiteRoom", primaryId: "suite:1" } },
+      },
+      message: 'Room.attachRelatedRoom.relatedRoom.objectTypeId must be "Room"',
+    },
+    {
+      name: "an object ref param without a string primary id",
+      request: {
+        actionId: "attachRelatedRoom",
+        subject: room1,
+        params: { relatedRoom: { objectTypeId: "Room" } },
+      },
+      message: "Room.attachRelatedRoom.relatedRoom.primaryId must be a string",
+    },
+    {
+      name: "an object ref param with unknown fields",
+      request: {
+        actionId: "attachRelatedRoom",
+        subject: room1,
+        params: { relatedRoom: { objectTypeId: "Room", primaryId: "room:2", label: "Room 2" } },
+      },
+      message: "Unknown field 'Room.attachRelatedRoom.relatedRoom.label'",
+    },
+  ])("rejects $name before recording a run", async ({ request, message }) => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const sixb = createTestSixb({
+      id: "action-request-test",
+      ontology: [Room, SuiteRoom],
+      actions: [
+        setTemperature,
+        prepareSuite,
+        createRoom,
+        attachRelatedRoom,
+        updateRoomCategory,
+        recordNullableNote,
+        recordExactAmount,
+      ].map(actionDefinition),
+      ...runtimeDeps,
+    })
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:1", externalId: "R1", name: "Room 1" },
+    })
+
+    const rejected = sixb.actions.request(request as Parameters<typeof sixb.actions.request>[0])
+
+    await expect(rejected).rejects.toBeInstanceOf(OntologyValidationError)
+    await expect(rejected).rejects.toThrow(message)
+    const { runs } = await runtimeDeps.storage.actionRuns.list({ projectId: "action-request-test" })
+    expect(runs).toHaveLength(0)
+  })
+
+  test("stores accepted params in their canonical form", async () => {
+    const sixb = createTestSixb({
+      id: "action-params-test",
+      ontology: [Room],
+      actions: [attachRelatedRoom, recordNullableNote, recordExactAmount].map(actionDefinition),
+      ...createTestRuntimeDeps(),
+    })
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:1", externalId: "R1", name: "Room 1" },
+    })
+    const relatedRoom = { objectTypeId: "Room", primaryId: "room:2" }
+
+    await expect(
+      sixb.actions.request({ actionId: "recordNullableNote", params: { note: null } })
+    ).resolves.toMatchObject({ status: "succeeded", params: { note: null } })
+    await expect(
+      sixb.actions.request({
+        actionId: "recordExactAmount",
+        params: { amount: "+009007199254740993.0100" } as never,
       })
-    ).rejects.toThrow("Unknown param 'bogus'")
+    ).resolves.toMatchObject({ status: "succeeded", params: { amount: "9007199254740993.01" } })
+    await expect(
+      sixb.objects(Room).requestAction({
+        id: "room:1",
+        actionId: "attachRelatedRoom",
+        params: { relatedRoom },
+      })
+    ).resolves.toMatchObject({ status: "succeeded", params: { relatedRoom } })
   })
 
   test("preserves omitted and null params as distinct values", async () => {
@@ -452,154 +488,6 @@ describe("requestAction", () => {
     ).rejects.toThrow("different request payload")
   })
 
-  test("enforces required and nullable validation independently", async () => {
-    const sixb = createTestSixb({
-      id: "nullable-action-test",
-      ontology: [Room],
-      actions: [
-        actionDefinition(setTemperature),
-        actionDefinition(updateRoomCategory),
-        actionDefinition(recordNullableNote),
-      ],
-      ...createTestRuntimeDeps(),
-    })
-
-    await expect(
-      sixb.actions.request({ actionId: "recordNullableNote", params: {} })
-    ).rejects.toThrow("Missing required param 'note'")
-
-    await expect(
-      sixb.actions.request({ actionId: "recordNullableNote", params: { note: null } })
-    ).resolves.toMatchObject({ status: "succeeded", params: { note: null } })
-
-    await expect(
-      sixb.actions.request({
-        actionId: "setTemperature",
-        subject: { kind: "object", objectTypeId: "Room", primaryId: "room:1" },
-        params: { target: null },
-      })
-    ).rejects.toThrow("Action param Room.setTemperature.target cannot be null")
-
-    await expect(
-      sixb.actions.request({
-        actionId: "updateRoomCategory",
-        subject: { kind: "object", objectTypeId: "Room", primaryId: "room:1" },
-        params: { category: "unsupported" },
-      })
-    ).rejects.toThrow("must be one of: general_services, construction")
-  })
-
-  test("canonicalizes exact decimal params and rejects JS numbers", async () => {
-    const runtimeDeps = createTestRuntimeDeps()
-    const sixb = createTestSixb({
-      id: "decimal-action-test",
-      ontology: [],
-      actions: [actionDefinition(recordExactAmount)],
-      ...runtimeDeps,
-    })
-
-    const requested = await sixb.actions.request({
-      actionId: "recordExactAmount",
-      params: { amount: "+009007199254740993.0100" } as never,
-    })
-
-    expect(requested.params).toEqual({ amount: "9007199254740993.01" })
-    await expect(
-      sixb.actions.request({
-        actionId: "recordExactAmount",
-        params: { amount: 1.1 } as never,
-      })
-    ).rejects.toThrow("must be an exact decimal string")
-  })
-
-  test("accepts object ref params", async () => {
-    const runtimeDeps = createTestRuntimeDeps()
-    const sixb = createTestSixb({
-      id: "action-ref-test",
-      ontology: [Room],
-      actions: [actionDefinition(attachRelatedRoom)],
-      ...runtimeDeps,
-    })
-
-    expect(attachRelatedRoom.params.relatedRoom.schema).toEqual({
-      type: "objectRef",
-      objectTypeId: "Room",
-    })
-
-    await sixb.objects(Room).upsert({
-      properties: { id: "room:1", externalId: "R1", name: "Room 1" },
-    })
-
-    const run = await sixb.objects(Room).requestAction({
-      id: "room:1",
-      actionId: "attachRelatedRoom",
-      params: {
-        relatedRoom: { objectTypeId: "Room", primaryId: "room:2" },
-      },
-    })
-
-    expect(run.params).toEqual({
-      relatedRoom: { objectTypeId: "Room", primaryId: "room:2" },
-    })
-  })
-
-  test("rejects object ref params with the wrong object type", async () => {
-    const sixb = createTestSixb({
-      id: "action-ref-test",
-      ontology: [Room],
-      actions: [actionDefinition(attachRelatedRoom)],
-      ...createTestRuntimeDeps(),
-    })
-
-    await expect(
-      sixb.objects(Room).requestAction({
-        id: "room:1",
-        actionId: "attachRelatedRoom",
-        params: {
-          relatedRoom: { objectTypeId: "SuiteRoom", primaryId: "suite:1" },
-        },
-      })
-    ).rejects.toThrow('Room.attachRelatedRoom.relatedRoom.objectTypeId must be "Room"')
-  })
-
-  test("rejects object ref params without a string primary id", async () => {
-    const sixb = createTestSixb({
-      id: "action-ref-test",
-      ontology: [Room],
-      actions: [actionDefinition(attachRelatedRoom)],
-      ...createTestRuntimeDeps(),
-    })
-
-    await expect(
-      sixb.objects(Room).requestAction({
-        id: "room:1",
-        actionId: "attachRelatedRoom",
-        params: {
-          relatedRoom: { objectTypeId: "Room" },
-        },
-      })
-    ).rejects.toThrow("Room.attachRelatedRoom.relatedRoom.primaryId must be a string")
-  })
-
-  test("rejects object ref params with unknown fields", async () => {
-    const sixb = createTestSixb({
-      id: "action-ref-test",
-      ontology: [Room],
-      actions: [actionDefinition(attachRelatedRoom)],
-      ...createTestRuntimeDeps(),
-    })
-
-    await expect(
-      sixb.objects(Room).requestAction({
-        id: "room:1",
-        actionId: "attachRelatedRoom",
-        params: {
-          relatedRoom: { objectTypeId: "Room", primaryId: "room:2", label: "Room 2" },
-        },
-      })
-    ).rejects.toThrow("Unknown field 'Room.attachRelatedRoom.relatedRoom.label'")
-  })
-
   test("fails the run, not the request, when the target object is missing", async () => {
     const runtimeDeps = createTestRuntimeDeps()
     const sixb = createTestSixb({
@@ -623,7 +511,7 @@ describe("requestAction", () => {
     })
   })
 
-  test("runs the Action under its own execution and announces its lifecycle", async () => {
+  test("runs the Action under its own execution", async () => {
     const runtimeDeps = createTestRuntimeDeps()
     let invoked = 0
     const counted = defineAction("counted")
@@ -688,53 +576,6 @@ describe("requestAction", () => {
       id: sixb.execution.id,
       correlationId: sixb.execution.correlationId,
     })
-  })
-
-  test("answers a reused run id with its terminal run and rejects conflicting payloads", async () => {
-    const runtimeDeps = createTestRuntimeDeps()
-    let writebacks = 0
-    const countedTemperature = defineAction("setTemperature")
-      .on(Room)
-      .params({ target: param("double") })
-      .writeback(() => {
-        writebacks += 1
-      })
-    const sixb = createTestSixb({
-      id: "action-idempotency-test",
-      ontology: [Room],
-      actions: [actionDefinition(countedTemperature)],
-      ...runtimeDeps,
-    })
-
-    await sixb.objects(Room).upsert({
-      properties: { id: "room:1", externalId: "R1", name: "Room 1" },
-    })
-
-    const first = await sixb.objects(Room).requestAction({
-      id: "room:1",
-      actionId: "setTemperature",
-      params: { target: 72 },
-      runId: "act_fixed",
-    })
-    const second = await sixb.objects(Room).requestAction({
-      id: "room:1",
-      actionId: "setTemperature",
-      params: { target: 72 },
-      runId: "act_fixed",
-    })
-
-    expect(first).toMatchObject({ id: "act_fixed", status: "succeeded" })
-    expect(second).toEqual(first)
-    expect(writebacks).toBe(1)
-
-    await expect(
-      sixb.objects(Room).requestAction({
-        id: "room:1",
-        actionId: "setTemperature",
-        params: { target: 73 },
-        runId: "act_fixed",
-      })
-    ).rejects.toBeInstanceOf(ActionRunError)
   })
 
   // Guard proof: drop the `executing` check from `ActionRunExecutor.request`
@@ -1026,21 +867,51 @@ describe("requestAction", () => {
     await expect(first).resolves.toEqual(stored)
   })
 
-  test("calls onRequested before the run executes, with nothing recorded yet", async () => {
-    const runtimeDeps = createTestRuntimeDeps()
+  // Guard proof: drop the catch around `onRequested` in `ActionRunExecutor.execute`
+  // (`actions/run/executor.ts`), and the request rejects with the hook's own, uncoded error.
+  test("calls onRequested before the run executes, and starts nothing when it throws", async () => {
     const calls: string[] = []
     const recorded = defineAction("recorded")
       .params({})
       .writeback(() => {
         calls.push("writeback")
       })
+    const reports: string[] = []
+    const runtimeDeps = createTestRuntimeDeps()
     const sixb = createTestSixb({
       id: "action-on-requested-test",
       ontology: [Room],
       actions: [actionDefinition(recorded)],
+      onError: (_error, context) => {
+        reports.push(context.type)
+      },
       ...runtimeDeps,
     })
+    const hookError = new Error("caller withdrew")
 
+    await expect(
+      sixb.actions.request({
+        actionId: "recorded",
+        runId: "act_hooked",
+        onRequested: () => {
+          throw hookError
+        },
+      })
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      message:
+        "[Sixb] Action run 'act_hooked' did not start: its requester failed before it executed.",
+      cause: hookError,
+    })
+    expect(calls).toEqual([])
+    expect(
+      await runtimeDeps.storage.actionRuns.getById({
+        projectId: "action-on-requested-test",
+        id: "act_hooked",
+      })
+    ).toBeNull()
+
+    // Nothing was recorded, so the same run id runs once requested again, after its hook.
     const run = await sixb.actions.request({
       actionId: "recorded",
       runId: "act_hooked",
@@ -1055,57 +926,6 @@ describe("requestAction", () => {
 
     expect(run.status).toBe("succeeded")
     expect(calls).toEqual(["requested:act_hooked:unrecorded", "writeback"])
-  })
-
-  // Guard proof: drop the catch around `onRequested` in `ActionRunExecutor.execute`
-  // (`actions/run/executor.ts`), and the request rejects with the hook's own, uncoded error.
-  test("starts and records nothing when onRequested throws", async () => {
-    let writebacks = 0
-    const recorded = defineAction("recorded")
-      .params({})
-      .writeback(() => {
-        writebacks += 1
-      })
-    const reports: string[] = []
-    const runtimeDeps = createTestRuntimeDeps()
-    const sixb = createTestSixb({
-      id: "action-on-requested-failure-test",
-      ontology: [Room],
-      actions: [actionDefinition(recorded)],
-      onError: (_error, context) => {
-        reports.push(context.type)
-      },
-      ...runtimeDeps,
-    })
-    const hookError = new Error("caller withdrew")
-
-    await expect(
-      sixb.actions.request({
-        actionId: "recorded",
-        runId: "act_withdrawn",
-        onRequested: () => {
-          throw hookError
-        },
-      })
-    ).rejects.toMatchObject({
-      code: "internal.unexpected",
-      message:
-        "[Sixb] Action run 'act_withdrawn' did not start: its requester failed before it executed.",
-      cause: hookError,
-    })
-    expect(writebacks).toBe(0)
-    expect(
-      await runtimeDeps.storage.actionRuns.getById({
-        projectId: "action-on-requested-failure-test",
-        id: "act_withdrawn",
-      })
-    ).toBeNull()
-
-    // Nothing was recorded, so the same run id runs once requested again.
-    await expect(
-      sixb.actions.request({ actionId: "recorded", runId: "act_withdrawn" })
-    ).resolves.toMatchObject({ status: "succeeded" })
-    expect(writebacks).toBe(1)
     await flushSixbErrors(sixb)
     expect(reports).toEqual([])
   })
@@ -1279,60 +1099,6 @@ describe("requestAction", () => {
       params: { id: "room:1", name: "Room 1" },
     })
   })
-
-  test("rejects invalid global action param schemas before running", async () => {
-    const runtimeDeps = createTestRuntimeDeps()
-    const sixb = createTestSixb({
-      id: "global-action-test",
-      ontology: [Room],
-      actions: [actionDefinition(createRoom)],
-      ...runtimeDeps,
-    })
-
-    await expect(
-      sixb.actions.request({
-        actionId: "createRoom",
-        params: { id: "room:1", name: 42 },
-      })
-    ).rejects.toBeInstanceOf(OntologyValidationError)
-
-    const { runs } = await runtimeDeps.storage.actionRuns.list({ projectId: "global-action-test" })
-    expect(runs).toHaveLength(0)
-    expect(await sixb.objects(Room).get("room:1")).toBeNull()
-  })
-
-  test("rejects object-scoped actions without an object subject", async () => {
-    const sixb = createTestSixb({
-      id: "global-action-test",
-      ontology: [Room],
-      actions: [actionDefinition(setTemperature)],
-      ...createTestRuntimeDeps(),
-    })
-
-    await expect(
-      sixb.actions.request({
-        actionId: "setTemperature",
-        params: { target: 72 },
-      })
-    ).rejects.toThrow("Action 'setTemperature' requires an object subject.")
-  })
-
-  test("rejects global actions with an object subject", async () => {
-    const sixb = createTestSixb({
-      id: "global-action-test",
-      ontology: [Room],
-      actions: [actionDefinition(createRoom)],
-      ...createTestRuntimeDeps(),
-    })
-
-    await expect(
-      sixb.actions.request({
-        actionId: "createRoom",
-        subject: { kind: "object", objectTypeId: "Room", primaryId: "room:1" },
-        params: { id: "room:2", name: "Room 2" },
-      })
-    ).rejects.toThrow("Action 'createRoom' does not accept an object subject.")
-  })
 })
 
 describe("drainActionRuns", () => {
@@ -1435,9 +1201,9 @@ describe("drainActionRuns", () => {
     await started.promise
     const consoleError = spyOn(console, "error").mockImplementation(() => {})
     try {
-      await drainActionRuns(host, 10)
+      await drainActionRuns(host, 0)
       expect(consoleError).toHaveBeenCalledWith(
-        "[Sixb] Stopped waiting after 10 ms for 1 in-flight Action run(s)."
+        "[Sixb] Stopped waiting after 0 ms for 1 in-flight Action run(s)."
       )
     } finally {
       consoleError.mockRestore()
@@ -1501,7 +1267,8 @@ describe("Action effects", () => {
     const runtimeDeps = createTestRuntimeDeps()
     const effectsStarted = Promise.withResolvers<void>()
     const releaseEffects = Promise.withResolvers<void>()
-    const reports: SixbErrorContext[] = []
+    const effectsError = new Error("Slack is down")
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
     const notify = defineAction("notify")
       .params({ fail: param("boolean") })
       .edits(({ objects }) => {
@@ -1511,14 +1278,14 @@ describe("Action effects", () => {
         expect(commit.created).toBe(true)
         effectsStarted.resolve()
         await releaseEffects.promise
-        if (params.fail) throw new Error("Slack is down")
+        if (params.fail) throw effectsError
       })
     const host = new SixbHost({
       id: "action-effects-test",
       ontology: [Room],
       actions: [actionDefinition(notify)],
-      onError: (_error, context) => {
-        reports.push(context)
+      onError: (error, context) => {
+        reports.push({ error, context })
       },
       ...runtimeDeps,
     })
@@ -1550,9 +1317,15 @@ describe("Action effects", () => {
     })
     expect(recorded?.error).toBeUndefined()
     await flushSixbErrors(host)
-    expect(reports).toMatchObject([
-      { type: "action.phase.failed", runId: "act_notify", phase: "effects" },
-    ])
+    expect(reports).toHaveLength(1)
+    expect(reports[0]?.error).toBe(effectsError)
+    expect(reports[0]?.context).toMatchObject({
+      type: "action.phase.failed",
+      runId: "act_notify",
+      phase: "effects",
+      failure: recorded?.effects?.error,
+      occurredAt: recorded?.effects?.error?.at,
+    })
   })
 
   test("runs no effects for a run that committed no edits", async () => {

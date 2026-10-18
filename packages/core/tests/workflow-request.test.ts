@@ -64,10 +64,16 @@ async function claimAll(host: { queues: Queues; id: string }) {
 }
 
 describe("sixb.workflows.request", () => {
-  test("queues a run, enqueues a job, and emits workflow.run.queued", async () => {
+  test("queues a run, enqueues a job, and emits workflow.run.queued with the request source", async () => {
     const { host, sixb } = createSixb()
+    const source = {
+      type: "webhook" as const,
+      connectorId: "companycam",
+      webhookId: "photo-created",
+      deliveryId: "delivery-1",
+    }
 
-    const result = await sixb.workflows.request(draftInvoice, { input: validInput() })
+    const result = await sixb.workflows.request(draftInvoice, { input: validInput(), source })
 
     expect(result.created).toBe(true)
     expect(result.workflowId).toBe("draft-invoice")
@@ -83,6 +89,8 @@ describe("sixb.workflows.request", () => {
     expect(run?.input).toEqual({
       transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
     })
+    // The source is the event's to carry: neither the run nor its execution duplicates it.
+    expect(run).not.toHaveProperty("source")
     const execution = run
       ? await host.storage.executions.getById({
           projectId: sixb.execution.projectId,
@@ -109,6 +117,7 @@ describe("sixb.workflows.request", () => {
       runId: result.runId,
       queuedAt: result.queuedAt,
       jobId: result.jobId,
+      source,
     })
   })
 
@@ -200,20 +209,14 @@ describe("sixb.workflows.request", () => {
     ).toBeNull()
   })
 
-  test("requestById rejects unknown input fields at runtime", async () => {
-    const { sixb } = createSixb()
-
-    await expect(
-      sixb.workflows.requestById({ workflowId: "draft-invoice", input: { bogus: true } })
-    ).rejects.toBeInstanceOf(WorkflowValidationError)
-  })
-
   test("rejects invalid input before any storage or queue write", async () => {
     const { host, sixb } = createSixb()
 
-    await expect(
-      sixb.workflows.requestById({ workflowId: "draft-invoice", runId: "run_fixed", input: {} })
-    ).rejects.toBeInstanceOf(WorkflowValidationError)
+    for (const input of [{}, { ...validInput(), bogus: true }]) {
+      await expect(
+        sixb.workflows.requestById({ workflowId: "draft-invoice", runId: "run_fixed", input })
+      ).rejects.toBeInstanceOf(WorkflowValidationError)
+    }
 
     const run = await host.storage.workflowRuns?.getById({
       projectId: sixb.execution.projectId,
@@ -268,21 +271,6 @@ describe("sixb.workflows.request", () => {
     ).rejects.toThrow("already exists with a different request payload")
   })
 
-  test("emits the request source without duplicating it on the run", async () => {
-    const { sixb } = createSixb()
-    const source = {
-      type: "webhook" as const,
-      connectorId: "companycam",
-      webhookId: "photo-created",
-      deliveryId: "delivery-1",
-    }
-
-    await sixb.workflows.request(draftInvoice, { input: validInput(), source })
-
-    const events = await sixb.events.read({ types: ["workflow.run.queued"] })
-    expect(events[0]?.payload).toMatchObject({ source })
-  })
-
   test("snapshots durable service-account groups from request authority", async () => {
     const { host } = createSixb()
     const auth = host.storage.auth
@@ -327,24 +315,6 @@ describe("sixb.workflows.request", () => {
       requestedBy: principal,
       requesterGroupIds: ["finance", "operations"],
     })
-  })
-
-  test("retried webhook delivery with a deterministic runId enqueues a single run", async () => {
-    const { host, sixb } = createSixb()
-    const source = {
-      type: "webhook" as const,
-      connectorId: "companycam",
-      webhookId: "photo-created",
-      deliveryId: "delivery-1",
-    }
-    const options = { runId: "run_companycam_photo-1", input: validInput(), source }
-
-    const first = await sixb.workflows.request(draftInvoice, options)
-    const second = await sixb.workflows.request(draftInvoice, options)
-
-    expect(first.created).toBe(true)
-    expect(second.created).toBe(false)
-    expect(await claimAll(host)).toHaveLength(1)
   })
 
   test("throws a clear error when workflow run storage is not configured", async () => {
@@ -397,52 +367,7 @@ describe("automatic workflow dispatch", () => {
     expect(after?.status).toBe("queued")
     expect(await claimAll(host)).toHaveLength(1)
   })
-  test("persists an honest root execution before publishing the queue job", async () => {
-    const { host } = createSixb()
-    const dispatcher = new WorkflowRunDispatcher(host)
-
-    const result = await dispatcher.dispatch({
-      workflowId: draftInvoice.id,
-      runId: "workflow:draft-invoice:schedule:daily:event:event-1",
-      input: validInput(),
-      scheduleId: "daily",
-      source: { type: "schedule", eventId: "event-1" },
-      correlationId: "correlation-1",
-      metadata: { sourceEventId: "event-1" },
-    })
-
-    const run = await host.storage.workflowRuns?.getById({
-      projectId: host.id,
-      id: result.runId,
-    })
-    const execution = run
-      ? await host.storage.executions.getById({ projectId: host.id, id: run.executionId })
-      : null
-    expect(execution).toMatchObject({
-      projectId: host.id,
-      executor: { type: "primitive", kind: "workflow", runId: result.runId },
-      source: { type: "schedule", eventId: "event-1" },
-      correlationId: "correlation-1",
-      authorizationRef: {
-        type: "trustedPrimitive",
-        primitive: { kind: "workflow", id: draftInvoice.id, runId: result.runId },
-      },
-    })
-    expect(execution?.requestedBy).toBeUndefined()
-
-    const [claimed] = await claimAll(host)
-    expect(claimed?.job).toMatchObject({
-      id: result.runId,
-      payload: { runId: result.runId },
-      metadata: { sourceEventId: "event-1" },
-    })
-    const [queuedEvent] = await host.events.read({ types: ["workflow.run.queued"] })
-    expect(
-      queuedEvent && "correlationId" in queuedEvent ? queuedEvent.correlationId : undefined
-    ).toBe("correlation-1")
-  })
-
-  test("uses event provenance for event-based schedules and deduplicates replay", async () => {
+  test("persists an honest root execution before publishing the job, and deduplicates replay", async () => {
     const { host } = createSixb()
     const dispatcher = new WorkflowRunDispatcher(host)
     const input = {
@@ -452,6 +377,7 @@ describe("automatic workflow dispatch", () => {
       scheduleId: "on-update",
       source: { type: "event" as const, eventId: "event-2" },
       correlationId: "upstream-correlation",
+      metadata: { sourceEventId: "event-2" },
     }
 
     const first = await dispatcher.dispatch(input)
@@ -464,10 +390,27 @@ describe("automatic workflow dispatch", () => {
       ? await host.storage.executions.getById({ projectId: host.id, id: run.executionId })
       : null
     expect(execution).toMatchObject({
+      projectId: host.id,
+      executor: { type: "primitive", kind: "workflow", runId: input.runId },
       source: { type: "event", eventId: "event-2" },
       correlationId: "upstream-correlation",
+      authorizationRef: {
+        type: "trustedPrimitive",
+        primitive: { kind: "workflow", id: draftInvoice.id, runId: input.runId },
+      },
     })
-    expect(await claimAll(host)).toHaveLength(1)
+    expect(execution?.requestedBy).toBeUndefined()
+    const claimed = await claimAll(host)
+    expect(claimed).toHaveLength(1)
+    expect(claimed[0]?.job).toMatchObject({
+      id: input.runId,
+      payload: { runId: input.runId },
+      metadata: { sourceEventId: "event-2" },
+    })
+    const [queuedEvent] = await host.events.read({ types: ["workflow.run.queued"] })
+    expect(
+      queuedEvent && "correlationId" in queuedEvent ? queuedEvent.correlationId : undefined
+    ).toBe("upstream-correlation")
     await expect(
       dispatcher.dispatch({ ...input, correlationId: "different-correlation" })
     ).rejects.toThrow("already exists with different automatic provenance")
