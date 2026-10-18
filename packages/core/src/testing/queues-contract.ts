@@ -29,6 +29,11 @@ export interface QueueContractSuiteOptions {
    * Time to wait for a delayed retry to become visible again. Defaults to `shortLeaseMs + 15`.
    */
   readonly retryRedeliveryMs?: number
+  /**
+   * Lets `ms` milliseconds pass for the provider. Defaults to a real sleep. An in-process
+   * provider can advance fake timers here instead, so lease and delay waits cost no wall time.
+   */
+  readonly sleep?: (ms: number) => Promise<void>
 }
 
 /**
@@ -43,6 +48,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
   const shortLeaseMs = options.shortLeaseMs ?? 20
   const leaseExpiryRedeliveryMs = options.leaseExpiryRedeliveryMs ?? shortLeaseMs + 10
   const retryRedeliveryMs = options.retryRedeliveryMs ?? shortLeaseMs + 15
+  const sleep = options.sleep ?? ((ms: number) => Bun.sleep(ms))
 
   const withQueues = async (body: (queues: Queues) => Promise<void>): Promise<void> => {
     const queues = await options.createQueues()
@@ -110,27 +116,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         })
       })
 
-      test("deduplicates repeated enqueue with a caller-supplied id", async () => {
-        await withQueues(async (queues) => {
-          const input = {
-            id: "dispatch-run-1",
-            type: "sync.run.requested" as const,
-            payload: { runId: "sync-1" },
-          }
-          const [[first], [second]] = await Promise.all([
-            queues.syncRuns.enqueue({ projectId: "project-a", jobs: [input] }),
-            queues.syncRuns.enqueue({ projectId: "project-a", jobs: [input] }),
-          ])
-
-          expect(first?.id).toBe(input.id)
-          expect(second?.id).toBe(input.id)
-          await expect(
-            queues.syncRuns.claim({ projectId: "project-a", workerId: "worker-1", limit: 2 })
-          ).resolves.toHaveLength(1)
-        })
-      })
-
-      test("treats caller-supplied ids as opaque across the job lifecycle", async () => {
+      test("deduplicates a caller-supplied id and treats it as opaque across the lifecycle", async () => {
         await withQueues(async (queues) => {
           const id = "workflow:review-meeting:node:0"
           const input = {
@@ -143,14 +129,16 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             queues.syncRuns.enqueue({ projectId: "project-a", jobs: [input] }),
             queues.syncRuns.enqueue({ projectId: "project-a", jobs: [input] }),
           ])
-          const [claimed] = await queues.syncRuns.claim({
+          const claims = await queues.syncRuns.claim({
             projectId: "project-a",
             workerId: "worker-1",
             limit: 2,
           })
+          const [claimed] = claims
 
           expect(first?.id).toBe(id)
           expect(duplicate?.id).toBe(id)
+          expect(claims).toHaveLength(1)
           expect(claimed?.job.id).toBe(id)
           if (queues.syncRuns.renewLease) {
             await expect(
@@ -266,7 +254,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             projectId: "project-a",
             workerId: "worker-1",
           })
-          await Bun.sleep(shortLeaseMs + 40)
+          await sleep(shortLeaseMs + 40)
           const after = await queues.syncRuns.claim({
             projectId: "project-a",
             workerId: "worker-1",
@@ -290,7 +278,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             .finally(() => {
               settled = true
             })
-          await Bun.sleep(50)
+          await sleep(50)
           expect(settled).toBe(false)
 
           await queues.syncRuns.enqueue({
@@ -310,11 +298,13 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" }, availableAt }],
           })
 
-          const claimed = await queues.syncRuns.claim({
+          const claiming = queues.syncRuns.claim({
             projectId: "project-a",
             workerId: "worker-1",
             signal: AbortSignal.timeout(4_000),
           })
+          await sleep(shortLeaseMs)
+          const claimed = await claiming
 
           expect(claimed).toHaveLength(1)
           expect(Date.now()).toBeGreaterThanOrEqual(Date.parse(availableAt))
@@ -330,7 +320,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             workerId: "worker-1",
             signal: waiting.signal,
           })
-          await Bun.sleep(20)
+          await sleep(20)
           waiting.abort()
 
           expect(await claim).toEqual([])
@@ -526,7 +516,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             leaseId: firstClaim!.leaseId,
             availableAt: retryAt,
           })
-          await Bun.sleep(retryRedeliveryMs + 30)
+          await sleep(retryRedeliveryMs + 30)
           const [secondClaim] = await queues.syncRuns.claim({
             projectId: "project-a",
             workerId: "worker-2",
@@ -619,20 +609,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         })
       })
 
-      test("returns null for unknown jobId", async () => {
-        await withQueues(async (queues) => {
-          const result = await queues.syncRuns.renewLease?.({
-            projectId: "project-a",
-            jobId: "00000000-0000-0000-0000-000000000000",
-            leaseId: "no-such-lease",
-            leaseMs: shortLeaseMs,
-          })
-
-          expect(result).toBeNull()
-        })
-      })
-
-      test("returns null when the leaseId does not match", async () => {
+      test("returns null for an unknown job or a lease it does not hold", async () => {
         await withQueues(async (queues) => {
           const [job] = await queues.syncRuns.enqueue({
             projectId: "project-a",
@@ -644,20 +621,27 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             leaseMs: shortLeaseMs * 10,
           })
 
-          const renewed = await queues.syncRuns.renewLease?.({
+          const unknown = await queues.syncRuns.renewLease?.({
+            projectId: "project-a",
+            jobId: "00000000-0000-0000-0000-000000000000",
+            leaseId: "no-such-lease",
+            leaseMs: shortLeaseMs,
+          })
+          const mismatched = await queues.syncRuns.renewLease?.({
             projectId: "project-a",
             jobId: job!.id,
             leaseId: "not-the-right-lease",
             leaseMs: shortLeaseMs,
           })
 
-          expect(renewed).toBeNull()
+          expect(unknown).toBeNull()
+          expect(mismatched).toBeNull()
         })
       })
     })
 
     describe("redelivery", () => {
-      test("redelivers after lease expiry with attempt incremented", async () => {
+      test("redelivers after lease expiry and rejects completing the expired lease", async () => {
         await withQueues(async (queues) => {
           const [job] = await queues.syncRuns.enqueue({
             projectId: "project-a",
@@ -669,7 +653,15 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             leaseMs: shortLeaseMs,
           })
 
-          await Bun.sleep(leaseExpiryRedeliveryMs)
+          await sleep(leaseExpiryRedeliveryMs)
+
+          await expect(
+            queues.syncRuns.complete({
+              projectId: "project-a",
+              jobId: job!.id,
+              leaseId: first!.leaseId,
+            })
+          ).rejects.toBeInstanceOf(QueueError)
           const [second] = await queues.syncRuns.claim({
             projectId: "project-a",
             workerId: "worker-2",
@@ -679,30 +671,6 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           expect(first?.job.attempt).toBe(1)
           expect(second?.job.id).toBe(job?.id)
           expect(second!.job.attempt).toBeGreaterThanOrEqual(2)
-        })
-      })
-
-      test("rejects complete on an already-expired lease", async () => {
-        await withQueues(async (queues) => {
-          const [job] = await queues.syncRuns.enqueue({
-            projectId: "project-a",
-            jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" } }],
-          })
-          const [claim] = await queues.syncRuns.claim({
-            projectId: "project-a",
-            workerId: "worker-1",
-            leaseMs: shortLeaseMs,
-          })
-
-          await Bun.sleep(leaseExpiryRedeliveryMs)
-
-          await expect(
-            queues.syncRuns.complete({
-              projectId: "project-a",
-              jobId: job!.id,
-              leaseId: claim!.leaseId,
-            })
-          ).rejects.toBeInstanceOf(QueueError)
         })
       })
     })

@@ -167,29 +167,6 @@ export function runFileUploadSessionStorageContractSuite<TStorage extends FileUp
       })
     })
 
-    test("lists abandoned sessions for one project only", async () => {
-      await withStorage(async (storage) => {
-        await storage.create(
-          sessionInput("upload_ours", {
-            expiresAt: ago(HOUR_MS),
-            providerUpload: multipart("ours"),
-          })
-        )
-        await storage.create(
-          sessionInput("upload_theirs", {
-            projectId: "other-project",
-            expiresAt: ago(HOUR_MS),
-            providerUpload: multipart("theirs"),
-          })
-        )
-
-        const ids = (await storage.listAbandoned({ projectId, now: new Date(), limit: 10 })).map(
-          (session) => session.id
-        )
-        expect(ids).toEqual(["upload_ours"])
-      })
-    })
-
     test("never deletes an abandoned session, on read or on cleanup", async () => {
       await withStorage(async (storage) => {
         await storage.create(
@@ -212,7 +189,7 @@ export function runFileUploadSessionStorageContractSuite<TStorage extends FileUp
       })
     })
 
-    test("lists only abandoned sessions, oldest expiry first, within the limit", async () => {
+    test("lists only the project's abandoned sessions, oldest expiry first, within the limit", async () => {
       await withStorage(async (storage) => {
         await storage.create(
           sessionInput("upload_newer", { expiresAt: ago(HOUR_MS), providerUpload: multipart("n") })
@@ -232,6 +209,13 @@ export function runFileUploadSessionStorageContractSuite<TStorage extends FileUp
           })
         )
         await storage.abort("upload_aborted")
+        await storage.create(
+          sessionInput("upload_theirs", {
+            projectId: "other-project",
+            expiresAt: ago(3 * HOUR_MS),
+            providerUpload: multipart("theirs"),
+          })
+        )
 
         const ids = async (limit: number) =>
           (await storage.listAbandoned({ projectId, now: new Date(), limit })).map(

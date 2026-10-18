@@ -74,6 +74,10 @@ export function runShareSessionStorageContractSuite<TStorage extends ShareSessio
       await withStorage(async (storage) => {
         await storage.create(sessionInput())
         const valid = renewalInput({ expiresAt: new Date("2026-08-20T12:10:00.000Z") })
+        // The exact inactivity expiry is already expired.
+        await expect(
+          storage.renewIfValid({ ...valid, now: new Date(expiresAt) })
+        ).resolves.toBeNull()
         await expect(storage.renewIfValid(valid)).resolves.toMatchObject({
           id: "shs_1",
           expiresAt: new Date("2026-08-20T12:10:00.000Z"),
@@ -104,20 +108,6 @@ export function runShareSessionStorageContractSuite<TStorage extends ShareSessio
             renewalInput({
               now: new Date(absoluteExpiresAt),
               expiresAt: new Date("2026-08-20T13:00:00.000Z"),
-            })
-          )
-        ).resolves.toBeNull()
-      })
-    })
-
-    test("treats the exact inactivity expiry as expired", async () => {
-      await withStorage(async (storage) => {
-        await storage.create(sessionInput())
-        await expect(
-          storage.renewIfValid(
-            renewalInput({
-              now: new Date(expiresAt),
-              expiresAt: new Date("2026-08-20T12:10:00.000Z"),
             })
           )
         ).resolves.toBeNull()

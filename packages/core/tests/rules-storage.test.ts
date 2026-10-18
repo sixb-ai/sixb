@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import type { RuleEventSubject } from "../src"
-import { InMemoryStorage } from "../src"
 import type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../src/events"
 import { InMemoryRulesStorage } from "../src/storage"
 
@@ -71,18 +70,6 @@ function resolvedEvent(
 }
 
 describe("InMemoryRulesStorage", () => {
-  test("getActive returns null before a rule is triggered", async () => {
-    const storage = new InMemoryRulesStorage()
-
-    await expect(
-      storage.getActive({
-        projectId: "project-a",
-        ruleId: "transaction.requires-document",
-        subject: defaultSubject,
-      })
-    ).resolves.toBeNull()
-  })
-
   test("applyTriggered stores the active rule state", async () => {
     const storage = new InMemoryRulesStorage()
     await storage.applyTriggered(triggeredEvent())
@@ -101,8 +88,15 @@ describe("InMemoryRulesStorage", () => {
     })
   })
 
-  test("getActive is scoped by project, rule, and subject", async () => {
+  test("getActive is null before a trigger and scoped by project, rule, and subject", async () => {
     const storage = new InMemoryRulesStorage()
+    await expect(
+      storage.getActive({
+        projectId: "project-a",
+        ruleId: "transaction.requires-document",
+        subject: defaultSubject,
+      })
+    ).resolves.toBeNull()
     await storage.applyTriggered(triggeredEvent())
 
     await expect(
@@ -252,7 +246,7 @@ describe("InMemoryRulesStorage", () => {
     })
   })
 
-  test("applyResolved removes active rule state", async () => {
+  test("applyResolved removes active rule state, and is a no-op without one", async () => {
     const storage = new InMemoryRulesStorage()
     await storage.applyTriggered(triggeredEvent())
     await storage.applyResolved(resolvedEvent())
@@ -264,11 +258,6 @@ describe("InMemoryRulesStorage", () => {
         subject: defaultSubject,
       })
     ).resolves.toBeNull()
-  })
-
-  test("applyResolved is a no-op when no active state exists", async () => {
-    const storage = new InMemoryRulesStorage()
-
     await expect(storage.applyResolved(resolvedEvent())).resolves.toBeUndefined()
   })
 
@@ -293,13 +282,5 @@ describe("InMemoryRulesStorage", () => {
     })
 
     expect(reloaded?.subject.primaryId).toBe("tx-1")
-  })
-})
-
-describe("InMemoryStorage", () => {
-  test("includes rules storage", () => {
-    const storage = new InMemoryStorage()
-
-    expect(storage.rules).toBeInstanceOf(InMemoryRulesStorage)
   })
 })

@@ -316,33 +316,23 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
       })
     })
 
-    test("keeps one run while reclaim rotates its execution", async () => {
-      await withStorage(async (context) => {
-        const storage = context.projectionRuns
-        const input = replacementInput("replacement-run")
-        await admitProjectionRun(context, input)
-        const first = await storage.startOrReclaim(input)
-        const second = await storage.startOrReclaim(input)
-
-        expect(first.run).toMatchObject({ id: input.id, attempt: 1, status: "running" })
-        expect(second.run).toMatchObject({ id: input.id, attempt: 2, status: "running" })
-        expect(second.execution.executionToken).not.toBe(first.execution.executionToken)
-        expect(second.run).not.toHaveProperty("executionToken")
-        expect(await storage.getById({ projectId, id: input.id })).toMatchObject({
-          identity: replacementIdentity,
-          target: objectTarget,
-          progress: { sourceRowsRead: 0, sourceRowsSkipped: 0 },
-        })
-      })
-    })
-
-    test("fences every stale lock, progress, and terminal write", async () => {
+    test("keeps one run while reclaim rotates its execution and fences every stale write", async () => {
       await withStorage(async (context) => {
         const storage = context.projectionRuns
         const input = replacementInput("fenced-run")
         await admitProjectionRun(context, input)
         const stale = await storage.startOrReclaim(input)
         const current = await storage.startOrReclaim(input)
+
+        expect(stale.run).toMatchObject({ id: input.id, attempt: 1, status: "running" })
+        expect(current.run).toMatchObject({ id: input.id, attempt: 2, status: "running" })
+        expect(current.execution.executionToken).not.toBe(stale.execution.executionToken)
+        expect(current.run).not.toHaveProperty("executionToken")
+        expect(await storage.getById({ projectId, id: input.id })).toMatchObject({
+          identity: replacementIdentity,
+          target: objectTarget,
+          progress: { sourceRowsRead: 0, sourceRowsSkipped: 0 },
+        })
 
         await expect(storage.lockForMaterialization(executionInput(stale))).rejects.toThrow(
           "execution token is stale"

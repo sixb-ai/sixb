@@ -3,7 +3,7 @@ import type { StartWebhookRunInput, Storage, WebhookRunRecord } from "../storage
 import type { ExecutionStorage } from "../storage/executions"
 
 /** Create the durable execution required by a Webhook-run storage fixture. */
-export async function createTestWebhookExecution(
+async function createTestWebhookExecution(
   executions: ExecutionStorage,
   input: {
     readonly projectId: string

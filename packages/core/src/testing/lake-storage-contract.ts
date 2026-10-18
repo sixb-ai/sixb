@@ -124,36 +124,27 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
 
   describe(label, () => {
     describe("dataset definitions", () => {
-      test("creates, gets, lists, and reuses dataset definitions", async () => {
-        await withStorage(async (storage) => {
-          expect(await storage.getDataset(definitionDataset.id)).toBeNull()
-
-          const created = await storage.createDataset(definitionDataset)
-          const repeated = await storage.createDataset(definitionDataset)
-
-          expect(created).toEqual(definitionDataset)
-          expect(repeated).toEqual(definitionDataset)
-          expect(await storage.getDataset(definitionDataset.id)).toEqual(definitionDataset)
-          expect(await storage.getDataset("missing.dataset")).toBeNull()
-          expect(await storage.listDatasets()).toEqual([definitionDataset])
-          expect(await storage.listVersions(definitionDataset.id)).toEqual([])
-        })
-      })
-
-      test("round-trips keyed definitions through create, get, list, and reuse", async () => {
+      test("creates, gets, lists, and reuses plain and keyed dataset definitions", async () => {
         // Regression guard: omitting primaryKey from mergeDatasetDefinition makes reuse lose
-        // the key and fails this contract case.
+        // the key and fails the keyed case.
         await withStorage(async (storage) => {
-          const created = await storage.createDataset(keyedDefinitionDataset)
-          const repeated = await storage.createDataset(keyedDefinitionDataset)
+          const datasets = [keyedDefinitionDataset, definitionDataset]
+          for (const dataset of datasets) {
+            expect(await storage.getDataset(dataset.id)).toBeNull()
 
-          expect(created).toEqual(keyedDefinitionDataset)
-          expect(repeated).toEqual(keyedDefinitionDataset)
-          expect(await storage.getDataset(keyedDefinitionDataset.id)).toEqual(
-            keyedDefinitionDataset
+            const created = await storage.createDataset(dataset)
+            const repeated = await storage.createDataset(dataset)
+
+            expect(created).toEqual(dataset)
+            expect(repeated).toEqual(dataset)
+            expect(await storage.getDataset(dataset.id)).toEqual(dataset)
+            expect(await storage.listVersions(dataset.id)).toEqual([])
+          }
+          expect(await storage.getDataset("missing.dataset")).toBeNull()
+          const listed = await storage.listDatasets()
+          expect([...listed].sort((left, right) => left.id.localeCompare(right.id))).toEqual(
+            datasets
           )
-          expect(await storage.listDatasets()).toEqual([keyedDefinitionDataset])
-          expect(await storage.listVersions(keyedDefinitionDataset.id)).toEqual([])
         })
       })
 
@@ -504,6 +495,7 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
             rowCount: 2,
           })
 
+          // `listVersions` orders by creation time: a later millisecond keeps the order exact.
           await Bun.sleep(2)
 
           const appendWrite = await storage.beginWrite({
@@ -823,6 +815,7 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
             versionId: seedVersion.versionId,
           })
 
+          // `listVersions` orders by creation time: a later millisecond keeps the order exact.
           await Bun.sleep(2)
 
           const changedWrite = await storage.beginWrite({ dataset: writeDataset, mode: "snapshot" })
@@ -849,8 +842,6 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
           const seedWrite = await storage.beginWrite({ dataset: writeDataset, mode: "snapshot" })
           await seedWrite.writeRows([rowA, rowA, rowB])
           const seedVersion = await seedWrite.commit()
-
-          await Bun.sleep(2)
 
           // Same distinct rows and row count, but different duplicate counts:
           // this is new content, not a no-op.

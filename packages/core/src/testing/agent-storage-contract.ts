@@ -953,32 +953,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
 
     // ── execution reclaim ───────────────────────────────────────────────────────────────────────
 
-    test("reclaim rotates the execution token and bumps the attempt", async () => {
-      await withStorage(async (storage, fixture) => {
-        await storage.threads.create(threadInput())
-        await createAndStartRun(storage, fixture, runInput({ id: "run_1" }))
-
-        const reclaimed = await storage.runs.reclaim({
-          projectId,
-          id: "run_1",
-          execution: execution("exec_2"),
-        })
-        expect(reclaimed).toMatchObject({ status: "running", attempt: 2 })
-        expect(reclaimed.execution?.token).toBe("exec_2")
-
-        await expectAgentError(
-          storage.runs.finish({
-            projectId,
-            id: "run_1",
-            executionToken: "exec_1",
-            status: "succeeded",
-          }),
-          "execution_lost"
-        )
-      })
-    })
-
-    test("projects confirmed queue ownership monotonically and fences stale executions", async () => {
+    test("projects confirmed queue ownership monotonically and reclaim fences stale executions", async () => {
       await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput())
         await createAndStartRun(
@@ -1008,11 +983,22 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         })
         expect(older.execution?.queueLeaseExpiresAt.toISOString()).toBe("2026-06-23T10:03:00.000Z")
 
-        await storage.runs.reclaim({
+        const reclaimed = await storage.runs.reclaim({
           projectId,
           id: "run_1",
           execution: execution("exec_2", at("2026-06-23T10:04:00.000Z")),
         })
+        expect(reclaimed).toMatchObject({ status: "running", attempt: 2 })
+        expect(reclaimed.execution?.token).toBe("exec_2")
+        await expectAgentError(
+          storage.runs.finish({
+            projectId,
+            id: "run_1",
+            executionToken: "exec_1",
+            status: "succeeded",
+          }),
+          "execution_lost"
+        )
         await expectAgentError(
           storage.runs.confirmExecutionOwnership({
             projectId,

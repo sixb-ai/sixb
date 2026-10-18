@@ -206,7 +206,7 @@ export function runEffectiveStorageContractSuite<TStorage extends Storage>(
       })
     })
 
-    test("keeps delimiter-bearing object and batch-link identities distinct", async () => {
+    test("keeps delimiter-bearing identities distinct in batch and incident link reads", async () => {
       await withStorage(async (storage) => {
         const opaqueProjectId = `${projectId}-opaque-batch-keys`
         const fixture = createMaterializerTestFixture({
@@ -263,22 +263,17 @@ export function runEffectiveStorageContractSuite<TStorage extends Storage>(
         })
         expect(links.get(linkBatchKey(OpaqueA.id, "B:C", "D"))).toHaveLength(1)
         expect(links.get(linkBatchKey(OpaqueAB.id, "C", "D"))).toHaveLength(1)
-      })
-    })
 
-    test("preserves distinct incident links when opaque ids contain delimiters", async () => {
-      await withStorage(async (storage) => {
         const opaqueIdsProjectId = `${projectId}-opaque-link-ids`
         const firstSourceId = "opaque:source"
         const firstTargetId = `target:peers:${Device.id}:opaque:end`
         const secondSourceId = `${firstSourceId}:peers:${Device.id}:target`
         const secondTargetId = "opaque:end"
-        const fixture = createMaterializerTestFixture({
+        await createMaterializerTestFixture({
           projectId: opaqueIdsProjectId,
           ontology,
           storage,
-        })
-        await fixture.seed({
+        }).seed({
           objects: [
             device(firstSourceId, "First source"),
             device(firstTargetId, "First target"),

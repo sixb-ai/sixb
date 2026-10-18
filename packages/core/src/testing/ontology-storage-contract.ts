@@ -3,15 +3,18 @@ import type {
   ProjectionExecution,
   ProjectionMaterializationIdentity,
 } from "../materialization/model"
+import { linkRefSortKey, linkScopeSortKey } from "../materialization/refs"
 import type {
   MaterializationPlanFinalization,
   MaterializationPlanHeader,
   MaterializationSession,
+  MaterializationWorkRecord,
   OntologyOutboxFailure,
   OntologySourceRecord,
 } from "../storage/ontology"
 import type { ProjectionRunStorage } from "../storage/projection-runs"
 import {
+  CONTRACT_COMMITTED_AT,
   commitEmptyEdit,
   commitExactObject,
   contractEditHeader,
@@ -301,7 +304,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             createdAt: "2026-01-01T00:00:00.000Z",
           })
         ).rejects.toThrow("identity")
-        await storage.ontology.sources.beginMaterialization({
+        const begin = {
           projectId: "contract-project",
           source,
           materializationId: "staging-candidate",
@@ -313,7 +316,16 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           ownershipHash: identity.ownershipHash,
           ontologyRevision: identity.ontologyRevision,
           createdAt: "2026-01-01T00:00:00.000Z",
+        } as const
+        const staging = await storage.ontology.sources.beginMaterialization(begin)
+        expect(staging).toMatchObject({
+          status: "staging",
+          executionToken: execution.executionToken,
+          rootCount: null,
+          assertionCount: null,
+          readyAt: null,
         })
+        expect(await storage.ontology.sources.beginMaterialization(begin)).toEqual(staging)
         expect(
           await storage.ontology.sources.getActive({ projectId: "contract-project", source })
         ).toBeNull()
@@ -363,7 +375,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           })
         ).rejects.toThrow()
 
-        const ready = await storage.ontology.sources.markReady({
+        const seal = {
           projectId: "contract-project",
           source,
           materializationId: "staging-candidate",
@@ -371,8 +383,24 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           rootCount: 1,
           assertionCount: 1,
           readyAt: "2026-01-01T00:01:00.000Z",
+        } as const
+        const ready = await storage.ontology.sources.markReady(seal)
+        expect(ready).toMatchObject({
+          status: "ready",
+          rootCount: 1,
+          assertionCount: 1,
+          readyAt: seal.readyAt,
         })
-        expect(ready).toMatchObject({ status: "ready", rootCount: 1, assertionCount: 1 })
+        expect(await storage.ontology.sources.markReady(seal)).toEqual(ready)
+        await expect(
+          storage.ontology.sources.stageRows({
+            projectId: "contract-project",
+            source,
+            materializationId: "staging-candidate",
+            execution,
+            rows: [],
+          })
+        ).rejects.toThrow("cannot accept rows")
 
         const reclaimed = await storage.projectionRuns.startOrReclaim({
           id: claimed.run.id,
@@ -481,10 +509,20 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         expect(
           await storage.ontology.sources.purgeAbandoned({ projectId: "contract-project", limit: 1 })
         ).toEqual({ rowsDeleted: 0, materializationsDeleted: 0 })
+
+        // Released, the run begins a candidate again.
+        expect(
+          await storage.ontology.sources.beginMaterialization({
+            ...begin,
+            materializationId: "next-candidate",
+            execution: reclaimed.execution,
+            createdAt: "2026-01-01T00:03:00.000Z",
+          })
+        ).toMatchObject({ status: "staging", executionToken: reclaimed.execution.executionToken })
       })
     })
 
-    test("adopts a staging candidate at its last staged root", async () => {
+    test("resumes an adopted staging candidate and seals only contiguous, exactly counted roots", async () => {
       await withStorage(async (storage) => {
         const identity = replacementIdentity("01")
         const claimed = await startTestProjectionRun(storage, {
@@ -494,7 +532,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           target: { objectTypeId: "ContractDevice" },
         })
         const source = { projectionId: identity.projectionId }
-        await storage.ontology.sources.beginMaterialization({
+        const begin = {
           projectId: "contract-project",
           source,
           materializationId: "resumed-candidate",
@@ -506,7 +544,8 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           ownershipHash: identity.ownershipHash,
           ontologyRevision: identity.ontologyRevision,
           createdAt: "2026-01-01T00:00:00.000Z",
-        })
+        } as const
+        await storage.ontology.sources.beginMaterialization(begin)
         const row = (primaryId: string, stagingOrdinal: number) => ({
           root: { kind: "object" as const, ref: { objectTypeId: "ContractDevice", primaryId } },
           assertion: {
@@ -530,6 +569,13 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           identity,
           target: { objectTypeId: "ContractDevice" },
         })
+        await expect(
+          storage.ontology.sources.beginMaterialization({
+            ...begin,
+            materializationId: "competing-candidate",
+            execution: reclaimed.execution,
+          })
+        ).rejects.toThrow("adopt it before beginning another")
         const adopted = await storage.ontology.sources.adopt({
           projectId: "contract-project",
           source,
@@ -559,17 +605,33 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             rows: [row("one", 1), row("two", 2)],
           })
         ).toEqual({ inserted: 1, unchanged: 1 })
-        expect(
-          await storage.ontology.sources.markReady({
+
+        const stage = (rows: ReturnType<typeof row>[]) =>
+          storage.ontology.sources.stageRows({
             projectId: "contract-project",
             source,
             materializationId: "resumed-candidate",
             execution: reclaimed.execution,
-            rootCount: 3,
-            assertionCount: 3,
+            rows,
+          })
+        const seal = (rootCount: number, assertionCount: number) =>
+          storage.ontology.sources.markReady({
+            projectId: "contract-project",
+            source,
+            materializationId: "resumed-candidate",
+            execution: reclaimed.execution,
+            rootCount,
+            assertionCount,
             readyAt: "2026-01-01T00:02:00.000Z",
           })
-        ).toMatchObject({ status: "ready", rootCount: 3 })
+        // A batch is staged whole or not at all: four is new again once its batch fails.
+        await expect(stage([row("four", 4), row("five", 4)])).rejects.toThrow("stream ordinal 4")
+        expect(await stage([row("four", 4)])).toEqual({ inserted: 1, unchanged: 0 })
+        // Ordinal 3 is missing.
+        await expect(seal(4, 4)).rejects.toMatchObject({ name: "MaterializationValidationError" })
+        await stage([row("three", 3)])
+        await expect(seal(5, 4)).rejects.toThrow("do not match")
+        expect(await seal(5, 5)).toMatchObject({ status: "ready", rootCount: 5 })
       })
     })
 
@@ -708,16 +770,47 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             source: first.source,
           })
         ).toMatchObject({ materializationId: left.materializationId })
-        expect(
-          await storage.ontology.sources.abandon({
-            kind: "candidate",
-            projectId: "contract-project",
-            source: right.source,
-            materializationId: right.materializationId,
-            execution: right.execution,
-            abandonedAt: "2026-02-02T00:00:00.000Z",
-          })
-        ).toMatchObject({ status: "abandoned" })
+        const abandonRight = {
+          kind: "candidate",
+          projectId: "contract-project",
+          source: right.source,
+          materializationId: right.materializationId,
+          execution: right.execution,
+          abandonedAt: "2026-02-02T00:00:00.000Z",
+        } as const
+        const abandoned = await storage.ontology.sources.abandon(abandonRight)
+        expect(abandoned).toMatchObject({ status: "abandoned" })
+        expect(await storage.ontology.sources.abandon(abandonRight)).toEqual(abandoned)
+      })
+    })
+
+    test("orders source activation after candidate readiness and the active update", async () => {
+      await withStorage(async (storage) => {
+        // Ready one second after its dataset version was created.
+        const early = await createReadyEmptyCandidate(storage, "run-early", "candidate-early", "01")
+        await expect(
+          activateEmptyCandidate(storage, early, null, "commit-early", "2026-01-01T00:00:00.500Z")
+        ).rejects.toMatchObject({ name: "MaterializationValidationError" })
+
+        // The same activation commits once it follows readiness.
+        const ready = await createReadyEmptyCandidate(storage, "run-ready", "candidate-ready", "02")
+        await activateEmptyCandidate(
+          storage,
+          ready,
+          null,
+          "commit-ready",
+          "2026-01-05T00:00:00.000Z"
+        )
+        const active = await storage.ontology.sources.getActive({
+          projectId: "contract-project",
+          source: ready.source,
+        })
+
+        // Ready on Jan 3, but activated before the active source's Jan 5 update.
+        const late = await createReadyEmptyCandidate(storage, "run-late", "candidate-late", "03")
+        await expect(
+          activateEmptyCandidate(storage, late, active, "commit-late", "2026-01-04T00:00:00.000Z")
+        ).rejects.toThrow("cannot precede the active materialization update")
       })
     })
 
@@ -828,6 +921,81 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             primaryId: "committed",
           })
         ).toMatchObject({ properties: { name: "committed" }, lastCommitId: "committed" })
+      })
+    })
+
+    test("rescans final link scopes instead of trusting staged occupancy", async () => {
+      await withStorage(async (storage) => {
+        const ref = {
+          source: { objectTypeId: "ContractDevice", primaryId: "one" },
+          linkId: "parent",
+          target: { objectTypeId: "ContractDevice", primaryId: "two" },
+        }
+        const commit = async (id: string, records: readonly MaterializationWorkRecord[]) => {
+          const header = contractEditHeader(id)
+          await storage.transaction(async (tx) => {
+            await ensureContractExecution(tx, header)
+            const session = await tx.ontology.materializations.begin(header)
+            await tx.ontology.materializations.stageWork({ session, records })
+            await tx.ontology.materializations.apply({ session })
+            await tx.ontology.materializations.finalize({
+              session,
+              finalization: { sourceActivations: [], result: contractEditResult(id) },
+            })
+          })
+        }
+        const written = {
+          createdAt: CONTRACT_COMMITTED_AT,
+          updatedAt: CONTRACT_COMMITTED_AT,
+          lastCommitId: "existing-link",
+        }
+        await commit("existing-link", [
+          ...[ref.source, ref.target].map(
+            (object, index): MaterializationWorkRecord => ({
+              kind: "plan",
+              recordKey: `plan:object-upsert:${index}`,
+              applyPhase: 4,
+              sortKey: `6${index}`,
+              item: {
+                kind: "object-upsert",
+                value: {
+                  row: {
+                    ref: object,
+                    properties: { name: object.primaryId },
+                    version: 1,
+                    ...written,
+                  },
+                  expected: { ref: object, exists: false },
+                },
+              },
+            })
+          ),
+          {
+            kind: "plan",
+            recordKey: "plan:link-upsert",
+            applyPhase: 5,
+            sortKey: "62",
+            item: {
+              kind: "link-upsert",
+              value: { row: { ref, ...written }, expected: { ref, exists: false } },
+            },
+          },
+        ])
+
+        // Apply accepts the dishonest record; finalization must inspect the durable scope.
+        await expect(
+          commit("dishonest-empty-scope", [
+            {
+              kind: "cardinality",
+              recordKey: "cardinality:dishonest-empty-scope",
+              view: "effective",
+              scopeSortKey: linkScopeSortKey(ref.source, ref.linkId),
+              linkSortKey: linkRefSortKey(ref),
+              ref,
+              occupied: false,
+            },
+          ])
+        ).rejects.toThrow("does not match the final effective link scope")
       })
     })
 

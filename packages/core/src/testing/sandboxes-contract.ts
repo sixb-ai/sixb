@@ -239,8 +239,9 @@ export function runSandboxesContractSuite(
     })
 
     describe("timeout and abort", () => {
-      test("sleep beyond timeout marks the result timedOut and exits non-zero", async () => {
-        const sandbox = await factory.create()
+      test("a per-call timeout overrides the sandbox's, marks the result timedOut, and exits non-zero", async () => {
+        // The sandbox's own timeout outlasts the command, so only the per-call one can stop it.
+        const sandbox = await factory.create({ timeout: SLEEP_BUDGET_SECONDS * 2 * 1000 })
         try {
           const start = Date.now()
           const result = await sandbox.runCommand("sleep", [String(SLEEP_BUDGET_SECONDS)], {
@@ -267,18 +268,6 @@ export function runSandboxesContractSuite(
           const elapsed = Date.now() - start
           expect(result.exitCode).not.toBe(0)
           expect(elapsed).toBeLessThan(SLEEP_BUDGET_SECONDS * 1000)
-        } finally {
-          await sandbox.destroy()
-        }
-      })
-
-      test("per-call timeout overrides sandbox-level timeout", async () => {
-        const sandbox = await factory.create({ timeout: SLEEP_BUDGET_SECONDS * 1000 })
-        try {
-          const result = await sandbox.runCommand("sleep", [String(SLEEP_BUDGET_SECONDS)], {
-            timeout: shortTimeoutMs,
-          })
-          expect(result.timedOut).toBe(true)
         } finally {
           await sandbox.destroy()
         }

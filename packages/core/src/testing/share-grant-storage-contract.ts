@@ -124,7 +124,7 @@ export function runShareGrantStorageContractSuite<TStorage extends ShareGrantSto
       })
     })
 
-    test("filters by project, definition, target, expiry, and revocation", async () => {
+    test("filters by project, definition, target, expiry instant, and revocation", async () => {
       await withStorage(async (storage) => {
         await storage.create(grantInput({ id: "active", tokenHash: "b".repeat(64) }))
         await storage.create(
@@ -153,12 +153,17 @@ export function runShareGrantStorageContractSuite<TStorage extends ShareGrantSto
           revokedBy: { type: "user", id: "usr_revoker" },
         })
         await storage.create(grantInput({ projectId: "other-project" }))
+        // A grant is inactive from the exact instant it expires.
+        const now = new Date("2026-08-19T13:00:00.000Z")
+        await storage.create(
+          grantInput({ id: "expires-now", tokenHash: "a".repeat(64), expiresAt: now })
+        )
 
         const filter = {
           projectId,
           definitionId: "published-report",
           target: { objectTypeId: "Report", primaryId: "report-1" },
-          now: new Date("2026-08-19T13:00:00.000Z"),
+          now,
         }
         await expect(storage.list(filter)).resolves.toMatchObject({
           grants: [{ id: "active" }],
@@ -170,20 +175,12 @@ export function runShareGrantStorageContractSuite<TStorage extends ShareGrantSto
           includeExpired: true,
           includeRevoked: true,
         })
-        expect(allStates.grants.map((grant) => grant.id)).toEqual(["revoked", "expired", "active"])
-      })
-    })
-
-    test("treats the exact expiry instant as inactive", async () => {
-      await withStorage(async (storage) => {
-        await storage.create(grantInput())
-        await expect(storage.list({ projectId, now: expiresAt })).resolves.toMatchObject({
-          grants: [],
-          total: 0,
-        })
-        await expect(
-          storage.list({ projectId, now: expiresAt, includeExpired: true })
-        ).resolves.toMatchObject({ grants: [{ id: "shr_1" }], total: 1 })
+        expect(allStates.grants.map((grant) => grant.id)).toEqual([
+          "revoked",
+          "expires-now",
+          "expired",
+          "active",
+        ])
       })
     })
 

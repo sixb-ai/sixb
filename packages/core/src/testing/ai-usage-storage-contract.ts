@@ -70,34 +70,37 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
 
   describe(label, () => {
     // Removal proof: omit audioDurationMs from a row codec; this round trip fails.
-    test("persists transcription usage and kind without invented token totals", async () => {
+    // Removal proof: omit 'reranking' from a storage migration's model_kind check; the write fails.
+    test("persists transcription and reranking usage kinds without invented token totals", async () => {
       await withStorage(async (storage) => {
+        const latest = () =>
+          storage.getLatestForExecution({ projectId, executionId: agentExecutionId })
         const input = modelCallInput({
           modelKind: "transcription",
           usage: { audioDurationMs: 1250 },
         })
         await storage.recordModelCall(input)
-        const latest = await storage.getLatestForExecution({
-          projectId,
-          executionId: agentExecutionId,
+        expect((await latest())?.modelKind).toBe("transcription")
+        expect((await latest())?.usage).toEqual({
+          audioDurationMs: 1250,
+          reportingStatus: "partial",
         })
-        expect(latest?.modelKind).toBe("transcription")
-        expect(latest?.usage).toEqual({ audioDurationMs: 1250, reportingStatus: "partial" })
         expect((await storage.recordModelCall(input)).created).toBe(false)
         expect(
           await storage.summarizeExecution({ projectId, executionId: agentExecutionId })
         ).toMatchObject({ modelCallCount: 1, usage: { audioDurationMs: 1250 } })
-      })
-    })
-    // Removal proof: omit 'reranking' from a storage migration's model_kind check; the write fails.
-    test("persists reranking usage kind", async () => {
-      await withStorage(async (storage) => {
-        await storage.recordModelCall(modelCallInput({ modelKind: "reranking", usage: {} }))
-        const latest = await storage.getLatestForExecution({
-          projectId,
-          executionId: agentExecutionId,
-        })
-        expect(latest?.modelKind).toBe("reranking")
+
+        await storage.recordModelCall(
+          modelCallInput({
+            id: "usage_reranking",
+            callId: "call_reranking",
+            responseId: "response_reranking",
+            modelKind: "reranking",
+            usage: {},
+            occurredAt: at("2026-06-23T10:01:00.000Z"),
+          })
+        )
+        expect((await latest())?.modelKind).toBe("reranking")
       })
     })
     test("retains native provider IDs across reads and replay", async () => {
