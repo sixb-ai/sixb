@@ -25,9 +25,13 @@ import {
 } from "react"
 import { createPortal } from "react-dom"
 import { ArtifactReferencesProvider } from "../artifacts/references/references"
-import { type ArtifactTarget, type ViewerTarget, viewerTargetKey } from "../artifacts/target"
+import {
+  type ArtifactTarget,
+  artifactTargetHref,
+  type ViewerTarget,
+  viewerTargetKey,
+} from "../artifacts/target"
 import { Viewer } from "../artifacts/viewer"
-import { artifactHref } from "../pages/routes"
 import {
   type ArtifactPanelPresentation,
   artifactPanelPresentation,
@@ -171,14 +175,7 @@ export function ArtifactPanelRoot({
               },
             }
           : {}),
-        ...(target.type === "artifact"
-          ? {
-              fullPageHref: artifactHref(target.artifactId, {
-                ...(target.version === undefined ? {} : { version: target.version }),
-                ...(target.part ? { part: target.part } : {}),
-              }),
-            }
-          : {}),
+        ...(target.type === "artifact" ? { fullPageHref: artifactTargetHref(target) } : {}),
       }}
     />
   ) : null
@@ -204,6 +201,7 @@ export function ArtifactPanelRoot({
       >
         <DialogContent
           showCloseButton={false}
+          onEscapeKeyDown={leaveEscapeToDeck}
           className="flex h-[calc(100dvh-1rem)] max-h-none w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 sm:h-[min(88vh,56rem)] sm:w-[min(92vw,72rem)] sm:max-w-[min(92vw,72rem)]"
         >
           <DialogTitle className="sr-only">{messages.dialogTitle}</DialogTitle>
@@ -230,6 +228,15 @@ export function ArtifactPanelRoot({
         : null}
     </ArtifactPanelContext.Provider>
   )
+}
+
+/**
+ * Escape in a deck's overview or presentation takes the deck back to its slide; only then does it
+ * close the dialog. The dialog hears Escape first, on the document, before the deck does.
+ */
+export function leaveEscapeToDeck(event: KeyboardEvent): void {
+  const target = event.target instanceof Element ? event.target : null
+  if (target?.closest('[data-deck-mode]:not([data-deck-mode="slide"])')) event.preventDefault()
 }
 
 // Keep the conversation wrapper stable while the panel opens, closes, or changes target.
