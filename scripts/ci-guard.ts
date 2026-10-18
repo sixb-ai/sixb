@@ -243,7 +243,8 @@ async function captureTree(pid: number): Promise<TreeSnapshot> {
 
 /** bun lists the files it was running, one per line, after "Interrupted while still running:". */
 function stillRunningFiles(lines: readonly string[]): string[] {
-  const start = lines.findLastIndex((line) => line.trim() === "Interrupted while still running:")
+  let start = lines.length - 1
+  while (start >= 0 && lines[start].trim() !== "Interrupted while still running:") start--
   if (start === -1) return []
   const files: string[] = []
   for (const line of lines.slice(start + 1)) {
