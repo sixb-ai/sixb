@@ -5,7 +5,6 @@ import { AgentExecutionTrace } from "../src/agent/agent-execution-trace"
 import { BashToolView } from "../src/agent/bash/bash-tool-view"
 import {
   ACTIVITY_STATUS_ROW_CLASS_NAME,
-  ActivityStatusText,
   activityStatusAt,
 } from "../src/agent/components/activity-status"
 import { AssistantBody } from "../src/agent/components/message-parts"
@@ -119,23 +118,31 @@ describe("assistant work dropdowns", () => {
     expect(html).not.toContain("Checking the available records.")
   })
 
-  test("keeps the pre-token and reasoning activity rows on one layout contract", () => {
+  test("keeps waiting, long waits, and reasoning in one status row showing only the current phrase", () => {
     const waiting = renderToStaticMarkup(createElement(ThinkingMarker))
+    const longer = renderToStaticMarkup(createElement(ThinkingMarker, { takingLonger: true }))
     const reasoningStarted = renderAssistant([reasoning("")], true)
 
-    expect(waiting).toContain(ACTIVITY_STATUS_ROW_CLASS_NAME)
-    expect(reasoningStarted).toContain(ACTIVITY_STATUS_ROW_CLASS_NAME)
+    for (const html of [waiting, longer, reasoningStarted]) {
+      expect(html).toContain(ACTIVITY_STATUS_ROW_CLASS_NAME)
+      for (const later of [
+        "Working through it",
+        "Taking a closer look",
+        "Checking the details",
+        "Still working",
+      ]) {
+        expect(html).not.toContain(later)
+      }
+    }
+    expect(longer.match(/role="status"/g)).toHaveLength(1)
+    expect(waiting).toContain("Thinking…")
+    expect(longer).toContain("Taking a little longer…")
     expect(reasoningStarted).toContain("Thinking…")
     expect(reasoningStarted).not.toContain(">Working…<")
-  })
-
-  test("keeps a long pre-token wait in the same single status row", () => {
-    const html = renderToStaticMarkup(createElement(ThinkingMarker, { takingLonger: true }))
-
-    expect(html).toContain(ACTIVITY_STATUS_ROW_CLASS_NAME)
-    expect(html).toContain("Taking a little longer…")
-    expect(html).not.toContain("Taking a closer look")
-    expect(html.match(/role="status"/g)).toHaveLength(1)
+    // The live work trigger is as wide as its content instead of highlighting the full row.
+    expect(renderAssistant([reasoning("Checking records."), tool("search")], true)).toContain(
+      'class="group flex w-fit max-w-full'
+    )
   })
 
   test("updates long indeterminate waits without inventing completion progress", () => {
@@ -146,21 +153,6 @@ describe("assistant work dropdowns", () => {
     expect(activityStatusAt("Thinking", 55_000)).toBe("Still working")
     expect(activityStatusAt("Preparing a command", 11_999)).toBe("Preparing a command")
     expect(activityStatusAt("Preparing a command", 12_000)).toBe("Still preparing a command")
-  })
-
-  test("renders only the current activity phrase", () => {
-    const html = renderToStaticMarkup(
-      createElement(ActivityStatusText, { label: "Thinking", className: "shimmer" })
-    )
-
-    expect(html).toContain("Thinking…")
-    expect(html).toContain("text-left")
-    expect(html).not.toContain("Working through it")
-    expect(html).not.toContain("Taking a closer look")
-    expect(html).not.toContain("Checking the details")
-    expect(html).not.toContain("Still working")
-    expect(html).not.toContain("invisible")
-    expect(html).not.toContain("opacity-0")
   })
 
   test("describes Sixb help as project work instead of CLI output", () => {
@@ -190,14 +182,8 @@ describe("assistant work dropdowns", () => {
     expect(html).not.toContain("color: red")
   })
 
-  test("uses a content-width trigger instead of highlighting the full row", () => {
-    const html = renderAssistant([reasoning("Checking records."), tool("search")], true)
-
-    expect(html).toContain('class="group flex w-fit max-w-full')
-  })
-
-  test("visible assistant text separates consecutive work groups", () => {
-    const html = renderAssistant([
+  test("only visible assistant text separates consecutive work groups", () => {
+    const separated = renderAssistant([
       reasoning("First investigation"),
       tool("first-tool"),
       { kind: "text", text: "First update." },
@@ -205,14 +191,11 @@ describe("assistant work dropdowns", () => {
       tool("second-tool"),
       { kind: "text", text: "Final result." },
     ])
+    expect(separated.match(/Worked/g)).toHaveLength(2)
+    expect(separated).toContain("First update.")
+    expect(separated).toContain("Final result.")
 
-    expect(html.match(/Worked/g)).toHaveLength(2)
-    expect(html).toContain("First update.")
-    expect(html).toContain("Final result.")
-  })
-
-  test("whitespace-only text does not split one work group into several dropdowns", () => {
-    const html = renderAssistant([
+    const whitespace = renderAssistant([
       reasoning("First investigation"),
       tool("first-tool"),
       { kind: "text", text: " \n" },
@@ -220,8 +203,7 @@ describe("assistant work dropdowns", () => {
       reasoning("Second investigation"),
       tool("second-tool"),
     ])
-
-    expect(html.match(/Worked/g)).toHaveLength(1)
+    expect(whitespace.match(/Worked/g)).toHaveLength(1)
   })
 
   test("streams a text-only answer without inventing a work dropdown", () => {

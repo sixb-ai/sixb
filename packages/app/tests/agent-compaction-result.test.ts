@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { MessageView } from "../src/agent/components/message-view"
 import type { AgentMessage } from "../src/agent/types"
 
-test("durable compacted responses expose their continuation summary", () => {
+test("only durable compacted responses expose their continuation summary", () => {
   const html = renderToStaticMarkup(
     createElement(MessageView, {
       message: assistantMessage({
@@ -20,12 +20,9 @@ test("durable compacted responses expose their continuation summary", () => {
   expect(html).toContain("group-hover:opacity-100")
   expect(html).toContain('aria-expanded="false"')
   expect(html).toContain("Here is the completed research.")
-})
 
-test("ordinary responses do not render a compaction disclosure", () => {
-  const html = renderToStaticMarkup(createElement(MessageView, { message: assistantMessage() }))
-
-  expect(html).not.toContain("Condensed conversation")
+  const ordinary = renderToStaticMarkup(createElement(MessageView, { message: assistantMessage() }))
+  expect(ordinary).not.toContain("Condensed conversation")
 })
 
 function assistantMessage(compaction?: AgentMessage["compaction"]): AgentMessage {

@@ -87,7 +87,21 @@ const api = Bun.serve({
       : new Response(null, { status: 404 }),
 })
 const app = await createCustomApp({ rootDir: ${JSON.stringify(root)}, authEnabled: false })
-const server = await app.start({ host: "127.0.0.1", port: Number(process.env.TEST_APP_PORT), apiBaseUrl: "http://127.0.0.1:" + api.port })
+// app.start answers with the port it was asked for, not one it bound, so the port is reserved
+// here, right before use, and another pick is made when a parallel process took it meanwhile.
+async function startOnFreePort() {
+  for (let attempt = 1; ; attempt += 1) {
+    const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(null) })
+    const port = probe.port
+    probe.stop(true)
+    try {
+      return await app.start({ host: "127.0.0.1", port, apiBaseUrl: "http://127.0.0.1:" + api.port })
+    } catch (error) {
+      if (attempt === 5 || error?.code !== "EADDRINUSE") throw error
+    }
+  }
+}
+const server = await startOnFreePort()
 let html
 try {
   html = await (await fetch("http://127.0.0.1:" + server.port)).text()
@@ -150,6 +164,119 @@ console.log(result.textContent + "|" + window.document.documentElement.lang)
   }, 30_000)
 })
 
+describe("custom app Tailwind build", () => {
+  // Inside the repo so the generated entry's react/react-router imports and the Tailwind CLI
+  // resolve from the workspace's node_modules.
+  let tempRoot = ""
+
+  afterEach(async () => {
+    if (tempRoot) await rm(tempRoot, { recursive: true, force: true })
+  })
+
+  test("compiles the app's Tailwind CSS fresh with the built-in pages and bundles it", async () => {
+    tempRoot = await mkdtemp(join(import.meta.dir, "tmp-tailwind-build-"))
+    for (const name of [
+      "@tailwindcss/cli",
+      "tailwindcss",
+      "react",
+      "react-dom",
+      "react-router-dom",
+      "@tanstack/react-query",
+      "@sixb/app",
+      "@sixb/client",
+      "@sixb/ui",
+    ]) {
+      const target = join(tempRoot, "node_modules", ...name.split("/"))
+      await mkdir(dirname(target), { recursive: true })
+      await symlink(dirname(Bun.resolveSync(`${name}/package.json`, packageRoot)), target)
+    }
+    const appDir = join(tempRoot, "app")
+    await mkdir(appDir, { recursive: true })
+    await writeFile(
+      join(appDir, "globals.css"),
+      [
+        '@import "@sixb/ui/globals.css";',
+        '@source "./**/*.tsx";',
+        ":root { --background: #123456; }",
+        "",
+      ].join("\n")
+    )
+    await writeFile(
+      join(appDir, "page.tsx"),
+      'export default function Page() { return <main className="line-through">ok</main> }\n'
+    )
+    // A leftover chunk from a previous build must not survive: the outdir is build-owned and gets
+    // cleared, or stale hashed assets accumulate forever.
+    const staleChunkPath = join(tempRoot, ".sixb", "dist", "app", "chunk-stale123.js")
+    await mkdir(dirname(staleChunkPath), { recursive: true })
+    await writeFile(staleChunkPath, "console.log('stale')\n")
+
+    const buildScript = join(tempRoot, "run-build.ts")
+    await writeFile(
+      buildScript,
+      `import { createCustomApp } from ${JSON.stringify(join(packageRoot, "src", "createCustomApp.ts"))}
+const app = await createCustomApp({ rootDir: ${JSON.stringify(tempRoot)}, apiBaseUrl: "http://127.0.0.1:3000" })
+const result = await app.build()
+if (!result.success) throw new Error((result.logs ?? []).join("\\n"))
+`
+    )
+    const build = await runBunScript(buildScript, tempRoot, "unused", 60_000)
+    expect(build.exitCode, build.stderr).toBe(0)
+
+    // The compiled stylesheet lands under .sixb/generated, not app/. Canary classes, one per
+    // scanned source — proves Tailwind compiled the app's own page plus the linked component
+    // libraries, not just one of them. `line-through` is the app page, `max-h-60` comes only from
+    // the agent's components, `scroll-mt-4` only from the built-in pages. (Repoint these if a class
+    // is removed from its source rather than asserting a class that no longer exists.)
+    const generatedCss = await readFile(join(tempRoot, ".sixb", "generated", "app.css"), "utf-8")
+    expect(generatedCss).toContain("line-through")
+    expect(generatedCss).toContain("max-h-60")
+    expect(generatedCss).toContain("scroll-mt-4")
+    expect(generatedCss.lastIndexOf("--background: #123456")).toBeGreaterThan(
+      generatedCss.lastIndexOf("--background: #fafafa")
+    )
+
+    const generatedRuntime = await readFile(
+      join(tempRoot, ".sixb", "generated", "app-runtime.tsx"),
+      "utf-8"
+    )
+    expect(generatedRuntime).toContain('import "./app.css"')
+    expect(generatedRuntime).not.toContain('import "./framework.css"')
+
+    // The bundled output ships the compiled utility, proving the generated entry imported the
+    // compiled CSS rather than the raw Tailwind source.
+    const outdir = join(tempRoot, ".sixb", "dist", "app")
+    const cssBundles: string[] = []
+    for await (const path of new Bun.Glob("*.css").scan({ cwd: outdir, absolute: true })) {
+      cssBundles.push(await readFile(path, "utf-8"))
+    }
+    expect(cssBundles.join("\n")).toContain("line-through")
+    expect(cssBundles.join("\n")).not.toContain("@source")
+
+    const builtHtml = await readFile(join(outdir, "index.html"), "utf-8")
+    expect(builtHtml.match(/src="\/(app-[a-z0-9]+\.js)"/)?.[1]).toBeDefined()
+    const sharedHtml = await readFile(join(outdir, "shared-index.html"), "utf-8")
+    expect(sharedHtml).toContain("async loadAppStyles()")
+    expect(sharedHtml).toContain('link.addEventListener("load", resolve, { once: true })')
+    expect(sharedHtml).toContain('link.addEventListener("error", resolve, { once: true })')
+    expect(sharedHtml.indexOf("await Promise.all(")).toBeLessThan(
+      sharedHtml.indexOf("document.head.append(link)")
+    )
+    const javascriptFiles = await Array.fromAsync(new Bun.Glob("*.js").scan({ cwd: outdir }))
+    expect(javascriptFiles.length).toBeGreaterThan(1)
+    const hasDynamicChunk = await Promise.all(
+      javascriptFiles.map(async (file) =>
+        (await readFile(join(outdir, file), "utf-8")).includes('import("/chunk-')
+      )
+    )
+    expect(hasDynamicChunk).toContain(true)
+    // Regression proof: restoring the HTML entry without `splitting` emits one ~10 MB JavaScript
+    // file for this fixture (all Shiki grammars) and fails both assertions above.
+
+    expect(await Bun.file(staleChunkPath).exists()).toBe(false)
+  }, 90_000)
+})
+
 async function linkFixtureDependencies(root: string): Promise<void> {
   const dependencies = new Map([
     ["react", join(packageRoot, "node_modules", "react")],
@@ -172,18 +299,15 @@ async function linkFixtureDependencies(root: string): Promise<void> {
 async function runBunScript(
   scriptPath: string,
   cwd: string,
-  publicValue: string
+  publicValue: string,
+  budgetMs = 15_000
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  const listener = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response() })
-  const port = listener.port
-  await listener.stop(true)
   const proc = Bun.spawn([process.execPath, "run", scriptPath], {
     cwd,
     env: {
       ...process.env,
       SIXB_PUBLIC_TEST_KEY: publicValue,
       SIXB_PRIVATE_TEST_KEY: "private-env-sentinel",
-      TEST_APP_PORT: String(port),
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -194,7 +318,7 @@ async function runBunScript(
   const timeout = setTimeout(() => {
     timedOut = true
     proc.kill()
-  }, 15_000)
+  }, budgetMs)
   const exitCode = await proc.exited
   clearTimeout(timeout)
   const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise])

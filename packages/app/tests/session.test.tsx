@@ -44,11 +44,10 @@ function renderWithSession(session: GetAuthSessionResponse) {
   return { view, fetches }
 }
 
-// Regression proof: drop `staleTime` from useCurrentUser and the mount refetches the session.
-test("useCurrentUser reads the session the app already loaded, without fetching it again", async () => {
+// Regression proof: drop `staleTime` from useCurrentUser and the mount refetches the session. The
+// refetch starts in the mount effect, which render() flushes, so nothing has to wait for it.
+test("useCurrentUser reads the session the app already loaded, without fetching it again", () => {
   const { view, fetches } = renderWithSession(signedIn)
-  // A stale query refetches after mounting, not during the render.
-  await Bun.sleep(20)
 
   expect(view.getByTestId("who").textContent).toBe("Alex Rivera|admins")
   expect(fetches).toEqual([])

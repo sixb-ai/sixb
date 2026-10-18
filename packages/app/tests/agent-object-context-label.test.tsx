@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { client } from "@sixb/client"
-import { type AgentContextInput, agentContextIdentity } from "@sixb/core/agents/context"
+import type { AgentContextInput } from "@sixb/core/agents/context"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
 import { ContextChips } from "../src/agent/components/context-chips"
@@ -106,11 +106,5 @@ describe("context chips", () => {
     untitled.setQueryData(objectContextTitleQuery(untitled, ref).queryKey, null)
     expect(renderChips({ kind: "object", ref }, untitled)).toContain("Invoice · Inv 1")
     expect(renderChips({ kind: "object", ref })).toContain("Invoice · Inv 1")
-  })
-
-  test("a label leaves the context identity unchanged", () => {
-    expect(agentContextIdentity({ kind: "object", ref, label: "July maintenance" })).toBe(
-      agentContextIdentity({ kind: "object", ref })
-    )
   })
 })

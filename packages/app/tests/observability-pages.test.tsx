@@ -79,17 +79,14 @@ describe("an action run's effects", () => {
   })
 
   // Removal proof: drop the time bound from effectsState; a run whose outcome never lands stays
-  // pending, and its page polls forever.
-  test("are waited for only a while after the run ended", () => {
-    expect(effectsState(run(), true, finished + 1_000)).toBe("pending")
-    expect(effectsState(run(), true, finished + effectsOutcomeWaitMs)).toBe("unrecorded")
-  })
-
-  // The page draws again after this long, since its last poll changes nothing. Removal proof:
-  // return a shorter wait and the page shows "pending" once more, then never again.
-  test("stop being waited for exactly when no outcome is expected", () => {
+  // pending, and its page polls forever. The page draws again after the remaining wait, since its
+  // last poll changes nothing: return a shorter wait and the page shows "pending" once more, then
+  // never again.
+  test("are waited for only a while after the run ended, and stop exactly when no outcome is expected", () => {
     const now = finished + 1_000
     const remaining = effectsWaitRemainingMs(run(), now)
+    expect(now + remaining).toBe(finished + effectsOutcomeWaitMs)
+    expect(effectsState(run(), true, now)).toBe("pending")
     expect(effectsState(run(), true, now + remaining - 1)).toBe("pending")
     expect(effectsState(run(), true, now + remaining)).toBe("unrecorded")
     expect(effectsWaitRemainingMs(run(), finished + effectsOutcomeWaitMs + 5_000)).toBe(0)

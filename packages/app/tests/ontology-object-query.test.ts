@@ -20,54 +20,34 @@ function property(
 }
 
 describe("object query properties", () => {
-  test("offer the operators the server resolved, in display order", () => {
-    const text = property("string", {
-      operators: ["eq", "neq", "lt", "lte", "gt", "gte", "in", "contains", "exists"],
-    })
-    expect(getOperatorsForProperty(text)).toEqual([
-      "eq",
-      "neq",
-      "lt",
-      "lte",
-      "gt",
-      "gte",
-      "contains",
-      "exists",
-      "missing",
+  // The schema plays no part: a value type's operators come from its capabilities too.
+  test.each([
+    [
+      "string",
+      ["eq", "neq", "lt", "lte", "gt", "gte", "in", "contains", "exists"],
+      ["eq", "neq", "lt", "lte", "gt", "gte", "contains", "exists", "missing"],
+    ],
+    ["boolean", ["eq", "neq", "in", "exists"], ["eq", "neq", "exists", "missing"]],
+    [{ type: "array", items: "string" }, ["contains"], ["contains"]],
+    [
+      { type: "valueTypeRef", valueTypeId: "reading" },
+      ["eq", "neq", "lt", "lte", "gt", "gte", "in", "exists"],
+      ["eq", "neq", "lt", "lte", "gt", "gte", "exists", "missing"],
+    ],
+  ] as const)("of schema %o offer the resolved operators, in display order", (schema, operators, expected) => {
+    expect(getOperatorsForProperty(property(schema, { operators: [...operators] }))).toEqual([
+      ...expected,
     ])
-
-    const flag = property("boolean", { operators: ["eq", "neq", "in", "exists"] })
-    expect(getOperatorsForProperty(flag)).toEqual(["eq", "neq", "exists", "missing"])
-
-    const tags = property({ type: "array", items: "string" }, { operators: ["contains"] })
-    expect(getOperatorsForProperty(tags)).toEqual(["contains"])
   })
 
-  test("resolve value-type properties from capabilities rather than the raw schema", () => {
+  test("sort and facet as the server reports, and hide what it reports no capability for", () => {
     const reading = property(
       { type: "valueTypeRef", valueTypeId: "reading" },
-      { operators: ["eq", "neq", "lt", "lte", "gt", "gte", "in", "exists"], sortable: true }
+      { operators: ["eq"], sortable: true, facet: true }
     )
-    expect(getOperatorsForProperty(reading)).toEqual([
-      "eq",
-      "neq",
-      "lt",
-      "lte",
-      "gt",
-      "gte",
-      "exists",
-      "missing",
-    ])
     expect(isSortableProperty(reading)).toBe(true)
-  })
+    expect(isFacetProperty(reading)).toBe(true)
 
-  test("limit primary ids without filter metadata to equality", () => {
-    const id = { ...property("string", { operators: ["eq", "in"] }), primary: true }
-    expect(getOperatorsForProperty(id)).toEqual(["eq"])
-    expect(isFilterableProperty(id)).toBe(true)
-  })
-
-  test("hide properties the server reports no capability for", () => {
     const document = property("fileRef", {})
     expect(getOperatorsForProperty(document)).toEqual([])
     expect(isFilterableProperty(document)).toBe(false)

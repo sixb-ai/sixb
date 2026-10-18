@@ -38,23 +38,16 @@ test("adaptive agent surface exposes only the collapsed launcher and compact doc
   expect(collapsed).toContain('aria-label="Ask Operations"')
   expect(collapsed).toContain('aria-hidden="true"')
 
-  const dock = renderSurface("dock")
+  // Without a mode, the surface is an uncontrolled, resizable dock at its default width.
+  const dock = renderSurface()
   expect(dock).toContain('data-agent-surface="dock"')
+  expect(dock).toContain("--agent-surface-width:384px")
   expect(dock).toContain('data-agent-artifact-host=""')
   expect(dock).toContain('aria-label="Collapse assistant"')
   expect(dock).toContain('aria-label="Resize assistant"')
   expect(dock).not.toContain(">Operations Assistant</span>")
   expect(dock).not.toContain('aria-label="Expand assistant workspace"')
   expect(dock).not.toContain('aria-label="Agent threads"')
-})
-
-test("adaptive agent surface defaults to an uncontrolled resizable dock", () => {
-  const dock = renderSurface()
-
-  expect(dock).toContain('data-agent-surface="dock"')
-  expect(dock).toContain("--agent-surface-width:384px")
-  expect(dock).toContain('aria-label="Resize assistant"')
-  expect(dock).not.toContain('aria-label="Ask Operations"')
 })
 
 test("the adaptive surface reuses the conversation as a full page", () => {

@@ -107,26 +107,6 @@ describe("ontology graph layout", () => {
     expectReadable(rerouted)
   })
 
-  test("leaves room between rows for relationship badges", () => {
-    const layout = layoutOntologyGraph(nodes, edges, "equipment", {
-      nodeWidth: NODE_WIDTH,
-      nodeHeight: NODE_HEIGHT,
-    })
-    const columns = new Map<number, number[]>()
-    for (const node of layout.nodes) {
-      const column = columns.get(node.position.x) ?? []
-      column.push(node.position.y)
-      columns.set(node.position.x, column)
-    }
-
-    for (const column of columns.values()) {
-      const rows = column.sort((left, right) => left - right)
-      for (let index = 1; index < rows.length; index += 1) {
-        expect(rows[index]! - rows[index - 1]!).toBeGreaterThanOrEqual(NODE_HEIGHT + 120)
-      }
-    }
-  })
-
   for (const { id: focusId } of nodes) {
     test(`keeps the complete ${focusId} view readable`, () => {
       const layout = layoutOntologyGraph(nodes, edges, focusId, {
@@ -137,6 +117,7 @@ describe("ontology graph layout", () => {
       expect(layout.nodes).toHaveLength(nodes.length)
       expect(layout.edges).toHaveLength(edges.length)
       expect(layout.nodes.find((node) => node.id === focusId)?.position.x).toBe(NODE_WIDTH + 400)
+      // Rows leave room between them for relationship badges.
       expectColumnSpacing(layout, 400, 120)
       for (const edge of layout.edges) {
         const input = edges.find((candidate) => candidate.id === edge.id)!

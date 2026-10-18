@@ -1,4 +1,4 @@
-import { describe, expect, jest, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import type { GetArtifactVersionResponse } from "@sixb/client"
 import { type DeckMode, FRAME_PROTOCOL, type FrameEvent } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -70,6 +70,9 @@ const browser = installDom([
   "cancelAnimationFrame",
 ])
 
+// A fake-timer test that times out never reaches its `finally`.
+afterEach(() => jest.useRealTimers())
+
 const DECK = "art_q3dec4000"
 const LINKED = "artifact:art_m3tr1csq3a#chart=sla-trend"
 
@@ -108,11 +111,14 @@ function frameCache(version: GetArtifactVersionResponse, token = "token"): Query
   return cache
 }
 
-/** Changes the cache, and lets its observers hear of it: the query cache tells them on a timer. */
+/**
+ * Changes the cache, and lets its observers hear of it: the query cache tells them on a zero-delay
+ * timer, so one set after the change runs once they have heard.
+ */
 async function changeCache(change: () => void): Promise<void> {
   await act(async () => {
     change()
-    await Bun.sleep(5)
+    await new Promise((resolve) => setTimeout(resolve, 0))
   })
 }
 
@@ -259,15 +265,18 @@ describe("a deck's frame", () => {
       </QueryClientProvider>
     )
     frameOf(ui.container.querySelector("iframe"))
-    const request = handle.current?.send("goto", { slide: 2 })
+    let outcome = "waiting"
+    handle.current?.send("goto", { slide: 2 }).then(
+      () => {
+        outcome = "answered"
+      },
+      () => {
+        outcome = "dropped"
+      }
+    )
+    // Unmounting runs the frame's cleanup there and then; its settling is heard a tick later.
     ui.unmount()
-    const outcome = await Promise.race([
-      request?.then(
-        () => "answered",
-        () => "dropped"
-      ),
-      Bun.sleep(50).then(() => "waiting"),
-    ])
+    await Promise.resolve()
     expect(outcome).toBe("dropped")
   })
 

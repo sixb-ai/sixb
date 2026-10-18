@@ -140,52 +140,93 @@ describe("who sees each section", () => {
       .filter((open) => open.definition.id === section)
       .flatMap((open) => open.pages.map((page) => page.id))
 
-  test("a signed-in person sees every Settings page unless visibility narrows it", () => {
-    expect(pagesOf({ user: { groupIds: [] }, visibility: undefined, enabled: true })).toEqual(
-      allSettingsPages
-    )
-    expect(
-      pagesOf({ user: { groupIds: ["admins"] }, visibility: { settings: [admins] }, enabled: true })
-    ).toEqual(allSettingsPages)
+  const yours = ["personal", "developers"]
+  const staff = { groupIds: ["staff"] }
+  const adminUser = { groupIds: ["admins"] }
+  const cases: {
+    readonly name: string
+    readonly section: AppSectionId
+    readonly user: { groupIds: string[] } | null
+    readonly visibility: AppVisibility | undefined
+    readonly pages: readonly string[]
+  }[] = [
+    // A signed-in person sees every Settings page unless visibility narrows it.
+    {
+      name: "Settings, signed in",
+      section: "settings",
+      user: { groupIds: [] },
+      visibility: undefined,
+      pages: allSettingsPages,
+    },
+    {
+      name: "Settings, in the listed group",
+      section: "settings",
+      user: adminUser,
+      visibility: { settings: [admins] },
+      pages: allSettingsPages,
+    },
+    // Outside the listed groups only the pages about yourself stay.
+    {
+      name: "Settings, outside the listed group",
+      section: "settings",
+      user: staff,
+      visibility: { settings: [admins] },
+      pages: yours,
+    },
+    {
+      name: "Settings, no group listed",
+      section: "settings",
+      user: adminUser,
+      visibility: { settings: [] },
+      pages: yours,
+    },
+    // Settings needs a signed-in person.
+    {
+      name: "Settings, signed out",
+      section: "settings",
+      user: null,
+      visibility: undefined,
+      pages: [],
+    },
+    // Data is open without auth, and visibility narrows it to the listed groups.
+    {
+      name: "Data, signed out",
+      section: "data",
+      user: null,
+      visibility: undefined,
+      pages: allDataPages,
+    },
+    {
+      name: "Data, signed in",
+      section: "data",
+      user: staff,
+      visibility: undefined,
+      pages: allDataPages,
+    },
+    {
+      name: "Data, outside the listed group",
+      section: "data",
+      user: staff,
+      visibility: { data: [admins] },
+      pages: [],
+    },
+    {
+      name: "Data, in the listed group",
+      section: "data",
+      user: adminUser,
+      visibility: { data: [admins] },
+      pages: allDataPages,
+    },
+  ]
+
+  test.each(cases)("$name", ({ section, user, visibility, pages }) => {
+    expect(pagesOf({ user, visibility, enabled: true }, section)).toEqual([...pages])
   })
 
-  test("outside the listed groups only the pages about yourself stay", () => {
-    const yours = ["personal", "developers"]
-    expect(
-      pagesOf({ user: { groupIds: ["staff"] }, visibility: { settings: [admins] }, enabled: true })
-    ).toEqual(yours)
-    expect(
-      pagesOf({ user: { groupIds: ["admins"] }, visibility: { settings: [] }, enabled: true })
-    ).toEqual(yours)
-  })
-
-  test("Settings needs a signed-in person, and shared links get no sections", () => {
-    expect(pagesOf({ user: null, visibility: undefined, enabled: true })).toEqual([])
-    expect(pagesOf({ user: { groupIds: [] }, visibility: undefined, enabled: false })).toEqual([])
+  test("shared links get no sections", () => {
     expect(
       resolveOpenSections({ user: { groupIds: [] }, visibility: undefined, enabled: false })
     ).toEqual([])
-  })
-
-  test("Data is open without auth, and visibility narrows it to the listed groups", () => {
-    expect(pagesOf({ user: null, visibility: undefined, enabled: true }, "data")).toEqual(
-      allDataPages
-    )
-    expect(
-      pagesOf({ user: { groupIds: ["staff"] }, visibility: undefined, enabled: true }, "data")
-    ).toEqual(allDataPages)
-    expect(
-      pagesOf(
-        { user: { groupIds: ["staff"] }, visibility: { data: [admins] }, enabled: true },
-        "data"
-      )
-    ).toEqual([])
-    expect(
-      pagesOf(
-        { user: { groupIds: ["admins"] }, visibility: { data: [admins] }, enabled: true },
-        "data"
-      )
-    ).toEqual(allDataPages)
   })
 })
 

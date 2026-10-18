@@ -33,6 +33,8 @@ describe("read tool presentation", () => {
       runningTitle: "Lecture de runtime.ts",
       detail: "lignes 4 à 5 · suite disponible",
     })
+    // An empty file has no line range to invent.
+    expect(describeRead(null, { ...output, content: "", truncated: false }).detail).toBe("empty")
   })
 
   test("turns skill files into friendly private guide labels", () => {
@@ -43,9 +45,5 @@ describe("read tool presentation", () => {
     expect(
       describeRead({ path: ".sixb/agent/skills/sixb-query/references/query-api.md" }, null)
     ).toMatchObject({ title: "Read the query api reference", skill: true })
-  })
-
-  test("labels empty files without inventing a line range", () => {
-    expect(describeRead(null, { ...output, content: "", truncated: false }).detail).toBe("empty")
   })
 })

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { createLiveRunState, type LiveRunState } from "../src/agent/live-run"
 import {
+  type ActiveTurnPresentation,
   type ActiveTurnSources,
   EXTENDED_WAITING_STATUS_MS,
-  findPreStreamFailedRun,
   presentActiveTurn,
   selectActiveRunId,
   shouldShowExtendedWaitingStatus,
@@ -60,15 +60,6 @@ describe("agent run presentation", () => {
     ).toBe(false)
   })
 
-  test("shows only the newest failed run that has no assistant message", () => {
-    const failed = run({ id: "failed", status: "failed" })
-    expect(findPreStreamFailedRun([failed], [])?.id).toBe("failed")
-    expect(findPreStreamFailedRun([failed], [assistantMessage(failed.id)])).toBeNull()
-
-    const retry = run({ id: "retry", status: "succeeded" })
-    expect(findPreStreamFailedRun([retry, failed], [])).toBeNull()
-  })
-
   test("selects the active run from pending send, thread claim, then history", () => {
     const queued = run({ id: "queued", status: "queued" })
     const done = run({ id: "done", status: "succeeded" })
@@ -105,295 +96,223 @@ function liveState(overrides: Partial<LiveRunState>): LiveRunState {
   return { ...createLiveRunState(overrides.runId ?? null), ...overrides }
 }
 
-describe("presentActiveTurn", () => {
-  test("a queued run responds with the run needed for the extended waiting status", () => {
-    const queued = run({ id: "r1", status: "queued" })
-    const presentation = presentActiveTurn(
-      sources({ activeRunId: "r1", pendingRun: queued, runs: [queued] })
-    )
-    expect(presentation).toEqual({ kind: "responding", queuedRun: queued })
-  })
+const queued = run({ id: "r1", status: "queued" })
+const running = run({ id: "r1", status: "running" })
+const succeeded = run({ id: "r1", status: "succeeded" })
+const failed = run({ id: "r1", status: "failed" })
+const cancelled = run({ id: "r1", status: "cancelled" })
+const interrupted = run({ id: "r1", status: "cancelled", finishReason: "interrupted" })
+const timedOut = run({ id: "r1", status: "failed", finishReason: "timeout" })
+const timedOutWithBudget = run({
+  id: "r1",
+  status: "failed",
+  finishReason: "timeout",
+  error: {
+    code: "agent.execution_failed",
+    message: "Agent execution failed.",
+    retryable: false,
+    at: "2026-07-12T10:10:00.000Z",
+    details: { timeoutMs: "600000" },
+  },
+})
+const retried = run({ id: "r2", status: "succeeded" })
+/** A run this browser sent, still running as far as durable state knows. */
+const sentRunning = { activeRunId: "r1", pendingRun: running } as const
+const partial = { parts: [{ kind: "text", text: "partial" }], partKeys: ["t1"] } as const
 
-  test("running before the first token responds without the queued run", () => {
-    const running = run({ id: "r1", status: "running" })
-    const presentation = presentActiveTurn(
-      sources({ activeRunId: "r1", streamRun: running, runs: [running] })
-    )
-    expect(presentation).toEqual({ kind: "responding", queuedRun: null })
-  })
-
-  test("an announced live stream responds without the queued run even while status lags", () => {
-    const queued = run({ id: "r1", status: "queued" })
-    const presentation = presentActiveTurn(
-      sources({
-        activeRunId: "r1",
-        runs: [queued],
-        live: liveState({ runId: "r1", active: true }),
-      })
-    )
-    expect(presentation).toEqual({ kind: "responding", queuedRun: null })
-  })
-
-  test("a terminal snapshot ends the responding state", () => {
-    const succeeded = run({ id: "r1", status: "succeeded" })
-    const presentation = presentActiveTurn(
-      sources({ activeRunId: "r1", streamRun: succeeded, runs: [succeeded] })
-    )
-    expect(presentation).toEqual({ kind: "idle" })
-  })
-
-  test("a terminal live event ends the responding state", () => {
-    const running = run({ id: "r1", status: "running" })
-    const presentation = presentActiveTurn(
-      sources({
-        activeRunId: "r1",
-        runs: [running],
-        live: liveState({
-          runId: "r1",
-          finishStatus: "succeeded",
-          parts: [{ kind: "text", text: "hi" }],
-          partKeys: ["t1"],
-        }),
-      })
-    )
-    expect(presentation).toEqual({ kind: "idle" })
-  })
-
-  test("the newest failed run without an assistant message surfaces as failed", () => {
-    const failed = run({ id: "r1", status: "failed" })
-    const presentation = presentActiveTurn(sources({ runs: [failed] }))
-    expect(presentation).toEqual({ kind: "failed", run: failed })
-  })
-
-  test("a timeout with durable progress offers continuation with its configured duration", () => {
-    const timedOut = run({
-      id: "r1",
-      status: "failed",
-      finishReason: "timeout",
-      error: {
-        code: "agent.execution_failed",
-        message: "Agent execution failed.",
-        retryable: false,
-        at: "2026-07-12T10:10:00.000Z",
-        details: { timeoutMs: "600000" },
-      },
-    })
-    const presentation = presentActiveTurn(
-      sources({ runs: [timedOut], messages: [assistantMessage(timedOut.id)] })
-    )
-
-    expect(presentation).toEqual({
-      kind: "timeout",
-      run: timedOut,
-      hasProgress: true,
-      timeoutMs: 600_000,
-    })
-  })
-
-  test("a timeout without coherent progress offers retry", () => {
-    const timedOut = run({ id: "r1", status: "failed", finishReason: "timeout" })
-
-    expect(presentActiveTurn(sources({ runs: [timedOut] }))).toEqual({
-      kind: "timeout",
-      run: timedOut,
-      hasProgress: false,
-    })
-  })
-
-  test("a durable timeout waits for messages before deciding between continue and retry", () => {
-    const timedOut = run({ id: "r1", status: "failed", finishReason: "timeout" })
-
-    expect(presentActiveTurn(sources({ runs: [timedOut], messagesLoading: true }))).toEqual({
-      kind: "idle",
-    })
-  })
-
-  test("a live timeout keeps streamed progress visible before durable state catches up", () => {
-    const running = run({ id: "r1", status: "running" })
-    const presentation = presentActiveTurn(
-      sources({
-        activeRunId: running.id,
-        pendingRun: running,
-        live: liveState({
-          runId: running.id,
-          finishStatus: "failed",
-          finishReason: "timeout",
-          parts: [{ kind: "text", text: "partial" }],
-          partKeys: ["t1"],
-        }),
-      })
-    )
-
-    expect(presentation).toEqual({ kind: "timeout", run: running, hasProgress: true })
-  })
-
-  test("a live timeout trusts a finalized message while the transcript refetch is pending", () => {
-    const running = run({ id: "r1", status: "running" })
-    const presentation = presentActiveTurn(
-      sources({
-        activeRunId: running.id,
-        pendingRun: running,
-        live: liveState({
-          runId: running.id,
-          finalizedMessageId: "message-r1",
-          finishStatus: "failed",
-          finishReason: "timeout",
-        }),
-      })
-    )
-
-    expect(presentation).toEqual({ kind: "timeout", run: running, hasProgress: true })
-  })
-
-  test("a live timeout does not treat unsafe streaming fragments as resumable progress", () => {
-    const running = run({ id: "r1", status: "running" })
-    const presentation = presentActiveTurn(
-      sources({
-        activeRunId: running.id,
-        pendingRun: running,
-        live: liveState({
-          runId: running.id,
-          finishStatus: "failed",
-          finishReason: "timeout",
-          parts: [
-            { kind: "text", text: "   " },
-            { kind: "reasoning", text: "\n", streaming: false },
-            { kind: "reasoning", text: "unfinished", streaming: true },
-            {
-              kind: "tool",
-              tool: { toolName: "bash", state: "input-streaming", inputText: "curl" },
-            },
-            { kind: "step-start" },
-          ],
-          partKeys: ["t1", "r1", "r2", "tool1", "step1"],
-        }),
-      })
-    )
-
-    expect(presentation).toEqual({ kind: "timeout", run: running, hasProgress: false })
-  })
-
-  test("an old failure stays hidden after a successful retry", () => {
-    const failed = run({ id: "r1", status: "failed" })
-    const retried = run({ id: "r2", status: "succeeded" })
-    const presentation = presentActiveTurn(
-      sources({ runs: [retried, failed], messages: [assistantMessage("r2")] })
-    )
-    expect(presentation).toEqual({ kind: "idle" })
-  })
-
-  test("a failure known only from the live event surfaces before history refetches", () => {
-    const failed = run({ id: "r1", status: "failed" })
-    const presentation = presentActiveTurn(
-      sources({
-        activeRunId: "r1",
-        streamRun: failed,
-        live: liveState({ runId: "r1", finishStatus: "failed" }),
-      })
-    )
-    expect(presentation).toEqual({ kind: "failed", run: failed })
-  })
-
-  test("a cancellation without content surfaces from history or from the live event", () => {
-    const cancelled = run({ id: "r1", status: "cancelled" })
-    expect(presentActiveTurn(sources({ runs: [cancelled] }))).toEqual({ kind: "cancelled" })
-    expect(
-      presentActiveTurn(
-        sources({ activeRunId: "r1", live: liveState({ runId: "r1", finishStatus: "cancelled" }) })
-      )
-    ).toEqual({ kind: "cancelled" })
-    expect(
-      presentActiveTurn(sources({ runs: [cancelled], messages: [assistantMessage("r1")] }))
-    ).toEqual({ kind: "idle" })
-  })
-
-  test("an interrupted turn offers a retry from history or from the live event", () => {
-    const interrupted = run({ id: "r1", status: "cancelled", finishReason: "interrupted" })
-    expect(presentActiveTurn(sources({ runs: [interrupted] }))).toEqual({
-      kind: "interrupted",
-      run: interrupted,
-      hasProgress: false,
-    })
-    expect(presentActiveTurn(sources({ runs: [interrupted], messagesLoading: true }))).toEqual({
-      kind: "idle",
-    })
-
+test.each<[string, Partial<ActiveTurnSources>, ActiveTurnPresentation]>([
+  [
+    "a queued run responds with the run needed for the extended waiting status",
+    { activeRunId: "r1", pendingRun: queued, runs: [queued] },
+    { kind: "responding", queuedRun: queued },
+  ],
+  [
+    "running before the first token responds without the queued run",
+    { activeRunId: "r1", streamRun: running, runs: [running] },
+    { kind: "responding", queuedRun: null },
+  ],
+  [
+    "an announced live stream responds without the queued run even while status lags",
+    { activeRunId: "r1", runs: [queued], live: liveState({ runId: "r1", active: true }) },
+    { kind: "responding", queuedRun: null },
+  ],
+  [
+    "a terminal snapshot ends the responding state",
+    { activeRunId: "r1", streamRun: succeeded, runs: [succeeded] },
+    { kind: "idle" },
+  ],
+  [
+    "a terminal live event ends the responding state",
+    {
+      activeRunId: "r1",
+      runs: [running],
+      live: liveState({ runId: "r1", finishStatus: "succeeded", ...partial }),
+    },
+    { kind: "idle" },
+  ],
+  [
+    "the newest failed run without an assistant message surfaces as failed",
+    { runs: [failed] },
+    { kind: "failed", run: failed },
+  ],
+  [
+    "a failed run that saved an answer is not a pre-stream failure",
+    { runs: [failed], messages: [assistantMessage("r1")] },
+    { kind: "idle" },
+  ],
+  [
+    "an old failure stays hidden after a successful retry",
+    { runs: [retried, failed], messages: [assistantMessage("r2")] },
+    { kind: "idle" },
+  ],
+  [
+    "a failure known only from the live event surfaces before history refetches",
+    {
+      activeRunId: "r1",
+      streamRun: failed,
+      live: liveState({ runId: "r1", finishStatus: "failed" }),
+    },
+    { kind: "failed", run: failed },
+  ],
+  [
+    "a failed run with partial live content is not a pre-stream failure",
+    {
+      activeRunId: "r1",
+      streamRun: failed,
+      messages: [assistantMessage("r1")],
+      live: liveState({ runId: "r1", finishStatus: "failed", ...partial }),
+    },
+    { kind: "idle" },
+  ],
+  [
+    "a timeout with durable progress offers continuation with its configured duration",
+    { runs: [timedOutWithBudget], messages: [assistantMessage("r1")] },
+    { kind: "timeout", run: timedOutWithBudget, hasProgress: true, timeoutMs: 600_000 },
+  ],
+  [
+    "a timeout without coherent progress offers retry",
+    { runs: [timedOut] },
+    { kind: "timeout", run: timedOut, hasProgress: false },
+  ],
+  [
+    "a durable timeout waits for messages before deciding between continue and retry",
+    { runs: [timedOut], messagesLoading: true },
+    { kind: "idle" },
+  ],
+  [
+    "a live timeout keeps streamed progress visible before durable state catches up",
+    {
+      ...sentRunning,
+      live: liveState({ runId: "r1", finishStatus: "failed", finishReason: "timeout", ...partial }),
+    },
+    { kind: "timeout", run: running, hasProgress: true },
+  ],
+  [
+    "a live timeout trusts a finalized message while the transcript refetch is pending",
+    {
+      ...sentRunning,
+      live: liveState({
+        runId: "r1",
+        finalizedMessageId: "message-r1",
+        finishStatus: "failed",
+        finishReason: "timeout",
+      }),
+    },
+    { kind: "timeout", run: running, hasProgress: true },
+  ],
+  [
+    "a live timeout does not treat unsafe streaming fragments as resumable progress",
+    {
+      ...sentRunning,
+      live: liveState({
+        runId: "r1",
+        finishStatus: "failed",
+        finishReason: "timeout",
+        parts: [
+          { kind: "text", text: "   " },
+          { kind: "reasoning", text: "\n", streaming: false },
+          { kind: "reasoning", text: "unfinished", streaming: true },
+          { kind: "tool", tool: { toolName: "bash", state: "input-streaming", inputText: "curl" } },
+          { kind: "step-start" },
+        ],
+        partKeys: ["t1", "r1", "r2", "tool1", "step1"],
+      }),
+    },
+    { kind: "timeout", run: running, hasProgress: false },
+  ],
+  [
+    "a cancellation without content surfaces from history",
+    { runs: [cancelled] },
+    { kind: "cancelled" },
+  ],
+  [
+    "a cancellation without content surfaces from the live event",
+    { activeRunId: "r1", live: liveState({ runId: "r1", finishStatus: "cancelled" }) },
+    { kind: "cancelled" },
+  ],
+  [
+    "a cancellation that saved an answer is not marked",
+    { runs: [cancelled], messages: [assistantMessage("r1")] },
+    { kind: "idle" },
+  ],
+  [
+    "an interrupted turn offers a retry from history",
+    { runs: [interrupted] },
+    { kind: "interrupted", run: interrupted, hasProgress: false },
+  ],
+  [
     // The live parts a dead worker streamed were never saved; they do not count as progress.
-    const running = run({ id: "r1", status: "running" })
-    expect(
-      presentActiveTurn(
-        sources({
-          activeRunId: running.id,
-          pendingRun: running,
-          live: liveState({
-            runId: running.id,
-            finishStatus: "cancelled",
-            finishReason: "interrupted",
-            parts: [{ kind: "text", text: "partial" }],
-            partKeys: ["t1"],
-          }),
-        })
-      )
-    ).toEqual({ kind: "interrupted", run: running, hasProgress: false })
-
-    const retried = run({ id: "r2", status: "succeeded" })
-    expect(
-      presentActiveTurn(
-        sources({ runs: [retried, interrupted], messages: [assistantMessage("r2")] })
-      )
-    ).toEqual({ kind: "idle" })
-  })
-
-  test("a turn interrupted by a stopping worker continues from its saved answer", () => {
+    "an interrupted turn offers a retry from the live event, whatever it streamed",
+    {
+      ...sentRunning,
+      live: liveState({
+        runId: "r1",
+        finishStatus: "cancelled",
+        finishReason: "interrupted",
+        ...partial,
+      }),
+    },
+    { kind: "interrupted", run: running, hasProgress: false },
+  ],
+  [
+    "an interrupted turn stays hidden after a successful retry",
+    { runs: [retried, interrupted], messages: [assistantMessage("r2")] },
+    { kind: "idle" },
+  ],
+  [
     // Regression proof: compute hasProgress as false for interrupted turns; Continue is lost.
-    const interrupted = run({ id: "r1", status: "cancelled", finishReason: "interrupted" })
-    expect(
-      presentActiveTurn(sources({ runs: [interrupted], messages: [assistantMessage("r1")] }))
-    ).toEqual({ kind: "interrupted", run: interrupted, hasProgress: true })
-
-    const running = run({ id: "r1", status: "running" })
-    expect(
-      presentActiveTurn(
-        sources({
-          activeRunId: running.id,
-          pendingRun: running,
-          live: liveState({
-            runId: running.id,
-            finalizedMessageId: "message-r1",
-            finishStatus: "cancelled",
-            finishReason: "interrupted",
-          }),
-        })
-      )
-    ).toEqual({ kind: "interrupted", run: running, hasProgress: true })
-  })
-
-  test("terminal markers wait for the transcript to load", () => {
-    const failed = run({ id: "r1", status: "failed" })
-    const cancelled = run({ id: "r2", status: "cancelled" })
-    expect(presentActiveTurn(sources({ runs: [failed], messagesLoading: true }))).toEqual({
-      kind: "idle",
-    })
-    expect(presentActiveTurn(sources({ runs: [cancelled], messagesLoading: true }))).toEqual({
-      kind: "idle",
-    })
-  })
-
-  test("a failed run with partial live content is not a pre-stream failure", () => {
-    const failed = run({ id: "r1", status: "failed" })
-    const presentation = presentActiveTurn(
-      sources({
-        activeRunId: "r1",
-        streamRun: failed,
-        messages: [assistantMessage("r1")],
-        live: liveState({
-          runId: "r1",
-          finishStatus: "failed",
-          parts: [{ kind: "text", text: "partial" }],
-          partKeys: ["t1"],
-        }),
-      })
-    )
-    expect(presentation).toEqual({ kind: "idle" })
-  })
+    "a turn interrupted by a stopping worker continues from its saved answer",
+    { runs: [interrupted], messages: [assistantMessage("r1")] },
+    { kind: "interrupted", run: interrupted, hasProgress: true },
+  ],
+  [
+    "a turn interrupted by a stopping worker continues from its finalized live message",
+    {
+      ...sentRunning,
+      live: liveState({
+        runId: "r1",
+        finalizedMessageId: "message-r1",
+        finishStatus: "cancelled",
+        finishReason: "interrupted",
+      }),
+    },
+    { kind: "interrupted", run: running, hasProgress: true },
+  ],
+  [
+    "a failed marker waits for the transcript to load",
+    { runs: [failed], messagesLoading: true },
+    { kind: "idle" },
+  ],
+  [
+    "a cancelled marker waits for the transcript to load",
+    { runs: [cancelled], messagesLoading: true },
+    { kind: "idle" },
+  ],
+  [
+    "an interrupted marker waits for the transcript to load",
+    { runs: [interrupted], messagesLoading: true },
+    { kind: "idle" },
+  ],
+])("presentActiveTurn: %s", (_name, overrides, expected) => {
+  expect(presentActiveTurn(sources(overrides))).toEqual(expected)
 })

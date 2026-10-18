@@ -67,9 +67,6 @@ describe("toSeriesData", () => {
       { value: 1, timestamp: "2026-01-01T00:00:00.000Z" },
       { value: 3, timestamp: "2026-01-03T00:00:00.000Z" },
     ])
-  })
-
-  test("returns an empty series for non-array input", () => {
     expect(toSeriesData(undefined)).toEqual([])
   })
 })

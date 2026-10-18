@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type BashIntent,
   classifyCommand,
   coerceBashOutput,
   commandPreview,
   describeBash,
-  objectCount,
 } from "../src/agent/bash/interpret"
 
 function output(stdout: string, exitCode = 0) {
@@ -61,129 +61,110 @@ describe("classifyCommand", () => {
     }
   })
 
-  test("tokenizes quoted opaque object ids without interpreting their path characters", () => {
-    expect(
-      classifyCommand(`sixb objects get RepositoryIssue 'github:issue:sixb-ai/sixb#297'`)
-    ).toEqual({
-      kind: "sixb",
-      command: "objects.get",
-      args: ["RepositoryIssue", "github:issue:sixb-ai/sixb#297"],
-    })
-  })
-
-  test("recognizes an installed CLI by basename", () => {
-    expect(classifyCommand("/opt/sixb/bin/sixb ontology list")).toEqual({
-      kind: "sixb",
-      command: "ontology.list",
-      args: [],
-    })
-  })
-
-  test("recognizes CLI commands after ordinary environment setup", () => {
-    expect(classifyCommand("SIXB_DEBUG=1 sixb ontology list")).toEqual({
-      kind: "sixb",
-      command: "ontology.list",
-      args: [],
-    })
-    expect(classifyCommand("env SIXB_DEBUG=1 sixb objects list --type Customer")).toEqual({
-      kind: "sixb",
-      command: "objects.list",
-      args: ["--type", "Customer"],
-    })
-  })
-
-  test("separates help and copyable query examples from query execution", () => {
-    expect(classifyCommand("sixb objects query --help")).toEqual({
-      kind: "sixb",
-      command: "help",
-      args: ["objects", "query"],
-    })
-    expect(classifyCommand("sixb objects query --example incoming")).toEqual({
-      kind: "sixb",
-      command: "objects.query-example",
-      args: ["--example", "incoming"],
-    })
-  })
-
-  test("only treats help tokens in command positions as help", () => {
-    expect(classifyCommand("sixb objects get Customer help")).toEqual({
-      kind: "sixb",
-      command: "objects.get",
-      args: ["Customer", "help"],
-    })
-    expect(classifyCommand("sixb objects query --file help")).toEqual({
-      kind: "sixb",
-      command: "objects.query",
-      args: ["--file", "help"],
-    })
-  })
-
-  test("keeps unknown Sixb operations recognizable without guessing their meaning", () => {
-    expect(classifyCommand("sixb objects future --value x")).toEqual({
-      kind: "sixb",
-      command: "unknown",
-      args: ["objects", "future", "--value", "x"],
-    })
-  })
-
-  test("classifies a skill read with skill name and reference", () => {
-    expect(classifyCommand(`cat "$SIXB_SKILLS_DIR/sixb/SKILL.md"`)).toEqual({
-      kind: "read-skill",
-      skillName: "sixb",
-      reference: undefined,
-    })
-    expect(
-      classifyCommand(`cat /tmp/sandbox/.sixb/agent/skills/sixb/references/query-ir.md`)
-    ).toEqual({ kind: "read-skill", skillName: "sixb", reference: "query-ir.md" })
-  })
-
-  test("a skill-path read is not mistaken for a Sixb command", () => {
-    expect(classifyCommand(`cat skills/sixb/references/query-ir.md`).kind).toBe("read-skill")
-    expect(classifyCommand(`echo cat skills/sixb/references/query-ir.md`).kind).toBe("generic")
-  })
-
-  test("falls back to generic for plain and legacy curl commands", () => {
-    expect(classifyCommand("ls -la /workspace")).toEqual({
-      kind: "generic",
-      command: "ls -la /workspace",
-    })
-    expect(classifyCommand(`curl -sS "$SIXB_API_BASE_URL/api/object-types"`).kind).toBe("generic")
-  })
-
-  test("keeps the meaningful intent when commands are combined", () => {
-    expect(classifyCommand("sixb ontology list | jq .")).toEqual({
-      kind: "compound",
-      primary: { kind: "sixb", command: "ontology.list", args: [] },
-      stepCount: 2,
-    })
-
-    const tests = classifyCommand("cd packages/core && bun test tests")
-    expect(tests.kind).toBe("compound")
-    expect(describeBash(tests, null).runningTitle).toBe("Running tests")
-
-    const fallback = classifyCommand("bun test || echo failed")
-    expect(fallback.kind).toBe("compound")
-    expect(describeBash(fallback, null).runningTitle).toBe("Running tests")
-
-    expect(describeBash(classifyCommand("uname -a && date"), null).runningTitle).toBe(
-      "Running 2 steps"
-    )
-    expect(describeBash(classifyCommand("find packages | head -n 20"), null).runningTitle).toBe(
-      "Inspecting files"
-    )
-  })
-
-  test("does not split operators inside quotes or heredocs", () => {
-    expect(classifyCommand(`echo "one && two"`).kind).toBe("generic")
-    expect(
-      describeBash(classifyCommand(`printf '%s' 'one && two' && pwd`), null).runningTitle
-    ).toBe("Checking the workspace location")
-
-    const html = classifyCommand(
-      `cat > output.html <<'HTML'\n<script>ready && render()</script>\nHTML`
-    )
-    expect(html.kind).toBe("generic")
-    expect(describeBash(html, null).runningTitle).toBe("Creating an HTML file")
+  test.each<[string, string, BashIntent]>([
+    [
+      "tokenizes quoted opaque object ids without interpreting their path characters",
+      `sixb objects get RepositoryIssue 'github:issue:sixb-ai/sixb#297'`,
+      {
+        kind: "sixb",
+        command: "objects.get",
+        args: ["RepositoryIssue", "github:issue:sixb-ai/sixb#297"],
+      },
+    ],
+    [
+      "recognizes an installed CLI by basename",
+      "/opt/sixb/bin/sixb ontology list",
+      { kind: "sixb", command: "ontology.list", args: [] },
+    ],
+    [
+      "recognizes CLI commands after ordinary environment setup",
+      "SIXB_DEBUG=1 sixb ontology list",
+      { kind: "sixb", command: "ontology.list", args: [] },
+    ],
+    [
+      "recognizes CLI commands after env",
+      "env SIXB_DEBUG=1 sixb objects list --type Customer",
+      { kind: "sixb", command: "objects.list", args: ["--type", "Customer"] },
+    ],
+    [
+      "separates help from query execution",
+      "sixb objects query --help",
+      { kind: "sixb", command: "help", args: ["objects", "query"] },
+    ],
+    [
+      "separates copyable query examples from query execution",
+      "sixb objects query --example incoming",
+      { kind: "sixb", command: "objects.query-example", args: ["--example", "incoming"] },
+    ],
+    [
+      "treats help as an argument outside command positions",
+      "sixb objects get Customer help",
+      { kind: "sixb", command: "objects.get", args: ["Customer", "help"] },
+    ],
+    [
+      "treats help as an option value outside command positions",
+      "sixb objects query --file help",
+      { kind: "sixb", command: "objects.query", args: ["--file", "help"] },
+    ],
+    [
+      "keeps unknown Sixb operations recognizable without guessing their meaning",
+      "sixb objects future --value x",
+      { kind: "sixb", command: "unknown", args: ["objects", "future", "--value", "x"] },
+    ],
+    [
+      "classifies a skill read with its skill name",
+      `cat "$SIXB_SKILLS_DIR/sixb/SKILL.md"`,
+      { kind: "read-skill", skillName: "sixb", reference: undefined },
+    ],
+    [
+      "classifies a skill read with its reference",
+      "cat /tmp/sandbox/.sixb/agent/skills/sixb/references/query-ir.md",
+      { kind: "read-skill", skillName: "sixb", reference: "query-ir.md" },
+    ],
+    [
+      "classifies a relative skill-path read",
+      "cat skills/sixb/references/query-ir.md",
+      { kind: "read-skill", skillName: "sixb", reference: "query-ir.md" },
+    ],
+    [
+      "does not mistake a skill path in an argument for a skill read",
+      "echo cat skills/sixb/references/query-ir.md",
+      { kind: "generic", command: "echo cat skills/sixb/references/query-ir.md" },
+    ],
+    [
+      "falls back to generic for plain commands",
+      "ls -la /workspace",
+      { kind: "generic", command: "ls -la /workspace" },
+    ],
+    [
+      "falls back to generic for legacy curl commands",
+      `curl -sS "$SIXB_API_BASE_URL/api/object-types"`,
+      { kind: "generic", command: `curl -sS "$SIXB_API_BASE_URL/api/object-types"` },
+    ],
+    [
+      "keeps the meaningful intent when commands are combined",
+      "sixb ontology list | jq .",
+      {
+        kind: "compound",
+        primary: { kind: "sixb", command: "ontology.list", args: [] },
+        stepCount: 2,
+      },
+    ],
+    [
+      "does not split operators inside quotes",
+      `echo "one && two"`,
+      { kind: "generic", command: `echo "one && two"` },
+    ],
+    [
+      "does not split operators inside heredocs",
+      `cat > output.html <<'HTML'\n<script>ready && render()</script>\nHTML`,
+      {
+        kind: "generic",
+        command: `cat > output.html <<'HTML'\n<script>ready && render()</script>\nHTML`,
+      },
+    ],
+  ])("%s", (_reason, command, expected) => {
+    expect(classifyCommand(command)).toEqual(expected)
   })
 })
 
@@ -210,7 +191,7 @@ describe("describeBash", () => {
     expect(description.detail).toBeUndefined()
   })
 
-  test("describes common generic commands by intent instead of exposing their payload", () => {
+  test("describes a generated file by intent instead of exposing its payload", () => {
     const html = describeBash(
       classifyCommand(
         `cat > "$SIXB_OUTPUT_PATH" <<'HTML'\n<!DOCTYPE html>\n<html>\n<body>Hi</body>\n</html>\nHTML`
@@ -220,43 +201,36 @@ describe("describeBash", () => {
     expect(html.title).toBe("Created an HTML file")
     expect(html.runningTitle).toBe("Creating an HTML file")
     expect(html.detail).toBeUndefined()
-
-    expect(describeBash(classifyCommand("bun test packages/core/tests"), null).runningTitle).toBe(
-      "Running tests"
-    )
-    expect(describeBash(classifyCommand("rg -n Customer packages"), null).runningTitle).toBe(
-      "Searching files"
-    )
   })
 
-  test("describes common file inspection commands", () => {
-    expect(describeBash(classifyCommand("ls -la /workspace"), null).runningTitle).toBe(
-      "Inspecting files"
-    )
-    expect(describeBash(classifyCommand("find packages -name '*.ts'"), null).runningTitle).toBe(
-      "Inspecting files"
-    )
-    expect(describeBash(classifyCommand("pwd"), null).runningTitle).toBe(
-      "Checking the workspace location"
-    )
-    expect(describeBash(classifyCommand("head -n 20 README.md"), null).runningTitle).toBe(
-      "Reading a file"
-    )
-  })
-
-  test("classifies generic commands by executable rather than words in their arguments", () => {
-    for (const command of [
-      "echo bun test",
-      "echo ls packages",
-      "echo head README.md",
-      `echo "cat > report.txt"`,
-      "(bun test || true)",
-    ]) {
-      expect(describeBash(classifyCommand(command), null).runningTitle).toBe("Running a command")
-    }
-    expect(describeBash(classifyCommand("TEST_MODE=1 bun test"), null).runningTitle).toBe(
-      "Running tests"
-    )
+  test.each([
+    // Combined commands keep the meaningful step, including a fallback branch.
+    ["cd packages/core && bun test tests", "Running tests"],
+    ["bun test || echo failed", "Running tests"],
+    ["uname -a && date", "Running 2 steps"],
+    ["find packages | head -n 20", "Inspecting files"],
+    // Operators inside quotes and heredocs do not split the command.
+    [`printf '%s' 'one && two' && pwd`, "Checking the workspace location"],
+    [
+      `cat > output.html <<'HTML'\n<script>ready && render()</script>\nHTML`,
+      "Creating an HTML file",
+    ],
+    // Common generic commands are described by intent.
+    ["bun test packages/core/tests", "Running tests"],
+    ["rg -n Customer packages", "Searching files"],
+    ["ls -la /workspace", "Inspecting files"],
+    ["find packages -name '*.ts'", "Inspecting files"],
+    ["pwd", "Checking the workspace location"],
+    ["head -n 20 README.md", "Reading a file"],
+    ["TEST_MODE=1 bun test", "Running tests"],
+    // Generic commands are classified by executable, not by words in their arguments.
+    ["echo bun test", "Running a command"],
+    ["echo ls packages", "Running a command"],
+    ["echo head README.md", "Running a command"],
+    [`echo "cat > report.txt"`, "Running a command"],
+    ["(bun test || true)", "Running a command"],
+  ])("describes `%s` as %s", (command, runningTitle) => {
+    expect(describeBash(classifyCommand(command), null).runningTitle).toBe(runningTitle)
   })
 
   test("summarizes the ontology with a count", () => {
@@ -273,6 +247,10 @@ describe("describeBash", () => {
       parsed
     )
     expect(description.title).toBe("Found 2 work orders")
+    // Both the list and the query envelopes are counted; a response without objects is not.
+    const list = { kind: "sixb", command: "objects.list", args: ["--type", "workOrder"] } as const
+    expect(describeBash(list, output(`[{},{},{}]`)).title).toBe("Found 3 work orders")
+    expect(describeBash(list, output(`{"count":9}`)).title).toBe("Queried objects")
   })
 
   test("summarizes a count response value", () => {
@@ -333,30 +311,16 @@ describe("describeBash", () => {
 })
 
 describe("coerceBashOutput", () => {
-  test("decodes JSON stdout on success", () => {
-    const parsed = output(`{"count":5}`)
-    expect(parsed?.ok).toBe(true)
-    expect(parsed?.json).toEqual({ count: 5 })
-  })
-
-  test("does not decode JSON when the command failed", () => {
-    const parsed = output(`{"count":5}`, 1)
-    expect(parsed?.ok).toBe(false)
-    expect(parsed?.json).toBeUndefined()
-  })
-
-  test("leaves non-JSON stdout undecoded", () => {
+  test("decodes JSON stdout only when the command succeeded", () => {
+    expect(output(`{"count":5}`)).toMatchObject({ ok: true, json: { count: 5 } })
+    const failed = output(`{"count":5}`, 1)
+    expect(failed?.ok).toBe(false)
+    expect(failed?.json).toBeUndefined()
     expect(output("plain text output")?.json).toBeUndefined()
   })
 })
 
 describe("helpers", () => {
-  test("objectCount handles both list and query envelopes", () => {
-    expect(objectCount([1, 2, 3])).toBe(3)
-    expect(objectCount({ objects: [1, 2] })).toBe(2)
-    expect(objectCount({ count: 9 })).toBeNull()
-  })
-
   test("folds multiline command payloads into a stable first-line preview", () => {
     const preview = commandPreview(
       "cat > output.html <<'HTML'\n<html>\n<body>large</body>\n</html>"

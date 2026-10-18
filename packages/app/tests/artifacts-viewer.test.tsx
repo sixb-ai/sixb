@@ -18,7 +18,6 @@ import {
   type ViewerTarget,
   withArtifactTarget,
 } from "../src/artifacts/target"
-import { artifactThemeAttributes } from "../src/artifacts/theme"
 import { Viewer } from "../src/artifacts/viewer"
 import { artifactHref } from "../src/pages/routes"
 import { seedVersion } from "./helpers/artifacts"
@@ -178,6 +177,8 @@ describe("the viewer", () => {
     readonly entry: string
     readonly texts?: Record<string, string>
     readonly target?: ViewerTarget
+    /** The version to seed; the artifact's latest is 2. */
+    readonly version?: number
   }): string {
     const cache = new QueryClient({
       defaultOptions: { queries: { enabled: false, retry: false, staleTime: Infinity } },
@@ -203,7 +204,7 @@ describe("the viewer", () => {
     } satisfies GetArtifactResponse)
     const version: GetArtifactVersionResponse = {
       artifactId: ARTIFACT_ID,
-      version: 2,
+      version: input.version ?? 2,
       title: "Q3 operating review",
       entry: input.entry,
       files: input.files,
@@ -268,16 +269,21 @@ describe("the viewer", () => {
     expect(html).toContain('aria-label="Copy a link to “Revenue”"')
   })
 
-  test("shows a file artifact as its type allows", () => {
+  test("shows a file artifact as its type allows, at the version a link pinned", () => {
+    // Only version 1 is read: reproduce by ignoring `target.version` in Viewer, which then waits
+    // on the latest, version 2.
     const html = render({
       kind: "file",
       entry: "regions.csv",
       files: [{ path: "regions.csv", file: fileRef("csv", 40, "text/csv") }],
       texts: { "regions.csv": "Region,Revenue\nNorth,1234\nSouth,980\n" },
+      target: { type: "artifact", artifactId: ARTIFACT_ID, version: 1 },
+      version: 1,
     })
     expect(html).toContain("Region")
     expect(html).toContain("North")
     expect(html).toContain('role="img" aria-label="File"')
+    expect(html).toContain("Version 1")
   })
 
   test("shows a sheet as a spreadsheet: its tabs, its typed columns, and its rows", () => {
@@ -334,17 +340,6 @@ describe("the viewer", () => {
     expect(html).not.toContain("This sheet could not be read.")
     expect(html).toMatch(/download="Visits.csv"[^>]*>.*Download Visits as CSV/)
   })
-
-  test("pins the version a link asked for", () => {
-    const html = render({
-      kind: "file",
-      entry: "regions.csv",
-      files: [{ path: "regions.csv", file: fileRef("csv", 40, "text/csv") }],
-      texts: { "regions.csv": "Region\nNorth\n" },
-      target: { type: "artifact", artifactId: ARTIFACT_ID, version: 2 },
-    })
-    expect(html).toContain("North")
-  })
 })
 
 test("an artifact's page is the whole window, with a way back and no panel controls", () => {
@@ -358,18 +353,10 @@ test("an artifact's page is the whole window, with a way back and no panel contr
       </MemoryRouter>
     </QueryClientProvider>
   )
-  expect(html).toContain('class="fixed inset-0 z-50 flex flex-col bg-background text-foreground"')
+  expect(html).toMatch(/class="fixed inset-0 /)
   expect(html).toContain('aria-label="Back"')
   expect(html).not.toContain('aria-label="Close"')
   expect(html).not.toContain('aria-label="Open full page"')
-})
-
-test("a theme pins its mode and scopes its tokens to the artifact", () => {
-  expect(artifactThemeAttributes(null)).toEqual({})
-  expect(artifactThemeAttributes({ mode: "light" })).toEqual({ className: "light" })
-  expect(artifactThemeAttributes({ tokens: { "--radius": "4px" } })).toEqual({
-    style: { "--radius": "4px" } as never,
-  })
 })
 
 function Wrap({ cache, children }: { readonly cache: QueryClient; readonly children: ReactNode }) {

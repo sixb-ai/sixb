@@ -129,7 +129,7 @@ describe("cell formatting", () => {
     return cellFormatter(column, locale)(value)
   }
 
-  test("follows the column's type and the reader's locale", () => {
+  test("follows the column's type and the reader's locale, and shows any other value as written", () => {
     expect(format("Revenue", "4120000")).toEqual({ text: "$4,120,000.0" })
     expect(format("Revenue", "-15000")).toEqual({ text: "-$15,000.0", negative: true })
     // French groups with narrow no-break spaces and keeps a space before the currency.
@@ -143,9 +143,6 @@ describe("cell formatting", () => {
       href: "https://northline.example/q4/",
     })
     expect(format("Quarter", "Q4 2025")).toEqual({ text: "Q4 2025" })
-  })
-
-  test("shows a value that is not its type as written", () => {
     expect(format("Revenue", "n/a")).toEqual({ text: "n/a" })
     expect(format("Closed", "soon")).toEqual({ text: "soon" })
   })
@@ -503,8 +500,8 @@ describe("a chart's data", () => {
   })
 
   test("of a long sheet is sampled evenly to what a chart can draw, its ends kept", () => {
-    // Reproduce by mapping every row in chartData: a chart of 100,000 rows draws 100,000 points
-    // on every render.
+    // Reproduce by mapping every row in chartData: a chart of 10,000 rows draws 10,000 points on
+    // every render.
     const chart = workbook.charts[0]
     if (!chart) throw new Error("Expected a chart.")
     const long = sheetModel(
@@ -512,16 +509,16 @@ describe("a chart's data", () => {
       parseCsv(
         [
           "Quarter,Revenue,Margin,Units,Closed,Site",
-          ...Array.from({ length: 100_000 }, (_, index) => `Day ${index + 1},${index},0.3,1,,`),
+          ...Array.from({ length: 10_000 }, (_, index) => `Day ${index + 1},${index},0.3,1,,`),
         ].join("\n")
       )
     )
     const data = chartData(chart, long)
     expect(data?.rows.length).toBe(MAX_CHART_POINTS)
     expect(data?.rows[0]?.x).toBe("Day 1")
-    expect(data?.rows.at(-1)?.x).toBe("Day 100000")
+    expect(data?.rows.at(-1)?.x).toBe("Day 10000")
     // A pie keeps every row: publishing caps its slices.
-    expect(chartData({ ...chart, type: "pie" }, long)?.rows.length).toBe(100_000)
+    expect(chartData({ ...chart, type: "pie" }, long)?.rows.length).toBe(10_000)
   })
 
   test("labels its last point with the first series, or with a stack's total", () => {

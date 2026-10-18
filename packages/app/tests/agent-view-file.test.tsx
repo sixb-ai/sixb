@@ -54,16 +54,13 @@ function savedTool(fileRef: AgentFileRef): NormalizedTool {
 }
 
 describe("view_file in the work trace", () => {
-  test("addresses a viewed file inside its tool result, not as a message attachment", () => {
-    const tool = savedTool(page)
-
-    expect(tool.files).toHaveLength(1)
-    expect(tool.files?.[0]?.source?.id).toBe("message:message/parts/0/output/content/1/fileRef")
-  })
-
   test("shows a viewed image as a small preview on its row", () => {
     // Regression proof: drop `toolFiles` from normalizeDurableParts; the image has no source.
-    const html = renderToStaticMarkup(<ViewFileToolView tool={savedTool(page)} />)
+    // The file is addressed inside its tool result, not as a message attachment.
+    const tool = savedTool(page)
+    expect(tool.files).toHaveLength(1)
+    expect(tool.files?.[0]?.source?.id).toBe("message:message/parts/0/output/content/1/fileRef")
+    const html = renderToStaticMarkup(<ViewFileToolView tool={tool} />)
 
     expect(html).toContain("Viewed scan-page-1.png")
     expect(html).toContain("<img")

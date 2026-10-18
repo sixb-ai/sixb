@@ -7,19 +7,73 @@ import {
   type ConversationPanelProps,
 } from "../src/agent/components/conversation-panel"
 import { createLiveRunState } from "../src/agent/live-run"
+import type { AgentThread } from "../src/agent/types"
 
-test.each([false, true])("shows the agent name without a brand avatar (compact: %s)", (compact) => {
-  // Restoring AgentAvatar in the header or welcome state brings back the brand SVG.
-  const html = renderPanel({ compact })
-  expect(html).toContain(">Agent<")
-  expect(html).not.toContain('viewBox="0 0 480 394"')
+function thread(id: string, title: string): AgentThread {
+  return {
+    id,
+    projectId: "project",
+    ownerPrincipal: { type: "user", id: "user" },
+    title,
+    status: "active",
+    activeRunId: null,
+    messageCount: 1,
+    createdAt: "2026-09-01T12:00:00.000Z",
+    updatedAt: "2026-09-01T12:00:00.000Z",
+  }
+}
+
+const current = thread("current", "Current customer research")
+
+test("compact chat exposes thread history and a direct new-thread action", () => {
+  const html = renderPanel({ compact: true, currentThread: current, threadId: current.id })
+
+  expect(html).toContain('aria-label="Thread history. Current: Current customer research"')
+  expect(html).toContain('aria-label="New thread"')
+  expect(html).not.toContain('aria-label="Recent chats"')
+  expect(html).not.toContain(">Operations Assistant</span>")
+  // An unsent conversation is a new thread.
+  expect(renderPanel({ compact: true })).toContain(
+    'aria-label="Thread history. Current: New thread"'
+  )
 })
 
-test.each([
-  false,
-  true,
-])("keeps the composer available for existing threads (compact: %s)", (compact) => {
-  expect(renderPanel({ compact, threadId: "existing-thread" })).toContain("<textarea")
+test("thread history shows a rotating active count while runs are in flight", () => {
+  const html = renderPanel({
+    compact: true,
+    currentThread: current,
+    threadId: current.id,
+    runningThreadCount: 2,
+  })
+
+  expect(html).toContain('data-active-thread-count="2"')
+  expect(html).toContain("animate-spin")
+  expect(html).toContain(
+    'aria-label="2 threads running. Open thread history. Current: Current customer research"'
+  )
+  expect(html).not.toContain("lucide-history")
+})
+
+test("an empty conversation shows host welcome content in place of the agent name", () => {
+  for (const compact of [false, true]) {
+    expect(renderPanel({ compact })).toContain(">Operations Assistant</p>")
+  }
+  const welcome = renderPanel({
+    welcomeContent: createElement("div", null, "Northline Mechanical"),
+  })
+  expect(welcome).toContain("Northline Mechanical")
+  expect(welcome).not.toContain(">Operations Assistant</p>")
+  // Null welcome content hides the name.
+  expect(renderPanel({ welcomeContent: null })).not.toContain(">Operations Assistant</p>")
+})
+
+test("sandbox recovery remains visible in an empty conversation", () => {
+  // Regression proof: remove sandboxRecovery from the empty composer layout; this fails.
+  const html = renderPanel({
+    sandboxRecovery: createElement("div", null, "Sandbox recovery required"),
+    composerDisabled: true,
+  })
+  expect(html).toContain("Sandbox recovery required")
 })
 
 test("replaces an interrupted turn's unsaved stream with a way to run it again", () => {
@@ -70,7 +124,7 @@ function renderPanel(props: Partial<ConversationPanelProps>): string {
         QueryClientProvider,
         { client: cache },
         createElement(ConversationPanel, {
-          agent: undefined,
+          agent: { name: "Operations Assistant", model: { provider: "test", modelId: "test" } },
           threadId: null,
           messages: [],
           live: createLiveRunState(),
@@ -78,7 +132,7 @@ function renderPanel(props: Partial<ConversationPanelProps>): string {
           messagesError: null,
           awaitingResponse: false,
           reconnecting: false,
-          agentThreads: [],
+          agentThreads: [thread("recent", "Recent customer research")],
           currentThread: null,
           runningThreadCount: 0,
           onSend: noop,

@@ -12,20 +12,13 @@ const defaults = {
   threadId: null,
 } as const
 
-test("agent surface state restores the tab's mode, width, and selected thread", () => {
+test("agent surface state restores the tab's mode, width, and thread, and rejects malformed values", () => {
   expect(
     parseAgentSurfaceSessionState(
       JSON.stringify({ mode: "collapsed", dockWidth: 512, threadId: "thread-42" }),
       defaults
     )
-  ).toEqual({
-    mode: "collapsed",
-    dockWidth: 512,
-    threadId: "thread-42",
-  })
-})
-
-test("agent surface state rejects malformed values and clamps persisted widths", () => {
+  ).toEqual({ mode: "collapsed", dockWidth: 512, threadId: "thread-42" })
   expect(parseAgentSurfaceSessionState("not json", defaults)).toEqual(defaults)
   expect(
     parseAgentSurfaceSessionState(

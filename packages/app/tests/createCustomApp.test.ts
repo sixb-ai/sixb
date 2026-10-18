@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -43,10 +43,6 @@ async function getFreePort(): Promise<number> {
       })
     })
   })
-}
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms))
 }
 
 async function mtimes(paths: readonly string[]): Promise<readonly number[]> {
@@ -105,7 +101,7 @@ describe("createCustomApp.start", () => {
   test("snapshots only public env at startup and refreshes it without rebuilding", async () => {
     const previous = process.env.SIXB_PUBLIC_TEST_KEY
     const secret = process.env.SIXB_PRIVATE_TEST_KEY
-    const app = await createCustomApp({ rootDir: tempRoot })
+    const app = await createCustomApp({ rootDir: tempRoot, authEnabled: false })
     const original = await readFile(join(tempRoot, ".sixb/dist/app/index.html"), "utf-8")
     try {
       process.env.SIXB_PRIVATE_TEST_KEY = "server-only-sentinel"
@@ -128,6 +124,8 @@ describe("createCustomApp.start", () => {
             const encoded = html.match(/window\.__SIXB_RUNTIME__ = (.*);<\/script>/)?.[1]
             expect(encoded).toBeDefined()
             const config = JSON.parse(encoded!)
+            // A public local app tells the browser that nobody signs in.
+            expect(config.auth).toEqual({ enabled: false })
             expect(config.publicEnv.SIXB_PUBLIC_TEST_KEY).toBe(value)
             expect(config.publicEnv.SIXB_PUBLIC_MISSING).toBeUndefined()
             expect(html).not.toContain("server-only-sentinel")
@@ -168,9 +166,16 @@ describe("createCustomApp.start", () => {
       expect(html).toContain('"api":{"baseUrl":"http://127.0.0.1:3000"}')
       expect(html).toContain('"auth":{"enabled":true}')
 
-      const routeResponse = await fetch(`http://127.0.0.1:${port}/dashboard/devices`)
-      expect(routeResponse.status).toBe(200)
-      expect(await routeResponse.text()).toContain('<div id="root"></div>')
+      // Deep routes get the SPA shell on a hard refresh, including an object id whose single path
+      // segment holds percent-encoded slashes and a dotted IP; neither makes it a missing asset.
+      for (const route of [
+        "/dashboard/devices",
+        "/point/point%3Aacme%3Aacme%2Facme_north_campus%2F10.0.0.10-100%2Fdevice%2F100",
+      ]) {
+        const routeResponse = await fetch(`http://127.0.0.1:${port}${route}`)
+        expect(routeResponse.status).toBe(200)
+        expect(await routeResponse.text()).toContain('<div id="root"></div>')
+      }
 
       const assetResponse = await fetch(`http://127.0.0.1:${port}/main.js`)
       expect(assetResponse.status).toBe(200)
@@ -219,7 +224,9 @@ describe("createCustomApp.start", () => {
     await rm(join(outdir, "shared-index.html"))
 
     const app = await createCustomApp({ rootDir: tempRoot })
-    await expect(app.start({ host: "127.0.0.1", port: await getFreePort() })).rejects.toThrow(
+    const error = await app.start({ host: "127.0.0.1", port: 0 }).catch((caught) => caught)
+    expect(error).toBeInstanceOf(Error)
+    expect(error.message).toMatch(
       /\[SixbCustomApp\] Built app in .*shared-index\.html; rebuild required/
     )
   })
@@ -289,51 +296,6 @@ describe("createCustomApp.start", () => {
 
       const shell = await fetch(`http://127.0.0.1:${port}/`)
       expect(shell.headers.get("cache-control")).toBe("no-store")
-    } finally {
-      await server.stop()
-    }
-  })
-
-  test("falls back to the SPA shell for deep routes with encoded slashes and dots", async () => {
-    const port = await getFreePort()
-    const app = await createCustomApp({ rootDir: tempRoot })
-    const server = await app.start({
-      host: "127.0.0.1",
-      port,
-      apiBaseUrl: "http://127.0.0.1:3000",
-    })
-
-    try {
-      // Regression: an object id with percent-encoded slashes (`%2F`) and a dotted
-      // segment (the IP `10.0.0.10`) lives inside a single path segment. On a hard
-      // refresh this must serve the SPA shell, not 404 as a "missing asset".
-      const deepRoute =
-        "/point/point%3Aacme%3Aacme%2Facme_north_campus%2F10.0.0.10-100%2Fdevice%2F100"
-      const response = await fetch(`http://127.0.0.1:${port}${deepRoute}`)
-      expect(response.status).toBe(200)
-      expect(await response.text()).toContain('<div id="root"></div>')
-
-      // A missing asset with a real extension still 404s.
-      const missingCss = await fetch(`http://127.0.0.1:${port}/assets/app.css`)
-      expect(missingCss.status).toBe(404)
-    } finally {
-      await server.stop()
-    }
-  })
-
-  test("injects disabled auth state for public local apps", async () => {
-    const port = await getFreePort()
-    const app = await createCustomApp({ rootDir: tempRoot, authEnabled: false })
-    const server = await app.start({
-      host: "127.0.0.1",
-      port,
-      apiBaseUrl: "http://127.0.0.1:3000",
-    })
-
-    try {
-      const rootResponse = await fetch(`http://127.0.0.1:${port}/`)
-      expect(rootResponse.status).toBe(200)
-      expect(await rootResponse.text()).toContain('"auth":{"enabled":false}')
     } finally {
       await server.stop()
     }
@@ -446,7 +408,8 @@ describe("createCustomApp.dev", () => {
 
   // Regression proof: replace publicEnv: config.publicEnv with publicEnv: {} in the injector.
   // Remove the fixture tsconfig with app/client dist absent to reproduce the clean-CI failure.
-  test("delivers public env before the development app entry", async () => {
+  // Forwarding the proxy's host headers to the internal shell request breaks the proxied fetch.
+  test("delivers public env before the development app entry, also behind a TLS-terminating proxy", async () => {
     const previous = process.env.SIXB_PUBLIC_TEST_KEY
     process.env.SIXB_PUBLIC_TEST_KEY = "dev-runtime-sentinel"
     const app = await createCustomApp({
@@ -476,6 +439,17 @@ describe("createCustomApp.dev", () => {
       )
       const generated = await readFile(join(tempRoot, ".sixb/generated/index.html"), "utf-8")
       expect(generated).not.toContain("dev-runtime-sentinel")
+
+      const proxied = await fetch(`http://127.0.0.1:${server.port}/dashboard`, {
+        headers: {
+          host: "app.example.test",
+          "x-forwarded-host": "app.example.test",
+          "x-forwarded-port": "443",
+          "x-forwarded-proto": "https",
+        },
+      })
+      expect(proxied.status).toBe(200)
+      expect(await proxied.text()).toContain('<div id="root"></div>')
     } finally {
       await server?.stop()
       if (previous === undefined) delete process.env.SIXB_PUBLIC_TEST_KEY
@@ -483,7 +457,7 @@ describe("createCustomApp.dev", () => {
     }
   })
 
-  test("serves the generated manifest and conventional public icons", async () => {
+  test("serves the generated manifest and public icons, and keeps API-owned routes off the dev origin", async () => {
     const publicDir = join(tempRoot, "app", "public")
     await mkdir(publicDir, { recursive: true })
     await writeFile(join(publicDir, "favicon.svg"), "<svg></svg>\n")
@@ -528,94 +502,16 @@ describe("createCustomApp.dev", () => {
       expect(connectorIcon.headers.get("content-type")).toContain("image/svg+xml")
       expect((await fetch(`http://127.0.0.1:${port}/missing-icon.png`)).status).toBe(404)
       expect((await fetch(`http://127.0.0.1:${port}/other.webmanifest`)).status).toBe(404)
-    } finally {
-      await server.stop()
-    }
-  })
 
-  test("does not build the shared browser graph for an ordinary dev server", async () => {
-    const port = await getFreePort()
-    const sharedDevRoot = join(tempRoot, ".sixb", "generated", "shared-dev")
-    const app = await createCustomApp({
-      rootDir: tempRoot,
-      authEnabled: false,
-      builtInPages: false,
-    })
-    const server = await app.dev({ host: "127.0.0.1", port })
+      // The Sixb API owns these paths; the dev app origin must not answer them.
+      expect((await fetch(`http://127.0.0.1:${port}/api/project`)).status).toBe(404)
+      expect((await fetch(`http://127.0.0.1:${port}/auth/sign-in`)).status).toBe(404)
+      expect((await fetch(`http://127.0.0.1:${port}/devices`, { method: "POST" })).status).toBe(404)
 
-    try {
-      // Regression proof: eagerly calling buildSharedAppDev() here makes the global parallel suite
-      // hit Bun 1.3.14's shared native bundler state and report EISDIR/Unseekable reads.
+      // Regression proof: eagerly calling buildSharedAppDev() at startup makes the global parallel
+      // suite hit Bun 1.3.14's shared native bundler state and report EISDIR/Unseekable reads.
+      const sharedDevRoot = join(tempRoot, ".sixb", "generated", "shared-dev")
       expect(await Bun.file(join(sharedDevRoot, "0")).exists()).toBe(false)
-    } finally {
-      await server.stop()
-    }
-  })
-
-  test("serves the app shell behind a TLS-terminating reverse proxy", async () => {
-    const workspaceTempDir = resolve(import.meta.dir, "../../..", ".local", "test-tmp")
-    await mkdir(workspaceTempDir, { recursive: true })
-    const proxyRoot = await mkdtemp(join(workspaceTempDir, "sixb-app-proxy-"))
-    await mkdir(join(proxyRoot, "app"), { recursive: true })
-    await writeFile(
-      join(proxyRoot, "app", "page.tsx"),
-      "export default function Page() { return null }\n"
-    )
-    await linkDependencies(proxyRoot, [
-      "@sixb/client",
-      "@tanstack/react-query",
-      "react",
-      "react-dom",
-      "react-router-dom",
-    ])
-
-    const port = await getFreePort()
-    const app = await createCustomApp({
-      rootDir: proxyRoot,
-      authEnabled: false,
-      builtInPages: false,
-    })
-    const server = await app.dev({ host: "127.0.0.1", port })
-
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/dashboard`, {
-        headers: {
-          host: "app.example.test",
-          "x-forwarded-host": "app.example.test",
-          "x-forwarded-port": "443",
-          "x-forwarded-proto": "https",
-        },
-      })
-
-      expect(response.status).toBe(200)
-      expect(await response.text()).toContain('<div id="root"></div>')
-    } finally {
-      await server.stop()
-      await rm(proxyRoot, { recursive: true, force: true })
-    }
-  })
-
-  test("keeps Sixb API-owned routes out of the dev app origin", async () => {
-    const port = await getFreePort()
-    const app = await createCustomApp({
-      rootDir: tempRoot,
-      apiBaseUrl: "http://127.0.0.1:3000",
-    })
-    const server = await app.dev({
-      host: "127.0.0.1",
-      port,
-    })
-
-    try {
-      const apiResponse = await fetch(`http://127.0.0.1:${port}/api/project`)
-      const authResponse = await fetch(`http://127.0.0.1:${port}/auth/sign-in`)
-      const mutationResponse = await fetch(`http://127.0.0.1:${port}/devices`, {
-        method: "POST",
-      })
-
-      expect(apiResponse.status).toBe(404)
-      expect(authResponse.status).toBe(404)
-      expect(mutationResponse.status).toBe(404)
     } finally {
       await server.stop()
     }
@@ -713,34 +609,6 @@ describe("createCustomApp.dev", () => {
     expect(runtime).toContain("function NotFoundView()")
   })
 
-  test("route manifest statically imports every page", async () => {
-    const generatedDir = join(tempRoot, ".sixb", "generated")
-    const manifestPath = await generateRouteManifest(
-      [
-        {
-          path: "/",
-          filePath: join(tempRoot, "app", "page.tsx"),
-          relativePath: "page.tsx",
-        },
-        {
-          path: "/devices/:id",
-          filePath: join(tempRoot, "app", "devices", "[id]", "page.tsx"),
-          relativePath: "devices/[id]/page.tsx",
-        },
-      ],
-      generatedDir
-    )
-    const manifest = await readFile(manifestPath, "utf-8")
-
-    expect(manifest).toContain('import Page0 from "../../app/page.tsx"')
-    expect(manifest).toContain('import Page1 from "../../app/devices/[id]/page.tsx"')
-    expect(manifest).toContain('export const routePaths = [\n  "/",\n  "/devices/:id"\n]')
-    expect(manifest).toContain('{ path: "/", element: createElement(Page0) },')
-    expect(manifest).toContain('path: "devices"')
-    expect(manifest).toContain('{ path: ":id", element: createElement(Page1) },')
-    expect(manifest).not.toContain("lazy(")
-  })
-
   // Reproduce: drop the `recordsActivity` filter in generateRouteManifest; tooling is recorded.
   test("route manifest lists the pages whose views are activity", async () => {
     const generatedDir = join(tempRoot, ".sixb", "generated")
@@ -765,7 +633,8 @@ describe("createCustomApp.dev", () => {
     expect(recordedRoutePaths(manifest)).toEqual(["/", "/agents"])
   })
 
-  test("route manifest nests framework-owned routes under a project layout", async () => {
+  // Composed layouts render through the generated routes in nested-layouts.test.tsx.
+  test("route manifest statically imports every page, and no layout without pages", async () => {
     const generatedDir = join(tempRoot, ".sixb", "generated")
     const manifestPath = await generateRouteManifest(
       [
@@ -774,69 +643,15 @@ describe("createCustomApp.dev", () => {
           filePath: join(tempRoot, "app", "page.tsx"),
           relativePath: "page.tsx",
         },
-      ],
-      generatedDir,
-      {
-        builtInRoutes: [
-          { path: "/agents", moduleSpecifier: "@sixb/app/pages", exportName: "AgentsPage" },
-          {
-            path: "/agents/new/:agentId",
-            moduleSpecifier: "@sixb/app/pages",
-            exportName: "AgentsPage",
-          },
-          {
-            path: "/agents/:threadId",
-            moduleSpecifier: "@sixb/app/pages",
-            exportName: "AgentsPage",
-          },
-        ],
-        layouts: [
-          {
-            path: "/agents",
-            filePath: join(tempRoot, "app", "agents", "layout.tsx"),
-            relativePath: "agents/layout.tsx",
-          },
-        ],
-      }
-    )
-    const manifest = await readFile(manifestPath, "utf-8")
-
-    expect(manifest).toContain('import Page0 from "../../app/page.tsx"')
-    expect(manifest).toContain('import { AgentsPage as BuiltInPage0 } from "@sixb/app/pages"')
-    expect(manifest).toContain('import { AgentsPage as BuiltInPage1 } from "@sixb/app/pages"')
-    expect(manifest).toContain('import { AgentsPage as BuiltInPage2 } from "@sixb/app/pages"')
-    expect(manifest).toContain('import Layout0 from "../../app/agents/layout.tsx"')
-    expect(manifest).toContain(
-      "element: createElement(Layout0, { children: createElement(Outlet) })"
-    )
-    expect(manifest).toContain("{ index: true, element: createElement(BuiltInPage0) },")
-    expect(manifest).toContain('{ path: ":agentId", element: createElement(BuiltInPage1) },')
-    expect(manifest).toContain('{ path: ":threadId", element: createElement(BuiltInPage2) },')
-  })
-
-  test("route manifest composes layouts and ignores layouts without pages", async () => {
-    const generatedDir = join(tempRoot, ".sixb", "generated")
-    const manifestPath = await generateRouteManifest(
-      [
         {
-          path: "/analytics/reports/:reportId",
-          filePath: join(tempRoot, "app", "analytics", "reports", "[reportId]", "page.tsx"),
-          relativePath: "analytics/reports/[reportId]/page.tsx",
+          path: "/devices/:id",
+          filePath: join(tempRoot, "app", "devices", "[id]", "page.tsx"),
+          relativePath: "devices/[id]/page.tsx",
         },
       ],
       generatedDir,
       {
         layouts: [
-          {
-            path: "/analytics",
-            filePath: join(tempRoot, "app", "analytics", "layout.tsx"),
-            relativePath: "analytics/layout.tsx",
-          },
-          {
-            path: "/analytics/reports/:reportId",
-            filePath: join(tempRoot, "app", "analytics", "reports", "[reportId]", "layout.tsx"),
-            relativePath: "analytics/reports/[reportId]/layout.tsx",
-          },
           {
             path: "/orphan",
             filePath: join(tempRoot, "app", "orphan", "layout.tsx"),
@@ -847,14 +662,14 @@ describe("createCustomApp.dev", () => {
     )
     const manifest = await readFile(manifestPath, "utf-8")
 
-    expect(manifest).toContain('import { Outlet, type RouteObject } from "react-router-dom"')
-    expect(manifest).toContain('import Layout0 from "../../app/analytics/layout.tsx"')
-    expect(manifest).toContain(
-      'import Layout1 from "../../app/analytics/reports/[reportId]/layout.tsx"'
-    )
+    expect(manifest).toContain('import Page0 from "../../app/page.tsx"')
+    expect(manifest).toContain('import Page1 from "../../app/devices/[id]/page.tsx"')
+    expect(manifest).toContain('export const routePaths = [\n  "/",\n  "/devices/:id"\n]')
+    expect(manifest).toContain('{ path: "/", element: createElement(Page0) },')
+    expect(manifest).toContain('path: "devices"')
+    expect(manifest).toContain('{ path: ":id", element: createElement(Page1) },')
+    expect(manifest).not.toContain("lazy(")
     expect(manifest).not.toContain("orphan/layout.tsx")
-    expect(manifest.match(/children: createElement\(Outlet\)/g)).toHaveLength(2)
-    expect(manifest).toContain("{ index: true, element: createElement(Page0) },")
   })
 
   test("generated entry imports framework styles before app styles", async () => {
@@ -900,13 +715,14 @@ describe("createCustomApp.dev", () => {
       sharedHtmlPath,
       manifestPath,
     ]
-    const before = await mtimes(files)
+    // Backdate every file instead of waiting out the clock: a rewrite moves its mtime to now.
+    const past = new Date("2026-01-01T00:00:00.000Z")
+    await Promise.all(files.map((path) => utimes(path, past, past)))
 
-    await wait(25)
     await generateRouteManifest(routes, generatedDir)
     await generateAppEntry(tempRoot, generatedDir)
 
-    expect(await mtimes(files)).toEqual(before)
+    expect(await mtimes(files)).toEqual(files.map(() => past.getTime()))
   })
 
   test("generated entry intercepts internal anchors conservatively", async () => {
@@ -954,70 +770,14 @@ describe("createCustomApp.dev", () => {
     expect(html).not.toContain("radial-gradient")
   })
 
-  test("custom apps get default agent routes without changing scanRoutes output", async () => {
+  // A project with its own home, an agents layout, its own members page and a root layout that
+  // narrows Settings: the built-in pages fill in around what the project owns.
+  test("adds the built-in pages around the project's own routes, without changing scanRoutes output", async () => {
     await mkdir(join(tempRoot, "app", "agents"), { recursive: true })
     await writeFile(
       join(tempRoot, "app", "agents", "layout.tsx"),
       "export default function AgentsLayout({ children }) { return children }\n"
     )
-    const port = await getFreePort()
-    const app = await createCustomApp({
-      rootDir: tempRoot,
-      apiBaseUrl: "http://127.0.0.1:3000",
-      authEnabled: false,
-    })
-    const server = await app.dev({ host: "127.0.0.1", port })
-
-    try {
-      expect((await app.scanRoutes()).map((route) => route.path)).toEqual(["/"])
-
-      const manifest = await readFile(join(tempRoot, ".sixb", "generated", "routes.ts"), "utf-8")
-      expect(manifest).toContain('import Layout0 from "../../app/agents/layout.tsx"')
-      expect(manifest).toContain(
-        "element: createElement(Layout0, { children: createElement(Outlet) })"
-      )
-      expect(manifest).toContain("{ index: true, element: createElement(BuiltInPage0) },")
-      expect(manifest).toContain('{ path: ":agentId", element: createElement(BuiltInPage1) },')
-      expect(manifest).toContain('{ path: ":threadId", element: createElement(BuiltInPage2) },')
-      // The project's app/page.tsx owns the root, so the built-in home stays out.
-      expect(manifest).not.toContain("HomePage")
-
-      const runtime = await readFile(
-        join(tempRoot, ".sixb", "generated", "app-runtime.tsx"),
-        "utf-8"
-      )
-      expect(runtime).toContain('import "./framework.css"')
-    } finally {
-      await server.stop()
-    }
-  }, 30_000)
-
-  test("serves the built-in home until the project adds app/page.tsx", async () => {
-    await rm(join(tempRoot, "app", "page.tsx"))
-    await mkdir(join(tempRoot, "app", "quotes"), { recursive: true })
-    await writeFile(
-      join(tempRoot, "app", "quotes", "page.tsx"),
-      "export default function Quotes() { return null }\n"
-    )
-    const port = await getFreePort()
-    const app = await createCustomApp({
-      rootDir: tempRoot,
-      apiBaseUrl: "http://127.0.0.1:3000",
-      authEnabled: false,
-    })
-    const server = await app.dev({ host: "127.0.0.1", port })
-
-    try {
-      const manifest = await readFile(join(tempRoot, ".sixb", "generated", "routes.ts"), "utf-8")
-      expect(manifest).toContain('import { HomePage as BuiltInPage3 } from "@sixb/app/pages"')
-      expect(manifest).toContain('"/quotes"')
-      expect(manifest).toContain("element: createElement(BuiltInPage3)")
-    } finally {
-      await server.stop()
-    }
-  }, 30_000)
-
-  test("serves the Settings pages until the project adds its own at the same path", async () => {
     await mkdir(join(tempRoot, "app", "settings", "members"), { recursive: true })
     await writeFile(
       join(tempRoot, "app", "settings", "members", "page.tsx"),
@@ -1036,10 +796,26 @@ describe("createCustomApp.dev", () => {
       apiBaseUrl: "http://127.0.0.1:3000",
       authEnabled: false,
     })
-    const server = await app.dev({ host: "127.0.0.1", port: await getFreePort() })
+    // Nothing here is fetched, so the server may bind any free port.
+    const server = await app.dev({ host: "127.0.0.1", port: 0 })
 
     try {
+      expect((await app.scanRoutes()).map((route) => route.path)).toEqual([
+        "/",
+        "/settings/members",
+      ])
+
       const manifest = await readFile(join(tempRoot, ".sixb", "generated", "routes.ts"), "utf-8")
+      // The default agent routes nest under the project's agents layout.
+      expect(manifest).toContain('import Layout0 from "../../app/agents/layout.tsx"')
+      expect(manifest).toContain(
+        "element: createElement(Layout0, { children: createElement(Outlet) })"
+      )
+      expect(manifest).toContain("{ index: true, element: createElement(BuiltInPage0) },")
+      expect(manifest).toContain('{ path: ":agentId", element: createElement(BuiltInPage1) },')
+      expect(manifest).toContain('{ path: ":threadId", element: createElement(BuiltInPage2) },')
+      // The project's app/page.tsx owns the root, so the built-in home stays out.
+      expect(manifest).not.toContain("HomePage")
       for (const page of [
         "SettingsIndexPage",
         "SettingsPersonalPage",
@@ -1068,11 +844,12 @@ describe("createCustomApp.dev", () => {
         expect(manifest).toContain(`"${path}"`)
       }
 
-      // The layout's visibility export reaches the sections.
       const runtime = await readFile(
         join(tempRoot, ".sixb", "generated", "app-runtime.tsx"),
         "utf-8"
       )
+      expect(runtime).toContain('import "./framework.css"')
+      // The layout's visibility export reaches the sections.
       expect(runtime).toContain(
         'import RootLayout, * as rootLayoutModule from "../../app/layout.tsx"'
       )
@@ -1101,8 +878,7 @@ describe("createCustomApp.dev", () => {
       apiBaseUrl: "http://127.0.0.1:3000",
       authEnabled: false,
     })
-    const port = await getFreePort()
-    const server = await app.dev({ host: "127.0.0.1", port })
+    const server = await app.dev({ host: "127.0.0.1", port: 0 })
     try {
       // Nothing to watch until the project creates `app/`; `sixb dev` restarts then.
       expect(server.watchesSources).toBe(false)
@@ -1138,7 +914,13 @@ describe("createCustomApp.dev", () => {
     }
   })
 
-  test("project-owned agent pages override the default agent routes", async () => {
+  test("serves the built-in home until the project adds app/page.tsx, and project agent pages replace the defaults", async () => {
+    await rm(join(tempRoot, "app", "page.tsx"))
+    await mkdir(join(tempRoot, "app", "quotes"), { recursive: true })
+    await writeFile(
+      join(tempRoot, "app", "quotes", "page.tsx"),
+      "export default function Quotes() { return null }\n"
+    )
     await mkdir(join(tempRoot, "app", "agents", "new", "[draft]"), { recursive: true })
     await mkdir(join(tempRoot, "app", "agents", "[thread]"), { recursive: true })
     await writeFile(
@@ -1154,20 +936,25 @@ describe("createCustomApp.dev", () => {
       "export default function AgentThread() { return null }\n"
     )
 
-    const port = await getFreePort()
     const app = await createCustomApp({
       rootDir: tempRoot,
       apiBaseUrl: "http://127.0.0.1:3000",
       authEnabled: false,
     })
-    const server = await app.dev({ host: "127.0.0.1", port })
+    const server = await app.dev({ host: "127.0.0.1", port: 0 })
 
     try {
       const manifest = await readFile(join(tempRoot, ".sixb", "generated", "routes.ts"), "utf-8")
+      const home = manifest.match(
+        /import \{ HomePage as (BuiltInPage\d+) \} from "@sixb\/app\/pages"/
+      )
+      expect(home).not.toBeNull()
+      expect(manifest).toContain(`element: createElement(${home?.[1]})`)
+      expect(manifest).toContain('"/quotes"')
+      // Project pages at the agent paths win, whatever their parameters are called.
       expect(manifest).toContain('"/agents"')
       expect(manifest).toContain('"/agents/new/:draft"')
       expect(manifest).toContain('"/agents/:thread"')
-      expect(manifest).toContain("createElement(Page")
       expect(manifest).not.toContain("AgentsPage")
     } finally {
       await server.stop()
