@@ -164,7 +164,7 @@ describe("magicLink", () => {
     ).resolves.toEqual({ status: "rate_limited", email: "ava@acme.com" })
   })
 
-  test("sends active users a hashed magic link", async () => {
+  test("sends active users a hashed magic link that names the requester only when given", async () => {
     const storage = new InMemoryAuthStorage()
     const { messages, sendMagicLink } = createSender()
     const strategy = magicLink({
@@ -204,31 +204,17 @@ describe("magicLink", () => {
       tokenHash: hashMagicLinkToken(token ?? ""),
     })
     expect(record?.tokenHash).not.toBe(token)
-  })
-
-  test("embeds the requester hash in the callback URL when provided", async () => {
-    const storage = new InMemoryAuthStorage()
-    const { messages, sendMagicLink } = createSender()
-    const strategy = magicLink({
-      allowedDomains: ["acme.com"],
-      sendMagicLink,
-    })
-
-    await storage.users.create({
-      id: "usr_1",
-      projectId,
-      email: "ava@acme.com",
-    })
 
     await requestMagicLink({
       storage,
       strategy,
       email: "ava@acme.com",
       requesterHash: "requester-hash-value",
+      now: at("2026-05-16T10:01:00.000Z"),
     })
-
-    const link = linkFromLatestMessage(messages)
-    expect(link.searchParams.get("requester")).toBe("requester-hash-value")
+    expect(linkFromLatestMessage(messages).searchParams.get("requester")).toBe(
+      "requester-hash-value"
+    )
   })
 
   test("peekMagicLink validates without consuming and rejects bad tokens", async () => {
@@ -305,28 +291,8 @@ describe("magicLink", () => {
     ).resolves.toBeNull()
   })
 
-  test("allows pending invitations to request a magic link", async () => {
-    const storage = new InMemoryAuthStorage()
-    const { messages, sendMagicLink } = createSender()
-    const strategy = magicLink({
-      allowedDomains: ["acme.com"],
-      sendMagicLink,
-    })
-
-    await storage.invitations.createOrUpdateActive({
-      id: "inv_1",
-      projectId,
-      email: "invited@acme.com",
-      createdAt: at("2026-05-16T09:00:00.000Z"),
-      expiresAt: at("2026-05-23T09:00:00.000Z"),
-    })
-
-    await expect(
-      requestMagicLink({ storage, strategy, email: "invited@acme.com" })
-    ).resolves.toEqual({ status: "sent" })
-    expect(messages).toHaveLength(1)
-  })
-
+  // A pending invitation is what makes this address eligible for both the delivery and the
+  // public request below; no user exists.
   test("reveals invitation links without exposing public sign-in links", async () => {
     const storage = new InMemoryAuthStorage()
     const { messages, sendMagicLink } = createSender()

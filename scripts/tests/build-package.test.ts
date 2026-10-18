@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -21,16 +21,20 @@ import { join } from "node:path"
 const buildPackageScript = join(import.meta.dir, "..", "build-package.ts")
 const fixtureRoots: string[] = []
 
-afterEach(async () => {
-  while (fixtureRoots.length > 0) {
-    const fixtureRoot = fixtureRoots.pop()
-    if (fixtureRoot) await rm(fixtureRoot, { recursive: true, force: true })
-  }
+afterAll(async () => {
+  await Promise.all(fixtureRoots.map((root) => rm(root, { recursive: true, force: true })))
 })
+
+// Both cases read the same build: started by whichever case runs first, then shared.
+let built: Promise<BuiltFixture> | undefined
+const builtFixture = () => {
+  built ??= buildFixture()
+  return built
+}
 
 describe("build-package", () => {
   test("keeps a sibling external even when an alias resolves it to source", async () => {
-    const { output } = await buildFixture()
+    const { output } = await builtFixture()
 
     // Delete `plugins: workspaceBoundaryPlugins(...)` from `build-package.ts` to watch these fail.
     // Bun 1.3.8 resolved through `packages: "external"` before it consulted `paths`, so this
@@ -42,7 +46,7 @@ describe("build-package", () => {
   }, 20_000)
 
   test("stops the alias at dist, so a consumer bundles the built sibling", async () => {
-    const { browserBundle } = await buildFixture()
+    const { browserBundle } = await builtFixture()
 
     // Delete `writeResolutionBoundary(distRoot)` from `build-package.ts` to watch these fail: the
     // consumer's own `paths` map reaches inside its dist and the bundle follows the alias into

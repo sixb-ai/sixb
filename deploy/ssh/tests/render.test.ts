@@ -65,6 +65,18 @@ const layout = deploymentLayout({
   bunVersion: "1.4.2",
 })
 
+const deployScript = renderDeployScript({
+  release,
+  layout,
+  incoming: "/home/sixb/northline/deploy/incoming/abc.123",
+  record: {
+    commit: "abc",
+    ref: "main",
+    deployedAt: "2026-09-30T12:00:00.000Z",
+    deployedBy: "ci",
+  },
+})
+
 describe("deployment files", () => {
   test("keep a deployment in its own directory, and Bun per user and version", () => {
     expect(layout.project).toBe("/home/sixb/northline/code/examples/northline")
@@ -125,19 +137,7 @@ describe("deployment files", () => {
 
 describe("deploy script", () => {
   test("names every step, in order, around the release's own commands", () => {
-    const { labels } = renderDeployScript({
-      release,
-      layout,
-      incoming: "/home/sixb/northline/deploy/incoming/abc.123",
-      record: {
-        commit: "abc",
-        ref: "main",
-        deployedAt: "2026-09-30T12:00:00.000Z",
-        deployedBy: "ci",
-      },
-    })
-
-    expect(labels).toEqual([
+    expect(deployScript.labels).toEqual([
       "Apply files",
       "Install Bun 1.4.2",
       "Install dependencies",
@@ -153,18 +153,7 @@ describe("deploy script", () => {
   })
 
   test("holds the lock, keeps standard input closed, and waits for the API", () => {
-    const { script } = renderDeployScript({
-      release,
-      layout,
-      incoming: "/home/sixb/northline/deploy/incoming/abc.123",
-      record: {
-        commit: "abc",
-        ref: "main",
-        deployedAt: "2026-09-30T12:00:00.000Z",
-        deployedBy: "ci",
-      },
-    })
-
+    const { script } = deployScript
     expect(script).toContain(`exec 9>'${layout.lock}'`)
     expect(script).toContain("flock -w 600 9")
     expect(script).toEndWith("main </dev/null\n")
@@ -175,17 +164,7 @@ describe("deploy script", () => {
 
   test("lets dependency install scripts call node when the server has none", async () => {
     // Red check: remove the node link from renderInstallBun; the first case finds no link.
-    const { labels, script } = renderDeployScript({
-      release,
-      layout,
-      incoming: "/home/sixb/northline/deploy/incoming/abc.123",
-      record: {
-        commit: "abc",
-        ref: "main",
-        deployedAt: "2026-09-30T12:00:00.000Z",
-        deployedBy: "ci",
-      },
-    })
+    const { labels, script } = deployScript
     const index = labels.indexOf("Install Bun 1.4.2")
     const step = script
       .split(`${STEP_MARKER} ${index} start\n`)[1]
@@ -199,8 +178,9 @@ describe("deploy script", () => {
         const tools = join(root, name, "tools")
         await mkdir(bunDir, { recursive: true })
         await mkdir(tools, { recursive: true })
-        // Bun is already installed, so the step skips the download.
-        await writeFile(join(bunDir, "bun"), "#!/bin/sh\necho 1.4.2\n", { mode: 0o755 })
+        // Bun is already installed, so the step skips the download. A link to an existing program
+        // stands in for it: macOS vets a freshly written executable for ~150ms on its first run.
+        await symlink(Bun.which("true")!, join(bunDir, "bun"))
         await symlink(Bun.which("ln")!, join(tools, "ln"))
         if (withNode) await writeFile(join(tools, "node"), "#!/bin/sh\n", { mode: 0o755 })
         const child = Bun.spawn(["/bin/bash", "-euc", step], {
@@ -212,12 +192,13 @@ describe("deploy script", () => {
         return join(bunDir, "node")
       }
 
-      const linked = await runStep("without-node", false)
+      const [linked, untouched] = await Promise.all([
+        runStep("without-node", false),
+        runStep("with-node", true),
+      ])
       expect((await lstat(linked)).isSymbolicLink()).toBe(true)
       expect(await readlink(linked)).toBe(join(root, "without-node", "bun", "bun"))
-
-      const untouched = await runStep("with-node", true)
-      await expect(lstat(untouched)).rejects.toThrow()
+      expect(await lstat(untouched).catch((error: unknown) => error)).toBeInstanceOf(Error)
     } finally {
       await rm(root, { recursive: true, force: true })
     }

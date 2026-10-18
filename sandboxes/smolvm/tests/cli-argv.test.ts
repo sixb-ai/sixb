@@ -12,88 +12,66 @@ import {
 const config: SmolvmCliConfig = { bin: "smolvm", image: "node:22-slim" }
 
 describe("buildCreateArgv", () => {
-  test("includes name and image, and never mounts a host volume", () => {
-    const argv = buildCreateArgv(config, {
-      id: "run-1",
-      network: [],
-    })
-    expect(argv).toEqual([
-      "smolvm",
-      "machine",
-      "create",
-      "--name",
-      "run-1",
-      "--image",
-      "node:22-slim",
-    ])
-    expect(argv).not.toContain("--volume")
-  })
-
-  test("appends storage and overlay sizes when configured", () => {
-    const argv = buildCreateArgv(
+  // No row mounts a host volume: files reach the isolated guest only through writeFiles.
+  test.each([
+    [
+      "names the machine and its image",
+      config,
+      [],
+      ["smolvm", "machine", "create", "--name", "run-1", "--image", "node:22-slim"],
+    ],
+    [
+      "omits --image for a bare machine",
+      { bin: "smolvm" },
+      [],
+      ["smolvm", "machine", "create", "--name", "run-1"],
+    ],
+    [
+      "appends storage and overlay sizes, then network flags last",
       { ...config, storageGiB: 40, overlayGiB: 8 },
-      { id: "run-1", network: [] }
-    )
-    expect(argv).toContain("--storage")
-    expect(argv[argv.indexOf("--storage") + 1]).toBe("40")
-    expect(argv).toContain("--overlay")
-    expect(argv[argv.indexOf("--overlay") + 1]).toBe("8")
-  })
-
-  test("omits --image for a bare machine (no image configured)", () => {
-    const argv = buildCreateArgv({ bin: "smolvm" }, { id: "run-1", network: [] })
-    expect(argv).not.toContain("--image")
-    expect(argv).toEqual(["smolvm", "machine", "create", "--name", "run-1"])
-  })
-
-  test("appends network flags last", () => {
-    const argv = buildCreateArgv(config, {
-      id: "run-1",
-      network: ["--net", "--allow-host", "api.example.com"],
-    })
-    expect(argv.slice(-3)).toEqual(["--net", "--allow-host", "api.example.com"])
-  })
-})
-
-describe("buildStartArgv / buildStopArgv / buildRemoveArgv", () => {
-  test("start", () => {
-    expect(buildStartArgv(config, "run-1")).toEqual([
-      "smolvm",
-      "machine",
-      "start",
-      "--name",
-      "run-1",
-    ])
-  })
-
-  test("stop", () => {
-    expect(buildStopArgv(config, "run-1")).toEqual(["smolvm", "machine", "stop", "--name", "run-1"])
-  })
-
-  test("delete passes --force to skip the confirmation prompt", () => {
-    expect(buildRemoveArgv(config, "run-1")).toEqual([
-      "smolvm",
-      "machine",
-      "delete",
-      "--name",
-      "run-1",
-      "--force",
-    ])
+      ["--net", "--allow-host", "api.example.com"],
+      [
+        "smolvm",
+        "machine",
+        "create",
+        "--name",
+        "run-1",
+        "--image",
+        "node:22-slim",
+        "--storage",
+        "40",
+        "--overlay",
+        "8",
+        "--net",
+        "--allow-host",
+        "api.example.com",
+      ],
+    ],
+  ] as const)("%s", (_label, cli, network, expected) => {
+    expect(buildCreateArgv(cli, { id: "run-1", network })).toEqual([...expected])
   })
 })
 
-describe("isLocalImageArchive", () => {
-  test("true for .tar / .tar.gz / .tgz paths", () => {
-    expect(isLocalImageArchive("/abs/node22.tar")).toBe(true)
-    expect(isLocalImageArchive("./images/agent.tar.gz")).toBe(true)
-    expect(isLocalImageArchive("agent.TGZ")).toBe(true)
-  })
+test("start, stop and delete address the machine by name; delete skips the confirmation prompt", () => {
+  expect(buildStartArgv(config, "run-1")).toEqual(["smolvm", "machine", "start", "--name", "run-1"])
+  expect(buildStopArgv(config, "run-1")).toEqual(["smolvm", "machine", "stop", "--name", "run-1"])
+  expect(buildRemoveArgv(config, "run-1")).toEqual([
+    "smolvm",
+    "machine",
+    "delete",
+    "--name",
+    "run-1",
+    "--force",
+  ])
+})
 
-  test("false for registry references", () => {
-    expect(isLocalImageArchive("node:22")).toBe(false)
-    expect(isLocalImageArchive("ghcr.io/acme/agent:latest")).toBe(false)
-    expect(isLocalImageArchive("alpine")).toBe(false)
-  })
+test("isLocalImageArchive accepts .tar / .tar.gz / .tgz paths, not registry references", () => {
+  expect(isLocalImageArchive("/abs/node22.tar")).toBe(true)
+  expect(isLocalImageArchive("./images/agent.tar.gz")).toBe(true)
+  expect(isLocalImageArchive("agent.TGZ")).toBe(true)
+  expect(isLocalImageArchive("node:22")).toBe(false)
+  expect(isLocalImageArchive("ghcr.io/acme/agent:latest")).toBe(false)
+  expect(isLocalImageArchive("alpine")).toBe(false)
 })
 
 describe("buildExecArgv", () => {
@@ -120,13 +98,13 @@ describe("buildExecArgv", () => {
     ])
   })
 
-  test("injects env vars as repeated --env KEY=VAL before the -- separator", () => {
+  test("injects env vars as repeated single-element --env KEY=VAL before the -- separator", () => {
     const argv = buildExecArgv(config, {
       id: "run-1",
       cwd: "/work",
       command: "bash",
       args: ["-lc", "env"],
-      env: { SIXB_API_BASE_URL: "http://host/x", SIXB_RUN_ID: "run-1" },
+      env: { SIXB_API_BASE_URL: "http://host/x", GREETING: "hello world" },
     })
     const dashDash = argv.indexOf("--")
     expect(argv.slice(0, dashDash)).toEqual([
@@ -140,19 +118,8 @@ describe("buildExecArgv", () => {
       "--env",
       "SIXB_API_BASE_URL=http://host/x",
       "--env",
-      "SIXB_RUN_ID=run-1",
+      "GREETING=hello world",
     ])
     expect(argv.slice(dashDash + 1)).toEqual(["bash", "-lc", "env"])
-  })
-
-  test("keeps each KEY=VAL a single argv element even with spaces", () => {
-    const argv = buildExecArgv(config, {
-      id: "run-1",
-      cwd: "/work",
-      command: "bash",
-      args: ["-lc", "true"],
-      env: { GREETING: "hello world" },
-    })
-    expect(argv).toContain("GREETING=hello world")
   })
 })

@@ -1,53 +1,48 @@
 import { describe, expect, test } from "bun:test"
-import { detectIsolation, warnIfUnisolated } from "../src/isolation/detect"
+import { type DetectInput, detectIsolation, warnIfUnisolated } from "../src/isolation/detect"
 
 describe("detectIsolation", () => {
-  test("darwin with sandbox-exec available picks seatbelt", () => {
-    const probe = detectIsolation({
-      platform: "darwin",
-      hasBinary: (name) => name === "sandbox-exec",
-    })
-    expect(probe.backend).toBe("seatbelt")
+  // Every fallback stays available as "none" and names the reason in its message.
+  test.each([
+    [
+      "darwin with sandbox-exec available picks seatbelt",
+      { platform: "darwin", hasBinary: (name: string) => name === "sandbox-exec" },
+      "seatbelt",
+      "sandbox-exec available",
+    ],
+    [
+      "darwin with unusable sandbox-exec falls back to none",
+      {
+        platform: "darwin",
+        hasBinary: (name: string) => name === "sandbox-exec",
+        canRunSeatbelt: () => false,
+      },
+      "none",
+      "cannot apply",
+    ],
+    [
+      "linux with bwrap available picks bwrap",
+      { platform: "linux", hasBinary: (name: string) => name === "bwrap" },
+      "bwrap",
+      "bwrap available",
+    ],
+    [
+      "linux without bwrap falls back to none",
+      { platform: "linux", hasBinary: () => false },
+      "none",
+      "bwrap not on PATH",
+    ],
+    [
+      "unsupported platform falls back to none",
+      { platform: "win32", hasBinary: () => true },
+      "none",
+      "win32",
+    ],
+  ] as const)("%s", (_label, input: DetectInput, backend, message) => {
+    const probe = detectIsolation(input)
+    expect(probe.backend).toBe(backend)
     expect(probe.available).toBe(true)
-  })
-
-  test("darwin with unusable sandbox-exec falls back to none", () => {
-    const probe = detectIsolation({
-      platform: "darwin",
-      hasBinary: (name) => name === "sandbox-exec",
-      canRunSeatbelt: () => false,
-    })
-    expect(probe.backend).toBe("none")
-    expect(probe.available).toBe(true)
-    expect(probe.message).toContain("cannot apply")
-  })
-
-  test("darwin without sandbox-exec falls back to none", () => {
-    const probe = detectIsolation({ platform: "darwin", hasBinary: () => false })
-    expect(probe.backend).toBe("none")
-    expect(probe.available).toBe(true)
-    expect(probe.message).toContain("sandbox-exec")
-  })
-
-  test("linux with bwrap available picks bwrap", () => {
-    const probe = detectIsolation({
-      platform: "linux",
-      hasBinary: (name) => name === "bwrap",
-    })
-    expect(probe.backend).toBe("bwrap")
-    expect(probe.available).toBe(true)
-  })
-
-  test("linux without bwrap falls back to none", () => {
-    const probe = detectIsolation({ platform: "linux", hasBinary: () => false })
-    expect(probe.backend).toBe("none")
-    expect(probe.message).toContain("bwrap")
-  })
-
-  test("unsupported platform falls back to none", () => {
-    const probe = detectIsolation({ platform: "win32", hasBinary: () => true })
-    expect(probe.backend).toBe("none")
-    expect(probe.message).toContain("win32")
+    expect(probe.message).toContain(message)
   })
 })
 

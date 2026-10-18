@@ -10,28 +10,15 @@ function stub(name: string, version: string): PublishablePackage {
 }
 
 describe("create-sixb template dependency policy", () => {
-  test("accepts independent compatible ranges", () => {
-    const errors = createSixbTemplateDependencyErrors(
-      {
-        dependencies: {
-          "@sixb/core": "^0.2.0",
-          "@sixb/ui": "^0.1.0",
-          react: "^19.0.0",
-        },
-      },
-      [stub("@sixb/core", "0.2.1"), stub("@sixb/ui", "0.1.4")]
-    )
-
-    expect(errors).toEqual([])
-  })
-
   test("rejects only the stale package range", () => {
     // Regression proof: deriving every range from create-sixb cannot distinguish these two lines.
+    // The compatible @sixb/ui range and the third-party react range pass.
     const errors = createSixbTemplateDependencyErrors(
       {
         dependencies: {
           "@sixb/core": "^0.1.0",
           "@sixb/ui": "^0.1.0",
+          react: "^19.0.0",
         },
       },
       [stub("@sixb/core", "0.2.0"), stub("@sixb/ui", "0.1.4")]

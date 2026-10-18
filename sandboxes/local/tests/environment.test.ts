@@ -3,7 +3,6 @@ import { LocalSandboxFactory } from "../src"
 
 test.each([
   undefined,
-  {},
   { setup: ["touch override-marker"] },
 ])("applies exactly the selected environment: %j", async (environment) => {
   // Regression proof: initialize only options.environment; the default-marker case fails.

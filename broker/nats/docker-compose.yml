@@ -6,8 +6,8 @@ services:
     # -m exposes the monitoring endpoint used by the healthcheck.
     command: ["-js", "-p", "42222", "-m", "42223"]
     ports:
-      - "42222:42222"
-      - "42223:42223"
+      - "127.0.0.1:42222:42222"
+      - "127.0.0.1:42223:42223"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:42223/healthz"]
       interval: 2s

@@ -1,24 +1,36 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 /**
  * The guard is the thing that has to work when nothing else does, so it is exercised end to end
  * as a process rather than by calling its internals: a real child, real pipes, real signals.
+ *
+ * Every case waits on the guard's own clock — a one-second progress poll and a half-second
+ * SIGTERM grace — so the cases run concurrently rather than adding those waits up.
  */
 const guardPath = join(import.meta.dir, "..", "ci-guard.ts")
 
 /**
- * Intentional stall fixtures still need their own last-resort bound. They also watch their parent
- * so a harness SIGKILL cannot leave them waiting for that bound after the guard disappears.
+ * Intentional stall fixtures still need their own last-resort bound. By default they also stop
+ * when their parent goes away, so a harness SIGKILL cannot leave them waiting for that bound after
+ * the guard disappears. The cleanup cases watch this test process instead: there, a fixture that
+ * outlives the guard is exactly the failure under test.
  */
-function boundedFixture(body = "", delayMs = 100): string {
+function boundedFixture(
+  body = "",
+  options: { readonly delayMs?: number; readonly watchTestProcess?: boolean } = {}
+): string {
+  const delayMs = options.delayMs ?? 100
   const iterations = Math.ceil(60_000 / delayMs)
   const step = body ? `${body}; ` : ""
+  const watching = options.watchTestProcess
+    ? `(() => { try { process.kill(${process.pid}, 0); return true } catch { return false } })()`
+    : "process.ppid === fixtureParentPid"
   return [
     "const fixtureParentPid = process.ppid",
-    `for (let i = 0; i < ${iterations} && process.ppid === fixtureParentPid; i++) { ${step}await Bun.sleep(${delayMs}) }`,
+    `for (let i = 0; i < ${iterations} && ${watching}; i++) { ${step}await Bun.sleep(${delayMs}) }`,
   ].join("; ")
 }
 
@@ -47,43 +59,55 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+/** Polls a reaped process away; a zombie still answers signal 0 until its parent collects it. */
+async function waitForExit(pid: number, withinMs: number): Promise<boolean> {
+  const deadline = performance.now() + withinMs
+  while (isProcessAlive(pid) && performance.now() < deadline) await Bun.sleep(10)
+  return !isProcessAlive(pid)
+}
+
+async function readPid(path: string): Promise<number> {
+  for (let attempt = 0; attempt < 200 && !(await Bun.file(path).exists()); attempt++) {
+    await Bun.sleep(10)
+  }
+  const pid = Number(await Bun.file(path).text())
+  expect(Number.isInteger(pid)).toBeTrue()
+  return pid
+}
+
+function killQuietly(pid: number | null | undefined): void {
+  if (pid === null || pid === undefined) return
+  try {
+    process.kill(pid, "SIGKILL")
+  } catch {
+    // Already stopped.
+  }
+}
+
 describe("ci-guard", () => {
-  test("passes a healthy command's output and exit code straight through", async () => {
+  test.concurrent("passes a command's output and exit code straight through", async () => {
     const result = await runGuard([
       "--stall",
       "30",
       "--",
       process.execPath,
       "-e",
-      'process.stdout.write("out\\n"); process.stderr.write("err\\n")',
+      'process.stdout.write("out\\n"); process.stderr.write("err\\n"); process.exitCode = 3',
     ])
 
-    expect(result.exitCode).toBe(0)
+    expect(result.exitCode).toBe(3)
     expect(result.stdout).toContain("out")
     expect(result.stderr).toContain("err")
   })
 
-  test("preserves a failing command's exit code instead of masking it", async () => {
+  test.concurrent("kills a silent command and names the test file it was still running", async () => {
+    // Mirrors the real failure: output flows, a test file reports, then the process goes quiet
+    // past the guard's bound. Under `--parallel` the file that reported last had finished; bun
+    // names the stuck one when SIGTERM interrupts it, as this fixture does. The fixture itself is
+    // capped so an infrastructure failure cannot leak it.
     const result = await runGuard([
       "--stall",
-      "30",
-      "--",
-      process.execPath,
-      "-e",
-      "process.exit(3)",
-    ])
-
-    expect(result.exitCode).toBe(3)
-  })
-
-  test("kills a silent command and names the test file it was still running", async () => {
-    // Mirrors the real failure: output flows, a test file reports, then the process goes quiet past
-    // the guard's bound. Under `--parallel` the file that reported last had finished; bun names
-    // the stuck one when SIGTERM interrupts it, as this fixture does. The fixture itself is capped
-    // so an infrastructure failure cannot leak it.
-    const result = await runGuard([
-      "--stall",
-      "1",
+      "0.5",
       "--",
       process.execPath,
       "-e",
@@ -108,9 +132,9 @@ describe("ci-guard", () => {
     // more than bun's 5s default per-test bound.
   }, 30_000)
 
-  test("bounds a command that keeps printing past the maximum", async () => {
-    // A stall bound alone cannot catch a loop that stays chatty, so `--max` covers wall clock. The
-    // fixture has its own generous cap so a broken guard still cannot leave it behind indefinitely.
+  test.concurrent("bounds a command that keeps printing past the maximum", async () => {
+    // A stall bound alone cannot catch a loop that stays chatty, so `--max` covers wall clock.
+    // The fixture has its own generous cap so a broken guard still cannot leave it behind.
     const result = await runGuard([
       "--stall",
       "30",
@@ -126,64 +150,65 @@ describe("ci-guard", () => {
     expect(result.stderr).toContain("ran for")
   }, 30_000)
 
-  test("kills the whole process group when process listing is unavailable", async () => {
-    // The orphaned `bun` processes the runner had to reap came from exactly this gap: a restricted
-    // process sandbox denied `ps -A`, so the old implementation discovered an empty tree and
-    // signaled nothing. Reverting the process-group cleanup makes this test time out and leak.
+  test.concurrent("kills the whole process group when process listing is unavailable", async () => {
+    // The orphaned `bun` processes the runner had to reap came from exactly this gap: a
+    // restricted process sandbox denied `ps -A`, so the old implementation discovered an empty
+    // tree and signaled nothing. Reverting the process-group cleanup leaves the grandchild
+    // running, and this test fails.
     const scriptDir = await mkdtemp(join(tmpdir(), "sixb-ci-guard-"))
-    const markerPath = join(scriptDir, "child-alive")
+    const pidPath = join(scriptDir, "grandchild-pid")
     const childPath = join(scriptDir, "child.ts")
     const parentPath = join(scriptDir, "parent.ts")
-    const fakePsPath = join(scriptDir, "ps")
+    let grandchildPid: number | null = null
 
     try {
-      await writeFile(fakePsPath, "#!/bin/sh\nexit 1\n", { mode: 0o755 })
+      // A link, not a script: macOS vets a freshly written executable on its first run.
+      await symlink(Bun.which("false") ?? "/usr/bin/false", join(scriptDir, "ps"))
       await writeFile(
         childPath,
-        boundedFixture(`await Bun.write(${JSON.stringify(markerPath)}, String(Date.now()))`, 50)
+        `await Bun.write(${JSON.stringify(pidPath)}, String(process.pid))\n${boundedFixture("", { watchTestProcess: true })}\n`
       )
       await writeFile(
         parentPath,
         [
           `Bun.spawn([process.execPath, ${JSON.stringify(childPath)}], { stdout: "ignore", stderr: "ignore" })`,
+          `for (let i = 0; i < 500 && !(await Bun.file(${JSON.stringify(pidPath)}).exists()); i++) await Bun.sleep(10)`,
           'process.stdout.write("spawned\\n")',
           boundedFixture(),
         ].join("\n")
       )
 
-      const result = await runGuard(["--stall", "1", "--", process.execPath, parentPath], {
+      const result = await runGuard(["--stall", "0.5", "--", process.execPath, parentPath], {
         ...process.env,
         PATH: scriptDir,
       })
       expect(result.exitCode).toBe(124)
 
-      // The grandchild keeps stamping the marker while it lives, so a marker that stops moving is
-      // proof it was killed rather than reparented.
-      const afterKill = await Bun.file(markerPath).text()
-      await Bun.sleep(500)
-      expect(await Bun.file(markerPath).text()).toBe(afterKill)
+      grandchildPid = await readPid(pidPath)
+      expect(await waitForExit(grandchildPid, 2_000)).toBeTrue()
     } finally {
+      killQuietly(grandchildPid)
       await rm(scriptDir, { recursive: true, force: true })
     }
   }, 30_000)
 
-  test("stops the guarded process before relaying a termination signal", async () => {
-    // Local coding harnesses terminate their direct command on cancellation. The guard has to reap
-    // its own child before it accepts that signal or the fixture is reparented to PID 1.
+  test.concurrent("stops the guarded process before relaying a termination signal", async () => {
+    // Local coding harnesses terminate their direct command on cancellation. The guard has to
+    // reap its own child before it accepts that signal or the fixture is reparented to PID 1.
     const scriptDir = await mkdtemp(join(tmpdir(), "sixb-ci-guard-signal-"))
     const pidPath = join(scriptDir, "child-pid")
     const childPath = join(scriptDir, "child.ts")
-    const fakePsPath = join(scriptDir, "ps")
     let childPid: number | null = null
     let guard: Bun.Subprocess<"ignore", "ignore", "ignore"> | null = null
 
     try {
       await writeFile(
         childPath,
-        `await Bun.write(${JSON.stringify(pidPath)}, String(process.pid))\n${boundedFixture()}\n`
+        `await Bun.write(${JSON.stringify(pidPath)}, String(process.pid))\n${boundedFixture("", { watchTestProcess: true })}\n`
       )
-      // A stuck diagnostic must not delay the process-group signal until after the caller's grace.
-      await writeFile(fakePsPath, "#!/bin/sh\nexec /bin/sleep 60\n", { mode: 0o755 })
+      // A stuck diagnostic must not delay the process-group signal until after the caller's
+      // grace: this `ps` holds the guard's process listing until its 2s bound.
+      await writeFile(join(scriptDir, "ps"), "#!/bin/sh\nexec /bin/sleep 60\n", { mode: 0o755 })
       guard = Bun.spawn(
         [process.execPath, guardPath, "--stall", "30", "--", process.execPath, childPath],
         {
@@ -192,83 +217,21 @@ describe("ci-guard", () => {
           env: { ...process.env, PATH: scriptDir },
         }
       )
-
-      for (let attempt = 0; attempt < 100 && !(await Bun.file(pidPath).exists()); attempt++) {
-        await Bun.sleep(10)
-      }
-      childPid = Number(await Bun.file(pidPath).text())
-      expect(Number.isInteger(childPid)).toBeTrue()
+      childPid = await readPid(pidPath)
 
       guard.kill("SIGTERM")
+      // Well inside the listing's 2s bound, so the child cannot have waited for it.
+      expect(await waitForExit(childPid, 1_000)).toBeTrue()
       await guard.exited
-      await Bun.sleep(100)
-      expect(isProcessAlive(childPid)).toBeFalse()
+      expect(guard.signalCode).toBe("SIGTERM")
     } finally {
-      try {
-        guard?.kill("SIGKILL")
-      } catch {
-        // Already stopped.
-      }
-      if (childPid !== null) {
-        try {
-          process.kill(childPid, "SIGKILL")
-        } catch {
-          // The assertion path already proved it was stopped.
-        }
-      }
+      killQuietly(guard?.pid)
+      killQuietly(childPid)
       await rm(scriptDir, { recursive: true, force: true })
     }
   }, 30_000)
 
-  test("bounds a fixture even when the guard is killed without cleanup", async () => {
-    // SIGKILL cannot be handled. The fixture itself watches its parent so the exact failure mode
-    // that produced the local PID-1 orphans still converges without waiting for its wall-clock cap.
-    const scriptDir = await mkdtemp(join(tmpdir(), "sixb-ci-guard-sigkill-"))
-    const pidPath = join(scriptDir, "child-pid")
-    const childPath = join(scriptDir, "child.ts")
-    let childPid: number | null = null
-    let guard: Bun.Subprocess<"ignore", "ignore", "ignore"> | null = null
-
-    try {
-      await writeFile(
-        childPath,
-        `await Bun.write(${JSON.stringify(pidPath)}, String(process.pid))\n${boundedFixture()}\n`
-      )
-      guard = Bun.spawn(
-        [process.execPath, guardPath, "--stall", "30", "--", process.execPath, childPath],
-        { stdout: "ignore", stderr: "ignore" }
-      )
-
-      for (let attempt = 0; attempt < 100 && !(await Bun.file(pidPath).exists()); attempt++) {
-        await Bun.sleep(10)
-      }
-      childPid = Number(await Bun.file(pidPath).text())
-      expect(Number.isInteger(childPid)).toBeTrue()
-
-      guard.kill("SIGKILL")
-      await guard.exited
-      for (let attempt = 0; attempt < 100 && isProcessAlive(childPid); attempt++) {
-        await Bun.sleep(10)
-      }
-      expect(isProcessAlive(childPid)).toBeFalse()
-    } finally {
-      try {
-        guard?.kill("SIGKILL")
-      } catch {
-        // Already stopped.
-      }
-      if (childPid !== null) {
-        try {
-          process.kill(childPid, "SIGKILL")
-        } catch {
-          // Already stopped.
-        }
-      }
-      await rm(scriptDir, { recursive: true, force: true })
-    }
-  }, 30_000)
-
-  test("refuses arguments it cannot act on rather than guessing", async () => {
+  test.concurrent("refuses arguments it cannot act on rather than guessing", async () => {
     const noStall = await runGuard(["--", process.execPath, "-e", ""])
     expect(noStall.exitCode).toBe(2)
     expect(noStall.stderr).toContain("--stall <seconds> is required")

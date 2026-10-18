@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -11,44 +11,57 @@ import { SmolvmSandbox } from "../src/smolvm-sandbox"
  * send), CommandResult mapping, the not-running guard, idempotency, and cleanup
  * — without needing a hypervisor. A real-VM round trip lives in the gated
  * smolvm-integration.test.ts.
+ *
+ * The script is written once per file: macOS scans every newly written executable on its first
+ * run (~150ms), so a fresh script per test made each test that slow. Each test configures it
+ * through a data file instead.
  */
 
 let dir: string
+let bin: string
 let logPath: string
+let configPath: string
 
-beforeEach(async () => {
+beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), "sixb-smolvm-test-"))
+  bin = join(dir, "fake-smolvm.sh")
   logPath = join(dir, "calls.log")
-})
-
-afterEach(async () => {
-  await rm(dir, { recursive: true, force: true })
-})
-
-/** Generate a fake smolvm that logs each invocation and returns controlled codes. */
-async function makeFakeSmolvm(
-  opts: { readonly failOn?: "create" | "start"; readonly execExit?: number } = {}
-): Promise<string> {
-  const bin = join(dir, "fake-smolvm.sh")
-  const execExit = opts.execExit ?? 0
-  const failOn = opts.failOn ?? ""
+  configPath = join(dir, "config")
+  // Logs each invocation; the config line holds "<failOn> <execExit>".
   const script = `#!/bin/sh
 printf '%s\\n' "$*" >> ${JSON.stringify(logPath)}
+read -r failOn execExit < ${JSON.stringify(configPath)}
 case "$2" in
-  create) [ "${failOn}" = "create" ] && exit 1 ;;
-  start) [ "${failOn}" = "start" ] && exit 1 ;;
+  create) [ "$failOn" = "create" ] && exit 1 ;;
+  start) [ "$failOn" = "start" ] && exit 1 ;;
   exec)
     # The working-directory bootstrap (mkdir) must always succeed; execExit models the guest
     # command's exit code, which only applies to the caller's runCommand.
     case "$*" in
       *"-- mkdir "*) exit 0 ;;
     esac
-    printf 'stdout-from-fake'; printf 'stderr-from-fake' 1>&2; exit ${execExit} ;;
+    printf 'stdout-from-fake'; printf 'stderr-from-fake' 1>&2; exit "$execExit" ;;
 esac
 exit 0
 `
   await writeFile(bin, script, "utf-8")
   await chmod(bin, 0o755)
+})
+
+afterAll(async () => {
+  await rm(dir, { recursive: true, force: true })
+})
+
+beforeEach(async () => {
+  await rm(logPath, { force: true })
+  await configure()
+})
+
+/** Configure the fake for the current test and return its path. */
+async function configure(
+  opts: { readonly failOn?: "create" | "start"; readonly execExit?: number } = {}
+): Promise<string> {
+  await writeFile(configPath, `${opts.failOn ?? "none"} ${opts.execExit ?? 0}\n`)
   return bin
 }
 
@@ -60,12 +73,12 @@ async function readCalls(): Promise<string[]> {
 describe("SmolvmSandbox lifecycle", () => {
   // Regression check: restore `options.cwd ?? this.workdir.dir` in runCommand;
   // the fake CLI must then receive incorrect relative --workdir arguments.
-  test("resolves command working directories before invoking the CLI", async () => {
-    const bin = await makeFakeSmolvm()
+  test("runCommand resolves working directories, forwards env and maps the CLI result", async () => {
     const sandbox = await SmolvmSandbox.create({
-      cli: { bin },
+      cli: { bin: await configure({ execExit: 7 }) },
       id: "cwd-test",
       workingDirectory: dir,
+      env: { SIXB_RUN_ID: "run-1" },
     })
     try {
       for (const [cwd, expected] of [
@@ -75,9 +88,14 @@ describe("SmolvmSandbox lifecycle", () => {
         ["./nested/..", sandbox.workingDirectory],
         ["/tmp", "/tmp"],
       ] as const) {
-        await sandbox.runCommand("pwd", [], { cwd })
+        const result = await sandbox.runCommand("bash", ["-lc", "echo hi"], { cwd })
+        expect(result).toMatchObject({
+          exitCode: 7,
+          stdout: "stdout-from-fake",
+          stderr: "stderr-from-fake",
+        })
         expect((await readCalls()).at(-1)).toBe(
-          `machine exec --name cwd-test --workdir ${expected} -- pwd`
+          `machine exec --name cwd-test --workdir ${expected} --env SIXB_RUN_ID=run-1 -- bash -lc echo hi`
         )
       }
     } finally {
@@ -85,8 +103,7 @@ describe("SmolvmSandbox lifecycle", () => {
     }
   })
 
-  test("create issues machine create then start, and reports running", async () => {
-    const bin = await makeFakeSmolvm()
+  test("create issues machine create then start in a guest /workspace, and reports running", async () => {
     const sandbox = await SmolvmSandbox.create({
       cli: { bin, image: "node:22-slim" },
       id: "run-1",
@@ -94,7 +111,7 @@ describe("SmolvmSandbox lifecycle", () => {
 
     expect(sandbox.status).toBe("running")
     expect(sandbox.provider).toBe("smolvm")
-    expect(sandbox.workingDirectory.length).toBeGreaterThan(0)
+    expect(sandbox.workingDirectory).toBe("/workspace")
 
     const calls = await readCalls()
     expect(calls[0]).toContain("machine create --name run-1")
@@ -103,81 +120,29 @@ describe("SmolvmSandbox lifecycle", () => {
     expect(calls[0]).not.toContain("--volume")
     expect(calls[1]).toContain("machine start --name run-1")
     // The working directory is created in-guest up front so it is a usable --workdir.
-    expect(calls[2]).toContain(`-- mkdir -p ${sandbox.workingDirectory}`)
+    expect(calls[2]).toBe("machine exec --name run-1 --workdir / -- mkdir -p /workspace")
 
     await sandbox.destroy()
   })
 
-  test("runCommand sets --workdir/--env and forwards bash -lc, mapping the result", async () => {
-    const bin = await makeFakeSmolvm({ execExit: 0 })
-    const sandbox = await SmolvmSandbox.create({
-      cli: { bin, image: "node:22-slim" },
-      id: "run-1",
-      env: { SIXB_RUN_ID: "run-1" },
-    })
-
-    const result = await sandbox.runCommand("bash", ["-lc", "echo hi"])
-    expect(result.exitCode).toBe(0)
-    expect(result.stdout).toBe("stdout-from-fake")
-    expect(result.stderr).toBe("stderr-from-fake")
-
-    const execCall = (await readCalls()).find(
-      (c) => c.includes("machine exec") && c.includes("bash")
-    )
-    expect(execCall).toContain("machine exec --name run-1")
-    expect(execCall).toContain(`--workdir ${sandbox.workingDirectory}`)
-    expect(execCall).toContain("--env SIXB_RUN_ID=run-1")
-    expect(execCall).toContain("-- bash -lc echo hi")
-
-    await sandbox.destroy()
-  })
-
-  test("propagates the guest exit code", async () => {
-    const bin = await makeFakeSmolvm({ execExit: 7 })
+  test("destroy stops and removes the machine; later stop/destroy are no-ops and commands reject", async () => {
     const sandbox = await SmolvmSandbox.create({ cli: { bin, image: "x" }, id: "run-1" })
-    const result = await sandbox.runCommand("bash", ["-lc", "exit 7"])
-    expect(result.exitCode).toBe(7)
-    await sandbox.destroy()
-  })
 
-  test("runCommand after stop rejects with SandboxNotRunningError", async () => {
-    const bin = await makeFakeSmolvm()
-    const sandbox = await SmolvmSandbox.create({ cli: { bin, image: "x" }, id: "run-1" })
+    await sandbox.destroy()
+    await sandbox.destroy()
     await sandbox.stop()
     expect(sandbox.status).toBe("stopped")
-    expect(sandbox.runCommand("bash", ["-lc", "echo"])).rejects.toThrow(SandboxNotRunningError)
-    await sandbox.destroy()
-  })
-
-  test("stop and destroy are idempotent", async () => {
-    const bin = await makeFakeSmolvm()
-    const sandbox = await SmolvmSandbox.create({ cli: { bin, image: "x" }, id: "run-1" })
-    await sandbox.stop()
-    await sandbox.stop()
-    await sandbox.destroy()
-    await sandbox.destroy()
-    expect(sandbox.status).toBe("stopped")
-  })
-
-  test("destroy stops and removes the machine", async () => {
-    const bin = await makeFakeSmolvm()
-    const sandbox = await SmolvmSandbox.create({ cli: { bin, image: "x" }, id: "run-1" })
-
-    await sandbox.destroy()
+    const error = await sandbox.runCommand("bash", ["-lc", "echo"]).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(SandboxNotRunningError)
 
     const calls = await readCalls()
-    expect(calls.some((c) => c.includes("machine stop --name run-1"))).toBe(true)
+    expect(calls.filter((c) => c.includes("machine stop --name run-1"))).toHaveLength(1)
     expect(calls.some((c) => c.includes("machine delete --name run-1"))).toBe(true)
   })
 
   // Regression check: derive the working directory from a host mkdtemp() path again; the default is
   // then a host path such as /private/var/folders/..., which a non-root image user cannot create.
-  test("uses a guest working directory and never creates it on the host", async () => {
-    const bin = await makeFakeSmolvm()
-    const byDefault = await SmolvmSandbox.create({ cli: { bin, image: "x" }, id: "run-1" })
-    expect(byDefault.workingDirectory).toBe("/workspace")
-    await byDefault.destroy()
-
+  test("uses a configured guest working directory and never creates it on the host", async () => {
     const configured = join(dir, "guest-only")
     const sandbox = await SmolvmSandbox.create({
       cli: { bin, image: "x" },
@@ -188,15 +153,16 @@ describe("SmolvmSandbox lifecycle", () => {
     expect((await readCalls()).at(-1)).toBe(
       `machine exec --name run-2 --workdir / -- mkdir -p ${configured}`
     )
-    expect(stat(configured)).rejects.toThrow()
+    expect(await stat(configured).catch(() => "absent")).toBe("absent")
     await sandbox.destroy()
   })
 
   test("create failure throws SandboxError and best-effort removes the machine", async () => {
-    const bin = await makeFakeSmolvm({ failOn: "create" })
-    expect(SmolvmSandbox.create({ cli: { bin, image: "x" }, id: "run-1" })).rejects.toThrow(
-      "smolvm create failed"
-    )
+    const error = await SmolvmSandbox.create({
+      cli: { bin: await configure({ failOn: "create" }), image: "x" },
+      id: "run-1",
+    }).catch((e: unknown) => e)
+    expect(String(error)).toContain("smolvm create failed")
 
     const calls = await readCalls()
     expect(calls.some((c) => c.includes("machine delete --name run-1"))).toBe(true)
@@ -210,7 +176,6 @@ describe("SmolvmSandbox registry egress", () => {
   } as const
 
   test("a registry image adds the registry hosts to the restricted allow list", async () => {
-    const bin = await makeFakeSmolvm()
     const sandbox = await SmolvmSandbox.create({
       cli: { bin, image: "node:22" },
       id: "run-1",
@@ -224,7 +189,6 @@ describe("SmolvmSandbox registry egress", () => {
   })
 
   test("a local image archive stays strict (no registry egress)", async () => {
-    const bin = await makeFakeSmolvm()
     const sandbox = await SmolvmSandbox.create({
       cli: { bin, image: "/images/agent.tar" },
       id: "run-1",

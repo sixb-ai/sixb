@@ -7,9 +7,11 @@ runBrokerContractSuite("NatsBroker", {
   teardown: async (broker) => {
     await broker.close()
   },
-  maxAgeMs: 1_000,
-  maxAgeWaitMs: 1_500,
-  subscriptionSetupMs: 500,
+  // JetStream expires records on a server timer that lags maxAgeMs: waits of maxAgeMs + 200ms
+  // failed locally while +300ms passed, so this keeps a wider margin.
+  maxAgeMs: 200,
+  maxAgeWaitMs: 700,
+  // subscribe() resolves once its ordered consumer exists, so no setup wait is needed.
   subscriptionDeliveryTimeoutMs: 5_000,
   subscriptionPollIntervalMs: 25,
 })
@@ -93,7 +95,6 @@ describe("NatsBroker", () => {
     await broker.subscribe({ projectId, streamId: stream.id }, (records) => {
       received.push(...records.map((record) => record.payload))
     })
-    await Bun.sleep(500)
 
     await broker.append({
       projectId,

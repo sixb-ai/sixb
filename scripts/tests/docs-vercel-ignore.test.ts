@@ -1,17 +1,10 @@
-import { describe, expect, test } from "bun:test"
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, relative, resolve } from "node:path"
 import { docsConfig } from "../../apps/docs/src/docs/config"
-import { decideDocsBuild, type GitProbe, gitProbe, WATCHED_PATHS } from "../docs-vercel-ignore"
+import { decideDocsBuild, type GitProbe, WATCHED_PATHS } from "../docs-vercel-ignore"
 import {
   type DependencyField,
   internalDependencies,
@@ -52,151 +45,128 @@ function probe(overrides: Partial<GitProbe> = {}): GitProbe {
 }
 
 describe("decideDocsBuild", () => {
-  test("builds when the branch has no previous deployment to compare against", () => {
-    expect(decideDocsBuild({ previousSha: undefined, git: probe() })).toEqual({
+  const deployedSha = "0f1e2d3c4b5a69788796a5b4c3d2e1f009876543"
+
+  test.each([
+    {
+      name: "builds when the branch has no previous deployment to compare against",
+      previousSha: undefined,
+      git: probe(),
       build: true,
       reason: "no previous successful deployment for this branch",
-    })
-  })
-
-  test("builds when the previous commit fell out of the shallow clone", () => {
-    const decision = decideDocsBuild({
-      previousSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f009876543",
+    },
+    {
+      name: "builds when the previous commit fell out of the shallow clone",
+      previousSha: deployedSha,
       git: probe({ hasCommit: () => false }),
-    })
-
-    expect(decision.build).toBe(true)
-    expect(decision.reason).toContain("outside the shallow clone")
-  })
-
-  test("builds when git cannot answer at all", () => {
-    const decision = decideDocsBuild({
-      previousSha: "abc1234",
+      build: true,
+      reason: "outside the shallow clone",
+    },
+    {
+      name: "builds when git cannot answer at all",
+      previousSha: deployedSha,
       git: probe({ changedPaths: () => null }),
-    })
-
-    expect(decision.build).toBe(true)
-    expect(decision.reason).toContain("could not diff")
-  })
-
-  test("builds when a watched path changed, and names the file that caused it", () => {
-    const decision = decideDocsBuild({
-      previousSha: "abc1234",
+      build: true,
+      reason: "could not diff",
+    },
+    {
+      name: "builds when a watched path changed, and names the file that caused it",
+      previousSha: deployedSha,
       git: probe({ changedPaths: () => ["docs/deployment/overview.md"] }),
-    })
+      build: true,
+      reason: "docs/deployment/overview.md",
+    },
+    {
+      name: "skips only when nothing watched changed",
+      previousSha: deployedSha,
+      git: probe(),
+      build: false,
+      reason: "no watched path changed",
+    },
+  ])("$name", ({ previousSha, git, build, reason }) => {
+    const decision = decideDocsBuild({ previousSha, git })
 
-    expect(decision.build).toBe(true)
-    expect(decision.reason).toContain("docs/deployment/overview.md")
-  })
-
-  test("skips only when nothing watched changed", () => {
-    const decision = decideDocsBuild({ previousSha: "abc1234", git: probe() })
-
-    expect(decision.build).toBe(false)
-    expect(decision.reason).toContain("no watched path changed")
-  })
-
-  test("diffs the whole gap since the last deployment, not just the last commit", () => {
-    const ranges: string[] = []
-    decideDocsBuild({
-      previousSha: "abc1234",
-      git: probe({
-        changedPaths: (range) => {
-          ranges.push(range)
-          return []
-        },
-      }),
-    })
-
-    expect(ranges).toEqual(["abc1234..HEAD"])
-  })
-
-  test("asks git about every watched path", () => {
-    let asked: readonly string[] = []
-    decideDocsBuild({
-      previousSha: "abc1234",
-      git: probe({
-        changedPaths: (_range, pathspecs) => {
-          asked = pathspecs
-          return []
-        },
-      }),
-    })
-
-    expect(asked).toEqual(WATCHED_PATHS)
+    expect(decision.build).toBe(build)
+    expect(decision.reason).toContain(reason)
   })
 })
 
-describe("gitProbe", () => {
-  function commitAll(cwd: string, message: string): string {
-    Bun.spawnSync(["git", "add", "-A"], { cwd })
-    Bun.spawnSync(["git", "commit", "-q", "-m", message], { cwd })
-    return Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd, stdout: "pipe" })
-      .stdout.toString()
-      .trim()
-  }
+/**
+ * The step as Vercel runs it: a process in the site's directory whose exit code is the decision.
+ * The repository's history is base → a docs edit → a README edit.
+ */
+describe("the ignored build step", () => {
+  const ignoreStep = join(import.meta.dir, "..", "docs-vercel-ignore.ts")
+  let repo = ""
+  const commits = { base: "", docsEdit: "" }
 
-  function repository(): string {
-    const cwd = mkdtempSync(join(tmpdir(), "sixb-docs-ignore-"))
-    Bun.spawnSync(["git", "init", "-q"], { cwd })
-    Bun.spawnSync(["git", "config", "user.email", "test@sixb.local"], { cwd })
-    Bun.spawnSync(["git", "config", "user.name", "Sixb Test"], { cwd })
-    // A contributor who signs every commit globally would otherwise get `gpg: no secret key`
-    // out of a test about pathspecs, since nothing here has a key for `test@sixb.local`.
-    Bun.spawnSync(["git", "config", "commit.gpgsign", "false"], { cwd })
-    mkdirSync(join(cwd, "docs"), { recursive: true })
-    mkdirSync(join(cwd, "apps", "docs"), { recursive: true })
-    writeFileSync(join(cwd, "docs", "overview.md"), "# one\n")
-    writeFileSync(join(cwd, "apps", "docs", "page.tsx"), "export default null\n")
-    writeFileSync(join(cwd, "README.md"), "# repo\n")
-    return cwd
-  }
-
-  /**
-   * Vercel runs the ignore step from the project's root directory, not the repo's. The `:/` anchor
-   * is what makes that irrelevant, and it is the assumption the old rule silently depended on.
-   */
-  test("resolves watched paths from a subdirectory, the way Vercel runs it", () => {
-    const cwd = repository()
-    try {
-      const base = commitAll(cwd, "initial")
-      writeFileSync(join(cwd, "docs", "overview.md"), "# two\n")
-      commitAll(cwd, "docs: edit a page")
-
-      const probeFromSubdirectory = gitProbe(join(cwd, "apps", "docs"))
-
-      expect(probeFromSubdirectory.changedPaths(`${base}..HEAD`, WATCHED_PATHS)).toEqual([
-        "docs/overview.md",
-      ])
-    } finally {
-      rmSync(cwd, { recursive: true, force: true })
+  beforeAll(async () => {
+    repo = await mkdtemp(join(tmpdir(), "sixb-docs-ignore-"))
+    // Async and bounded: a synchronous spawn can hang a parallel test worker on a reaped child.
+    const git = async (...args: string[]) => {
+      const result = await run(
+        [
+          "git",
+          // A contributor who signs every commit globally would otherwise get `gpg: no secret key`
+          // out of a test about pathspecs, since nothing here has a key for `test@sixb.local`.
+          ...["-c", "user.email=test@sixb.local", "-c", "user.name=Sixb Test"],
+          ...["-c", "commit.gpgsign=false", ...args],
+        ],
+        repo
+      )
+      if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed:\n${result.stderr}`)
+      return result.stdout.trim()
     }
+
+    await mkdir(join(repo, "apps", "docs"), { recursive: true })
+    await mkdir(join(repo, "docs"), { recursive: true })
+    await writeFile(join(repo, "docs", "overview.md"), "# one\n")
+    await writeFile(join(repo, "apps", "docs", "page.tsx"), "export default null\n")
+    await writeFile(join(repo, "README.md"), "# repo\n")
+    await git("init", "-q")
+    await git("add", "-A")
+    await git("commit", "-q", "-m", "initial")
+    commits.base = await git("rev-parse", "HEAD")
+
+    await writeFile(join(repo, "docs", "overview.md"), "# two\n")
+    await git("commit", "-q", "-am", "docs: edit a page")
+    commits.docsEdit = await git("rev-parse", "HEAD")
+
+    await writeFile(join(repo, "README.md"), "# changed\n")
+    await git("commit", "-q", "-am", "readme: edit")
   })
 
-  test("reports nothing for a change outside the watched paths", () => {
-    const cwd = repository()
-    try {
-      const base = commitAll(cwd, "initial")
-      writeFileSync(join(cwd, "README.md"), "# changed\n")
-      commitAll(cwd, "readme: edit")
-
-      expect(gitProbe(cwd).changedPaths(`${base}..HEAD`, WATCHED_PATHS)).toEqual([])
-    } finally {
-      rmSync(cwd, { recursive: true, force: true })
-    }
+  afterAll(async () => {
+    if (repo) await rm(repo, { recursive: true, force: true })
   })
 
-  test("reports an absent commit rather than throwing", () => {
-    const cwd = repository()
-    try {
-      commitAll(cwd, "initial")
-      const absent = "0f1e2d3c4b5a69788796a5b4c3d2e1f009876543"
+  // Vercel runs the step from the project's root directory, not the repo's. The `:/` anchor is
+  // what makes that irrelevant, and it is the assumption the old rule silently depended on.
+  const runStep = (previousSha: string) =>
+    run([process.execPath, ignoreStep], join(repo, "apps", "docs"), {
+      VERCEL_GIT_PREVIOUS_SHA: previousSha,
+    })
 
-      expect(gitProbe(cwd).hasCommit(absent)).toBe(false)
-      expect(gitProbe(cwd).changedPaths(`${absent}..HEAD`, WATCHED_PATHS)).toBeNull()
-    } finally {
-      rmSync(cwd, { recursive: true, force: true })
-    }
+  test.concurrent("builds for a watched change anywhere since the last deployment", async () => {
+    // The docs edit is one commit behind HEAD: diffing only the last commit would skip it.
+    const result = await runStep(commits.base)
+
+    expect(result.stdout).toContain("build: docs/overview.md changed")
+    expect(result.exitCode).toBe(1)
+  })
+
+  test.concurrent("skips when only unwatched paths changed", async () => {
+    const result = await runStep(commits.docsEdit)
+
+    expect(result.stdout).toContain("skip: no watched path changed")
+    expect(result.exitCode).toBe(0)
+  })
+
+  test.concurrent("builds when the last deployment is missing from the clone", async () => {
+    const result = await runStep("0f1e2d3c4b5a69788796a5b4c3d2e1f009876543")
+
+    expect(result.stdout).toContain("build: 0f1e2d3c is outside the shallow clone")
+    expect(result.exitCode).toBe(1)
   })
 })
 
@@ -262,6 +232,30 @@ function workspacePackages(): Map<string, string> {
   }
 
   return byName
+}
+
+async function run(
+  command: string[],
+  cwd: string,
+  env: Readonly<Record<string, string>> = {}
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const proc = Bun.spawn(command, {
+    cwd,
+    env: { ...process.env, ...env },
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const timer = setTimeout(() => proc.kill("SIGKILL"), 4_000)
+  try {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ])
+    return { exitCode, stdout, stderr }
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 function readManifest<T = PackageJson>(repoRelativeDir: string): T {

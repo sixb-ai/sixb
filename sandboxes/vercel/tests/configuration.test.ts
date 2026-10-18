@@ -3,9 +3,10 @@ import { param } from "@sixb/core"
 import { VercelSandboxFactory, type VercelSandboxFactoryOptions } from "../src"
 
 test("carries only common configuration, not provider credentials or infrastructure", () => {
+  const credentials = { token: "private", teamId: "team", projectId: "project" }
   const factory = new VercelSandboxFactory({
     runtime: "node24",
-    credentials: { token: "private", teamId: "team", projectId: "project" },
+    credentials,
     source: { type: "git", url: "https://github.com/acme/app.git" },
     setup: ["bun install"],
   })
@@ -13,6 +14,14 @@ test("carries only common configuration, not provider credentials or infrastruct
     source: { type: "git", url: "https://github.com/acme/app.git" },
     setup: ["bun install"],
   })
+
+  // A dynamic recipe is carried as given, never evaluated at configuration time.
+  const resolve = () => {
+    throw new Error("Not called at configuration time")
+  }
+  const params = { clientId: param("string") }
+  const dynamic = new VercelSandboxFactory({ runtime: "node24", credentials, params, resolve })
+  expect(dynamic.configuration).toEqual({ params, resolve })
 })
 
 test("rejects provider-specific source variants at construction", () => {
@@ -28,13 +37,4 @@ test("rejects provider-specific source variants at construction", () => {
         >)
     ).toThrow("Invalid sandbox source")
   }
-})
-
-test("carries dynamic configuration without evaluating it or provisioning a sandbox", () => {
-  const resolve = () => {
-    throw new Error("Not called at configuration time")
-  }
-  const params = { clientId: param("string") }
-  const factory = new VercelSandboxFactory({ params, resolve })
-  expect(factory.configuration).toEqual({ params, resolve })
 })

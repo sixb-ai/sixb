@@ -33,9 +33,13 @@ describe("Vercel named persistence", () => {
     }
   })
 
-  test("failed static setup stops the obtained session without deleting saved state", async () => {
-    const f = fixture(["prepare-once"])
-    // This transport rejects commands, exercising initialization failure through the real SDK.
+  test.each([
+    "setup",
+    "session configuration",
+  ])("a failed %s stops the obtained session without deleting saved state", async (phase) => {
+    const f = fixture(phase === "setup" ? ["prepare-once"] : undefined)
+    // The transport rejects commands, exercising setup failure through the real SDK.
+    if (phase !== "setup") f.failNetwork()
     await expect(f.factory.create({ persistence: { name: "workspace-1" } })).rejects.toThrow()
     expect(f.requests.some((request) => request.path.includes("session-1/stop"))).toBe(true)
     expect(f.requests.some((request) => request.method === "DELETE")).toBe(false)
@@ -305,14 +309,6 @@ describe("Vercel named persistence", () => {
     f.failNetwork()
     await expect(sandbox.stop()).rejects.toThrow("network cleanup failed")
     expect(f.requests.some((request) => request.path.includes("/stop"))).toBe(true)
-  })
-
-  test("setup failure stops only the obtained session and preserves the named state", async () => {
-    const f = fixture()
-    f.failNetwork()
-    await expect(f.factory.create({ persistence: { name: "workspace-1" } })).rejects.toThrow()
-    expect(f.requests.some((request) => request.path.includes("session-1/stop"))).toBe(true)
-    expect(f.requests.some((request) => request.method === "DELETE")).toBe(false)
   })
 
   test("invalid options fail before any provider request", async () => {

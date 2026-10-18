@@ -48,7 +48,7 @@ async function deployFiles(home: string, files: Record<string, string>): Promise
 }
 
 describe("applying an upload", () => {
-  test("matches the commit like git reset --hard, keeping what the server made", async () => {
+  test("matches the commit like git reset --hard, keeping what the server made and its .env", async () => {
     const home = await tempDir()
     const code = join(home, "northline", "code")
 
@@ -64,6 +64,7 @@ describe("applying an upload", () => {
     })
 
     await deployFiles(home, {
+      ".env": "SECRET=committed",
       "package.json": "{}",
       "src/keep.ts": "v2",
       "src/new.ts": "new",
@@ -78,17 +79,8 @@ describe("applying an upload", () => {
       "src/new.ts",
     ])
     expect(await readFile(join(code, "src/keep.ts"), "utf8")).toBe("v2")
-  })
-
-  test("never replaces the server's .env with a committed one", async () => {
-    const home = await tempDir()
-    const code = join(home, "northline", "code")
-    await writeTree(code, { ".env": "SECRET=server" })
-
-    await deployFiles(home, { ".env": "SECRET=committed", "app.ts": "app" })
-
+    // A committed .env never replaces the server's.
     expect(await readFile(join(code, ".env"), "utf8")).toBe("SECRET=server")
-    expect(await tree(code)).toEqual([".env", "app.ts"])
   })
 })
 

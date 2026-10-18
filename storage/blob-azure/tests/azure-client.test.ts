@@ -72,19 +72,7 @@ describe("Azure client configuration", () => {
     expect(scopes).toEqual(["https://storage.azure.com/.default"])
   })
 
-  test("shared-key copy-source URLs grant read access only", async () => {
-    const client = createAzureClient(
-      { container: "files", connectionString: "UseDevelopmentStorage=true" },
-      0
-    )
-    const source = await client.copySource(client.container.getBlockBlobClient("private/staging"))
-    const url = new URL(source.url)
-    expect(url.searchParams.get("sp")).toBe("r")
-    expect(url.searchParams.get("sr")).toBe("b")
-    expect(url.searchParams.has("sig")).toBe(true)
-  })
-
-  test("copy-source SAS includes a bounded validity window for expiration policies", async () => {
+  test("shared-key copy-source SAS grants read-only access for a bounded window", async () => {
     // Regression: removing startsOn in copySource fails this test. Azure accounts
     // enforcing SAS expiration policies reject signatures without a signed start.
     const client = createAzureClient(
@@ -95,6 +83,9 @@ describe("Azure client configuration", () => {
     const source = await client.copySource(client.container.getBlockBlobClient("private/staging"))
     const after = Date.now()
     const params = new URL(source.url).searchParams
+    expect(params.get("sp")).toBe("r")
+    expect(params.get("sr")).toBe("b")
+    expect(params.has("sig")).toBe(true)
     expect(params.has("st")).toBe(true)
     const start = Date.parse(params.get("st")!)
     const end = Date.parse(params.get("se")!)
@@ -137,6 +128,7 @@ describe("Azure download stream bridge", () => {
         this.destroy(new Error("download failed"))
       },
     })
-    await expect(new Response(webStream(source)).bytes()).rejects.toThrow("download failed")
+    const error = await new Response(webStream(source)).bytes().catch((caught: unknown) => caught)
+    expect(error).toEqual(new Error("download failed"))
   })
 })

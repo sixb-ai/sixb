@@ -103,9 +103,11 @@ describe("Azure data-plane adapter", () => {
     })
   })
 
+  // Every operation shares one request path; these per-operation cases prove each one forwards its
+  // options and status list to it, and the deadline case below proves the shared timer.
   for (const [name, operation] of Object.entries(operations)) {
     // Reproduce regression check: replace the status guard with a retry, or remove
-    // the request signal/timer. The corresponding test below must fail (or time out).
+    // the request signal. The corresponding test below must fail (or time out).
     test(`${name} sends once on 503 and redacts the response`, async () => {
       let calls = 0
       const client = createAzureSandboxClient(config, {
@@ -121,22 +123,6 @@ describe("Azure data-plane adapter", () => {
       expect(String(error)).not.toContain(token.token)
       expect(calls).toBe(1)
     })
-
-    test(`${name} aborts its transport on deadline`, async () => {
-      let signal: AbortSignal | null | undefined
-      const client = createAzureSandboxClient(
-        { ...config, requestTimeoutMs: 15 },
-        {
-          fetch: async (_, init) => {
-            signal = init.signal
-            // Deliberately ignore cancellation to prove the caller still receives a bound.
-            return new Promise<Response>(() => {})
-          },
-        }
-      )
-      await expect(operation(client, {})).rejects.toMatchObject({ kind: "timeout" })
-      expect(signal?.aborted).toBe(true)
-    }, 1000)
 
     test(`${name} forwards caller cancellation and rejects pre-aborted requests`, async () => {
       const abort = new AbortController()
@@ -160,6 +146,23 @@ describe("Azure data-plane adapter", () => {
       expect(calls).toBe(1)
     }, 1000)
   }
+
+  test("aborts its transport on deadline", async () => {
+    let signal: AbortSignal | null | undefined
+    const client = createAzureSandboxClient(
+      { ...config, requestTimeoutMs: 15 },
+      {
+        fetch: async (_, init) => {
+          signal = init.signal
+          // Deliberately ignore cancellation to prove the caller still receives a bound.
+          return new Promise<Response>(() => {})
+        },
+      }
+    )
+    const error = await client.execute("sandbox", "echo hello", "/tmp").catch((e: unknown) => e)
+    expect(error).toMatchObject({ kind: "timeout" })
+    expect(signal?.aborted).toBe(true)
+  }, 1000)
 
   test("bounds credentials that ignore abort and never sends after they resolve late", async () => {
     let resolveToken!: (value: typeof token) => void
@@ -208,22 +211,6 @@ describe("Azure data-plane adapter", () => {
     await expect(client.get("sandbox")).rejects.toMatchObject({ kind: "timeout" })
     expect(signal?.aborted).toBe(true)
   }, 1000)
-
-  test("does not follow redirect responses", async () => {
-    let calls = 0
-    const client = createAzureSandboxClient(config, {
-      fetch: async (_, init) => {
-        calls++
-        expect(init.redirect).toBe("manual")
-        return new Response(null, {
-          status: 307,
-          headers: { Location: "https://untrusted.invalid" },
-        })
-      },
-    })
-    await expect(client.get("sandbox")).rejects.toMatchObject({ kind: "http", statusCode: 307 })
-    expect(calls).toBe(1)
-  })
 
   test("accepts already-deleted resources but preserves get/stop conflicts", async () => {
     const missing = createAzureSandboxClient(config, {

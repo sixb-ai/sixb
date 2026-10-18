@@ -216,14 +216,11 @@ describe("credential injection policy", () => {
 })
 
 describe("toVercelNetworkPolicy", () => {
-  test("maps deny-all and allow-all modes", () => {
+  test("maps deny-all (including an empty restricted allow list) and allow-all modes", () => {
     expect(toVercelNetworkPolicy(undefined)).toBe("deny-all")
     expect(toVercelNetworkPolicy({ mode: "none" })).toBe("deny-all")
-    expect(toVercelNetworkPolicy({ mode: "all" })).toBe("allow-all")
-  })
-
-  test("maps empty restricted allow list to deny-all", () => {
     expect(toVercelNetworkPolicy({ mode: "restricted", allow: [] })).toBe("deny-all")
+    expect(toVercelNetworkPolicy({ mode: "all" })).toBe("allow-all")
   })
 
   test("maps HTTPS restricted targets to domain allow rules", () => {

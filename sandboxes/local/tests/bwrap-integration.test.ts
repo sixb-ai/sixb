@@ -9,5 +9,7 @@ if (process.platform === "linux" && Bun.which("bwrap")) {
       readOnlyEnforcement: true,
       isolation: true,
     },
+    // The timer starts after the spawn, so any bound below `sleep`'s runtime proves the kill.
+    shortTimeoutMs: 50,
   })
 }

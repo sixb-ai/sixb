@@ -5,7 +5,7 @@ services:
     # Redis on 46379 do not collide with this broker test server.
     command: ["redis-server", "--port", "46380"]
     ports:
-      - "46380:46380"
+      - "127.0.0.1:46380:46380"
     healthcheck:
       test: ["CMD", "redis-cli", "-p", "46380", "ping"]
       interval: 2s

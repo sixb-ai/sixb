@@ -24,41 +24,35 @@ describe("buildSeatbeltProfile", () => {
     )
   })
 
-  test('network.mode="all" drops the network-outbound deny', () => {
+  // Local isolation cannot enforce an allow list, so restricted is best-effort host network.
+  test.each([
+    ["all", { mode: "all" }],
+    [
+      "restricted",
+      { mode: "restricted", allow: [{ name: "sixb-api", origin: "http://127.0.0.1:3000" }] },
+    ],
+  ] as const)('network.mode="%s" drops the network-outbound deny', (_label, network) => {
     const profile = buildSeatbeltProfile({
       workingDirectory: "/private/tmp/wd",
       readOnlyPaths: [],
       readWritePaths: [],
-      network: { mode: "all" },
+      network,
     })
 
     expect(profile).not.toContain("network-outbound")
-    expect(profile).toContain("(allow default)")
+    expect(profile).toContain("(deny file-write*)")
   })
 
-  test('network.mode="restricted" drops the network-outbound deny for local best-effort access', () => {
+  test("readWritePaths add file-write allow rules; readOnlyPaths are informational", () => {
     const profile = buildSeatbeltProfile({
       workingDirectory: "/private/tmp/wd",
-      readOnlyPaths: [],
-      readWritePaths: [],
-      network: {
-        mode: "restricted",
-        allow: [{ name: "sixb-api", origin: "http://127.0.0.1:3000" }],
-      },
-    })
-
-    expect(profile).not.toContain("network-outbound")
-  })
-
-  test("readWritePaths produce additional file-write allow rules", () => {
-    const profile = buildSeatbeltProfile({
-      workingDirectory: "/private/tmp/wd",
-      readOnlyPaths: [],
+      readOnlyPaths: ["/etc/secrets"],
       readWritePaths: ["/private/var/cache/agent"],
       network: { mode: "none" },
     })
 
     expect(profile).toContain('(allow file-write* (subpath "/private/var/cache/agent"))')
+    expect(profile).not.toContain("/etc/secrets")
   })
 
   test("escapes quotes and backslashes in subpath strings", () => {
@@ -72,17 +66,6 @@ describe("buildSeatbeltProfile", () => {
     expect(profile).toContain(
       '(allow file-write* (subpath "/tmp/with \\"quotes\\"\\\\and\\\\backslashes"))'
     )
-  })
-
-  test("readOnlyPaths is informational on Seatbelt", () => {
-    const profile = buildSeatbeltProfile({
-      workingDirectory: "/private/tmp/wd",
-      readOnlyPaths: ["/etc/secrets"],
-      readWritePaths: [],
-      network: { mode: "none" },
-    })
-
-    expect(profile).not.toContain("/etc/secrets")
   })
 })
 

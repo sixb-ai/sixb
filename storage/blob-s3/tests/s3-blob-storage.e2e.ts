@@ -295,27 +295,46 @@ describe("S3BlobStorage", () => {
     }
   })
 
+  // The operator script configures itself from S3_* and reports failure through its exit code;
+  // importing it runs the same top-level checks without a cold process. It moves 2 x 10 MiB.
   test("runs the release smoke check against the local S3 service", async () => {
-    const child = Bun.spawn(
-      [process.execPath, "--no-env-file", `${import.meta.dir}/../scripts/verify-direct-upload.ts`],
-      {
-        env: {
-          PATH: process.env.PATH,
-          S3_BUCKET: process.env.SIXB_S3_BUCKET,
-          S3_ENDPOINT: process.env.SIXB_S3_ENDPOINT,
-          S3_ACCESS_KEY_ID: process.env.SIXB_S3_ACCESS_KEY_ID,
-          S3_SECRET_ACCESS_KEY: process.env.SIXB_S3_SECRET_ACCESS_KEY,
-        },
-        stdout: "pipe",
-        stderr: "pipe",
-      }
+    const env: Record<string, string | undefined> = {
+      S3_BUCKET: process.env.SIXB_S3_BUCKET,
+      S3_ENDPOINT: process.env.SIXB_S3_ENDPOINT,
+      S3_ACCESS_KEY_ID: process.env.SIXB_S3_ACCESS_KEY_ID,
+      S3_SECRET_ACCESS_KEY: process.env.SIXB_S3_SECRET_ACCESS_KEY,
+      S3_REGION: undefined,
+      AWS_REGION: undefined,
+      S3_SESSION_TOKEN: undefined,
+      AWS_SESSION_TOKEN: undefined,
+    }
+    const previousEnv = Object.fromEntries(
+      Object.keys(env).map((name) => [name, process.env[name]])
     )
-    const [code, stdout, stderr] = await Promise.all([
-      child.exited,
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-    ])
-    expect({ code, stderr }).toEqual({ code: 0, stderr: "" })
-    expect(stdout).toContain("PASS: direct upload verification and cleanup")
-  })
+    const previousExitCode = process.exitCode
+    const info = spyOn(console, "info").mockImplementation(() => undefined)
+    const error = spyOn(console, "error").mockImplementation(() => undefined)
+    try {
+      setEnv(env)
+      await import("../scripts/verify-direct-upload")
+
+      expect({ exitCode: process.exitCode, errors: error.mock.calls }).toEqual({
+        exitCode: previousExitCode,
+        errors: [],
+      })
+      expect(info.mock.calls.at(-1)).toEqual(["PASS: direct upload verification and cleanup"])
+    } finally {
+      setEnv(previousEnv)
+      process.exitCode = previousExitCode
+      info.mockRestore()
+      error.mockRestore()
+    }
+  }, 15_000)
 })
+
+function setEnv(values: Record<string, string | undefined>): void {
+  for (const [name, value] of Object.entries(values)) {
+    if (value === undefined) delete process.env[name]
+    else process.env[name] = value
+  }
+}

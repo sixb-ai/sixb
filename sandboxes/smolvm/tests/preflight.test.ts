@@ -1,40 +1,24 @@
-import { describe, expect, test } from "bun:test"
+import { expect, test } from "bun:test"
 import { evaluateSmolvm, type ProbeInput } from "../src/preflight"
 
-function input(overrides: Partial<ProbeInput>): ProbeInput {
-  return {
+const missing = () => false
+// macOS (Hypervisor.framework) and Windows (WHP) need no KVM and are not probed for it.
+const cases: [label: string, overrides: Partial<ProbeInput>, ok: boolean, message: string][] = [
+  ["ok on linux with binary and kvm", {}, true, "ready"],
+  ["not ok when binary is missing", { hasBinary: missing }, false, "not found"],
+  ["not ok on linux without /dev/kvm", { hasKvm: missing }, false, "KVM"],
+  ["ok on darwin without kvm", { platform: "darwin", hasKvm: missing }, true, "ready"],
+  ["ok on win32 without kvm", { platform: "win32", hasKvm: missing }, true, "ready"],
+]
+
+test.each(cases)("evaluateSmolvm %s", (_label, overrides, ok, message) => {
+  const probe = evaluateSmolvm({
     bin: "smolvm",
     platform: "linux",
     hasBinary: () => true,
     hasKvm: () => true,
     ...overrides,
-  }
-}
-
-describe("evaluateSmolvm", () => {
-  test("ok on linux with binary and kvm", () => {
-    expect(evaluateSmolvm(input({})).ok).toBe(true)
   })
-
-  test("not ok when binary is missing", () => {
-    const probe = evaluateSmolvm(input({ hasBinary: () => false }))
-    expect(probe.ok).toBe(false)
-    expect(probe.message).toContain("not found")
-  })
-
-  test("not ok on linux without /dev/kvm", () => {
-    const probe = evaluateSmolvm(input({ hasKvm: () => false }))
-    expect(probe.ok).toBe(false)
-    expect(probe.message).toContain("KVM")
-  })
-
-  test("ok on darwin without kvm (Hypervisor.framework, not probed)", () => {
-    const probe = evaluateSmolvm(input({ platform: "darwin", hasKvm: () => false }))
-    expect(probe.ok).toBe(true)
-  })
-
-  test("ok on win32 without kvm (WHP, not probed)", () => {
-    const probe = evaluateSmolvm(input({ platform: "win32", hasKvm: () => false }))
-    expect(probe.ok).toBe(true)
-  })
+  expect(probe.ok).toBe(ok)
+  expect(probe.message).toContain(message)
 })

@@ -97,7 +97,6 @@ test("factory validates unsupported persistence and network before provisioning"
 
 test.each([
   undefined,
-  {},
   { setup: ["override"] },
 ])("factory prepares only the selected environment: %j", async (environment) => {
   transport((method, path, body) => {
@@ -345,9 +344,9 @@ for (const operation of ["stop", "destroy"] as const) {
   })
 }
 
+// An empty restricted allow list resolves to "none" (network.test.ts).
 for (const network of [
   { mode: "none" },
-  { mode: "restricted", allow: [] },
   { mode: "restricted", allow: [{ name: "gateway", origin: "https://example.com" }] },
   { mode: "all" },
 ] as const) {

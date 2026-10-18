@@ -6,7 +6,7 @@ services:
     # relies on a clean Redis on every run via `down -v`.
     command: ["redis-server", "--port", "46379"]
     ports:
-      - "46379:46379"
+      - "127.0.0.1:46379:46379"
     healthcheck:
       test: ["CMD", "redis-cli", "-p", "46379", "ping"]
       interval: 2s
