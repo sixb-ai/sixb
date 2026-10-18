@@ -18,5 +18,6 @@ input is supported; check the resulting page state after interaction. Before pri
 fonts and relevant images, set print styles/page size, and inspect the resulting PDF page previews
 with `sixb-render`. A successful navigation or screenshot does not prove the page meets the task.
 
-Deliver only requested final files, each with `publish_artifact` as a `file` artifact. Browser
-traces, temporary HTML, and screenshots used for verification are working files unless requested.
+Deliver only requested final files: each with `publish_artifact` as a `file` artifact when you
+have that tool, otherwise as your instructions say. Browser traces, temporary HTML, and screenshots
+used for verification are working files unless requested.

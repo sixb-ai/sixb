@@ -16,17 +16,15 @@ artifact:<id>[@<version>][/<file>][#<part>]
 | `artifact:art_k3m9q2x7tp#Summary!A1:D6` | A range of a sheet; row 1 is the header row |
 | `artifact:art_k3m9q2x7tp#chart=revenue` | A chart in a workbook |
 | `artifact:art_k3m9q2x7tp#methodology` | A document's section |
+| `artifact:art_k3m9q2x7tp#4` | A deck's slide 4 |
 
 Copy addresses from `$SIXB_ARTIFACTS`: each artifact lists its `address` and the `parts` it has,
 each with two addresses written out:
 
-- `address` follows the artifact's latest version. Use it in a document or a sheet, which you revise
-  as the artifact changes.
+- `address` follows the artifact's latest version. Use it in a document, a sheet, or a deck, which
+  you revise as the artifact changes.
 - `pinned` names the version you read, such as `artifact:art_k3m9q2x7tp@2#chart=revenue`. Use it in
   a reply: a reply's words describe that version, so what it shows must stay that version.
-
-An artifact you published in this turn is not listed yet: write its address from what
-`publish_artifact` returned, pinned to that version, such as `artifact:<artifactId>@<version>#chart=revenue`.
 
 In a Markdown link, write a space as `%20`: `artifact:art_k3m9q2x7tp#Q3%20numbers!A1:D6`.
 

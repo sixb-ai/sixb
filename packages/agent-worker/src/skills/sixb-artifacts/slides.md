@@ -53,6 +53,10 @@ end), and `<p class="source">` for where its numbers come from, in the footer. T
 with the source on the left and the slide's number on the right; add `no-number` to a slide to drop
 the number.
 
+Inside a slide: `<div class="callout">` sets the one point to remember on a shaded panel,
+`<span class="tag">` is a small pill label such as a status, and `class="note"` sets an aside in
+smaller, muted text.
+
 ## Write
 
 - One idea per slide. Its heading states the takeaway ("Restorations within SLA reached 94%"),
@@ -125,5 +129,6 @@ result says the check did not run, read `index.html` slide by slide instead.
 
 ## Examples
 
-`examples/slides/` holds two finished decks built from the layouts alone: a quarterly review with a
-chart, a stat, and a table, and a launch plan with a timeline and a quote.
+`examples/slides/` holds two finished decks built from the layouts and classes above, with no CSS
+of their own: a quarterly review with a chart, a stat, and a table, and a launch plan with a
+timeline, a callout, and a table of owners.
