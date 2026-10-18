@@ -5,9 +5,18 @@
       "columns": {
         "Calls": "number",
         "Within SLA": { "type": "percent", "decimals": 1 },
-        "Service revenue": { "type": "currency", "currency": "USD" },
-        "Parts cost": { "type": "currency", "currency": "USD" },
+        "Service revenue": { "type": "currency", "currency": "USD", "compact": true },
+        "Parts cost": { "type": "currency", "currency": "USD", "compact": true },
         "Quarter end": "date"
+      },
+      "descriptions": {
+        "Within SLA": "Priority calls restored inside the agreed time, of all priority calls."
+      },
+      "totals": {
+        "Calls": "sum",
+        "Within SLA": "average",
+        "Service revenue": "sum",
+        "Parts cost": "sum"
       }
     },
     {
@@ -16,10 +25,12 @@
       "columns": {
         "Visits": "number",
         "Within SLA": { "type": "percent", "decimals": 1 },
-        "Change": { "type": "percent", "decimals": 1 },
+        "Change": { "type": "percent", "decimals": 1, "signed": true },
         "Parts cost": { "type": "currency", "currency": "USD" },
         "Lead": "link"
-      }
+      },
+      "descriptions": { "Change": "Within SLA against the quarter before, in points." },
+      "totals": { "Visits": "sum", "Within SLA": "average", "Parts cost": "sum" }
     }
   ],
   "charts": [

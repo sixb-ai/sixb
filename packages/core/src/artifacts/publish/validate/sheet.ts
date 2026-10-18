@@ -129,7 +129,12 @@ async function readSheet(
     }
   }
 
-  for (const column of [...Object.keys(sheet.columns), ...Object.keys(sheet.widths)]) {
+  for (const column of [
+    ...Object.keys(sheet.columns),
+    ...Object.keys(sheet.widths),
+    ...Object.keys(sheet.descriptions),
+    ...Object.keys(sheet.totals),
+  ]) {
     if (!seen.has(column)) {
       throw invalidArtifact(
         `${WORKBOOK_FILE} sheet '${sheet.name}' names column '${column}', which '${path}' does not have.`

@@ -36,6 +36,7 @@ export function GridCell({
   covered,
   sort,
   title,
+  description,
   style,
   children,
 }: {
@@ -61,6 +62,8 @@ export function GridCell({
   readonly sort?: SortDirection
   /** What a header's column holds, shown on hover. */
   readonly title?: string
+  /** What a header's column means, from the workbook, for assistive technology. */
+  readonly description?: string
   readonly style: CSSProperties
   readonly children: ReactNode
 }) {
@@ -75,6 +78,7 @@ export function GridCell({
       aria-colindex={column + 2}
       aria-selected={selected}
       aria-sort={sort}
+      aria-description={description}
       title={title}
       className={cn(
         "flex shrink-0 items-center border-r border-b border-(--sheet-line) px-2 whitespace-nowrap",
@@ -161,7 +165,16 @@ export function HeaderContent({
           filterButton && "pr-5"
         )}
       >
-        <span className="min-w-0 truncate">{column?.name}</span>
+        {/* A described column's name is underlined as a term with more to read on hover. */}
+        <span
+          className={cn(
+            "min-w-0 truncate",
+            column?.description &&
+              "underline decoration-muted-foreground/45 decoration-dotted underline-offset-[3px]"
+          )}
+        >
+          {column?.name}
+        </span>
         <TypeGlyph column={column} />
         {Icon ? (
           <Icon className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -205,6 +218,48 @@ function TypeGlyph({ column }: { readonly column: SheetColumn | undefined }) {
       {glyph}
     </span>
   ) : null
+}
+
+/**
+ * A cell of the totals row pinned under the rows: a column's total, the word "Total" in the first
+ * column without one, or nothing. It is not a cell of the sheet: selection and addresses pass it.
+ */
+export function TotalCell({
+  text,
+  label,
+  title,
+  fixed,
+  lastFixed,
+  scrolled,
+  style,
+}: {
+  readonly text: string
+  /** It names the row rather than totaling a column. */
+  readonly label: boolean
+  readonly title?: string
+  readonly fixed: boolean
+  readonly lastFixed: boolean
+  readonly scrolled: boolean
+  readonly style: CSSProperties
+}) {
+  return (
+    <div
+      role="gridcell"
+      title={title}
+      className={cn(
+        "flex shrink-0 items-center overflow-hidden border-r border-(--sheet-line) bg-(--sheet-header) px-2 font-semibold whitespace-nowrap tabular-nums",
+        fixed ? "sticky z-[1]" : "relative",
+        !label && "justify-end",
+        lastFixed &&
+          (scrolled
+            ? "shadow-[1px_0_0_var(--border),5px_0_8px_-5px_rgb(0_0_0/0.18)]"
+            : "shadow-[1px_0_0_var(--border)]")
+      )}
+      style={style}
+    >
+      <span className="min-w-0 overflow-hidden text-ellipsis">{text}</span>
+    </div>
+  )
 }
 
 export function CellContent({

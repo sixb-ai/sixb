@@ -3,7 +3,7 @@ import { ARTIFACT_LIMITS } from "./limits"
 /**
  * A sheet artifact is `workbook.json` and one CSV per sheet under `sheets/`. The CSV holds the
  * values; the workbook holds what CSV can't: sheet order, column types and formats, frozen rows
- * and columns, widths, and charts drawn from the sheets. Formulas belong in an `.xlsx` file.
+ * and columns, widths, descriptions and totals, and charts drawn from the sheets.
  */
 export const WORKBOOK_FILE = "workbook.json"
 
@@ -21,6 +21,10 @@ export type SheetColumnType = (typeof SHEET_COLUMN_TYPES)[number]
 /** Column types whose cells are numbers, so a chart can plot them and a range can sum them. */
 export const NUMERIC_COLUMN_TYPES: readonly SheetColumnType[] = ["number", "currency", "percent"]
 
+/** What a sheet's totals row shows under a column, over the rows the reader sees. */
+export const SHEET_TOTALS = ["sum", "average", "min", "max", "count"] as const
+export type SheetTotal = (typeof SHEET_TOTALS)[number]
+
 export const SHEET_CHART_TYPES = ["bar", "line", "area", "pie"] as const
 export type SheetChartType = (typeof SHEET_CHART_TYPES)[number]
 
@@ -30,6 +34,10 @@ export interface SheetColumnFormat {
   readonly currency?: string
   /** Digits after the decimal point, for numbers, currencies, and percents. */
   readonly decimals?: number
+  /** `1.2M` for `1,204,330`, for numbers and currencies. */
+  readonly compact?: boolean
+  /** A sign on positive values too, `+3.2%`, for numbers, currencies, and percents. */
+  readonly signed?: boolean
 }
 
 export interface WorkbookSheet {
@@ -42,6 +50,10 @@ export interface WorkbookSheet {
   readonly columns: Readonly<Record<string, SheetColumnFormat>>
   /** Widths in pixels by column name. */
   readonly widths: Readonly<Record<string, number>>
+  /** What a column means, shown on its header, by column name. */
+  readonly descriptions: Readonly<Record<string, string>>
+  /** A totals row pinned under the rows: what each named column totals to. */
+  readonly totals: Readonly<Record<string, SheetTotal>>
 }
 
 export interface WorkbookChart {
@@ -111,6 +123,7 @@ export function parseSheetDate(value: string): Date | undefined {
 class WorkbookError extends Error {}
 
 const SHEET_NAME_MAX = 60
+const DESCRIPTION_MAX = 300
 const CHART_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/
 const CONTROL = /[\u0000-\u001f\u007f]/
 
@@ -150,7 +163,15 @@ function readWorkbook(value: unknown): Workbook {
 
 function readSheet(value: unknown, index: number): WorkbookSheet {
   const at = `sheet ${index + 1}`
-  const input = record(value, at, ["name", "frozenRows", "frozenColumns", "columns", "widths"])
+  const input = record(value, at, [
+    "name",
+    "frozenRows",
+    "frozenColumns",
+    "columns",
+    "widths",
+    "descriptions",
+    "totals",
+  ])
   const name = typeof input.name === "string" ? input.name.trim() : ""
   if (
     !name ||
@@ -182,18 +203,52 @@ function readSheet(value: unknown, index: number): WorkbookSheet {
     }
     widths[column] = width
   }
+  const descriptions: Record<string, string> = {}
+  for (const [column, description] of Object.entries(
+    record(input.descriptions ?? {}, `${sheetAt} "descriptions"`, null)
+  )) {
+    if (
+      typeof description !== "string" ||
+      !description.trim() ||
+      description.length > DESCRIPTION_MAX
+    ) {
+      throw new WorkbookError(
+        `${sheetAt} describes column '${column}' with ${JSON.stringify(description)}; a description is text of at most ${DESCRIPTION_MAX} characters.`
+      )
+    }
+    descriptions[column] = description.trim()
+  }
+  const totals: Record<string, SheetTotal> = {}
+  for (const [column, total] of Object.entries(
+    record(input.totals ?? {}, `${sheetAt} "totals"`, null)
+  )) {
+    if (!(SHEET_TOTALS as readonly unknown[]).includes(total)) {
+      throw new WorkbookError(
+        `${sheetAt} totals column '${column}' with ${JSON.stringify(total)}; use one of ${SHEET_TOTALS.join(", ")}.`
+      )
+    }
+    const type = columns[column]?.type ?? "text"
+    if (total !== "count" && !NUMERIC_COLUMN_TYPES.includes(type)) {
+      throw new WorkbookError(
+        `${sheetAt} totals column '${column}' with "${String(total)}", but it is ${type}; only a number, currency, or percent column has a ${String(total)}. Use "count", or give it a numeric type in "columns".`
+      )
+    }
+    totals[column] = total as SheetTotal
+  }
   return {
     name,
     frozenRows: integer(input.frozenRows, 1, 0, 10, `${sheetAt} "frozenRows"`),
     frozenColumns: integer(input.frozenColumns, 0, 0, 5, `${sheetAt} "frozenColumns"`),
     columns,
     widths,
+    descriptions,
+    totals,
   }
 }
 
 function readColumnFormat(value: unknown, at: string): SheetColumnFormat {
   if (typeof value === "string") return { type: columnType(value, at) }
-  const input = record(value, at, ["type", "currency", "decimals"])
+  const input = record(value, at, ["type", "currency", "decimals", "compact", "signed"])
   const type = columnType(input.type, at)
   if (input.currency !== undefined) {
     if (type !== "currency")
@@ -207,9 +262,23 @@ function readColumnFormat(value: unknown, at: string): SheetColumnFormat {
       `${at} sets "decimals" but is not a number, currency, or percent column.`
     )
   }
+  for (const [key, types, named] of [
+    ["compact", ["number", "currency"], "number or currency"],
+    ["signed", ["number", "currency", "percent"], "number, currency, or percent"],
+  ] as const) {
+    if (input[key] === undefined) continue
+    if (typeof input[key] !== "boolean") {
+      throw new WorkbookError(`${at} "${key}" must be true or false.`)
+    }
+    if (!(types as readonly string[]).includes(type)) {
+      throw new WorkbookError(`${at} sets "${key}" but is not a ${named} column.`)
+    }
+  }
   return {
     type,
     ...(typeof input.currency === "string" ? { currency: input.currency } : {}),
+    ...(input.compact === true ? { compact: true } : {}),
+    ...(input.signed === true ? { signed: true } : {}),
     ...(input.decimals === undefined
       ? {}
       : { decimals: integer(input.decimals, 0, 0, 6, `${at} "decimals"`) }),
