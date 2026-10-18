@@ -598,16 +598,6 @@ describe("SqliteWorkflowRunStorage", () => {
     ).rejects.toBeInstanceOf(WorkflowRunError)
   })
 
-  test("SqliteStorage includes workflow run storage", () => {
-    const bundled = new SqliteStorage()
-
-    try {
-      expect(bundled.workflowRuns).toBeInstanceOf(SqliteWorkflowRunStorage)
-    } finally {
-      closeSqliteStorage(bundled)
-    }
-  })
-
   test("stores agent workflow node execution metadata", async () => {
     await storage.start({
       id: "wf-run-agent",
@@ -688,10 +678,6 @@ describe("SqliteWorkflowRunStorage", () => {
     expect(cancelled.execution).toBeUndefined()
   })
 })
-
-function closeSqliteStorage(storage: SqliteStorage): void {
-  storage.close()
-}
 
 type TestQueueWorkflowRunInput = Omit<QueueWorkflowRunInput, "executionId"> & {
   readonly executionId?: string

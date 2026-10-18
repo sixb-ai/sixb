@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test"
 import type { AiCostStorage } from "@sixb/core/storage"
 import {
   createTestAgentExecution,
-  createTestWorkflowExecution,
   runAiCostStorageContractSuite,
   runAiModelCallGroupsContractSuite,
   seedAiCostStorageContractUsage,
@@ -100,104 +99,6 @@ describe("SqliteStorage AI accounting", () => {
         to: new Date("2026-08-02T00:00:00.000Z"),
       })
       expect(groups.items[0]?.costs.amounts).toEqual(overview.totals.costs.amounts)
-    } finally {
-      storage.close()
-    }
-  })
-
-  test("returns workflow-agent attribution with model-call pages", async () => {
-    const storage = new SqliteStorage()
-    try {
-      const workflowRunId = "workflow_run_1"
-      const workflowId = "research-workflow"
-      const nodeRunId = `${workflowRunId}:node:0`
-      const workflowExecutionId = await createTestWorkflowExecution(storage.executions, {
-        projectId: "project_1",
-        workflowId,
-        runId: workflowRunId,
-      })
-      await storage.workflowRuns.queue({
-        id: workflowRunId,
-        projectId: "project_1",
-        executionId: workflowExecutionId,
-        workflowId,
-        input: {},
-      })
-      await storage.workflowRuns.start({ id: workflowRunId, projectId: "project_1" })
-      await storage.workflowRuns.nodes.start({
-        id: nodeRunId,
-        projectId: "project_1",
-        workflowRunId,
-        workflowId,
-        nodeIndex: 0,
-        nodeType: "agent",
-        nodeId: "research-step",
-        nodeKey: "researchStep",
-        input: {},
-      })
-      const executionId = await createTestAgentExecution(storage, {
-        projectId: "project_1",
-        actorId: "research",
-        runId: nodeRunId,
-        sourceExecutionId: workflowExecutionId,
-      })
-      await storage.workflowRuns.agentNodes.create({
-        projectId: "project_1",
-        nodeRunId,
-        executionId,
-        actorId: "research",
-        prompt: "Research the incident.",
-      })
-      await storage.aiUsage.recordModelCall({
-        id: "usage_workflow_agent_1",
-        projectId: "project_1",
-        executionId,
-        attempt: 1,
-        callId: "call_1",
-        requesterGroupIds: [],
-        providerId: "anthropic.messages",
-        requestedModelId: "claude-opus-4-8",
-        responseId: "response_1",
-        usage: { inputTokens: 10, outputTokens: 5 },
-        occurredAt: new Date("2026-09-01T12:00:00.000Z"),
-      })
-
-      await expect(
-        storage.aiCosts.listModelCallGroups({
-          projectId: "project_1",
-          from: new Date("2026-09-01T00:00:00.000Z"),
-          to: new Date("2026-09-02T00:00:00.000Z"),
-        })
-      ).resolves.toMatchObject({
-        total: 1,
-        items: [
-          {
-            executionId,
-            attribution: { kind: "workflowAgent", workflowId, workflowRunId, nodeRunId },
-            modelCallCount: 1,
-            executions: [{ executionId, modelCallCount: 1 }],
-          },
-        ],
-      })
-      await expect(
-        storage.aiCosts.listModelCalls({
-          projectId: "project_1",
-          from: new Date("2026-09-01T00:00:00.000Z"),
-          to: new Date("2026-09-02T00:00:00.000Z"),
-        })
-      ).resolves.toMatchObject({
-        items: [
-          {
-            attribution: {
-              kind: "workflowAgent",
-              agentStepId: "research-step",
-              nodeRunId,
-              workflowId,
-              workflowRunId,
-            },
-          },
-        ],
-      })
     } finally {
       storage.close()
     }

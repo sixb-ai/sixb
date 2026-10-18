@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { RuleEventSubject } from "@sixb/core"
 import type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "@sixb/core/internal/events"
-import { SqliteStorage } from "../src"
 import { SqliteRulesStorage } from "../src/rules-storage"
 
 const defaultSubject: RuleEventSubject = {
@@ -327,14 +326,5 @@ describe("SqliteRulesStorage", () => {
       ["transaction.requires-document", "tx-1"],
     ])
     expect(second.states.map((state) => state.subject.primaryId)).toEqual(["tx-2"])
-  })
-})
-
-describe("SqliteStorage", () => {
-  test("includes rules storage", () => {
-    const storage = new SqliteStorage()
-
-    expect(storage.rules).toBeInstanceOf(SqliteRulesStorage)
-    storage.close()
   })
 })

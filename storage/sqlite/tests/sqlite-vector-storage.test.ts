@@ -34,6 +34,7 @@ import { assertVectorBatchInvalidation } from "../../tests/vector-invalidation-c
 import { assertVectorBatchPublication } from "../../tests/vector-write-batch-contract"
 import { SqliteStorage } from "../src"
 import { createSqliteMigrator, sqliteStorageMigrations, sqliteStoragePath } from "../src/migrations"
+import { freshStorageDirectory } from "./fixtures/fresh-storage-directory"
 
 const model: EmbeddingModel = {
   providerId: "test",
@@ -80,11 +81,11 @@ async function runtime(storage: SqliteStorage, embedding = model, id = projectId
   return createTestSixb(host)
 }
 async function fixture(migrate = true) {
-  const path = await mkdtemp(join(tmpdir(), "sixb-sqlite-vectors-"))
+  const path = migrate
+    ? await freshStorageDirectory()
+    : await mkdtemp(join(tmpdir(), "sixb-sqlite-vectors-"))
   const storage = new SqliteStorage({ path })
-  if (migrate) {
-    await migrateStorage(storage)
-  } else {
+  if (!migrate) {
     await createSqliteMigrator({
       path: sqliteStoragePath(path),
       migrations: defineMigrations({
@@ -213,7 +214,9 @@ describe("SQLite vector storage", () => {
         } finally {
           release.resolve({ vectors: [[0, 1, 0]] })
         }
-        await expect(pending).rejects.toBeInstanceOf(MaterializationConflictError)
+        expect(await pending.catch((error: unknown) => error)).toBeInstanceOf(
+          MaterializationConflictError
+        )
       }
     } finally {
       await other.close()
@@ -279,7 +282,7 @@ describe("SQLite vector storage", () => {
       ).rejects.toThrow("session")
       await f.storage.transaction(async (tx) => {
         expect(await tx.ontology.vectors?.list({ projectId, ref })).toEqual([state])
-        await expect(f.states()).rejects.toThrow("Root storage")
+        expect(await f.states().catch((error: Error) => error.message)).toContain("Root storage")
       })
     } finally {
       await f.close()

@@ -1,15 +1,13 @@
 import { Database } from "bun:sqlite"
 import assert from "node:assert/strict"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { migrateStorage } from "@sixb/core"
+import { rm } from "node:fs/promises"
 import { verifyVectorSearch } from "../../../../packages/core/tests/fixtures/vector-search"
 import { SqliteStorage } from "../../src"
 import { sqliteStoragePath } from "../../src/migrations"
 import { compileObjectQuery, DEFAULT_OBJECT_QUERY_SOURCE } from "../../src/objects/query-compiler"
 import { SqliteObjectReader } from "../../src/objects/reader"
 import { ensureSqliteVectorSearch } from "../../src/objects/vector-extension"
+import { freshStorageDirectory } from "./fresh-storage-directory"
 
 if (process.platform === "darwin") {
   const path = process.env.SIXB_TEST_SQLITE_LIBRARY
@@ -17,9 +15,8 @@ if (process.platform === "darwin") {
     throw new Error("Set SIXB_TEST_SQLITE_LIBRARY to an extension-capable SQLite library on macOS.")
   Database.setCustomSQLite(path)
 }
-const path = await mkdtemp(join(tmpdir(), "sixb-vector-search-"))
+const path = await freshStorageDirectory()
 const storage = new SqliteStorage({ path })
-await migrateStorage(storage)
 const db = new Database(sqliteStoragePath(path))
 try {
   await verifyVectorSearch(storage, async () => {

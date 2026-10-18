@@ -1,9 +1,6 @@
 import { Database } from "bun:sqlite"
 import { expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { migrateStorage } from "@sixb/core"
+import { rm } from "node:fs/promises"
 import type { MaterializationPlanHeader, MaterializationWorkRecord } from "@sixb/core/storage"
 import {
   runMaterializationFailureContractSuite,
@@ -12,6 +9,7 @@ import {
 } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 import { sqliteStoragePath } from "../src/migrations"
+import { freshStorageDirectory } from "./fixtures/fresh-storage-directory"
 
 runOntologyStorageContractSuite("SQLite ontology storage contract", {
   createStorage: () => new SqliteStorage(),
@@ -88,13 +86,12 @@ interface FailureStorage extends SqliteStorage {
 
 runMaterializationFailureContractSuite("SQLite materialization failure contract", {
   async createStorage(): Promise<FailureStorage> {
-    const testDirectory = await mkdtemp(join(tmpdir(), "sixb-sqlite-ontology-failure-"))
+    const testDirectory = await freshStorageDirectory()
     const storage = new SqliteStorage({ path: testDirectory }) as FailureStorage
     Object.defineProperties(storage, {
       testDirectory: { value: testDirectory },
       testDatabasePath: { value: sqliteStoragePath(testDirectory) },
     })
-    await migrateStorage(storage)
     return storage
   },
   cleanup: async (storage) => {

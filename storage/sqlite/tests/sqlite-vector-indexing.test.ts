@@ -1,7 +1,5 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { rm } from "node:fs/promises"
 import {
   defineObjectType,
   type EmbeddingModel,
@@ -9,7 +7,6 @@ import {
   InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
-  migrateStorage,
   prop,
   SixbHost,
 } from "@sixb/core"
@@ -17,9 +14,10 @@ import { getVectorIndexingRuntime } from "@sixb/core/internal/runtime"
 import { createTestSixb, type TestExecutionHost } from "@sixb/core/testing"
 import { assertVectorBatchTransitions, seedVectorBatch } from "../../tests/vector-batching-contract"
 import { SqliteStorage } from "../src"
+import { freshStorageDirectory } from "./fixtures/fresh-storage-directory"
 
 test("durable indexing intent and ready results survive SQLite reopening", async () => {
-  const path = await mkdtemp(join(tmpdir(), "sixb-indexing-"))
+  const path = await freshStorageDirectory()
   let storage = new SqliteStorage({ path })
   let calls = 0
   const model: EmbeddingModel = {
@@ -53,7 +51,6 @@ test("durable indexing intent and ready results survive SQLite reopening", async
     })
   let host: (TestExecutionHost & { closeBroker(): Promise<void> }) | undefined
   try {
-    await migrateStorage(storage)
     host = hostFor()
     await host.closeBroker()
     await createTestSixb(host)
@@ -143,10 +140,9 @@ test("durable indexing intent and ready results survive SQLite reopening", async
 })
 
 test("SQLite durable batches survive reopening and transition atomically", async () => {
-  const path = await mkdtemp(join(tmpdir(), "sixb-batch-"))
+  const path = await freshStorageDirectory()
   let storage = new SqliteStorage({ path })
   try {
-    await migrateStorage(storage)
     await seedVectorBatch(storage)
     await seedVectorBatch(storage, "isolated-project")
     await storage.close()
