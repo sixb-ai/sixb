@@ -35,6 +35,11 @@ export interface BrokerContractSuiteOptions<TBroker extends Broker = Broker> {
    * Poll interval while waiting for asynchronous subscription delivery. Defaults to 10ms.
    */
   readonly subscriptionPollIntervalMs?: number
+  /**
+   * Lets `ms` milliseconds pass for the provider. Defaults to a real sleep. An in-process
+   * provider can advance fake timers here instead, so the waits above cost no wall time.
+   */
+  readonly sleep?: (ms: number) => Promise<void>
 }
 
 const eventsStream: BrokerStreamDefinition = { id: "__events" }
@@ -57,6 +62,20 @@ export function runBrokerContractSuite<TBroker extends Broker>(
   const subscriptionSetupMs = options.subscriptionSetupMs ?? 0
   const subscriptionDeliveryTimeoutMs = options.subscriptionDeliveryTimeoutMs ?? 200
   const subscriptionPollIntervalMs = options.subscriptionPollIntervalMs ?? 10
+  const sleep = options.sleep ?? ((ms: number) => Bun.sleep(ms))
+  const waitUntil = async (
+    predicate: () => boolean,
+    params: { timeoutMs: number; intervalMs: number; message: string }
+  ): Promise<void> => {
+    const deadline = Date.now() + params.timeoutMs
+    while (Date.now() < deadline) {
+      if (predicate()) {
+        return
+      }
+      await sleep(params.intervalMs)
+    }
+    throw new Error(`${params.message} within ${params.timeoutMs}ms`)
+  }
 
   const withBroker = async (body: (broker: TBroker) => Promise<void>): Promise<void> => {
     const broker = await options.createBroker()
@@ -476,7 +495,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
               message: "Async broker subscription did not progress",
             })
           try {
-            if (subscriptionSetupMs > 0) await Bun.sleep(subscriptionSetupMs)
+            if (subscriptionSetupMs > 0) await sleep(subscriptionSetupMs)
             await broker.append({
               projectId: "project-a",
               streamId: eventsStream.id,
@@ -489,7 +508,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
               records: [{ payload: "two" }],
             })
             await wait(() => observer.length === 2)
-            await Bun.sleep(30)
+            await sleep(30)
             expect(received).toEqual(["one"])
             release()
             await wait(() => received.length === 2)
@@ -523,7 +542,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
             }
           )
           try {
-            if (subscriptionSetupMs > 0) await Bun.sleep(subscriptionSetupMs)
+            if (subscriptionSetupMs > 0) await sleep(subscriptionSetupMs)
             await broker.append({
               projectId: "project-a",
               streamId: eventsStream.id,
@@ -566,7 +585,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
             }
           )
           if (subscriptionSetupMs > 0) {
-            await Bun.sleep(subscriptionSetupMs)
+            await sleep(subscriptionSetupMs)
           }
 
           await appendRecords(broker, {
@@ -604,7 +623,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
             }
           )
           if (subscriptionSetupMs > 0) {
-            await Bun.sleep(subscriptionSetupMs)
+            await sleep(subscriptionSetupMs)
           }
 
           await appendRecords(broker, {
@@ -669,7 +688,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
             }
           )
           if (subscriptionSetupMs > 0) {
-            await Bun.sleep(subscriptionSetupMs)
+            await sleep(subscriptionSetupMs)
           }
 
           await appendRecords(broker, {
@@ -690,7 +709,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
             stream: eventsStream,
             records: [{ payload: "two" }],
           })
-          await Bun.sleep(Math.min(250, subscriptionDeliveryTimeoutMs))
+          await sleep(Math.min(250, subscriptionDeliveryTimeoutMs))
 
           expect(received).toEqual(["one"])
         })
@@ -710,7 +729,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
             }
           )
           if (subscriptionSetupMs > 0) {
-            await Bun.sleep(subscriptionSetupMs)
+            await sleep(subscriptionSetupMs)
           }
 
           await expect(
@@ -827,7 +846,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
             records: [{ payload: "old" }],
           })
 
-          await Bun.sleep(maxAgeWaitMs)
+          await sleep(maxAgeWaitMs)
 
           await appendRecords(broker, {
             projectId: "project-a",
@@ -912,18 +931,4 @@ async function subscribeRecords(
     },
     handler
   )
-}
-
-async function waitUntil(
-  predicate: () => boolean,
-  options: { timeoutMs: number; intervalMs: number; message: string }
-): Promise<void> {
-  const deadline = Date.now() + options.timeoutMs
-  while (Date.now() < deadline) {
-    if (predicate()) {
-      return
-    }
-    await Bun.sleep(options.intervalMs)
-  }
-  throw new Error(`${options.message} within ${options.timeoutMs}ms`)
 }

@@ -1035,7 +1035,7 @@ export function runAiLimitStorageContractSuite<TStorage extends AiLimitStorageCo
   })
 }
 
-export async function seedAiLimitStorageContractExecution(
+async function seedAiLimitStorageContractExecution(
   auth: AuthStorage,
   executions: ExecutionStorage
 ): Promise<void> {

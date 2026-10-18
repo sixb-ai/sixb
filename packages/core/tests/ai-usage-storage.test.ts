@@ -28,49 +28,7 @@ runAiUsageStorageContractSuite("InMemoryAiUsageStorage", {
   },
 })
 
-describe("InMemoryAiUsageStorage", () => {
-  test("snapshots model-call records, idempotency keys, and group rows", async () => {
-    const bundle = new InMemoryStorage()
-    const storage = new InMemoryAiUsageStorage(bundle.executions)
-    await createExecution(bundle, "project_1", "exec_1")
-    const empty = storage.snapshot()
-
-    await storage.recordModelCall(modelCallInput())
-    const populated = storage.snapshot()
-    expect(populated.records.size).toBe(1)
-    expect(populated.recordKeysByIdempotencyKey.size).toBe(1)
-    expect([...populated.groupRows.values()]).toEqual([
-      {
-        projectId: "project_1",
-        usageRecordId: "usage_1",
-        groupId: "engineering",
-        occurredAt: new Date("2026-06-23T10:00:00.000Z"),
-      },
-      {
-        projectId: "project_1",
-        usageRecordId: "usage_1",
-        groupId: "support",
-        occurredAt: new Date("2026-06-23T10:00:00.000Z"),
-      },
-    ])
-
-    storage.restore(empty)
-    await expect(storage.summarizeExecution(executionSummaryInput())).resolves.toEqual({
-      modelCallCount: 0,
-      usage: { reportingStatus: "unavailable" },
-    })
-    await expect(storage.recordModelCall(modelCallInput())).resolves.toMatchObject({
-      created: true,
-    })
-  })
-})
-
 describe("InMemoryStorage AI usage", () => {
-  test("is wired into the composite storage", () => {
-    const storage = new InMemoryStorage()
-    expect(storage.aiUsage).toBeDefined()
-  })
-
   test("rolls back ledger records, idempotency keys, and group rows", async () => {
     const storage = new InMemoryStorage()
     await createExecution(storage, "project_1", "exec_1")

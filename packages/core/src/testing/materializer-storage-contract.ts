@@ -1443,8 +1443,10 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
 
         let retries = 0
         const recording = observeActionRunRecords(storage)
-        const second = contractMaterializer(recording.storage, {}, () => {
-          retries += 1
+        const second = contractMaterializer(recording.storage, {
+          onSerializationRetry: () => {
+            retries += 1
+          },
         })
           .withScope(await scopeOf(secondRun.executionId))
           .edits.commit(commitOf(secondRun, "second"))
@@ -1618,6 +1620,7 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
     let failNextCommit = true
     let stagedIdentities = 0
     let plannedAt: string | undefined
+    let now = new Date("2026-03-01T00:00:00.000Z")
     const observed = observePlanning(
       storage,
       async (planned, commit) => {
@@ -1631,7 +1634,7 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         throw new Error("commit lost")
       }
     )
-    const materializer = contractMaterializer(observed)
+    const materializer = contractMaterializer(observed, { clock: () => now })
     try {
       const execution = await claimDevices(storage, 1)
       const values = [sourceEntry("a", "A"), sourceEntry("b", "B", "a")]
@@ -1640,7 +1643,7 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
       )
       expect(stagedIdentities).toBe(3)
       // The redelivery's clock has moved on; its commit keeps the time its events were planned at.
-      await new Promise((resolve) => setTimeout(resolve, 5))
+      now = new Date("2026-03-01T00:00:01.000Z")
       const result = await publishDevices(materializer, storage, 1, values, execution)
       expect(stagedIdentities).toBe(3)
       expect(result.committedAt).toBe(plannedAt!)
@@ -2027,17 +2030,27 @@ const CONTRACT_PROJECT = "materializer-storage-contract"
 
 function contractMaterializer(
   storage: Storage,
-  batching: { readonly transactionReplanRows?: number } = {},
-  onSerializationRetry?: () => void
+  options: {
+    readonly transactionReplanRows?: number
+    readonly onSerializationRetry?: () => void
+    readonly clock?: () => Date
+  } = {}
 ): OntologyMaterializer {
+  const { transactionReplanRows, onSerializationRetry, clock } = options
   return createOntologyMaterializer({
     projectId: CONTRACT_PROJECT,
     ontology,
     projections,
     storage,
     dependencies: {
-      batching: { sourceStageRows: 1, statePageRows: 1, planChunkRows: 1, ...batching },
+      batching: {
+        sourceStageRows: 1,
+        statePageRows: 1,
+        planChunkRows: 1,
+        ...(transactionReplanRows === undefined ? {} : { transactionReplanRows }),
+      },
       ...(onSerializationRetry === undefined ? {} : { onSerializationRetry }),
+      ...(clock === undefined ? {} : { clock }),
     },
   })
 }
@@ -2107,7 +2120,6 @@ function observePlanning(
   return observe(storage, false)
 }
 
-/** The same storage, whose transactions wait before they finalize until `release` is called. */
 /** Resolves `reached` when a transaction of `storage` first records an Action run. */
 function observeActionRunRecords(storage: ContractStorage) {
   const reached = Promise.withResolvers<void>()
@@ -2143,6 +2155,7 @@ function observeActionRunRecords(storage: ContractStorage) {
   return { storage: observed, reached: reached.promise }
 }
 
+/** The same storage, whose transactions wait before they finalize until `release` is called. */
 function pauseBeforeFinalize(storage: ContractStorage) {
   let reach!: () => void
   const reached = new Promise<void>((resolve) => {

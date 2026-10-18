@@ -129,23 +129,20 @@ export function runWebhookRunStorageContractSuite<
         await expect(
           storage.webhookRuns.restart({ projectId, id: started.id })
         ).rejects.toMatchObject({ code: "invalid_transition" })
-      })
-    })
 
-    test("does not reopen a terminal client rejection", async () => {
-      await withStorage(async (storage) => {
-        const run = await startTestWebhookRun(storage, runInput("delivery-rejected"))
+        // A terminal client rejection is not reopened either.
+        const rejected = await startTestWebhookRun(storage, runInput("delivery-rejected"))
         await storage.webhookRuns.finish({
           projectId,
-          id: run.id,
+          id: rejected.id,
           status: "failed",
           finishedAt,
           responseStatus: 422,
           error: rejectedFailure,
         })
-        await expect(storage.webhookRuns.restart({ projectId, id: run.id })).rejects.toMatchObject({
-          code: "invalid_transition",
-        })
+        await expect(
+          storage.webhookRuns.restart({ projectId, id: rejected.id })
+        ).rejects.toMatchObject({ code: "invalid_transition" })
       })
     })
 

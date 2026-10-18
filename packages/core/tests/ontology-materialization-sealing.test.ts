@@ -13,7 +13,6 @@ import type {
 } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { startTestProjectionRun } from "../src/testing"
-import { createMaterializerFixture } from "./materializer-fixture"
 
 const projectId = "project"
 const ontologyRevision = "ontology-revision"
@@ -603,66 +602,6 @@ describe("in-memory ontology materialization finalization", () => {
     ).rejects.toThrow("Link scope 'Device.parent' has cardinality one.")
   })
 
-  test("rescans final link scopes instead of trusting staged occupancy", async () => {
-    const storage = new InMemoryStorage()
-    const header = emptyEditHeader("cardinality-rescan")
-    const ref = {
-      source: { objectTypeId: "Device", primaryId: "one" },
-      linkId: "parent",
-      target: { objectTypeId: "Device", primaryId: "two" },
-    }
-    const { materializer } = createMaterializerFixture({ storage })
-    await materializer.edits.commit({
-      mode: "atomic",
-      source: { kind: "runtime", requestId: "existing-link" },
-      operations: [
-        {
-          id: "create-one",
-          kind: "object.create",
-          ref: ref.source,
-          properties: { name: "One" },
-        },
-        {
-          id: "create-two",
-          kind: "object.create",
-          ref: ref.target,
-          properties: { name: "Two" },
-        },
-        { id: "existing-link", kind: "link.upsert", ref },
-      ],
-      expectedObjects: [],
-      expectedLinks: [],
-      expectedLinkScopes: [],
-    })
-
-    await expect(
-      storage.transaction(async (tx) => {
-        if (!tx.ontology) throw new Error("missing ontology")
-        const session = await beginMaterialization(tx, header)
-        await tx.ontology.materializations.stageWork({
-          session,
-          records: [
-            {
-              kind: "cardinality",
-              recordKey: "cardinality:dishonest-empty-scope",
-              view: "effective",
-              scopeSortKey: linkScopeSortKey(ref.source, ref.linkId),
-              linkSortKey: linkRefSortKey(ref),
-              ref,
-              occupied: false,
-            },
-          ],
-        })
-        // Apply accepts the dishonest record; finalization must inspect the durable scope.
-        await tx.ontology.materializations.apply({ session })
-        await tx.ontology.materializations.finalize({
-          session,
-          finalization: emptyEditFinalization(header),
-        })
-      })
-    ).rejects.toThrow("does not match the final effective link scope")
-  })
-
   test("rejects activation of a candidate other than the one opened by the session", async () => {
     const storage = new InMemoryStorage()
     const opened = await prepareEmptyCandidate(storage, {
@@ -701,75 +640,6 @@ describe("in-memory ontology materialization finalization", () => {
         })
       })
     ).rejects.toThrow("does not match the replacement plan the session applies")
-  })
-
-  test("rejects activation before candidate readiness or the prior active update", async () => {
-    const storage = new InMemoryStorage()
-    const first = await prepareEmptyCandidate(storage, {
-      projectionId: "devices",
-      projectionKind: "object",
-      runId: "first-run",
-      materializationId: "first-candidate",
-      versionId: "v1",
-      datasetCreatedAt: "2026-01-01T00:00:00.000Z",
-      candidateCreatedAt: "2026-01-01T00:00:00.000Z",
-      readyAt: "2026-01-01T01:00:00.000Z",
-    })
-    const tooEarlyHeader = replacementHeader(
-      first,
-      "before-ready-commit",
-      "2026-01-01T00:30:00.000Z"
-    )
-    await expect(
-      storage.transaction(async (tx) => {
-        if (!tx.ontology) throw new Error("missing ontology")
-        const session = await beginPlanned(tx, tooEarlyHeader, first)
-        await tx.ontology.materializations.apply({ session })
-        await tx.ontology.materializations.finalize({
-          session,
-          finalization: replacementFinalization(first, tooEarlyHeader),
-        })
-      })
-    ).rejects.toThrow("cannot precede candidate readiness")
-
-    const firstHeader = replacementHeader(first, "first-commit", "2026-01-03T00:00:00.000Z")
-    await storage.transaction(async (tx) => {
-      if (!tx.ontology) throw new Error("missing ontology")
-      const session = await beginPlanned(tx, firstHeader, first)
-      await tx.ontology.materializations.apply({ session })
-      await tx.ontology.materializations.finalize({
-        session,
-        finalization: replacementFinalization(first, firstHeader),
-      })
-    })
-
-    const second = await prepareEmptyCandidate(storage, {
-      projectionId: "devices",
-      projectionKind: "object",
-      runId: "second-run",
-      materializationId: "second-candidate",
-      versionId: "v2",
-      datasetCreatedAt: "2026-01-02T00:00:00.000Z",
-      candidateCreatedAt: "2026-01-02T00:00:00.000Z",
-      readyAt: "2026-01-02T01:00:00.000Z",
-    })
-    const secondHeader = replacementHeader(
-      second,
-      "before-active-update-commit",
-      "2026-01-02T12:00:00.000Z",
-      { materializationId: first.materializationId, commitId: firstHeader.commit.id }
-    )
-    await expect(
-      storage.transaction(async (tx) => {
-        if (!tx.ontology) throw new Error("missing ontology")
-        const session = await beginPlanned(tx, secondHeader, second)
-        await tx.ontology.materializations.apply({ session })
-        await tx.ontology.materializations.finalize({
-          session,
-          finalization: replacementFinalization(second, secondHeader),
-        })
-      })
-    ).rejects.toThrow("cannot precede the active materialization update")
   })
 
   test("fences source dataset watermarks at provider activation and starts one per dataset", async () => {

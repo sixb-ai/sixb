@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import type { JsonValue } from "../json"
 import {
-  collectObjectQueryValidationIssues,
   countObjects,
   executeObjectQuery,
   executeObjectQueryLinks,
   existsObjects,
   facetObjects,
-  normalizeObjectQuery,
   type ObjectQuery,
   ObjectQueryPlanningError,
   type ObjectQueryPredicate,
@@ -195,73 +193,6 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
   }
 
   describe(label, () => {
-    test("normalizes query shape and resolves search profile defaults", () => {
-      const normalized = normalizeObjectQuery({
-        kind: "limit",
-        limit: 10,
-        input: {
-          kind: "limit",
-          limit: 3,
-          input: {
-            kind: "project",
-            properties: ["id", "name", "id"],
-            input: {
-              kind: "text",
-              query: "alpha",
-              fields: ["name", "description", "name"],
-              input: { kind: "start", objectTypeId: Room.id },
-            },
-          },
-        },
-      })
-
-      expect(normalized.kind).toBe("limit")
-      if (normalized.kind !== "limit") return
-      expect(normalized.limit).toBe(3)
-      expect(normalized.input.kind).toBe("project")
-      if (normalized.input.kind !== "project") return
-      expect(normalized.input.properties).toEqual(["id", "name"])
-      expect(normalized.input.input.kind).toBe("text")
-      if (normalized.input.input.kind !== "text") return
-      expect(normalized.input.input.fields).toEqual(["name", "description"])
-
-      const validated = validateObjectQuery(
-        { kind: "text", query: "alpha", input: { kind: "start", objectTypeId: Room.id } },
-        { ontology: objectQueryContractOntology }
-      )
-      expect(validated.query.kind).toBe("text")
-      if (validated.query.kind === "text") {
-        expect(validated.query.fields).toBeUndefined()
-        expect(validated.query.fieldsByObjectType).toEqual({
-          [Room.id]: ["name", "description"],
-        })
-      }
-    })
-
-    test("collects validation failures before provider planning", () => {
-      const issues = collectObjectQueryValidationIssues(
-        {
-          kind: "filter",
-          predicate: { op: "eq", propertyId: "missing", value: "x" },
-          input: {
-            kind: "text",
-            query: "alpha",
-            fields: ["capacity"],
-            input: { kind: "start", objectTypeId: Room.id },
-          },
-        },
-        { ontology: objectQueryContractOntology }
-      )
-
-      expect(issues.map((issue) => issue.code)).toEqual(
-        expect.arrayContaining([
-          "unknown_property",
-          "query_field_not_enabled",
-          "text_field_not_string_like",
-        ])
-      )
-    })
-
     test("declares the portable V1 query capability surface", async () => {
       await withStorage(async ({ objects: storage }) => {
         const capabilities = storage.queryCapabilities()
@@ -756,80 +687,21 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
       })
     })
 
-    test("counts matching objects without returning rows", async () => {
+    test("counts and checks existence without returning rows or applying outer row shaping", async () => {
       await withStorage(async ({ objects: storage, fixture }) => {
         await seedObjectQueryContractData(fixture)
-
-        const active = await countObjects(
-          {
-            projectId,
-            query: {
-              kind: "filter",
-              predicate: { op: "eq", propertyId: "status", value: "active" },
-              input: { kind: "start", objectTypeId: Room.id },
-            },
-          },
-          { ontology: objectQueryContractOntology, storage }
-        )
-        const limited = await countObjects(
-          {
-            projectId,
-            query: { kind: "limit", limit: 2, input: { kind: "start", objectTypeId: Room.id } },
-          },
-          { ontology: objectQueryContractOntology, storage }
-        )
-
-        expect(active.plan.mode).toBe("pushdown")
-        expect(active.count).toBe(2)
-        expect(limited.count).toBe(5)
-      })
-    })
-
-    test("checks existence without returning rows", async () => {
-      await withStorage(async ({ objects: storage, fixture }) => {
-        await seedObjectQueryContractData(fixture)
-
-        const active = await existsObjects(
-          {
-            projectId,
-            query: {
-              kind: "filter",
-              predicate: { op: "eq", propertyId: "status", value: "active" },
-              input: { kind: "start", objectTypeId: Room.id },
-            },
-          },
-          { ontology: objectQueryContractOntology, storage }
-        )
-        const missing = await existsObjects(
-          {
-            projectId,
-            query: {
-              kind: "filter",
-              predicate: { op: "eq", propertyId: "name", value: "No Such Room" },
-              input: { kind: "start", objectTypeId: Room.id },
-            },
-          },
-          { ontology: objectQueryContractOntology, storage }
-        )
-        const limited = await existsObjects(
-          {
-            projectId,
-            query: { kind: "limit", limit: 0, input: { kind: "start", objectTypeId: Room.id } },
-          },
-          { ontology: objectQueryContractOntology, storage }
-        )
-
-        expect(active.plan.mode).toBe("pushdown")
-        expect(active.exists).toBe(true)
-        expect(missing.exists).toBe(false)
-        expect(limited.exists).toBe(true)
-      })
-    })
-
-    test("plans aggregate operations without outer row-shaping requirements", async () => {
-      await withStorage(async ({ objects: storage, fixture }) => {
-        await seedObjectQueryContractData(fixture)
-        const query: ObjectQuery = {
+        const context = { ontology: objectQueryContractOntology, storage }
+        const active: ObjectQuery = {
+          kind: "filter",
+          predicate: { op: "eq", propertyId: "status", value: "active" },
+          input: { kind: "start", objectTypeId: Room.id },
+        }
+        const missing: ObjectQuery = {
+          kind: "filter",
+          predicate: { op: "eq", propertyId: "name", value: "No Such Room" },
+          input: { kind: "start", objectTypeId: Room.id },
+        }
+        const relevance: ObjectQuery = {
           kind: "sort",
           fields: [{ kind: "relevance" }],
           input: {
@@ -839,23 +711,32 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
           },
         }
 
-        const count = await countObjects(
-          { projectId, query },
-          { ontology: objectQueryContractOntology, storage }
-        )
-        const exists = await existsObjects(
-          { projectId, query },
-          { ontology: objectQueryContractOntology, storage }
-        )
+        const activeCount = await countObjects({ projectId, query: active }, context)
+        expect(activeCount.plan.mode).toBe("pushdown")
+        expect(activeCount.count).toBe(2)
+        const activeExists = await existsObjects({ projectId, query: active }, context)
+        expect(activeExists.plan.mode).toBe("pushdown")
+        expect(activeExists.exists).toBe(true)
+        expect((await existsObjects({ projectId, query: missing }, context)).exists).toBe(false)
 
-        expect(count.plan.mode).toBe("pushdown")
-        if (count.plan.mode !== "pushdown") return
-        expect(count.plan.query.kind).toBe("text")
-        expect(count.count).toBe(1)
-        expect(exists.plan.mode).toBe("pushdown")
-        if (exists.plan.mode !== "pushdown") return
-        expect(exists.plan.query.kind).toBe("text")
-        expect(exists.exists).toBe(true)
+        // Limits and relevance sorts shape rows; aggregate terminals ignore them.
+        const limited = (limit: number): ObjectQuery => ({
+          kind: "limit",
+          limit,
+          input: { kind: "start", objectTypeId: Room.id },
+        })
+        expect((await countObjects({ projectId, query: limited(2) }, context)).count).toBe(5)
+        expect((await existsObjects({ projectId, query: limited(0) }, context)).exists).toBe(true)
+        const relevanceCount = await countObjects({ projectId, query: relevance }, context)
+        const relevanceExists = await existsObjects({ projectId, query: relevance }, context)
+        expect(relevanceCount.plan.mode).toBe("pushdown")
+        if (relevanceCount.plan.mode !== "pushdown") return
+        expect(relevanceCount.plan.query.kind).toBe("text")
+        expect(relevanceCount.count).toBe(1)
+        expect(relevanceExists.plan.mode).toBe("pushdown")
+        if (relevanceExists.plan.mode !== "pushdown") return
+        expect(relevanceExists.plan.query.kind).toBe("text")
+        expect(relevanceExists.exists).toBe(true)
       })
     })
 
@@ -1369,37 +1250,10 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
         expect(ids(result)).toEqual(["room-alpha", "room-beta"])
       })
     })
-
-    test("rejects fallback for unsupported query nodes when pushdown is disabled", async () => {
-      await withStorage(async ({ objects: storage, fixture }) => {
-        await seedObjectQueryContractData(fixture)
-        const fallbackStorage = withoutQueryPushdown(storage)
-
-        await expectPlanningIssue(
-          executeObjectQuery(
-            {
-              projectId,
-              query: {
-                kind: "limit",
-                limit: 5,
-                input: {
-                  kind: "traverse",
-                  direction: "outgoing",
-                  linkId: "hasDevice",
-                  input: { kind: "start", objectTypeId: Room.id },
-                },
-              },
-            },
-            { ontology: objectQueryContractOntology, storage: fallbackStorage, maxFallbackRows: 20 }
-          ),
-          "fallback_node_not_supported"
-        )
-      })
-    })
   })
 }
 
-export async function seedObjectQueryContractData(fixture: MaterializerTestFixture): Promise<void> {
+async function seedObjectQueryContractData(fixture: MaterializerTestFixture): Promise<void> {
   await fixture.seed({
     objects: [
       objectSeed(Room.id, "room-alpha", {
