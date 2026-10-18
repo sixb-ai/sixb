@@ -11,7 +11,7 @@ import {
   type Storage,
 } from "@sixb/core"
 import { ARTIFACT_KINDS, ARTIFACT_THEME_FILE, parseArtifactTheme } from "@sixb/core/artifacts"
-import { SLIDES_ENTRY } from "@sixb/core/internal/artifacts/frames"
+import { HTML_ENTRY } from "@sixb/core/internal/artifacts/frames"
 import {
   ARTIFACT_LIMITS,
   artifactVersionWarnings,
@@ -279,9 +279,8 @@ async function publish(
   }
   // A published deck is laid out in the sandbox's browser, so the Agent sees what the reader
   // will, and fixes it in its next version.
-  const deck =
-    kind === "slides" ? sources.find((source) => source.path === SLIDES_ENTRY) : undefined
-  const deckEntry = contents.find((file) => file.path === SLIDES_ENTRY)
+  const deck = kind === "slides" ? sources.find((source) => source.path === HTML_ENTRY) : undefined
+  const deckEntry = contents.find((file) => file.path === HTML_ENTRY)
   const themeFile = contents.find((file) => file.path === ARTIFACT_THEME_FILE)
   // Publishing has read it already: a version with a theme.json it refused is not here.
   const theme = themeFile ? parseArtifactTheme(new TextDecoder().decode(themeFile.bytes)) : null

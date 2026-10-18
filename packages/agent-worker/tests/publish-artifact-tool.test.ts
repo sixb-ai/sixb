@@ -393,8 +393,8 @@ describe("publish_artifact", () => {
 
   test("refuses input outside its schema", () => {
     const { create, version } = tools()
-    expect(() => create.parseInput({ path: "a", kind: "page", title: "A" })).toThrow(
-      "kind must be one of document, sheet, slides, file"
+    expect(() => create.parseInput({ path: "a", kind: "canvas", title: "A" })).toThrow(
+      "kind must be one of document, sheet, slides, page, file"
     )
     expect(() =>
       create.parseInput({ path: "a", kind: "file", title: "A", id: "art_0000000000" })

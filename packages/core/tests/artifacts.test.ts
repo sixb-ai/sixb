@@ -227,12 +227,12 @@ describe("publishing any version", () => {
     const { as, put } = setup()
     await expectRequestError(
       as("alice").artifacts.create({
-        kind: "page" as never,
+        kind: "canvas" as never,
         title: "Q3",
-        files: [await put("index.html", "<p/>")],
+        files: [await put("canvas.json", "{}")],
       }),
       "invalid_artifact",
-      "'page' is not a kind of artifact"
+      "'canvas' is not a kind of artifact"
     )
   })
 })

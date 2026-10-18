@@ -11,6 +11,7 @@ owner reads it.
 | `document` | A Markdown report in `document.md`, with its images beside it          |
 | `sheet`    | Tables of data, one CSV per sheet, with typed columns and their charts |
 | `slides`   | A deck: `index.html` with one `<section class="slide">` per slide      |
+| `page`     | A web page: `index.html` and its scripts, styles, images, and data     |
 | `file`     | One file, shown as its type allows or offered for download             |
 
 ## Publish an artifact
@@ -174,6 +175,53 @@ previous and next, an overview of every slide, and present, where the slide fill
   with a screenshot of every slide to look at before it revises. This needs the agent image (or a
   sandbox with Playwright for Node at `/opt/sixb/js/node_modules/playwright`); without a browser
   the deck still publishes, unchecked, and the Agent is told.
+
+## Write a page
+
+A page is `index.html` and the files it loads beside it by relative path: scripts, styles, images,
+and data as JSON. Use one for what reads best as a small web app: a dashboard, a calculator, a
+planner, an interactive explainer. It opens in the same sandboxed frame as slides, filling the
+viewer and scrolling as a page does.
+
+```text
+fleet-planner/
+├── index.html
+├── app.js
+├── style.css
+└── data/units.json
+```
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Fleet planner</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">Q4 2026</p>
+      <h1>Fleet planner</h1>
+      <p class="lede">Crews and vans needed for next quarter's service visits.</p>
+      <div class="grid">
+        <div class="card stat"><div class="label">Visits</div><div class="value">1,284</div></div>
+      </div>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
+```
+
+- Sixb adds a kit and the runtime to the page, as it does to a deck. The kit makes plain HTML look
+  finished in your app's theme: `<main>` is a centered column, and headings, tables, forms, and
+  buttons are drawn like the app's. A page picks a few components by class: `.eyebrow`, `.lede`,
+  `.card`, `.grid`, `.row`, `.stat` (with `.label`, `.value`, `.delta`), `.tag`, and `.callout`.
+  The page's own CSS overrides the kit and the theme.
+- The page's `<title>`, else its first `<h1>`, names it in cards and lists.
+- A page runs its own scripts, with the same limits as a deck: it can't read the app's cookies or
+  call the API as the reader, and it loads only its own files and a few public CDNs (jsDelivr,
+  cdnjs, unpkg, and Google Fonts). Read data from JSON files published beside it with `fetch`.
+- A link to another artifact (`<a href="artifact:…">`) opens it where the reader is.
 
 ## Reference another artifact
 

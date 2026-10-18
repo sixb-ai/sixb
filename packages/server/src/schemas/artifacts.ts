@@ -31,12 +31,15 @@ const SlidesOutlineSchema = z.object({
   slides: z.array(z.object({ title: z.string().optional() })),
 })
 
+const PageOutlineSchema = z.object({ kind: z.literal("page"), title: z.string().optional() })
+
 const FileOutlineSchema = z.object({ kind: z.literal("file"), mediaType: z.string() })
 
 const ArtifactOutlineSchema = z.discriminatedUnion("kind", [
   DocumentOutlineSchema,
   SheetOutlineSchema,
   SlidesOutlineSchema,
+  PageOutlineSchema,
   FileOutlineSchema,
 ])
 

@@ -3,7 +3,7 @@
  * and the Agent's layout check lays a version out in them.
  */
 
-export { SLIDES_ENTRY } from "../publish/validate/slides"
+export { HTML_ENTRY } from "../publish/validate/html"
 export {
   FRAME_ASSETS,
   FRAME_REFERENCE_PREFIX,

@@ -1,23 +1,15 @@
 import type { ArtifactFile } from "../../../storage/artifacts/types"
-import { isArtifactAddress, parseArtifactAddress } from "../../address"
 import { decodeHtmlEntities } from "../../html"
 import { ARTIFACT_LIMITS } from "../../limits"
 import type { SlidesOutline } from "../../outline"
 import { type ArtifactBlobStorage, invalidArtifact, readArtifactText } from "../files"
 import type { FoundReference } from "../references"
-
-/** The file a deck renders from. */
-export const SLIDES_ENTRY = "index.html"
-
-/** Where the frame serves the kit and the runtime, beside a deck's own files. */
-export const FRAME_ASSET_PREFIX = "__sixb/"
+import { HTML_ENTRY, readHtmlReferences, refuseFrameAssetPaths } from "./html"
 
 /**
  * Reads a deck: `index.html` with one `<section class="slide">` per 1280×720 slide, and the files
  * it loads beside it. Each slide's first heading becomes its title in the outline. The `artifact:`
- * addresses it uses are returned with the slide each is on, to resolve: links (`<a href>`), files
- * it shows from other artifacts (`<img src>`), and anything else it shows (`<sixb-embed src>`), a
- * chart, a range, a section, or a slide, which the app draws over the frame.
+ * addresses it uses are returned with the slide each is on, to resolve.
  */
 export async function validateSlides(
   blobStorage: ArtifactBlobStorage,
@@ -27,27 +19,20 @@ export async function validateSlides(
   readonly outline: SlidesOutline
   readonly references: readonly FoundReference[]
 }> {
-  const entry = files.find((file) => file.path === SLIDES_ENTRY)
+  const entry = files.find((file) => file.path === HTML_ENTRY)
   if (!entry) {
     throw invalidArtifact(
-      `A deck needs '${SLIDES_ENTRY}' with one <section class="slide"> per slide.`
+      `A deck needs '${HTML_ENTRY}' with one <section class="slide"> per slide.`
     )
   }
-  const reserved = files.find((file) => file.path.startsWith(FRAME_ASSET_PREFIX))
-  if (reserved) {
-    throw invalidArtifact(
-      `'${reserved.path}' is under ${FRAME_ASSET_PREFIX}, where Sixb serves the deck's kit and runtime: move it.`
-    )
-  }
+  refuseFrameAssetPaths(files, "the deck")
   const html = await readArtifactText(blobStorage, entry, ARTIFACT_LIMITS.maxDeckBytes)
 
   const slides: { title: string; heading: boolean }[] = []
-  const references: FoundReference[] = []
-  let refused: string | undefined
   const at = () => String(Math.max(1, slides.length))
   // The heading being read, if it is the first of the current slide.
   let reading: { title: string; heading: boolean } | null = null
-  new HTMLRewriter()
+  const rewriter = new HTMLRewriter()
     .on("section", {
       element(element) {
         const classes = (element.getAttribute("class") ?? "").split(/\s+/)
@@ -68,51 +53,14 @@ export async function validateSlides(
         if (reading) reading.title += chunk.text
       },
     })
-    .on("a[href]", {
-      element(element) {
-        const href = decodeHtmlEntities(element.getAttribute("href") ?? "")
-        if (isArtifactAddress(href)) {
-          references.push({ address: href.trim(), as: "link", at: at() })
-        }
-      },
-    })
-    .on("img[src]", {
-      element(element) {
-        const source = decodeHtmlEntities(element.getAttribute("src") ?? "").trim()
-        if (!isArtifactAddress(source)) return
-        if (!parseArtifactAddress(source)?.path) {
-          refused ??= `An <img> shows a file from another artifact, and '${source}' names none: show a chart, a range, a section, or a slide with <sixb-embed src="${source}"></sixb-embed>.`
-          return
-        }
-        references.push({ address: source, as: "embed", at: at() })
-      },
-    })
-    .on("sixb-embed", {
-      element(element) {
-        const source = decodeHtmlEntities(element.getAttribute("src") ?? "").trim()
-        if (!isArtifactAddress(source)) {
-          refused ??= `<sixb-embed> shows another artifact: give it src="artifact:…", such as artifact:art_k3m9q2x7tp#chart=revenue.`
-          return
-        }
-        references.push({ address: source, as: "embed", at: at() })
-      },
-    })
-    .on("iframe[src], object[data], embed[src]", {
-      element(element) {
-        const source = decodeHtmlEntities(
-          element.getAttribute("src") ?? element.getAttribute("data") ?? ""
-        ).trim()
-        if (isArtifactAddress(source)) {
-          refused ??= `${SLIDES_ENTRY} frames '${source}': show another artifact with <sixb-embed src="${source}"></sixb-embed>, or a file of one with <img>.`
-        }
-      },
-    })
-    .transform(html)
+  const { references, refusal } = readHtmlReferences(rewriter, at)
+  rewriter.transform(html)
 
+  const refused = refusal()
   if (refused) throw invalidArtifact(refused)
   if (slides.length === 0) {
     throw invalidArtifact(
-      `${SLIDES_ENTRY} has no slides: put each slide in a <section class="slide">.`
+      `${HTML_ENTRY} has no slides: put each slide in a <section class="slide">.`
     )
   }
   if (slides.length > ARTIFACT_LIMITS.maxSlides) {
@@ -121,7 +69,7 @@ export async function validateSlides(
     )
   }
   return {
-    entry: SLIDES_ENTRY,
+    entry: HTML_ENTRY,
     outline: {
       kind: "slides",
       slides: slides.map(({ title }) => {

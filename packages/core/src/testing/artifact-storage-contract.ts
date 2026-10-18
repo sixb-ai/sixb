@@ -149,6 +149,22 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    test("keeps a page, and lists it as its kind", async () => {
+      await withStorage(async (artifacts) => {
+        const version = versionInput({
+          entry: "index.html",
+          files: [{ path: "index.html", file: fileRef("a", "text/html") }],
+          outline: { kind: "page", title: "Fleet planner" },
+        })
+        await artifacts.create(createInput({ id: "art_planner", kind: "page", version }))
+        expect(
+          await artifacts.getVersion({ projectId, artifactId: "art_planner", version: 1 })
+        ).toMatchObject({ outline: { kind: "page", title: "Fleet planner" } })
+        const pages = await artifacts.list({ projectId, kind: "page", limit: 10 })
+        expect(pages.artifacts.map((artifact) => artifact.id)).toEqual(["art_planner"])
+      })
+    })
+
     test("lists the latest versions that refer to an artifact, at any version, file, or part", async () => {
       await withStorage(async (artifacts) => {
         const refer = (address: string) => ({

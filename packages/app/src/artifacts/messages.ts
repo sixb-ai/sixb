@@ -10,6 +10,7 @@ export const en = {
     document: "Document",
     sheet: "Sheet",
     slides: "Slides",
+    page: "Page",
     file: "File",
   },
   viewer: {
@@ -55,16 +56,23 @@ export const en = {
   },
   gallery: {
     title: "Artifacts",
-    description: "Documents, sheets, slides, and files published in this project.",
+    description: "Documents, sheets, slides, pages, and files published in this project.",
     filter: "Filter by kind",
     all: "All",
-    kinds: { document: "Documents", sheet: "Sheets", slides: "Slides", file: "Files" },
+    kinds: {
+      document: "Documents",
+      sheet: "Sheets",
+      slides: "Slides",
+      page: "Pages",
+      file: "Files",
+    },
     count: (count: number, kind?: ArtifactKind) => {
       const [one, many] = {
         all: ["artifact", "artifacts"],
         document: ["document", "documents"],
         sheet: ["sheet", "sheets"],
         slides: ["deck", "decks"],
+        page: ["page", "pages"],
         file: ["file", "files"],
       }[kind ?? "all"]
       return `${number(count)} ${count === 1 ? one : many}`
@@ -73,10 +81,14 @@ export const en = {
     emptyDescription:
       "Ask the agent for a report, a spreadsheet, or a deck. What it publishes appears here.",
     emptyKind: (kind: ArtifactKind) =>
-      `No ${{ document: "documents", sheet: "sheets", slides: "decks", file: "files" }[kind]} yet`,
+      `No ${{ document: "documents", sheet: "sheets", slides: "decks", page: "pages", file: "files" }[kind]} yet`,
     showAll: "Show all",
     loadFailed: "Artifacts could not be loaded.",
     retry: "Try again",
+  },
+  page: {
+    frame: (title: string) => `Page ${title}`,
+    loadFailed: "This page could not be opened.",
   },
   slides: {
     deck: (title: string) => `Slides: ${title}`,
@@ -237,6 +249,7 @@ export const fr: Translation<ArtifactMessages> = {
     document: "Document",
     sheet: "Feuille",
     slides: "Diapositives",
+    page: "Page",
     file: "Fichier",
   },
   viewer: {
@@ -282,16 +295,23 @@ export const fr: Translation<ArtifactMessages> = {
   },
   gallery: {
     title: "Artefacts",
-    description: "Documents, feuilles, diapositives et fichiers publiés dans ce projet.",
+    description: "Documents, feuilles, diapositives, pages et fichiers publiés dans ce projet.",
     filter: "Filtrer par type",
     all: "Tous",
-    kinds: { document: "Documents", sheet: "Feuilles", slides: "Diapositives", file: "Fichiers" },
+    kinds: {
+      document: "Documents",
+      sheet: "Feuilles",
+      slides: "Diapositives",
+      page: "Pages",
+      file: "Fichiers",
+    },
     count: (count, kind) => {
       const [one, many] = {
         all: ["artefact", "artefacts"],
         document: ["document", "documents"],
         sheet: ["feuille", "feuilles"],
         slides: ["présentation", "présentations"],
+        page: ["page", "pages"],
         file: ["fichier", "fichiers"],
       }[kind ?? "all"]
       return `${numberFr(count)} ${count <= 1 ? one : many}`
@@ -300,10 +320,14 @@ export const fr: Translation<ArtifactMessages> = {
     emptyDescription:
       "Demandez à l’agent un rapport, un tableur ou une présentation : ce qu’il publie apparaît ici.",
     emptyKind: (kind) =>
-      `Aucun${kind === "sheet" || kind === "slides" ? "e" : ""} ${{ document: "document", sheet: "feuille", slides: "présentation", file: "fichier" }[kind]} pour l’instant`,
+      `Aucun${kind === "sheet" || kind === "slides" || kind === "page" ? "e" : ""} ${{ document: "document", sheet: "feuille", slides: "présentation", page: "page", file: "fichier" }[kind]} pour l’instant`,
     showAll: "Tout afficher",
     loadFailed: "Impossible de charger les artefacts.",
     retry: "Réessayer",
+  },
+  page: {
+    frame: (title) => `Page ${title}`,
+    loadFailed: "Impossible d’ouvrir cette page.",
   },
   slides: {
     deck: (title) => `Diapositives : ${title}`,

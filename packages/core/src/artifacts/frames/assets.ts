@@ -1,9 +1,9 @@
 import type { ArtifactFrameTarget } from "../../storage/artifacts/types"
 import { isArtifactAddress, parseArtifactAddress } from "../address"
 import { decodeHtmlEntities } from "../html"
-import { FRAME_ASSET_PREFIX } from "../publish/validate/slides"
+import { FRAME_ASSET_PREFIX } from "../publish/validate/html"
 import type { FrameLayout } from "./entries"
-import { FRAME_DECK_CSS } from "./kit"
+import { FRAME_DECK_CSS, FRAME_PAGE_CSS } from "./kit"
 import { frameRuntime } from "./runtime"
 
 /**
@@ -15,6 +15,7 @@ export const FRAME_ASSETS: Readonly<
   Record<string, { readonly body: string; readonly type: string }>
 > = {
   [`${FRAME_ASSET_PREFIX}deck.css`]: { body: FRAME_DECK_CSS, type: "text/css; charset=utf-8" },
+  [`${FRAME_ASSET_PREFIX}page.css`]: { body: FRAME_PAGE_CSS, type: "text/css; charset=utf-8" },
   [`${FRAME_ASSET_PREFIX}runtime.js`]: {
     body: `(${frameRuntime.toString()})()\n`,
     type: "text/javascript; charset=utf-8",
