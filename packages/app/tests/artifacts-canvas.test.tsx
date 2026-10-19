@@ -216,8 +216,9 @@ describe("a canvas's board", () => {
     )
     const node = (id: string) =>
       view.container.querySelector<HTMLElement>(`.react-flow__node[data-id="${id}"]`)
-    // Reproduce by drawing embeds as tiles: neither shows the artifact or the notice.
-    expect(node("plan")?.textContent).toContain("Q4 crew capacity planner")
+    // Reproduce by drawing embeds as tiles: neither shows the artifact or the notice. A page
+    // runs live, filling the item.
+    expect(node("plan")?.querySelector("[data-sixb-page-embed]")).not.toBeNull()
     expect(node("plan")?.style.width).toBe("480px")
     expect(node("gone")?.textContent).toContain("It was deleted, or it isn't shared with you.")
     view.unmount()

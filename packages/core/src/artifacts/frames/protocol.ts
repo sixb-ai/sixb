@@ -40,6 +40,8 @@ export type FrameRequest =
     >
   | FrameRequestOf<"goto", { readonly slide: number }>
   | FrameRequestOf<"mode", { readonly mode: DeckMode }>
+  /** Scrolls a page by a wheel turned over what the app draws on it. */
+  | FrameRequestOf<"scroll", { readonly x: number; readonly y: number }>
 
 interface FrameRequestOf<Method extends string, Params> {
   readonly protocol: typeof FRAME_PROTOCOL
@@ -66,13 +68,16 @@ export type FrameEvent =
   /** A link to another artifact, which opens where the reader is. */
   | FrameEventOf<"open", { readonly address: string }>
   /**
-   * Where the shown slide's `<sixb-embed>` boxes are, for the app to draw each over the frame: in
-   * the frame's pixels, with the scale the slide is drawn at. Empty in the overview, where an
-   * embed stays a placeholder, as it does in a filled frame, which never reports.
+   * Where the `<sixb-embed>` boxes in view are, for the app to draw each over the frame: in the
+   * frame's pixels, with the scale they are drawn at. A deck reports the shown slide's, and none in
+   * the overview, where an embed stays a placeholder, as it does in a filled frame, which never
+   * reports; a page reports those near its view as it scrolls, at its own scale.
    */
   | FrameEventOf<"embeds", { readonly embeds: readonly FrameEmbed[] }>
+  /** A page's height as laid out at the frame's width, so a document can size the frame to it. */
+  | FrameEventOf<"size", { readonly height: number }>
 
-/** One `<sixb-embed>` on the shown slide. */
+/** One `<sixb-embed>` the frame shows. */
 export interface FrameEmbed {
   readonly address: string
   readonly rect: {
@@ -81,7 +86,10 @@ export interface FrameEmbed {
     readonly width: number
     readonly height: number
   }
-  /** The slide's scale: the embed is drawn at `rect / scale`, then scaled with the slide. */
+  /**
+   * The scale it is drawn at: a slide's, where the embed is laid out at `rect / scale` and scaled
+   * with the slide; 1 on a page.
+   */
   readonly scale: number
 }
 
@@ -150,10 +158,17 @@ export function parseFrameEvent(data: unknown): FrameEvent | null {
       }
       return event("embeds", { embeds: parsed })
     }
+    case "size":
+      return Number.isFinite(params.height) && Number(params.height) >= 0
+        ? event("size", { height: Math.min(Number(params.height), MAX_HEIGHT) })
+        : null
     default:
       return null
   }
 }
+
+/** The most a page reports as its height: more is a page that grows with its frame. */
+const MAX_HEIGHT = 100_000
 
 function event<Name extends FrameEvent["event"]>(
   name: Name,

@@ -1,7 +1,8 @@
-import type { FrameEvent } from "@sixb/core/artifacts"
+import type { FrameEmbed, FrameEvent } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { ArtifactFrame } from "../frame"
+import { ArtifactFrame, type ArtifactFrameHandle } from "../frame"
+import { FrameEmbeds } from "../frame-embeds"
 import { useArtifactMessages } from "../messages"
 import { type ArtifactVersion, useArtifactTheme } from "../queries"
 import { useOpenArtifactAddress } from "../references/references"
@@ -10,25 +11,19 @@ import { ViewerLoading, ViewerNotice } from "./notice"
 
 /**
  * A page: its `index.html` live in a sandboxed frame that fills the viewer, in the app's theme or
- * its own, scrolling as the page does. The page runs its own scripts, so a link to another
- * artifact opens only when the version recorded it at publish, whatever the frame says.
+ * its own, scrolling as the page does, with the artifacts it embeds drawn over it where the page
+ * puts them as it scrolls. The page runs its own scripts, so a link to another artifact opens, and
+ * an embed shows, only when the version recorded it at publish, whatever the frame says.
  */
 export function PageRenderer({ version }: { readonly version: ArtifactVersion }) {
   const messages = useArtifactMessages()
   const theme = useArtifactThemeAttributes(version)
-  const openAddress = useOpenArtifactAddress()
-  const linked = useMemo(
-    () => new Set(version.references.map((reference) => reference.address)),
-    [version]
-  )
-  const onEvent = useCallback(
-    (event: FrameEvent) => {
-      if (event.event === "open" && linked.has(event.params.address)) {
-        openAddress(event.params.address)
-      }
-    },
-    [linked, openAddress]
-  )
+  const frame = useRef<ArtifactFrameHandle | null>(null)
+  const [embeds, setEmbeds] = useState<readonly FrameEmbed[]>([])
+  const onEvent = usePageEvents(version, { onEmbeds: setEmbeds })
+  const scroll = useCallback((delta: { readonly x: number; readonly y: number }) => {
+    frame.current?.send("scroll", delta).catch(() => {})
+  }, [])
   return (
     <div
       data-sixb-artifact=""
@@ -36,14 +31,51 @@ export function PageRenderer({ version }: { readonly version: ArtifactVersion })
       style={theme.style}
     >
       <ArtifactFrame
+        handle={frame}
         version={version}
         title={messages.page.frame(version.title)}
         onEvent={onEvent}
         className="flex-1"
         fallback={<ViewerLoading label={messages.viewer.loading} />}
         failure={<ViewerNotice title={messages.page.loadFailed} />}
+        overlay={<FrameEmbeds version={version} embeds={embeds} onScroll={scroll} />}
       />
     </div>
+  )
+}
+
+/**
+ * What a page's frame says, for wherever it is shown: a link it recorded at publish opens, and its
+ * embeds and height go to whoever draws them.
+ */
+export function usePageEvents(
+  version: ArtifactVersion,
+  on: {
+    readonly onEmbeds?: (embeds: readonly FrameEmbed[]) => void
+    readonly onSize?: (height: number) => void
+  }
+): (event: FrameEvent) => void {
+  const openAddress = useOpenArtifactAddress()
+  const linked = useMemo(
+    () => new Set(version.references.map((reference) => reference.address)),
+    [version]
+  )
+  const { onEmbeds, onSize } = on
+  return useCallback(
+    (event: FrameEvent) => {
+      switch (event.event) {
+        case "open":
+          if (linked.has(event.params.address)) openAddress(event.params.address)
+          return
+        case "embeds":
+          onEmbeds?.(event.params.embeds)
+          return
+        case "size":
+          onSize?.(event.params.height)
+          return
+      }
+    },
+    [linked, openAddress, onEmbeds, onSize]
   )
 }
 
