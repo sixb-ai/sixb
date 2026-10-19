@@ -1,10 +1,13 @@
-import { createPrivateKey, sign } from "node:crypto"
+import { createPrivateKey, type KeyObject, sign } from "node:crypto"
 import type { SandboxSourceAuth, SandboxSourceCredentials } from "@sixb/core"
 import type { SandboxRequestCredential } from "@sixb/core/sandboxes"
 
 export interface GitHubAppOptions {
   readonly appId: string
-  /** PEM-encoded RSA private key. Never supplied to a sandbox or resolver result. */
+  /**
+   * PEM-encoded RSA private key. Newlines escaped as a literal `\n`, as environment variables often
+   * hold it, are accepted. Never supplied to a sandbox or resolver result.
+   */
   readonly privateKey: string
 }
 
@@ -40,15 +43,7 @@ export function githubApp(options: GitHubAppOptions): SandboxSourceAuth {
   if (typeof appId !== "string" || !/^[1-9][0-9]*$/.test(appId)) {
     throw new Error("[SixbGitHub] App ID must be a positive numeric string.")
   }
-  const key = (() => {
-    try {
-      const result = createPrivateKey(options.privateKey)
-      if (result.asymmetricKeyType !== "rsa") throw new Error()
-      return result
-    } catch {
-      throw new Error("[SixbGitHub] App private key must be a valid RSA PEM key.")
-    }
-  })()
+  const key = appPrivateKey(options.privateKey)
   const jwt = () => {
     const now = Math.floor(Date.now() / 1000)
     const input = [
@@ -169,6 +164,19 @@ export function githubApp(options: GitHubAppOptions): SandboxSourceAuth {
       }
     },
   })
+}
+
+/** Accept newlines escaped as a literal `\n`: a PEM key never contains a backslash. */
+function appPrivateKey(value: unknown): KeyObject {
+  try {
+    const key = createPrivateKey(String(value).replaceAll("\\n", "\n"))
+    if (key.asymmetricKeyType !== "rsa") throw new Error()
+    return key
+  } catch {
+    throw new Error(
+      "[SixbGitHub] App private key must be a valid RSA PEM key (escaped \\n newlines are accepted)."
+    )
+  }
 }
 
 /**

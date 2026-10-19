@@ -88,7 +88,8 @@ For private GitHub repositories, authenticate with a GitHub App:
    Metadata: Read. Read-only access needs only Contents: Read.
 2. Install the App on the repository.
 3. Note the App ID from the App's settings page.
-4. Generate a private key and put its contents in an environment variable.
+4. Generate a private key and put its contents in an environment variable. Newlines escaped as
+   `\n` are accepted.
 
 Then configure host-side authentication on the Vercel factory:
 

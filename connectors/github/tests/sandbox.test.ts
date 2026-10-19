@@ -353,6 +353,16 @@ describe("GitHub App workspace auth", () => {
     ).rejects.toThrow("[SixbGitHub] Workspace authentication request failed.")
   })
 
+  test("accepts a private key whose newlines are escaped, as environment variables hold it", () => {
+    // Regression proof: pass options.privateKey to createPrivateKey unchanged; this key throws.
+    const escaped = pem.trim().replaceAll("\n", "\\n")
+
+    expect(() => githubApp({ appId: "123", privateKey: escaped })).not.toThrow()
+    expect(() => githubApp({ appId: "123", privateKey: "not a key" })).toThrow(
+      "[SixbGitHub] App private key must be a valid RSA PEM key (escaped \\n newlines are accepted)."
+    )
+  })
+
   test("reports revocation failure and permits a retry", async () => {
     const f = fixture({ revokeStatus: 503 })
     const grant = await f.authorize()
