@@ -15,6 +15,9 @@ export type CellInput = { readonly value: string } | { readonly error: CellInput
  * Reads what a reader typed into a cell as the column's type stores it, in the reader's locale:
  * `12%` in a percent column is `0.12`, `$1,200` in a currency column is `1200`, `23/11/2026` is
  * `2026-11-23` where the day comes first. Empty is always a value: the cell is cleared.
+ *
+ * A pasted value is read as a sheet copies one: a number as it stores it first, then in the
+ * locale's form, and a percent without its sign as the fraction, `0.12`, not 12 points.
  */
 export function parseCellInput(
   text: string,
@@ -23,18 +26,29 @@ export function parseCellInput(
   options: {
     /** Whether a path is one of the artifact's images. */
     readonly image?: (path: string) => boolean
+    /** Read as pasted from a sheet, not typed. */
+    readonly pasted?: boolean
   } = {}
 ): CellInput {
+  const pasted = options.pasted ?? false
   const trimmed = text.trim()
   if (!trimmed) return { value: "" }
   switch (format.type) {
     case "number":
     case "currency": {
-      const number = localeNumber(trimmed, locale, format.type === "currency")
+      const number =
+        (pasted ? parseSheetNumber(trimmed) : undefined) ??
+        localeNumber(trimmed, locale, format.type === "currency")
       return number === undefined ? { error: "number" } : { value: String(number) }
     }
     case "percent": {
-      // A percent is typed in points, with or without its sign: 12 and 12% are both 0.12.
+      // A percent is typed in points, with or without its sign: 12 and 12% are both 0.12. Pasted
+      // without its sign, it is the fraction a sheet stores.
+      const signed = /%$/.test(trimmed)
+      if (pasted && !signed) {
+        const number = parseSheetNumber(trimmed) ?? localeNumber(trimmed, locale, false)
+        return number === undefined ? { error: "number" } : { value: String(number) }
+      }
       const number = localeNumber(trimmed.replace(/\s*%$/, ""), locale, false)
       return number === undefined ? { error: "number" } : { value: String(fraction(number)) }
     }

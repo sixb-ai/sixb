@@ -216,3 +216,40 @@ export function sortedOrder(
     return sign * collator.compare(left, right) || a - b
   })
 }
+
+/**
+ * Text from the clipboard as rows of cells, as a spreadsheet copies them: tabs between cells,
+ * line breaks between rows, and a cell holding either quoted, its quotes doubled. A last empty
+ * line is the copy's end, not a row.
+ */
+export function parseTsv(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let cell = ""
+  let quoted = false
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index] as string
+    if (quoted) {
+      if (character === '"' && text[index + 1] === '"') {
+        cell += '"'
+        index += 1
+      } else if (character === '"') quoted = false
+      else cell += character
+    } else if (character === '"' && cell === "") quoted = true
+    else if (character === "\t") {
+      row.push(cell)
+      cell = ""
+    } else if (character === "\n" || character === "\r") {
+      if (character === "\r" && text[index + 1] === "\n") index += 1
+      row.push(cell)
+      rows.push(row)
+      row = []
+      cell = ""
+    } else cell += character
+  }
+  if (cell !== "" || row.length > 0) {
+    row.push(cell)
+    rows.push(row)
+  }
+  return rows
+}

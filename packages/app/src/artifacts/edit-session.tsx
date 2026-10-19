@@ -11,6 +11,10 @@ export interface ArtifactDraft {
   readonly changed: boolean
   /** The files a save publishes: each changed path with its new text, or `null` to drop it. */
   readonly files: () => ReadonlyMap<string, string | null>
+  /** Takes back the last change; absent when there is none. */
+  readonly undo?: () => void
+  /** Makes again the last change taken back; absent when there is none. */
+  readonly redo?: () => void
 }
 
 interface EditSession {

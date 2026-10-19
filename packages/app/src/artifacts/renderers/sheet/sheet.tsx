@@ -9,7 +9,7 @@ import { Button } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { Download, ListFilter, Search } from "lucide-react"
-import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from "react"
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useArtifactEditing, useReportDraft } from "../../edit-session"
 import { formatFileSize } from "../../file-size"
 import { useArtifactMessages } from "../../messages"
@@ -19,12 +19,18 @@ import { ViewerLoading, ViewerNotice } from "../notice"
 import { CHART_ICONS } from "./chart-icon"
 import {
   cellEdited,
+  type DraftHistory,
+  deleteRows,
   draftChanged,
   draftFiles,
   draftModel,
   draftTable,
+  insertRows,
+  recordDraft,
+  redoDraft,
   setCells,
-  startDraft,
+  startHistory,
+  undoDraft,
   type WorkbookDraft,
 } from "./draft"
 import { useSheetFind } from "./find-bar"
@@ -299,10 +305,17 @@ function useWorkbookEdit(
   locale: string
 ): { readonly model: SheetModel | null; readonly editor: SheetGridEditor | null } {
   const editing = useArtifactEditing()
-  const [draft, setDraft] = useState<WorkbookDraft>(() => startDraft(workbook))
+  const [history, setHistory] = useState<DraftHistory>(() => startHistory(workbook))
   useEffect(() => {
-    if (!editing) setDraft(startDraft(workbook))
+    if (!editing) setHistory(startHistory(workbook))
   }, [editing, workbook])
+  const draft = history.present
+  /** One change of the draft: one step for undo. */
+  const change = useCallback(
+    (apply: (draft: WorkbookDraft) => WorkbookDraft) =>
+      setHistory((last) => recordDraft(last, apply(last.present))),
+    []
+  )
   const sheet = workbook.sheets.find((entry) => entry.name === sheetName)
   const current = table ? draftTable(draft, sheetName, table) : null
   const model = useMemo(
@@ -316,18 +329,33 @@ function useWorkbookEdit(
     return {
       editable: (column) => !format(column).formula,
       inputText: (column, raw) => cellInputText(raw, format(column), locale),
-      read: (column, text) =>
+      read: (column, text, pasted) =>
         parseCellInput(text, format(column), locale, {
           image: (path) => images.has(path.replace(/^\.\//, "")),
+          pasted: pasted ?? false,
         }),
-      write: (edits) => setDraft((last) => setCells(last, sheetName, table, edits)),
+      write: (edits, grow) => change((last) => setCells(last, sheetName, table, edits, grow)),
+      insertRows: (at, count) => change((last) => insertRows(last, sheetName, table, at, count)),
+      deleteRows: (rows) => change((last) => deleteRows(last, sheetName, table, rows)),
+      undo: () => setHistory(undoDraft),
+      redo: () => setHistory(redoDraft),
       edited: (row, column) => cellEdited(current.rows[row], column),
       suggestions: (column) => tagSuggestions(model, column),
     }
-  }, [editing, model, table, current, version.files, locale, sheetName])
+  }, [editing, model, table, current, version.files, locale, sheetName, change])
+  const canUndo = history.past.length > 0
+  const canRedo = history.future.length > 0
   const report = useMemo(
-    () => (editing ? { changed: draftChanged(draft), files: () => draftFiles(draft) } : null),
-    [editing, draft]
+    () =>
+      editing
+        ? {
+            changed: draftChanged(draft),
+            files: () => draftFiles(draft),
+            ...(canUndo ? { undo: () => setHistory(undoDraft) } : {}),
+            ...(canRedo ? { redo: () => setHistory(redoDraft) } : {}),
+          }
+        : null,
+    [editing, draft, canUndo, canRedo]
   )
   useReportDraft(report)
   return { model, editor }
