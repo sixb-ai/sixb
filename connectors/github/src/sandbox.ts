@@ -38,7 +38,7 @@ type GitIdentity = Readonly<Record<string, string>>
 export function githubApp(options: GitHubAppOptions): SandboxSourceAuth {
   const appId = options.appId
   if (typeof appId !== "string" || !/^[1-9][0-9]*$/.test(appId)) {
-    throw new Error("[GitHub] App ID must be a positive numeric string.")
+    throw new Error("[SixbGitHub] App ID must be a positive numeric string.")
   }
   const key = (() => {
     try {
@@ -46,7 +46,7 @@ export function githubApp(options: GitHubAppOptions): SandboxSourceAuth {
       if (result.asymmetricKeyType !== "rsa") throw new Error()
       return result
     } catch {
-      throw new Error("[GitHub] App private key must be a valid RSA PEM key.")
+      throw new Error("[SixbGitHub] App private key must be a valid RSA PEM key.")
     }
   })()
   const jwt = () => {
@@ -84,7 +84,7 @@ export function githubApp(options: GitHubAppOptions): SandboxSourceAuth {
       const { owner, repo, path } = repository(source.url)
       const access = source.access ?? "read"
       if (source.type !== "git" || (access !== "read" && access !== "write")) {
-        throw new Error("[GitHub] Workspace source must use Git with read or write access.")
+        throw new Error("[SixbGitHub] Workspace source must use Git with read or write access.")
       }
       const installation = await request(`/repos/${owner}/${repo}/installation`, {
         token: jwt(),
@@ -96,7 +96,7 @@ export function githubApp(options: GitHubAppOptions): SandboxSourceAuth {
         !Number.isSafeInteger(installation.id) ||
         Number(installation.id) <= 0
       ) {
-        throw new Error("[GitHub] Repository installation response is invalid.")
+        throw new Error("[SixbGitHub] Repository installation response is invalid.")
       }
 
       const { permissions, label } = ACCESS[access]
@@ -108,7 +108,7 @@ export function githubApp(options: GitHubAppOptions): SandboxSourceAuth {
         failures: {
           // GitHub answers 422 when the installation has not granted a requested permission.
           422:
-            `[GitHub] The App installation does not grant the permissions this workspace ` +
+            `[SixbGitHub] The App installation does not grant the permissions this workspace ` +
             `needs (${label}). Update the App's permissions and approve them on the installation.`,
         },
       })
@@ -118,7 +118,7 @@ export function githubApp(options: GitHubAppOptions): SandboxSourceAuth {
         !grant.token ||
         /[\r\n]/.test(grant.token)
       ) {
-        throw new Error("[GitHub] Installation token response is invalid.")
+        throw new Error("[SixbGitHub] Installation token response is invalid.")
       }
       const token = grant.token
       let revoked = false
@@ -142,7 +142,7 @@ export function githubApp(options: GitHubAppOptions): SandboxSourceAuth {
       ) {
         await revokeAfterFailure(revoke)
         throw new Error(
-          "[GitHub] Installation token did not match the requested repository, permissions or lifetime."
+          "[SixbGitHub] Installation token did not match the requested repository, permissions or lifetime."
         )
       }
 
@@ -210,7 +210,7 @@ async function revokeAfterFailure(revoke: () => Promise<void>): Promise<void> {
   try {
     await revoke()
   } catch {
-    console.error("[GitHub] Installation token revocation failed after an authorization error.")
+    console.error("[SixbGitHub] Installation token revocation failed after an authorization error.")
   }
 }
 
@@ -219,7 +219,7 @@ function repository(value: string): { owner: string; repo: string; path: string 
   try {
     url = new URL(value)
   } catch {
-    throw new Error("[GitHub] Workspace repository URL is invalid.")
+    throw new Error("[SixbGitHub] Workspace repository URL is invalid.")
   }
   const match = /^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(url.pathname)
   if (
@@ -234,7 +234,7 @@ function repository(value: string): { owner: string; repo: string; path: string 
     [".", ".."].includes(match[2])
   ) {
     throw new Error(
-      "[GitHub] Workspace auth requires a credential-free https://github.com/owner/repo URL."
+      "[SixbGitHub] Workspace auth requires a credential-free https://github.com/owner/repo URL."
     )
   }
   return { owner: match[1], repo: match[2], path: url.pathname.replace(/\/$/, "") }
@@ -253,7 +253,7 @@ async function botIdentity(appId: string, jwt: string, token: string): Promise<G
     typeof app.slug !== "string" ||
     !/^[A-Za-z0-9-]+$/.test(app.slug)
   ) {
-    throw new Error("[GitHub] App response is invalid.")
+    throw new Error("[SixbGitHub] App response is invalid.")
   }
 
   const login = `${app.slug}[bot]`
@@ -266,7 +266,7 @@ async function botIdentity(appId: string, jwt: string, token: string): Promise<G
     !Number.isSafeInteger(user.id) ||
     Number(user.id) <= 0
   ) {
-    throw new Error("[GitHub] App bot user response is invalid.")
+    throw new Error("[SixbGitHub] App bot user response is invalid.")
   }
 
   const email = `${user.id}+${user.login}@users.noreply.github.com`
@@ -323,19 +323,19 @@ async function request(
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
   } catch {
-    throw new Error("[GitHub] Workspace authentication request failed.")
+    throw new Error("[SixbGitHub] Workspace authentication request failed.")
   }
   // Revoking an already invalid token is successful cleanup.
   if (method === "DELETE" && (response.status === 204 || response.status === 401)) return
   if (!response.ok) {
     throw new Error(
       failures[response.status] ??
-        `[GitHub] Workspace authentication failed (HTTP ${response.status}).`
+        `[SixbGitHub] Workspace authentication failed (HTTP ${response.status}).`
     )
   }
   try {
     return await response.json()
   } catch {
-    throw new Error("[GitHub] Workspace authentication response is invalid.")
+    throw new Error("[SixbGitHub] Workspace authentication response is invalid.")
   }
 }
