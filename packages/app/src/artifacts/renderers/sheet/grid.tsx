@@ -133,6 +133,12 @@ export interface SheetGridEditor {
   /** Adds empty rows before a data row; at the row count, after the last. */
   readonly insertRows: (at: number, count: number) => void
   readonly deleteRows: (rows: readonly number[]) => void
+  /** Adds an empty column before a column; at the column count, after the last. */
+  readonly insertColumn: (at: number) => void
+  /** Removes a column; returns why it can't be, in words, when it can't. */
+  readonly deleteColumn: (column: number) => string | null
+  /** Opens a column's settings: to rename it, or to set its type and form. */
+  readonly editColumn: (column: number, focus: "name" | "type") => void
   readonly undo: () => void
   readonly redo: () => void
   /** Whether a cell holds a value the edit changed. */
@@ -940,6 +946,25 @@ export function SheetGrid({
       ? { onUnfreeze: () => updateView((current) => ({ ...current, frozenColumns: 0 })) }
       : {}),
     ...(hidden.size < columnCount - 1 ? { onHide: () => hide(column) } : {}),
+    ...(editor
+      ? {
+          edit: {
+            onInsertLeft: () => editor.insertColumn(column),
+            onInsertRight: () => editor.insertColumn(column + 1),
+            onRename: () => editor.editColumn(column, "name"),
+            onSettings: () => editor.editColumn(column, "type"),
+            onDelete: () => {
+              const refused = editor.deleteColumn(column)
+              if (refused) setNotice(refused)
+              else
+                select(
+                  { row: focus.row, column: Math.max(0, Math.min(column, columnCount - 2)) },
+                  false
+                )
+            },
+          },
+        }
+      : {}),
   })
 
   /**
@@ -1362,7 +1387,11 @@ export function SheetGrid({
           onDoubleClick={(event) => {
             const target = (event.target as HTMLElement).closest<HTMLElement>("[data-cell]")
             const point = target ? cellPoint(target) : null
-            if (point && !(event.target as HTMLElement).closest("input")) startEdit(point)
+            if (!point || (event.target as HTMLElement).closest("input, button")) return
+            // A header's name is changed in the column's settings.
+            if (editor && point.row === 0 && point.column >= 0)
+              editor.editColumn(point.column, "name")
+            else startEdit(point)
           }}
         >
           <div

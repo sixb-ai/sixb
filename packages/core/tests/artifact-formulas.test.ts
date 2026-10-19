@@ -9,6 +9,7 @@ import {
   FormulaCycleError,
   formulaDependencies,
   parseFormula,
+  renameColumnReferences,
 } from "../src/artifacts/formula"
 import type { SheetColumnFormat } from "../src/artifacts/workbook"
 import { emptyGrantIndex } from "../src/authorization/types"
@@ -168,6 +169,26 @@ describe("formulas", () => {
     const text = formatCsv(["Name", "Revenue", "Note", "Address"], rows)
     expect(text.startsWith("Name,Revenue,Note,Address\r\n")).toBe(true)
     expect(parseCsv(text)).toEqual({ header: ["Name", "Revenue", "Note", "Address"], rows })
+  })
+})
+
+describe("renaming a column in a formula", () => {
+  test.each([
+    [
+      "([@Room revenue]-[@Cost])/[@Room revenue]",
+      "Room revenue",
+      "Revenue",
+      "([@Revenue]-[@Cost])/[@Revenue]",
+    ],
+    // A name a plain reference can't hold is bracketed again, whole columns too.
+    ["SUM([Cost])/[@Cost]", "Cost", "Cost (USD)", "SUM([[Cost (USD)]])/[@[Cost (USD)]]"],
+    ["[@[Lead (weeks)]]*7", "Lead (weeks)", "Lead", "[@Lead]*7"],
+    // Text in quotes is the formula's own, whatever it reads like.
+    ['IF([@Status]="[@Status]",1,0)', "Status", "State", 'IF([@State]="[@Status]",1,0)'],
+    ["[@Visits]+[@Visitors]", "Visits", "Calls", "[@Calls]+[@Visitors]"],
+  ])("%p, %p to %p", (formula, from, to, renamed) => {
+    expect(renameColumnReferences(formula, from, to)).toBe(renamed)
+    expect(formulaDependencies(parseFormula(renamed))).toContain(to)
   })
 })
 

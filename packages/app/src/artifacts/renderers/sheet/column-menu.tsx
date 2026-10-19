@@ -9,13 +9,18 @@ import {
 } from "@sixb/ui/components"
 import {
   ArrowDown,
+  ArrowLeftToLine,
+  ArrowRightToLine,
   ArrowUp,
   ChevronDown,
   EyeOff,
   ListFilter,
   MoveHorizontal,
+  PencilLine,
   Pin,
   PinOff,
+  SlidersHorizontal,
+  Trash2,
   X,
 } from "lucide-react"
 import { type ReactNode, useRef } from "react"
@@ -38,6 +43,14 @@ export interface ColumnActions {
   readonly onFreeze?: () => void
   readonly onUnfreeze?: () => void
   readonly onHide?: () => void
+  /** While the sheet is edited: add a column beside it, rename it, set its form, delete it. */
+  readonly edit?: {
+    readonly onInsertLeft: () => void
+    readonly onInsertRight: () => void
+    readonly onRename: () => void
+    readonly onSettings: () => void
+    readonly onDelete: () => void
+  }
 }
 
 /** The parts a menu is drawn with: a dropdown's from a column letter, a context menu's on right-click. */
@@ -62,9 +75,36 @@ export function ColumnMenuItems({
   readonly parts: MenuParts
   readonly messages: ArtifactMessages["sheet"]
 }): ReactNode {
-  const { sort } = actions
+  const { sort, edit } = actions
+  const column = useArtifactMessages().column
   return (
     <>
+      {edit ? (
+        <>
+          <Item onSelect={edit.onRename}>
+            <PencilLine aria-hidden="true" />
+            {column.rename}
+          </Item>
+          <Item onSelect={edit.onSettings}>
+            <SlidersHorizontal aria-hidden="true" />
+            {column.settings}
+          </Item>
+          <Separator />
+          <Item onSelect={edit.onInsertLeft}>
+            <ArrowLeftToLine aria-hidden="true" />
+            {column.insertLeft}
+          </Item>
+          <Item onSelect={edit.onInsertRight}>
+            <ArrowRightToLine aria-hidden="true" />
+            {column.insertRight}
+          </Item>
+          <Item variant="destructive" onSelect={edit.onDelete}>
+            <Trash2 aria-hidden="true" />
+            {column.delete}
+          </Item>
+          <Separator />
+        </>
+      ) : null}
       <Item disabled={sort === "ascending"} onSelect={() => actions.onSort("ascending")}>
         <ArrowUp aria-hidden="true" />
         {messages.sortAscending}

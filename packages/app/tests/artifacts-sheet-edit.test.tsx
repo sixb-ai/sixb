@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { client, type GetArtifactResponse, type GetArtifactVersionResponse } from "@sixb/client"
 import { getArtifactQueryKey, getArtifactVersionQueryKey } from "@sixb/client/hooks"
-import { type CsvTable, parseCsv, parseWorkbook, type WorkbookSheet } from "@sixb/core/artifacts"
+import {
+  type CsvTable,
+  parseCsv,
+  parseWorkbook,
+  type SheetColumnFormat,
+  type WorkbookSheet,
+} from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, waitFor } from "@testing-library/react"
 import { useMemo, useState } from "react"
@@ -9,14 +15,18 @@ import { MemoryRouter } from "react-router-dom"
 import { artifactFileSource } from "../src/artifacts/file-source"
 import {
   cellEdited,
+  deleteColumn,
   deleteRows,
   draftFiles,
   draftModel,
+  draftSheet,
   draftTable,
+  insertColumn,
   insertRows,
   recordDraft,
   redoDraft,
   setCells,
+  setColumn,
   startDraft,
   startHistory,
   undoDraft,
@@ -151,12 +161,12 @@ describe("a workbook's draft", () => {
     expect(table.rows[1]).toEqual(["South", "1200", "0.918", "false", ""])
     // Rows nobody touched are the version's own.
     expect(table.rows[0]).toBe(TABLE.rows[0] as string[])
-    expect(cellEdited(table.rows[1], 1)).toBe(true)
-    expect(cellEdited(table.rows[1], 0)).toBe(false)
-    expect(cellEdited(table.rows[0], 1)).toBe(false)
+    expect(cellEdited(table, 1, 1)).toBe(true)
+    expect(cellEdited(table, 1, 0)).toBe(false)
+    expect(cellEdited(table, 0, 1)).toBe(false)
     // Editing it back marks nothing.
     const back = setCells(draft, "Regions", TABLE, [{ row: 1, column: 1, value: "1107" }])
-    expect(cellEdited(draftTable(back, "Regions", TABLE).rows[1], 1)).toBe(false)
+    expect(cellEdited(draftTable(back, "Regions", TABLE), 1, 1)).toBe(false)
     // A value the cell holds already changes nothing.
     expect(
       setCells(startDraft(workbook), "Regions", TABLE, [{ row: 0, column: 0, value: "North" }])
@@ -181,7 +191,7 @@ describe("a workbook's draft", () => {
     const inserted = draftTable(insertRows(empty, "Regions", TABLE, 1, 2), "Regions", TABLE)
     expect(inserted.rows.map((row) => row[0])).toEqual(["North", "", "", "South", "Harbor"])
     // An added row's cells are marked once they hold something.
-    expect(cellEdited(inserted.rows[1], 0)).toBe(false)
+    expect(cellEdited(inserted, 1, 0)).toBe(false)
     const deleted = draftTable(deleteRows(empty, "Regions", TABLE, [0, 2]), "Regions", TABLE)
     expect(deleted.rows.map((row) => row[0])).toEqual(["South"])
     const grown = draftTable(
@@ -200,7 +210,7 @@ describe("a workbook's draft", () => {
     )
     expect(grown.header.at(-1)).toBe("Column 6")
     expect(grown.rows[3]).toEqual(["Coastal", "", "", "", "", "Rising"])
-    expect(cellEdited(grown.rows[3], 0)).toBe(true)
+    expect(cellEdited(grown, 3, 0)).toBe(true)
     expect(grown.rows[0]?.length).toBe(6)
   })
 
@@ -299,9 +309,13 @@ function EditedGrid({ sort }: { readonly sort?: boolean }) {
         ),
       deleteRows: (rows) =>
         setHistory((last) => recordDraft(last, deleteRows(last.present, "Regions", TABLE, rows))),
+      insertColumn: (at) =>
+        setHistory((last) => recordDraft(last, insertColumn(last.present, "Regions", TABLE, at))),
+      deleteColumn: () => null,
+      editColumn: () => {},
       undo: () => setHistory(undoDraft),
       redo: () => setHistory(redoDraft),
-      edited: (row, column) => cellEdited(table.rows[row], column),
+      edited: (row, column) => cellEdited(table, row, column),
     }),
     [model, table]
   )
@@ -423,6 +437,149 @@ describe("editing a sheet's cells", () => {
     expect(ui.text(1, 0)).toBe("North")
     expect(ui.text(1, 1)).toBe("100")
     ui.view.unmount()
+  })
+})
+
+describe("a sheet's columns, as edited", () => {
+  const charted = workbookSheet({
+    Visits: { type: "number" },
+    "Within SLA": { type: "percent" },
+    Share: { type: "percent", formula: "[@Visits]/SUM([Visits])" },
+  })
+  const workbook = {
+    sheets: [{ ...charted, widths: { Visits: 140 }, totals: { Visits: "sum" as const } }],
+    charts: [
+      {
+        name: "visits",
+        type: "bar" as const,
+        sheet: "Regions",
+        x: "Region",
+        y: ["Visits"],
+        line: [],
+        stacked: false,
+        title: "Visits by region",
+      },
+    ],
+  }
+  const read = (value: string, format: SheetColumnFormat) =>
+    parseCellInput(value, format, "en-US", { pasted: true })
+  const table = parseCsv("Region,Visits,Within SLA,Share\nNorth,1284,0.961,\nSouth,1107,0.918,\n")
+
+  test("renames a column in its width, total, the charts that plot it, and the formulas that read it", () => {
+    // Reproduce by renaming the header alone: the chart and the formula name a column gone.
+    const draft = setColumn(
+      startDraft(workbook),
+      "Regions",
+      table,
+      1,
+      { name: "Calls", format: { type: "number" }, total: "sum" },
+      read
+    )
+    if ("refused" in draft) throw new Error(draft.refused)
+    const sheet = draftSheet(draft, "Regions")
+    expect(draftTable(draft, "Regions", table).header).toEqual([
+      "Region",
+      "Calls",
+      "Within SLA",
+      "Share",
+    ])
+    expect(sheet?.widths).toEqual({ Calls: 140 })
+    expect(sheet?.totals).toEqual({ Calls: "sum" })
+    expect(sheet?.columns.Share?.formula).toBe("[@Calls]/SUM([Calls])")
+    expect(draft.workbook.charts[0]?.y).toEqual(["Calls"])
+    // The workbook is saved, as an author writes it, and reads back the same.
+    const files = draftFiles(draft)
+    const saved = parseWorkbook(files.get("workbook.json") ?? "")
+    expect(saved).toEqual({ workbook: draft.workbook })
+    expect(files.get("workbook.json")).toContain('"Calls": "number"')
+  })
+
+  test("refuses to delete a column a chart plots or a formula reads, naming which", () => {
+    expect(deleteColumn(startDraft(workbook), "Regions", table, 1)).toEqual({
+      refused: "charted",
+      by: "Visits by region",
+    })
+    const unplotted = { ...workbook, charts: [] }
+    expect(deleteColumn(startDraft(unplotted), "Regions", table, 1)).toEqual({
+      refused: "computed-from",
+      by: "Share",
+    })
+    const removed = deleteColumn(startDraft(unplotted), "Regions", table, 2)
+    if ("refused" in removed) throw new Error(removed.refused)
+    expect(draftTable(removed, "Regions", table).header).toEqual(["Region", "Visits", "Share"])
+  })
+
+  test("inserts a column without marking the cells it moves along", () => {
+    // Reproduce by comparing cells by index: every cell right of the new column reads as changed.
+    const inserted = draftTable(
+      insertColumn(startDraft(workbook), "Regions", table, 1),
+      "Regions",
+      table
+    )
+    expect(inserted.header).toEqual(["Region", "Column 5", "Visits", "Within SLA", "Share"])
+    expect([0, 1, 2, 3].map((column) => cellEdited(inserted, 0, column))).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ])
+  })
+
+  test("converts values to a new type, and refuses one they don't fit", () => {
+    const words = parseCsv("Region,Visits,Within SLA,Share\nNorth,1284,high,\nSouth,1107,0.918,\n")
+    // A percent that becomes a number keeps its values; one that reads as neither is refused.
+    const refused = setColumn(
+      startDraft(workbook),
+      "Regions",
+      words,
+      2,
+      { name: "Within SLA", format: { type: "number" } },
+      read
+    )
+    expect(refused).toEqual({ refused: "values", count: 1 })
+    const asText = setColumn(
+      startDraft(workbook),
+      "Regions",
+      table,
+      0,
+      { name: "Region", format: { type: "date" } },
+      read
+    )
+    expect(asText).toEqual({ refused: "values", count: 2 })
+  })
+
+  test("computes a column from a formula, and keeps what it computed when the formula goes", () => {
+    const computed = setColumn(
+      startDraft(workbook),
+      "Regions",
+      table,
+      2,
+      { name: "Within SLA", format: { type: "number", formula: "[@Visits]*2" } },
+      read
+    )
+    if ("refused" in computed) throw new Error(computed.refused)
+    expect(draftTable(computed, "Regions", table).rows.map((row) => row[2])).toEqual(["", ""])
+    const kept = setColumn(
+      computed,
+      "Regions",
+      table,
+      2,
+      { name: "Within SLA", format: { type: "number" } },
+      read
+    )
+    if ("refused" in kept) throw new Error(kept.refused)
+    expect(draftTable(kept, "Regions", table).rows.map((row) => row[2])).toEqual(["2568", "2214"])
+    // A formula that reads a column the sheet lacks, or computes text into a number, is refused.
+    expect(
+      setColumn(
+        startDraft(workbook),
+        "Regions",
+        table,
+        2,
+        { name: "Within SLA", format: { type: "number", formula: "[@Region]" } },
+        read
+      )
+    ).toEqual({ refused: "formula-type", computes: "text" })
   })
 })
 
