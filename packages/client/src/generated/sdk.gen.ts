@@ -29,6 +29,9 @@ import type {
   CaptureActivityData,
   CaptureActivityErrors,
   CaptureActivityResponses,
+  ClearArtifactStateData,
+  ClearArtifactStateErrors,
+  ClearArtifactStateResponses,
   CompleteFileUploadData,
   CompleteFileUploadErrors,
   CompleteFileUploadResponses,
@@ -71,6 +74,9 @@ import type {
   DeleteArtifactData,
   DeleteArtifactErrors,
   DeleteArtifactResponses,
+  DeleteArtifactStateValueData,
+  DeleteArtifactStateValueErrors,
+  DeleteArtifactStateValueResponses,
   DisableAuthServiceAccountData,
   DisableAuthServiceAccountErrors,
   DisableAuthServiceAccountResponses,
@@ -136,6 +142,9 @@ import type {
   GetArtifactFileContentErrors,
   GetArtifactFileContentResponses,
   GetArtifactResponses,
+  GetArtifactStateData,
+  GetArtifactStateErrors,
+  GetArtifactStateResponses,
   GetArtifactVersionData,
   GetArtifactVersionErrors,
   GetArtifactVersionResponses,
@@ -427,6 +436,9 @@ import type {
   SelectConnectorConnectionRunAccountData,
   SelectConnectorConnectionRunAccountErrors,
   SelectConnectorConnectionRunAccountResponses,
+  SetArtifactStateData,
+  SetArtifactStateErrors,
+  SetArtifactStateResponses,
   SignFileUploadPartData,
   SignFileUploadPartErrors,
   SignFileUploadPartResponses,
@@ -2779,6 +2791,87 @@ export const getArtifact = <ThrowOnError extends boolean = false>(
     ],
     url: "/api/artifacts/{artifactId}",
     ...options,
+  })
+
+/**
+ * Reset what a page keeps
+ *
+ * Deletes every value the artifact keeps for the caller.
+ */
+export const clearArtifactState = <ThrowOnError extends boolean = false>(
+  options: Options<ClearArtifactStateData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<
+    ClearArtifactStateResponses,
+    ClearArtifactStateErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/state",
+    ...options,
+  })
+
+/**
+ * Read what a page keeps
+ *
+ * Every value the artifact keeps for the caller as its reader, as a page keeps it with sixb.state, across its versions.
+ */
+export const getArtifactState = <ThrowOnError extends boolean = false>(
+  options: Options<GetArtifactStateData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetArtifactStateResponses, GetArtifactStateErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/state",
+    ...options,
+  })
+
+/**
+ * Delete a value a page keeps
+ */
+export const deleteArtifactStateValue = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteArtifactStateValueData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<
+    DeleteArtifactStateValueResponses,
+    DeleteArtifactStateValueErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/state/{key}",
+    ...options,
+  })
+
+/**
+ * Keep a value for a page
+ *
+ * Keeps a JSON value under the key for the caller, replacing one there. Refused with 413 state_full past the limits.
+ */
+export const setArtifactState = <ThrowOnError extends boolean = false>(
+  options: Options<SetArtifactStateData, ThrowOnError>
+) =>
+  (options.client ?? client).put<SetArtifactStateResponses, SetArtifactStateErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/artifacts/{artifactId}/state/{key}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**

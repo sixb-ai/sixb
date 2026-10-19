@@ -1,4 +1,4 @@
-import { ARTIFACT_KINDS } from "@sixb/core/artifacts"
+import { ARTIFACT_KINDS, ARTIFACT_STATE_LIMITS } from "@sixb/core/artifacts"
 import { z } from "zod"
 import { ErrorResponseSchema, PrincipalSchema } from "./common"
 import { FileRefSchema } from "./files"
@@ -171,6 +171,41 @@ export const PublishedArtifactResponseSchema = z.object({
 
 export const DeleteArtifactResponseSchema = z.object({ deleted: z.literal(true) })
 
+export const ArtifactStateParamsSchema = ArtifactParamsSchema.extend({
+  key: z
+    .string()
+    .min(1)
+    .max(ARTIFACT_STATE_LIMITS.maxKeyLength)
+    .describe("The key a page keeps the value under, such as filters"),
+})
+
+const ArtifactStateEntrySchema = z.object({
+  key: z.string(),
+  value: z.unknown().describe("The JSON value"),
+  updatedAt: z.string(),
+})
+
+export const ArtifactStateResponseSchema = z.object({
+  entries: z.array(ArtifactStateEntrySchema).describe("By key, in order"),
+})
+
+export const SetArtifactStateBodySchema = z.object({
+  value: z
+    .unknown()
+    .refine((value) => value !== undefined, "A value is required.")
+    .describe(
+      `Any JSON value: at most ${ARTIFACT_STATE_LIMITS.maxValueBytes / 1024} KB written out, within ${ARTIFACT_STATE_LIMITS.maxKeys} keys and ${ARTIFACT_STATE_LIMITS.maxBytes / 1024 / 1024} MB for each reader`
+    ),
+})
+
+export const SetArtifactStateResponseSchema = ArtifactStateEntrySchema
+
+export const DeleteArtifactStateResponseSchema = z.object({ deleted: z.boolean() })
+
+export const ClearArtifactStateResponseSchema = z.object({
+  cleared: z.number().int().describe("How many values were deleted"),
+})
+
 export const ArtifactFrameResponseSchema = z.object({
   path: z
     .string()
@@ -185,7 +220,7 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
     .string()
     .optional()
     .describe(
-      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
     ),
   latest: z
     .object({ version: z.number().int(), author: PrincipalSchema })

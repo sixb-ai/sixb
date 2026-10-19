@@ -440,6 +440,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("067-activity-timeline", activityTimelineSql),
     pgSql("068-activity-interactions", activityInteractionsSql),
     pgSql("069-artifact-kinds", artifactKindsSql),
+    pgSql("070-artifact-state", artifactStateSql),
   ],
 })
 
@@ -483,3 +484,4 @@ import activityInteractionsSql from "./migrations/068-activity-interactions.sql"
   type: "text",
 }
 import artifactKindsSql from "./migrations/069-artifact-kinds.sql" with { type: "text" }
+import artifactStateSql from "./migrations/070-artifact-state.sql" with { type: "text" }

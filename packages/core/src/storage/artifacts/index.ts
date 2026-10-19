@@ -10,6 +10,9 @@ export type {
   ArtifactOutline,
   ArtifactRecord,
   ArtifactReference,
+  ArtifactStateEntry,
+  ArtifactStateKeyInput,
+  ArtifactStateScope,
   ArtifactStorage,
   ArtifactVersionInput,
   ArtifactVersionRecord,
@@ -27,4 +30,5 @@ export type {
   ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
+  SetArtifactStateInput,
 } from "./types"

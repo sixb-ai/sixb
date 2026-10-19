@@ -1,9 +1,12 @@
-import { principalsEqual } from "../../auth"
+import { type Principal, principalsEqual } from "../../auth"
 import { paginate } from "../pagination"
-import { artifactStorageErrors } from "./record"
+import { artifactStateBytes, artifactStorageErrors, checkArtifactStateWrite } from "./record"
 import type {
   ArtifactFrameGrantRecord,
   ArtifactRecord,
+  ArtifactStateEntry,
+  ArtifactStateKeyInput,
+  ArtifactStateScope,
   ArtifactStorage,
   ArtifactVersionInput,
   ArtifactVersionRecord,
@@ -21,6 +24,7 @@ import type {
   ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
+  SetArtifactStateInput,
 } from "./types"
 
 interface StoredArtifact {
@@ -34,11 +38,14 @@ interface StoredArtifact {
 interface InMemoryArtifactSnapshot {
   readonly artifacts: ReadonlyMap<string, StoredArtifact>
   readonly frameGrants: ReadonlyMap<string, ArtifactFrameGrantRecord>
+  readonly state: ReadonlyMap<string, ReadonlyMap<string, ArtifactStateEntry>>
 }
 
 export class InMemoryArtifactStorage implements ArtifactStorage {
   private artifacts = new Map<string, StoredArtifact>()
   private frameGrants = new Map<string, ArtifactFrameGrantRecord>()
+  /** By artifact and reader, then by key. */
+  private state = new Map<string, Map<string, ArtifactStateEntry>>()
 
   async create(input: CreateArtifactInput): Promise<PublishedArtifactVersion> {
     const key = artifactKey(input.projectId, input.id)
@@ -174,6 +181,51 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     return deleted
   }
 
+  async getState(input: ArtifactStateKeyInput): Promise<ArtifactStateEntry | null> {
+    const entry = this.state.get(stateKey(input))?.get(input.key)
+    return entry ? structuredClone(entry) : null
+  }
+
+  async setState(input: SetArtifactStateInput): Promise<void> {
+    if (!this.artifacts.has(artifactKey(input.projectId, input.artifactId))) {
+      throw artifactStorageErrors.notFound(input.artifactId)
+    }
+    const kept = this.state.get(stateKey(input)) ?? new Map<string, ArtifactStateEntry>()
+    const others = [...kept.values()].filter((entry) => entry.key !== input.key)
+    const sizeBytes = artifactStateBytes(input.value)
+    checkArtifactStateWrite({
+      key: input.key,
+      valueBytes: sizeBytes,
+      others: {
+        keys: others.length,
+        bytes: others.reduce((total, entry) => total + entry.sizeBytes, 0),
+      },
+    })
+    kept.set(input.key, {
+      key: input.key,
+      value: input.value,
+      sizeBytes,
+      updatedAt: new Date(input.updatedAt),
+    })
+    this.state.set(stateKey(input), kept)
+  }
+
+  async deleteState(input: ArtifactStateKeyInput): Promise<boolean> {
+    return this.state.get(stateKey(input))?.delete(input.key) ?? false
+  }
+
+  async listState(input: ArtifactStateScope): Promise<ArtifactStateEntry[]> {
+    const kept = [...(this.state.get(stateKey(input))?.values() ?? [])]
+    // Code-unit order, as SQLite compares text.
+    return structuredClone(kept.sort((left, right) => (left.key < right.key ? -1 : 1)))
+  }
+
+  async clearState(input: ArtifactStateScope): Promise<number> {
+    const count = this.state.get(stateKey(input))?.size ?? 0
+    this.state.delete(stateKey(input))
+    return count
+  }
+
   async delete(input: DeleteArtifactInput): Promise<boolean> {
     return this.deleteArtifact(artifactKey(input.projectId, input.id))
   }
@@ -205,19 +257,30 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
   }
 
   snapshot(): InMemoryArtifactSnapshot {
-    return structuredClone({ artifacts: this.artifacts, frameGrants: this.frameGrants })
+    return structuredClone({
+      artifacts: this.artifacts,
+      frameGrants: this.frameGrants,
+      state: this.state,
+    })
   }
 
   restore(snapshot: InMemoryArtifactSnapshot): void {
     const restored = structuredClone(snapshot)
     this.artifacts = new Map(restored.artifacts)
     this.frameGrants = new Map(restored.frameGrants)
+    this.state = new Map([...restored.state].map(([key, kept]) => [key, new Map(kept)]))
   }
 
-  /** Deletes an artifact with its frame grants, as the SQL providers' cascade does. */
+  /**
+   * Deletes an artifact with its frame grants and what it keeps for its readers, as the SQL
+   * providers' cascade does.
+   */
   private deleteArtifact(key: string): boolean {
     for (const [grantKey, grant] of this.frameGrants) {
       if (artifactKey(grant.projectId, grant.artifactId) === key) this.frameGrants.delete(grantKey)
+    }
+    for (const kept of this.state.keys()) {
+      if (kept.startsWith(`${key}\0`)) this.state.delete(kept)
     }
     return this.artifacts.delete(key)
   }
@@ -241,6 +304,15 @@ function published(
 
 function artifactKey(projectId: string, id: string): string {
   return `${projectId}\0${id}`
+}
+
+/** An artifact's key, then its reader's. */
+function stateKey(scope: {
+  readonly projectId: string
+  readonly artifactId: string
+  readonly principal: Principal
+}): string {
+  return `${artifactKey(scope.projectId, scope.artifactId)}\0${scope.principal.type}\0${scope.principal.id}`
 }
 
 /** Whether an address names the artifact `artifact:<id>` is, at any version, file, or part. */

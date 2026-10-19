@@ -11713,7 +11713,7 @@ export type ListArtifactsErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -11733,7 +11733,7 @@ export type ListArtifactsErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -11810,7 +11810,7 @@ export type CreateArtifactErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -11830,7 +11830,7 @@ export type CreateArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -11850,7 +11850,7 @@ export type CreateArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -11870,7 +11870,7 @@ export type CreateArtifactErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -11890,7 +11890,7 @@ export type CreateArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -12037,7 +12037,7 @@ export type DeleteArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -12057,7 +12057,7 @@ export type DeleteArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -12102,7 +12102,7 @@ export type GetArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -12122,7 +12122,7 @@ export type GetArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -12179,6 +12179,360 @@ export type GetArtifactResponses = {
 
 export type GetArtifactResponse = GetArtifactResponses[keyof GetArtifactResponses]
 
+export type ClearArtifactStateData = {
+  body?: never
+  path: {
+    artifactId: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/state"
+}
+
+export type ClearArtifactStateErrors = {
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type ClearArtifactStateError = ClearArtifactStateErrors[keyof ClearArtifactStateErrors]
+
+export type ClearArtifactStateResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    /**
+     * How many values were deleted
+     */
+    cleared: number
+  }
+}
+
+export type ClearArtifactStateResponse =
+  ClearArtifactStateResponses[keyof ClearArtifactStateResponses]
+
+export type GetArtifactStateData = {
+  body?: never
+  path: {
+    artifactId: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/state"
+}
+
+export type GetArtifactStateErrors = {
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type GetArtifactStateError = GetArtifactStateErrors[keyof GetArtifactStateErrors]
+
+export type GetArtifactStateResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    /**
+     * By key, in order
+     */
+    entries: Array<{
+      key: string
+      /**
+       * The JSON value
+       */
+      value?: unknown
+      updatedAt: string
+    }>
+  }
+}
+
+export type GetArtifactStateResponse = GetArtifactStateResponses[keyof GetArtifactStateResponses]
+
+export type DeleteArtifactStateValueData = {
+  body?: never
+  path: {
+    artifactId: string
+    /**
+     * The key a page keeps the value under, such as filters
+     */
+    key: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/state/{key}"
+}
+
+export type DeleteArtifactStateValueErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type DeleteArtifactStateValueError =
+  DeleteArtifactStateValueErrors[keyof DeleteArtifactStateValueErrors]
+
+export type DeleteArtifactStateValueResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    deleted: boolean
+  }
+}
+
+export type DeleteArtifactStateValueResponse =
+  DeleteArtifactStateValueResponses[keyof DeleteArtifactStateValueResponses]
+
+export type SetArtifactStateData = {
+  body: {
+    /**
+     * Any JSON value: at most 64 KB written out, within 100 keys and 1 MB for each reader
+     */
+    value: unknown
+  }
+  path: {
+    artifactId: string
+    /**
+     * The key a page keeps the value under, such as filters
+     */
+    key: string
+  }
+  query?: never
+  url: "/api/artifacts/{artifactId}/state/{key}"
+}
+
+export type SetArtifactStateErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 413
+   */
+  413: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
+     */
+    code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type SetArtifactStateError = SetArtifactStateErrors[keyof SetArtifactStateErrors]
+
+export type SetArtifactStateResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    key: string
+    /**
+     * The JSON value
+     */
+    value?: unknown
+    updatedAt: string
+  }
+}
+
+export type SetArtifactStateResponse = SetArtifactStateResponses[keyof SetArtifactStateResponses]
+
 export type PublishArtifactVersionData = {
   body: {
     kind: "document" | "sheet" | "slides" | "page" | "canvas" | "file"
@@ -12219,7 +12573,7 @@ export type PublishArtifactVersionErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -12239,7 +12593,7 @@ export type PublishArtifactVersionErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -12259,7 +12613,7 @@ export type PublishArtifactVersionErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -12279,7 +12633,7 @@ export type PublishArtifactVersionErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -12299,7 +12653,7 @@ export type PublishArtifactVersionErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -12452,7 +12806,7 @@ export type CreateArtifactFrameErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -12472,7 +12826,7 @@ export type CreateArtifactFrameErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -12492,7 +12846,7 @@ export type CreateArtifactFrameErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -12549,7 +12903,7 @@ export type GetArtifactVersionErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**
@@ -12569,7 +12923,7 @@ export type GetArtifactVersionErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable.
      */
     code?: string
     /**

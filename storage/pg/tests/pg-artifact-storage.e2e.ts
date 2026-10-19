@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { ARTIFACT_STATE_LIMITS } from "@sixb/core/artifacts"
 import type { ArtifactVersionInput } from "@sixb/core/storage"
 import { runArtifactStorageContractSuite } from "@sixb/core/testing"
 import { PostgresStorage } from "../src"
@@ -119,6 +120,55 @@ describe("PgArtifactStorage under concurrent writes", () => {
     } finally {
       await other.close()
       await disposeTestStorage(storage)
+    }
+  })
+
+  test("of two values written at once that only fit one at a time, one is kept", async () => {
+    // Reproduce by dropping the advisory lock from `setState`: both writes count the reader's
+    // other values before either lands, and both are kept, past the limit.
+    const { storage, schemaName, connectionString } = await createTestStorage()
+    const other = new PostgresStorage({
+      connectionString,
+      schemaName,
+      max: 2,
+    })
+    try {
+      await storage.artifacts.create({
+        projectId,
+        id: "art_planner",
+        kind: "document",
+        owner,
+        version: version("run_1", 0),
+      })
+      const reader = { projectId, artifactId: "art_planner", principal: owner }
+      const value = JSON.stringify("x".repeat(ARTIFACT_STATE_LIMITS.maxValueBytes - 2))
+      // Fifteen values of 64 KB, so one more fits and two do not.
+      for (let index = 0; index < 15; index++) {
+        await storage.artifacts.setState({
+          ...reader,
+          key: `k${index}`,
+          value,
+          updatedAt: new Date(),
+        })
+      }
+      let second: Promise<void> | undefined
+      const first = storage.transaction(async (tx) => {
+        await tx.artifacts?.setState({ ...reader, key: "a", value, updatedAt: new Date() })
+        second = other.artifacts.setState({ ...reader, key: "b", value, updatedAt: new Date() })
+        await Bun.sleep(300)
+      })
+      await first
+      const refused = await (second as Promise<void>).then(
+        () => null,
+        (error: unknown) => error
+      )
+      expect(refused).toMatchObject({ name: "ArtifactStorageError", code: "artifact_state_full" })
+      expect((await storage.artifacts.listState(reader)).map((entry) => entry.key)).toContain("a")
+      expect(await storage.artifacts.listState(reader)).toHaveLength(16)
+    } finally {
+      await other.close()
+      await storage.dropSchema()
+      await storage.close()
     }
   })
 })

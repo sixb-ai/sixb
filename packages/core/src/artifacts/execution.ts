@@ -2,6 +2,7 @@ import { type Principal, principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
 import type { BlobStorage } from "../blob-storage/types"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
+import { ArtifactStorageError } from "../storage/artifacts/errors"
 import type {
   ArtifactFile,
   ArtifactRecord,
@@ -12,6 +13,7 @@ import type {
 } from "../storage/artifacts/types"
 import { ArtifactRequestError } from "./errors"
 import type { ArtifactKind } from "./kinds"
+import { ARTIFACT_STATE_LIMITS } from "./limits"
 import { type PublishedArtifact, publishArtifact } from "./publish/publish"
 
 /** A version's content: what its kind renders from, and what it is called. */
@@ -59,6 +61,35 @@ export interface ArtifactsRuntime {
   ): Promise<ListArtifactVersionsResult | null>
   /** Deletes the artifact with every version. `false` when it is not the caller's. */
   delete(artifactId: string): Promise<boolean>
+  /**
+   * What the artifact keeps for the caller as its reader, as a page keeps it with `sixb.state`:
+   * JSON values by key, across its versions. Each call throws `artifact_not_found` when the
+   * artifact is not the caller's.
+   */
+  state(artifactId: string): ArtifactStateRuntime
+}
+
+/** One reader's values, kept by one artifact. */
+export interface ArtifactStateRuntime {
+  /** The value under the key, or undefined when there is none. */
+  get(key: string): Promise<unknown>
+  /**
+   * Keeps a JSON value under the key, replacing one there. Throws `invalid_state` for a key or a
+   * value that is not one, and `state_full` past `ARTIFACT_STATE_LIMITS`. Returns what it kept.
+   */
+  set(key: string, value: unknown): Promise<ArtifactStateValue>
+  /** `false` when there was no value under the key. */
+  delete(key: string): Promise<boolean>
+  /** Every value, by key in order. */
+  entries(): Promise<ArtifactStateValue[]>
+  /** Deletes every value, and returns how many. */
+  clear(): Promise<number>
+}
+
+export interface ArtifactStateValue {
+  readonly key: string
+  readonly value: unknown
+  readonly updatedAt: Date
 }
 
 export function createArtifactsRuntime(
@@ -150,7 +181,84 @@ export function createArtifactsRuntime(
       if (!(await getVisible(artifactId))) return false
       return requireStorage().delete({ projectId: runtime.projectId, id: artifactId })
     },
+
+    state(artifactId) {
+      // The reader is the caller; the artifact must be one they can open.
+      const scope = async () => {
+        const principal = requireCaller()
+        if (!(await getVisible(artifactId))) throw notFound(artifactId)
+        return { projectId: runtime.projectId, artifactId, principal }
+      }
+      return {
+        async get(key) {
+          const entry = await requireStorage().getState({ ...(await scope()), key: stateKey(key) })
+          return entry ? JSON.parse(entry.value) : undefined
+        },
+        async set(key, value) {
+          const at = { ...(await scope()), key: stateKey(key) }
+          const text = stateValue(value)
+          const updatedAt = new Date()
+          try {
+            await requireStorage().setState({ ...at, value: text, updatedAt })
+          } catch (error) {
+            if (error instanceof ArtifactStorageError && error.code === "artifact_state_full") {
+              throw new ArtifactRequestError("state_full", error.message)
+            }
+            throw error
+          }
+          // As read back: what JSON keeps of it.
+          return { key: at.key, value: JSON.parse(text), updatedAt }
+        },
+        async delete(key) {
+          return requireStorage().deleteState({ ...(await scope()), key: stateKey(key) })
+        },
+        async entries() {
+          const entries = await requireStorage().listState(await scope())
+          return entries.map((entry) => ({
+            key: entry.key,
+            value: JSON.parse(entry.value),
+            updatedAt: entry.updatedAt,
+          }))
+        },
+        async clear() {
+          return requireStorage().clearState(await scope())
+        },
+      }
+    },
   }
+}
+
+/** A key a page names a value by: a short line of text. */
+function stateKey(key: string): string {
+  if (
+    typeof key !== "string" ||
+    key.length === 0 ||
+    key.length > ARTIFACT_STATE_LIMITS.maxKeyLength ||
+    /\p{Cc}/u.test(key)
+  ) {
+    throw new ArtifactRequestError(
+      "invalid_state",
+      `[Sixb] A key is 1 to ${ARTIFACT_STATE_LIMITS.maxKeyLength} characters on one line, such as "filters".`
+    )
+  }
+  return key
+}
+
+/** A value as JSON text, refused when JSON has no way to write it. */
+function stateValue(value: unknown): string {
+  let text: string | undefined
+  try {
+    text = JSON.stringify(value)
+  } catch {
+    text = undefined
+  }
+  if (text === undefined) {
+    throw new ArtifactRequestError(
+      "invalid_state",
+      "[Sixb] A page keeps JSON values: text, numbers, true and false, null, lists, and objects of them."
+    )
+  }
+  return text
 }
 
 function notFound(artifactId: string): ArtifactRequestError {

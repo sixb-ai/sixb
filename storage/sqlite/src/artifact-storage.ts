@@ -1,13 +1,19 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite"
 import {
+  artifactStateBytes,
   artifactStorageErrors,
+  checkArtifactStateWrite,
   parseArtifactFrameGrantRow,
   parseArtifactRow,
+  parseArtifactStateRow,
   parseArtifactVersionRow,
 } from "@sixb/core/internal/storage"
 import type {
   ArtifactFrameGrantRecord,
   ArtifactRecord,
+  ArtifactStateEntry,
+  ArtifactStateKeyInput,
+  ArtifactStateScope,
   ArtifactStorage,
   ArtifactVersionInput,
   ArtifactVersionRecord,
@@ -25,6 +31,7 @@ import type {
   ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
+  SetArtifactStateInput,
 } from "@sixb/core/storage"
 import { runImmediateTransaction, type SqliteStoreConnection } from "./transactions"
 
@@ -44,6 +51,15 @@ const FRAME_GRANT_COLUMNS = `
   project_id AS projectId, token_hash AS tokenHash, artifact_id AS artifactId, version, targets,
   created_at AS createdAt, expires_at AS expiresAt
 `
+
+const STATE_COLUMNS = "key, value, size_bytes AS sizeBytes, updated_at AS updatedAt"
+
+/** One reader of one artifact: the bindings that follow `STATE_SCOPE`. */
+const STATE_SCOPE = "project_id = ? AND artifact_id = ? AND principal_type = ? AND principal_id = ?"
+
+function stateScope(input: ArtifactStateScope): SQLQueryBindings[] {
+  return [input.projectId, input.artifactId, input.principal.type, input.principal.id]
+}
 
 type Row = Record<string, unknown>
 
@@ -286,8 +302,65 @@ export class SqliteArtifactStorage implements ArtifactStorage {
       .run(input.projectId, input.expiredBefore.toISOString(), input.limit).changes
   }
 
+  async getState(input: ArtifactStateKeyInput): Promise<ArtifactStateEntry | null> {
+    const row = this.db
+      .query(`SELECT ${STATE_COLUMNS} FROM artifact_state WHERE ${STATE_SCOPE} AND key = ?`)
+      .get(...stateScope(input), input.key) as Row | null
+    return row ? parseArtifactStateRow(row) : null
+  }
+
+  async setState(input: SetArtifactStateInput): Promise<void> {
+    runImmediateTransaction(this.db, () => {
+      const artifact = this.db
+        .query("SELECT 1 FROM artifacts WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.artifactId)
+      if (!artifact) throw artifactStorageErrors.notFound(input.artifactId)
+      // In the write transaction: two writes at once cannot both fit under the limits.
+      const others = this.db
+        .query(
+          `SELECT count(*) AS keys, coalesce(sum(size_bytes), 0) AS bytes FROM artifact_state
+           WHERE ${STATE_SCOPE} AND key <> ?`
+        )
+        .get(...stateScope(input), input.key) as { readonly keys: number; readonly bytes: number }
+      const sizeBytes = artifactStateBytes(input.value)
+      checkArtifactStateWrite({ key: input.key, valueBytes: sizeBytes, others })
+      this.db
+        .query(
+          `INSERT INTO artifact_state (
+            project_id, artifact_id, principal_type, principal_id, key, value, size_bytes,
+            updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (project_id, artifact_id, principal_type, principal_id, key) DO UPDATE SET
+            value = excluded.value, size_bytes = excluded.size_bytes,
+            updated_at = excluded.updated_at`
+        )
+        .run(...stateScope(input), input.key, input.value, sizeBytes, input.updatedAt.toISOString())
+    })
+  }
+
+  async deleteState(input: ArtifactStateKeyInput): Promise<boolean> {
+    return (
+      this.db
+        .query(`DELETE FROM artifact_state WHERE ${STATE_SCOPE} AND key = ?`)
+        .run(...stateScope(input), input.key).changes > 0
+    )
+  }
+
+  async listState(input: ArtifactStateScope): Promise<ArtifactStateEntry[]> {
+    const rows = this.db
+      .query(`SELECT ${STATE_COLUMNS} FROM artifact_state WHERE ${STATE_SCOPE} ORDER BY key`)
+      .all(...stateScope(input)) as Row[]
+    return rows.map(parseArtifactStateRow)
+  }
+
+  async clearState(input: ArtifactStateScope): Promise<number> {
+    return this.db
+      .query(`DELETE FROM artifact_state WHERE ${STATE_SCOPE}`)
+      .run(...stateScope(input)).changes
+  }
+
   async delete(input: DeleteArtifactInput): Promise<boolean> {
-    // Versions and frame grants go with the artifact through ON DELETE CASCADE.
+    // Versions, frame grants, and state go with the artifact through ON DELETE CASCADE.
     return (
       this.db
         .query("DELETE FROM artifacts WHERE project_id = ? AND id = ?")

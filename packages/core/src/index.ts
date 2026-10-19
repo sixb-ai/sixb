@@ -907,6 +907,8 @@ export type { ArtifactRequestErrorCode } from "./artifacts/errors"
 export { ArtifactRequestError } from "./artifacts/errors"
 export type {
   ArtifactContentInput,
+  ArtifactStateRuntime,
+  ArtifactStateValue,
   ArtifactsRuntime,
   ListArtifactsRuntimeInput,
   PublishArtifactRuntimeInput,

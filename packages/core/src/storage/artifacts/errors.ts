@@ -5,6 +5,7 @@ export type ArtifactStorageErrorCode =
   | "artifact_not_found"
   | "artifact_kind_mismatch"
   | "artifact_moved"
+  | "artifact_state_full"
 
 /** The version an artifact had moved on to, and who published it, when a publish found it moved. */
 export interface ArtifactLatestVersion {
