@@ -35,11 +35,11 @@ repository and issue APIs. Organization people APIs require `Members: read`. Pub
 and public organization membership can be queried without that organization permission, but private
 membership visibility depends on the authenticated user's organization access.
 
-## Workspace authentication
+## Sandbox access
 
-`@sixb/connector-github/auth` provides `githubApp({ appId, privateKey })` for
+`@sixb/connector-github/sandbox` provides `githubApp({ appId, privateKey })` for
 the sandbox factory's `auth` option. It is separate from the token-based REST connector; no connector
-registration is required. See [sandbox configuration](../../docs/agents/defining-agents.md#sandbox-configuration).
+registration is required. See [repository authentication](../../docs/sandboxes/overview.md#repository-authentication).
 
 Set up the GitHub App once:
 

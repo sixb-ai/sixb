@@ -93,7 +93,7 @@ For private GitHub repositories, authenticate with a GitHub App:
 Then configure host-side authentication on the Vercel factory:
 
 ```ts
-import { githubApp } from "@sixb/connector-github/auth"
+import { githubApp } from "@sixb/connector-github/sandbox"
 import { VercelSandboxFactory } from "@sixb/sandboxes-vercel"
 
 const factory = new VercelSandboxFactory({
