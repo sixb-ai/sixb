@@ -25,6 +25,7 @@ import {
   useState,
 } from "react"
 import { useArtifactMessages } from "../../messages"
+import { CellEditor, type CommitMove } from "./cell-editor"
 import {
   CellContent,
   columnTypeLabel,
@@ -35,6 +36,7 @@ import {
   TotalCell,
 } from "./cells"
 import { CONTEXT_PARTS, type ColumnActions, ColumnMenu, ColumnMenuItems } from "./column-menu"
+import type { CellEdit } from "./draft"
 import { filteredOrder } from "./filter"
 import { FilterPanel } from "./filter-panel"
 import { findMatches } from "./find"
@@ -42,6 +44,7 @@ import { modulo, type SheetFind, type SheetFindCount } from "./find-bar"
 import { elementTextMeasure, fitWidth, type TextMeasure } from "./fit"
 import { cellFormatter, type FormattedCell, numberFormat } from "./format"
 import { cellHighlight, highlightRanges } from "./highlight"
+import type { CellInput, CellInputError } from "./input"
 import type { SheetColumn, SheetModel } from "./model"
 import {
   type CellPoint,
@@ -98,11 +101,31 @@ export interface SheetGridStatus {
 }
 
 /**
- * A read-only spreadsheet grid: column letters and row numbers, the header row and any frozen rows
- * and columns kept in view, a menu on each column's letter and on a right-click that sorts,
- * filters, fits, freezes, and hides it, filter buttons on the headers in filter mode, and a
- * selection of cells, rows, or columns by pointer, Shift, and keyboard that copies as TSV and as a
- * table. Only the cells in view are drawn, so a sheet of 100,000 rows scrolls like a short one.
+ * Editing a sheet in place: which columns take input, how what the reader types is read and shown,
+ * and where the values go. Rows are the model's data rows, from 0.
+ */
+export interface SheetGridEditor {
+  /** Whether a column's cells take input; a computed column's don't. */
+  readonly editable: (column: number) => boolean
+  /** A stored value as the reader types it back. */
+  readonly inputText: (column: number, raw: string) => string
+  /** What a column's cell stores from what the reader typed, or why it can't. */
+  readonly read: (column: number, text: string) => CellInput
+  readonly write: (edits: readonly CellEdit[]) => void
+  /** Whether a cell holds a value the edit changed. */
+  readonly edited: (row: number, column: number) => boolean
+  /** Values to offer while typing into a column, such as its tags. */
+  readonly suggestions?: (column: number) => readonly string[]
+}
+
+/**
+ * A spreadsheet grid: column letters and row numbers, the header row and any frozen rows and
+ * columns kept in view, a menu on each column's letter and on a right-click that sorts, filters,
+ * fits, freezes, and hides it, filter buttons on the headers in filter mode, and a selection of
+ * cells, rows, or columns by pointer, Shift, and keyboard that copies as TSV and as a table. Only
+ * the cells in view are drawn, so a sheet of 100,000 rows scrolls like a short one. Given an
+ * editor, its cells take input: typing, Enter, F2, or a double-click edits one, Delete clears the
+ * selection, and Space or a click toggles a checkbox.
  */
 export function SheetGrid({
   model,
@@ -115,6 +138,7 @@ export function SheetGrid({
   view: viewProp,
   onViewChange,
   goTo,
+  editor,
   className,
 }: {
   readonly model: SheetModel
@@ -132,6 +156,8 @@ export function SheetGrid({
   readonly selected?: CellRange
   /** A range to go to, as the name box names one; each new `seq` goes there again. */
   readonly goTo?: { readonly range: CellRange; readonly seq: number }
+  /** Edits the sheet's cells; without it, the grid is read-only. */
+  readonly editor?: SheetGridEditor
   readonly className?: string
 }) {
   const messages = useArtifactMessages().sheet
@@ -172,10 +198,42 @@ export function SheetGrid({
   const textWidths = useRef(new Map<string, number>())
 
   const sorted = useMemo(() => sortedOrder(model, sort, locale), [model, sort, locale])
-  const order = useMemo(
+  const computedOrder = useMemo(
     () => filteredOrder(model, sorted, view.filters, locale),
     [model, sorted, view.filters, locale]
   )
+  // While the sheet is edited, rows keep their places as their values change, as a spreadsheet's
+  // do: the sort and filters apply again when they change, or when rows come or go.
+  const held = useRef<HeldOrder | null>(null)
+  let order = computedOrder
+  if (editor) {
+    const last = held.current
+    if (
+      last &&
+      last.sort === sort &&
+      last.filters === view.filters &&
+      last.locale === locale &&
+      last.rows === model.rows.length
+    ) {
+      order = last.order
+    } else {
+      held.current = {
+        sort,
+        filters: view.filters,
+        locale,
+        rows: model.rows.length,
+        order: computedOrder,
+      }
+    }
+  } else held.current = null
+  /** The cell being typed into: what's typed so far, and why it can't be stored when it can't. */
+  const [editing, setEditing] = useState<{
+    readonly point: CellPoint
+    readonly text: string
+    readonly error?: CellInputError
+  } | null>(null)
+  const typedText = editing?.text
+  const typedAt = editing?.point
   /** The column whose filter is open. */
   const [filtering, setFiltering] = useState<number | null>(null)
   /** What the reader right-clicked, which decides what the context menu offers. */
@@ -280,20 +338,38 @@ export function SheetGrid({
         ? (model.columns[focus.column]?.name ?? "")
         : (model.rows[order[focus.row - 1] ?? -1]?.[focus.column] ?? "")
     const cell = focus.row === 0 ? null : formatters[focus.column]?.(raw)
-    // A computed cell shows its formula, as a spreadsheet's formula bar does.
+    // A computed cell shows its formula, as a spreadsheet's formula bar does; a cell being typed
+    // into, what's typed.
     const formula = focus.row === 0 ? undefined : model.columns[focus.column]?.format.formula
+    const typed =
+      typedText !== undefined && typedAt?.row === focus.row && typedAt.column === focus.column
+        ? typedText
+        : undefined
     onStatusChange?.({
       range,
       stats: rangeStats(range, model, order, hidden),
       column: model.columns[focus.column],
-      value: formula
-        ? `=${formula}`
-        : cell
-          ? (cell.href ?? cell.reference ?? cell.image ?? cell.text)
-          : raw,
+      value:
+        typed ??
+        (formula
+          ? `=${formula}`
+          : cell
+            ? (cell.href ?? cell.reference ?? cell.image ?? cell.text)
+            : raw),
       rows: order.length,
     })
-  }, [onStatusChange, range, model, order, formatters, hidden, focus.row, focus.column])
+  }, [
+    onStatusChange,
+    range,
+    model,
+    order,
+    formatters,
+    hidden,
+    focus.row,
+    focus.column,
+    typedText,
+    typedAt,
+  ])
 
   // A filter that keeps fewer rows pulls the selection up into the rows still shown.
   useEffect(() => {
@@ -388,6 +464,95 @@ export function SheetGrid({
     setFocus(point)
   }
 
+  /** A cell takes input when the grid edits, it holds data, and its column isn't computed. */
+  const editableAt = (point: CellPoint) =>
+    !!editor && point.row > 0 && point.column >= 0 && editor.editable(point.column)
+
+  /** Opens a cell's editor with its value, or with what the reader started typing. */
+  const startEdit = (point: CellPoint, typed?: string): boolean => {
+    if (!editor || !editableAt(point)) return false
+    setEditing({
+      point,
+      text: typed ?? editor.inputText(point.column, valueAt(point.row, point.column)),
+    })
+    reveal(point)
+    return true
+  }
+
+  const endEdit = () => {
+    setEditing(null)
+    gridRef.current?.focus({ preventScroll: true })
+  }
+
+  /** Stores what was typed and moves on; holds it, with why, when it doesn't fit the column. */
+  const commitEdit = (move: CommitMove | null): boolean => {
+    if (!editing || !editor) return true
+    const { point, text } = editing
+    const result = editor.read(point.column, text)
+    if ("error" in result) {
+      setEditing({ ...editing, error: result.error })
+      return false
+    }
+    const row = order[point.row - 1]
+    if (row !== undefined) editor.write([{ row, column: point.column, value: result.value }])
+    endEdit()
+    if (move) {
+      const next =
+        move === "down"
+          ? { ...point, row: Math.min(rowCount - 1, point.row + 1) }
+          : move === "up"
+            ? { ...point, row: Math.max(1, point.row - 1) }
+            : {
+                ...point,
+                column: visibleColumn(
+                  Math.min(
+                    columnCount - 1,
+                    Math.max(0, point.column + (move === "right" ? 1 : -1))
+                  ),
+                  point.column,
+                  columnCount,
+                  hidden
+                ),
+              }
+      select(next, false)
+      reveal(next)
+    }
+    return true
+  }
+
+  /** The selection's cells that take input, by data row. */
+  const editableCells = (): { row: number; column: number }[] => {
+    const cells: { row: number; column: number }[] = []
+    for (let row = Math.max(1, range.top); row <= range.bottom; row += 1) {
+      const dataRow = order[row - 1]
+      if (dataRow === undefined) continue
+      for (let column = range.left; column <= range.right; column += 1) {
+        if (!hidden.has(column) && editableAt({ row, column })) cells.push({ row: dataRow, column })
+      }
+    }
+    return cells
+  }
+
+  /** Delete clears the selection's cells. */
+  const clearSelection = () => {
+    if (!editor) return
+    editor.write(editableCells().map((cell) => ({ ...cell, value: "" })))
+  }
+
+  /**
+   * Space, or a click on a checkbox, toggles the selection's checkboxes: all on unless they all
+   * are, as a spreadsheet's do.
+   */
+  const toggleChecks = (cells: readonly { row: number; column: number }[]) => {
+    if (!editor) return
+    const checks = cells.filter((cell) => model.columns[cell.column]?.format.type === "boolean")
+    if (checks.length === 0) return
+    const allOn = checks.every(
+      (cell) => (model.rows[cell.row]?.[cell.column] ?? "").trim().toLowerCase() === "true"
+    )
+    editor.write(checks.map((cell) => ({ ...cell, value: allOn ? "false" : "true" })))
+  }
+
   /** Every cell of the rows from one to another, header row included when it is one of them. */
   const selectRows = (from: number, to: number) => {
     setAnchor({ row: from, column: 0 })
@@ -402,11 +567,23 @@ export function SheetGrid({
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
     const target = (event.target as HTMLElement).closest<HTMLElement>("[data-cell]")
-    if (!target || (event.target as HTMLElement).closest("a, button")) return
+    if (!target || (event.target as HTMLElement).closest("a, button, input")) return
     const point = cellPoint(target)
     if (!point) return
     event.preventDefault()
     gridRef.current?.focus({ preventScroll: true })
+    // A click on a checkbox toggles it while the sheet is edited.
+    if (
+      editor &&
+      !event.shiftKey &&
+      (event.target as HTMLElement).closest("[data-check]") &&
+      editableAt(point)
+    ) {
+      const row = order[point.row - 1]
+      select(point, false)
+      if (row !== undefined) toggleChecks([{ row, column: point.column }])
+      return
+    }
     if (point.column < 0) {
       // A row number selects its row; with Shift, every row from the selection's.
       dragging.current = "rows"
@@ -492,6 +669,27 @@ export function SheetGrid({
     if (event.key === "Escape") {
       setAnchor(focus)
       return
+    }
+    if (editor && !command && !event.altKey) {
+      if (event.key === "Enter" || event.key === "F2") {
+        if (startEdit(focus)) event.preventDefault()
+        return
+      }
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault()
+        clearSelection()
+        return
+      }
+      if (event.key === " " && !event.shiftKey) {
+        event.preventDefault()
+        toggleChecks(editableCells())
+        return
+      }
+      // A character typed on a cell starts its value afresh, as a spreadsheet's does.
+      if (event.key.length === 1 && !event.nativeEvent.isComposing) {
+        if (startEdit(focus, event.key)) event.preventDefault()
+        return
+      }
     }
     const page = Math.max(
       1,
@@ -715,6 +913,9 @@ export function SheetGrid({
         ...(fixed ? { left: rowNumberWidth + (offsets[column] ?? 0) } : {}),
         ...selectionEdges(range, row, column),
       }
+      const typing =
+        editing && editing.point.row === row && editing.point.column === column ? editing : null
+      const dataRow = header ? undefined : order[row - 1]
       return (
         <GridCell
           key={column}
@@ -736,9 +937,24 @@ export function SheetGrid({
             : {})}
           matched={matched.has(`${row}:${column}`)}
           {...(highlight ? { highlight } : {})}
+          edited={!!editor && dataRow !== undefined && editor.edited(dataRow, column)}
+          editing={!!typing}
           style={style}
         >
-          {header ? (
+          {typing && editor ? (
+            <CellEditor
+              text={typing.text}
+              {...(typing.error ? { error: messages.inputErrors[typing.error] } : {})}
+              numeric={model.columns[column]?.numeric ?? false}
+              label={messages.editCell(`${columnLetter(column)}${row + 1}`)}
+              {...(editor.suggestions ? { suggestions: editor.suggestions(column) } : {})}
+              onChange={(text) =>
+                setEditing((current) => (current ? { point: current.point, text } : current))
+              }
+              onCommit={commitEdit}
+              onCancel={endEdit}
+            />
+          ) : header ? (
             <HeaderContent
               column={model.columns[column]}
               sort={sort?.column === column ? sort.direction : null}
@@ -999,6 +1215,11 @@ export function SheetGrid({
           )}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
+          onDoubleClick={(event) => {
+            const target = (event.target as HTMLElement).closest<HTMLElement>("[data-cell]")
+            const point = target ? cellPoint(target) : null
+            if (point && !(event.target as HTMLElement).closest("input")) startEdit(point)
+          }}
         >
           <div
             className="flex flex-col overflow-clip"
@@ -1127,6 +1348,15 @@ export function SheetGrid({
       </ContextMenuContent>
     </ContextMenu>
   )
+}
+
+/** The rows' order while the sheet is edited, and what it was worked out from. */
+interface HeldOrder {
+  readonly sort: SheetView["sort"]
+  readonly filters: SheetView["filters"]
+  readonly locale: string
+  readonly rows: number
+  readonly order: readonly number[]
 }
 
 /** What a right-click landed on: a column's letter or a cell in it, a row's number, or neither. */

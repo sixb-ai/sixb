@@ -35,6 +35,26 @@ export const en = {
     storageUnavailable: "Artifact storage is not available.",
     loadFailed: "This artifact could not be loaded.",
   },
+  edit: {
+    edit: "Edit",
+    editing: (version: number) => `Editing version ${number(version)}`,
+    unsaved: "Unsaved changes",
+    discard: "Discard",
+    save: (version: number) => `Save as version ${number(version)}`,
+    saving: "Saving…",
+    saveFailed: "Your changes could not be saved. Try again.",
+    discardTitle: "Discard your changes?",
+    discardDescription: "What you changed since you started editing will be lost.",
+    keepEditing: "Keep editing",
+    moved: (version: number, byYou: boolean) =>
+      byYou
+        ? `You published version ${number(version)} somewhere else while editing this one.`
+        : `Version ${number(version)} was published while you were editing.`,
+    movedDescription:
+      "Saving anyway publishes your edit over it; it stays in the artifact's versions.",
+    openLatest: (version: number) => `Open version ${number(version)}`,
+    saveAnyway: (version: number) => `Save as version ${number(version)} anyway`,
+  },
   document: {
     outline: "On this page",
     copySection: (heading: string) => `Copy a link to “${heading}”`,
@@ -145,6 +165,14 @@ export const en = {
     removedSections: (count: number) => `Removed ${number(count)} sections`,
   },
   sheet: {
+    editCell: (cell: string) => `Edit ${cell}`,
+    inputErrors: {
+      number: "Type a number, such as 1,200 or −3.5.",
+      date: "Type a date, such as 11/23/2026 or 2026-11-23.",
+      link: "Type a web address, such as example.com.",
+      image: "Type the path of one of this artifact's images.",
+      boolean: "Type yes or no, or true or false.",
+    },
     tabs: "Sheets and charts",
     grid: (sheet: string) => `Sheet ${sheet}`,
     downloadCsv: (sheet: string) => `Download ${sheet} as CSV`,
@@ -302,6 +330,26 @@ export const fr: Translation<ArtifactMessages> = {
     storageUnavailable: "Le stockage des artefacts n’est pas disponible.",
     loadFailed: "Impossible de charger cet artefact.",
   },
+  edit: {
+    edit: "Modifier",
+    editing: (version) => `Modification de la version ${numberFr(version)}`,
+    unsaved: "Modifications non enregistrées",
+    discard: "Annuler",
+    save: (version) => `Enregistrer la version ${numberFr(version)}`,
+    saving: "Enregistrement…",
+    saveFailed: "Impossible d’enregistrer vos modifications. Réessayez.",
+    discardTitle: "Abandonner vos modifications ?",
+    discardDescription: "Ce que vous avez modifié depuis le début sera perdu.",
+    keepEditing: "Continuer",
+    moved: (version, byYou) =>
+      byYou
+        ? `Vous avez publié la version ${numberFr(version)} ailleurs pendant cette modification.`
+        : `La version ${numberFr(version)} a été publiée pendant votre modification.`,
+    movedDescription:
+      "Enregistrer quand même publie votre version par-dessus ; elle reste dans les versions.",
+    openLatest: (version) => `Ouvrir la version ${numberFr(version)}`,
+    saveAnyway: (version) => `Enregistrer la version ${numberFr(version)} quand même`,
+  },
   document: {
     outline: "Sur cette page",
     copySection: (heading) => `Copier un lien vers « ${heading} »`,
@@ -412,6 +460,14 @@ export const fr: Translation<ArtifactMessages> = {
     removedSections: (count) => `${numberFr(count)} sections supprimées`,
   },
   sheet: {
+    editCell: (cell) => `Modifier ${cell}`,
+    inputErrors: {
+      number: "Saisissez un nombre, comme 1 200 ou −3,5.",
+      date: "Saisissez une date, comme 23/11/2026 ou 2026-11-23.",
+      link: "Saisissez une adresse web, comme example.com.",
+      image: "Saisissez le chemin d’une image de cet artefact.",
+      boolean: "Saisissez oui ou non, ou vrai ou faux.",
+    },
     tabs: "Feuilles et graphiques",
     grid: (sheet) => `Feuille ${sheet}`,
     downloadCsv: (sheet) => `Télécharger ${sheet} en CSV`,

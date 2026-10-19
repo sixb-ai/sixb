@@ -27,12 +27,16 @@ export class ArtifactMovedError extends Error {
  * changed, carries every other file over by reference, and publishes from the version edited, so a
  * version published meanwhile is never replaced unseen. A changed path maps to its new contents,
  * or to `null` to leave the file out. Rejects with {@link ArtifactMovedError} when the artifact has
- * moved past the version edited.
+ * moved past the version edited; `baseVersion` names a later one to publish over anyway.
  */
 export async function publishEdit(
   version: ArtifactVersion,
   changed: ReadonlyMap<string, Blob | null>,
-  options: { readonly client?: SixbClient; readonly signal?: AbortSignal } = {}
+  options: {
+    readonly baseVersion?: number
+    readonly client?: SixbClient
+    readonly signal?: AbortSignal
+  } = {}
 ): Promise<PublishArtifactVersionResponse> {
   const transport = {
     ...(options.client ? { client: options.client } : {}),
@@ -60,7 +64,7 @@ export async function publishEdit(
         kind: version.outline.kind,
         title: version.title,
         files,
-        baseVersion: version.version,
+        baseVersion: options.baseVersion ?? version.version,
       },
       throwOnError: true,
       ...transport,
