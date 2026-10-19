@@ -2,14 +2,16 @@ import { client, createArtifactFrame } from "@sixb/client"
 import {
   FRAME_PROTOCOL,
   FRAME_THEME_TOKENS,
+  type FrameCallResult,
   type FrameEvent,
   type FrameRequest,
   type FrameStart,
   frameStartHash,
+  parseFrameCall,
   parseFrameEvent,
 } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   type ReactNode,
   type Ref,
@@ -19,6 +21,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { answerStateCall, onPageStateReset } from "./page-state"
 import { type ArtifactVersion, useArtifactTheme } from "./queries"
 
 /** Asks the deck in the frame to do something; resolves when it has. */
@@ -44,6 +47,9 @@ const READY_TIMEOUT_MS = 20_000
  *
  * The frame stays hidden until its theme is applied, then fades in over `fallback`: until the
  * tokens arrive, a deck paints in the kit's light defaults, which flash on a dark page.
+ *
+ * A page in it keeps data with `sixb.state`: the frame's calls are answered here, for the artifact
+ * it shows and the signed-in reader, however many frames of it are open.
  */
 export function ArtifactFrame({
   version,
@@ -95,6 +101,9 @@ export function ArtifactFrame({
   const [shown, setShown] = useState<string | null>(null)
   const [timedOut, setTimedOut] = useState<string | null>(null)
   const reportsFailure = failure !== undefined
+  const queries = useQueryClient()
+  const artifactId = useRef(version.artifactId)
+  artifactId.current = version.artifactId
 
   const frame = useQuery({
     queryKey: ["artifact-frame", version.artifactId, version.version],
@@ -167,6 +176,28 @@ export function ArtifactFrame({
         if (!iframe.current || message.source !== iframe.current.contentWindow) return
         const data = message.data as Record<string, unknown> | null
         if (!data || data.protocol !== FRAME_PROTOCOL) return
+        if ("call" in data) {
+          const call = parseFrameCall(data)
+          const frame = message.source as Window
+          const answer = (result: Omit<FrameCallResult, "protocol">) =>
+            frame.postMessage({ protocol: FRAME_PROTOCOL, ...result }, "*")
+          if (!call) {
+            // A call the protocol can't take still settles, so the page's promise never hangs.
+            if (Number.isSafeInteger(data.call)) {
+              answer({ result: Number(data.call), error: "[SixbApp] sixb.state refused the call." })
+            }
+            return
+          }
+          answerStateCall(queries, artifactId.current, call).then(
+            (value) => answer({ result: call.call, ...(value === undefined ? {} : { value }) }),
+            (error: unknown) =>
+              answer({
+                result: call.call,
+                error: error instanceof Error ? error.message : String(error),
+              })
+          )
+          return
+        }
         if (typeof data.id === "number") {
           const request = pending.current.get(data.id)
           pending.current.delete(data.id)
@@ -183,7 +214,16 @@ export function ArtifactFrame({
         }
         onEventRef.current?.(event)
       }),
-    [sendTheme]
+    [sendTheme, queries]
+  )
+
+  // A page whose data was reset starts over, wherever it is open.
+  useEffect(
+    () =>
+      onPageStateReset((reset) => {
+        if (reset === artifactId.current) send("reload", {}).catch(() => {})
+      }),
+    [send]
   )
 
   // A ready frame has the theme as it was then. The app's mode changes the class on <html>, and an

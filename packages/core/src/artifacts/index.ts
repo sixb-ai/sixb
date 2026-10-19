@@ -50,12 +50,15 @@ export {
   type DeckMode,
   FRAME_PROTOCOL,
   FRAME_THEME_TOKENS,
+  type FrameCall,
+  type FrameCallResult,
   type FrameEmbed,
   type FrameEvent,
   type FrameRequest,
   type FrameResponse,
   type FrameStart,
   frameStartHash,
+  parseFrameCall,
   parseFrameEvent,
 } from "./frames/protocol"
 export { ARTIFACT_KINDS, type ArtifactKind } from "./kinds"

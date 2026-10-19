@@ -281,6 +281,40 @@ describe.skipIf(!playwright)("the layout check in a browser", () => {
   )
 
   test(
+    "runs a page that keeps data, its values kept in memory while it is open",
+    async () => {
+      // Opened alone, as the check opens it, a page has no app to keep its values. Reproduce by
+      // posting every call from the runtime, alone or not: the page waits on its data forever,
+      // and the fine print it draws from it never appears.
+      const keeping = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Keeps</title></head>
+<body>
+  <main><h1>Keeps its inputs</h1></main>
+  <script>
+    (async () => {
+      await sixb.state.set("inputs", { rate: 450 })
+      const inputs = await sixb.state.get("inputs")
+      const keys = await sixb.state.keys()
+      document.querySelector("main").insertAdjacentHTML(
+        "beforeend",
+        '<p style="font-size: 9px">Kept ' + inputs.rate + " under " + keys.join() + "</p>"
+      )
+    })()
+  </script>
+</body>
+</html>`
+      const result = await check(keeping, ["index.html"], "keeping", undefined, "page")
+      if (result.status !== "checked") throw new Error(`The check did not run: ${result.reason}`)
+      expect(
+        result.warnings.some((warning) => warning.message.includes("Kept 450 under inputs"))
+      ).toBe(true)
+      expect(result.warnings.filter((warning) => warning.code === "layout_load_error")).toEqual([])
+    },
+    { timeout: 120_000 }
+  )
+
+  test(
     "checks each of a canvas's boards at its own size, naming the board",
     async () => {
       // A phone board that reads well, and one whose fixed-width box is wider than the board.

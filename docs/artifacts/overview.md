@@ -284,6 +284,11 @@ fleet-planner/
   cdnjs, unpkg, and Google Fonts). Read data from JSON files published beside it with `fetch`.
   A chart drawn on a canvas redraws on the window's `sixb:theme` event, which fires when the app
   sends its theme, light or dark.
+- `window.sixb.state` keeps JSON values for each reader, across the page's versions, so a
+  planner opens where they left it: `await sixb.state.set("inputs", { rate: 450 })`, then
+  `get`, `delete`, and `keys`. Each reader gets 100 keys, 64 KB a value, and 1 MB in all. A
+  page has no other storage. *Reset page data* in the viewer's menu clears a reader's values,
+  and on the server `sixb.artifacts.state(id)` reads and writes the caller's.
 - A link to another artifact (`<a href="artifact:…">`) opens it where the reader is, and
   `<sixb-embed src="artifact:…#chart=revenue">` shows one on the page, as it does on a slide: the
   app draws the artifact over the box and keeps it there as the page scrolls.

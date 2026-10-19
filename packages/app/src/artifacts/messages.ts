@@ -116,6 +116,11 @@ export const en = {
   page: {
     frame: (title: string) => `Page ${title}`,
     loadFailed: "This page could not be opened.",
+    more: "More",
+    reset: "Reset page data",
+    resetDetail: (count: number) =>
+      `Forget the ${count === 1 ? "value" : `${number(count)} values`} this page keeps for you, and start it over.`,
+    resetFailed: "The page's data could not be reset.",
   },
   canvas: {
     canvas: (title: string) => `Canvas ${title}`,
@@ -509,6 +514,11 @@ export const fr: Translation<ArtifactMessages> = {
   page: {
     frame: (title) => `Page ${title}`,
     loadFailed: "Impossible d’ouvrir cette page.",
+    more: "Plus",
+    reset: "Réinitialiser les données de la page",
+    resetDetail: (count) =>
+      `Oublier ${count === 1 ? "la valeur" : `les ${numberFr(count)} valeurs`} que cette page garde pour vous, et la recommencer.`,
+    resetFailed: "Impossible de réinitialiser les données de la page.",
   },
   canvas: {
     canvas: (title) => `Canevas ${title}`,
