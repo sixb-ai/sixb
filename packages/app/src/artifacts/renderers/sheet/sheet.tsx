@@ -9,7 +9,17 @@ import { Button } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { Download, ListFilter, Search } from "lucide-react"
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
+import {
+  lazy,
+  type ReactNode,
+  Suspense,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { useArtifactEditing, useReportDraft } from "../../edit-session"
 import { formatFileSize } from "../../file-size"
 import { useArtifactMessages } from "../../messages"
@@ -17,18 +27,24 @@ import { type ArtifactVersion, versionImageSource } from "../../queries"
 import { useArtifactThemeAttributes } from "../../theme"
 import { ViewerLoading, ViewerNotice } from "../notice"
 import { CHART_ICONS } from "./chart-icon"
+import { ColumnDialog, refusalText } from "./column-format"
 import {
+  type ColumnRefusal,
   cellEdited,
   type DraftHistory,
+  deleteColumn,
   deleteRows,
   draftChanged,
   draftFiles,
   draftModel,
+  draftSheet,
   draftTable,
+  insertColumn,
   insertRows,
   recordDraft,
   redoDraft,
   setCells,
+  setColumn,
   startHistory,
   undoDraft,
   type WorkbookDraft,
@@ -96,7 +112,7 @@ export function SheetRenderer({
 
 function WorkbookView({
   version,
-  workbook,
+  workbook: published,
   tab,
   onTab,
   selected,
@@ -110,13 +126,21 @@ function WorkbookView({
   const messages = useArtifactMessages()
   const locale = useLocale()
   const id = useId()
+  // A chart's sheet is its sheet in every draft: an edit renames columns, never sheets.
+  const sheetName =
+    (tab.kind === "chart"
+      ? published.charts.find((entry) => entry.name === tab.name)?.sheet
+      : undefined) ?? tab.name
+  const read = useSheetModel(
+    version,
+    published.sheets.find((entry) => entry.name === sheetName)
+  )
+  const { source, loading, tooLarge } = read
+  const edit = useWorkbookEdit(version, published, sheetName, read.table, read.model, locale)
+  // What is shown is the draft's, while there is one: its charts follow a column renamed.
+  const workbook = edit.workbook
   const chart =
     tab.kind === "chart" ? workbook.charts.find((entry) => entry.name === tab.name) : undefined
-  const sheetName = chart?.sheet ?? tab.name
-  const sheet = workbook.sheets.find((entry) => entry.name === sheetName)
-  const read = useSheetModel(version, sheet)
-  const { source, loading, tooLarge } = read
-  const edit = useWorkbookEdit(version, workbook, sheetName, read.table, read.model, locale)
   const model = edit.model
   const [status, setStatus] = useState<SheetGridStatus | null>(null)
   const [goTo, setGoTo] = useState<{ range: CellRange; seq: number } | null>(null)
@@ -287,6 +311,7 @@ function WorkbookView({
           ) : null
         }
       />
+      {edit.dialog}
     </div>
   )
 }
@@ -303,7 +328,13 @@ function useWorkbookEdit(
   table: CsvTable | null,
   base: SheetModel | null,
   locale: string
-): { readonly model: SheetModel | null; readonly editor: SheetGridEditor | null } {
+): {
+  readonly workbook: Workbook
+  readonly model: SheetModel | null
+  readonly editor: SheetGridEditor | null
+  /** The column settings dialog, while one is open. */
+  readonly dialog: ReactNode
+} {
   const editing = useArtifactEditing()
   const [history, setHistory] = useState<DraftHistory>(() => startHistory(workbook))
   useEffect(() => {
@@ -316,11 +347,30 @@ function useWorkbookEdit(
       setHistory((last) => recordDraft(last, apply(last.present))),
     []
   )
-  const sheet = workbook.sheets.find((entry) => entry.name === sheetName)
+  const published = workbook.sheets.find((entry) => entry.name === sheetName)
+  const layout = draftSheet(draft, sheetName)
   const current = table ? draftTable(draft, sheetName, table) : null
   const model = useMemo(
-    () => (sheet && base && current && current !== table ? draftModel(sheet, current, base) : base),
-    [sheet, base, current, table]
+    () =>
+      layout && base && current && (current !== table || layout !== published)
+        ? draftModel(layout, current, base)
+        : base,
+    [layout, published, base, current, table]
+  )
+  /** The column whose settings are open, and what they open on. */
+  const [settings, setSettings] = useState<{ column: number; focus: "name" | "type" } | null>(null)
+  const messages = useArtifactMessages()
+  const present = useRef(draft)
+  present.current = draft
+  /** A change that may be refused: made when it can be, its refusal returned when not. */
+  const attempt = useCallback(
+    (apply: (draft: WorkbookDraft) => WorkbookDraft | ColumnRefusal): ColumnRefusal | null => {
+      const next = apply(present.current)
+      if ("refused" in next) return next
+      setHistory((last) => recordDraft(last, next))
+      return null
+    },
+    []
   )
   const editor = useMemo<SheetGridEditor | null>(() => {
     if (!editing || !model || !table || !current) return null
@@ -337,12 +387,18 @@ function useWorkbookEdit(
       write: (edits, grow) => change((last) => setCells(last, sheetName, table, edits, grow)),
       insertRows: (at, count) => change((last) => insertRows(last, sheetName, table, at, count)),
       deleteRows: (rows) => change((last) => deleteRows(last, sheetName, table, rows)),
+      insertColumn: (at) => change((last) => insertColumn(last, sheetName, table, at)),
+      deleteColumn: (column) => {
+        const refused = attempt((last) => deleteColumn(last, sheetName, table, column))
+        return refused ? refusalText(refused, messages.column, () => "") : null
+      },
+      editColumn: (column, focus) => setSettings({ column, focus }),
       undo: () => setHistory(undoDraft),
       redo: () => setHistory(redoDraft),
-      edited: (row, column) => cellEdited(current.rows[row], column),
+      edited: (row, column) => cellEdited(current, row, column),
       suggestions: (column) => tagSuggestions(model, column),
     }
-  }, [editing, model, table, current, version.files, locale, sheetName, change])
+  }, [editing, model, table, current, version.files, locale, sheetName, change, attempt, messages])
   const canUndo = history.past.length > 0
   const canRedo = history.future.length > 0
   const report = useMemo(
@@ -358,7 +414,35 @@ function useWorkbookEdit(
     [editing, draft, canUndo, canRedo]
   )
   useReportDraft(report)
-  return { model, editor }
+
+  const column = settings && model && layout ? model.columns[settings.column] : undefined
+  const dialog =
+    editing && settings && column && layout && table ? (
+      <ColumnDialog
+        key={`${settings.column}:${column.name}`}
+        subject={{
+          name: column.name,
+          format: column.format,
+          ...(column.description ? { description: column.description } : {}),
+          ...(column.total ? { total: column.total } : {}),
+          others: new Map(
+            model?.columns
+              .filter((entry) => entry.name !== column.name)
+              .map((entry) => [entry.name, entry.format.type])
+          ),
+        }}
+        focus={settings.focus}
+        onApply={(next) =>
+          attempt((last) =>
+            setColumn(last, sheetName, table, settings.column, next, (value, format) =>
+              parseCellInput(value, format, locale, { pasted: true })
+            )
+          )
+        }
+        onClose={() => setSettings(null)}
+      />
+    ) : null
+  return { workbook: editing ? draft.workbook : workbook, model, editor, dialog }
 }
 
 /** A tag column's tags to offer while typing: its toned tags, then the values it holds. */

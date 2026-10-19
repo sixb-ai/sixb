@@ -33,13 +33,18 @@ export {
 export { CsvParseError, type CsvTable, formatCsv, parseCsv } from "./csv"
 export {
   checkFormula,
+  columnFormulaType,
   evaluateComputedColumns,
   FORMULA_ERRORS,
+  FormulaCycleError,
   type FormulaErrorCode,
   type FormulaNode,
   type FormulaOperator,
+  type FormulaType,
   formulaDependencies,
+  formulaFitsColumn,
   parseFormula,
+  renameColumnReferences,
 } from "./formula"
 export {
   type DeckMode,
@@ -79,6 +84,9 @@ export {
   parseSheetDate,
   parseSheetNumber,
   parseWorkbook,
+  SHEET_COLUMN_TYPES,
+  SHEET_HIGHLIGHTS,
+  SHEET_TOTALS,
   type SheetChartAggregate,
   type SheetChartType,
   type SheetColumnFormat,

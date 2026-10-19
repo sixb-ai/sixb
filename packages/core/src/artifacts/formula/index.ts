@@ -34,6 +34,7 @@ export {
   FormulaSyntaxError,
   formulaDependencies,
   parseFormula,
+  renameColumnReferences,
 } from "./parser"
 
 /** What a column's values are, as a formula reads them. */

@@ -277,3 +277,59 @@ export function formulaDependencies(node: FormulaNode): Set<string> {
   visit(node)
   return columns
 }
+
+/**
+ * A formula with every reference to a column renamed, `[@Revenue]` and `[Revenue]` alike, and
+ * nothing else changed: text in quotes is left as it is, and the new name is bracketed again when
+ * it holds characters a plain reference can't.
+ */
+export function renameColumnReferences(formula: string, from: string, to: string): string {
+  let result = ""
+  let index = 0
+  while (index < formula.length) {
+    const char = formula[index] as string
+    if (char === '"') {
+      // A text in quotes, its quotes doubled, as the parser reads one.
+      let end = index + 1
+      while (end < formula.length) {
+        if (formula[end] === '"' && formula[end + 1] === '"') end += 2
+        else if (formula[end] === '"') break
+        else end += 1
+      }
+      result += formula.slice(index, end + 1)
+      index = end + 1
+      continue
+    }
+    if (char !== "[") {
+      result += char
+      index += 1
+      continue
+    }
+    const start = index
+    index += 1
+    const row = formula[index] === "@"
+    if (row) index += 1
+    const bracketed = formula[index] === "["
+    if (bracketed) index += 1
+    let name = ""
+    while (index < formula.length && formula[index] !== "]") {
+      if (formula[index] === "'") index += 1
+      name += formula[index] ?? ""
+      index += 1
+    }
+    index += bracketed ? 2 : 1
+    result +=
+      name.trim() === from
+        ? columnReference(to, row)
+        : formula.slice(start, Math.min(index, formula.length))
+  }
+  return result
+}
+
+/** A reference to a column: this row's value, or the whole column. */
+function columnReference(name: string, row: boolean): string {
+  const escaped = name.replace(/['[\]#@]/g, "'$&")
+  const plain = /^[A-Za-z0-9_ ]+$/.test(name) && name === name.trim()
+  const inner = plain ? escaped : `[${escaped}]`
+  return row ? `[@${inner}]` : `[${inner}]`
+}
