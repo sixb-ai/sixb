@@ -228,6 +228,30 @@
       render()
     }
 
+    /** What the reader set last, kept for them with sixb.state: they come back to it. */
+    let keeping = null
+    function keep() {
+      clearTimeout(keeping)
+      const scenario = document.querySelector('input[name="scenario"]:checked')?.value ?? null
+      keeping = setTimeout(() => {
+        sixb.state.set("settings", { ...settings(), scenario }).catch(() => {})
+      }, 300)
+    }
+
+    function restore(kept) {
+      for (const name of ["growth", "pace", "overtime", "contractors"]) {
+        if (typeof kept[name] === "number") field(name).value = String(kept[name])
+      }
+      field("storms").checked = kept.storms === true
+      for (const input of document.querySelectorAll("#regions input")) {
+        input.checked = !Array.isArray(kept.regions) || kept.regions.includes(input.value)
+      }
+      for (const input of document.querySelectorAll('input[name="scenario"]')) {
+        input.checked = input.value === kept.scenario
+      }
+      render()
+    }
+
     /** Each region's visits and crews needed, week by week, under the settings. */
     function model(s) {
       const perCrewWeek = s.pace * plan.daysPerWeek
@@ -395,11 +419,19 @@
         for (const input of document.querySelectorAll('input[name="scenario"]')) input.checked = false
       }
       render()
+      keep()
     })
     for (const input of document.querySelectorAll('input[name="scenario"]')) {
-      input.addEventListener("change", () => apply(input.value))
+      input.addEventListener("change", () => {
+        apply(input.value)
+        keep()
+      })
     }
-    field("reset").addEventListener("click", () => apply("base"))
+    field("reset").addEventListener("click", () => {
+      apply("base")
+      clearTimeout(keeping)
+      sixb.state.delete("settings").catch(() => {})
+    })
     // A chart on a canvas keeps the colors it was drawn in: draw it again in the new theme.
     addEventListener("sixb:theme", render)
     new ResizeObserver(() => chart?.resize()).observe(field("chart"))
@@ -419,7 +451,11 @@
             return chip
           })
         )
-        apply("base")
+        // Where the reader left it, or the base plan the first time.
+        return sixb.state
+          .get("settings")
+          .catch(() => undefined)
+          .then((kept) => (kept ? restore(kept) : apply("base")))
       })
   </script>
 </body>

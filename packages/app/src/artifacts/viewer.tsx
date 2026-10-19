@@ -16,6 +16,7 @@ import {
   Button,
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -37,8 +38,10 @@ import {
   Link2,
   LoaderCircle,
   Maximize2,
+  MoreHorizontal,
   PencilLine,
   Redo2,
+  RotateCcw,
   Trash2,
   TriangleAlert,
   Undo2,
@@ -55,6 +58,7 @@ import { useFileName } from "./file-source"
 import { FileTypeIcon, fileTypeOf } from "./file-type-icon"
 import { type ArtifactKindName, ArtifactKindTile } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
+import { resetPageState, usePageStateCount } from "./page-state"
 import { type ArtifactMoved, ArtifactMovedError } from "./publish-edit"
 import { type ArtifactVersion, versionFileSource } from "./queries"
 import { ArtifactReferencesProvider } from "./references/references"
@@ -625,6 +629,7 @@ function ArtifactHeader({
       ) : (
         <EntryDownloadMenu version={version} kind={artifact.kind} />
       )}
+      {artifact.kind === "page" ? <PageMenu artifactId={artifact.id} /> : null}
       <CopyLinkButton link={() => artifactLink(target, artifact.latestVersion, location.origin)} />
     </ViewerBar>
   )
@@ -696,6 +701,68 @@ function VersionPicker({
 /** A sheet downloads as its workbook, built in the browser, or any of its sheets as CSV. */
 function SheetDownloadMenu({ version }: { readonly version: ArtifactVersion }) {
   return <DownloadMenu options={useWorkbookDownloads(version, version.title)} />
+}
+
+/**
+ * A page's More: *Reset page data*, once the page keeps something for the reader. The page starts
+ * over wherever it is open; a reset that fails says so beside the button.
+ */
+function PageMenu({ artifactId }: { readonly artifactId: string }) {
+  const messages = useArtifactMessages().page
+  const queries = useQueryClient()
+  const count = usePageStateCount(artifactId)
+  const [state, setState] = useState<"idle" | "working" | "failed">("idle")
+  if (count === 0 && state !== "working") return null
+  const reset = async () => {
+    setState("working")
+    try {
+      await resetPageState(queries, artifactId)
+      setState("idle")
+    } catch (error) {
+      console.warn("[SixbApp] Could not reset the page's data:", error)
+      setState("failed")
+    }
+  }
+  return (
+    <span className="flex shrink-0 items-center gap-2">
+      {state === "failed" ? (
+        <span role="status" className="hidden text-xs text-destructive @lg:inline">
+          {messages.resetFailed}
+        </span>
+      ) : null}
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger
+          aria-label={messages.more}
+          title={messages.more}
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-muted data-[state=open]:text-foreground [&_svg]:size-[17px] [&_svg]:stroke-[1.75]"
+        >
+          {state === "working" ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            <MoreHorizontal aria-hidden="true" />
+          )}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" sideOffset={6} className="w-72 p-1.5">
+          <DropdownMenuItem
+            className="items-start gap-3 rounded-md px-2 py-1.5"
+            disabled={state === "working"}
+            onSelect={() => void reset()}
+          >
+            <RotateCcw
+              className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-[13px] font-medium text-foreground">{messages.reset}</span>
+              <span className="text-xs leading-snug text-muted-foreground">
+                {messages.resetDetail(count)}
+              </span>
+            </span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </span>
+  )
 }
 
 /**

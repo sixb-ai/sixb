@@ -12,6 +12,10 @@
  * show that slide alone filling the frame, as a thumbnail or an embed does; it tells the app about
  * keys and picks in the overview. A page scrolls as it is: it reports the embeds near its view as
  * it scrolls, and its height as it changes.
+ *
+ * It gives every layout `window.sixb.state`, where a page keeps JSON values for its reader: each
+ * call is a message the app answers, and the app keeps the values. Opened on its own, with no app
+ * around it, as the layout check opens a page, the values live in memory until it closes.
  */
 export function frameRuntime(): void {
   const PROTOCOL = "sixb-frame/1"
@@ -29,6 +33,9 @@ export function frameRuntime(): void {
     " ",
     "Escape",
   ]
+  /** What a page may keep, as `ARTIFACT_STATE_LIMITS` says: refused here before it is sent. */
+  const MAX_KEY_LENGTH = 128
+  const MAX_VALUE_BYTES = 65536
   const root = document.documentElement
   const deck = document.currentScript?.getAttribute("data-sixb-layout") !== "page"
   const start = new URLSearchParams(window.location.hash.slice(1))
@@ -179,6 +186,10 @@ export function frameRuntime(): void {
         if (!deck) throw new Error("Only a deck has slides.")
         show(Number(params.slide))
         return
+      case "reload":
+        // After the answer is posted, so the app hears it before the page goes.
+        setTimeout(() => window.location.reload())
+        return
       case "scroll":
         if (deck) throw new Error("Only a page scrolls.")
         window.scrollBy({ left: Number(params.x) || 0, top: Number(params.y) || 0 })
@@ -196,9 +207,84 @@ export function frameRuntime(): void {
     }
   }
 
+  /**
+   * `sixb.state`, promise-based: each call posted numbered, and settled by the app's result with
+   * that number.
+   */
+  const calls = new Map<
+    number,
+    { resolve: (value: unknown) => void; reject: (error: Error) => void }
+  >()
+  let called = 0
+  const alone = window.parent === window
+  const memory = new Map<string, string>()
+  const call = (method: string, params: Record<string, unknown>): Promise<unknown> => {
+    if (alone) {
+      const key = String(params.key)
+      const kept = memory.get(key)
+      switch (method) {
+        case "state.get":
+          return Promise.resolve(kept === undefined ? undefined : JSON.parse(kept))
+        case "state.set":
+          memory.set(key, JSON.stringify(params.value))
+          return Promise.resolve(undefined)
+        case "state.delete":
+          return Promise.resolve(memory.delete(key))
+        default:
+          return Promise.resolve([...memory.keys()].sort())
+      }
+    }
+    called += 1
+    const id = called
+    return new Promise((resolve, reject) => {
+      calls.set(id, { resolve, reject })
+      post({ call: id, method, params })
+    })
+  }
+  const checkKey = (key: unknown): string => {
+    if (typeof key !== "string" || key.length === 0 || key.length > MAX_KEY_LENGTH) {
+      throw new TypeError(`sixb.state: a key is text of 1 to ${MAX_KEY_LENGTH} characters.`)
+    }
+    return key
+  }
+  const state = {
+    get: (key: string) => Promise.resolve().then(() => call("state.get", { key: checkKey(key) })),
+    set: (key: string, value: unknown) =>
+      Promise.resolve().then(() => {
+        const json = JSON.stringify(value)
+        if (json === undefined) {
+          throw new TypeError(
+            "sixb.state: a value is JSON: text, a number, true or false, null, a list, or an object."
+          )
+        }
+        if (new TextEncoder().encode(json).byteLength > MAX_VALUE_BYTES) {
+          throw new RangeError(
+            `sixb.state: a value is at most ${MAX_VALUE_BYTES / 1024} KB as JSON.`
+          )
+        }
+        // As JSON keeps it, so the page reads back what it would after a reload.
+        return call("state.set", { key: checkKey(key), value: JSON.parse(json) }).then(() => {})
+      }),
+    delete: (key: string) =>
+      Promise.resolve().then(() => call("state.delete", { key: checkKey(key) })),
+    keys: () => call("state.keys", {}),
+  }
+  Object.defineProperty(window, "sixb", {
+    value: Object.freeze({ state: Object.freeze(state) }),
+    enumerable: true,
+  })
+
   window.addEventListener("message", (event) => {
     if (event.source !== window.parent) return
     const data = event.data as Record<string, unknown> | null
+    // The app's answer to a call.
+    if (data && data.protocol === PROTOCOL && typeof data.result === "number") {
+      const pending = calls.get(data.result)
+      calls.delete(data.result)
+      if (typeof data.error === "string") pending?.reject(new Error(data.error))
+      else pending?.resolve(data.value)
+      return
+    }
     // Requests only: at the top level, as in the layout check, the frame's own answers come back
     // to it, and answering an answer would trade error messages with itself for good.
     if (!data || data.protocol !== PROTOCOL || typeof data.id !== "number") return

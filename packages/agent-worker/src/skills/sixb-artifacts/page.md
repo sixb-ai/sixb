@@ -112,8 +112,22 @@ cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com, and Google Fonts; nothing els
   reader switches mode.
 - Skip animations when `matchMedia("(prefers-reduced-motion: reduce)")` matches (ECharts:
   `animation: false`). The check measures with reduced motion, so its screenshots show charts drawn.
-- The page has no storage: what the reader enters lasts while it is open. Give inputs sensible
-  defaults and a Reset.
+- Keep what the reader sets with `sixb.state`, so they come back to it: their inputs, filters,
+  pinned scenarios, a checklist. It is kept for each reader, across the page's versions, and
+  there is no other storage (`localStorage` throws in the sandbox). Values are JSON: at most 64 KB
+  a key, 100 keys, and 1 MB in all. Give inputs sensible defaults for a first visit, and a Reset
+  that deletes what it kept.
+
+  ```js
+  const kept = await sixb.state.get("inputs")      // the value, or undefined the first time
+  await sixb.state.set("inputs", { rate: 450, occupancy: 84 })
+  await sixb.state.delete("inputs")
+  const keys = await sixb.state.keys()             // ["inputs", "pinned"]
+  ```
+
+  Write after the reader stops moving a control (a 300 ms pause), not on every step. The check
+  keeps values in memory, so a page that uses them checks as it runs. The reader can clear them
+  with *Reset page data* in the viewer.
 - A link to another artifact (`<a href="artifact:…">`) opens it beside the conversation; a link to
   a web page opens in a new tab.
 - `<sixb-embed src="artifact:…#chart=revenue"></sixb-embed>` shows another artifact on the page: a
@@ -156,7 +170,8 @@ A script error means the page may show nothing at all: fix it first.
 `examples/page/` holds three finished pages built on the kit, each with its data in JSON beside it:
 
 - `fleet-planner`: scenarios, sliders, a switch, and region chips drive animated stats, an ECharts
-  chart of crews needed against crews available, and a table with sparklines.
+  chart of crews needed against crews available, and a table with sparklines. It keeps the
+  reader's settings with `sixb.state`.
 - `service-explorer`: nine months of service as a calendar heatmap, a zoomable trend, causes, and
   a sortable table; a day picked anywhere fills a panel with every region that day.
 - `dispatch-board`: work orders dragged between crews with SortableJS, live capacity meters, a

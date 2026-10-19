@@ -1,4 +1,4 @@
-import { ARTIFACT_LIMITS } from "../limits"
+import { ARTIFACT_LIMITS, ARTIFACT_STATE_LIMITS } from "../limits"
 import { ARTIFACT_THEME_TOKENS } from "../theme"
 
 /**
@@ -42,6 +42,8 @@ export type FrameRequest =
   | FrameRequestOf<"mode", { readonly mode: DeckMode }>
   /** Scrolls a page by a wheel turned over what the app draws on it. */
   | FrameRequestOf<"scroll", { readonly x: number; readonly y: number }>
+  /** Loads the entry again, as a page whose data was reset starts over. */
+  | FrameRequestOf<"reload", Record<string, never>>
 
 interface FrameRequestOf<Method extends string, Params> {
   readonly protocol: typeof FRAME_PROTOCOL
@@ -97,6 +99,88 @@ interface FrameEventOf<Event extends string, Params> {
   readonly protocol: typeof FRAME_PROTOCOL
   readonly event: Event
   readonly params: Params
+}
+
+/**
+ * What the frame asks of the app, numbered so the app's `result` answers it: a page keeping data
+ * with `sixb.state`. The app answers only its own frame, for the artifact it shows.
+ */
+export type FrameCall =
+  | FrameCallOf<"state.get", { readonly key: string }>
+  | FrameCallOf<"state.set", { readonly key: string; readonly value: unknown }>
+  | FrameCallOf<"state.delete", { readonly key: string }>
+  | FrameCallOf<"state.keys", Record<string, never>>
+
+interface FrameCallOf<Method extends string, Params> {
+  readonly protocol: typeof FRAME_PROTOCOL
+  readonly call: number
+  readonly method: Method
+  readonly params: Params
+}
+
+/** The app's answer to one call: its value, or why it failed. */
+export interface FrameCallResult {
+  readonly protocol: typeof FRAME_PROTOCOL
+  readonly result: number
+  readonly value?: unknown
+  readonly error?: string
+}
+
+/**
+ * A message from a frame as a call, or null when it is not one. A page's scripts write what it
+ * posts, so the shapes are checked here, and a value is checked for size as JSON, as storage will
+ * count it, before the app sends it anywhere.
+ */
+export function parseFrameCall(data: unknown): FrameCall | null {
+  if (!isRecord(data) || data.protocol !== FRAME_PROTOCOL || !isRecord(data.params)) return null
+  if (!Number.isSafeInteger(data.call) || Number(data.call) < 0) return null
+  const call = Number(data.call)
+  const { params } = data
+  const key = params.key
+  const keyed = isStateKey(key)
+  switch (data.method) {
+    case "state.get":
+    case "state.delete":
+      return keyed
+        ? ({ protocol: FRAME_PROTOCOL, call, method: data.method, params: { key } } as FrameCall)
+        : null
+    case "state.set": {
+      if (!keyed || !("value" in params)) return null
+      const json = jsonText(params.value)
+      if (json === undefined || utf8Bytes(json) > ARTIFACT_STATE_LIMITS.maxValueBytes) return null
+      return {
+        protocol: FRAME_PROTOCOL,
+        call,
+        method: "state.set",
+        params: { key, value: params.value },
+      }
+    }
+    case "state.keys":
+      return { protocol: FRAME_PROTOCOL, call, method: "state.keys", params: {} }
+    default:
+      return null
+  }
+}
+
+function isStateKey(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= ARTIFACT_STATE_LIMITS.maxKeyLength &&
+    !/\p{Cc}/u.test(value)
+  )
+}
+
+function jsonText(value: unknown): string | undefined {
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return undefined
+  }
+}
+
+function utf8Bytes(text: string): number {
+  return new TextEncoder().encode(text).byteLength
 }
 
 /** Keys the frame passes to the app, so a deck navigates the same with focus in it or not. */

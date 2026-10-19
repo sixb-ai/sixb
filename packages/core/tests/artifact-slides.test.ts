@@ -7,9 +7,11 @@ import {
   DECK_KEYS,
   FRAME_PROTOCOL,
   frameStartHash,
+  parseFrameCall,
   parseFrameEvent,
 } from "../src/artifacts/frames/protocol"
 import { frameRuntime } from "../src/artifacts/frames/runtime"
+import { ARTIFACT_STATE_LIMITS } from "../src/artifacts/limits"
 import { emptyGrantIndex } from "../src/authorization/types"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -159,6 +161,26 @@ describe("the frame runtime", () => {
     expect(() => new Function(`return (${source})`)()).not.toThrow()
   })
 
+  test("refuses the values storage would, by the limits Core declares", () => {
+    // The runtime repeats the limits instead of importing them, and its source as served has
+    // them inlined. Reproduce by changing one there.
+    const source = frameRuntime.toString()
+    expect(source).toMatch(
+      new RegExp(`length > (MAX_KEY_LENGTH|${ARTIFACT_STATE_LIMITS.maxKeyLength})\\b`)
+    )
+    expect(source).toMatch(
+      new RegExp(`byteLength > (MAX_VALUE_BYTES|${ARTIFACT_STATE_LIMITS.maxValueBytes})\\b`)
+    )
+    for (const [name, value] of [
+      ["MAX_KEY_LENGTH", ARTIFACT_STATE_LIMITS.maxKeyLength],
+      ["MAX_VALUE_BYTES", ARTIFACT_STATE_LIMITS.maxValueBytes],
+    ] as const) {
+      // Where the constant is kept by name, it is the limit's value.
+      const declared = new RegExp(`${name} = (\\d+)`).exec(source)?.[1]
+      if (declared !== undefined) expect(Number(declared)).toBe(value)
+    }
+  })
+
   test("reads its layout from the tag the frame injects it with", () => {
     // Reproduce by renaming the attribute on either side: every page lays out as a deck.
     expect(frameRuntime.toString()).toContain('"data-sixb-layout"')
@@ -242,5 +264,50 @@ describe("a frame's events", () => {
     )
     expect(parseFrameEvent(null)).toBeNull()
     expect(parseFrameEvent({ protocol: FRAME_PROTOCOL, event: "ready" })).toBeNull()
+  })
+})
+
+describe("a frame's calls", () => {
+  const call = (method: string, params: unknown, id: unknown = 1) =>
+    parseFrameCall({ protocol: FRAME_PROTOCOL, call: id, method, params })
+
+  test("read as the protocol declares them", () => {
+    expect(call("state.get", { key: "inputs" })).toEqual({
+      protocol: FRAME_PROTOCOL,
+      call: 1,
+      method: "state.get",
+      params: { key: "inputs" },
+    })
+    expect(call("state.set", { key: "inputs", value: { rate: 450 } })?.params).toEqual({
+      key: "inputs",
+      value: { rate: 450 },
+    })
+    // null is a value a page keeps.
+    expect(call("state.set", { key: "cleared", value: null })?.params).toEqual({
+      key: "cleared",
+      value: null,
+    })
+    expect(call("state.delete", { key: "inputs" })?.method).toBe("state.delete")
+    expect(call("state.keys", {})?.params).toEqual({})
+  })
+
+  test("that a page's own scripts could post out of shape are dropped", () => {
+    // A page writes what it posts: reproduce by returning `data` as a FrameCall unchecked.
+    const value = "x".repeat(ARTIFACT_STATE_LIMITS.maxValueBytes)
+    for (const [method, params, id] of [
+      ["state.get", { key: "" }, 1],
+      ["state.get", { key: "a".repeat(129) }, 1],
+      ["state.get", { key: "line\nbreak" }, 1],
+      ["state.get", { key: 42 }, 1],
+      ["state.set", { key: "inputs" }, 1],
+      ["state.set", { key: "big", value }, 1],
+      ["state.set", { key: "loop", value: 10n }, 1],
+      ["state.clear", {}, 1],
+      ["state.keys", {}, -1],
+      ["state.keys", {}, "1"],
+    ] as const) {
+      expect(call(method, params, id)).toBeNull()
+    }
+    expect(parseFrameCall({ protocol: FRAME_PROTOCOL, event: "ready", params: {} })).toBeNull()
   })
 })
