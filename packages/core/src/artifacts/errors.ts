@@ -1,6 +1,9 @@
+import type { ArtifactLatestVersion } from "../storage/artifacts/errors"
+
 export type ArtifactRequestErrorCode =
   | "artifact_not_found"
   | "artifact_kind_mismatch"
+  | "artifact_moved"
   | "invalid_artifact"
   | "not_allowed"
   | "storage_unavailable"
@@ -14,7 +17,9 @@ export class ArtifactRequestError extends Error {
 
   constructor(
     readonly code: ArtifactRequestErrorCode,
-    message: string
+    message: string,
+    /** With `artifact_moved`: the latest version, which the publish was not based on. */
+    readonly latest?: ArtifactLatestVersion
   ) {
     super(message)
   }

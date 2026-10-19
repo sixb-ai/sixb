@@ -11713,9 +11713,19 @@ export type ListArtifactsErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
   /**
    * Response for status 501
@@ -11723,9 +11733,19 @@ export type ListArtifactsErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
 }
 
@@ -11790,9 +11810,19 @@ export type CreateArtifactErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
   /**
    * Response for status 403
@@ -11800,9 +11830,19 @@ export type CreateArtifactErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
   /**
    * Response for status 404
@@ -11810,9 +11850,19 @@ export type CreateArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
   /**
    * Response for status 409
@@ -11820,9 +11870,19 @@ export type CreateArtifactErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
   /**
    * Response for status 501
@@ -11830,9 +11890,19 @@ export type CreateArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
 }
 
@@ -11967,9 +12037,19 @@ export type DeleteArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
   /**
    * Response for status 501
@@ -11977,9 +12057,19 @@ export type DeleteArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
 }
 
@@ -12012,9 +12102,19 @@ export type GetArtifactErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
   /**
    * Response for status 501
@@ -12022,9 +12122,19 @@ export type GetArtifactErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
 }
 
@@ -12090,6 +12200,10 @@ export type PublishArtifactVersionData = {
         logicalPath?: string
       }
     }>
+    /**
+     * The version this one was made from. When another was published since, the publish is refused with 409 artifact_moved, naming the latest version.
+     */
+    baseVersion?: number
   }
   path: {
     artifactId: string
@@ -12105,9 +12219,19 @@ export type PublishArtifactVersionErrors = {
   400: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
   /**
    * Response for status 403
@@ -12115,9 +12239,19 @@ export type PublishArtifactVersionErrors = {
   403: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
   /**
    * Response for status 404
@@ -12125,9 +12259,19 @@ export type PublishArtifactVersionErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
   /**
    * Response for status 409
@@ -12135,9 +12279,19 @@ export type PublishArtifactVersionErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
   /**
    * Response for status 501
@@ -12145,9 +12299,19 @@ export type PublishArtifactVersionErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
 }
 
@@ -12288,9 +12452,19 @@ export type CreateArtifactFrameErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
   /**
    * Response for status 409
@@ -12298,9 +12472,19 @@ export type CreateArtifactFrameErrors = {
   409: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
   /**
    * Response for status 501
@@ -12308,9 +12492,19 @@ export type CreateArtifactFrameErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
 }
 
@@ -12355,9 +12549,19 @@ export type GetArtifactVersionErrors = {
   404: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
   /**
    * Response for status 501
@@ -12365,9 +12569,19 @@ export type GetArtifactVersionErrors = {
   501: {
     error: string
     /**
-     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable.
+     * Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable.
      */
     code?: string
+    /**
+     * With artifact_moved: the latest version and who published it
+     */
+    latest?: {
+      version: number
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
   }
 }
 

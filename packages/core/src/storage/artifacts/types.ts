@@ -72,6 +72,11 @@ export interface PublishArtifactVersionInput {
   /** Must be the artifact's kind. */
   readonly kind: ArtifactKind
   readonly version: ArtifactVersionInput
+  /**
+   * The version this one was made from. When the latest version is another, the publish fails
+   * with `artifact_moved` rather than replace changes it never saw.
+   */
+  readonly baseVersion?: number
 }
 
 export interface PublishedArtifactVersion {
@@ -178,8 +183,11 @@ export interface ArtifactStorage {
   /** Creates the artifact with its first version. Throws `artifact_exists` when the id is taken. */
   create(input: CreateArtifactInput): Promise<PublishedArtifactVersion>
   /**
-   * Stores the next version and makes it the latest. Throws `artifact_not_found` or
-   * `artifact_kind_mismatch`. A version number is never reused, even after its version is deleted.
+   * Stores the next version and makes it the latest. Throws `artifact_not_found`,
+   * `artifact_kind_mismatch`, or `artifact_moved` with the latest version and its author when
+   * `baseVersion` is not the latest, checked in the same transaction as the write, so of two
+   * publishes from one base only the first is stored. A version number is never reused, even
+   * after its version is deleted.
    */
   publish(input: PublishArtifactVersionInput): Promise<PublishedArtifactVersion>
   get(input: GetArtifactInput): Promise<ArtifactRecord | null>

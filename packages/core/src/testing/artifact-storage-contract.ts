@@ -120,6 +120,48 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    test("publishes from a base version, and refuses one the artifact has moved past", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput())
+        const edited = await artifacts.publish({
+          ...publishInput({ author: otherOwner, origin: undefined, createdAt: at(1) }),
+          baseVersion: 1,
+        })
+        expect(edited.version.version).toBe(2)
+
+        // A second save from version 1 would replace version 2's changes unseen.
+        const error = await artifacts
+          .publish({ ...publishInput({ createdAt: at(2) }), baseVersion: 1 })
+          .then(
+            () => null,
+            (caught: unknown) => caught
+          )
+        expect(error).toBeInstanceOf(ArtifactStorageError)
+        expect(error).toMatchObject({
+          code: "artifact_moved",
+          latest: { version: 2, author: otherOwner },
+        })
+        expect((await artifacts.get({ projectId, id: "art_report" }))?.latestVersion).toBe(2)
+
+        // Of two publishes racing from one base, one is stored and the other finds it moved.
+        // Reproduce by checking the base outside the publish's transaction.
+        const raced = await Promise.allSettled([
+          artifacts.publish({ ...publishInput({ createdAt: at(3) }), baseVersion: 2 }),
+          artifacts.publish({ ...publishInput({ createdAt: at(4) }), baseVersion: 2 }),
+        ])
+        expect(raced.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+        const refused = raced.find((result) => result.status === "rejected")
+        expect(refused?.status === "rejected" && refused.reason).toMatchObject({
+          code: "artifact_moved",
+          latest: { version: 3 },
+        })
+        // Without a base, a publish is stored over whatever is latest.
+        expect((await artifacts.publish(publishInput({ createdAt: at(5) }))).version.version).toBe(
+          4
+        )
+      })
+    })
+
     test("stores a version's files, outline, references, and origin exactly", async () => {
       await withStorage(async (artifacts) => {
         const version = versionInput({

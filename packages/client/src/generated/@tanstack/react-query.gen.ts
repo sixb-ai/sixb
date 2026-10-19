@@ -4634,7 +4634,7 @@ export const getArtifactOptions = (options: Options<GetArtifactData>) =>
 /**
  * Publish an artifact's next version
  *
- * The kind must be the artifact's. The new version becomes the latest.
+ * The kind must be the artifact's. The new version becomes the latest. With baseVersion, it is refused with 409 artifact_moved when another version was published since.
  */
 export const publishArtifactVersionMutation = (
   options?: Partial<Options<PublishArtifactVersionData>>

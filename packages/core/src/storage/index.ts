@@ -224,6 +224,7 @@ export type {
   ArtifactFrameGrantRecord,
   ArtifactFrameTarget,
   ArtifactKind,
+  ArtifactLatestVersion,
   ArtifactOrigin,
   ArtifactOutline,
   ArtifactRecord,

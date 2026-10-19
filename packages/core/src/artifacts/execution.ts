@@ -22,6 +22,14 @@ export interface ArtifactContentInput {
   readonly files: readonly ArtifactFile[]
 }
 
+export interface PublishArtifactRuntimeInput extends ArtifactContentInput {
+  /**
+   * The version this one was made from, such as the one a person edited. When another version was
+   * published since, publishing fails with `artifact_moved`, naming the latest and its author.
+   */
+  readonly baseVersion?: number
+}
+
 export interface ListArtifactsRuntimeInput {
   /** Only artifacts with a version the Agent published in this thread. */
   readonly threadId?: string
@@ -39,7 +47,7 @@ export interface ArtifactsRuntime {
   /** Creates an artifact owned by the caller, with its first version. */
   create(input: ArtifactContentInput): Promise<PublishedArtifact>
   /** Publishes the next version. The kind must be the artifact's. */
-  publish(artifactId: string, input: ArtifactContentInput): Promise<PublishedArtifact>
+  publish(artifactId: string, input: PublishArtifactRuntimeInput): Promise<PublishedArtifact>
   get(artifactId: string): Promise<ArtifactRecord | null>
   /** Most recently updated first. */
   list(input?: ListArtifactsRuntimeInput): Promise<ListArtifactsResult>

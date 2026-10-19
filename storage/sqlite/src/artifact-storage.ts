@@ -88,15 +88,32 @@ export class SqliteArtifactStorage implements ArtifactStorage {
     return runImmediateTransaction(this.db, () => {
       const current = this.db
         .query(
-          "SELECT kind, next_version AS nextVersion FROM artifacts WHERE project_id = ? AND id = ?"
+          `SELECT kind, next_version AS nextVersion, latest_version AS latestVersion
+           FROM artifacts WHERE project_id = ? AND id = ?`
         )
         .get(input.projectId, input.artifactId) as {
         readonly kind: ArtifactRecord["kind"]
         readonly nextVersion: number
+        readonly latestVersion: number
       } | null
       if (!current) throw artifactStorageErrors.notFound(input.artifactId)
       if (current.kind !== input.kind) {
         throw artifactStorageErrors.kindMismatch(input.artifactId, current.kind, input.kind)
+      }
+      // Inside the write transaction: a publish from the same base after this one finds it moved.
+      if (input.baseVersion !== undefined && current.latestVersion !== input.baseVersion) {
+        const latest = parseArtifactVersionRow(
+          this.db
+            .query(
+              `SELECT ${VERSION_COLUMNS} FROM artifact_versions
+               WHERE project_id = ? AND artifact_id = ? AND version = ?`
+            )
+            .get(input.projectId, input.artifactId, current.latestVersion) as Row
+        )
+        throw artifactStorageErrors.moved(input.artifactId, input.baseVersion, {
+          version: latest.version,
+          author: latest.author,
+        })
       }
       const version = this.insertVersion(
         input.projectId,

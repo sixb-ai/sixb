@@ -3,7 +3,7 @@ import type { ArtifactOutline } from "../../artifacts/outline"
 import type { ArtifactReference } from "../../artifacts/references"
 import type { Principal } from "../../auth"
 import { isFileRef } from "../../blob-storage"
-import { ArtifactStorageError } from "./errors"
+import { type ArtifactLatestVersion, ArtifactStorageError } from "./errors"
 import type {
   ArtifactFile,
   ArtifactFrameGrantRecord,
@@ -92,6 +92,12 @@ export const artifactStorageErrors = {
     new ArtifactStorageError(
       "artifact_kind_mismatch",
       `[Sixb] Artifact '${id}' is a ${kind}; it cannot take a ${requested} version.`
+    ),
+  moved: (id: string, baseVersion: number, latest: ArtifactLatestVersion) =>
+    new ArtifactStorageError(
+      "artifact_moved",
+      `[Sixb] Artifact '${id}' is at version ${latest.version}, not version ${baseVersion}, which this publish was based on.`,
+      latest
     ),
 }
 

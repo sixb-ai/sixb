@@ -909,6 +909,7 @@ export type {
   ArtifactContentInput,
   ArtifactsRuntime,
   ListArtifactsRuntimeInput,
+  PublishArtifactRuntimeInput,
 } from "./artifacts/execution"
 export type { ArtifactKind } from "./artifacts/kinds"
 export type { ArtifactOutline } from "./artifacts/outline"
@@ -1050,6 +1051,7 @@ export type {
   ActivityVisit,
   ActivityVisitsPage,
 } from "./storage/activity/types"
+export type { ArtifactLatestVersion } from "./storage/artifacts/errors"
 export type { VectorIndexingFailureCode } from "./storage/ontology/vector-indexing"
 export type { SyncRunsRuntime, SyncsRuntime } from "./syncs/execution"
 export type {

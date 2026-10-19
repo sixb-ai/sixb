@@ -29,6 +29,7 @@ import {
   ArtifactVersionSchema,
   DeleteArtifactResponseSchema,
   PublishArtifactBodySchema,
+  PublishArtifactVersionBodySchema,
   PublishedArtifactResponseSchema,
 } from "../schemas/artifacts"
 import { FileContentQuerySchema } from "../schemas/files"
@@ -110,6 +111,7 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
         set.status = 404
         break
       case "artifact_kind_mismatch":
+      case "artifact_moved":
         set.status = 409
         break
       case "invalid_artifact":
@@ -122,7 +124,11 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
         set.status = 501
         break
     }
-    return { error: error.message, code: error.code }
+    return {
+      error: error.message,
+      code: error.code,
+      ...(error.latest ? { latest: error.latest } : {}),
+    }
   }
   if (error instanceof ZodError) {
     set.status = 400
@@ -309,10 +315,13 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       "/api/artifacts/:artifactId/versions",
       async (context) => {
         try {
-          const body = PublishArtifactBodySchema.parse(context.body)
+          const body = PublishArtifactVersionBodySchema.parse(context.body)
           const published = await requireRequestSixb(context).artifacts.publish(
             context.params.artifactId,
-            contentInput(body)
+            {
+              ...contentInput(body),
+              ...(body.baseVersion === undefined ? {} : { baseVersion: body.baseVersion }),
+            }
           )
           context.set.status = 201
           return serializePublished(published)
@@ -322,11 +331,12 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       },
       {
         params: ArtifactParamsSchema,
-        body: PublishArtifactBodySchema,
+        body: PublishArtifactVersionBodySchema,
         response: publishResponses,
         detail: {
           summary: "Publish an artifact's next version",
-          description: "The kind must be the artifact's. The new version becomes the latest.",
+          description:
+            "The kind must be the artifact's. The new version becomes the latest. With baseVersion, it is refused with 409 artifact_moved when another version was published since.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "publishArtifactVersion",
           security: accessTokenSecurityRequirement("publishArtifactVersion"),

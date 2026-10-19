@@ -609,6 +609,37 @@ describe("materializeThreadArtifacts", () => {
     expect(JSON.parse(elsewhere.manifestJson)).toEqual({ artifacts: [] })
   })
 
+  test("marks an artifact a person edited after the Agent published it", async () => {
+    write("a/document.md", "# Plan\n\nDraft.\n")
+    const { artifactId } = (await publish({ path: "a", kind: "document", title: "Plan" })) as {
+      artifactId: string
+    }
+    expect(JSON.parse((await install()).manifestJson).artifacts[0]).not.toHaveProperty("edited")
+
+    // The person saves version 2 in the app: no thread origin.
+    const first = await storage.artifacts.getVersion({ projectId, artifactId, version: 1 })
+    if (!first) throw new Error("Version 1 was not stored.")
+    const {
+      projectId: _project,
+      artifactId: _artifact,
+      version: _version,
+      origin: _origin,
+      ...content
+    } = first
+    await storage.artifacts.publish({
+      projectId,
+      artifactId,
+      kind: "document",
+      version: { ...content, createdAt: new Date() },
+      baseVersion: 1,
+    })
+    // Reproduce by marking every entry: the Agent's own versions read as edited too.
+    expect(JSON.parse((await install()).manifestJson).artifacts[0]).toMatchObject({
+      version: 2,
+      edited: true,
+    })
+  })
+
   test("lists a deck's slides with their addresses", async () => {
     write(
       "deck/index.html",

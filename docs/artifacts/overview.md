@@ -43,6 +43,14 @@ const { artifact } = await sixb.artifacts.create({
 version first: a document's images must be files in that version or another artifact's address, so
 it reads the same wherever it opens.
 
+Pass `baseVersion`, the version your change was made from, when someone else may publish in
+between. If another version was published since, the publish fails with `artifact_moved` (409 over
+HTTP) and names the latest version and its author, rather than replace changes you never saw:
+
+```ts
+await sixb.artifacts.publish(artifact.id, { ...input, baseVersion: 3 })
+```
+
 From outside the server, use `POST /api/artifacts` and
 `POST /api/artifacts/{artifactId}/versions` with files uploaded through `POST /api/files`.
 
