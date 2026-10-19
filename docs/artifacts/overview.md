@@ -75,6 +75,32 @@ The Agent learns the formats from a built-in skill, `sixb-artifacts`.
 A file one of your tools returns stays with that tool's step in the conversation. The Agent
 publishes it when it is what you asked for.
 
+## Edit in the app
+
+Sheets and canvases are edited where they open. Press **Edit** on the latest version: the header
+becomes a draft bar with Undo, Redo, Discard, and **Save as version N**. Saving publishes your
+draft as the next version; the earlier ones stay in the version menu. ⌘S saves, and leaving with
+changes asks first.
+
+| In a sheet | |
+| --- | --- |
+| Cells | Type on a cell, or press Enter, F2, or double-click: Enter and Tab commit, Esc puts it back. Values are read in your locale: `12%`, `$1,200`, `23/11/2026`, `4.5M` |
+| Rows | Insert above or below and delete from a row's menu; ⌘D fills down; a paste grows the sheet |
+| Columns | Insert, rename, delete, and set the type, format, total, description, or formula from a column's menu |
+| Undo | ⌘Z and ⇧⌘Z, every change in the draft |
+
+| In a canvas | |
+| --- | --- |
+| Items | Drag to move, snapped to 8 pixels; resize from the handles; Delete removes; ⌘D duplicates; the arrows nudge |
+| Add | A note, text, shape, or section from the toolbar; double-click or Enter to type in one |
+| Arrows | Drag from the dot on an item's side to another item; the toolbar sets a line's style and label |
+| Style | A note's or a shape's color, a text's size, a shape's form, for everything selected |
+
+Boards' pages are the Agent's to change; on the canvas you arrange them. If someone published a
+version while you were editing, the save stops and says so: open the new version, or save yours
+over it. The next time the Agent works on the artifact, it starts from your version and keeps your
+changes.
+
 ## Write a document
 
 A document is Markdown with tables, footnotes, and task lists. A few conventions shape its page:

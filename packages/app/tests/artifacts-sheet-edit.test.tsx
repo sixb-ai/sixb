@@ -13,6 +13,7 @@ import { act, fireEvent, render, waitFor } from "@testing-library/react"
 import { useMemo, useState } from "react"
 import { MemoryRouter } from "react-router-dom"
 import { artifactFileSource } from "../src/artifacts/file-source"
+import { recordChange, redoChange, startHistory, undoChange } from "../src/artifacts/history"
 import {
   cellEdited,
   deleteColumn,
@@ -23,13 +24,9 @@ import {
   draftTable,
   insertColumn,
   insertRows,
-  recordDraft,
-  redoDraft,
   setCells,
   setColumn,
   startDraft,
-  startHistory,
-  undoDraft,
 } from "../src/artifacts/renderers/sheet/draft"
 import { SheetGrid, type SheetGridEditor } from "../src/artifacts/renderers/sheet/grid"
 import { cellInputText, parseCellInput } from "../src/artifacts/renderers/sheet/input"
@@ -216,9 +213,9 @@ describe("a workbook's draft", () => {
 
   test("undoes and does again each change, across edits, inserts, and deletes", () => {
     // Reproduce by recording only the present: undo has nothing to return to.
-    let history = startHistory(workbook)
+    let history = startHistory(startDraft(workbook))
     const apply = (change: (draft: typeof history.present) => typeof history.present) => {
-      history = recordDraft(history, change(history.present))
+      history = recordChange(history, change(history.present))
     }
     const names = () => draftTable(history.present, "Regions", TABLE).rows.map((row) => row[0])
     apply((draft) =>
@@ -227,19 +224,19 @@ describe("a workbook's draft", () => {
     apply((draft) => insertRows(draft, "Regions", TABLE, 0, 1))
     apply((draft) => deleteRows(draft, "Regions", TABLE, [3]))
     expect(names()).toEqual(["", "North East", "South"])
-    history = undoDraft(history)
+    history = undoChange(history)
     expect(names()).toEqual(["", "North East", "South", "Harbor"])
-    history = undoDraft(undoDraft(history))
+    history = undoChange(undoChange(history))
     expect(names()).toEqual(["North", "South", "Harbor"])
-    history = redoDraft(history)
+    history = redoChange(history)
     expect(names()).toEqual(["North East", "South", "Harbor"])
     // A change after an undo drops what was undone.
     apply((draft) =>
       setCells(draft, "Regions", TABLE, [{ row: 1, column: 0, value: "South West" }])
     )
-    expect(redoDraft(history)).toBe(history)
+    expect(redoChange(history)).toBe(history)
     // A change that changes nothing is no step.
-    expect(recordDraft(history, history.present)).toBe(history)
+    expect(recordChange(history, history.present)).toBe(history)
   })
 
   test("saves the sheets it changed, and no others", () => {
@@ -282,7 +279,9 @@ const BY_VISITS = {
 
 /** The grid editing a sheet held in a draft, as the sheet renderer edits one. */
 function EditedGrid({ sort }: { readonly sort?: boolean }) {
-  const [history, setHistory] = useState(() => startHistory({ sheets: [SHEET], charts: [] }))
+  const [history, setHistory] = useState(() =>
+    startHistory(startDraft({ sheets: [SHEET], charts: [] }))
+  )
   const draft = history.present
   const base = useMemo(() => sheetModel(SHEET, TABLE), [])
   const table = draftTable(draft, "Regions", TABLE)
@@ -301,20 +300,20 @@ function EditedGrid({ sort }: { readonly sort?: boolean }) {
         }),
       write: (edits, grow) =>
         setHistory((last) =>
-          recordDraft(last, setCells(last.present, "Regions", TABLE, edits, grow))
+          recordChange(last, setCells(last.present, "Regions", TABLE, edits, grow))
         ),
       insertRows: (at, count) =>
         setHistory((last) =>
-          recordDraft(last, insertRows(last.present, "Regions", TABLE, at, count))
+          recordChange(last, insertRows(last.present, "Regions", TABLE, at, count))
         ),
       deleteRows: (rows) =>
-        setHistory((last) => recordDraft(last, deleteRows(last.present, "Regions", TABLE, rows))),
+        setHistory((last) => recordChange(last, deleteRows(last.present, "Regions", TABLE, rows))),
       insertColumn: (at) =>
-        setHistory((last) => recordDraft(last, insertColumn(last.present, "Regions", TABLE, at))),
+        setHistory((last) => recordChange(last, insertColumn(last.present, "Regions", TABLE, at))),
       deleteColumn: () => null,
       editColumn: () => {},
-      undo: () => setHistory(undoDraft),
-      redo: () => setHistory(redoDraft),
+      undo: () => setHistory(undoChange),
+      redo: () => setHistory(redoChange),
       edited: (row, column) => cellEdited(table, row, column),
     }),
     [model, table]

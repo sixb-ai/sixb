@@ -14,6 +14,7 @@ import { useArtifactMessages } from "../../messages"
 import { ArtifactEmbed, ArtifactLink } from "../../references/references"
 import { TONE_COLORS } from "../../tones"
 import { LiveBoard, useLiveBoards } from "./board"
+import { EditChrome, InPlaceText, useCanvasEditing } from "./editing"
 import { type CanvasFlowNode, TEXT_SIZES } from "./layout"
 
 /**
@@ -124,6 +125,7 @@ function BoardNode(props: NodeProps<CanvasFlowNode>) {
   return (
     <div className="relative size-full">
       <Ends />
+      <EditChrome id={board.id} selected={props.selected} />
       {scale && named ? (
         <NameRow
           width={board.w}
@@ -160,12 +162,26 @@ function BoardNode(props: NodeProps<CanvasFlowNode>) {
 function SectionNode(props: NodeProps<CanvasFlowNode>) {
   const section = itemOf<CanvasSection>(props)
   const scale = useNameScale()
+  const editing = useCanvasEditing()
+  const heading =
+    "absolute top-0 left-0 m-0 origin-top-left text-base leading-6 font-semibold tracking-[-0.01em] text-foreground"
   return (
     <div className="relative size-full">
       <Ends />
-      {section.title && scale ? (
+      <EditChrome id={section.id} selected={props.selected} />
+      {editing?.typing === section.id ? (
+        <div className={cn(heading, "pointer-events-auto")} style={{ width: section.w }}>
+          <InPlaceText id={section.id} value={section.title ?? ""} />
+        </div>
+      ) : section.title && scale ? (
+        // While the canvas is edited, the heading is what takes the section: a press anywhere
+        // else in its region falls through to what the region holds, or pans.
         <h3
-          className="pointer-events-none absolute top-0 left-0 m-0 origin-top-left truncate text-base leading-6 font-semibold tracking-[-0.01em] text-foreground"
+          className={cn(
+            heading,
+            "truncate",
+            editing ? "pointer-events-auto cursor-grab" : "pointer-events-none"
+          )}
           style={{ maxWidth: section.w / scale, transform: `scale(${scale})` }}
         >
           {section.title}
@@ -182,6 +198,7 @@ function SectionNode(props: NodeProps<CanvasFlowNode>) {
 function NoteNode(props: NodeProps<CanvasFlowNode>) {
   const note = itemOf<CanvasNote>(props)
   const tone = note.tone ?? "warning"
+  const editing = useCanvasEditing()
   return (
     <div
       className={cn(
@@ -191,8 +208,9 @@ function NoteNode(props: NodeProps<CanvasFlowNode>) {
           : "shadow-[0_1px_2px_rgb(0_0_0/0.06),0_10px_24px_-14px_rgb(0_0_0/0.28)]"
       )}
       style={{
-        width: note.w,
-        minHeight: note.h ?? Math.min(note.w, 112),
+        width: "100%",
+        // As tall as its box while it is resized, and never shorter than its height.
+        minHeight: `max(${note.h ?? Math.min(note.w, 112)}px, 100%)`,
         // A wide note is read from further out, so its text is a little larger: never so large
         // that a few words fill it.
         fontSize: Math.round(Math.min(22, Math.max(15, note.w / 13))),
@@ -202,7 +220,17 @@ function NoteNode(props: NodeProps<CanvasFlowNode>) {
       }}
     >
       <Ends />
-      {note.text}
+      <EditChrome id={note.id} selected={props.selected} />
+      {editing?.typing === note.id ? (
+        <InPlaceText
+          id={note.id}
+          value={note.text}
+          multiline
+          className="leading-[1.4] font-medium"
+        />
+      ) : (
+        note.text
+      )}
     </div>
   )
 }
@@ -211,6 +239,7 @@ function NoteNode(props: NodeProps<CanvasFlowNode>) {
 function TextNode(props: NodeProps<CanvasFlowNode>) {
   const text = itemOf<CanvasText>(props)
   const size = TEXT_SIZES[text.size]
+  const editing = useCanvasEditing()
   return (
     <div
       className={cn(
@@ -222,11 +251,16 @@ function TextNode(props: NodeProps<CanvasFlowNode>) {
       style={{
         fontSize: size,
         lineHeight: text.size === "xl" || text.size === "l" ? 1.15 : 1.45,
-        ...(text.w === undefined ? { width: "max-content" } : { width: text.w }),
+        ...(text.w === undefined ? { width: "max-content", minWidth: "100%" } : { width: "100%" }),
       }}
     >
       <Ends />
-      {text.text}
+      <EditChrome id={text.id} selected={props.selected} />
+      {editing?.typing === text.id ? (
+        <InPlaceText id={text.id} value={text.text} multiline className="min-w-[8ch]" />
+      ) : (
+        text.text
+      )}
     </div>
   )
 }
@@ -238,9 +272,17 @@ function ShapeNode(props: NodeProps<CanvasFlowNode>) {
     ? `color-mix(in oklab, ${TONE_COLORS[shape.tone]} 16%, var(--card))`
     : "var(--card)"
   const stroke = "color-mix(in oklab, var(--foreground) 32%, transparent)"
+  const editing = useCanvasEditing()
+  const fontSize = Math.round(Math.min(22, Math.max(15, Math.min(shape.w, shape.h * 2) / 12)))
+  const textBox = cn(
+    "relative text-center leading-snug font-medium text-foreground",
+    // A diamond's middle is narrower than its box.
+    shape.shape === "diamond" ? "max-w-[60%]" : "max-w-[80%]"
+  )
   return (
     <div className="relative flex size-full items-center justify-center">
       <Ends />
+      <EditChrome id={shape.id} selected={props.selected} />
       <svg
         viewBox={`0 0 ${shape.w} ${shape.h}`}
         className="absolute inset-0 size-full overflow-visible"
@@ -272,18 +314,13 @@ function ShapeNode(props: NodeProps<CanvasFlowNode>) {
           />
         )}
       </svg>
-      {shape.text ? (
-        <span
-          className={cn(
-            "relative text-center leading-snug font-medium text-foreground",
-            // A diamond's middle is narrower than its box.
-            shape.shape === "diamond" ? "max-w-[60%]" : "max-w-[80%]"
-          )}
-          // A larger shape is read from further out, as a note is.
-          style={{
-            fontSize: Math.round(Math.min(22, Math.max(15, Math.min(shape.w, shape.h * 2) / 12))),
-          }}
-        >
+      {editing?.typing === shape.id ? (
+        <div className={cn(textBox, "w-full")} style={{ fontSize }}>
+          <InPlaceText id={shape.id} value={shape.text ?? ""} className="text-center" />
+        </div>
+      ) : shape.text ? (
+        // A larger shape is read from further out, as a note is.
+        <span className={textBox} style={{ fontSize }}>
           {shape.text}
         </span>
       ) : null}
@@ -304,6 +341,7 @@ function EmbedNode(props: NodeProps<CanvasFlowNode>) {
   return (
     <div className="relative size-full">
       <Ends />
+      <EditChrome id={embed.id} selected={props.selected} />
       {named && scale && embed.title ? (
         <NameRow
           width={embed.w}

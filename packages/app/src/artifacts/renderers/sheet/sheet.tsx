@@ -22,6 +22,7 @@ import {
 } from "react"
 import { useArtifactEditing, useReportDraft } from "../../edit-session"
 import { formatFileSize } from "../../file-size"
+import { type History, recordChange, redoChange, startHistory, undoChange } from "../../history"
 import { useArtifactMessages } from "../../messages"
 import { type ArtifactVersion, versionImageSource } from "../../queries"
 import { useArtifactThemeAttributes } from "../../theme"
@@ -31,7 +32,6 @@ import { ColumnDialog, refusalText } from "./column-format"
 import {
   type ColumnRefusal,
   cellEdited,
-  type DraftHistory,
   deleteColumn,
   deleteRows,
   draftChanged,
@@ -41,12 +41,9 @@ import {
   draftTable,
   insertColumn,
   insertRows,
-  recordDraft,
-  redoDraft,
   setCells,
   setColumn,
-  startHistory,
-  undoDraft,
+  startDraft,
   type WorkbookDraft,
 } from "./draft"
 import { useSheetFind } from "./find-bar"
@@ -336,15 +333,17 @@ function useWorkbookEdit(
   readonly dialog: ReactNode
 } {
   const editing = useArtifactEditing()
-  const [history, setHistory] = useState<DraftHistory>(() => startHistory(workbook))
+  const [history, setHistory] = useState<History<WorkbookDraft>>(() =>
+    startHistory(startDraft(workbook))
+  )
   useEffect(() => {
-    if (!editing) setHistory(startHistory(workbook))
+    if (!editing) setHistory(startHistory(startDraft(workbook)))
   }, [editing, workbook])
   const draft = history.present
   /** One change of the draft: one step for undo. */
   const change = useCallback(
     (apply: (draft: WorkbookDraft) => WorkbookDraft) =>
-      setHistory((last) => recordDraft(last, apply(last.present))),
+      setHistory((last) => recordChange(last, apply(last.present))),
     []
   )
   const published = workbook.sheets.find((entry) => entry.name === sheetName)
@@ -367,7 +366,7 @@ function useWorkbookEdit(
     (apply: (draft: WorkbookDraft) => WorkbookDraft | ColumnRefusal): ColumnRefusal | null => {
       const next = apply(present.current)
       if ("refused" in next) return next
-      setHistory((last) => recordDraft(last, next))
+      setHistory((last) => recordChange(last, next))
       return null
     },
     []
@@ -393,8 +392,8 @@ function useWorkbookEdit(
         return refused ? refusalText(refused, messages.column, () => "") : null
       },
       editColumn: (column, focus) => setSettings({ column, focus }),
-      undo: () => setHistory(undoDraft),
-      redo: () => setHistory(redoDraft),
+      undo: () => setHistory(undoChange),
+      redo: () => setHistory(redoChange),
       edited: (row, column) => cellEdited(current, row, column),
       suggestions: (column) => tagSuggestions(model, column),
     }
@@ -407,8 +406,8 @@ function useWorkbookEdit(
         ? {
             changed: draftChanged(draft),
             files: () => draftFiles(draft),
-            ...(canUndo ? { undo: () => setHistory(undoDraft) } : {}),
-            ...(canRedo ? { redo: () => setHistory(redoDraft) } : {}),
+            ...(canUndo ? { undo: () => setHistory(undoChange) } : {}),
+            ...(canRedo ? { redo: () => setHistory(redoChange) } : {}),
           }
         : null,
     [editing, draft, canUndo, canRedo]

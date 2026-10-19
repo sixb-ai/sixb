@@ -212,3 +212,57 @@
   outline-offset: 4px;
   border-radius: 8px;
 }
+
+/*
+ * A canvas while it is edited (renderers/canvas/edit-mode.tsx). An item shows it can be moved on
+ * hover; a dot on each side, shown on hover and while it is selected, drags an arrow out; the
+ * selected item's frame resizes it. A section's region takes no press: its heading does, so a
+ * press inside a section reaches what it holds, or pans.
+ */
+.sixb-artboard[data-editing] .react-flow__node:not(.react-flow__node-section, .react-flow__node-point):hover:not(.selected) {
+  outline: 1.5px solid color-mix(in oklab, var(--primary) 45%, transparent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.sixb-artboard .react-flow__node-section {
+  pointer-events: none !important;
+}
+
+.sixb-artboard .react-flow__node-section :is(.react-flow__resize-control, .react-flow__handle) {
+  pointer-events: all;
+}
+
+.sixb-artboard .react-flow__handle.sixb-connect {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--primary);
+  border-radius: 999px;
+  background: var(--background);
+  opacity: 0;
+  transition: opacity 120ms ease-out, transform 120ms ease-out;
+}
+
+.sixb-artboard .react-flow__node:hover .react-flow__handle.sixb-connect,
+.sixb-artboard .react-flow__handle.sixb-connect[data-selected],
+.sixb-artboard .react-flow__handle.sixb-connect.connectingto {
+  opacity: 1;
+}
+
+.sixb-artboard .react-flow__handle.sixb-connect:hover,
+.sixb-artboard .react-flow__handle.sixb-connect.connectingto {
+  transform: translate(-50%, -50%) scale(1.25);
+  background: var(--primary);
+}
+
+.sixb-artboard .sixb-resize-handle {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--primary) !important;
+  border-radius: 2px;
+  background: var(--background) !important;
+}
+
+.sixb-artboard .sixb-resize-line {
+  border-color: color-mix(in oklab, var(--primary) 80%, transparent) !important;
+}
