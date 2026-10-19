@@ -16,18 +16,20 @@ import type { ArtifactVersion } from "../../queries"
 import { CANVAS_EDGE_TYPES } from "./arrows"
 import { LiveBoardsProvider, liveBoards } from "./board"
 import { CanvasControls } from "./controls"
+import { type CanvasEditor, useBoardEditing } from "./edit-mode"
+import { CanvasEditingProvider } from "./editing"
 import { BoardFocus } from "./focus"
 import { CANVAS_NODE_TYPES } from "./items"
-import { canvasGraph } from "./layout"
 
 /** Room around what the board fits to, as a share of the view. */
 const PADDING = 0.12
 
 /**
  * A canvas on an endless board: drag or scroll to pan, pinch or ⌘-scroll to zoom, the zoom
- * controls in a corner. Boards run live as the view comes to them;
- * double-click one, press Enter on it, or press its Open to open it over the canvas. It opens on
- * the item an address named, else fitted to everything.
+ * controls in a corner. Boards run live as the view comes to them; double-click one, press Enter
+ * on it, or press its Open to open it over the canvas. It opens on the item an address named,
+ * else fitted to everything. Given an editor, its items are selected, moved, resized, connected,
+ * and typed into, with a toolbar to add more.
  */
 export default memo(function CanvasBoard({
   canvas,
@@ -35,6 +37,7 @@ export default memo(function CanvasBoard({
   title,
   mode,
   focus,
+  edit,
 }: {
   readonly canvas: Canvas
   /** The version the canvas is, whose frames its boards run in; none draws boards as tiles. */
@@ -47,6 +50,8 @@ export default memo(function CanvasBoard({
   readonly mode: "light" | "dark"
   /** An item to open on, as `artifact:…#id` names one. */
   readonly focus?: string
+  /** Edits the canvas; without it, it is read. */
+  readonly edit?: CanvasEditor
 }) {
   return (
     <ReactFlowProvider>
@@ -56,6 +61,7 @@ export default memo(function CanvasBoard({
         mode={mode}
         {...(version ? { version } : {})}
         {...(focus ? { focus } : {})}
+        {...(edit ? { edit } : {})}
       />
     </ReactFlowProvider>
   )
@@ -67,15 +73,16 @@ function Board({
   title,
   mode,
   focus,
+  edit,
 }: {
   readonly canvas: Canvas
   readonly version?: ArtifactVersion
   readonly title: string
   readonly mode: "light" | "dark"
   readonly focus?: string
+  readonly edit?: CanvasEditor
 }) {
   const messages = useArtifactMessages().canvas
-  const { nodes, edges } = useMemo(() => canvasGraph(canvas), [canvas])
   const boards = useMemo(
     () => canvas.items.filter((item): item is CanvasBoardItem => item.type === "board"),
     [canvas]
@@ -109,6 +116,7 @@ function Board({
     }),
     [version, liveKey]
   )
+  const board = useBoardEditing(canvas, edit, version ? setOpened : undefined)
   const fitOptions = useMemo<FitViewOptions>(() => {
     const item = focus ? canvas.items.find((candidate) => candidate.id === focus) : undefined
     // An item with a box opens filling the view; an arrow or a text opens the whole canvas.
@@ -117,10 +125,18 @@ function Board({
   }, [canvas, focus])
   return (
     <div
-      className="sixb-canvas sixb-artboard relative size-full bg-background"
+      ref={board.root}
+      // Editing, the board takes the keys: it is focused as typing ends.
+      tabIndex={board.editing ? -1 : undefined}
+      className="sixb-canvas sixb-artboard relative size-full bg-background outline-none"
+      data-editing={board.editing ? "" : undefined}
       role="region"
       aria-label={messages.canvas(title)}
       onKeyDown={(event) => {
+        if (board.editing) {
+          board.onKeyDown(event)
+          return
+        }
         // Enter on a board, as the keyboard reaches it, opens it.
         if (event.key !== "Enter" || !live.open) return
         const id = (event.target as HTMLElement)
@@ -130,33 +146,40 @@ function Board({
       }}
     >
       <LiveBoardsProvider value={live}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={CANVAS_NODE_TYPES}
-          edgeTypes={CANVAS_EDGE_TYPES}
-          colorMode={mode}
-          fitView
-          fitViewOptions={fitOptions}
-          minZoom={0.04}
-          maxZoom={2.5}
-          // Scroll pans, as a design tool's board does; a pinch, or ⌘ or Ctrl with scroll, zooms.
-          panOnScroll
-          zoomOnScroll={false}
-          zoomOnPinch
-          zoomActivationKeyCode={["Meta", "Control"]}
-          panOnDrag
-          nodesDraggable={false}
-          nodesConnectable={false}
-          elementsSelectable={false}
-          onNodeDoubleClick={(_, node) => {
-            if (node.type === "board") live.open?.(node.id)
-          }}
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background variant={BackgroundVariant.Dots} gap={24} size={1.3} />
-          <CanvasControls padding={PADDING} />
-        </ReactFlow>
+        <CanvasEditingProvider value={board.editing ? board.items : null}>
+          <ReactFlow
+            nodes={board.nodes}
+            edges={board.edges}
+            nodeTypes={CANVAS_NODE_TYPES}
+            edgeTypes={CANVAS_EDGE_TYPES}
+            colorMode={mode}
+            fitView
+            fitViewOptions={fitOptions}
+            minZoom={0.04}
+            maxZoom={2.5}
+            // Scroll pans, as a design tool's board does; a pinch, or ⌘ or Ctrl with scroll, zooms.
+            panOnScroll
+            zoomOnScroll={false}
+            zoomOnPinch
+            zoomActivationKeyCode={["Meta", "Control"]}
+            panOnDrag
+            {...(board.editing
+              ? board.flow
+              : {
+                  nodesDraggable: false,
+                  nodesConnectable: false,
+                  elementsSelectable: false,
+                  onNodeDoubleClick: (_: unknown, node: { type?: string; id: string }) => {
+                    if (node.type === "board") live.open?.(node.id)
+                  },
+                })}
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background variant={BackgroundVariant.Dots} gap={24} size={1.3} />
+            <CanvasControls padding={PADDING} />
+            {board.editing ? board.toolbar : null}
+          </ReactFlow>
+        </CanvasEditingProvider>
       </LiveBoardsProvider>
       {opened && version ? (
         <BoardFocus

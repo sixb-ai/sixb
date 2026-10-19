@@ -62,7 +62,7 @@ export function exitPoint(rect: Rect, toward: { x: number; y: number }): { x: nu
  * in the theme's color, dashed when the canvas says so, and its label on the line, kept readable
  * as names are.
  */
-function FloatingArrow({ id, source, target, data }: EdgeProps<CanvasFlowEdge>) {
+function FloatingArrow({ id, source, target, data, selected }: EdgeProps<CanvasFlowEdge>) {
   const from = useInternalNode(source)
   const to = useInternalNode(target)
   const scale = useNameScale()
@@ -89,9 +89,19 @@ function FloatingArrow({ id, source, target, data }: EdgeProps<CanvasFlowEdge>) 
     (LABEL_SHARE * Math.hypot(end.x - start.x, end.y - start.y)) /
     ((data?.label?.length ?? 0) * 6.6 + 24)
   const labelScale = scale === null ? null : Math.min(scale, Math.max(1, room))
-  const color = "color-mix(in oklab, var(--foreground) 62%, transparent)"
+  const color = selected
+    ? "var(--primary)"
+    : "color-mix(in oklab, var(--foreground) 62%, transparent)"
   return (
     <>
+      {/* A wide line no one sees, so an arrow is easy to press while the canvas is edited. */}
+      <path
+        d={`M${start.x},${start.y} L${end.x},${end.y}`}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={18}
+        className="react-flow__edge-interaction"
+      />
       <path
         id={id}
         d={`M${start.x},${start.y} L${stem.x},${stem.y}`}

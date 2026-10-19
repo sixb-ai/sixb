@@ -406,53 +406,6 @@ export function newColumnNames(header: readonly string[], count: number): string
 }
 
 /**
- * Every change of a draft in order, so each can be undone and done again. A change made after an
- * undo drops what was undone, as an editor's does.
- */
-export interface DraftHistory {
-  readonly past: readonly WorkbookDraft[]
-  readonly present: WorkbookDraft
-  readonly future: readonly WorkbookDraft[]
-}
-
-/** How many changes undo reaches back. */
-const HISTORY_LIMIT = 200
-
-export function startHistory(workbook: Workbook): DraftHistory {
-  return { past: [], present: startDraft(workbook), future: [] }
-}
-
-/** The draft after a change, which undo returns from; one that changes nothing is not kept. */
-export function recordDraft(history: DraftHistory, next: WorkbookDraft): DraftHistory {
-  if (next === history.present) return history
-  return {
-    past: [...history.past, history.present].slice(-HISTORY_LIMIT),
-    present: next,
-    future: [],
-  }
-}
-
-export function undoDraft(history: DraftHistory): DraftHistory {
-  const previous = history.past.at(-1)
-  if (!previous) return history
-  return {
-    past: history.past.slice(0, -1),
-    present: previous,
-    future: [history.present, ...history.future],
-  }
-}
-
-export function redoDraft(history: DraftHistory): DraftHistory {
-  const next = history.future[0]
-  if (!next) return history
-  return {
-    past: [...history.past, history.present],
-    present: next,
-    future: history.future.slice(1),
-  }
-}
-
-/**
  * Whether a cell holds a value the draft changed: one that differs from the version's in the row
  * and column it was made from, or any value at all in a row or column the draft added.
  */
