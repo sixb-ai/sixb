@@ -11,9 +11,10 @@ import {
   useState,
 } from "react"
 import { ArtifactFrame, type ArtifactFrameHandle } from "../../frame"
+import { FrameEmbeds } from "../../frame-embeds"
 import { type ArtifactMessages, useArtifactMessages } from "../../messages"
 import type { ArtifactVersion } from "../../queries"
-import { ArtifactEmbed, useOpenArtifactAddress } from "../../references/references"
+import { useOpenArtifactAddress } from "../../references/references"
 import { useArtifactThemeAttributes } from "../../theme"
 import { ViewerNotice } from "../notice"
 import { type DeckAction, deckKeyAction, slideFromPart } from "./navigation"
@@ -155,7 +156,7 @@ export function SlidesRenderer({
           className="flex-1"
           fallback={presenting ? null : <SlidePlaceholder />}
           failure={<ViewerNotice title={messages.loadFailed} />}
-          overlay={<DeckEmbeds version={version} embeds={embeds} />}
+          overlay={<FrameEmbeds version={version} embeds={embeds} zoom={EMBED_ZOOM} />}
         />
         {presenting ? (
           <button
@@ -330,59 +331,6 @@ function Filmstrip({
 
 /** The app's text, 13px, reads at about 20px on a slide drawn at 1.5 times the slide's scale. */
 const EMBED_ZOOM = 1.5
-
-/**
- * What the shown slide embeds from other artifacts, drawn where the deck put each box: laid out
- * at the box's size in slide pixels over 1.5, then scaled with the slide. Only what the version
- * records as an embed is drawn, so a deck shows nothing it did not publish with.
- */
-function DeckEmbeds({
-  version,
-  embeds,
-}: {
-  readonly version: ArtifactVersion
-  readonly embeds: readonly FrameEmbed[]
-}) {
-  const recorded = useMemo(
-    () =>
-      new Set(
-        version.references
-          .filter((reference) => reference.as === "embed")
-          .map((reference) => reference.address)
-      ),
-    [version]
-  )
-  return embeds
-    .filter((embed) => recorded.has(embed.address))
-    .map((embed, index) => {
-      const zoom = embed.scale * EMBED_ZOOM
-      return (
-        <div
-          // A slide may embed one address twice.
-          key={`${index}:${embed.address}`}
-          data-sixb-deck-embed={embed.address}
-          className="pointer-events-auto absolute"
-          style={{
-            left: embed.rect.x,
-            top: embed.rect.y,
-            width: embed.rect.width,
-            height: embed.rect.height,
-          }}
-        >
-          <div
-            style={{
-              width: embed.rect.width / zoom,
-              height: embed.rect.height / zoom,
-              transform: `scale(${zoom})`,
-              transformOrigin: "0 0",
-            }}
-          >
-            <ArtifactEmbed address={embed.address} caption="" fill />
-          </div>
-        </div>
-      )
-    })
-}
 
 /**
  * Where the slide will be while the frame loads: the frame centers a 16:9 slide with a margin of

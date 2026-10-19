@@ -116,6 +116,10 @@ cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com, and Google Fonts; nothing els
   defaults and a Reset.
 - A link to another artifact (`<a href="artifact:…">`) opens it beside the conversation; a link to
   a web page opens in a new tab.
+- `<sixb-embed src="artifact:…#chart=revenue"></sixb-embed>` shows another artifact on the page: a
+  chart, a range, a section, a slide (see `references.md`). Size the box with CSS like any block;
+  it is the column's width and 16:9 unless you say otherwise. The app draws the artifact over it,
+  live, as the page scrolls. Use one instead of redrawing a chart a sheet already draws.
 
 ## Narrow screens
 

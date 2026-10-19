@@ -5,11 +5,13 @@
  * the two together. Its tag names the layout, `data-sixb-layout`.
  *
  * In every layout it applies the theme the app sends, then fires `sixb:theme` on the window for
- * what draws its own colors; answers the app's requests; and tells the
- * app about links to other artifacts. A deck it also lays out: every `section.slide` is a 1280×720
- * slide, shown one at a time scaled to fit, or all at once in a grid. The URL's fragment can open
- * it at a slide, and with `sixb-fill` show that slide alone filling the frame, as a thumbnail or an
- * embed does; it tells the app about keys and picks in the overview. A page scrolls as it is.
+ * what draws its own colors; answers the app's requests; and tells the app about links to other
+ * artifacts and where its `<sixb-embed>` boxes are, for the app to draw them over the frame. A
+ * deck it also lays out: every `section.slide` is a 1280×720 slide, shown one at a time scaled to
+ * fit, or all at once in a grid. The URL's fragment can open it at a slide, and with `sixb-fill`
+ * show that slide alone filling the frame, as a thumbnail or an embed does; it tells the app about
+ * keys and picks in the overview. A page scrolls as it is: it reports the embeds near its view as
+ * it scrolls, and its height as it changes.
  */
 export function frameRuntime(): void {
   const PROTOCOL = "sixb-frame/1"
@@ -67,29 +69,63 @@ export function frameRuntime(): void {
     )
   }
 
-  /** The shown slide's embeds, for the app to draw over the frame; once a frame, when they move. */
+  /**
+   * The embeds to draw over the frame, once an animation frame, when they move: the shown slide's
+   * in a deck; in a page, those within a screen of its view, so a long page mounts what is near.
+   */
   let reported = ""
   let reporting = false
   const reportEmbeds = () => {
-    if (!deck || reporting || root.dataset.mode === "fill") return
+    if (reporting || root.dataset.mode === "fill") return
     reporting = true
     requestAnimationFrame(() => {
       reporting = false
-      const scale = Number(root.style.getPropertyValue("--sixb-scale")) || 1
-      const slide = root.dataset.mode === "overview" ? undefined : slides()[current - 1]
-      const embeds = Array.from(slide?.querySelectorAll("sixb-embed[src]") ?? []).map((element) => {
-        const rect = element.getBoundingClientRect()
-        return {
-          address: (element.getAttribute("src") ?? "").trim(),
-          rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
-          scale,
+      const scale = deck ? Number(root.style.getPropertyValue("--sixb-scale")) || 1 : 1
+      const scope = deck
+        ? root.dataset.mode === "overview"
+          ? undefined
+          : slides()[current - 1]
+        : document
+      const near = (rect: DOMRect) =>
+        deck || (rect.bottom > -window.innerHeight && rect.top < window.innerHeight * 2)
+      const embeds = Array.from(scope?.querySelectorAll("sixb-embed[src]") ?? []).flatMap(
+        (element) => {
+          const rect = element.getBoundingClientRect()
+          return near(rect)
+            ? [
+                {
+                  address: (element.getAttribute("src") ?? "").trim(),
+                  rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+                  scale,
+                },
+              ]
+            : []
         }
-      })
+      )
       const next = JSON.stringify(embeds)
       if (next === reported) return
       reported = next
       post({ event: "embeds", params: { embeds } })
     })
+  }
+
+  /**
+   * A page's height as laid out, for a document that shows it to size its frame: its body's, not
+   * the document's, which is never less than the frame and so would never let the frame shrink.
+   */
+  let height = -1
+  const reportSize = () => {
+    const body = document.body
+    if (deck || !body) return
+    const style = getComputedStyle(body)
+    const next = Math.ceil(
+      Math.max(body.scrollHeight, body.getBoundingClientRect().height) +
+        (Number.parseFloat(style.marginTop) || 0) +
+        (Number.parseFloat(style.marginBottom) || 0)
+    )
+    if (next === height) return
+    height = next
+    post({ event: "size", params: { height } })
   }
 
   const show = (slide: number) => {
@@ -142,6 +178,10 @@ export function frameRuntime(): void {
       case "goto":
         if (!deck) throw new Error("Only a deck has slides.")
         show(Number(params.slide))
+        return
+      case "scroll":
+        if (deck) throw new Error("Only a page scrolls.")
+        window.scrollBy({ left: Number(params.x) || 0, top: Number(params.y) || 0 })
         return
       case "mode":
         if (!deck) throw new Error("Only a deck has modes.")
@@ -203,13 +243,26 @@ export function frameRuntime(): void {
   })
 
   window.addEventListener("resize", () => {
-    if (!deck) return
-    fit()
+    if (deck) fit()
     reportEmbeds()
   })
   const ready = () => {
     if (!deck) {
       post({ event: "ready", params: {} })
+      window.addEventListener("scroll", reportEmbeds, { passive: true })
+      // What changes the page's height moves its embeds too: content, fonts, and images.
+      const resized = new ResizeObserver(() => {
+        reportSize()
+        reportEmbeds()
+      })
+      resized.observe(document.documentElement)
+      if (document.body) resized.observe(document.body)
+      window.addEventListener("load", () => {
+        reportSize()
+        reportEmbeds()
+      })
+      reportSize()
+      reportEmbeds()
       return
     }
     slides().forEach((element, index) => {

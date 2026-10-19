@@ -206,6 +206,13 @@ describe("a frame's events", () => {
       event("embeds", { embeds: [{ address: "artifact:art_0123456789#1", rect, scale: 0.5 }] })
         ?.params
     ).toEqual({ embeds: [{ address: "artifact:art_0123456789#1", rect, scale: 0.5 }] })
+    expect(event("size", { height: 1240 })?.params).toEqual({ height: 1240 })
+  })
+
+  test("give a page's height as at most 100,000 pixels", () => {
+    // A page that grows with its frame would grow a document's frame without end. Reproduce by
+    // dropping the cap in parseFrameEvent: the height comes through as posted.
+    expect(event("size", { height: 1e9 })?.params).toEqual({ height: 100_000 })
   })
 
   test("that a deck's own scripts could post out of shape are dropped", () => {
@@ -223,6 +230,9 @@ describe("a frame's events", () => {
       ["embeds", { embeds: [{ address: "artifact:art_0123456789", rect, scale: 0 }] }],
       ["embeds", { embeds: [{ address: "artifact:art_0123456789", rect: { ...rect, x: "1" } }] }],
       ["embeds", { embeds: Array.from({ length: 201 }, () => ({ address: "a", rect, scale: 1 })) }],
+      ["size", { height: -1 }],
+      ["size", { height: "tall" }],
+      ["size", { height: Number.NaN }],
       ["unknown", {}],
     ] as const) {
       expect(event(name, params)).toBeNull()

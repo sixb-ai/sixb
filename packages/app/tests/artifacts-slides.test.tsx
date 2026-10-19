@@ -517,7 +517,7 @@ describe("a deck", () => {
 
 describe("a deck's embeds", () => {
   test("are drawn over the frame where it reports them, only those the version records", async () => {
-    // Reproduce by drawing every embed the frame reports in DeckEmbeds: the unrecorded address
+    // Reproduce by drawing every embed the frame reports in FrameEmbeds: the unrecorded address
     // shows too, so a deck could show an artifact it never published with.
     const version = deckVersion({
       references: [{ address: LINKED, as: "embed", at: "1", resolvedVersion: 1 }],
@@ -535,8 +535,8 @@ describe("a deck's embeds", () => {
         ],
       },
     })
-    const drawn = Array.from(ui.container.querySelectorAll<HTMLElement>("[data-sixb-deck-embed]"))
-    expect(drawn.map((element) => element.dataset.sixbDeckEmbed)).toEqual([LINKED])
+    const drawn = Array.from(ui.container.querySelectorAll<HTMLElement>("[data-sixb-frame-embed]"))
+    expect(drawn.map((element) => element.dataset.sixbFrameEmbed)).toEqual([LINKED])
     expect(drawn[0]?.style.left).toBe("120px")
     expect(drawn[0]?.style.width).toBe("600px")
     // Laid out at the box over the slide's scale times 1.5, then scaled back up to fit it.

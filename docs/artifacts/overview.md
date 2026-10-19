@@ -284,7 +284,9 @@ fleet-planner/
   cdnjs, unpkg, and Google Fonts). Read data from JSON files published beside it with `fetch`.
   A chart drawn on a canvas redraws on the window's `sixb:theme` event, which fires when the app
   sends its theme, light or dark.
-- A link to another artifact (`<a href="artifact:…">`) opens it where the reader is.
+- A link to another artifact (`<a href="artifact:…">`) opens it where the reader is, and
+  `<sixb-embed src="artifact:…#chart=revenue">` shows one on the page, as it does on a slide: the
+  app draws the artifact over the box and keeps it there as the page scrolls.
 - When the Agent publishes a page, its sandbox's headless browser loads it at 1280px and at a
   phone's 390px, as it checks a deck, and warns about content past the screen's right edge,
   overlapping or cut off text, text under 12px, a control under 24px, low contrast, a broken image,
@@ -342,8 +344,8 @@ gets each board's warnings and screenshot.
 
 ## Reference another artifact
 
-A document, a sheet, or an agent's reply can show another artifact, or a part of it, by its
-address. A report that shows a sheet's chart stays current when the sheet changes. The Agent is
+A document, a sheet, a deck, a page, or an agent's reply can show another artifact, or a part of
+it, by its address. A report that shows a sheet's chart stays current when the sheet changes. The Agent is
 told to pin the version a reply describes (`@2`), so that what the reply shows matches its words;
 an address it writes without a version follows the latest one.
 
@@ -371,7 +373,8 @@ The [regional numbers](artifact:art_k3m9q2x7tp#Regions) explain the gap.
 ```
 
 A range shows as a table formatted the way its sheet formats it, a chart as the chart, a section as
-its text, an image file as the image, and a whole artifact as a card. Under each, a line names the
+its text, an image file as the image, a deck as its first slide, a page live, as tall as it lays out
+up to 800px and then scrolling, and any other whole artifact as a card. Under each, a line names the
 source and whether it follows the latest version or a fixed one. Something shown inside a shown
 artifact appears as a link. In a sheet, a `link` or `image` column cell can hold an address.
 

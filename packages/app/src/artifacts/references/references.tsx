@@ -23,17 +23,20 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useState,
 } from "react"
 import { ArtifactCardFace } from "../card-preview"
 import { ArtifactFrame } from "../frame"
 import { ArtifactKindIcon } from "../kind-icon"
 import { useArtifactMessages } from "../messages"
-import { type ArtifactVersion, useFileText, versionFileSource } from "../queries"
+import { type ArtifactVersion, useArtifactTheme, useFileText, versionFileSource } from "../queries"
 import { documentComponents } from "../renderers/document"
 import { rehypeArtifactDocument } from "../renderers/document-tree"
+import { usePageEvents } from "../renderers/page"
 import { cellFormatter } from "../renderers/sheet/format"
 import { useSheetModel, useWorkbook } from "../renderers/sheet/workbook"
 import { type ArtifactTarget, artifactTargetHref } from "../target"
+import { artifactThemeAttributes } from "../theme"
 import {
   artifactUrlTransform,
   EMBED_ATTRIBUTE,
@@ -360,6 +363,8 @@ function EmbedBody({
     case "artifact":
       return version.outline.kind === "slides" ? (
         <SlideEmbed version={version} slide={1} fill={fill} />
+      ) : version.outline.kind === "page" ? (
+        <PageEmbed version={version} fill={fill} />
       ) : (
         <CardEmbed version={version} address={address} />
       )
@@ -564,6 +569,49 @@ function SlideEmbed({
           : "aspect-video w-full overflow-hidden rounded-xl border border-border bg-background"
       }
     />
+  )
+}
+
+/** How tall a page's frame starts, before the page says, and the most it grows to before it scrolls. */
+const PAGE_START_HEIGHT = 360
+const PAGE_MAX_HEIGHT = 800
+
+/**
+ * A page, live in its frame at the width it is given, in its own theme: as tall as the page says
+ * it is, up to 800 pixels, past which it scrolls inside. Filling a box, it scrolls within the box.
+ * Its own embeds stay placeholders: an embed shows nothing nested in it.
+ */
+function PageEmbed({
+  version,
+  fill = false,
+}: {
+  readonly version: ArtifactVersion
+  readonly fill?: boolean
+}) {
+  const theme = artifactThemeAttributes(useArtifactTheme(version))
+  const [height, setHeight] = useState<number | null>(null)
+  const onEvent = usePageEvents(version, { onSize: setHeight })
+  return (
+    <div
+      data-sixb-page-embed=""
+      className={cn(
+        "w-full overflow-hidden bg-background",
+        fill ? "h-full" : "rounded-xl border border-border",
+        theme.className
+      )}
+      style={{
+        ...theme.style,
+        ...(fill ? {} : { height: Math.min(height ?? PAGE_START_HEIGHT, PAGE_MAX_HEIGHT) }),
+      }}
+    >
+      <ArtifactFrame
+        version={version}
+        title={version.title}
+        onEvent={onEvent}
+        className="size-full"
+        fallback={<Pending loading fill />}
+      />
+    </div>
   )
 }
 
