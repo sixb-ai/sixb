@@ -47,6 +47,11 @@ interface ManifestEntry {
   /** Where the version's files are, relative to the working directory; absent when not installed. */
   readonly directory?: string
   readonly files: readonly string[]
+  /**
+   * The latest version was published outside this conversation, as a person's edit in the app
+   * is: the next version starts from it and keeps their changes.
+   */
+  readonly edited?: true
 }
 
 /**
@@ -207,7 +212,11 @@ export async function materializeThreadArtifacts(input: {
         install = false
       }
     }
-    entries.push(manifestEntry(artifact, version, install ? directory : undefined))
+    entries.push(
+      manifestEntry(artifact, version, install ? directory : undefined, {
+        edited: version.origin?.threadId !== input.threadId,
+      })
+    )
   }
   return new InstalledArtifacts(
     { directory: input.directory, manifestPath: input.manifestPath, maxBytes },
@@ -220,7 +229,8 @@ export async function materializeThreadArtifacts(input: {
 function manifestEntry(
   artifact: Pick<ArtifactRecord, "id" | "kind">,
   version: ArtifactVersionRecord,
-  directory: string | undefined
+  directory: string | undefined,
+  { edited = false }: { readonly edited?: boolean } = {}
 ): ManifestEntry {
   return {
     id: artifact.id,
@@ -232,6 +242,7 @@ function manifestEntry(
     ...partsOf(artifact.id, version.version, version.outline),
     ...(directory === undefined ? {} : { directory }),
     files: version.files.map((file) => file.path),
+    ...(edited ? { edited: true as const } : {}),
   }
 }
 

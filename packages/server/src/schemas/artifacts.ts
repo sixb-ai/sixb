@@ -152,6 +152,25 @@ export const PublishArtifactBodySchema = z
   })
   .strict()
 
+export const PublishArtifactVersionBodySchema = z
+  .object({
+    kind: ArtifactKindSchema,
+    title: z.string(),
+    files: z
+      .array(ArtifactFileSchema)
+      .min(1)
+      .describe("Files stored with POST /api/files, at their paths in the artifact"),
+    baseVersion: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "The version this one was made from. When another was published since, the publish is refused with 409 artifact_moved, naming the latest version."
+      ),
+  })
+  .strict()
+
 export const PublishedArtifactResponseSchema = z.object({
   artifact: ArtifactSchema,
   version: ArtifactVersionSchema,
@@ -174,6 +193,10 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
     .string()
     .optional()
     .describe(
-      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
     ),
+  latest: z
+    .object({ version: z.number().int(), author: PrincipalSchema })
+    .optional()
+    .describe("With artifact_moved: the latest version and who published it"),
 })

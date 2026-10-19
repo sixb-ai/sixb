@@ -65,6 +65,15 @@ export class InMemoryArtifactStorage implements ArtifactStorage {
     if (stored.record.kind !== input.kind) {
       throw artifactStorageErrors.kindMismatch(input.artifactId, stored.record.kind, input.kind)
     }
+    const latest = stored.versions.find(
+      (candidate) => candidate.version === stored.record.latestVersion
+    )
+    if (input.baseVersion !== undefined && latest && latest.version !== input.baseVersion) {
+      throw artifactStorageErrors.moved(input.artifactId, input.baseVersion, {
+        version: latest.version,
+        author: structuredClone(latest.author),
+      })
+    }
     const version = versionRecord(
       input.projectId,
       input.artifactId,

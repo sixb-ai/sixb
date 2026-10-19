@@ -2784,7 +2784,7 @@ export const getArtifact = <ThrowOnError extends boolean = false>(
 /**
  * Publish an artifact's next version
  *
- * The kind must be the artifact's. The new version becomes the latest.
+ * The kind must be the artifact's. The new version becomes the latest. With baseVersion, it is refused with 409 artifact_moved when another version was published since.
  */
 export const publishArtifactVersion = <ThrowOnError extends boolean = false>(
   options: Options<PublishArtifactVersionData, ThrowOnError>

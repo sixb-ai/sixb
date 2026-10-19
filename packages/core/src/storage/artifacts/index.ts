@@ -1,4 +1,4 @@
-export type { ArtifactStorageErrorCode } from "./errors"
+export type { ArtifactLatestVersion, ArtifactStorageErrorCode } from "./errors"
 export { ArtifactStorageError } from "./errors"
 export { InMemoryArtifactStorage } from "./in-memory"
 export type {

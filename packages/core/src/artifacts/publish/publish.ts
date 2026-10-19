@@ -45,6 +45,8 @@ export interface PublishArtifactInput {
   /** Publishes the version, and owns the artifact when this creates it. */
   readonly author: Principal
   readonly origin?: ArtifactOrigin
+  /** The version this one was made from: publishing fails with `artifact_moved` past it. */
+  readonly baseVersion?: number
 }
 
 export interface PublishedArtifact {
@@ -58,6 +60,7 @@ const CREATE_ATTEMPTS = 3
 /** A version checked against its kind and with its addresses resolved, ready to store. */
 export interface PreparedArtifactVersion {
   readonly artifactId?: string
+  readonly baseVersion?: number
   readonly kind: ArtifactKind
   readonly author: Principal
   readonly version: ArtifactVersionInput
@@ -97,6 +100,7 @@ export async function prepareArtifactVersion(
   )
   return {
     ...(input.artifactId ? { artifactId: input.artifactId } : {}),
+    ...(input.baseVersion === undefined ? {} : { baseVersion: input.baseVersion }),
     kind: input.kind,
     author: input.author,
     warnings: validated.warnings ?? [],
@@ -119,7 +123,7 @@ export async function storeArtifactVersion(
   prepared: PreparedArtifactVersion
 ): Promise<PublishedArtifactVersion> {
   return prepared.artifactId
-    ? publishVersion(context, prepared.artifactId, prepared.kind, prepared.version)
+    ? publishVersion(context, prepared.artifactId, prepared)
     : createArtifact(context, prepared.kind, prepared.author, prepared.version)
 }
 
@@ -219,15 +223,15 @@ function checkTitle(value: string): string {
 async function publishVersion(
   context: PublishArtifactContext,
   artifactId: string,
-  kind: ArtifactKind,
-  version: ArtifactVersionInput
+  prepared: PreparedArtifactVersion
 ): Promise<PublishedArtifactVersion> {
   try {
     return await context.storage.publish({
       projectId: context.projectId,
       artifactId,
-      kind,
-      version,
+      kind: prepared.kind,
+      version: prepared.version,
+      ...(prepared.baseVersion === undefined ? {} : { baseVersion: prepared.baseVersion }),
     })
   } catch (error) {
     if (error instanceof ArtifactStorageError && error.code === "artifact_not_found") {
@@ -235,6 +239,9 @@ async function publishVersion(
     }
     if (error instanceof ArtifactStorageError && error.code === "artifact_kind_mismatch") {
       throw new ArtifactRequestError("artifact_kind_mismatch", error.message)
+    }
+    if (error instanceof ArtifactStorageError && error.code === "artifact_moved") {
+      throw new ArtifactRequestError("artifact_moved", error.message, error.latest)
     }
     throw error
   }

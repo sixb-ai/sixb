@@ -80,7 +80,7 @@ export class PgArtifactStorage implements ArtifactStorage {
     return runPgTransaction(this.sql, async (tx) => {
       // The row lock serializes concurrent publishes of one artifact.
       const [current] = await tx<PgRow[]>`
-        SELECT kind, next_version FROM artifacts
+        SELECT kind, next_version, latest_version FROM artifacts
         WHERE project_id = ${input.projectId} AND id = ${input.artifactId}
         FOR UPDATE
       `
@@ -88,6 +88,20 @@ export class PgArtifactStorage implements ArtifactStorage {
       const kind = current.kind as ArtifactRecord["kind"]
       if (kind !== input.kind) {
         throw artifactStorageErrors.kindMismatch(input.artifactId, kind, input.kind)
+      }
+      // Under the row lock: a publish from the same base after this one finds it moved.
+      const latestVersion = Number(current.latest_version)
+      if (input.baseVersion !== undefined && latestVersion !== input.baseVersion) {
+        const [row] = await tx<PgRow[]>`
+          SELECT ${tx.unsafe(VERSION_COLUMNS)} FROM artifact_versions
+          WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+            AND version = ${latestVersion}
+        `
+        const latest = parseArtifactVersionRow(row as PgRow)
+        throw artifactStorageErrors.moved(input.artifactId, input.baseVersion, {
+          version: latest.version,
+          author: latest.author,
+        })
       }
       const version = await insertVersion(
         tx,

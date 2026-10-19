@@ -207,6 +207,26 @@ describe("artifact routes", () => {
     expect(mismatch.status).toBe(409)
     expect((await mismatch.json()).code).toBe("artifact_kind_mismatch")
 
+    // A save from version 1 after version 2 was published is refused, naming version 2.
+    const edited = await post(`/api/artifacts/${artifact.id}/versions`, {
+      kind: "document",
+      title: "Report",
+      files,
+      baseVersion: 1,
+    })
+    expect(edited.status).toBe(201)
+    const moved = await post(`/api/artifacts/${artifact.id}/versions`, {
+      kind: "document",
+      title: "Report",
+      files,
+      baseVersion: 1,
+    })
+    expect(moved.status).toBe(409)
+    expect(await moved.json()).toMatchObject({
+      code: "artifact_moved",
+      latest: { version: 2, author: { type: "user" } },
+    })
+
     const badReference = await post("/api/artifacts", {
       kind: "file",
       title: "Report",

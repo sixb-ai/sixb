@@ -35008,7 +35008,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -35029,7 +35055,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -35656,7 +35708,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -35677,7 +35755,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -35698,7 +35802,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -35719,7 +35849,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -35740,7 +35896,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -35908,7 +36090,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -35929,7 +36137,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -35998,7 +36232,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -36019,7 +36279,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -36034,7 +36320,7 @@
     "/api/artifacts/{artifactId}/versions": {
       "post": {
         "summary": "Publish an artifact's next version",
-        "description": "The kind must be the artifact's. The new version becomes the latest.",
+        "description": "The kind must be the artifact's. The new version becomes the latest. With baseVersion, it is refused with 409 artifact_moved when another version was published since.",
         "tags": ["Artifacts"],
         "operationId": "publishArtifactVersion",
         "security": [
@@ -36116,6 +36402,12 @@
                     },
                     "minItems": 1,
                     "description": "Files stored with POST /api/files, at their paths in the artifact"
+                  },
+                  "baseVersion": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0,
+                    "description": "The version this one was made from. When another was published since, the publish is refused with 409 artifact_moved, naming the latest version."
                   }
                 },
                 "required": ["kind", "title", "files"],
@@ -36176,6 +36468,12 @@
                     },
                     "minItems": 1,
                     "description": "Files stored with POST /api/files, at their paths in the artifact"
+                  },
+                  "baseVersion": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0,
+                    "description": "The version this one was made from. When another was published since, the publish is refused with 409 artifact_moved, naming the latest version."
                   }
                 },
                 "required": ["kind", "title", "files"],
@@ -36236,6 +36534,12 @@
                     },
                     "minItems": 1,
                     "description": "Files stored with POST /api/files, at their paths in the artifact"
+                  },
+                  "baseVersion": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0,
+                    "description": "The version this one was made from. When another was published since, the publish is refused with 409 artifact_moved, naming the latest version."
                   }
                 },
                 "required": ["kind", "title", "files"],
@@ -36659,7 +36963,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -36680,7 +37010,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -36701,7 +37057,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -36722,7 +37104,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -36743,7 +37151,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -36828,7 +37262,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -36849,7 +37309,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -36870,7 +37356,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -37251,7 +37763,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
@@ -37272,7 +37810,33 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
                     }
                   },
                   "required": ["error"],
