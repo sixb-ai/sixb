@@ -1,4 +1,5 @@
 import { isArtifactKind } from "../../artifacts/kinds"
+import { ARTIFACT_STATE_LIMITS } from "../../artifacts/limits"
 import type { ArtifactOutline } from "../../artifacts/outline"
 import type { ArtifactReference } from "../../artifacts/references"
 import type { Principal } from "../../auth"
@@ -10,6 +11,7 @@ import type {
   ArtifactFrameTarget,
   ArtifactKind,
   ArtifactRecord,
+  ArtifactStateEntry,
   ArtifactVersionRecord,
 } from "./types"
 
@@ -82,6 +84,57 @@ export function parseArtifactFrameGrantRow(row: Row): ArtifactFrameGrantRecord {
   }
 }
 
+export function parseArtifactStateRow(row: Row): ArtifactStateEntry {
+  const key = text(row.key, "key", "artifact state")
+  const where = `artifact state '${key}'`
+  const sizeBytes = Number(row.sizeBytes)
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+    throw corrupt(where, "sizeBytes is not a byte count")
+  }
+  return {
+    key,
+    value: text(row.value, "value", where),
+    sizeBytes,
+    updatedAt: date(row.updatedAt, "updatedAt", where),
+  }
+}
+
+/** A value's UTF-8 bytes, which a reader's state limits count. */
+export function artifactStateBytes(value: string): number {
+  return new TextEncoder().encode(value).byteLength
+}
+
+/**
+ * Throws `artifact_state_full` when a value would take a reader past `ARTIFACT_STATE_LIMITS`.
+ * `others` is what the reader keeps under every other key, so replacing a value counts once.
+ */
+export function checkArtifactStateWrite(input: {
+  readonly key: string
+  readonly valueBytes: number
+  readonly others: { readonly keys: number; readonly bytes: number }
+}): void {
+  const limits = ARTIFACT_STATE_LIMITS
+  if (input.valueBytes > limits.maxValueBytes) {
+    throw artifactStorageErrors.stateFull(
+      `[Sixb] '${input.key}' is ${kilobytes(input.valueBytes)}; a page keeps at most ${kilobytes(limits.maxValueBytes)} under one key.`
+    )
+  }
+  if (input.others.keys + 1 > limits.maxKeys) {
+    throw artifactStorageErrors.stateFull(
+      `[Sixb] A page keeps at most ${limits.maxKeys} keys for each reader: delete one before keeping '${input.key}'.`
+    )
+  }
+  if (input.others.bytes + input.valueBytes > limits.maxBytes) {
+    throw artifactStorageErrors.stateFull(
+      `[Sixb] A page keeps at most ${kilobytes(limits.maxBytes)} for each reader; '${input.key}' would take it to ${kilobytes(input.others.bytes + input.valueBytes)}.`
+    )
+  }
+}
+
+function kilobytes(bytes: number): string {
+  return `${Math.ceil(bytes / 1024).toLocaleString("en-US")} KB`
+}
+
 /** The errors every provider raises, with one wording. */
 export const artifactStorageErrors = {
   exists: (id: string) =>
@@ -99,6 +152,7 @@ export const artifactStorageErrors = {
       `[Sixb] Artifact '${id}' is at version ${latest.version}, not version ${baseVersion}, which this publish was based on.`,
       latest
     ),
+  stateFull: (message: string) => new ArtifactStorageError("artifact_state_full", message),
 }
 
 function files(value: unknown, where: string): ArtifactFile[] {

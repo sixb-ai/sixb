@@ -1,12 +1,18 @@
 import {
+  artifactStateBytes,
   artifactStorageErrors,
+  checkArtifactStateWrite,
   parseArtifactFrameGrantRow,
   parseArtifactRow,
+  parseArtifactStateRow,
   parseArtifactVersionRow,
 } from "@sixb/core/internal/storage"
 import type {
   ArtifactFrameGrantRecord,
   ArtifactRecord,
+  ArtifactStateEntry,
+  ArtifactStateKeyInput,
+  ArtifactStateScope,
   ArtifactStorage,
   ArtifactVersionInput,
   ArtifactVersionRecord,
@@ -24,6 +30,7 @@ import type {
   ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
+  SetArtifactStateInput,
 } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
@@ -50,6 +57,8 @@ const FRAME_GRANT_COLUMNS = `
   project_id AS "projectId", token_hash AS "tokenHash", artifact_id AS "artifactId", version,
   targets, created_at AS "createdAt", expires_at AS "expiresAt"
 `
+
+const STATE_COLUMNS = `key, value, size_bytes AS "sizeBytes", updated_at AS "updatedAt"`
 
 export class PgArtifactStorage implements ArtifactStorage {
   constructor(private readonly sql: PgStoreClient) {}
@@ -255,8 +264,97 @@ export class PgArtifactStorage implements ArtifactStorage {
     return rows.length
   }
 
+  async getState(input: ArtifactStateKeyInput): Promise<ArtifactStateEntry | null> {
+    const [row] = await this.sql<PgRow[]>`
+      SELECT ${this.sql.unsafe(STATE_COLUMNS)} FROM artifact_state
+      WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+        AND principal_type = ${input.principal.type} AND principal_id = ${input.principal.id}
+        AND key = ${input.key}
+    `
+    return row ? parseArtifactStateRow(row) : null
+  }
+
+  async setState(input: SetArtifactStateInput): Promise<void> {
+    await runPgTransaction(this.sql, async (tx) => {
+      // The key share lock keeps the artifact from being deleted under the write, without
+      // waiting on a publish.
+      const [artifact] = await tx<PgRow[]>`
+        SELECT 1 FROM artifacts WHERE project_id = ${input.projectId} AND id = ${input.artifactId}
+        FOR KEY SHARE
+      `
+      if (!artifact) throw artifactStorageErrors.notFound(input.artifactId)
+      // One reader's writes to one artifact take turns, so two at once cannot both fit under the
+      // limits; other readers' writes do not wait.
+      await tx`
+        SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify([
+          "artifact_state",
+          input.projectId,
+          input.artifactId,
+          input.principal.type,
+          input.principal.id,
+        ])}, 0))
+      `
+      const [others] = await tx<PgRow[]>`
+        SELECT count(*) AS keys, coalesce(sum(size_bytes), 0) AS bytes FROM artifact_state
+        WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+          AND principal_type = ${input.principal.type} AND principal_id = ${input.principal.id}
+          AND key <> ${input.key}
+      `
+      const sizeBytes = artifactStateBytes(input.value)
+      checkArtifactStateWrite({
+        key: input.key,
+        valueBytes: sizeBytes,
+        others: { keys: Number(others?.keys ?? 0), bytes: Number(others?.bytes ?? 0) },
+      })
+      await tx`
+        INSERT INTO artifact_state (
+          project_id, artifact_id, principal_type, principal_id, key, value, size_bytes,
+          updated_at
+        ) VALUES (
+          ${input.projectId}, ${input.artifactId}, ${input.principal.type},
+          ${input.principal.id}, ${input.key}, ${input.value}, ${sizeBytes}, ${input.updatedAt}
+        )
+        ON CONFLICT (project_id, artifact_id, principal_type, principal_id, key) DO UPDATE SET
+          value = excluded.value, size_bytes = excluded.size_bytes,
+          updated_at = excluded.updated_at
+      `
+    })
+  }
+
+  async deleteState(input: ArtifactStateKeyInput): Promise<boolean> {
+    const rows = await this.sql`
+      DELETE FROM artifact_state
+      WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+        AND principal_type = ${input.principal.type} AND principal_id = ${input.principal.id}
+        AND key = ${input.key}
+      RETURNING key
+    `
+    return rows.length > 0
+  }
+
+  async listState(input: ArtifactStateScope): Promise<ArtifactStateEntry[]> {
+    // COLLATE "C": code-unit order, as SQLite and the in-memory store compare keys.
+    const rows = await this.sql<PgRow[]>`
+      SELECT ${this.sql.unsafe(STATE_COLUMNS)} FROM artifact_state
+      WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+        AND principal_type = ${input.principal.type} AND principal_id = ${input.principal.id}
+      ORDER BY key COLLATE "C"
+    `
+    return rows.map(parseArtifactStateRow)
+  }
+
+  async clearState(input: ArtifactStateScope): Promise<number> {
+    const rows = await this.sql`
+      DELETE FROM artifact_state
+      WHERE project_id = ${input.projectId} AND artifact_id = ${input.artifactId}
+        AND principal_type = ${input.principal.type} AND principal_id = ${input.principal.id}
+      RETURNING key
+    `
+    return rows.length
+  }
+
   async delete(input: DeleteArtifactInput): Promise<boolean> {
-    // Versions and frame grants go with the artifact through ON DELETE CASCADE.
+    // Versions, frame grants, and state go with the artifact through ON DELETE CASCADE.
     const rows = await this.sql`
       DELETE FROM artifacts WHERE project_id = ${input.projectId} AND id = ${input.id}
       RETURNING id

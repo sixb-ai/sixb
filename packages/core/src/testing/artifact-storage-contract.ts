@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { ARTIFACT_STATE_LIMITS } from "../artifacts/limits"
 import type { Principal } from "../auth"
 import type { FileRef } from "../blob-storage"
 import {
@@ -466,6 +467,107 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
+    test("keeps a value for each reader under its key, replacing one there", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput())
+        const mine = { projectId, artifactId: "art_report", principal: owner }
+        const theirs = { ...mine, principal: otherOwner }
+        await artifacts.setState({ ...mine, key: "rate", value: "412", updatedAt: at(1) })
+        await artifacts.setState({
+          ...mine,
+          key: "filters",
+          value: '{"region":"Lisboa ☀"}',
+          updatedAt: at(1),
+        })
+        await artifacts.setState({ ...mine, key: "rate", value: "450", updatedAt: at(2) })
+        await artifacts.setState({ ...theirs, key: "rate", value: "380", updatedAt: at(2) })
+
+        expect(await artifacts.getState({ ...mine, key: "rate" })).toEqual({
+          key: "rate",
+          value: "450",
+          sizeBytes: 3,
+          updatedAt: at(2),
+        })
+        // Bytes as UTF-8: 21 characters, the sun three bytes of them.
+        expect((await artifacts.getState({ ...mine, key: "filters" }))?.sizeBytes).toBe(23)
+        expect((await artifacts.listState(mine)).map((entry) => entry.key)).toEqual([
+          "filters",
+          "rate",
+        ])
+        // Another reader keeps their own, and another project sees none.
+        expect((await artifacts.getState({ ...theirs, key: "rate" }))?.value).toBe("380")
+        expect(await artifacts.listState({ ...mine, projectId: otherProjectId })).toEqual([])
+        expect(await artifacts.getState({ ...mine, key: "missing" })).toBeNull()
+
+        expect(await artifacts.deleteState({ ...mine, key: "rate" })).toBe(true)
+        expect(await artifacts.deleteState({ ...mine, key: "rate" })).toBe(false)
+        expect(await artifacts.clearState(mine)).toBe(1)
+        expect(await artifacts.listState(mine)).toEqual([])
+        expect(await artifacts.listState(theirs)).toHaveLength(1)
+        await expectArtifactError(
+          artifacts.setState({
+            ...mine,
+            artifactId: "art_missing",
+            key: "a",
+            value: "1",
+            updatedAt: at(3),
+          }),
+          "artifact_not_found"
+        )
+      })
+    })
+
+    test("refuses a value past the limits, counting a replaced value once", async () => {
+      // Reproduce by dropping `checkArtifactStateWrite` from a provider's setState: the reader's
+      // values grow past every limit.
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput())
+        const mine = { projectId, artifactId: "art_report", principal: owner }
+        const value = (bytes: number) => JSON.stringify("x".repeat(bytes - 2))
+        const set = (key: string, bytes: number) =>
+          artifacts.setState({ ...mine, key, value: value(bytes), updatedAt: at(1) })
+
+        await expectArtifactError(
+          set("big", ARTIFACT_STATE_LIMITS.maxValueBytes + 1),
+          "artifact_state_full"
+        )
+        await set("big", ARTIFACT_STATE_LIMITS.maxValueBytes)
+        // Sixteen values of 64 KB are 1 MB: a seventeenth is past the reader's bytes, but the
+        // sixteenth replaced is not.
+        for (let index = 1; index < 16; index++)
+          await set(`big-${index}`, ARTIFACT_STATE_LIMITS.maxValueBytes)
+        await expectArtifactError(set("one-more", 2), "artifact_state_full")
+        await set("big-15", ARTIFACT_STATE_LIMITS.maxValueBytes)
+        await artifacts.clearState(mine)
+
+        for (let index = 0; index < ARTIFACT_STATE_LIMITS.maxKeys; index++)
+          await set(`key-${index}`, 4)
+        await expectArtifactError(set("key-extra", 4), "artifact_state_full")
+        await set("key-0", 8)
+        // Another reader's limits are their own.
+        await artifacts.setState({
+          ...mine,
+          principal: otherOwner,
+          key: "key-extra",
+          value: "1",
+          updatedAt: at(1),
+        })
+        expect(await artifacts.getState({ ...mine, key: "key-extra" })).toBeNull()
+      })
+    })
+
+    test("drops what an artifact keeps for its readers with the artifact", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput())
+        const mine = { projectId, artifactId: "art_report", principal: owner }
+        await artifacts.setState({ ...mine, key: "rate", value: "412", updatedAt: at(1) })
+        await artifacts.delete({ projectId, id: "art_report" })
+        await artifacts.create(createInput())
+        // To see this fail, leave state out of `InMemoryArtifactStorage.deleteArtifact`.
+        expect(await artifacts.listState(mine)).toEqual([])
+      })
+    })
+
     test("rolls back with its containing storage transaction", async () => {
       await withStorage(async (artifacts, storage) => {
         await artifacts.create(createInput())
@@ -477,6 +579,14 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
             await tx.artifacts.publish(publishInput({ createdAt: at(1) }))
             await tx.artifacts.create(createInput({ id: "art_rolled_back" }))
             await tx.artifacts.createFrameGrant(frameGrant("a"))
+            await tx.artifacts.setState({
+              projectId,
+              artifactId: "art_report",
+              principal: owner,
+              key: "rate",
+              value: "450",
+              updatedAt: at(1),
+            })
             expect((await tx.artifacts.get({ projectId, id: "art_report" }))?.latestVersion).toBe(2)
             throw rollback
           })
@@ -486,6 +596,10 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
         expect(await artifacts.get({ projectId, id: "art_rolled_back" })).toBeNull()
         // To see this fail, leave frame grants out of `InMemoryArtifactStorage.restore`.
         expect(await artifacts.findFrameGrant({ projectId, tokenHash: "a".repeat(64) })).toBeNull()
+        // To see this fail, leave state out of `InMemoryArtifactStorage.restore`.
+        expect(
+          await artifacts.listState({ projectId, artifactId: "art_report", principal: owner })
+        ).toEqual([])
         expect((await artifacts.publish(publishInput({ createdAt: at(2) }))).version.version).toBe(
           2
         )

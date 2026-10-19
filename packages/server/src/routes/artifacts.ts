@@ -25,12 +25,18 @@ import {
   ArtifactListResponseSchema,
   ArtifactParamsSchema,
   ArtifactResponseSchema,
+  ArtifactStateParamsSchema,
+  ArtifactStateResponseSchema,
   ArtifactVersionParamsSchema,
   ArtifactVersionSchema,
+  ClearArtifactStateResponseSchema,
   DeleteArtifactResponseSchema,
+  DeleteArtifactStateResponseSchema,
   PublishArtifactBodySchema,
   PublishArtifactVersionBodySchema,
   PublishedArtifactResponseSchema,
+  SetArtifactStateBodySchema,
+  SetArtifactStateResponseSchema,
 } from "../schemas/artifacts"
 import { FileContentQuerySchema } from "../schemas/files"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
@@ -115,7 +121,11 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
         set.status = 409
         break
       case "invalid_artifact":
+      case "invalid_state":
         set.status = 400
+        break
+      case "state_full":
+        set.status = 413
         break
       case "not_allowed":
         set.status = 403
@@ -308,6 +318,132 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "deleteArtifact",
           security: accessTokenSecurityRequirement("deleteArtifact"),
+        },
+      }
+    )
+    .get(
+      "/api/artifacts/:artifactId/state",
+      async (context) => {
+        try {
+          const entries = await requireRequestSixb(context)
+            .artifacts.state(context.params.artifactId)
+            .entries()
+          return ArtifactStateResponseSchema.parse({
+            entries: entries.map((entry) => ({
+              ...entry,
+              updatedAt: toIsoString(entry.updatedAt),
+            })),
+          })
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactParamsSchema,
+        response: {
+          200: ArtifactStateResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Read what a page keeps",
+          description:
+            "Every value the artifact keeps for the caller as its reader, as a page keeps it with sixb.state, across its versions.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "getArtifactState",
+          security: accessTokenSecurityRequirement("getArtifactState"),
+        },
+      }
+    )
+    .put(
+      "/api/artifacts/:artifactId/state/:key",
+      async (context) => {
+        try {
+          const body = SetArtifactStateBodySchema.parse(context.body)
+          const entry = await requireRequestSixb(context)
+            .artifacts.state(context.params.artifactId)
+            .set(context.params.key, body.value)
+          return SetArtifactStateResponseSchema.parse({
+            ...entry,
+            updatedAt: toIsoString(entry.updatedAt),
+          })
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactStateParamsSchema,
+        body: SetArtifactStateBodySchema,
+        response: {
+          200: SetArtifactStateResponseSchema,
+          400: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          413: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Keep a value for a page",
+          description:
+            "Keeps a JSON value under the key for the caller, replacing one there. Refused with 413 state_full past the limits.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "setArtifactState",
+          security: accessTokenSecurityRequirement("setArtifactState"),
+        },
+      }
+    )
+    .delete(
+      "/api/artifacts/:artifactId/state/:key",
+      async (context) => {
+        try {
+          const deleted = await requireRequestSixb(context)
+            .artifacts.state(context.params.artifactId)
+            .delete(context.params.key)
+          return DeleteArtifactStateResponseSchema.parse({ deleted })
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactStateParamsSchema,
+        response: {
+          200: DeleteArtifactStateResponseSchema,
+          400: ArtifactErrorResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Delete a value a page keeps",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "deleteArtifactStateValue",
+          security: accessTokenSecurityRequirement("deleteArtifactStateValue"),
+        },
+      }
+    )
+    .delete(
+      "/api/artifacts/:artifactId/state",
+      async (context) => {
+        try {
+          const cleared = await requireRequestSixb(context)
+            .artifacts.state(context.params.artifactId)
+            .clear()
+          return ClearArtifactStateResponseSchema.parse({ cleared })
+        } catch (error) {
+          return handleArtifactRouteError(error, context.set)
+        }
+      },
+      {
+        params: ArtifactParamsSchema,
+        response: {
+          200: ClearArtifactStateResponseSchema,
+          404: ArtifactErrorResponseSchema,
+          501: ArtifactErrorResponseSchema,
+        },
+        detail: {
+          summary: "Reset what a page keeps",
+          description: "Deletes every value the artifact keeps for the caller.",
+          tags: [OPENAPI_TAGS.artifacts.name],
+          operationId: "clearArtifactState",
+          security: accessTokenSecurityRequirement("clearArtifactState"),
         },
       }
     )

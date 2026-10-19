@@ -175,6 +175,33 @@ export interface DeleteArtifactVersionsByOriginInput {
   readonly runId: string
 }
 
+/** Whose values, kept by which artifact: a page keeps its own for each reader. */
+export interface ArtifactStateScope {
+  readonly projectId: string
+  readonly artifactId: string
+  readonly principal: Principal
+}
+
+export interface ArtifactStateKeyInput extends ArtifactStateScope {
+  readonly key: string
+}
+
+export interface SetArtifactStateInput extends ArtifactStateKeyInput {
+  /** JSON text, stored as written. */
+  readonly value: string
+  readonly updatedAt: Date
+}
+
+/** One value a page keeps for a reader. */
+export interface ArtifactStateEntry {
+  readonly key: string
+  /** JSON text. */
+  readonly value: string
+  /** The value's UTF-8 bytes, which the reader's limits count. */
+  readonly sizeBytes: number
+  readonly updatedAt: Date
+}
+
 /**
  * Persistence only: who may read or publish, and what a version may contain, are decided in Core
  * before a call reaches storage.
@@ -207,7 +234,24 @@ export interface ArtifactStorage {
   findFrameGrant(input: FindArtifactFrameGrantInput): Promise<ArtifactFrameGrantRecord | null>
   /** Deletes up to `limit` grants that expired before `expiredBefore`, and returns the count. */
   deleteExpiredFrameGrants(input: DeleteExpiredArtifactFrameGrantsInput): Promise<number>
-  /** Deletes the artifact, every version, and its frame grants. `false` when it does not exist. */
+  /** A value a page keeps for a reader, or null when it keeps none under the key. */
+  getState(input: ArtifactStateKeyInput): Promise<ArtifactStateEntry | null>
+  /**
+   * Keeps a value under its key, replacing one there. Throws `artifact_not_found`, or
+   * `artifact_state_full` when the value, or the reader's keys or bytes with it, would pass
+   * `ARTIFACT_STATE_LIMITS`, checked in the same transaction as the write.
+   */
+  setState(input: SetArtifactStateInput): Promise<void>
+  /** `false` when there was no value under the key. */
+  deleteState(input: ArtifactStateKeyInput): Promise<boolean>
+  /** Every value a page keeps for a reader, by key. */
+  listState(input: ArtifactStateScope): Promise<ArtifactStateEntry[]>
+  /** Deletes every value a page keeps for a reader, and returns how many. */
+  clearState(input: ArtifactStateScope): Promise<number>
+  /**
+   * Deletes the artifact, every version, its frame grants, and what it keeps for its readers.
+   * `false` when it does not exist.
+   */
   delete(input: DeleteArtifactInput): Promise<boolean>
   /**
    * Deletes the versions a run published and returns how many. An artifact left without versions

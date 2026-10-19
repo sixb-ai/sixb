@@ -279,6 +279,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("065-activity-timeline", activityTimelineSql),
     sqliteSql("066-activity-interactions", activityInteractionsSql),
     sqliteSql("067-artifact-kinds", artifactKindsSql),
+    sqliteSql("068-artifact-state", artifactStateSql),
   ],
 })
 
@@ -637,3 +638,4 @@ import activityInteractionsSql from "./migrations/066-activity-interactions.sql"
   type: "text",
 }
 import artifactKindsSql from "./migrations/067-artifact-kinds.sql" with { type: "text" }
+import artifactStateSql from "./migrations/068-artifact-state.sql" with { type: "text" }

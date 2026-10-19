@@ -229,6 +229,9 @@ export type {
   ArtifactOutline,
   ArtifactRecord,
   ArtifactReference,
+  ArtifactStateEntry,
+  ArtifactStateKeyInput,
+  ArtifactStateScope,
   ArtifactStorage,
   ArtifactStorageError,
   ArtifactStorageErrorCode,
@@ -248,6 +251,7 @@ export type {
   ListReferencingVersionsInput,
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
+  SetArtifactStateInput,
 } from "./artifacts"
 export type {
   AccessTokenRecord,

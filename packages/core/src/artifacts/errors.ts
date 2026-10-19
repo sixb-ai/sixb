@@ -5,6 +5,8 @@ export type ArtifactRequestErrorCode =
   | "artifact_kind_mismatch"
   | "artifact_moved"
   | "invalid_artifact"
+  | "invalid_state"
+  | "state_full"
   | "not_allowed"
   | "storage_unavailable"
 

@@ -35008,7 +35008,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -35055,7 +35055,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -35708,7 +35708,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -35755,7 +35755,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -35802,7 +35802,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -35849,7 +35849,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -35896,7 +35896,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -36090,7 +36090,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -36137,7 +36137,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -36232,7 +36232,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -36279,7 +36279,799 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifactId}/state": {
+      "get": {
+        "summary": "Read what a page keeps",
+        "description": "Every value the artifact keeps for the caller as its reader, as a page keeps it with sixb.state, across its versions.",
+        "tags": ["Artifacts"],
+        "operationId": "getArtifactState",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "description": "The JSON value"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["key", "updatedAt"],
+                        "additionalProperties": false
+                      },
+                      "description": "By key, in order"
+                    }
+                  },
+                  "required": ["entries"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Reset what a page keeps",
+        "description": "Deletes every value the artifact keeps for the caller.",
+        "tags": ["Artifacts"],
+        "operationId": "clearArtifactState",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cleared": {
+                      "type": "integer",
+                      "description": "How many values were deleted"
+                    }
+                  },
+                  "required": ["cleared"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{artifactId}/state/{key}": {
+      "put": {
+        "summary": "Keep a value for a page",
+        "description": "Keeps a JSON value under the key for the caller, replacing one there. Refused with 413 state_full past the limits.",
+        "tags": ["Artifacts"],
+        "operationId": "setArtifactState",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "description": "The key a page keeps the value under, such as filters"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "description": "Any JSON value: at most 64 KB written out, within 100 keys and 1 MB for each reader"
+                  }
+                },
+                "required": ["value"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "description": "Any JSON value: at most 64 KB written out, within 100 keys and 1 MB for each reader"
+                  }
+                },
+                "required": ["value"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "description": "Any JSON value: at most 64 KB written out, within 100 keys and 1 MB for each reader"
+                  }
+                },
+                "required": ["value"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "description": "The JSON value"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["key", "updatedAt"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a value a page keeps",
+        "tags": ["Artifacts"],
+        "operationId": "deleteArtifactStateValue",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "description": "The key a page keeps the value under, such as filters"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["deleted"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+                    },
+                    "latest": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["version", "author"],
+                      "additionalProperties": false,
+                      "description": "With artifact_moved: the latest version and who published it"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -36963,7 +37755,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -37010,7 +37802,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -37057,7 +37849,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -37104,7 +37896,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -37151,7 +37943,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -37262,7 +38054,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -37309,7 +38101,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -37356,7 +38148,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -37763,7 +38555,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",
@@ -37810,7 +38602,7 @@
                     },
                     "code": {
                       "type": "string",
-                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, not_allowed, or storage_unavailable."
+                      "description": "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
                     },
                     "latest": {
                       "type": "object",

@@ -28,9 +28,12 @@ export {
 export { assertAiUsageExecutionId, normalizeAiModelCallRecord } from "./ai-usage/record"
 export { normalizeAiModelCallUsage } from "./ai-usage/usage"
 export {
+  artifactStateBytes,
   artifactStorageErrors,
+  checkArtifactStateWrite,
   parseArtifactFrameGrantRow,
   parseArtifactRow,
+  parseArtifactStateRow,
   parseArtifactVersionRow,
 } from "./artifacts/record"
 export { parseFileDownloadGrantRow } from "./file-download-grants/record"

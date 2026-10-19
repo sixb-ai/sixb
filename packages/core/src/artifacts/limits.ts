@@ -40,3 +40,14 @@ export const ARTIFACT_LIMITS = {
   /** `artifact:` addresses one version may use. */
   maxReferences: 200,
 } as const
+
+/**
+ * What a page may keep for each reader with `sixb.state`, across its versions: values are JSON,
+ * counted by their UTF-8 bytes as written.
+ */
+export const ARTIFACT_STATE_LIMITS = {
+  maxKeyLength: 128,
+  maxValueBytes: 64 * 1024,
+  maxKeys: 100,
+  maxBytes: 1024 * 1024,
+} as const

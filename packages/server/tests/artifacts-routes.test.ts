@@ -281,3 +281,86 @@ describe("artifact routes", () => {
     }
   })
 })
+
+describe("what a page keeps", () => {
+  async function page() {
+    const { app, storage, put } = createApp()
+    const alice = await seedSession(storage, "alice")
+    const created = await app.fetch(
+      new Request(url("/api/artifacts"), {
+        method: "POST",
+        headers: alice.mutationHeaders,
+        body: JSON.stringify({
+          kind: "page",
+          title: "Rate what-if",
+          files: [await put("index.html", "<main><h1>Rate what-if</h1></main>", "text/html")],
+        }),
+      })
+    )
+    const id = (await created.json()).artifact.id as string
+    const call = (path: string, init: { method?: string; body?: unknown } = {}, as = alice) =>
+      app.fetch(
+        new Request(url(`/api/artifacts/${id}/state${path}`), {
+          method: init.method ?? "GET",
+          headers: init.method ? as.mutationHeaders : as.headers,
+          ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+        })
+      )
+    return { storage, call }
+  }
+
+  test("keeps the reader's values by key, across requests, until they reset them", async () => {
+    const { call } = await page()
+    const kept = await call("/inputs", {
+      method: "PUT",
+      body: { value: { rate: 450, occupancy: 84 } },
+    })
+    expect(kept.status).toBe(200)
+    expect(await kept.json()).toMatchObject({ key: "inputs", value: { rate: 450, occupancy: 84 } })
+    // A key may hold any character a page names it with.
+    expect(
+      (
+        await call(`/${encodeURIComponent("view/Lisboa 2")}`, {
+          method: "PUT",
+          body: { value: "chart" },
+        })
+      ).status
+    ).toBe(200)
+
+    const read = await (await call("")).json()
+    expect(
+      read.entries.map((entry: { key: string; value: unknown }) => [entry.key, entry.value])
+    ).toEqual([
+      ["inputs", { rate: 450, occupancy: 84 }],
+      ["view/Lisboa 2", "chart"],
+    ])
+
+    expect(await (await call("/inputs", { method: "DELETE" })).json()).toEqual({ deleted: true })
+    expect(await (await call("", { method: "DELETE" })).json()).toEqual({ cleared: 1 })
+    expect((await (await call("")).json()).entries).toEqual([])
+  })
+
+  test("keeps each reader's own, and keeps nothing for one who can't open the page", async () => {
+    // Reproduce by dropping the visibility check from `state` in createArtifactsRuntime: Bob
+    // writes into Alice's page.
+    const { storage, call } = await page()
+    const bob = await seedSession(storage, "bob")
+    expect((await call("/inputs", { method: "PUT", body: { value: 1 } }, bob)).status).toBe(404)
+    expect((await call("", {}, bob)).status).toBe(404)
+  })
+
+  test("refuses a value past the limits, and a key or a value that is not one", async () => {
+    const { call } = await page()
+    const big = await call("/big", { method: "PUT", body: { value: "x".repeat(70 * 1024) } })
+    expect(big.status).toBe(413)
+    expect(await big.json()).toMatchObject({ code: "state_full" })
+    const control = await call(`/${encodeURIComponent("a\nb")}`, {
+      method: "PUT",
+      body: { value: 1 },
+    })
+    expect(control.status).toBe(400)
+    expect(await control.json()).toMatchObject({ code: "invalid_state" })
+    // The body is checked before the route runs, as every body is.
+    expect((await call("/empty", { method: "PUT", body: {} })).status).toBe(422)
+  })
+})

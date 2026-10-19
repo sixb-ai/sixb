@@ -17,6 +17,7 @@ import {
   cancelWorkflowIntervention,
   cancelWorkflowRun,
   captureActivity,
+  clearArtifactState,
   completeFileUpload,
   countObjects,
   createAgentThread,
@@ -31,6 +32,7 @@ import {
   createFileUpload,
   deleteAiLimitPolicy,
   deleteArtifact,
+  deleteArtifactStateValue,
   disableAuthServiceAccount,
   disconnectConnectorConnection,
   exchangeDeviceAuthorization,
@@ -53,6 +55,7 @@ import {
   getAiLimitSubjectOptions,
   getArtifact,
   getArtifactFileContent,
+  getArtifactState,
   getArtifactVersion,
   getAuthAccessManagementOptions,
   getAuthInvitationOptions,
@@ -149,6 +152,7 @@ import {
   revokeSharedAccessGrant,
   searchObjects,
   selectConnectorConnectionRunAccount,
+  setArtifactState,
   signFileUploadPart,
   signOut,
   signOutAll,
@@ -185,6 +189,9 @@ import type {
   CaptureActivityData,
   CaptureActivityError,
   CaptureActivityResponse,
+  ClearArtifactStateData,
+  ClearArtifactStateError,
+  ClearArtifactStateResponse,
   CompleteFileUploadData,
   CompleteFileUploadError,
   CompleteFileUploadResponse,
@@ -227,6 +234,9 @@ import type {
   DeleteArtifactData,
   DeleteArtifactError,
   DeleteArtifactResponse,
+  DeleteArtifactStateValueData,
+  DeleteArtifactStateValueError,
+  DeleteArtifactStateValueResponse,
   DisableAuthServiceAccountData,
   DisableAuthServiceAccountError,
   DisableAuthServiceAccountResponse,
@@ -292,6 +302,9 @@ import type {
   GetArtifactFileContentError,
   GetArtifactFileContentResponse,
   GetArtifactResponse,
+  GetArtifactStateData,
+  GetArtifactStateError,
+  GetArtifactStateResponse,
   GetArtifactVersionData,
   GetArtifactVersionError,
   GetArtifactVersionResponse,
@@ -565,6 +578,9 @@ import type {
   SelectConnectorConnectionRunAccountData,
   SelectConnectorConnectionRunAccountError,
   SelectConnectorConnectionRunAccountResponse,
+  SetArtifactStateData,
+  SetArtifactStateError,
+  SetArtifactStateResponse,
   SignFileUploadPartData,
   SignFileUploadPartError,
   SignFileUploadPartResponse,
@@ -4630,6 +4646,118 @@ export const getArtifactOptions = (options: Options<GetArtifactData>) =>
     },
     queryKey: getArtifactQueryKey(options),
   })
+
+/**
+ * Reset what a page keeps
+ *
+ * Deletes every value the artifact keeps for the caller.
+ */
+export const clearArtifactStateMutation = (
+  options?: Partial<Options<ClearArtifactStateData>>
+): UseMutationOptions<
+  ClearArtifactStateResponse,
+  ClearArtifactStateError,
+  Options<ClearArtifactStateData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    ClearArtifactStateResponse,
+    ClearArtifactStateError,
+    Options<ClearArtifactStateData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await clearArtifactState({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getArtifactStateQueryKey = (options: Options<GetArtifactStateData>) =>
+  createQueryKey("getArtifactState", options)
+
+/**
+ * Read what a page keeps
+ *
+ * Every value the artifact keeps for the caller as its reader, as a page keeps it with sixb.state, across its versions.
+ */
+export const getArtifactStateOptions = (options: Options<GetArtifactStateData>) =>
+  queryOptions<
+    GetArtifactStateResponse,
+    GetArtifactStateError,
+    GetArtifactStateResponse,
+    ReturnType<typeof getArtifactStateQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getArtifactState({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getArtifactStateQueryKey(options),
+  })
+
+/**
+ * Delete a value a page keeps
+ */
+export const deleteArtifactStateValueMutation = (
+  options?: Partial<Options<DeleteArtifactStateValueData>>
+): UseMutationOptions<
+  DeleteArtifactStateValueResponse,
+  DeleteArtifactStateValueError,
+  Options<DeleteArtifactStateValueData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    DeleteArtifactStateValueResponse,
+    DeleteArtifactStateValueError,
+    Options<DeleteArtifactStateValueData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await deleteArtifactStateValue({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Keep a value for a page
+ *
+ * Keeps a JSON value under the key for the caller, replacing one there. Refused with 413 state_full past the limits.
+ */
+export const setArtifactStateMutation = (
+  options?: Partial<Options<SetArtifactStateData>>
+): UseMutationOptions<
+  SetArtifactStateResponse,
+  SetArtifactStateError,
+  Options<SetArtifactStateData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    SetArtifactStateResponse,
+    SetArtifactStateError,
+    Options<SetArtifactStateData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await setArtifactState({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 /**
  * Publish an artifact's next version
