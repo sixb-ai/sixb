@@ -49,7 +49,7 @@ Set up the GitHub App once:
 2. Install the App on the repository the sandbox clones.
 3. Note the App ID shown on the App's settings page.
 4. Generate a private key and put the PEM file's contents in an environment variable, such as
-   `GITHUB_APP_PRIVATE_KEY`.
+   `GITHUB_APP_PRIVATE_KEY`. Newlines escaped as `\n` are accepted.
 
 With `source.access: "write"`, the agent can use `git` and GitHub API clients such as `gh` for
 that repository, for example to push and open pull requests. Each run receives a repository-scoped installation token,
