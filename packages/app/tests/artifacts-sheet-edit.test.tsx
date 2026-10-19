@@ -9,15 +9,22 @@ import { MemoryRouter } from "react-router-dom"
 import { artifactFileSource } from "../src/artifacts/file-source"
 import {
   cellEdited,
+  deleteRows,
   draftFiles,
   draftModel,
   draftTable,
+  insertRows,
+  recordDraft,
+  redoDraft,
   setCells,
   startDraft,
+  startHistory,
+  undoDraft,
 } from "../src/artifacts/renderers/sheet/draft"
 import { SheetGrid, type SheetGridEditor } from "../src/artifacts/renderers/sheet/grid"
 import { cellInputText, parseCellInput } from "../src/artifacts/renderers/sheet/input"
 import { sheetModel } from "../src/artifacts/renderers/sheet/model"
+import { parseTsv } from "../src/artifacts/renderers/sheet/selection"
 import { Viewer } from "../src/artifacts/viewer"
 import { installDom } from "./helpers/dom"
 
@@ -92,6 +99,28 @@ describe("what a reader types into a cell", () => {
     expect(parseCellInput(text, { type }, locale)).toEqual(expected)
   })
 
+  test("reads a pasted value as a sheet copies it: a percent without its sign is a fraction", () => {
+    expect(parseCellInput("0.12", { type: "percent" }, "en-US", { pasted: true })).toEqual({
+      value: "0.12",
+    })
+    expect(parseCellInput("12%", { type: "percent" }, "en-US", { pasted: true })).toEqual({
+      value: "0.12",
+    })
+    // A number as a sheet stores it comes first, whatever the locale's marks.
+    expect(parseCellInput("1234.5", { type: "number" }, "de-DE", { pasted: true })).toEqual({
+      value: "1234.5",
+    })
+    expect(parseCellInput("1234.5", { type: "number" }, "de-DE")).toEqual({ value: "12345" })
+  })
+
+  test("reads the clipboard as a spreadsheet copies: tabs, line breaks, and quoted cells", () => {
+    expect(parseTsv('North\t1300\r\n"Cape Town, ""CPT"""\t\r\n"two\nlines"\t9\r\n')).toEqual([
+      ["North", "1300"],
+      ['Cape Town, "CPT"', ""],
+      ["two\nlines", "9"],
+    ])
+  })
+
   test("reads an image's path against the artifact's files", () => {
     const image = (path: string) => path === "images/north.jpg"
     expect(parseCellInput("images/north.jpg", { type: "image" }, "en-US", { image })).toEqual({
@@ -147,6 +176,62 @@ describe("a workbook's draft", () => {
     )
   })
 
+  test("adds and removes rows, and grows to hold what's pasted past its edge", () => {
+    const empty = startDraft(workbook)
+    const inserted = draftTable(insertRows(empty, "Regions", TABLE, 1, 2), "Regions", TABLE)
+    expect(inserted.rows.map((row) => row[0])).toEqual(["North", "", "", "South", "Harbor"])
+    // An added row's cells are marked once they hold something.
+    expect(cellEdited(inserted.rows[1], 0)).toBe(false)
+    const deleted = draftTable(deleteRows(empty, "Regions", TABLE, [0, 2]), "Regions", TABLE)
+    expect(deleted.rows.map((row) => row[0])).toEqual(["South"])
+    const grown = draftTable(
+      setCells(
+        empty,
+        "Regions",
+        TABLE,
+        [
+          { row: 3, column: 0, value: "Coastal" },
+          { row: 3, column: 5, value: "Rising" },
+        ],
+        { rows: 1, columns: 1 }
+      ),
+      "Regions",
+      TABLE
+    )
+    expect(grown.header.at(-1)).toBe("Column 6")
+    expect(grown.rows[3]).toEqual(["Coastal", "", "", "", "", "Rising"])
+    expect(cellEdited(grown.rows[3], 0)).toBe(true)
+    expect(grown.rows[0]?.length).toBe(6)
+  })
+
+  test("undoes and does again each change, across edits, inserts, and deletes", () => {
+    // Reproduce by recording only the present: undo has nothing to return to.
+    let history = startHistory(workbook)
+    const apply = (change: (draft: typeof history.present) => typeof history.present) => {
+      history = recordDraft(history, change(history.present))
+    }
+    const names = () => draftTable(history.present, "Regions", TABLE).rows.map((row) => row[0])
+    apply((draft) =>
+      setCells(draft, "Regions", TABLE, [{ row: 0, column: 0, value: "North East" }])
+    )
+    apply((draft) => insertRows(draft, "Regions", TABLE, 0, 1))
+    apply((draft) => deleteRows(draft, "Regions", TABLE, [3]))
+    expect(names()).toEqual(["", "North East", "South"])
+    history = undoDraft(history)
+    expect(names()).toEqual(["", "North East", "South", "Harbor"])
+    history = undoDraft(undoDraft(history))
+    expect(names()).toEqual(["North", "South", "Harbor"])
+    history = redoDraft(history)
+    expect(names()).toEqual(["North East", "South", "Harbor"])
+    // A change after an undo drops what was undone.
+    apply((draft) =>
+      setCells(draft, "Regions", TABLE, [{ row: 1, column: 0, value: "South West" }])
+    )
+    expect(redoDraft(history)).toBe(history)
+    // A change that changes nothing is no step.
+    expect(recordDraft(history, history.present)).toBe(history)
+  })
+
   test("saves the sheets it changed, and no others", () => {
     const other = { ...SHEET, name: "Targets" }
     const draft = setCells(startDraft({ sheets: [SHEET, other], charts: [] }), "Regions", TABLE, [
@@ -187,7 +272,8 @@ const BY_VISITS = {
 
 /** The grid editing a sheet held in a draft, as the sheet renderer edits one. */
 function EditedGrid({ sort }: { readonly sort?: boolean }) {
-  const [draft, setDraft] = useState(() => startDraft({ sheets: [SHEET], charts: [] }))
+  const [history, setHistory] = useState(() => startHistory({ sheets: [SHEET], charts: [] }))
+  const draft = history.present
   const base = useMemo(() => sheetModel(SHEET, TABLE), [])
   const table = draftTable(draft, "Regions", TABLE)
   const model = useMemo(
@@ -199,9 +285,22 @@ function EditedGrid({ sort }: { readonly sort?: boolean }) {
       editable: (column) => !model.columns[column]?.format.formula,
       inputText: (column, raw) =>
         cellInputText(raw, model.columns[column]?.format ?? { type: "text" }, "en-US"),
-      read: (column, text) =>
-        parseCellInput(text, model.columns[column]?.format ?? { type: "text" }, "en-US"),
-      write: (edits) => setDraft((last) => setCells(last, "Regions", TABLE, edits)),
+      read: (column, text, pasted) =>
+        parseCellInput(text, model.columns[column]?.format ?? { type: "text" }, "en-US", {
+          pasted: pasted ?? false,
+        }),
+      write: (edits, grow) =>
+        setHistory((last) =>
+          recordDraft(last, setCells(last.present, "Regions", TABLE, edits, grow))
+        ),
+      insertRows: (at, count) =>
+        setHistory((last) =>
+          recordDraft(last, insertRows(last.present, "Regions", TABLE, at, count))
+        ),
+      deleteRows: (rows) =>
+        setHistory((last) => recordDraft(last, deleteRows(last.present, "Regions", TABLE, rows))),
+      undo: () => setHistory(undoDraft),
+      redo: () => setHistory(redoDraft),
       edited: (row, column) => cellEdited(table.rows[row], column),
     }),
     [model, table]
@@ -232,13 +331,22 @@ function mountEditing(options: { sort?: boolean } = {}) {
       fireEvent.pointerDown(cell(row, column), { button: 0 })
     })
   }
-  const press = async (key: string, target: HTMLElement = grid) => {
+  const press = async (
+    key: string,
+    target: HTMLElement = grid,
+    modifiers: { metaKey?: boolean; shiftKey?: boolean } = {}
+  ) => {
     await act(async () => {
-      fireEvent.keyDown(target, { key })
+      fireEvent.keyDown(target, { key, ...modifiers })
+    })
+  }
+  const paste = async (text: string) => {
+    await act(async () => {
+      fireEvent.paste(grid, { clipboardData: { getData: () => text } })
     })
   }
   const editor = () => view.container.querySelector<HTMLInputElement>('[role="grid"] input')
-  return { view, grid, cell, text, select, press, editor }
+  return { view, grid, cell, text, select, press, paste, editor }
 }
 
 describe("editing a sheet's cells", () => {
@@ -314,6 +422,47 @@ describe("editing a sheet's cells", () => {
     await ui.press("Enter", input)
     expect(ui.text(1, 0)).toBe("North")
     expect(ui.text(1, 1)).toBe("100")
+    ui.view.unmount()
+  })
+})
+
+describe("pasting, filling, and undoing in a sheet", () => {
+  test("pastes a block past the last row and column, and grows the sheet to hold it", async () => {
+    const ui = mountEditing()
+    await ui.select(3, 0)
+    // Two rows from Harbor down, three columns: one past the last.
+    await ui.paste("Harbor\t900\t95%\r\nCoastal\t448\t0.95\r\n")
+    expect(ui.text(3, 1)).toBe("900")
+    expect(ui.text(4, 0)).toBe("Coastal")
+    expect(ui.text(4, 1)).toBe("448")
+    // Typed, 95% is 0.95; pasted bare, 0.95 is the fraction a sheet copies.
+    expect(ui.text(4, 2)).toBe("95.0%")
+    ui.view.unmount()
+
+    const wide = mountEditing()
+    await wide.select(1, 4)
+    // The share is computed: what lands on it is left out and counted; the rest grows the sheet.
+    await wide.paste("0.5\tnew")
+    expect(wide.cell(0, 5).textContent).toContain("Column 6")
+    expect(wide.text(1, 5)).toBe("new")
+    expect(wide.view.getByRole("status").textContent).toBe(
+      "1 value wasn't pasted: it doesn't fit its column."
+    )
+    wide.view.unmount()
+  })
+
+  test("fills the first row down the selection, and undoes and redoes it", async () => {
+    const ui = mountEditing()
+    await ui.select(1, 1)
+    await act(async () => {
+      fireEvent.pointerDown(ui.cell(3, 2), { button: 0, shiftKey: true })
+    })
+    await ui.press("d", ui.grid, { metaKey: true })
+    expect([ui.text(2, 1), ui.text(3, 1), ui.text(3, 2)]).toEqual(["1,284", "1,284", "96.1%"])
+    await ui.press("z", ui.grid, { metaKey: true })
+    expect([ui.text(2, 1), ui.text(3, 2)]).toEqual(["1,107", "93.4%"])
+    await ui.press("z", ui.grid, { metaKey: true, shiftKey: true })
+    expect(ui.text(2, 1)).toBe("1,284")
     ui.view.unmount()
   })
 })

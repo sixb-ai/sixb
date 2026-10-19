@@ -38,7 +38,9 @@ import {
   LoaderCircle,
   Maximize2,
   PencilLine,
+  Redo2,
   TriangleAlert,
+  Undo2,
   X,
 } from "lucide-react"
 import { type ReactNode, useCallback, useEffect, useState } from "react"
@@ -217,6 +219,9 @@ interface ArtifactEdit {
   readonly editing: boolean
   readonly changed: boolean
   readonly saving: SaveState
+  /** Takes back the draft's last change; absent when there is none. */
+  readonly undo?: () => void
+  readonly redo?: () => void
   /** The version a save publishes. */
   readonly next: number
   readonly start: () => void
@@ -317,6 +322,8 @@ function useArtifactEdit(
     editing,
     changed,
     saving,
+    ...(editing && draft?.undo ? { undo: draft.undo } : {}),
+    ...(editing && draft?.redo ? { redo: draft.redo } : {}),
     next: (saving.state === "moved" ? saving.latest.version : (artifact?.latestVersion ?? 0)) + 1,
     start: () => {
       setSaving({ state: "idle" })
@@ -498,6 +505,22 @@ function ArtifactHeader({
         }
       >
         <div className="flex items-center gap-1.5 pr-1">
+          <div className="mr-1 flex items-center">
+            <HeaderButton
+              label={messages.edit.undo}
+              onClick={edit.undo}
+              disabled={!edit.undo || saving}
+            >
+              <Undo2 />
+            </HeaderButton>
+            <HeaderButton
+              label={messages.edit.redo}
+              onClick={edit.redo}
+              disabled={!edit.redo || saving}
+            >
+              <Redo2 />
+            </HeaderButton>
+          </div>
           <Button size="sm" variant="ghost" onClick={edit.discard} disabled={saving}>
             {messages.edit.discard}
           </Button>
@@ -766,15 +789,23 @@ function HeaderTooltip({
 function HeaderButton({
   label,
   onClick,
+  disabled = false,
   children,
 }: {
   readonly label: string
-  readonly onClick: () => void
+  readonly onClick?: (() => void) | undefined
+  readonly disabled?: boolean
   readonly children: ReactNode
 }) {
   return (
     <HeaderTooltip label={label}>
-      <button type="button" className={HEADER_ACTION} onClick={onClick} aria-label={label}>
+      <button
+        type="button"
+        className={cn(HEADER_ACTION, "disabled:pointer-events-none disabled:opacity-35")}
+        onClick={onClick}
+        aria-label={label}
+        disabled={disabled}
+      >
         {children}
       </button>
     </HeaderTooltip>

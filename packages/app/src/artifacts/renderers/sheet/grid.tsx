@@ -9,8 +9,18 @@ import {
   PopoverTrigger,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { ArrowDown, ArrowUp, ChevronDown, Copy, Filter } from "lucide-react"
 import {
+  ArrowDown,
+  ArrowDownToLine,
+  ArrowUp,
+  ArrowUpToLine,
+  ChevronDown,
+  Copy,
+  Filter,
+  Trash2,
+} from "lucide-react"
+import {
+  type ClipboardEvent,
   type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
@@ -54,6 +64,7 @@ import {
   inRange,
   type MoveKey,
   moveFocus,
+  parseTsv,
   type RangeStats,
   rangeHtml,
   rangeStats,
@@ -109,9 +120,21 @@ export interface SheetGridEditor {
   readonly editable: (column: number) => boolean
   /** A stored value as the reader types it back. */
   readonly inputText: (column: number, raw: string) => string
-  /** What a column's cell stores from what the reader typed, or why it can't. */
-  readonly read: (column: number, text: string) => CellInput
-  readonly write: (edits: readonly CellEdit[]) => void
+  /** What a column's cell stores from what the reader typed or pasted, or why it can't. */
+  readonly read: (column: number, text: string, pasted?: boolean) => CellInput
+  /**
+   * Stores values, as one change. `grow` adds empty rows at the end and columns at the right
+   * first, as a paste past the sheet's edge does; edits may name them.
+   */
+  readonly write: (
+    edits: readonly CellEdit[],
+    grow?: { readonly rows: number; readonly columns: number }
+  ) => void
+  /** Adds empty rows before a data row; at the row count, after the last. */
+  readonly insertRows: (at: number, count: number) => void
+  readonly deleteRows: (rows: readonly number[]) => void
+  readonly undo: () => void
+  readonly redo: () => void
   /** Whether a cell holds a value the edit changed. */
   readonly edited: (row: number, column: number) => boolean
   /** Values to offer while typing into a column, such as its tags. */
@@ -234,6 +257,13 @@ export function SheetGrid({
   } | null>(null)
   const typedText = editing?.text
   const typedAt = editing?.point
+  /** A word on what the last paste left out, shown for a moment over the grid. */
+  const [notice, setNotice] = useState<string | null>(null)
+  useEffect(() => {
+    if (!notice) return
+    const timer = setTimeout(() => setNotice(null), NOTICE_MS)
+    return () => clearTimeout(timer)
+  }, [notice])
   /** The column whose filter is open. */
   const [filtering, setFiltering] = useState<number | null>(null)
   /** What the reader right-clicked, which decides what the context menu offers. */
@@ -553,6 +583,106 @@ export function SheetGrid({
     editor.write(checks.map((cell) => ({ ...cell, value: allOn ? "false" : "true" })))
   }
 
+  /** The data rows of the selection's rows, in the order they're shown. */
+  const selectedRows = (): number[] => {
+    const rows: number[] = []
+    for (let row = Math.max(1, range.top); row <= range.bottom; row += 1) {
+      const dataRow = order[row - 1]
+      if (dataRow !== undefined) rows.push(dataRow)
+    }
+    return rows
+  }
+
+  /** Empty rows above or below the selection's, as many as it spans. */
+  const insertRowsBeside = (where: "above" | "below") => {
+    if (!editor) return
+    const rows = selectedRows()
+    const first = order[Math.max(1, range.top) - 1]
+    const last = order[range.bottom - 1]
+    const at = where === "above" ? first : last === undefined ? undefined : last + 1
+    editor.insertRows(at ?? model.rows.length, Math.max(1, rows.length))
+  }
+
+  const deleteSelectedRows = () => {
+    if (!editor) return
+    const rows = selectedRows()
+    if (rows.length === 0) return
+    editor.deleteRows(rows)
+    const top = Math.max(1, Math.min(range.top, rowCount - 1 - rows.length))
+    select({ row: top, column: focus.column }, false)
+  }
+
+  /** ⌘D: the selection's first row copied down through the rest of it, as a spreadsheet fills. */
+  const fillDown = () => {
+    if (!editor || range.bottom <= Math.max(1, range.top)) return
+    const top = Math.max(1, range.top)
+    const source = order[top - 1]
+    if (source === undefined) return
+    const edits: CellEdit[] = []
+    for (let row = top + 1; row <= range.bottom; row += 1) {
+      const dataRow = order[row - 1]
+      if (dataRow === undefined) continue
+      for (let column = range.left; column <= range.right; column += 1) {
+        if (hidden.has(column) || !editableAt({ row, column })) continue
+        edits.push({ row: dataRow, column, value: model.rows[source]?.[column] ?? "" })
+      }
+    }
+    editor.write(edits)
+  }
+
+  /**
+   * A block from the clipboard, written from the selection's top left as one change: past the
+   * last row or column, the sheet grows to hold it; one value fills the whole selection. A value
+   * that doesn't fit its column, or lands in a computed one, is left out and counted.
+   */
+  const paste = (block: readonly (readonly string[])[]) => {
+    if (!editor || block.length === 0) return
+    const top = Math.max(1, range.top)
+    const single = block.length === 1 && block[0]?.length === 1
+    const height = single ? range.bottom - top + 1 : block.length
+    const width = single
+      ? range.right - range.left + 1
+      : Math.max(...block.map((row) => row.length))
+    const shown = order.length
+    const extraRows = Math.max(0, top - 1 + height - shown)
+    const extraColumns = Math.max(0, range.left + width - columnCount)
+    const edits: CellEdit[] = []
+    let skipped = 0
+    for (let offset = 0; offset < height; offset += 1) {
+      const row = top + offset
+      // Rows past those shown are the ones the paste adds, after the table's last.
+      const dataRow = row <= shown ? order[row - 1] : model.rows.length + (row - shown - 1)
+      if (dataRow === undefined) continue
+      for (let across = 0; across < width; across += 1) {
+        const column = range.left + across
+        const text = single ? (block[0]?.[0] ?? "") : (block[offset]?.[across] ?? "")
+        if (column >= columnCount) {
+          edits.push({ row: dataRow, column, value: text })
+          continue
+        }
+        if (hidden.has(column) || !editor.editable(column)) {
+          if (text.trim()) skipped += 1
+          continue
+        }
+        const read = editor.read(column, text, true)
+        if ("error" in read) skipped += 1
+        else edits.push({ row: dataRow, column, value: read.value })
+      }
+    }
+    editor.write(edits, { rows: extraRows, columns: extraColumns })
+    setAnchor({ row: top, column: range.left })
+    setFocus({ row: top + height - 1, column: range.left + width - 1 })
+    setNotice(skipped > 0 ? messages.pasteSkipped(skipped) : null)
+  }
+
+  const onPaste = (event: ClipboardEvent<HTMLDivElement>) => {
+    if (!editor || editing || event.target !== event.currentTarget) return
+    const text = event.clipboardData.getData("text/plain")
+    if (!text) return
+    event.preventDefault()
+    paste(parseTsv(text))
+  }
+
   /** Every cell of the rows from one to another, header row included when it is one of them. */
   const selectRows = (from: number, to: number) => {
     setAnchor({ row: from, column: 0 })
@@ -657,6 +787,20 @@ export function SheetGrid({
       event.preventDefault()
       await copy()
       return
+    }
+    if (editor && command && !event.altKey) {
+      const key = event.key.toLowerCase()
+      if (key === "z" || key === "y") {
+        event.preventDefault()
+        if (key === "y" || event.shiftKey) editor.redo()
+        else editor.undo()
+        return
+      }
+      if (key === "d") {
+        event.preventDefault()
+        fillDown()
+        return
+      }
     }
     // Shift+Space selects the selection's rows, Ctrl+Space its columns, and both every cell.
     if (event.key === " " && (event.shiftKey || event.ctrlKey) && !event.metaKey) {
@@ -1237,6 +1381,7 @@ export function SheetGrid({
               tabIndex={0}
               className="flex-1 outline-none"
               onKeyDown={onKeyDown}
+              onPaste={onPaste}
             >
               <div
                 role="rowgroup"
@@ -1329,6 +1474,26 @@ export function SheetGrid({
             {messages.copy}
           </ContextMenuItem>
         )}
+        {editor &&
+        (contextTarget?.kind === "row" ||
+          (contextTarget?.kind === "column" && contextTarget.cell)) &&
+        range.bottom > 0 ? (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => insertRowsBeside("above")}>
+              <ArrowUpToLine aria-hidden="true" />
+              {messages.insertRowsAbove(selectedRows().length || 1)}
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => insertRowsBeside("below")}>
+              <ArrowDownToLine aria-hidden="true" />
+              {messages.insertRowsBelow(selectedRows().length || 1)}
+            </ContextMenuItem>
+            <ContextMenuItem variant="destructive" onSelect={deleteSelectedRows}>
+              <Trash2 aria-hidden="true" />
+              {messages.deleteRows(selectedRows().length)}
+            </ContextMenuItem>
+          </>
+        ) : null}
         {contextTarget?.kind === "column" ? (
           <>
             {contextTarget.cell ? <ContextMenuSeparator /> : null}
@@ -1346,9 +1511,20 @@ export function SheetGrid({
           </>
         ) : null}
       </ContextMenuContent>
+      {notice ? (
+        <div
+          role="status"
+          className="pointer-events-none absolute bottom-12 left-1/2 z-10 -translate-x-1/2 rounded-full border border-border bg-popover px-3.5 py-1.5 text-xs font-medium whitespace-nowrap text-popover-foreground shadow-[0_8px_24px_-12px_rgb(0_0_0/0.35)] motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1"
+        >
+          {notice}
+        </div>
+      ) : null}
     </ContextMenu>
   )
 }
+
+/** How long a word on a paste stays over the grid. */
+const NOTICE_MS = 4000
 
 /** The rows' order while the sheet is edited, and what it was worked out from. */
 interface HeldOrder {

@@ -40,6 +40,8 @@ export const en = {
     editing: (version: number) => `Editing version ${number(version)}`,
     unsaved: "Unsaved changes",
     discard: "Discard",
+    undo: "Undo",
+    redo: "Redo",
     save: (version: number) => `Save as version ${number(version)}`,
     saving: "Saving…",
     saveFailed: "Your changes could not be saved. Try again.",
@@ -166,6 +168,15 @@ export const en = {
   },
   sheet: {
     editCell: (cell: string) => `Edit ${cell}`,
+    insertRowsAbove: (count: number) =>
+      count === 1 ? "Insert a row above" : `Insert ${number(count)} rows above`,
+    insertRowsBelow: (count: number) =>
+      count === 1 ? "Insert a row below" : `Insert ${number(count)} rows below`,
+    deleteRows: (count: number) => (count === 1 ? "Delete row" : `Delete ${number(count)} rows`),
+    pasteSkipped: (count: number) =>
+      count === 1
+        ? "1 value wasn't pasted: it doesn't fit its column."
+        : `${number(count)} values weren't pasted: they don't fit their columns.`,
     inputErrors: {
       number: "Type a number, such as 1,200 or −3.5.",
       date: "Type a date, such as 11/23/2026 or 2026-11-23.",
@@ -334,7 +345,9 @@ export const fr: Translation<ArtifactMessages> = {
     edit: "Modifier",
     editing: (version) => `Modification de la version ${numberFr(version)}`,
     unsaved: "Modifications non enregistrées",
-    discard: "Annuler",
+    discard: "Abandonner",
+    undo: "Annuler",
+    redo: "Rétablir",
     save: (version) => `Enregistrer la version ${numberFr(version)}`,
     saving: "Enregistrement…",
     saveFailed: "Impossible d’enregistrer vos modifications. Réessayez.",
@@ -461,6 +474,16 @@ export const fr: Translation<ArtifactMessages> = {
   },
   sheet: {
     editCell: (cell) => `Modifier ${cell}`,
+    insertRowsAbove: (count) =>
+      count === 1 ? "Insérer une ligne au-dessus" : `Insérer ${numberFr(count)} lignes au-dessus`,
+    insertRowsBelow: (count) =>
+      count === 1 ? "Insérer une ligne en dessous" : `Insérer ${numberFr(count)} lignes en dessous`,
+    deleteRows: (count) =>
+      count === 1 ? "Supprimer la ligne" : `Supprimer ${numberFr(count)} lignes`,
+    pasteSkipped: (count) =>
+      count === 1
+        ? "1 valeur n’a pas été collée : elle ne correspond pas à sa colonne."
+        : `${numberFr(count)} valeurs n’ont pas été collées : elles ne correspondent pas à leurs colonnes.`,
     inputErrors: {
       number: "Saisissez un nombre, comme 1 200 ou −3,5.",
       date: "Saisissez une date, comme 23/11/2026 ou 2026-11-23.",
