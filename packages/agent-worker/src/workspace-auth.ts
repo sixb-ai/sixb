@@ -114,6 +114,13 @@ export class WorkspaceAuthSession {
       )
         throw authError()
 
+      // Every request origin joins the run's network, so it must name exactly one host.
+      if (!grant.requests.every((request) => isSingleHostOrigin(request.origin))) {
+        throw new Error(
+          "[SixbAgentWorker] Source auth must issue credentials for exact https:// origins, never wildcard hosts."
+        )
+      }
+
       // The guest environment is fixed when the session is acquired; renewals only rotate
       // requests, so a later grant's env is ignored rather than failing a running session.
       const env = this.env ?? (grant.env === undefined ? {} : captureSandboxEnv(grant.env))
@@ -206,6 +213,18 @@ export class WorkspaceAuthSession {
       if (error) throw authError()
     })()
     return this.closing
+  }
+}
+
+/** An origin as written, whose host is not a wildcard a provider would read as many domains. */
+function isSingleHostOrigin(origin: unknown): boolean {
+  if (typeof origin !== "string") return false
+
+  try {
+    const url = new URL(origin)
+    return url.protocol === "https:" && url.origin === origin && !url.hostname.includes("*")
+  } catch {
+    return false
   }
 }
 

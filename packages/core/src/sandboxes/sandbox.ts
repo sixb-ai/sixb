@@ -89,7 +89,8 @@ export type SandboxRequestMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
  * the token's own permissions are the boundary, so issue it with the narrowest scope that works.
  *
  * Providers apply the same rules so that a credential means the same thing everywhere:
- * - `origin` is one `https://` domain: no port, path, user info, IP address or loopback host.
+ * - `origin` is one `https://` domain: no port, path, user info, IP address, loopback host or
+ *   `*` wildcard.
  * - A path is matched case-sensitively against the raw request path. It starts with a single
  *   "/" and is printable ASCII without spaces, control characters, "?", "#", "%", "\\", or "."
  *   and ".." segments. A prefix also ends with "/", so it stops at a segment boundary.

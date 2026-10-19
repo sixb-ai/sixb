@@ -120,6 +120,20 @@ describe("credential injection policy", () => {
     )
   })
 
+  // Remove the wildcard check in credentialHost to watch this test fail: an `all` network has
+  // no allow list that could reject the host first.
+  test.each([
+    ["https://*", "wildcard hosts are not allowed"],
+    ["https://*.github.com", "wildcard hosts are not allowed"],
+    // The URL parser decodes the escape, so the origin no longer reads as written.
+    ["https://%2A.github.com", "without path, port or user info"],
+  ])("rejects a wildcard host even when the network allows every domain: %p", (origin, reason) => {
+    const attempt = () => withRequestCredentials({ mode: "all" }, [{ ...api, origin }])
+
+    expect(attempt).toThrow(SandboxError)
+    expect(attempt).toThrow(reason)
+  })
+
   // Remove the `endsWith("/")` check in selectPath to watch "/repos" fail here, and the
   // printable-ASCII check in requestPath to watch the tab, DEL and non-ASCII cases fail.
   test.each([
@@ -243,6 +257,16 @@ describe("toVercelNetworkPolicy", () => {
         allow: [{ name: "local", origin: "http://127.0.0.1:3002" }],
       })
     ).toThrow("cannot reach restricted target")
+  })
+
+  // Remove the wildcard check in toVercelNetworkPolicy to watch this test fail.
+  test.each([
+    "https://*",
+    "https://*.npmjs.org",
+  ])("rejects a wildcard target, which Vercel would read as every matching domain: %p", (origin) => {
+    expect(() =>
+      toVercelNetworkPolicy({ mode: "restricted", allow: [{ name: "any", origin }] })
+    ).toThrow("uses a wildcard host")
   })
 
   test("rejects plain HTTP hostname targets because Vercel domain filtering is TLS-only", () => {

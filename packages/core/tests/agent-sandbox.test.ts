@@ -179,6 +179,16 @@ describe("Agent sandbox binding", () => {
     )
   })
 
+  // Remove the wildcard check in validateSource or validateNetworkTarget to watch this fail.
+  test.each<SandboxConfig>([
+    { source: { type: "git", url: "https://*.github.com/acme/repo" } },
+    { network: { mode: "restricted", allow: [{ name: "any", origin: "https://*" }] } },
+    { network: { mode: "restricted", allow: [{ name: "gh", origin: "https://*.github.com" }] } },
+  ])("rejects a wildcard host, which would open every matching domain: %j", (config) => {
+    expect(() => setup(config)).toThrow(SandboxError)
+    expect(() => setup(config)).toThrow("wildcard hosts are not allowed")
+  })
+
   test.each([
     { mode: "none" as const },
     { mode: "all" as const },

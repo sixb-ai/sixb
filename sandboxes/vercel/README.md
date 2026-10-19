@@ -192,6 +192,8 @@ methods it lists: GET, POST, PUT, PATCH or DELETE. HEAD and OPTIONS requests are
 
 - Paths match the raw request path, case-sensitively. They must be printable ASCII without
   spaces, control characters, `?`, `#`, `%`, `\`, or `.` and `..` segments.
+- An origin names one public domain. Wildcards such as `https://*.github.com` are rejected, in
+  credentials and in network targets alike.
 - Two credentials that could match the same request are rejected: the firewall would apply only
   the first.
 - Every injected request gets its Host header set to the credential's domain, so a connection
