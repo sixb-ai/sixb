@@ -264,7 +264,9 @@ describe("workspace auth lifecycle", () => {
 
   test("keeps the integration's error as the cause behind the generic message", async () => {
     // Regression proof: catch without binding in refresh() and throw authError(); no cause remains.
-    const integration = new Error("[GitHub] The App installation does not grant the permissions.")
+    const integration = new Error(
+      "[SixbGitHub] The App installation does not grant the permissions."
+    )
     const f = fixture(async () => {
       throw integration
     })
@@ -282,7 +284,7 @@ describe("workspace auth lifecycle", () => {
   test("reports a failed renewal with the integration's error in its cause chain", async () => {
     // Regression proof: drop the error from the renewal catch; the chain ends before it.
     const old = grant("old", 61_000)
-    const integration = new Error("[GitHub] Workspace authentication failed (HTTP 503).")
+    const integration = new Error("[SixbGitHub] Workspace authentication failed (HTTP 503).")
     let calls = 0
     const f = fixture(async () => {
       if (++calls > 1) throw integration

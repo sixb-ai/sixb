@@ -183,7 +183,7 @@ describe("GitHub App workspace auth", () => {
 
     expect(failure).toBeInstanceOf(Error)
     expect(String(failure)).toContain(
-      `[GitHub] The App installation does not grant the permissions this workspace needs (${label}). Update the App's permissions and approve them on the installation.`
+      `[SixbGitHub] The App installation does not grant the permissions this workspace needs (${label}). Update the App's permissions and approve them on the installation.`
     )
     expect(String(failure)).not.toContain("not granted to this installation")
   })
@@ -249,7 +249,7 @@ describe("GitHub App workspace auth", () => {
     // the injected slug resolves as a bot.
     const f = fixture({ app: () => Response.json(app) })
 
-    await expect(f.authorize()).rejects.toThrow("[GitHub] App response is invalid.")
+    await expect(f.authorize()).rejects.toThrow("[SixbGitHub] App response is invalid.")
     expect(f.calls.some((call) => call.url.includes("/users/"))).toBe(false)
     expect(f.calls.at(-1)?.init?.method).toBe("DELETE")
   })
@@ -263,7 +263,7 @@ describe("GitHub App workspace auth", () => {
     // Regression proof: remove the user.type check; the "User" case resolves.
     const f = fixture({ user: () => Response.json(user) })
 
-    await expect(f.authorize()).rejects.toThrow("[GitHub] App bot user response is invalid.")
+    await expect(f.authorize()).rejects.toThrow("[SixbGitHub] App bot user response is invalid.")
     expect(f.calls.at(-1)?.init?.method).toBe("DELETE")
   })
 
@@ -296,11 +296,11 @@ describe("GitHub App workspace auth", () => {
       await expect(mismatch.authorize()).rejects.toThrow("did not match")
 
       const identity = fixture({ revokeStatus: 503, app: () => Response.json({ id: 456 }) })
-      await expect(identity.authorize()).rejects.toThrow("[GitHub] App response is invalid.")
+      await expect(identity.authorize()).rejects.toThrow("[SixbGitHub] App response is invalid.")
 
       expect(errors).toHaveBeenCalledTimes(2)
       expect(errors).toHaveBeenCalledWith(
-        "[GitHub] Installation token revocation failed after an authorization error."
+        "[SixbGitHub] Installation token revocation failed after an authorization error."
       )
     } finally {
       errors.mockRestore()
@@ -316,7 +316,7 @@ describe("GitHub App workspace auth", () => {
     "https://github.com/acme/%77ebsite.git",
   ])("rejects unsupported or ambiguous repository URLs before any request: %s", async (url) => {
     const f = fixture()
-    await expect(f.authorize(url)).rejects.toThrow("[GitHub]")
+    await expect(f.authorize(url)).rejects.toThrow("[SixbGitHub]")
     expect(f.calls).toHaveLength(0)
   })
 
@@ -350,7 +350,7 @@ describe("GitHub App workspace auth", () => {
         source: { type: "git", url: "https://github.com/acme/website.git" },
         signal: new AbortController().signal,
       })
-    ).rejects.toThrow("[GitHub] Workspace authentication request failed.")
+    ).rejects.toThrow("[SixbGitHub] Workspace authentication request failed.")
   })
 
   test("reports revocation failure and permits a retry", async () => {
