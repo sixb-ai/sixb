@@ -40,6 +40,8 @@ export function useSheetModel(
   sheet: WorkbookSheet | undefined
 ): {
   readonly model: SheetModel | null
+  /** The sheet's values as its CSV holds them, computed columns empty: what an edit starts from. */
+  readonly table: CsvTable | null
   /** The sheet's CSV, which downloads as it is. */
   readonly source: FileSource | null
   readonly loading: boolean
@@ -47,15 +49,22 @@ export function useSheetModel(
 } {
   const source = sheet ? versionFileSource(version, sheetFilePath(sheet.name)) : null
   const csv = useFileText(source, ARTIFACT_LIMITS.maxSheetFileBytes)
-  const model = useMemo(() => {
+  const read = useMemo(() => {
     if (!sheet || csv.text === undefined) return null
     try {
-      return sheetModel(sheet, parseCsv(csv.text))
+      const table = parseCsv(csv.text)
+      return { table, model: sheetModel(sheet, table) }
     } catch {
       return null
     }
   }, [sheet, csv.text])
-  return { model, source, loading: csv.loading, tooLarge: csv.tooLarge }
+  return {
+    model: read?.model ?? null,
+    table: read?.table ?? null,
+    source,
+    loading: csv.loading,
+    tooLarge: csv.tooLarge,
+  }
 }
 
 /**

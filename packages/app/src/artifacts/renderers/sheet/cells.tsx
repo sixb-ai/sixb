@@ -49,6 +49,8 @@ export function GridCell({
   title,
   description,
   highlight,
+  edited = false,
+  editing = false,
   style,
   children,
 }: {
@@ -78,6 +80,10 @@ export function GridCell({
   readonly description?: string
   /** A bar or shade by the cell's value in its column. The selection's tint covers a shade. */
   readonly highlight?: CellHighlight
+  /** It holds a value the reader changed and hasn't saved. */
+  readonly edited?: boolean
+  /** It is being typed into: the editor draws over it and past its edges. */
+  readonly editing?: boolean
   readonly style: CSSProperties
   readonly children: ReactNode
 }) {
@@ -98,7 +104,8 @@ export function GridCell({
         "flex shrink-0 items-center border-r border-b border-(--sheet-line) px-2 whitespace-nowrap",
         header ? "border-b-border bg-(--sheet-header) font-semibold" : "bg-(--sheet-cell)",
         fixed ? "sticky z-[1]" : "relative",
-        spill === undefined ? "overflow-hidden" : "overflow-visible",
+        spill === undefined && !editing ? "overflow-hidden" : "overflow-visible",
+        editing && "z-[4]",
         // Text that runs on draws over the gridlines it crosses, as a spreadsheet's does.
         (spill !== undefined || covered === "through") && "border-r-transparent",
         lastFixed &&
@@ -138,6 +145,13 @@ export function GridCell({
         />
       ) : null}
       {children}
+      {edited ? (
+        // A changed value is marked in its corner until it's saved.
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute top-0 left-0 size-[7px] bg-primary [clip-path:polygon(0_0,100%_0,0_100%)]"
+        />
+      ) : null}
       {corner ? (
         <span
           aria-hidden="true"
@@ -360,6 +374,7 @@ export function CellContent({
       <span className="flex min-w-0 flex-1 justify-center">
         <span
           role="img"
+          data-check=""
           aria-label={cell.text}
           className={cn(
             "flex size-[15px] items-center justify-center rounded-[4px] border",

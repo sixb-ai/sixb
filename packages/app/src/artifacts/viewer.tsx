@@ -1,6 +1,19 @@
 import { type GetArtifactResponse, isSixbApiError } from "@sixb/client"
-import { getArtifactOptions, getArtifactVersionOptions } from "@sixb/client/hooks"
 import {
+  getArtifactOptions,
+  getArtifactQueryKey,
+  getArtifactVersionOptions,
+} from "@sixb/client/hooks"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  Button,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuLabel,
@@ -14,7 +27,7 @@ import {
 } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -22,18 +35,24 @@ import {
   Check,
   ChevronDown,
   Link2,
+  LoaderCircle,
   Maximize2,
+  PencilLine,
+  TriangleAlert,
   X,
 } from "lucide-react"
-import type { ReactNode } from "react"
+import { type ReactNode, useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
+import { useCurrentUser } from "../session"
 import { useCopyFeedback } from "./copy-feedback"
 import { DownloadMenu } from "./downloads"
+import { type ArtifactDraft, EditSessionProvider, saveDraft } from "./edit-session"
 import { formatFileSize } from "./file-size"
 import { useFileName } from "./file-source"
 import { FileTypeIcon, fileTypeOf } from "./file-type-icon"
 import { type ArtifactKindName, ArtifactKindTile } from "./kind-icon"
 import { useArtifactMessages } from "./messages"
+import { type ArtifactMoved, ArtifactMovedError } from "./publish-edit"
 import { type ArtifactVersion, versionFileSource } from "./queries"
 import { ArtifactReferencesProvider } from "./references/references"
 import { CanvasRenderer } from "./renderers/canvas/renderer"
@@ -75,7 +94,13 @@ export function Viewer({
       {target.type === "artifact" ? (
         // A link to another artifact opens it here, in place of this one.
         <ArtifactReferencesProvider open={onOpenReference}>
-          <ArtifactView target={target} onTargetChange={onTargetChange} chrome={chrome} />
+          {/* An edit belongs to its artifact: another one opens without it. */}
+          <ArtifactView
+            key={target.artifactId}
+            target={target}
+            onTargetChange={onTargetChange}
+            chrome={chrome}
+          />
         </ArtifactReferencesProvider>
       ) : (
         <>
@@ -113,6 +138,8 @@ function ArtifactView({
     retry: false,
   })
   const error = artifactQuery.error ?? versionQuery.error
+  const edit = useArtifactEdit(target, detail, versionQuery.data, onTargetChange)
+  const guarded = edit.guard(chrome)
 
   if (error || (artifactQuery.isSuccess && !detail)) {
     const notFound = isSixbApiError(error) && error.status === 404
@@ -149,7 +176,8 @@ function ArtifactView({
         target={target}
         detail={detail}
         version={version}
-        chrome={chrome}
+        chrome={guarded}
+        edit={edit}
         onVersionChange={(next) =>
           onTargetChange({
             type: "artifact",
@@ -158,14 +186,228 @@ function ArtifactView({
           })
         }
       />
-      <ArtifactBody
-        key={bodyKey(version, kind, target.part)}
-        version={version}
-        kind={kind}
-        latestVersion={detail.artifact.latestVersion}
-        part={target.part}
-      />
+      {edit.saving.state === "moved" || edit.saving.state === "failed" ? (
+        <EditNotice edit={edit} />
+      ) : null}
+      <EditSessionProvider editing={edit.editing} report={edit.report}>
+        <ArtifactBody
+          key={bodyKey(version, kind, target.part)}
+          version={version}
+          kind={kind}
+          latestVersion={detail.artifact.latestVersion}
+          part={target.part}
+        />
+      </EditSessionProvider>
+      <DiscardDialog edit={edit} />
     </>
+  )
+}
+
+/** The kinds a reader edits in place; the rest are the Agent's to change. */
+const EDITABLE_KINDS: ReadonlySet<ArtifactKindName> = new Set(["sheet", "canvas"])
+
+type SaveState =
+  | { readonly state: "idle" | "saving" | "failed" }
+  | { readonly state: "moved"; readonly latest: ArtifactMoved }
+
+/** Editing the version shown: whether it can be, the draft, and saving it as the next version. */
+interface ArtifactEdit {
+  /** Whether the reader may edit what is shown: the latest version of a kind that edits. */
+  readonly available: boolean
+  readonly editing: boolean
+  readonly changed: boolean
+  readonly saving: SaveState
+  /** The version a save publishes. */
+  readonly next: number
+  readonly start: () => void
+  readonly report: (draft: ArtifactDraft | null) => void
+  /** Saves the draft as the next version; over `baseVersion`, when the reader chose to. */
+  readonly save: (baseVersion?: number) => Promise<void>
+  /** Leaves editing, asking first when the draft has changes. */
+  readonly discard: () => void
+  /** Leaves editing for the latest version, the draft dropped. */
+  readonly openLatest: () => void
+  /** Whether the discard confirmation is open, and what it continues with. */
+  readonly confirming: (() => void) | null
+  readonly confirm: (then: (() => void) | null) => void
+  /** The header's close and back, asking first when the draft has changes. */
+  readonly guard: (chrome: ViewerChrome) => ViewerChrome
+}
+
+function useArtifactEdit(
+  target: ArtifactTarget,
+  detail: ArtifactDetail | undefined,
+  version: ArtifactVersion | undefined,
+  onTargetChange: (target: ViewerTarget) => void
+): ArtifactEdit {
+  const queries = useQueryClient()
+  const user = useCurrentUser()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState<ArtifactDraft | null>(null)
+  const [saving, setSaving] = useState<SaveState>({ state: "idle" })
+  const [confirming, setConfirming] = useState<(() => void) | null>(null)
+  const artifact = detail?.artifact
+  // The owner publishes; with sign-in off, everyone does.
+  const owns = !user || (artifact?.owner.type === "user" && artifact.owner.id === user.id) || false
+  const available =
+    !!artifact &&
+    !!version &&
+    EDITABLE_KINDS.has(artifact.kind) &&
+    version.version === artifact.latestVersion &&
+    owns
+  const changed = editing && !!draft?.changed
+
+  const stop = useCallback(() => {
+    setEditing(false)
+    setDraft(null)
+    setSaving({ state: "idle" })
+  }, [])
+
+  const save = useCallback(
+    async (over?: number) => {
+      if (!version || !draft?.changed || saving.state === "saving") return
+      // Once a save has met a later version, saving again is saving over it, as the notice says.
+      const baseVersion = over ?? (saving.state === "moved" ? saving.latest.version : undefined)
+      setSaving({ state: "saving" })
+      try {
+        await saveDraft(queries, version, draft, baseVersion === undefined ? {} : { baseVersion })
+        // The artifact's latest version is the one just saved: the view moves to it.
+        await queries.invalidateQueries({
+          queryKey: getArtifactQueryKey({ path: { artifactId: version.artifactId } }),
+        })
+        void queries.invalidateQueries({
+          predicate: (query) =>
+            (query.queryKey[0] as { _id?: string } | undefined)?._id === "listArtifacts",
+        })
+        stop()
+        onTargetChange({ type: "artifact", artifactId: version.artifactId })
+      } catch (error) {
+        setSaving(
+          error instanceof ArtifactMovedError
+            ? { state: "moved", latest: error.latest }
+            : { state: "failed" }
+        )
+      }
+    },
+    [version, draft, saving, queries, stop, onTargetChange]
+  )
+
+  // ⌘S saves, as an editor's does; leaving the page with changes asks first.
+  useEffect(() => {
+    if (!editing) return
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "s") {
+        event.preventDefault()
+        void save()
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [editing, save])
+  useEffect(() => {
+    if (!changed) return
+    const onLeave = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener("beforeunload", onLeave)
+    return () => window.removeEventListener("beforeunload", onLeave)
+  }, [changed])
+
+  const ask = (then: () => void) => (changed ? setConfirming(() => then) : then())
+  return {
+    available,
+    editing,
+    changed,
+    saving,
+    next: (saving.state === "moved" ? saving.latest.version : (artifact?.latestVersion ?? 0)) + 1,
+    start: () => {
+      setSaving({ state: "idle" })
+      setEditing(true)
+    },
+    report: setDraft,
+    save,
+    discard: () => ask(stop),
+    openLatest: () => {
+      stop()
+      void queries.invalidateQueries({
+        queryKey: getArtifactQueryKey({ path: { artifactId: target.artifactId } }),
+      })
+      onTargetChange({ type: "artifact", artifactId: target.artifactId })
+    },
+    confirming,
+    confirm: setConfirming,
+    guard: (chrome) => ({
+      ...chrome,
+      ...(chrome.onClose ? { onClose: () => ask(chrome.onClose as () => void) } : {}),
+      ...(chrome.onBack ? { onBack: () => ask(chrome.onBack as () => void) } : {}),
+    }),
+  }
+}
+
+/** Under the header, when a save didn't go through: why, and what the reader can do. */
+function EditNotice({ edit }: { readonly edit: ArtifactEdit }) {
+  const messages = useArtifactMessages().edit
+  const user = useCurrentUser()
+  const moved = edit.saving.state === "moved" ? edit.saving.latest : null
+  return (
+    <div
+      role="alert"
+      className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-[color-mix(in_oklab,var(--warning)_30%,var(--border))] bg-[color-mix(in_oklab,var(--warning)_9%,var(--background))] px-4 py-2.5 text-[13px]"
+    >
+      <TriangleAlert className="size-4 shrink-0 text-warning" aria-hidden="true" />
+      <div className="min-w-0 flex-1">
+        <p className="font-medium text-foreground">
+          {moved
+            ? messages.moved(
+                moved.version,
+                moved.author.type === "user" && moved.author.id === user?.id
+              )
+            : messages.saveFailed}
+        </p>
+        {moved ? <p className="text-muted-foreground">{messages.movedDescription}</p> : null}
+      </div>
+      {moved ? (
+        <div className="flex shrink-0 items-center gap-2">
+          <Button size="sm" variant="outline" onClick={edit.openLatest}>
+            {messages.openLatest(moved.version)}
+          </Button>
+          <Button size="sm" onClick={() => void edit.save(moved.version)}>
+            {messages.saveAnyway(moved.version + 1)}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** Asks before a draft with changes is dropped: by Discard, or by closing the viewer. */
+function DiscardDialog({ edit }: { readonly edit: ArtifactEdit }) {
+  const messages = useArtifactMessages().edit
+  return (
+    <AlertDialog
+      open={edit.confirming !== null}
+      onOpenChange={(open) => {
+        if (!open) edit.confirm(null)
+      }}
+    >
+      <AlertDialogContent size="sm">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{messages.discardTitle}</AlertDialogTitle>
+          <AlertDialogDescription>{messages.discardDescription}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{messages.keepEditing}</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            onClick={() => {
+              const then = edit.confirming
+              edit.confirm(null)
+              then?.()
+            }}
+          >
+            {messages.discard}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 
@@ -221,16 +463,57 @@ function ArtifactHeader({
   detail,
   version,
   chrome,
+  edit,
   onVersionChange,
 }: {
   readonly target: ArtifactTarget
   readonly detail: ArtifactDetail
   readonly version: ArtifactVersion
   readonly chrome: ViewerChrome
+  readonly edit: ArtifactEdit
   readonly onVersionChange: (version: number) => void
 }) {
   const messages = useArtifactMessages()
   const { artifact } = detail
+  if (edit.editing) {
+    // The draft bar: what is being edited, Discard, and Save as the next version.
+    const saving = edit.saving.state === "saving"
+    return (
+      <ViewerBar
+        chrome={chrome}
+        leading={<ArtifactKindTile kind={artifact.kind} label={messages.kinds[artifact.kind]} />}
+        title={version.title}
+        accessory={
+          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-primary">
+            <span
+              aria-hidden="true"
+              className={cn(
+                "size-1.5 rounded-full bg-primary",
+                edit.changed &&
+                  "shadow-[0_0_0_3px_color-mix(in_oklab,var(--primary)_22%,transparent)]"
+              )}
+            />
+            {edit.changed ? messages.edit.unsaved : messages.edit.editing(version.version)}
+          </span>
+        }
+      >
+        <div className="flex items-center gap-1.5 pr-1">
+          <Button size="sm" variant="ghost" onClick={edit.discard} disabled={saving}>
+            {messages.edit.discard}
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => void edit.save()}
+            disabled={!edit.changed || saving}
+            aria-keyshortcuts="Meta+S Control+S"
+          >
+            {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : null}
+            {saving ? messages.edit.saving : messages.edit.save(edit.next)}
+          </Button>
+        </div>
+      </ViewerBar>
+    )
+  }
   return (
     <ViewerBar
       chrome={chrome}
@@ -240,6 +523,17 @@ function ArtifactHeader({
         <VersionPicker detail={detail} version={version} onVersionChange={onVersionChange} />
       }
     >
+      {edit.available ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="mr-0.5 text-muted-foreground hover:text-foreground"
+          onClick={edit.start}
+        >
+          <PencilLine aria-hidden="true" />
+          {messages.edit.edit}
+        </Button>
+      ) : null}
       {artifact.kind === "sheet" ? (
         <SheetDownloadMenu version={version} />
       ) : (

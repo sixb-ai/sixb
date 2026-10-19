@@ -1,5 +1,6 @@
 import {
   type CellRange,
+  type CsvTable,
   parseSheetPart,
   type Workbook,
   type WorkbookChart,
@@ -8,13 +9,24 @@ import { Button } from "@sixb/ui/components"
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { Download, ListFilter, Search } from "lucide-react"
-import { lazy, Suspense, useId, useRef, useState } from "react"
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from "react"
+import { useArtifactEditing, useReportDraft } from "../../edit-session"
 import { formatFileSize } from "../../file-size"
 import { useArtifactMessages } from "../../messages"
 import { type ArtifactVersion, versionImageSource } from "../../queries"
 import { useArtifactThemeAttributes } from "../../theme"
 import { ViewerLoading, ViewerNotice } from "../notice"
 import { CHART_ICONS } from "./chart-icon"
+import {
+  cellEdited,
+  draftChanged,
+  draftFiles,
+  draftModel,
+  draftTable,
+  setCells,
+  startDraft,
+  type WorkbookDraft,
+} from "./draft"
 import { useSheetFind } from "./find-bar"
 import {
   CommandBar,
@@ -25,7 +37,8 @@ import {
   type SheetTabItem,
   StatusFigures,
 } from "./frame"
-import { SheetGrid, type SheetGridStatus } from "./grid"
+import { SheetGrid, type SheetGridEditor, type SheetGridStatus } from "./grid"
+import { cellInputText, parseCellInput } from "./input"
 import type { SheetModel } from "./model"
 import { rangeLabel } from "./selection"
 import { INITIAL_SHEET_VIEW, type SheetView, setAutoFilter, useSheetViews } from "./view"
@@ -94,10 +107,11 @@ function WorkbookView({
   const chart =
     tab.kind === "chart" ? workbook.charts.find((entry) => entry.name === tab.name) : undefined
   const sheetName = chart?.sheet ?? tab.name
-  const { model, source, loading, tooLarge } = useSheetModel(
-    version,
-    workbook.sheets.find((entry) => entry.name === sheetName)
-  )
+  const sheet = workbook.sheets.find((entry) => entry.name === sheetName)
+  const read = useSheetModel(version, sheet)
+  const { source, loading, tooLarge } = read
+  const edit = useWorkbookEdit(version, workbook, sheetName, read.table, read.model, locale)
+  const model = edit.model
   const [status, setStatus] = useState<SheetGridStatus | null>(null)
   const [goTo, setGoTo] = useState<{ range: CellRange; seq: number } | null>(null)
   const root = useRef<HTMLDivElement | null>(null)
@@ -218,6 +232,7 @@ function WorkbookView({
               view={view}
               onViewChange={updateView}
               imageUrl={(path) => versionImageSource(version, path)?.inlineUrl}
+              {...(edit.editor ? { editor: edit.editor } : {})}
               className="flex-1"
             />
             {sheetCharts.length > 0 ? (
@@ -268,6 +283,67 @@ function WorkbookView({
       />
     </div>
   )
+}
+
+/**
+ * The workbook as the reader edits it, while the viewer is editing: the draft of every sheet
+ * changed, the shown sheet's model drawn from it, the grid's editor, and the draft reported to
+ * the header's Save. Leaving editing drops the draft.
+ */
+function useWorkbookEdit(
+  version: ArtifactVersion,
+  workbook: Workbook,
+  sheetName: string,
+  table: CsvTable | null,
+  base: SheetModel | null,
+  locale: string
+): { readonly model: SheetModel | null; readonly editor: SheetGridEditor | null } {
+  const editing = useArtifactEditing()
+  const [draft, setDraft] = useState<WorkbookDraft>(() => startDraft(workbook))
+  useEffect(() => {
+    if (!editing) setDraft(startDraft(workbook))
+  }, [editing, workbook])
+  const sheet = workbook.sheets.find((entry) => entry.name === sheetName)
+  const current = table ? draftTable(draft, sheetName, table) : null
+  const model = useMemo(
+    () => (sheet && base && current && current !== table ? draftModel(sheet, current, base) : base),
+    [sheet, base, current, table]
+  )
+  const editor = useMemo<SheetGridEditor | null>(() => {
+    if (!editing || !model || !table || !current) return null
+    const format = (column: number) => model.columns[column]?.format ?? { type: "text" as const }
+    const images = new Set(version.files.map((file) => file.path))
+    return {
+      editable: (column) => !format(column).formula,
+      inputText: (column, raw) => cellInputText(raw, format(column), locale),
+      read: (column, text) =>
+        parseCellInput(text, format(column), locale, {
+          image: (path) => images.has(path.replace(/^\.\//, "")),
+        }),
+      write: (edits) => setDraft((last) => setCells(last, sheetName, table, edits)),
+      edited: (row, column) => cellEdited(current.rows[row], column),
+      suggestions: (column) => tagSuggestions(model, column),
+    }
+  }, [editing, model, table, current, version.files, locale, sheetName])
+  const report = useMemo(
+    () => (editing ? { changed: draftChanged(draft), files: () => draftFiles(draft) } : null),
+    [editing, draft]
+  )
+  useReportDraft(report)
+  return { model, editor }
+}
+
+/** A tag column's tags to offer while typing: its toned tags, then the values it holds. */
+function tagSuggestions(model: SheetModel, column: number): readonly string[] {
+  const entry = model.columns[column]
+  if (entry?.format.type !== "tag") return []
+  const tags = new Set(Object.keys(entry.format.tones ?? {}))
+  for (const row of model.rows) {
+    const value = row[column]?.trim()
+    if (value) tags.add(value)
+    if (tags.size >= 50) break
+  }
+  return [...tags]
 }
 
 /** One table on its own, as a CSV file shows: the command bar, the grid, and the status bar. */
