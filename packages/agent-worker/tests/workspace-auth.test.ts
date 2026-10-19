@@ -210,6 +210,25 @@ describe("workspace auth lifecycle", () => {
     expect(token.revocations()).toBe(1)
   })
 
+  test.each([
+    "https://*",
+    "https://*.github.com",
+    "https://github.com/acme",
+    "http://github.com",
+  ])("rejects a request origin that is not one exact host, and revokes its grant: %p", async (origin) => {
+    // Regression proof: drop the isSingleHostOrigin check in refresh(); prepare resolves and
+    // the run's network opens the origin as issued.
+    const token = grant("wildcard")
+    const [request] = token.value.requests
+    const f = fixture(async () => ({ ...token.value, requests: [{ ...request!, origin }] }))
+
+    await expect(f.auth.prepare()).rejects.toThrow("authentication could not be confirmed")
+    await expect(f.auth.close()).rejects.toThrow("authentication could not be confirmed")
+
+    expect(f.updates).toEqual([])
+    expect(token.revocations()).toBe(1)
+  })
+
   test("ignores the guest environment of a renewal", async () => {
     // Regression proof: validate every grant's env; the invalid renewal env interrupts the session.
     const old = grant("old", 61_000)

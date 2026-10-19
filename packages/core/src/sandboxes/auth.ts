@@ -5,8 +5,9 @@ import type { SandboxRequestCredential } from "./sandbox"
 export interface SandboxSourceCredentials {
   /**
    * Sixb opens these origins in the run's network, whether the recipe omits `network` or
-   * restricts it. The network is set from the first grant of a session: return requests for the
-   * same origins on renewal.
+   * restricts it, so each must be one exact `https://` origin: a wildcard host is rejected. The
+   * network is set from the first grant of a session: return requests for the same origins on
+   * renewal.
    */
   readonly requests: readonly SandboxRequestCredential[]
   /**

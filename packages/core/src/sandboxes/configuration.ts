@@ -177,6 +177,10 @@ function validateSource(source: unknown): void {
   if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
     fail("source URL: expected credential-free HTTPS")
   }
+
+  // The repository host joins the run's network, where "*" would open every matching domain.
+  if (url.hostname.includes("*")) fail("source URL: wildcard hosts are not allowed")
+
   if (
     source.revision !== undefined &&
     (typeof source.revision !== "string" ||
@@ -254,6 +258,10 @@ function validateNetworkTarget(target: unknown): void {
   if (!["http:", "https:"].includes(url.protocol) || url.origin !== target.origin) {
     fail("network origin")
   }
+
+  // Providers such as Vercel read "*" in a domain as a wildcard: one target would open every
+  // matching domain. List each domain instead.
+  if (url.hostname.includes("*")) fail("network origin: wildcard hosts are not allowed")
 }
 
 function parseUrl(value: string, field: string): URL {

@@ -87,6 +87,9 @@ function credentialHost(origin: unknown): string {
     throw invalid("origin must name a public domain, not an IP address or loopback host")
   }
 
+  // Vercel reads "*" in a domain as a wildcard: one credential would open every matching domain.
+  if (url.hostname.includes("*")) throw invalid("wildcard hosts are not allowed")
+
   return url.host
 }
 
@@ -218,6 +221,13 @@ export function toVercelNetworkPolicy(policy: SandboxNetworkPolicy | undefined):
     if (isLoopbackHost(origin.host)) {
       throw new SandboxError(
         `[Sandbox] Vercel Sandbox runs remotely and cannot reach restricted target '${target.name}' at ${target.origin}. Use a public HTTPS gateway origin instead of localhost/loopback.`
+      )
+    }
+
+    // Vercel reads "*" in a domain as a wildcard, which would open every matching domain.
+    if (origin.host.includes("*")) {
+      throw new SandboxError(
+        `[Sandbox] Network target '${target.name}' (${target.origin}) uses a wildcard host, which Vercel Sandbox would read as every matching domain. List each domain the sandbox needs.`
       )
     }
 
