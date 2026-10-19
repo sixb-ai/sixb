@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { generateKeyPairSync, verify } from "node:crypto"
-import { githubApp } from "../src/auth"
+import { githubApp } from "../src/sandbox"
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 })
 const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString()

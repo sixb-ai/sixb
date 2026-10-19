@@ -23,17 +23,17 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    "./auth": {
-      "types": "./dist/auth.d.ts",
-      "bun": "./src/auth.ts",
-      "import": "./dist/auth.js",
-      "default": "./dist/auth.js"
-    },
     ".": {
       "types": "./dist/index.d.ts",
       "bun": "./src/index.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./sandbox": {
+      "types": "./dist/sandbox.d.ts",
+      "bun": "./src/sandbox.ts",
+      "import": "./dist/sandbox.js",
+      "default": "./dist/sandbox.js"
     }
   },
   "scripts": {
