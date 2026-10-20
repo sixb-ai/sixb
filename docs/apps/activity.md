@@ -43,6 +43,8 @@ A visit's timeline lists, by time and filterable by kind:
 Above it, the connection names the browser and system, or the shared link. A user's view also
 lists their sign-ins with the visits each opened.
 
+Each page view is a step, with what happened on that page under it and a mark when it is a revisit.
+
 An action names its object, and links to its run, only if you may read them. A visit shows at most
 200 page views and interactions and 200 runs, and says when it stops short.
 
