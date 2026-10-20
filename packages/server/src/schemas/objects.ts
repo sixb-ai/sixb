@@ -7,6 +7,7 @@ import {
   jsonValueOpenApiOverride,
   RedactionsSchema,
 } from "./common"
+import { UserProfileSchema } from "./users"
 
 type OpenApiSchema = NonNullable<
   NonNullable<NonNullable<ElysiaOpenAPIConfig["documentation"]>["components"]>["schemas"]
@@ -190,6 +191,7 @@ export const ObjectExpansionSchema: z.ZodType<unknown> = z.lazy(() =>
       limit: z.number().int().nonnegative().optional(),
       orderBy: z.array(ObjectQuerySortFieldSchema).optional(),
       expand: z.array(ObjectExpansionSchema).optional(),
+      users: z.array(z.string().min(1)).optional(),
     })
     .strict()
 )
@@ -297,6 +299,7 @@ export const ObjectQuerySchema: z.ZodType<unknown> = z.lazy(() =>
         kind: z.literal("expand"),
         input: ObjectQuerySchema,
         expansions: z.array(ObjectExpansionSchema),
+        users: z.array(z.string().min(1)).optional(),
       })
       .strict(),
   ])
@@ -418,6 +421,12 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
         additionalProperties: { $ref: "#/components/schemas/ObjectQueryLinkValue" },
       },
       linkProperties: { type: "object", additionalProperties: true },
+      // Populated only on the query route, by an `expand` node naming user properties: member
+      // profiles keyed by property id. Absent entries were not readable.
+      users: {
+        type: "object",
+        additionalProperties: { $ref: "#/components/schemas/ObjectQueryUserValue" },
+      },
     },
   },
   // One expanded link value: a single child ("one" cardinality, or null when
@@ -429,6 +438,18 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
     ],
     nullable: true,
   },
+  // One expanded user property: a profile (or null) for a reference, an array for an array of them.
+  ObjectQueryUserValue: {
+    oneOf: [
+      { $ref: "#/components/schemas/UserProfile" },
+      { type: "array", items: { $ref: "#/components/schemas/UserProfile" } },
+    ],
+    nullable: true,
+  },
+  UserProfile: zodToJsonSchema(UserProfileSchema, {
+    target: "openApi3",
+    $refStrategy: "none",
+  }) as OpenApi3Schema,
   ObjectQueryIssue: {
     type: "object",
     required: ["path", "code", "message"],
@@ -812,6 +833,7 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
           kind: { type: "string", enum: ["expand"] },
           input: objectQueryRef,
           expansions: { type: "array", items: objectExpansionRef },
+          users: stringArraySchema,
         },
       },
     ],
@@ -828,6 +850,7 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
       limit: { type: "integer", minimum: 0 },
       orderBy: { type: "array", items: objectQuerySortFieldRef },
       expand: { type: "array", items: objectExpansionRef },
+      users: stringArraySchema,
     },
   },
   ObjectQueryPredicate: {

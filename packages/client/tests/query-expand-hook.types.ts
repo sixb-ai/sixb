@@ -6,7 +6,8 @@
 // (query-hooks.ts), the path real app code takes in components. It mirrors that
 // stress (polymorphic target, "many" arrays, 5-deep self-cycle) through the hooks.
 // Augmentation injects the ontology so nested targets resolve.
-import { defineObjectType, link, prop } from "@sixb/core/ontology"
+import type { UserProfile } from "@sixb/core"
+import { defineObjectType, link, prop, ref } from "@sixb/core/ontology"
 import { objects } from "../src/query"
 import { useObjectsInfinite, useObjectsQuery } from "../src/query-hooks"
 
@@ -36,7 +37,7 @@ const HookUser = defineObjectType({
 const HookTeam = defineObjectType({
   id: "HookTeam",
   name: "Team",
-  properties: [prop("slug", "string", { required: true })],
+  properties: [prop("slug", "string", { required: true }), prop("lead", ref.user())],
   links: [link.ref("members", "HookUser", { cardinality: "many" })],
 })
 
@@ -77,6 +78,7 @@ const projectQuery = objects(HookProject)
       .expand(HookUser.l.department)
       .expand(HookUser.l.skills, { limit: 5 })
       .expand(HookTeam.l.members, { limit: 10 }, (member) => member.expand(HookUser.l.manager))
+      .expand(HookTeam.p.lead)
   )
 
 function useProjectGraphView(): void {
@@ -112,9 +114,10 @@ function useProjectGraphView(): void {
     }
     if (owner?.objectTypeId === "HookTeam") {
       const memberEmails: string[] = owner.links.members.map((m) => m.properties.email)
+      const lead: UserProfile | null | undefined = owner.users.lead
       // @ts-expect-error — `department` is a User-only expansion, absent on Team rows.
       void owner.links.department
-      void memberEmails
+      void [memberEmails, lead]
     }
     void ownerTypeId
   }

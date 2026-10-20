@@ -92,6 +92,12 @@
           "linkProperties": {
             "type": "object",
             "additionalProperties": true
+          },
+          "users": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ObjectQueryUserValue"
+            }
           }
         }
       },
@@ -108,6 +114,43 @@
           }
         ],
         "nullable": true
+      },
+      "ObjectQueryUserValue": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/UserProfile"
+          },
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserProfile"
+            }
+          }
+        ],
+        "nullable": true
+      },
+      "UserProfile": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "avatarUrl": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "suspended"]
+          }
+        },
+        "required": ["id", "email", "status"],
+        "additionalProperties": false
       },
       "ObjectQueryIssue": {
         "type": "object",
@@ -766,6 +809,13 @@
                 "items": {
                   "$ref": "#/components/schemas/ObjectExpansion"
                 }
+              },
+              "users": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
               }
             }
           }
@@ -805,6 +855,13 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ObjectExpansion"
+            }
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
             }
           }
         }

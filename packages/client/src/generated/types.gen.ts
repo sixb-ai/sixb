@@ -30,9 +30,22 @@ export type ObjectQueryObject = {
   linkProperties?: {
     [key: string]: unknown
   }
+  users?: {
+    [key: string]: ObjectQueryUserValue
+  }
 }
 
 export type ObjectQueryLinkValue = ObjectQueryObject | Array<ObjectQueryObject> | null
+
+export type ObjectQueryUserValue = UserProfile | Array<UserProfile> | null
+
+export type UserProfile = {
+  id: string
+  email: string
+  displayName?: string
+  avatarUrl?: string
+  status: "active" | "suspended"
+}
 
 export type ObjectQueryIssue = {
   path: string
@@ -253,6 +266,7 @@ export type ObjectQuery =
       kind: "expand"
       input: ObjectQuery
       expansions: Array<ObjectExpansion>
+      users?: Array<string>
     }
 
 export type ObjectExpansion = {
@@ -262,6 +276,7 @@ export type ObjectExpansion = {
   limit?: number
   orderBy?: Array<ObjectQuerySortField>
   expand?: Array<ObjectExpansion>
+  users?: Array<string>
 }
 
 export type ObjectQueryPredicate =

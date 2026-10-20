@@ -12,6 +12,7 @@ import type {
   ExpandedObjectRow,
   ObjectRow,
   ObjectRowLinks,
+  ObjectRowUsers,
   Redactions,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
@@ -109,6 +110,7 @@ type SerializedLinkValue = SerializedExpandedObject | SerializedExpandedObject[]
 type SerializedExpandedObject = SerializedObject & {
   links?: Record<string, SerializedLinkValue>
   linkProperties?: Record<string, unknown>
+  users?: ObjectRowUsers
 }
 
 /**
@@ -121,6 +123,8 @@ function serializeExpandedObject(row: ExpandedObjectRow): SerializedExpandedObje
   const serialized: SerializedExpandedObject = serializeObject(row)
   if (row.links) serialized.links = serializeLinks(row.links)
   if (row.linkProperties !== undefined) serialized.linkProperties = row.linkProperties
+  // Profiles are plain JSON: no dates to convert.
+  if (row.users) serialized.users = row.users
   return serialized
 }
 
