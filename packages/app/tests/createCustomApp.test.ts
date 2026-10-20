@@ -704,7 +704,9 @@ describe("createCustomApp.dev", () => {
     expect(runtime).toContain("function RoutedErrorBoundary")
     // A 404 is an expected "not found" state, not the generic crash screen.
     expect(runtime).toContain("isSixbApiError(error) && error.status === 404")
-    expect(runtime).toContain('import { isSixbApiError } from "@sixb/client/browser"')
+    expect(runtime).toContain(
+      'import { isSixbApiError, recordSixbPageView } from "@sixb/client/browser"'
+    )
     // Unmatched client routes render the not-found view instead of a blank page.
     expect(runtime).toContain('{ path: "*", element: <NotFoundView /> }')
     expect(runtime).toContain("return useRoutes(appRoutes)")
@@ -737,6 +739,30 @@ describe("createCustomApp.dev", () => {
     expect(manifest).toContain('path: "devices"')
     expect(manifest).toContain('{ path: ":id", element: createElement(Page1) },')
     expect(manifest).not.toContain("lazy(")
+  })
+
+  // Reproduce: drop the `recordsActivity` filter in generateRouteManifest; tooling is recorded.
+  test("route manifest lists the pages whose views are activity", async () => {
+    const generatedDir = join(tempRoot, ".sixb", "generated")
+    const manifestPath = await generateRouteManifest(
+      [{ path: "/", filePath: join(tempRoot, "app", "page.tsx"), relativePath: "page.tsx" }],
+      generatedDir,
+      {
+        builtInRoutes: [
+          { path: "/agents", moduleSpecifier: "@sixb/app/pages", exportName: "AgentsPage" },
+          {
+            path: "/observability/logs",
+            moduleSpecifier: "@sixb/app/pages",
+            exportName: "ObservabilityLogsPage",
+            recordsActivity: false,
+          },
+        ],
+      }
+    )
+    const manifest = await readFile(manifestPath, "utf-8")
+
+    expect(manifest).toContain('"/observability/logs"')
+    expect(recordedRoutePaths(manifest)).toEqual(["/", "/agents"])
   })
 
   test("route manifest nests framework-owned routes under a project layout", async () => {
@@ -1030,6 +1056,18 @@ describe("createCustomApp.dev", () => {
       expect(manifest).not.toContain("SettingsMembersPage")
       expect(manifest).toContain('import Page1 from "../../app/settings/members/page.tsx"')
 
+      // The built-in sections are developer tooling, so their views are not app activity; the
+      // project's own page at a section path is. Reproduce: drop `recordsActivity: false` from
+      // builtInRoutesFor and the Settings pages are recorded.
+      const recorded = recordedRoutePaths(manifest)
+      expect(recorded).toContain("/settings/members")
+      expect(recorded).toContain("/agents/:threadId")
+      expect(recorded).toContain("/objects/:objectTypeId/:primaryId")
+      for (const path of ["/settings", "/settings/personal", "/observability/activity"]) {
+        expect(recorded).not.toContain(path)
+        expect(manifest).toContain(`"${path}"`)
+      }
+
       // The layout's visibility export reaches the sections.
       const runtime = await readFile(
         join(tempRoot, ".sixb", "generated", "app-runtime.tsx"),
@@ -1136,3 +1174,12 @@ describe("createCustomApp.dev", () => {
     }
   }, 30_000)
 })
+
+/** The `activityRoutePaths` a generated route manifest declares. */
+function recordedRoutePaths(manifest: string): string[] {
+  const match = manifest.match(
+    /export const activityRoutePaths: readonly string\[\] = (\[[^\]]*\])/
+  )
+  if (!match?.[1]) throw new Error("The manifest declares no activityRoutePaths.")
+  return JSON.parse(match[1])
+}

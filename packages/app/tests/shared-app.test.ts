@@ -213,7 +213,7 @@ describe("generated shared application bootstrap", () => {
     expect(sharedMain).toContain("readonly loadAppStyles?: () => Promise<void>")
 
     expect(main).toContain('from "./app-runtime"')
-    expect(runtime).toContain('import { routePaths, routes } from "./routes"')
+    expect(runtime).toContain('import { activityRoutePaths, routePaths, routes } from "./routes"')
     expect(runtime).toContain("return useRoutes(appRoutes)")
     expect(runtime).toContain("matchPath(path, appPath)")
     expect(runtime).toContain('import "../../app/globals.css"')

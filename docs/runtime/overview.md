@@ -56,6 +56,7 @@ Add services as your project needs them:
 | `sandboxes` | Execution environments for agent tools. | [Sandboxes](../sandboxes/overview.md) |
 | `tools` | Your project's custom agent tools. | [Tools & skills](../models/tools-and-authorization.md) |
 | `logger`, `observability` | Log output and capture settings. | [Logging](../logging/overview.md) |
+| `activity` | Record visits and page views in your app. | [App activity](../apps/activity.md) |
 | `onError` | Send failures to your monitoring service. | [Failure notifications](../logging/overview.md#report-failures) |
 | `connectorConnections` | Protect stored OAuth credentials. | [OAuth connectors](../connectors/authentication.md) |
 

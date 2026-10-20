@@ -3,6 +3,7 @@ import { untranslatedMessages } from "@sixb/ui/lib/i18n"
 import { browserAppMessages } from "../src/locale"
 import { en, fr } from "../src/locale-messages"
 import { en as dataEn, fr as dataFr } from "../src/pages/data/messages"
+import { en as activityEn, fr as activityFr } from "../src/pages/observability/activity/messages"
 import { en as aiUsageEn, fr as aiUsageFr } from "../src/pages/observability/ai-usage/messages"
 import { en as observabilityEn, fr as observabilityFr } from "../src/pages/observability/messages"
 import { en as sectionUiEn, fr as sectionUiFr } from "../src/pages/section-ui"
@@ -16,6 +17,7 @@ test("translates every generated screen into French", () => {
   expect(untranslatedMessages(sectionUiEn, sectionUiFr)).toEqual([])
   expect(untranslatedMessages(observabilityEn, observabilityFr)).toEqual([])
   expect(untranslatedMessages(aiUsageEn, aiUsageFr)).toEqual([])
+  expect(untranslatedMessages(activityEn, activityFr)).toEqual([])
   expect(untranslatedMessages(valuesEn, valuesFr)).toEqual([])
 })
 

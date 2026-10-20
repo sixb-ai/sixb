@@ -54,6 +54,7 @@ Pass a definition, an array of definitions, or a selector such as `every.object(
 | `can.run(invoiceReview)` | Run a workflow, sync, or pipeline. `can.run(agent)` grants access to the built-in agent. |
 | `can.manage(accounting)` | Manage a connector's OAuth accounts. `can.manage(agent.usage)` manages AI limits. |
 | `can.observe(project.logs)` | Read captured logs. `can.observe(agent.usage)` reads AI usage. |
+| `can.observe(project.activity)` | Read the app's [visits and page views](../apps/activity.md). |
 | `can.share(invoiceShare)` | Issue and revoke links from a [Share definition](shared-access.md). |
 
 `agent`, `can`, `every`, and `project` are exported from `@sixb/core`.

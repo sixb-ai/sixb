@@ -19,6 +19,7 @@ export { DataProjectionPage, DataProjectionsPage } from "./pages/data/projection
 export { DataSyncPage, DataSyncsPage } from "./pages/data/syncs"
 export { HomePage } from "./pages/home"
 export { ObservabilityActionRunPage } from "./pages/observability/action-run"
+export { ObservabilityActivityPage } from "./pages/observability/activity/page"
 export { ObservabilityAiUsagePage } from "./pages/observability/ai-usage/page"
 export { ObservabilityLogsPage } from "./pages/observability/logs"
 export { ObservabilityRunsPage } from "./pages/observability/runs"
