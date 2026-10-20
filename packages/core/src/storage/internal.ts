@@ -1,6 +1,28 @@
 /** Implementation exports for Sixb packages only. */
 
 export { normalizeRecordActionRunInput, resolveActionRunEffects } from "./action-runs/record"
+export type { ActivitySourceState, StoredActivityPageView } from "./activity/policy"
+export {
+  ACTIVITY_BATCH_LIMIT,
+  ACTIVITY_EVENT_ID_PATTERN,
+  ACTIVITY_HOSTNAME_PATTERN,
+  ACTIVITY_ID_MAX_LENGTH,
+  ACTIVITY_LABEL_MAX_LENGTH,
+  ACTIVITY_LABEL_PATTERN,
+  ACTIVITY_MAX_PAGE_SIZE,
+  ACTIVITY_MAX_PERIOD_MS,
+  ACTIVITY_MAX_VISIT_MS,
+  ACTIVITY_REFERRER_MAX_LENGTH,
+  ACTIVITY_ROUTE_MAX_LENGTH,
+  ACTIVITY_VISIT_ID_PATTERN,
+  activityActor,
+  activityCalendarDays,
+  isActivityRoutePattern,
+  parseActivityAttribution,
+  planActivityAppend,
+  serializeActivityAttribution,
+  validateActivityAppend,
+} from "./activity/policy"
 export { assertAiUsageExecutionId, normalizeAiModelCallRecord } from "./ai-usage/record"
 export { normalizeAiModelCallUsage } from "./ai-usage/usage"
 export {

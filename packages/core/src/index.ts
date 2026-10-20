@@ -863,6 +863,15 @@ export type {
 // ── Runtime ─────────────────────────────────────────────────
 
 export type { ActionRunsRuntime, ActionsRuntime } from "./actions/execution"
+export type { ActivityRuntime, ActivityUsersResult } from "./activity/execution"
+export type {
+  ActivityCalendar,
+  ActivityCalendarQuery,
+  ActivityOptions,
+  ActivityPageQuery,
+  ActivityPeriodQuery,
+  ActivityTimelineQuery,
+} from "./activity/service"
 export type {
   AgentRunListResult,
   AgentRunsRuntime,
@@ -1006,6 +1015,18 @@ export type {
   WebhookRunFailureCode,
   WorkflowRunFailureCode,
 } from "./storage"
+export type {
+  ActivityActor,
+  ActivityAttribution,
+  ActivityCursor,
+  ActivityDay,
+  ActivityPageView,
+  ActivitySummary,
+  ActivityUser,
+  ActivityVisit,
+  ActivityVisitPage,
+  ActivityVisitsPage,
+} from "./storage/activity/types"
 export type { VectorIndexingFailureCode } from "./storage/ontology/vector-indexing"
 export type { SyncRunsRuntime, SyncsRuntime } from "./syncs/execution"
 export type {

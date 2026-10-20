@@ -1,4 +1,11 @@
 import { type ActionsRuntime, createActionsRuntime } from "../actions/execution"
+import {
+  type ActivityRuntime,
+  createActivityCaptureRuntime,
+  createActivityRuntime,
+  registerActivityCaptureRuntime,
+} from "../activity/execution"
+import type { ActivityService } from "../activity/service"
 import { type AgentRuntime, createAgentRuntime } from "../agents/execution"
 import { type AiUsageRuntime, createAiUsageRuntime } from "../ai-usage"
 import { type ArtifactsRuntime, createArtifactsRuntime } from "../artifacts/execution"
@@ -50,6 +57,7 @@ export interface Sixb<TParams extends Record<string, unknown> = Record<string, u
   readonly aiUsage: AiUsageRuntime
   readonly events: EventsRuntime
   readonly logs: LogsRuntime
+  readonly activity: ActivityRuntime
   readonly schedules: SchedulesRuntime
   readonly shares: SharesRuntime
   readonly connector: ConnectorRuntime
@@ -65,6 +73,7 @@ export interface SixbDependencies {
   }
   readonly definitions: SixbDefinitions
   readonly logging: LoggingService
+  readonly activity: ActivityService
   readonly connectorService: ConnectorService
   readonly connectorConnections?: ConnectorConnectionProcess
   readonly blobStorage: BlobStorage
@@ -91,6 +100,7 @@ export function createBoundSixb<TParams extends Record<string, unknown> = Record
     ...createExecutionFacades<TParams>(runtime, execution, dependencies),
   }
   shareOntologyMutationRuntime(runtime, sixb)
+  registerActivityCaptureRuntime(sixb, createActivityCaptureRuntime(runtime, dependencies.activity))
   if (dependencies.connectorConnections) {
     registerConnectorConnectionsRuntime(
       sixb,
@@ -145,6 +155,7 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
     aiUsage: createAiUsageRuntime(runtime, dependencies.definitions.security),
     events: createEventsRuntime(runtime),
     logs: createLogsRuntime(runtime, dependencies.logging),
+    activity: createActivityRuntime(runtime, dependencies.activity),
     schedules: createSchedulesRuntime(runtime, dependencies.definitions.schedules),
     shares: createSharesRuntime(runtime, execution, dependencies.definitions.shares),
     connector: createConnectorRuntime(runtime, execution, dependencies.connectorService),

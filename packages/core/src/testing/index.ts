@@ -9,6 +9,10 @@ export {
   type ActionRunStorageContractSuiteOptions,
   runActionRunStorageContractSuite,
 } from "./action-run-storage-contract"
+export {
+  type ActivityStorageContractSuiteOptions,
+  runActivityStorageContractSuite,
+} from "./activity-storage-contract"
 export { createTestAgentExecution } from "./agent-execution"
 export {
   type AgentStorageContractSuiteOptions,

@@ -1,4 +1,5 @@
 import type { ActionRunStorage } from "./action-runs"
+import type { ActivityStorage } from "./activity"
 import type { AgentStorage } from "./agents"
 import type { AiCostStorage } from "./ai-cost"
 import type { AiLimitStorage } from "./ai-limits"
@@ -373,6 +374,7 @@ export interface Storage {
   fileUploadSessions?: FileUploadSessionStore
   fileDownloadGrants?: FileDownloadGrantStorage
   connectorConnections?: ConnectorConnectionStorage
+  activity?: ActivityStorage
 
   /** Lightweight reachability probe. It must not open a write transaction or run migrations. */
   ping(): Promise<void>

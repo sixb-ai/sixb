@@ -1,3 +1,5 @@
+export type { ActivityCaptureRuntime } from "../activity/execution"
+export { getActivityCaptureRuntime } from "../activity/execution"
 export { getConnectorConnectionsRuntime } from "../connectors/connections/capability"
 export type {
   CompleteConnectorAuthorizationInput,

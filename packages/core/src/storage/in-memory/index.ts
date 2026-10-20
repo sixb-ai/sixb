@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import { InMemoryActionRunStorage } from "../action-runs"
+import { type ActivityStorage, InMemoryActivityStorage } from "../activity"
 import { type AgentStorage, InMemoryAgentStorage } from "../agents"
 import { type AiAccountingAttribution, type AiCostStorage, InMemoryAiCostStorage } from "../ai-cost"
 import { directModelCallAttribution } from "../ai-cost/attribution"
@@ -124,6 +125,7 @@ export class InMemoryStorage implements Storage {
   private readonly fileUploadSessionStorage = new InMemoryFileUploadSessions()
   private readonly fileDownloadGrantStorage = new InMemoryFileDownloadGrantStorage()
   private readonly connectorConnectionStorage: InMemoryConnectorConnectionStorage
+  private readonly activityStorage = new InMemoryActivityStorage()
   readonly auth: AuthStorage
   readonly executions: ExecutionStorage
   readonly agents: AgentStorage
@@ -144,6 +146,7 @@ export class InMemoryStorage implements Storage {
   readonly fileUploadSessions: FileUploadSessionStore
   readonly fileDownloadGrants: FileDownloadGrantStorage
   readonly connectorConnections: ConnectorConnectionStorage
+  readonly activity: ActivityStorage
 
   constructor(options: InMemoryStorageOptions = {}) {
     this.connectorConnectionStorage = new InMemoryConnectorConnectionStorage(
@@ -178,6 +181,7 @@ export class InMemoryStorage implements Storage {
     this.fileUploadSessions = createOperationScopedFacade(this.fileUploadSessionStorage, scope)
     this.fileDownloadGrants = createOperationScopedFacade(this.fileDownloadGrantStorage, scope)
     this.connectorConnections = createOperationScopedFacade(this.connectorConnectionStorage, scope)
+    this.activity = createOperationScopedFacade(this.activityStorage, scope)
     this.ontologyStorage = new InMemoryOntologyStorage(this.objectStorage, this.timeseriesStorage, {
       runRootOperation: async (run) => run(),
       getTransactionToken: () => this.getActiveTransactionToken(),
@@ -389,6 +393,7 @@ export class InMemoryStorage implements Storage {
       fileUploadSessions: this.fileUploadSessionStorage,
       fileDownloadGrants: this.fileDownloadGrantStorage,
       connectorConnections: this.connectorConnectionStorage,
+      activity: this.activityStorage,
       ping: async () => undefined,
       transaction: async <T>(): Promise<T> => {
         throwNestedStorageTransaction()
@@ -421,6 +426,7 @@ export class InMemoryStorage implements Storage {
       fileUploadSessions: this.fileUploadSessionStorage.snapshot(),
       fileDownloadGrants: this.fileDownloadGrantStorage.snapshot(),
       connectorConnections: this.connectorConnectionStorage.snapshot(),
+      activity: this.activityStorage.snapshot(),
     }
   }
 
@@ -448,6 +454,7 @@ export class InMemoryStorage implements Storage {
     this.fileUploadSessionStorage.restore(snapshot.fileUploadSessions)
     this.fileDownloadGrantStorage.restore(snapshot.fileDownloadGrants)
     this.connectorConnectionStorage.restore(snapshot.connectorConnections)
+    this.activityStorage.restore(snapshot.activity)
   }
 }
 
@@ -475,4 +482,5 @@ export interface InMemoryStorageSnapshot {
   readonly fileUploadSessions: ReturnType<InMemoryFileUploadSessions["snapshot"]>
   readonly fileDownloadGrants: ReturnType<InMemoryFileDownloadGrantStorage["snapshot"]>
   readonly connectorConnections: ReturnType<InMemoryConnectorConnectionStorage["snapshot"]>
+  readonly activity: ReturnType<InMemoryActivityStorage["snapshot"]>
 }
