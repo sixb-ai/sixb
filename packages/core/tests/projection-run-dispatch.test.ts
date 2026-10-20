@@ -94,6 +94,17 @@ async function commitDevicesVersion(
   return write.commit()
 }
 
+/** Records the version id of every lake version read the dispatcher makes. */
+function recordVersionReads(lakeStorage: InMemoryLakeStorage): string[] {
+  const reads: string[] = []
+  const getVersion = lakeStorage.getVersion.bind(lakeStorage)
+  lakeStorage.getVersion = (datasetId, versionId) => {
+    reads.push(versionId)
+    return getVersion(datasetId, versionId)
+  }
+  return reads
+}
+
 function dispatchInput(
   version: Awaited<ReturnType<typeof commitDevicesVersion>>,
   projectionId = deviceProjection.id
@@ -258,6 +269,51 @@ describe("ProjectionRunDispatcher", () => {
     expect(
       await queues.projections.claim({ projectId: host.id, workerId: "test", limit: 10 })
     ).toHaveLength(1)
+  })
+
+  test("reuses an admitted run without reading its version from the lake again", async () => {
+    // Red check: read the version before looking up the run; the repeat reads it a second time.
+    const { host, lakeStorage } = createDependencies()
+    const version = await commitDevicesVersion(lakeStorage)
+    const reads = recordVersionReads(lakeStorage)
+    const dispatcher = new ProjectionRunDispatcher(host)
+
+    const first = await dispatcher.dispatch(dispatchInput(version))
+    const repeated = await dispatcher.dispatch(dispatchInput(version))
+
+    expect(first.created).toBe(true)
+    expect(repeated).toMatchObject({ runId: first.runId, created: false })
+    expect(reads).toEqual([version.versionId])
+  })
+
+  test.each([
+    ["an unknown version", { versionId: "missing" }, "does not match its immutable metadata"],
+    [
+      "another creation time",
+      { createdAt: "2020-01-01T00:00:00.000Z" },
+      "does not match its immutable metadata",
+    ],
+    ["a schema-only version", {}, "cannot materialize a schema-only dataset version"],
+  ] as const)("admits no run for %s", async (label, pinned, message) => {
+    // Red check: drop the lake checks from admitProjectionRun; each case admits a run.
+    const { host, lakeStorage, storage } = createDependencies()
+    const version = await commitDevicesVersion(lakeStorage)
+    if (label === "a schema-only version") {
+      const getVersion = lakeStorage.getVersion.bind(lakeStorage)
+      lakeStorage.getVersion = async (datasetId, versionId) => {
+        const recorded = await getVersion(datasetId, versionId)
+        return recorded && { ...recorded, mode: "schema" }
+      }
+    }
+    const input = dispatchInput(version)
+
+    await expect(
+      new ProjectionRunDispatcher(host).dispatch({
+        ...input,
+        datasetVersion: { ...input.datasetVersion, ...pinned },
+      })
+    ).rejects.toThrow(message)
+    expect((await storage.projectionRuns.list({ projectId: host.id })).runs).toEqual([])
   })
 
   test("creates a distinct run when the registered Projection semantics change", async () => {

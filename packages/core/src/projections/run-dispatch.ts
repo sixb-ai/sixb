@@ -76,20 +76,6 @@ export class ProjectionRunDispatcher implements ProjectionRunDispatchPort {
     if (!projection) {
       throw new ProjectionValidationError(`[Sixb] Unknown projection '${input.projectionId}'.`)
     }
-    const version = await this.dependencies.lakeStorage.getVersion(
-      input.datasetVersion.datasetId,
-      input.datasetVersion.versionId
-    )
-    if (!version || version.createdAt.toISOString() !== input.datasetVersion.createdAt) {
-      throw new ProjectionValidationError(
-        `[Sixb] Dataset '${input.datasetVersion.datasetId}' version '${input.datasetVersion.versionId}' does not match its immutable metadata.`
-      )
-    }
-    if (version.mode === "schema") {
-      throw new ProjectionValidationError(
-        `[Sixb] Projection '${input.projectionId}' cannot materialize a schema-only dataset version.`
-      )
-    }
 
     const { datasetId: _datasetId, ...semanticIdentity } = descriptor
     const identity = {
@@ -98,20 +84,14 @@ export class ProjectionRunDispatcher implements ProjectionRunDispatchPort {
     }
     const runId = createProjectionRunId(this.dependencies.id, identity)
     const projectionRuns = requireProjectionRunStorage(this.dependencies.storage)
+    // Most dispatches repeat an admitted one: the live commit event and the reconciler both
+    // dispatch each version. Only admitProjectionRun creates a run, once the lake confirms its
+    // version, and the run id hashes that version's dataset, id and creation time. An existing run
+    // therefore needs no lake read.
     const existing = await projectionRuns.getById({ projectId: this.dependencies.id, id: runId })
     let persisted = existing
       ? await reuseProjectionRun(this.dependencies, existing, identity)
-      : await persistProjectionRun({
-          dependencies: this.dependencies,
-          runId,
-          identity,
-          projection,
-          producerExecution: await resolveProducerExecution(
-            this.dependencies.storage,
-            this.dependencies.id,
-            version.producer
-          ),
-        })
+      : await admitProjectionRun(this.dependencies, input, { runId, identity, projection })
 
     if (!persisted.publish && persisted.run.status === "queued") {
       persisted = await reuseProjectionRun(this.dependencies, persisted.run, identity)
@@ -119,6 +99,39 @@ export class ProjectionRunDispatcher implements ProjectionRunDispatchPort {
     if (!persisted.publish) return existingResult(persisted.run)
     return publishProjectionRun(this.dependencies, input.metadata, persisted)
   }
+}
+
+/** Persists a new run once the lake confirms the dispatched version is one it can materialize. */
+async function admitProjectionRun(
+  dependencies: ProjectionRunDispatcherDependencies,
+  input: ProjectionRunDispatchInput,
+  run: {
+    readonly runId: string
+    readonly identity: ProjectionRunRecord["identity"]
+    readonly projection: ProjectionDefinition
+  }
+): Promise<PersistedProjectionRun> {
+  const { datasetId, versionId, createdAt } = input.datasetVersion
+  const version = await dependencies.lakeStorage.getVersion(datasetId, versionId)
+  if (!version || version.createdAt.toISOString() !== createdAt) {
+    throw new ProjectionValidationError(
+      `[Sixb] Dataset '${datasetId}' version '${versionId}' does not match its immutable metadata.`
+    )
+  }
+  if (version.mode === "schema") {
+    throw new ProjectionValidationError(
+      `[Sixb] Projection '${input.projectionId}' cannot materialize a schema-only dataset version.`
+    )
+  }
+  return persistProjectionRun({
+    dependencies,
+    ...run,
+    producerExecution: await resolveProducerExecution(
+      dependencies.storage,
+      dependencies.id,
+      version.producer
+    ),
+  })
 }
 
 async function persistProjectionRun(input: {
