@@ -30,6 +30,7 @@ import {
   definitionIdOf,
   isBreadthSelector,
 } from "./every"
+import { project } from "./project"
 import type {
   AgentRunGrant,
   AppendGrant,
@@ -37,10 +38,11 @@ import type {
   EditGrant,
   ManageGrant,
   ObserveGrant,
-  ProjectSurfaceReference,
+  ProjectReference,
   RunGrant,
   Selection,
   ShareGrant,
+  UsersViewGrant,
   ViewGrant,
 } from "./types"
 
@@ -156,17 +158,51 @@ function resolveGrant<TDefinition extends { readonly id?: unknown }, TTarget ext
   return { target, selection: { all: false, ids } }
 }
 
+/** `project` itself and the surfaces of it that are not viewed, which `can.view` rejects. */
+const UNVIEWABLE_PROJECT_REFERENCES: ReadonlySet<unknown> = new Set([
+  project,
+  project.logs,
+  project.activity,
+])
+
 function view<const TObjectTypeId extends string>(
   input: ShareTarget<TObjectTypeId>
 ): ShareViewGrantBuilder<TObjectTypeId>
+function view(input: ProjectReference["users"]): UsersViewGrant
 function view(input: GrantInput<ObjectType, "object">): ViewGrant<"object">
 function view(input: GrantInput<DatasetDefinition, "dataset">): ViewGrant<"dataset">
 function view(
-  input: ShareTarget | GrantInput<ObjectType | DatasetDefinition, "object" | "dataset">
-): ViewGrant | ShareViewGrantBuilder {
+  input:
+    | ShareTarget
+    | ProjectReference["users"]
+    | GrantInput<ObjectType | DatasetDefinition, "object" | "dataset">
+): ViewGrant | UsersViewGrant | ShareViewGrantBuilder {
   if (isShareTarget(input)) return createShareViewGrant(input)
+
+  if (isUsersReference(input)) {
+    return { kind: "grant", capability: "view", target: "users" }
+  }
+
+  // `project` and its other surfaces would otherwise read as an object type with no id.
+  if (UNVIEWABLE_PROJECT_REFERENCES.has(input)) {
+    throw new SecurityValidationError(
+      "[Sixb] can.view accepts object types, datasets, shares, or project.users."
+    )
+  }
+
   const { target, selection } = resolveGrant(input, "can.view", VIEW_TARGETS)
   return { kind: "grant", capability: "view", target, selection }
+}
+
+function isUsersReference(input: unknown): input is ProjectReference["users"] {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    !Array.isArray(input) &&
+    !isBreadthSelector(input) &&
+    "kind" in input &&
+    input.kind === "users"
+  )
 }
 
 function edit(input: GrantInput<ObjectType, "object">): EditGrant {
@@ -259,11 +295,19 @@ function isAgentUsageReference(input: unknown): input is AgentUsageReference {
   )
 }
 
-type ObservableReference = ProjectSurfaceReference | AgentUsageReference | AgentThreadsReference
+/**
+ * Listed member by member: a `project` surface is not observable just by existing.
+ * `project.users` is read with `can.view`.
+ */
+type ObservableReference =
+  | ProjectReference["logs"]
+  | ProjectReference["activity"]
+  | AgentUsageReference
+  | AgentThreadsReference
 
 /**
  * Every reference `can.observe` accepts, keyed by its `kind`, which is also its grant target. The
- * full `Record` is what stops a new `project` member from compiling until it is listed here.
+ * full `Record` is what stops a new observable reference from compiling until it is listed here.
  */
 const OBSERVABLE_REFERENCES: Readonly<Record<ObservableReference["kind"], string>> = {
   logs: "project.logs",

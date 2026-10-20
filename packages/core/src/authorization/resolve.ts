@@ -16,7 +16,8 @@ import type { AuthorizationContext, GrantIndex, ResolvedRole } from "./types"
  *
  * Broad grants (`every.object().except([...])`) expand against the registered
  * universe; object-type grants also expand to subtypes. Resource grants become
- * id sets; grants on one project-wide surface (the Agent, logs, AI usage) become booleans.
+ * id sets; grants on one project-wide surface (the member directory, the Agent, logs, AI usage)
+ * become booleans.
  * The per-kind universe and subtype rules come from the `GRANT_KINDS` table, so
  * this loop never enumerates targets by hand.
  */

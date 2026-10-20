@@ -36,7 +36,6 @@ export type {
   ObserveGrant,
   ObserveGrantTarget,
   ProjectReference,
-  ProjectSurfaceReference,
   RedactionReason,
   Redactions,
   RegisteredSecurityDefinitions,
@@ -45,6 +44,7 @@ export type {
   RunGrantTarget,
   Selection,
   ShareGrant,
+  UsersViewGrant,
   ViewGrant,
   ViewGrantTarget,
 } from "./types"

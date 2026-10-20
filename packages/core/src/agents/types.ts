@@ -8,6 +8,7 @@ import type { ModelsRuntime } from "../models/generation-types"
 import type { InferSchema } from "../ontology/inference"
 import type { Schema } from "../ontology/types"
 import type { ObjectReader } from "../runtime/types"
+import type { UsersRuntime } from "../users"
 
 export type {
   AgentContextEntryInput,
@@ -153,6 +154,7 @@ export interface AgentToolRuntimeFacade extends ObjectReader {
   readonly actions: ActionsRuntime
   readonly models: ModelsRuntime
   readonly connector: ConnectorRuntime
+  readonly users: UsersRuntime
 }
 
 /** The narrow, run-scoped surface passed to an agent tool handler. */

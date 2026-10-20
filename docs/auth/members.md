@@ -35,6 +35,39 @@ Administrators can manage an existing user only when all of that user's current 
 
 Suspending a user revokes their sessions. Reactivating them requires a new sign-in. Role grants do not give member-management permissions; membership policies do.
 
+## Read the member directory
+
+The member directory lists the project's members with their name, email, avatar, and status. Use it to show who a [user reference](../ontology/properties.md#reference-a-user) points at, or to let someone pick a colleague.
+
+Reading it requires `can.view(project.users)`. `every.object()` and other grants do not include it.
+
+```ts
+// security/roles/team.ts
+import { can, defineRole, project } from "@sixb/core"
+import { team } from "../groups/team"
+
+export const teamRole = defineRole("team", {
+  grantedTo: [team],
+  grants: [can.view(project.users)],
+})
+```
+
+In server code, `sixb.users` reads the directory:
+
+```ts
+import { userRef } from "@sixb/core"
+
+const { users } = await sixb.users.list({ search: "ava" })
+const assignee = await sixb.users.get(userRef("usr_1"))
+```
+
+| Method | Returns |
+| --- | --- |
+| `list({ status, search, limit, offset })` | `{ users, hasMore, total }`, oldest member first. `status` is `"active"` (the default), `"suspended"`, or `"all"`. `search` matches part of a name or email, ignoring case, and has at most 200 characters. `limit` is 1 to 200, 50 by default. |
+| `get(userRef(id))` | `{ id, email, displayName?, avatarUrl?, status }`, or `null` when no member has this id. |
+
+Trusted code, such as workflows and actions, can always read the directory. An action or a workflow can therefore return directory data to a caller who lacks the grant, so return only what that caller should see. The agent and its tools read it with the permissions they run with: in a conversation, those of the person who asked. Shared links never read it.
+
 ## Service accounts and tokens
 
 Choose the credential that matches the caller:

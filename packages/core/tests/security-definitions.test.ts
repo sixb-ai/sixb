@@ -496,6 +496,11 @@ describe("role definitions", () => {
         selection: { all: true, except: ["normalize-accounts"] },
       },
     ],
+    [
+      "can.view takes the member directory",
+      can.view(project.users),
+      { capability: "view", target: "users" },
+    ],
     ["can.run takes the project Agent", can.run(agent), { capability: "run", target: "agent" }],
     [
       "can.manage takes a connector definition",
@@ -541,6 +546,17 @@ describe("role definitions", () => {
     expect(grant).toEqual({ kind: "grant", ...expected })
   })
 
+  test("can.view names project.users when given another project surface", () => {
+    // Removal proof: without the project check in `view`, both read as an object type with no id.
+    const view = can.view as (input: unknown) => unknown
+
+    for (const input of [project, project.logs, project.activity]) {
+      expect(() => view(input)).toThrow(
+        "[Sixb] can.view accepts object types, datasets, shares, or project.users."
+      )
+    }
+  })
+
   test("AI usage builders reject strings and unrelated references at runtime", () => {
     // Removal proof: accepting the old string target or skipping reference validation fails here.
     const observe = can.observe as (input: unknown) => unknown
@@ -570,7 +586,14 @@ describe("role definitions", () => {
     const observe = can.observe as (input: unknown) => unknown
     const manage = can.manage as (input: unknown) => unknown
 
-    for (const input of [project, { kind: "project" }, { kind: "toString" }, [project.logs]]) {
+    const inputs = [
+      project,
+      project.users,
+      { kind: "project" },
+      { kind: "toString" },
+      [project.logs],
+    ]
+    for (const input of inputs) {
       expect(() => observe(input)).toThrow(
         "[Sixb] can.observe accepts project.logs or project.activity or agent.usage or agent.threads."
       )
@@ -579,6 +602,7 @@ describe("role definitions", () => {
     expect(Object.isFrozen(project)).toBe(true)
     expect(Object.isFrozen(project.logs)).toBe(true)
     expect(Object.isFrozen(project.activity)).toBe(true)
+    expect(Object.isFrozen(project.users)).toBe(true)
   })
 
   // Typing already blocks these from TypeScript. The runtime check is what protects an untyped
@@ -720,11 +744,26 @@ describe("role definitions", () => {
     )
   })
 
-  // Logs, AI usage, and the project Agent are one surface each. Reproduce: drop `observe` and the
-  // AI-usage `manage` from the singleton check in assertGrantDefinition and these grants are
-  // accepted.
-  test("runtime registration rejects selections on logs, AI usage, and Agent grants", () => {
+  test("runtime registration accepts the member directory grant", () => {
+    const role = defineRole("directory.reader", {
+      grantedTo: [commercial],
+      grants: [can.view(project.users)],
+    })
+
+    expect(() => createRuntime({ groups: [commercial], roles: [role] })).not.toThrow()
+  })
+
+  // Logs, AI usage, the project Agent, and the member directory are one surface each. Reproduce:
+  // drop `observe`, the AI-usage `manage`, or `view:users` from the singleton check in
+  // assertGrantDefinition and these grants are accepted.
+  test("runtime registration rejects selections on logs, AI usage, Agent, and directory grants", () => {
     for (const grant of [
+      {
+        kind: "grant",
+        capability: "view",
+        target: "users",
+        selection: { all: true, except: [] },
+      },
       {
         kind: "grant",
         capability: "observe",

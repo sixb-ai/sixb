@@ -96,6 +96,7 @@ function buildActionContext(
     actions: execution.sixb.actions,
     connector: execution.sixb.connector,
     blobs: execution.sixb.blobs,
+    users: execution.sixb.users,
   }
   return {
     id: host.id,
