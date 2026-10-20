@@ -397,10 +397,12 @@ export type {
   MembershipCapabilities,
   MembershipOperationCapabilities,
   Principal,
+  ProfileField,
   SixbAuthConfig,
   UserPrincipal,
 } from "./auth"
 export { principalsEqual, SYSTEM_PRINCIPAL } from "./auth"
+export type { UserIdentityRecord } from "./storage/auth"
 
 // ── Authorization ──────────────────────────────────────────
 

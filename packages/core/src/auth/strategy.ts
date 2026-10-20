@@ -7,8 +7,10 @@
  * entry plus the storage contracts from `@sixb/core/storage`.
  */
 
+export type { UserIdentityRecord } from "../storage/auth"
 export type { SignInRefusalReason } from "./errors"
 export { SignInRefusedError } from "./errors"
+export { signInAvatarUrl, signInDisplayName } from "./profile"
 export type {
   AuthEmailDeliveryStatus,
   AuthInvitationRecipientInput,
@@ -40,6 +42,7 @@ export type {
   OidcCallbackResult,
   OidcStartSignInInput,
   OidcStartSignInResult,
+  ProfileField,
   RevealedInvitationLink,
 } from "./types"
 export {

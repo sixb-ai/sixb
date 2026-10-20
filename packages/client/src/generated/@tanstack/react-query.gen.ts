@@ -62,6 +62,7 @@ import {
   getAuthAccessManagementOptions,
   getAuthInvitationOptions,
   getAuthMembershipOptions,
+  getAuthProfile,
   getAuthSession,
   getBulkTelemetryHistory,
   getConnector,
@@ -169,6 +170,7 @@ import {
   suspendAuthMember,
   updateAiLimitPolicy,
   updateAuthMemberGroups,
+  updateAuthProfile,
   uploadFileContent,
   uploadFileRaw,
   upsertObject,
@@ -330,6 +332,9 @@ import type {
   GetAuthMembershipOptionsData,
   GetAuthMembershipOptionsError,
   GetAuthMembershipOptionsResponse,
+  GetAuthProfileData,
+  GetAuthProfileError,
+  GetAuthProfileResponse,
   GetAuthSessionData,
   GetAuthSessionResponse,
   GetBulkTelemetryHistoryData,
@@ -635,6 +640,9 @@ import type {
   UpdateAuthMemberGroupsData,
   UpdateAuthMemberGroupsError,
   UpdateAuthMemberGroupsResponse,
+  UpdateAuthProfileData,
+  UpdateAuthProfileError,
+  UpdateAuthProfileResponse,
   UploadFileContentData,
   UploadFileContentError,
   UploadFileContentResponse,
@@ -878,6 +886,60 @@ export const signOutAllMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await signOutAll({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getAuthProfileQueryKey = (options?: Options<GetAuthProfileData>) =>
+  createQueryKey("getAuthProfile", options)
+
+/**
+ * Get the current user's profile
+ */
+export const getAuthProfileOptions = (options?: Options<GetAuthProfileData>) =>
+  queryOptions<
+    GetAuthProfileResponse,
+    GetAuthProfileError,
+    GetAuthProfileResponse,
+    ReturnType<typeof getAuthProfileQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAuthProfile({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAuthProfileQueryKey(options),
+  })
+
+/**
+ * Update the current user's name or picture
+ *
+ * Fields the identity provider manages, listed in `managedFields`, are refused with 403.
+ */
+export const updateAuthProfileMutation = (
+  options?: Partial<Options<UpdateAuthProfileData>>
+): UseMutationOptions<
+  UpdateAuthProfileResponse,
+  UpdateAuthProfileError,
+  Options<UpdateAuthProfileData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    UpdateAuthProfileResponse,
+    UpdateAuthProfileError,
+    Options<UpdateAuthProfileData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await updateAuthProfile({
         ...options,
         ...fnOptions,
         throwOnError: true,

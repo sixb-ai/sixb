@@ -32,6 +32,7 @@ import {
 import { getRequestClientAddress } from "./client-address"
 import { getCookie, type ResolvedAuthCookieOptions } from "./cookies"
 import { AuthRuntimeError } from "./errors"
+import { normalizeProfileChanges } from "./profile"
 import { SessionCache } from "./session-cache"
 import {
   type BearerSessionTokens,
@@ -82,6 +83,8 @@ import type {
   MembershipCapabilities,
   OidcCallbackInput,
   OidcCallbackResult,
+  OwnProfile,
+  ProfileField,
   ReactivateMemberInput,
   ReactivateMemberResult,
   ResolvedAuthConfig,
@@ -97,6 +100,7 @@ import type {
   UnauthenticatedAuthSession,
   UpdateMemberGroupsInput,
   UpdateMemberGroupsResult,
+  UpdateOwnProfileInput,
 } from "./types"
 import {
   assertNonEmpty,
@@ -127,6 +131,8 @@ const BEARER_ACCESS_TOKEN_TTL_MS = 15 * 60_000
 // A replaced refresh token still rotates this long after its replacement, so a client whose refresh
 // response was lost can retry. Later, it means a copy is in use and the session is revoked.
 const REFRESH_REUSE_GRACE_MS = 60_000
+
+const PROFILE_FIELDS: readonly ProfileField[] = ["displayName", "avatarUrl"]
 
 export interface AuthRuntimeOptions {
   readonly projectId: string
@@ -1208,6 +1214,79 @@ export class AuthRuntime {
     })
 
     return { user: reactivated, groupIds, managedGroupIds }
+  }
+
+  /** The caller's own profile, and which of its fields their identity provider manages. */
+  async getProfile(caller: AuthenticatedUserRequestSession): Promise<OwnProfile> {
+    const storage = this.requireAuthStorage()
+    const user = await storage.users.getById({ projectId: this.projectId, id: caller.user.id })
+    if (!user) {
+      throw new AuthStorageError(
+        "missing_user",
+        `[Sixb] User '${caller.user.id}' not found for project '${this.projectId}'.`
+      )
+    }
+
+    return { user, managedFields: await this.managedProfileFields(storage, user.id) }
+  }
+
+  /**
+   * Change the caller's own name or picture. A field their identity provider manages is refused,
+   * because the next sign-in would overwrite it.
+   */
+  async updateProfile(
+    caller: AuthenticatedUserRequestSession,
+    input: UpdateOwnProfileInput
+  ): Promise<OwnProfile> {
+    const changes = normalizeProfileChanges(input)
+    const storage = this.requireAuthStorage()
+    const managedFields = await this.managedProfileFields(storage, caller.user.id)
+
+    const managedChanges = managedFields.filter((field) => changes[field] !== undefined)
+    if (managedChanges.length > 0) {
+      throw new AuthRuntimeError(
+        "authorization_denied",
+        `[Sixb] Your identity provider manages ${managedChanges.join(" and ")}. ` +
+          `Change ${managedChanges.length > 1 ? "them" : "it"} there.`
+      )
+    }
+
+    const user = await storage.users.updateProfile({
+      projectId: this.projectId,
+      id: caller.user.id,
+      ...changes,
+      updatedAt: new Date(),
+    })
+
+    // Every session of this person caches their profile; drop them so all show the change.
+    this.sessionCache?.invalidateUser(user.id)
+
+    return { user, managedFields }
+  }
+
+  // The fields the active strategy's provider sets at sign-in, through any of the person's
+  // identities with it. Identities from a strategy the project no longer uses manage nothing.
+  private async managedProfileFields(
+    storage: AuthStorage,
+    userId: string
+  ): Promise<readonly ProfileField[]> {
+    const strategy = this.getStrategy()
+    if (!strategy?.providerProfileFields) {
+      return []
+    }
+
+    const identities = await storage.identities.listForUser({ projectId: this.projectId, userId })
+    const managed = new Set<ProfileField>()
+    for (const identity of identities) {
+      if (identity.strategyId !== strategy.id) {
+        continue
+      }
+      for (const field of strategy.providerProfileFields(identity)) {
+        managed.add(field)
+      }
+    }
+
+    return PROFILE_FIELDS.filter((field) => managed.has(field))
   }
 
   /** The caller's active sessions, most recently active first. */

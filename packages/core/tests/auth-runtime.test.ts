@@ -18,6 +18,7 @@ import {
   formatSessionCookieValue,
   hashSessionSecret,
   type MagicLinkAuthStrategy,
+  type ProfileField,
   parseSessionCookieValue,
   resolveAuthConfig,
   resolveAuthCookieOptions,
@@ -60,6 +61,45 @@ async function resolveCaller(
     throw new Error(`Expected an authenticated user, got ${JSON.stringify(session)}`)
   }
   return session
+}
+
+// Ava, signed in under the "okta" strategy, whose provider manages the field each subject names.
+async function createProfileRuntime() {
+  const deps = createTestRuntimeDeps()
+  const fieldsBySubject: Readonly<Record<string, readonly ProfileField[]>> = {
+    name: ["displayName"],
+    picture: ["avatarUrl"],
+  }
+  const sixb = new SixbHost({
+    ontology: [] as const,
+    ...deps,
+    auth: {
+      id: "okta",
+      kind: "dev",
+      providerProfileFields: (identity) => fieldsBySubject[identity.subject] ?? [],
+    } satisfies AuthStrategy,
+  })
+  const caller = await seedAuthenticatedUser(sixb, deps, {
+    userId: "usr_ava",
+    email: "ava@acme.com",
+    groupIds: [],
+  })
+
+  return { sixb, deps, caller }
+}
+
+async function linkIdentity(
+  sixb: SixbHost,
+  deps: ReturnType<typeof createTestRuntimeDeps>,
+  strategyId: string,
+  subject: string
+) {
+  await deps.storage.auth.identities.upsert({
+    projectId: sixb.id,
+    strategyId,
+    subject,
+    userId: "usr_ava",
+  })
 }
 
 const invitationDestination = {
@@ -770,6 +810,84 @@ describe("SixbHost auth runtime", () => {
         session,
       })
     ).rejects.toMatchObject({ code: "invalid_auth_config" })
+  })
+
+  test("lets a person edit only the profile fields their provider does not manage", async () => {
+    const { sixb, deps, caller } = await createProfileRuntime()
+    await linkIdentity(sixb, deps, "okta", "name")
+    // An identity from a strategy the project no longer uses manages nothing.
+    await linkIdentity(sixb, deps, "google", "picture")
+
+    await expect(sixb.auth.getProfile(caller)).resolves.toMatchObject({
+      managedFields: ["displayName"],
+    })
+    for (const displayName of ["Ava Lovelace", null]) {
+      await expect(sixb.auth.updateProfile(caller, { displayName })).rejects.toMatchObject({
+        code: "authorization_denied",
+      })
+    }
+
+    const pictured = await sixb.auth.updateProfile(caller, {
+      avatarUrl: " https://Images.ACME.com/ava photo.png ",
+    })
+    expect(pictured.user.avatarUrl).toBe("https://images.acme.com/ava%20photo.png")
+
+    const cleared = await sixb.auth.updateProfile(caller, { avatarUrl: "" })
+    expect(cleared.user.avatarUrl).toBeUndefined()
+  })
+
+  test("manages every field one of the person's identities with the provider manages", async () => {
+    const { sixb, deps, caller } = await createProfileRuntime()
+    await linkIdentity(sixb, deps, "okta", "picture")
+    await linkIdentity(sixb, deps, "okta", "name")
+
+    await expect(sixb.auth.getProfile(caller)).resolves.toMatchObject({
+      managedFields: ["displayName", "avatarUrl"],
+    })
+  })
+
+  test("validates the profile changes a person makes", async () => {
+    const { sixb, caller } = await createProfileRuntime()
+
+    for (const input of [
+      {},
+      { displayName: "a".repeat(101) },
+      { displayName: "😀".repeat(101) },
+      { displayName: "a".repeat(1_000_000) },
+      { displayName: "Ava\nLovelace" },
+      { displayName: "Ava\u2028Lovelace" },
+      { displayName: "Ava \u202Eecalevol" },
+      { displayName: "\u2066Ava\u2069" },
+      { displayName: "Ava\uD800" },
+      { displayName: "\u200D\u200B" },
+      { avatarUrl: "ftp://images.acme.com/ava.png" },
+      { avatarUrl: "/ava.png" },
+      { avatarUrl: "data:image/png;base64,iVBORw0KGgo=" },
+      { avatarUrl: "http://images.acme.com/ava.png" },
+      { avatarUrl: "https://ava:secret@images.acme.com/ava.png" },
+      { avatarUrl: `https://images.acme.com/${"a".repeat(2048)}` },
+    ]) {
+      await expect(sixb.auth.updateProfile(caller, input)).rejects.toMatchObject({
+        code: "invalid_auth_input",
+      })
+    }
+
+    const named = await sixb.auth.updateProfile(caller, { displayName: "  Ava Lovelace  " })
+    expect(named.user.displayName).toBe("Ava Lovelace")
+    // The limit counts characters as people see them, and keeps the joiner emoji are built with.
+    const family = "👩\u200D👩\u200D👧"
+    const emoji = await sixb.auth.updateProfile(caller, {
+      displayName: `${"😀".repeat(95)}${family}`,
+    })
+    expect(emoji.user.displayName).toBe(`${"😀".repeat(95)}${family}`)
+    const unnamed = await sixb.auth.updateProfile(caller, { displayName: "   " })
+    expect(unnamed.user.displayName).toBeUndefined()
+
+    // A picture served by your own machine is fine over plain http.
+    const local = await sixb.auth.updateProfile(caller, {
+      avatarUrl: "http://localhost:3000/ava.png",
+    })
+    expect(local.user.avatarUrl).toBe("http://localhost:3000/ava.png")
   })
 
   test("verifies double-submit CSRF tokens", () => {

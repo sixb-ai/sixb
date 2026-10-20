@@ -292,6 +292,28 @@ export const AuthSessionResponseSchema = z.union([
   }),
 ])
 
+export const AuthProfileFieldSchema = z.enum(["displayName", "avatarUrl"])
+
+export const AuthProfileResponseSchema = z.object({
+  profile: z.object({
+    id: z.string(),
+    email: z.string(),
+    displayName: z.string().optional(),
+    avatarUrl: z.string().optional(),
+    status: AuthUserStatusSchema,
+  }),
+  /** Set by the identity provider at every sign-in, so they cannot be changed here. */
+  managedFields: z.array(AuthProfileFieldSchema),
+})
+
+/** Omitted fields stay unchanged, and `null` or an empty string clears one. */
+export const UpdateAuthProfileBodySchema = z
+  .object({
+    displayName: z.string().nullable().optional(),
+    avatarUrl: z.string().nullable().optional(),
+  })
+  .strict()
+
 export const AuthSignOutResponseSchema = z.object({
   success: z.boolean(),
 })

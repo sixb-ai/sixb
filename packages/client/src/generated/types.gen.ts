@@ -592,6 +592,105 @@ export type SignOutAllResponses = {
 
 export type SignOutAllResponse = SignOutAllResponses[keyof SignOutAllResponses]
 
+export type GetAuthProfileData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/auth/profile"
+}
+
+export type GetAuthProfileErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetAuthProfileError = GetAuthProfileErrors[keyof GetAuthProfileErrors]
+
+export type GetAuthProfileResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    profile: {
+      id: string
+      email: string
+      displayName?: string
+      avatarUrl?: string
+      status: "active" | "suspended"
+    }
+    managedFields: Array<"displayName" | "avatarUrl">
+  }
+}
+
+export type GetAuthProfileResponse = GetAuthProfileResponses[keyof GetAuthProfileResponses]
+
+export type UpdateAuthProfileData = {
+  body: {
+    displayName?: string | null
+    avatarUrl?: string | null
+  }
+  path?: never
+  query?: never
+  url: "/api/auth/profile"
+}
+
+export type UpdateAuthProfileErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type UpdateAuthProfileError = UpdateAuthProfileErrors[keyof UpdateAuthProfileErrors]
+
+export type UpdateAuthProfileResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    profile: {
+      id: string
+      email: string
+      displayName?: string
+      avatarUrl?: string
+      status: "active" | "suspended"
+    }
+    managedFields: Array<"displayName" | "avatarUrl">
+  }
+}
+
+export type UpdateAuthProfileResponse = UpdateAuthProfileResponses[keyof UpdateAuthProfileResponses]
+
 export type GetAuthAccessManagementOptionsData = {
   body?: never
   path?: never
