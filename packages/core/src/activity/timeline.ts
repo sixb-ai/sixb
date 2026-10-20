@@ -1,6 +1,11 @@
 import type { ActionObjectSubject } from "../actions"
 import { unreadableActionRunTypes } from "../actions/run-authorization"
-import { AuthorizationError, canViewActionRun, canViewWorkflowRun } from "../authorization"
+import {
+  AuthorizationError,
+  canViewActionRun,
+  canViewWorkflowRun,
+  isRuntimeAllowed,
+} from "../authorization"
 import { resolveExecutionCosts } from "../runtime/ai-cost"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { ActionRunStatus } from "../storage/action-runs"
@@ -70,13 +75,18 @@ export interface ActivityWorkflowEntry {
   readonly runVisible: boolean
 }
 
-/** A conversation's run: its metadata only, never its title or messages. */
+/** A conversation's run: its metadata, and its thread's title only for those who read threads. */
 export interface ActivityAgentEntry {
   readonly kind: "agent"
   readonly at: Date
   readonly executionId: string
   readonly runId: string
   readonly threadId: string
+  /**
+   * Present only when the viewer can read the conversation, with `can.observe(agent.threads)`.
+   * Activity alone never shows a title or a message.
+   */
+  readonly thread?: { readonly title?: string }
   readonly status: AgentRunStatus
   /** Messages in the thread now, every run's. */
   readonly messages: number
@@ -183,7 +193,8 @@ export async function composeActivityTimeline(
 
   const actionRunByExecution = new Map(actionRuns.map((run) => [run.executionId, run]))
   const workflowRunByExecution = new Map(workflowRuns.map((run) => [run.executionId, run]))
-  const messagesByThread = new Map(threads.map((thread) => [thread.id, thread.messageCount]))
+  const threadById = new Map(threads.map((thread) => [thread.id, thread]))
+  const observesThreads = isRuntimeAllowed(runtime, { kind: "agentThreads.observe" })
   const costByAgent = rollUpCosts(byId, conversations, withAgent, costs)
 
   const executionEntries = executions.flatMap((execution): ActivityTimelineEntry[] => {
@@ -239,6 +250,9 @@ export async function composeActivityTimeline(
     const conversation = conversations.get(execution.id)
     if (conversation) {
       const cost = costByAgent.get(execution.id)
+      const thread = threadById.get(conversation.threadId)
+      const title = thread?.title
+
       return [
         {
           kind: "agent",
@@ -246,8 +260,9 @@ export async function composeActivityTimeline(
           executionId: execution.id,
           runId: conversation.id,
           threadId: conversation.threadId,
+          ...(observesThreads && thread ? { thread: title === undefined ? {} : { title } } : {}),
           status: conversation.status,
-          messages: messagesByThread.get(conversation.threadId) ?? 0,
+          messages: thread?.messageCount ?? 0,
           ...(cost === undefined ? {} : { cost }),
         },
       ]

@@ -43,7 +43,8 @@ export interface ListArtifactsRuntimeInput {
 
 /**
  * Artifacts the caller owns: create one, publish its next version, read it back. A user or service
- * account reaches only its own artifacts; system code reaches every artifact in the project.
+ * account reaches only its own artifacts; system code reaches every artifact in the project. What
+ * the Agent published in other users' conversations is read on `sixb.agent.observed.artifacts`.
  */
 export interface ArtifactsRuntime {
   /** Creates an artifact owned by the caller, with its first version. */

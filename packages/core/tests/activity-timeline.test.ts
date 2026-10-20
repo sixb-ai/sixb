@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test"
 import {
+  agent,
   can,
   defineAction,
   defineGroup,
@@ -44,6 +45,11 @@ const observer = defineRole("observer", {
   grantedTo: [observers],
   grants: [can.observe(project.activity), can.view(Invoice), can.apply(markPaid)],
 })
+const threadObservers = defineGroup("thread-observers")
+const threadObserver = defineRole("thread-observer", {
+  grantedTo: [threadObservers],
+  grants: [can.observe(project.activity), can.observe(agent.threads)],
+})
 
 const projectId = "activity-timeline"
 const start = new Date("2026-10-20T14:02:00.000Z")
@@ -69,8 +75,8 @@ async function createFixture() {
     id: projectId,
     ontology: [Invoice, Payroll],
     actions: [markPaid],
-    groups: [observers],
-    roles: [observer],
+    groups: [observers, threadObservers],
+    roles: [observer, threadObserver],
     storage,
     broker: new InMemoryBroker(),
     lakeStorage: new InMemoryLakeStorage(),
@@ -102,6 +108,13 @@ async function createFixture() {
       roles: host.definitions.security.listResolvedRoles(),
     }),
   })
+  const threadViewer = createTestSixb(host, {
+    authorization: resolveAuthorizationContext({
+      principal: { type: "user", id: "thread-viewer" },
+      groupIds: [threadObservers.id],
+      roles: host.definitions.security.listResolvedRoles(),
+    }),
+  })
   const stranger = createTestSixb(host, {
     authorization: resolveAuthorizationContext({
       principal: { type: "user", id: "stranger" },
@@ -110,7 +123,7 @@ async function createFixture() {
     }),
   })
 
-  return { host, storage, viewer, stranger }
+  return { host, storage, viewer, threadViewer, stranger }
 }
 
 /** Creates an execution at `offsetMs` after the first visit's start: storage stamps it. */
@@ -629,6 +642,57 @@ describe("activity timeline", () => {
     expect(runIds(entries)).toEqual(["act_in"])
     expect(entries[action - 1]).toMatchObject({ kind: "interaction", sequence: 82 })
     expect(entries[action + 1]).toMatchObject({ kind: "interaction", sequence: 83 })
+  })
+
+  // Guard proof: drop `observesThreads &&` from the Agent entry in composeActivityTimeline; the
+  // activity-only viewer then sees the title.
+  test("an Agent run names its conversation only to a viewer who reads conversations", async () => {
+    const fixture = await createFixture()
+    const { storage } = fixture
+    const [visitId = ""] = await pageViews(storage, { offsetsMs: [0, 3 * minute] })
+
+    const root = await executionAt(storage, minute, request("root"))
+    for (const [index, title] of ["Overdue invoices", undefined].entries()) {
+      setSystemTime(new Date(start.getTime() + (2 + index) * minute))
+      const executionId = await createTestAgentExecution(storage, {
+        projectId,
+        runId: `run_${index}`,
+        sourceExecutionId: root.id,
+      })
+      setSystemTime()
+
+      await storage.agents.threads.create({
+        id: `thr_${index}`,
+        projectId,
+        ownerPrincipal: { type: "user", id: "marie" },
+        ...(title === undefined ? {} : { title }),
+      })
+      await storage.agents.runs.create({
+        id: `run_${index}`,
+        projectId,
+        executionId,
+        threadId: `thr_${index}`,
+        triggerMessageId: `msg_${index}`,
+        spec: { model: { provider: "test", modelId: "large" } },
+      })
+    }
+
+    const agentEntries = async (sixb: typeof fixture.viewer) =>
+      (await sixb.activity.timeline(visitId))?.entries.flatMap((entry) =>
+        entry.kind === "agent" ? [{ threadId: entry.threadId, thread: entry.thread }] : []
+      )
+
+    expect(await agentEntries(fixture.threadViewer)).toEqual([
+      { threadId: "thr_0", thread: { title: "Overdue invoices" } },
+      { threadId: "thr_1", thread: {} },
+    ])
+    expect(await agentEntries(fixture.viewer)).toEqual([
+      { threadId: "thr_0", thread: undefined },
+      { threadId: "thr_1", thread: undefined },
+    ])
+    expect(JSON.stringify(await fixture.viewer.activity.timeline(visitId))).not.toContain(
+      "Overdue invoices"
+    )
   })
 
   test("a user's connections list every sign-in with the visits it opened", async () => {

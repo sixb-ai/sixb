@@ -1382,7 +1382,7 @@ describe("bound Sixb surface", () => {
       ["getById", "list", "listLinks", "listObjects", "listTelemetry", "runs"].sort()
     )
     expect(Object.keys(scoped.rules).sort()).toEqual(["getById", "list", "states"])
-    expect(Object.keys(scoped.agent).sort()).toEqual(["get", "runs", "threads"])
+    expect(Object.keys(scoped.agent).sort()).toEqual(["get", "observed", "runs", "threads"])
     expect(Object.keys(scoped.events).sort()).toEqual(
       ["append", "emit", "latestCursor", "read", "subscribe", "visible"].sort()
     )
