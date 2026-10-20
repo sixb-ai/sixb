@@ -93,6 +93,7 @@ export const sectionCatalog: readonly SectionDefinition[] = [
       },
       { id: "logs", path: "/observability/logs", exportName: "ObservabilityLogsPage" },
       { id: "ai-usage", path: "/observability/ai-usage", exportName: "ObservabilityAiUsagePage" },
+      { id: "activity", path: "/observability/activity", exportName: "ObservabilityActivityPage" },
     ],
   },
   {

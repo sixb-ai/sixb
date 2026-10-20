@@ -247,14 +247,15 @@ import { SyncButton } from "@sixb/app"
 
 ## Observability
 
-Every app includes Observability, in the user menu: what ran, what it wrote while it worked, and
-what its model calls cost.
+Every app includes Observability, in the user menu: what ran, what it wrote while it worked, what
+its model calls cost, and who uses the app.
 
 | Page | Path | Shows |
 | --- | --- | --- |
 | Runs | `/observability/runs` | Every run, a tab per kind: workflows, actions, syncs, pipelines, projections and webhook deliveries, filtered by what ran and its status |
 | Logs | `/observability/logs` | Logs as runs write them, filtered by kind and level and searchable |
 | AI usage | `/observability/ai-usage` | This month's [usage limits](../models/usage-and-limits.md), then cost, tokens and every model call for a date range |
+| Activity | `/observability/activity` | Who [uses the app](activity.md): visits, the pages viewed in them, and each user's active days |
 
 A workflow or action run opens its own page, such as `/observability/runs/workflows/run_123`: its
 input and output, each step with what it read and wrote, and its logs. A step that waits for
@@ -264,8 +265,8 @@ those who can open Ontology. A sync, pipeline, projection or webhook run opens t
 
 Each page shows what the API lets the person read. Runs follow the grants of what ran, such as
 `can.run` on a workflow or `can.apply` on an action. Logs need `can.observe(project.logs)`, AI usage
-needs `can.observe(agent.usage)`, and changing limits needs `can.manage(agent.usage)`. See
-[Authorization](../auth/authorization.md).
+needs `can.observe(agent.usage)`, changing limits needs `can.manage(agent.usage)`, and activity needs
+`can.observe(project.activity)`. See [Authorization](../auth/authorization.md).
 
 ## Ontology
 

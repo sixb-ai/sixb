@@ -55,7 +55,7 @@ export const en = {
     },
     observability: {
       label: "Observability",
-      pages: { runs: "Runs", logs: "Logs", "ai-usage": "AI usage" },
+      pages: { runs: "Runs", logs: "Logs", "ai-usage": "AI usage", activity: "Activity" },
     },
     ontology: {
       label: "Ontology",
@@ -146,7 +146,12 @@ export const fr: Translation<AppMessages> = {
     },
     observability: {
       label: "Observabilité",
-      pages: { runs: "Exécutions", logs: "Journaux", "ai-usage": "Usage de l’IA" },
+      pages: {
+        runs: "Exécutions",
+        logs: "Journaux",
+        "ai-usage": "Usage de l’IA",
+        activity: "Activité",
+      },
     },
     ontology: {
       label: "Ontologie",

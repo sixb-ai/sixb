@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { client, type GetActionRunResponse } from "@sixb/client"
 import { getAuthSessionQueryKey } from "@sixb/client/hooks"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, waitFor } from "@testing-library/react"
 import { MemoryRouter, useLocation } from "react-router-dom"
 import { SectionsProvider } from "../src/pages"
 import {
@@ -10,6 +10,8 @@ import {
   effectsState,
   effectsWaitRemainingMs,
 } from "../src/pages/observability/action-run"
+import { ObservabilityActivityPage } from "../src/pages/observability/activity/page"
+import { useActivityUsers } from "../src/pages/observability/activity/users"
 import { ObservabilityAiUsagePage } from "../src/pages/observability/ai-usage/page"
 import { ObservabilityLogsPage } from "../src/pages/observability/logs"
 import { ObservabilityRunsPage } from "../src/pages/observability/runs"
@@ -33,6 +35,9 @@ installDom([
   "matchMedia",
   "requestAnimationFrame",
   "cancelAnimationFrame",
+  // The Activity page's user filter is a popover, which measures its anchor.
+  "ResizeObserver",
+  "DOMRect",
 ])
 const originalConfig = client.getConfig()
 // Generated query keys carry the client's base URL, so it is set before any key is built.
@@ -188,6 +193,196 @@ describe("Logs", () => {
       await view.findByText("Seeing logs takes can.observe(project.logs) in one of your roles.")
     ).toBeDefined()
     expect(sockets?.opened.length ?? 0).toBe(opened)
+    view.unmount()
+    queryClient.clear()
+  })
+})
+
+describe("Activity", () => {
+  const visit = {
+    id: "visit_1",
+    actor: { type: "user", userId: "usr_1" },
+    attribution: { source: "newsletter", campaign: "launch" },
+    startedAt: "2026-10-02T09:00:00.000Z",
+    lastSeenAt: "2026-10-02T09:20:00.000Z",
+    pageViews: 2,
+  }
+  const sharedVisit = {
+    id: "visit_2",
+    actor: { type: "share", grantId: "shr_1" },
+    attribution: {},
+    startedAt: "2026-10-02T08:00:00.000Z",
+    lastSeenAt: "2026-10-02T08:05:00.000Z",
+    pageViews: 0,
+  }
+
+  function activityApi(requests: string[]) {
+    return async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(new Request(input, init).url)
+      requests.push(`${url.pathname}${url.search}`)
+      switch (url.pathname) {
+        case "/api/activity/summary":
+          return Response.json({ users: 1, visits: 2, sharedVisits: 1, pageViews: 2 })
+        case "/api/activity/users":
+          // A second page, behind the first, shows the list does not stop at one.
+          return Response.json(
+            url.searchParams.get("beforeId") === "usr_1"
+              ? {
+                  users: [
+                    {
+                      userId: "usr_2",
+                      displayName: "Blake",
+                      lastSeenAt: sharedVisit.lastSeenAt,
+                      visits: 1,
+                      pageViews: 1,
+                    },
+                  ],
+                  hasMore: false,
+                }
+              : {
+                  users: [
+                    {
+                      userId: "usr_1",
+                      displayName: "Alex",
+                      lastSeenAt: visit.lastSeenAt,
+                      visits: 1,
+                      pageViews: 2,
+                    },
+                  ],
+                  hasMore: true,
+                }
+          )
+        case "/api/activity/visits":
+          return Response.json({ visits: [visit, sharedVisit], hasMore: false })
+        case "/api/activity/visits/visit_1":
+          return Response.json({
+            visit,
+            pageViews: [
+              { id: "p1", sequence: 1, route: "/invoices", receivedAt: visit.startedAt },
+              { id: "p2", sequence: 2, route: "/invoices/:id", receivedAt: visit.lastSeenAt },
+            ],
+            hasMore: false,
+          })
+        case "/api/activity/calendar":
+          return Response.json({
+            userId: "usr_1",
+            year: 2026,
+            days: [{ day: "2026-10-02", visits: 1, pageViews: 2 }],
+          })
+        default:
+          return Response.json({ error: "Not found" }, { status: 404 })
+      }
+    }
+  }
+
+  function renderActivity(path: string) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(getAuthSessionQueryKey(), { authenticated: false, authEnabled: false })
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <SectionsProvider visibility={undefined}>
+          <MemoryRouter initialEntries={[path]}>
+            <ObservabilityActivityPage />
+            <Location />
+          </MemoryRouter>
+        </SectionsProvider>
+      </QueryClientProvider>
+    )
+    return { view, queryClient }
+  }
+
+  // Removal proof: drop `denied` from the page's useLoadFailure call; the generic refusal shows.
+  test("tells a refused person which grant reads activity", async () => {
+    const api = async () => Response.json({ error: "[Sixb] not allowed" }, { status: 403 })
+    client.setConfig({ fetch: Object.assign(api, { preconnect: fetch.preconnect }) })
+    const { view, queryClient } = renderActivity("/observability/activity")
+
+    expect(
+      await view.findByText(
+        "Seeing activity takes can.observe(project.activity) in one of your roles."
+      )
+    ).toBeDefined()
+    view.unmount()
+    queryClient.clear()
+  })
+
+  test("lists visits by name, opens a visit's page views, and a user's calendar opens a day", async () => {
+    const requests: string[] = []
+    client.setConfig({
+      fetch: Object.assign(activityApi(requests), { preconnect: fetch.preconnect }),
+    })
+    const { view, queryClient } = renderActivity("/observability/activity?user=usr_1&year=2026")
+
+    // The visit reads with the account's name; a shared link stays anonymous.
+    // With a user chosen, a row is named by its time, in UTC, not by the user again.
+    const row = await view.findByRole("button", { name: /UTC.*2 page views/ })
+    expect(row.textContent).not.toContain("Alex")
+    expect(row.textContent).toContain("Oct 2 · 9:00 AM–9:20 AM UTC")
+    fireEvent.click(row)
+    expect(await view.findByText("/invoices/:id")).toBeDefined()
+    expect(view.getByText("9:20:00 AM")).toBeDefined()
+    expect(view.getByText("launch")).toBeDefined()
+    await waitFor(() => expect(view.getByTestId("location").textContent).toContain("visit=visit_1"))
+
+    const day = await view.findByRole("button", { name: /1 visit, 2 page views/ })
+    fireEvent.click(day)
+    await waitFor(() =>
+      expect(view.getByTestId("location").textContent).toContain("day=2026-10-02")
+    )
+    // A chosen day reads exactly that UTC day.
+    await waitFor(() =>
+      expect(
+        requests.some((request) =>
+          request.includes("from=2026-10-02T00%3A00%3A00.000Z&to=2026-10-03T00%3A00%3A00.000Z")
+        )
+      ).toBe(true)
+    )
+    view.unmount()
+    queryClient.clear()
+  })
+
+  // The filter is a popover, which happy-dom cannot open (see sections.test.tsx), so this drives
+  // the hook it lists. Removal proof: return undefined from getNextPageParam; Blake never loads.
+  test("the user filter pages through every user of the period", async () => {
+    const requests: string[] = []
+    client.setConfig({
+      fetch: Object.assign(activityApi(requests), { preconnect: fetch.preconnect }),
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const period = { from: "2026-10-01T00:00:00.000Z", to: "2026-10-08T00:00:00.000Z" }
+    const { result } = renderHook(() => useActivityUsers(period), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      ),
+    })
+
+    await waitFor(() => expect(result.current.hasMore).toBe(true))
+    act(() => result.current.more())
+    await waitFor(() => expect([...result.current.names.values()]).toEqual(["Alex", "Blake"]))
+    expect(result.current.hasMore).toBe(false)
+    queryClient.clear()
+  })
+
+  // Removal proof: invalidate every activity query as well as moving the period; each period
+  // query then loads twice.
+  test("Refresh loads each query once", async () => {
+    const requests: string[] = []
+    client.setConfig({
+      fetch: Object.assign(activityApi(requests), { preconnect: fetch.preconnect }),
+    })
+    const { view, queryClient } = renderActivity("/observability/activity")
+    await view.findByRole("button", { name: /Alex.*2 page views/ })
+    // A shared link has no account: it reads as one, told apart by the end of its id.
+    expect(view.getByText("Shared link")).toBeDefined()
+    expect(view.getByText("Link ending shr1")).toBeDefined()
+    const summaries = () =>
+      requests.filter((request) => request.startsWith("/api/activity/summary"))
+    const before = summaries().length
+
+    fireEvent.click(view.getByRole("button", { name: "Refresh" }))
+    await waitFor(() => expect(summaries().length).toBe(before + 1))
+    await Bun.sleep(20)
+    expect(summaries().length).toBe(before + 1)
     view.unmount()
     queryClient.clear()
   })

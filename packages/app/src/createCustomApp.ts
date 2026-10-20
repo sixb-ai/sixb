@@ -746,18 +746,26 @@ function builtInRoutesFor(routes: readonly PageRoute[]): BuiltInRouteManifestEnt
       moduleSpecifier: builtInPageModule,
       exportName: "ArtifactPage",
     },
+    // The sections are developer tooling: opening one is not using the app.
     ...sectionCatalog.flatMap((section) => [
       {
         path: section.path,
         moduleSpecifier: builtInPageModule,
         exportName: section.indexExportName,
+        recordsActivity: false,
       },
       ...section.pages.flatMap((page) => [
-        { path: page.path, moduleSpecifier: builtInPageModule, exportName: page.exportName },
+        {
+          path: page.path,
+          moduleSpecifier: builtInPageModule,
+          exportName: page.exportName,
+          recordsActivity: false,
+        },
         ...(page.details ?? []).map((detail) => ({
           path: detail.path,
           moduleSpecifier: builtInPageModule,
           exportName: detail.exportName,
+          recordsActivity: false,
         })),
       ]),
     ]),

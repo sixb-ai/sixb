@@ -10,6 +10,8 @@ export interface BuiltInRouteManifestEntry {
   readonly path: string
   readonly moduleSpecifier: string
   readonly exportName: string
+  /** False for developer tooling, whose views are not app activity. Default: true. */
+  readonly recordsActivity?: boolean
 }
 
 export interface GenerateRouteManifestOptions {
@@ -114,9 +116,16 @@ export async function generateRouteManifest(
     ...pages.map((route) => route.path),
     ...builtInRoutes.map((route) => route.path),
   ]
+  const activityRoutePaths = [
+    ...pages.map((route) => route.path),
+    ...builtInRoutes.filter((route) => route.recordsActivity !== false).map((route) => route.path),
+  ]
   const content = `${importEntries}
 
 export const routePaths = ${JSON.stringify(routePaths, null, 2)} as const
+
+/** The pages whose views count as app activity: all but the built-in sections. */
+export const activityRoutePaths: readonly string[] = ${JSON.stringify(activityRoutePaths, null, 2)}
 
 export const routes = [
 ${renderRootRouteObjects(tree)}
@@ -528,19 +537,20 @@ import type { GetAuthSessionResponse } from "@sixb/client"
 import {
   BrowserRouter,
   matchPath,
+  matchRoutes,
   useLocation,
   useNavigate,
   useRoutes,
 } from "react-router-dom"
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query"
-import { isSixbApiError } from "@sixb/client/browser"
+import { isSixbApiError, recordSixbPageView } from "@sixb/client/browser"
 import {
   getAuthSessionQueryKey,
   getProjectInfoOptions,
   SixbEventsProvider,
 } from "@sixb/client/hooks"
 import { LocaleProvider, useAppMessages } from "@sixb/app/locale"
-${sectionsImport}import { routePaths, routes } from "./routes"
+${sectionsImport}import { activityRoutePaths, routePaths, routes } from "./routes"
 ${globalsCssImport}
 ${layoutImport}
 
@@ -896,6 +906,23 @@ function RoutedErrorBoundary({
 const appRoutes = [...routes, { path: "*", element: <NotFoundView /> }]
 ${sectionsSetup}
 
+const routePatterns = routePaths.map((path) => ({ path }))
+const recordedRoutePaths = new Set(activityRoutePaths)
+
+// Reports the pattern of the page shown, never its URL. A page that is not recorded, such as a
+// built-in section or an unknown path, reports null, which pauses activity until the next one.
+// Only a new path is a new view: a changed search or hash, or the same path again, is not.
+function ActivityPageView() {
+  const { pathname } = useLocation()
+
+  React.useEffect(() => {
+    const path = matchRoutes(routePatterns, pathname)?.at(-1)?.route.path
+    recordSixbPageView(path !== undefined && recordedRoutePaths.has(path) ? path : null)
+  }, [pathname])
+
+  return null
+}
+
 function AppRoutes() {
   return useRoutes(appRoutes)
 }
@@ -942,6 +969,7 @@ function App({ basename }: StartAppOptions) {
       <ProjectLocale shared={Boolean(basename)}>
         ${sectionsStart}
         <BrowserRouter basename={basename}>
+          <ActivityPageView />
           <SharedDocumentLinkInterceptor basename={basename} />
           <InternalLinkInterceptor basename={basename} />
           {basename ? (
@@ -1019,6 +1047,7 @@ function ApiUnavailableView({ apiBaseUrl }: { readonly apiBaseUrl: string }) {
   configureSixbBrowserClient,
   readSixbBrowserRuntimeConfig,
   requireSixbBrowserAuthSession,
+  startSixbActivityCapture,
 } from "@sixb/client/browser"
 import { renderApiUnavailable, startApp } from "./app-runtime"
 
@@ -1045,6 +1074,8 @@ if (authSession === "unavailable") {
   (authSession?.authenticated === false && authSession.authEnabled === false) ||
   authSession?.authenticated === true
 ) {
+  // Only a signed-in person's visits are recorded; without auth there is nobody to attribute.
+  if (authSession?.authenticated === true) startSixbActivityCapture()
   startApp({ session: authSession ?? undefined })
 }
 `
@@ -1058,8 +1089,10 @@ if (authSession === "unavailable") {
 import {
   configureSixbSharedBrowserClient,
   isSixbApiError,
+  preserveSixbActivityArrival,
   readSixbBrowserRuntimeConfig,
   type SixbSharedBrowserClientController,
+  startSixbActivityCapture,
 } from "@sixb/client/browser"
 
 export interface SharedAppBootstrap {
@@ -1149,6 +1182,8 @@ export function startSharedApp(
 
       const { startApp } = await import("./app-runtime")
       startApp({ basename })
+      // After a start that held: a failed one is retried, and must still find the arrival.
+      startSixbActivityCapture()
     } catch (error) {
       if (isRetryableSharedFailure(error)) {
         console.error("[SixbSharedApp] Shared access could not be opened; retry is available.")
@@ -1185,6 +1220,7 @@ function canonicalizeInitialDestination(basename: string, destinationPath: strin
     } catch {
       // Preserve the authority boundary even when a browser or embedding policy denies History
       // mutation: a fresh document at the trusted server destination is still safe.
+      preserveSixbActivityArrival()
       window.location.replace(canonicalPath)
       return false
     }
