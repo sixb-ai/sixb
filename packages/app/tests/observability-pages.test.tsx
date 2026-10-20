@@ -254,15 +254,96 @@ describe("Activity", () => {
           )
         case "/api/activity/visits":
           return Response.json({ visits: [visit, sharedVisit], hasMore: false })
-        case "/api/activity/visits/visit_1":
+        case "/api/activity/visits/visit_1/timeline":
           return Response.json({
             visit,
-            pageViews: [
-              { id: "p1", sequence: 1, route: "/invoices", receivedAt: visit.startedAt },
-              { id: "p2", sequence: 2, route: "/invoices/:id", receivedAt: visit.lastSeenAt },
+            connection: {
+              type: "session",
+              device: { browser: "Chrome", os: "macOS" },
+              status: "active",
+              createdAt: "2026-10-02T08:30:00.000Z",
+            },
+            entries: [
+              { kind: "page", at: visit.startedAt, sequence: 1, route: "/invoices" },
+              {
+                kind: "action",
+                at: "2026-10-02T09:01:00.000Z",
+                executionId: "exe_1",
+                actionId: "markPaid",
+                runId: "act_1",
+                status: "succeeded",
+                runVisible: true,
+                object: { objectTypeId: "Invoice", primaryId: "inv-1" },
+              },
+              {
+                kind: "action",
+                at: "2026-10-02T09:02:00.000Z",
+                executionId: "exe_2",
+                actionId: "approvePayroll",
+                runId: "act_2",
+                status: "incomplete",
+                runVisible: false,
+              },
+              {
+                kind: "action",
+                at: "2026-10-02T09:02:30.000Z",
+                executionId: "exe_3",
+                actionId: "archiveInvoice",
+                runId: "act_3",
+                status: "succeeded",
+                runVisible: false,
+              },
+              {
+                kind: "agent",
+                at: "2026-10-02T09:03:00.000Z",
+                executionId: "exe_4",
+                runId: "run_1",
+                threadId: "thr_1",
+                status: "succeeded",
+                messages: 3,
+                cost: {
+                  amounts: [{ currency: "USD", amountNanos: "40000000" }],
+                  ratedCallCount: 2,
+                  unpriceableCallCount: 0,
+                  unvaluedCallCount: 0,
+                },
+              },
+              { kind: "page", at: visit.lastSeenAt, sequence: 2, route: "/invoices/:id" },
             ],
-            hasMore: false,
+            truncated: true,
           })
+        case "/api/activity/connections":
+          // Two pages: the cursor is the server's, passed back as is.
+          return Response.json(
+            url.searchParams.get("cursor") === "next-page"
+              ? {
+                  connections: [
+                    {
+                      type: "session",
+                      device: {},
+                      clientName: "sixb CLI",
+                      status: "revoked",
+                      createdAt: "2026-10-01T08:00:00.000Z",
+                      visits: 0,
+                      latestVisits: [],
+                    },
+                  ],
+                }
+              : {
+                  connections: [
+                    {
+                      type: "session",
+                      device: { browser: "Chrome", os: "macOS" },
+                      status: "active",
+                      createdAt: "2026-10-02T08:30:00.000Z",
+                      lastSeenAt: visit.lastSeenAt,
+                      visits: 7,
+                      latestVisits: [visit],
+                    },
+                  ],
+                  nextCursor: "next-page",
+                }
+          )
         case "/api/activity/calendar":
           return Response.json({
             userId: "usr_1",
@@ -306,7 +387,7 @@ describe("Activity", () => {
     queryClient.clear()
   })
 
-  test("lists visits by name, opens a visit's page views, and a user's calendar opens a day", async () => {
+  test("lists visits by name, opens a visit's timeline, and a user's calendar opens a day", async () => {
     const requests: string[] = []
     client.setConfig({
       fetch: Object.assign(activityApi(requests), { preconnect: fetch.preconnect }),
@@ -337,6 +418,53 @@ describe("Activity", () => {
         )
       ).toBe(true)
     )
+    view.unmount()
+    queryClient.clear()
+  })
+
+  test("a visit's timeline filters by kind and links recorded runs and readable objects", async () => {
+    client.setConfig({
+      fetch: Object.assign(activityApi([]), { preconnect: fetch.preconnect }),
+    })
+    const { view, queryClient } = renderActivity(
+      "/observability/activity?user=usr_1&year=2026&visit=visit_1"
+    )
+
+    expect(await view.findByText("/invoices/:id")).toBeDefined()
+    expect(view.getByRole("link", { name: "Open the run of Mark Paid" }).getAttribute("href")).toBe(
+      "/observability/runs/actions/act_1"
+    )
+    expect(view.getByRole("link", { name: "Invoice · inv-1" }).getAttribute("href")).toBe(
+      "/objects/Invoice/inv-1"
+    )
+    // A run without a recorded outcome, or one the viewer may not read, has no page to open.
+    expect(view.getByText("Approve Payroll").closest("a")).toBeNull()
+    expect(view.getByText("Archive Invoice").closest("a")).toBeNull()
+    expect(view.getByText("Not finished")).toBeDefined()
+    expect(view.getByText("3 messages")).toBeDefined()
+    expect(view.getByText("$0.04")).toBeDefined()
+    expect(view.getAllByText("Chrome · macOS").length).toBeGreaterThan(0)
+
+    fireEvent.click(view.getByRole("tab", { name: /Actions/ }))
+    expect(view.queryByText("/invoices/:id")).toBeNull()
+    expect(view.getByText("Mark Paid")).toBeDefined()
+    fireEvent.click(view.getByRole("tab", { name: /Workflows/ }))
+    expect(view.getByText("Nothing of this kind in this visit.")).toBeDefined()
+
+    expect(
+      view.getByText(
+        "This visit did more than the timeline shows: it stops after 200 page views or 200 recorded executions."
+      )
+    ).toBeDefined()
+
+    // The user's connections: each sign-in, with its latest visits, then the older ones.
+    expect(await view.findByText("7 visits")).toBeDefined()
+    expect(view.getByText("6 earlier visits")).toBeDefined()
+    expect(view.queryByText("sixb CLI")).toBeNull()
+    fireEvent.click(view.getByRole("button", { name: "Load more connections" }))
+    expect(await view.findByText("sixb CLI")).toBeDefined()
+    expect(view.getByText("Revoked")).toBeDefined()
+    expect(view.queryByRole("button", { name: "Load more connections" })).toBeNull()
     view.unmount()
     queryClient.clear()
   })

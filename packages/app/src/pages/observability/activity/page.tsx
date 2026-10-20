@@ -1,8 +1,8 @@
 import {
   type GetActivitySummaryResponse,
-  type GetActivityVisitResponse,
+  type GetActivityVisitTimelineResponse,
   getActivitySummary,
-  getActivityVisit,
+  getActivityVisitTimeline,
   isSixbApiError,
   type ListActivityVisitsResponse,
   listActivityVisits,
@@ -12,7 +12,7 @@ import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link2, MousePointerClick, RefreshCw, UserRound, X } from "lucide-react"
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { SectionPage } from "../../section-page"
 import {
@@ -25,7 +25,10 @@ import {
   useNumbers,
 } from "../../section-ui"
 import { ActivityCalendar } from "./calendar"
+import { UserConnections } from "./connections"
+import { type UtcFormat, useUtcFormat } from "./format"
 import { useActivityMessages } from "./messages"
+import { MetaItems } from "./meta-items"
 import {
   type ActivityRange,
   activityPeriod,
@@ -33,8 +36,8 @@ import {
   activityRanges,
   parseActivityDay,
   parseActivityRange,
-  utcDay,
 } from "./period"
+import { ConnectionLine, VisitEntries } from "./timeline"
 import { UserFilter, useActivityUsers } from "./users"
 
 type Visit = ListActivityVisitsResponse["visits"][number]
@@ -94,11 +97,13 @@ export function ObservabilityActivityPage() {
   const names = users.names
 
   // A rolling range moves to now, which gives its queries new keys; what a period does not key
-  // (a chosen day, the calendar, a visit's pages) is reloaded in place. Each loads once.
+  // (a chosen day, the calendar, connections, a visit's timeline) is reloaded in place. Each loads
+  // once.
   const refresh = () => {
     if (day === undefined) {
       setEnd(new Date())
       void queryClient.invalidateQueries({ queryKey: [...activityQueryKey, "calendar"] })
+      void queryClient.invalidateQueries({ queryKey: [...activityQueryKey, "connections"] })
       void queryClient.invalidateQueries({ queryKey: [...activityQueryKey, "visit"] })
     } else {
       void queryClient.invalidateQueries({ queryKey: activityQueryKey })
@@ -181,13 +186,20 @@ export function ObservabilityActivityPage() {
           <Metrics summary={summary.data} forUser={userId !== undefined} />
 
           {userId ? (
-            <ActivityCalendar
-              userId={userId}
-              year={year}
-              selectedDay={day}
-              onYear={(next) => update({ year: String(next) })}
-              onDay={(next) => update({ day: next, year: next.slice(0, 4), visit: undefined })}
-            />
+            <>
+              <ActivityCalendar
+                userId={userId}
+                year={year}
+                selectedDay={day}
+                onYear={(next) => update({ year: String(next) })}
+                onDay={(next) => update({ day: next, year: next.slice(0, 4), visit: undefined })}
+              />
+              <UserConnections
+                userId={userId}
+                selected={visitId}
+                onSelect={(id) => update({ visit: id })}
+              />
+            </>
           ) : null}
 
           <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-2">
@@ -390,31 +402,25 @@ function VisitTimeline({
   readonly names: ReadonlyMap<string, string>
 }) {
   const messages = useActivityMessages()
-  const format = useUtcFormat()
-  const query = useInfiniteQuery({
+  const query = useQuery({
     queryKey: [...activityQueryKey, "visit", visitId],
     enabled: visitId !== undefined,
-    initialPageParam: 0,
-    queryFn: async ({ pageParam, signal }) =>
+    queryFn: async ({ signal }) =>
       (
-        await getActivityVisit({
+        await getActivityVisitTimeline({
           path: { visitId: visitId ?? "" },
-          query: { afterSequence: pageParam, limit: 50 },
           signal,
           throwOnError: true,
         })
       ).data,
-    getNextPageParam: (page: GetActivityVisitResponse) =>
-      page.hasMore ? page.pageViews.at(-1)?.sequence : undefined,
     retry: false,
   })
 
-  const visit = query.data?.pages[0]?.visit
-  const pageViews = query.data?.pages.flatMap((page) => page.pageViews) ?? []
+  const timeline = query.data
 
   // Below the list on a narrow screen, the chosen visit would open out of sight.
   const panel = useRef<HTMLDivElement>(null)
-  const shownId = visit?.id
+  const shownId = timeline?.visit.id
   useEffect(() => {
     if (shownId && window.matchMedia?.("(max-width: 1023px)").matches) {
       panel.current?.scrollIntoView({ block: "start", behavior: "smooth" })
@@ -432,52 +438,28 @@ function VisitTimeline({
           </Panel>
         ) : (
           <Panel
-            toolbar={visit ? <VisitHeader visit={visit} names={names} /> : undefined}
-            footer={messages.visit.note}
+            toolbar={timeline ? <VisitHeader timeline={timeline} names={names} /> : undefined}
+            footer={
+              timeline?.truncated ? (
+                <>
+                  <p>{messages.visit.truncated}</p>
+                  <p className="mt-1">{messages.visit.note}</p>
+                </>
+              ) : (
+                messages.visit.note
+              )
+            }
           >
             {query.isPending ? (
               <PanelSkeleton rows={3} />
-            ) : query.isError || !visit ? (
+            ) : query.isError || !timeline ? (
               <PanelEmpty
                 tone="error"
                 icon={MousePointerClick}
                 title={messages.visit.unavailable}
               />
-            ) : pageViews.length === 0 ? (
-              <p className="px-4 py-6 text-[0.8125rem] text-muted-foreground">
-                {messages.visit.noPages}
-              </p>
             ) : (
-              <>
-                <ol className="divide-y divide-border">
-                  {pageViews.map((pageView) => (
-                    <li key={pageView.sequence} className="flex items-baseline gap-4 px-4 py-3">
-                      <time
-                        dateTime={pageView.receivedAt}
-                        className="shrink-0 text-xs text-muted-foreground tabular-nums"
-                      >
-                        {format.timeIn(visit.startedAt, pageView.receivedAt)}
-                      </time>
-                      <span className="min-w-0 font-mono text-[0.8125rem] break-all">
-                        {pageView.route}
-                      </span>
-                    </li>
-                  ))}
-                </ol>
-                {query.hasNextPage ? (
-                  <div className="px-4 py-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={query.isFetchingNextPage}
-                      onClick={() => void query.fetchNextPage()}
-                    >
-                      {messages.visit.loadMore}
-                    </Button>
-                  </div>
-                ) : null}
-              </>
+              <VisitEntries timeline={timeline} />
             )}
           </Panel>
         )}
@@ -487,14 +469,15 @@ function VisitTimeline({
 }
 
 function VisitHeader({
-  visit,
+  timeline,
   names,
 }: {
-  readonly visit: Visit
+  readonly timeline: GetActivityVisitTimelineResponse
   readonly names: ReadonlyMap<string, string>
 }) {
   const messages = useActivityMessages().source
   const format = useUtcFormat()
+  const { visit } = timeline
   const facts = [
     { label: messages.label, value: sourceLabel(visit, messages) },
     ...(visit.attribution?.medium
@@ -521,6 +504,7 @@ function VisitHeader({
           </div>
         ))}
       </dl>
+      {timeline.connection ? <ConnectionLine connection={timeline.connection} /> : null}
     </div>
   )
 }
@@ -582,75 +566,12 @@ function sourceLabel(
   return attribution.referrer ?? messages.direct
 }
 
-type UtcFormat = ReturnType<typeof useUtcFormat>
-
-/** Activity counts in UTC days, so its times read in UTC too, and say so. */
-function useUtcFormat() {
-  const locale = useLocale()
-  return useMemo(() => {
-    const thisYear = new Date().getUTCFullYear()
-    const day = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone: "UTC" })
-    const dayAndYear = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" })
-    const clock = new Intl.DateTimeFormat(locale, { timeStyle: "short", timeZone: "UTC" })
-    const clockWithSeconds = new Intl.DateTimeFormat(locale, {
-      timeStyle: "medium",
-      timeZone: "UTC",
-    })
-
-    const date = (at: Date) =>
-      at.getUTCFullYear() === thisYear ? day.format(at) : dayAndYear.format(at)
-
-    return {
-      /** `Oct 20 · 10:03–10:16`: the date once, or each day for a visit across midnight. */
-      range(startedAt: string, lastSeenAt: string): string {
-        const start = new Date(startedAt)
-        const end = new Date(lastSeenAt)
-        const from = clock.format(start)
-        const to = clock.format(end)
-
-        if (utcDay(start) !== utcDay(end)) {
-          return `${date(start)} ${from} – ${date(end)} ${to}`
-        }
-        return `${date(start)} · ${from === to ? from : `${from}–${to}`}`
-      },
-      /** A time within a visit: the clock alone, with the date once it is another day. */
-      timeIn(startedAt: string, at: string): string {
-        const time = new Date(at)
-        const sameDay = utcDay(new Date(startedAt)) === utcDay(time)
-        return sameDay ? clockWithSeconds.format(time) : `${date(time)} ${clock.format(time)}`
-      },
-    }
-  }, [locale])
-}
-
 function VisitRange({ visit, format }: { readonly visit: Visit; readonly format: UtcFormat }) {
   const messages = useActivityMessages()
   return (
     <span className="tabular-nums">
       {format.range(visit.startedAt, visit.lastSeenAt)}{" "}
       <span className="text-[0.6875rem] text-muted-foreground/80">{messages.utc}</span>
-    </span>
-  )
-}
-
-/**
- * A row's facts. Each separator leads its fact, and the list is shifted left by one separator
- * under a clip, so the separator of a fact that wraps to the start of a line is cut away: no line
- * starts or ends on one.
- */
-function MetaItems({ items }: { readonly items: readonly ReactNode[] }) {
-  return (
-    <span className="block w-full min-w-0 overflow-hidden">
-      <span className="-ml-4 flex flex-wrap items-center">
-        {items.map((item, index) => (
-          <span key={index} className="inline-flex min-w-0 items-center">
-            <span aria-hidden className="w-4 shrink-0 text-center text-muted-foreground/50">
-              ·
-            </span>
-            <span className="truncate">{item}</span>
-          </span>
-        ))}
-      </span>
     </span>
   )
 }
