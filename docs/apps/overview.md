@@ -203,7 +203,7 @@ replaces the built-in one: `app/settings/members/page.tsx` replaces Members.
 
 | Group | Page | Path | Shows |
 | --- | --- | --- | --- |
-| Your account | Personal | `/settings/personal` | The person's name, email, and groups, the theme, and where they are signed in |
+| Your account | Personal | `/settings/personal` | Their name (editable unless their identity provider sets it), email and groups, the theme, and where they are signed in |
 | Your account | Developers | `/settings/developers` | Their [personal access tokens](../auth/members.md#service-accounts-and-tokens) |
 | Project | Members | `/settings/members` | Members and invitations their [membership policy](../auth/members.md) covers |
 | Project | Service accounts | `/settings/service-accounts` | Service accounts and their tokens, with the `serviceAccounts` policy operation |

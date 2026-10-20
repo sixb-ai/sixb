@@ -95,7 +95,7 @@ Bootstrap groups are applied on every sign-in. Use invitations for subsequent us
 
 ## Names and pictures
 
-Each person has a name and a picture that the app shows wherever it shows them. People change their own with `PATCH /api/auth/profile`, which takes `displayName` and `avatarUrl`; `null` clears one.
+Each person has a name and a picture that the app shows wherever it shows them. People change their name in Settings › Personal. Both can also be changed with `PATCH /api/auth/profile`, which takes `displayName` and `avatarUrl`; `null` clears one.
 
 With OIDC, the identity provider owns the ones it sends: every sign-in updates them from the `name` and `picture` claims, and people cannot change them in Sixb. A field the provider does not send stays editable, such as the picture with Microsoft Entra. `GET /api/auth/profile` lists the fields the provider owns in `managedFields`.
 
