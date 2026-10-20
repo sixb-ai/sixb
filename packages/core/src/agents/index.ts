@@ -26,6 +26,7 @@ export {
   resolveAgentExecutionAuthorization,
   resolveAgentPropertyClearance,
   resolveInheritedAgentExecutionAuthorization,
+  userCanRunAgent,
 } from "./authority"
 export { defineAgentTool } from "./builders"
 export type {

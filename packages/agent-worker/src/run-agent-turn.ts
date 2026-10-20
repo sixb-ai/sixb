@@ -7,6 +7,7 @@ import {
   type AgentRunFinishReason,
   type AgentRunRecord,
   type AgentStorage,
+  type AgentThreadRecord,
   type ConversationAgentRunRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
@@ -21,6 +22,7 @@ import { AgentTurnTimeoutError } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
+import { type ConversationReaders, loadConversationAuthors } from "./message-authors"
 import { loadUserMessageTimes } from "./message-times"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
@@ -45,6 +47,8 @@ export interface RunAgentTurnInput {
   readonly stopSignal?: AbortSignal
   /** Shared with preflight when this turn performed compaction. */
   readonly runtime?: AgentTurnRuntime
+  /** The thread and who can read it now; without it the model is told nothing of its people. */
+  readonly conversation?: ConversationReaders
   /** Preflight's retained projection, avoiding a second storage read in the worker path. */
   readonly threadContext?: LoadedAgentThreadModelContext
 }
@@ -84,15 +88,38 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
           signal,
         })
       : undefined)
-  const sentTimes = await loadUserMessageTimes({
-    storage: agents,
-    projectId,
-    threadId: run.threadId,
-    messages: threadContext.retainedMessages,
-    projectTimeZone: context.projectTimeZone,
-  })
+  const [sentTimes, authors] = await Promise.all([
+    loadUserMessageTimes({
+      storage: agents,
+      projectId,
+      threadId: run.threadId,
+      messages: threadContext.retainedMessages,
+      projectTimeZone: context.projectTimeZone,
+    }),
+    input.conversation
+      ? loadConversationAuthors({
+          auth: storage.auth,
+          conversation: input.conversation,
+          messages: threadContext.retainedMessages,
+        })
+      : undefined,
+  ])
+  const newestUserMessageId = threadContext.retainedMessages
+    .filter((message) => message.role === "user")
+    .at(-1)?.id
+
   const modelMessages = toModelMessages(threadContext.modelMessages, {
-    userMessageSuffix: (message) => (message.id ? sentTimes.get(message.id) : undefined),
+    // Who takes part, then when, then who wrote it: `<sixb_author>` stays the message's last tag.
+    userMessageSuffix: (message) => {
+      if (!message.id) return undefined
+
+      const closing = [
+        message.id === newestUserMessageId ? authors?.section : undefined,
+        sentTimes.get(message.id),
+        authors?.byMessageId.get(message.id),
+      ]
+      return closing.filter(Boolean).join("\n") || undefined
+    },
     fileText: ({ message, partIndex }) =>
       message.id
         ? attachmentContext?.promptTextByPartKey.get(attachmentKey(message.id, partIndex))

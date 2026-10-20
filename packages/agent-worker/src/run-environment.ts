@@ -38,6 +38,7 @@ import { prepareAgentConversationContext } from "./context-compaction"
 import { ephemeralRunSandbox } from "./ephemeral-run-sandbox"
 import { assertExecutionOwned, isLostExecution } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
+import type { ConversationReaders } from "./message-authors"
 import { type AgentErrorDetails, modelToolsFromAgentDefinitions } from "./model-adapters"
 import { persistentRunSandbox } from "./persistent-run-sandbox"
 import type { AcquiredRunSandbox, RunSandbox } from "./run-sandbox"
@@ -88,6 +89,8 @@ interface CreateAgentEnvironmentInput {
 
 export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvironmentInput {
   readonly thread?: AgentThreadRecord | null
+  /** Who can read the thread now: in a shared one, who wrote what counts toward the estimate. */
+  readonly conversation?: ConversationReaders
   readonly sandboxDefinition?: SandboxDefinition
   /** Run preflight only after current sandbox access has been resolved. */
   readonly preflight?: { readonly budget: AgentContextBudget; readonly runtime: AgentTurnRuntime }
@@ -148,6 +151,7 @@ export async function createConversationAgentEnvironment(
           plan,
           ontologyIndex: ontologyDocs.index,
           run,
+          ...(input.conversation === undefined ? {} : { conversation: input.conversation }),
           budget: preflight.budget,
           runtime: {
             ...preflight.runtime,

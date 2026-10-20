@@ -15,6 +15,7 @@ import type {
   AgentContextCheckpointReason,
   AgentContextCheckpointRecord,
   AgentMessageRecord,
+  AgentThreadRecord,
   ConversationAgentRunRecord,
 } from "@sixb/core/storage"
 import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
@@ -22,6 +23,11 @@ import { agentRuntimeFacts, renderAgentSystemPrompt } from "./agent-prompt"
 import type { AgentContextBudget } from "./context-budget"
 import { AgentContextCompactionError, AgentExecutionLostError } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
+import {
+  type ConversationReaders,
+  conversationAuthorsText,
+  loadConversationAuthors,
+} from "./message-authors"
 import { type LoadedAgentThreadModelContext, loadAgentThreadModelContext } from "./thread-context"
 import { type AgentModelToolSpec, agentModelToolSpecs } from "./tools/model-spec"
 import type { AgentTurnRuntime } from "./turn-runtime"
@@ -58,6 +64,8 @@ export async function prepareAgentConversationContext(input: {
   readonly ontologyIndex?: readonly OntologyDocsIndexEntry[]
   readonly budget: AgentContextBudget
   readonly run: ConversationAgentRunRecord
+  /** Who can read the run's thread: in a shared one, who wrote what counts toward the estimate. */
+  readonly conversation?: ConversationReaders
   readonly runtime: AgentTurnRuntime
   readonly frameworkTools?: readonly ModelTool[]
 }): Promise<PreparedAgentConversationContext> {
@@ -69,14 +77,26 @@ export async function prepareAgentConversationContext(input: {
   })
   runtime.assertCanContinue()
 
+  // The authors ride on user messages, not the system prompt; an estimate only needs their size.
+  const authors = input.conversation
+    ? await loadConversationAuthors({
+        auth: context.storage.auth,
+        conversation: input.conversation,
+        messages: initialContext.retainedMessages,
+      })
+    : undefined
+
   const estimateShape = {
-    systemPrompt: renderAgentSystemPrompt({
-      mode: "conversation",
-      instructions: plan.instructions,
-      skills: plan.skills,
-      ...(input.ontologyIndex === undefined ? {} : { ontologyIndex: input.ontologyIndex }),
-      facts: agentRuntimeFacts(plan, context),
-    }),
+    systemPrompt: [
+      renderAgentSystemPrompt({
+        mode: "conversation",
+        instructions: plan.instructions,
+        skills: plan.skills,
+        ...(input.ontologyIndex === undefined ? {} : { ontologyIndex: input.ontologyIndex }),
+        facts: agentRuntimeFacts(plan, context),
+      }),
+      authors ? conversationAuthorsText(authors) : "",
+    ].join("\n"),
     tools: contextEstimateTools([
       ...agentModelToolSpecs({
         definitions: plan.tools,

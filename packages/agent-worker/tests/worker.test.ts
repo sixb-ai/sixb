@@ -8794,6 +8794,104 @@ describe("AgentWorker", () => {
     }
   })
 
+  // Guard proof: drop the section or the authors from userMessageSuffix in runAgentTurn; the
+  // shared turn then cannot tell who takes part or who wrote what.
+  test("tells the model who wrote each message of a shared thread, and stores none of it", async () => {
+    const requests: LanguageModelRequest[] = []
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (request) => {
+        requests.push(request)
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "Done" },
+          { type: "text-end", id: "answer" },
+          finish("stop"),
+        ])
+      },
+    })
+    // Bob reads the thread through a role, so the model is told he takes part.
+    const chatters = defineGroup("chatters")
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      security: {
+        ontology: [],
+        groups: [AGENT_RUNTIME_GROUP, chatters],
+        roles: [defineRole("chat.users", { grantedTo: [chatters], grants: [can.run(agent)] })],
+      },
+    })
+    const storage = agentStorageOf(sixb)
+    const alice = { type: "user", id: "usr_alice" } as const
+    const bob = { type: "user", id: "usr_bob" } as const
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const terminal = (runId: string) =>
+        waitFor(
+          async () => {
+            const run = await storage.runs.getById({ projectId: PROJECT_ID, id: runId })
+            return run && run.status !== "queued" && run.status !== "running" ? run : null
+          },
+          { label: "shared run terminal" }
+        )
+
+      const first = await requestAgentAs(sixb, alice, { text: "Which deals slipped?" })
+      await terminal(first.run.id)
+      const threadId = first.run.threadId
+
+      await authStorageOf(sixb).users.create({
+        projectId: PROJECT_ID,
+        id: bob.id,
+        email: "usr_bob@example.com",
+      })
+      await authStorageOf(sixb).groupMemberships.upsert({
+        projectId: PROJECT_ID,
+        userId: bob.id,
+        groupId: chatters.id,
+        source: "manual",
+      })
+      await storage.threads.addParticipants({
+        projectId: PROJECT_ID,
+        threadId,
+        principals: [bob],
+        addedBy: alice,
+        maxParticipants: 50,
+      })
+      const second = await requestAgentAs(sixb, bob, { text: "Why did Acme slip?", threadId })
+      await terminal(second.run.id)
+
+      const alone = requests[0]
+      const shared = requests.at(-1)
+      if (!alone || !shared) throw new Error("Expected the model to be called.")
+
+      const text = (request: LanguageModelRequest) => JSON.stringify(request.messages)
+      expect(text(alone)).not.toContain("sixb_author")
+      expect(text(alone)).not.toContain("sixb_conversation")
+
+      // Names are data: the system prompt of a shared thread is the one of any other.
+      expect(shared.messages[0]).toEqual(alone.messages[0])
+
+      const closings = shared.messages
+        .filter((message) => message.role === "user")
+        .map((message) => {
+          const last = message.content.at(-1)
+          return last?.type === "text" ? last.text : ""
+        })
+      expect(closings[0]).not.toContain("sixb_conversation")
+      expect(closings[0]).toEndWith('<sixb_author id="usr_alice">usr_alice</sixb_author>')
+
+      // The newest message carries who takes part, then when it was sent, then who sent it.
+      expect(closings[1]).toMatch(
+        /^\n\n<sixb_conversation>\nThis conversation is shared\. Its owner: usr_alice\.\nAlso taking part: usr_bob\.[\s\S]*<\/sixb_conversation>\n<sixb_current_time>[^<]*<\/sixb_current_time>\n<sixb_author id="usr_bob">usr_bob<\/sixb_author>$/
+      )
+
+      const stored = JSON.stringify(await listMessages(storage, threadId))
+      expect(stored).not.toContain("sixb_author")
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("pairs the canonical conversation prompt with the provisioned CLI runtime and gateway env", async () => {
     let capturedSystem: string | undefined
     const sandboxes = new RecordingSandboxFactory()
