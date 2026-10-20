@@ -717,15 +717,7 @@ describe("runs gateway requests inside the agent run's execution", () => {
       new Request(`${gatewayBaseUrl}/api/objects/query`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          query: {
-            kind: "vector",
-            input: { kind: "start", objectTypeId: "device" },
-            profile: "content",
-            vector: "fan",
-            k: 1,
-          },
-        }),
+        body: JSON.stringify({ query: deviceSearchQuery() }),
       })
     )
     expect(search.status).toBe(200)
@@ -750,6 +742,39 @@ describe("runs gateway requests inside the agent run's execution", () => {
       "limit-requester": { meter: "tokens.total", amount: 7 },
       "limit-agent": { meter: "tokens.total", amount: 0 },
     })
+  })
+
+  // Removal proof: build the forwarded request without the caller's `signal` in
+  // handleAgentApiGatewayRequest and the embedding runs to its own timeout, never aborted.
+  test("cancels the forwarded work when the caller aborts", async () => {
+    let embedding: AbortSignal | undefined
+    let embeddingStarted: () => void = () => {}
+    const started = new Promise<void>((resolve) => {
+      embeddingStarted = resolve
+    })
+    const { app, gatewayBaseUrl } = await createGatewayRuntime({
+      embed: async ({ texts, signal }) => {
+        embedding = signal
+        embeddingStarted()
+        await abortedOrTimedOut(signal, 2_000)
+        return { vectors: texts.map(() => [1, 0, 0]), usage: { inputTokens: 7 } }
+      },
+    })
+
+    const caller = new AbortController()
+    const response = app.fetch(
+      new Request(`${gatewayBaseUrl}/api/objects/query`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query: deviceSearchQuery() }),
+        signal: caller.signal,
+      })
+    )
+    await started
+    caller.abort()
+    await Promise.resolve(response).catch(() => undefined)
+
+    expect(embedding?.aborted).toBe(true)
   })
 
   // Removal proof: restore the `!host.auth.isEnabled()` shortcut in resolveAgentRunAuthState and
@@ -789,6 +814,31 @@ describe("runs gateway requests inside the agent run's execution", () => {
     })
   })
 })
+
+function deviceSearchQuery() {
+  return {
+    kind: "vector",
+    input: { kind: "start", objectTypeId: "device" },
+    profile: "content",
+    vector: "fan",
+    k: 1,
+  }
+}
+
+/** Resolve once the signal aborts, or after `timeoutMs` so a missed abort cannot hang the test. */
+function abortedOrTimedOut(signal: AbortSignal | undefined, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs)
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer)
+        resolve()
+      },
+      { once: true }
+    )
+  })
+}
 
 async function labelDeviceThroughGateway(
   app: ReturnType<typeof createSixbApi>,
@@ -856,6 +906,8 @@ async function createGatewayRuntime(
     readonly queueLeaseExpiresAt?: Date
     /** A workflow AI task's delivery attempt: above 1, the task was redelivered. */
     readonly attempt?: number
+    /** Replaces how the device embedding model embeds, keeping its identity. */
+    readonly embed?: EmbeddingModel["embed"]
   } = {}
 ): Promise<{
   readonly app: ReturnType<typeof createSixbApi>
@@ -874,7 +926,9 @@ async function createGatewayRuntime(
     workflows: [inspectDevices],
     groups: [agentRuntime, noteReaders],
     roles: [agentRole, noteReaderRole],
-    models: { embedding: [deviceEmbeddings] },
+    models: {
+      embedding: [options.embed ? { ...deviceEmbeddings, embed: options.embed } : deviceEmbeddings],
+    },
     broker: new InMemoryBroker(),
     storage,
     lakeStorage: new InMemoryLakeStorage(),
