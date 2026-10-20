@@ -3,7 +3,7 @@ import { withFailureMessage } from "../../errors/failure-message"
 import type { ObjectFieldSchema, Schema, ValueType, ValueTypeRefSchema } from ".."
 import { isDecimalString } from "../decimal"
 import { OntologyValidationError } from "../errors"
-import { isUserRef } from "../user-ref"
+import { currentUserNotStorableMessage, isCurrentUser, isUserRef } from "../user-ref"
 
 /** Recursive schema validator used by both object and link property validation. */
 export function validateSchemaValue(
@@ -81,6 +81,14 @@ export function validateSchemaValue(
         return
       }
       case "userRef": {
+        if (isCurrentUser(value)) {
+          throw withFailureMessage(
+            new OntologyValidationError(
+              `[Sixb] ${currentUserNotStorableMessage(`Property ${path}`)}`
+            ),
+            currentUserNotStorableMessage(`Property ${diagnosticPath}`)
+          )
+        }
         if (!isUserRef(value)) {
           throw withFailureMessage(
             new OntologyValidationError(

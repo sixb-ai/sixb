@@ -133,6 +133,10 @@ To show the member's name, email, or avatar, read the
 [member directory](../auth/members.md#read-the-member-directory), or include the profiles in a
 query with [`expand()`](../objects/querying.md#include-the-members-a-property-names).
 
+To match the user who runs a query, use [`currentUser()`](../objects/querying.md#match-the-reading-user)
+instead of a fixed ID: `task.p.assignee.eq(currentUser())`. It only stands for that user in a query
+predicate, so a property cannot store it.
+
 User references are set by your code, actions, and workflows. Projections, telemetry properties,
 link properties, and action parameters of a [share](../auth/shared-access.md) cannot use them yet. For a
 person who is part of your domain rather than a project member, such as a customer contact, define
