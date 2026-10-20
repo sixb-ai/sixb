@@ -202,6 +202,8 @@ const ActivityTimelineEntrySchema = z.discriminatedUnion("kind", [
     executionId: z.string(),
     runId: z.string(),
     threadId: z.string(),
+    /** Only for a reader with can.observe(agent.threads), who can open the conversation. */
+    thread: z.object({ title: z.string().optional() }).optional(),
     status: AgentRunStatusSchema,
     messages: z.number(),
     cost: AiCostSummarySchema.optional(),
