@@ -13,6 +13,10 @@ import {
   isActivityRoutePattern,
 } from "@sixb/core/internal/storage"
 import { z } from "zod"
+import { ActionRunStatusSchema } from "./actions"
+import { AgentRunStatusSchema } from "./agents"
+import { AiCostSummarySchema } from "./ai-accounting"
+import { WorkflowRunStatusSchema } from "./workflows"
 
 // The limits come from the activity policy, so the API refuses what the providers would.
 const VisitIdSchema = z.string().regex(ACTIVITY_VISIT_ID_PATTERN)
@@ -130,6 +134,84 @@ export const ActivityVisitPageSchema = z.object({
   hasMore: z.boolean(),
 })
 
+const ActivityConnectionStatusSchema = z.enum(["active", "expired", "revoked"])
+
+const ActivitySessionConnectionSchema = z.object({
+  type: z.literal("session"),
+  device: z.object({ browser: z.string().optional(), os: z.string().optional() }),
+  clientName: z.string().optional(),
+  status: ActivityConnectionStatusSchema,
+  createdAt: z.string().datetime(),
+  lastSeenAt: z.string().datetime().optional(),
+  revokedAt: z.string().datetime().optional(),
+})
+
+const ActivityShareConnectionSchema = z.object({
+  type: z.literal("share"),
+  grantId: z.string(),
+  definitionId: z.string().optional(),
+  status: ActivityConnectionStatusSchema,
+  createdAt: z.string().datetime(),
+  revokedAt: z.string().datetime().optional(),
+})
+
+const ActivityTimelineEntrySchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("page"),
+    at: z.string().datetime(),
+    sequence: z.number(),
+    route: z.string(),
+  }),
+  z.object({
+    kind: z.literal("action"),
+    at: z.string().datetime(),
+    executionId: z.string(),
+    actionId: z.string(),
+    runId: z.string(),
+    status: z.union([ActionRunStatusSchema, z.literal("incomplete")]),
+    runVisible: z.boolean().describe("Whether the viewer may read the run itself."),
+    object: z.object({ objectTypeId: z.string(), primaryId: z.string() }).optional(),
+  }),
+  z.object({
+    kind: z.literal("workflow"),
+    at: z.string().datetime(),
+    executionId: z.string(),
+    workflowId: z.string(),
+    runId: z.string(),
+    status: z.union([WorkflowRunStatusSchema, z.literal("incomplete")]),
+    runVisible: z.boolean().describe("Whether the viewer may read the run itself."),
+  }),
+  z.object({
+    kind: z.literal("agent"),
+    at: z.string().datetime(),
+    executionId: z.string(),
+    runId: z.string(),
+    threadId: z.string(),
+    status: AgentRunStatusSchema,
+    messages: z.number(),
+    cost: AiCostSummarySchema.optional(),
+  }),
+])
+
+export const ActivityVisitTimelineSchema = z.object({
+  visit: ActivityVisitSchema,
+  connection: z
+    .discriminatedUnion("type", [ActivitySessionConnectionSchema, ActivityShareConnectionSchema])
+    .optional(),
+  entries: z.array(ActivityTimelineEntrySchema),
+  truncated: z.boolean(),
+})
+
+export const ActivityConnectionsPageSchema = z.object({
+  connections: z.array(
+    ActivitySessionConnectionSchema.extend({
+      visits: z.number(),
+      latestVisits: z.array(ActivityVisitSchema),
+    })
+  ),
+  nextCursor: z.string().optional(),
+})
+
 export const ActivityCalendarSchema = z.object({
   userId: z.string(),
   year: z.number(),
@@ -171,6 +253,18 @@ export const ActivityPageQuerySchema = z
 export const ActivityCalendarQuerySchema = z.object({
   userId: UserIdSchema,
   year: z.coerce.number().int().min(1970).max(9998),
+})
+
+export const ActivityConnectionsQuerySchema = z.object({
+  userId: UserIdSchema,
+  limit: PageSizeSchema.optional(),
+  cursor: z
+    .string()
+    .min(1)
+    .max(200)
+    .regex(/^[A-Za-z0-9_-]+$/)
+    .optional()
+    .describe("The previous page's nextCursor."),
 })
 
 export const ActivityVisitParamsSchema = z.object({ visitId: VisitIdSchema })

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   can,
+  defineAction,
   defineGroup,
   defineObjectType,
   defineRole,
@@ -31,10 +32,19 @@ const SharedItem = defineShare("shared-item", {
   target: Item,
   grants: ({ target }) => [can.view(target)],
 })
+const MarkSeen = defineAction("markSeen")
+  .on(Item)
+  .params({})
+  .writeback(() => ({}))
 const observers = defineGroup("observers")
 const observer = defineRole("observer", {
   grantedTo: [observers],
   grants: [can.observe(project.activity), can.view(Item), can.share(SharedItem)],
+})
+const members = defineGroup("members")
+const member = defineRole("member", {
+  grantedTo: [members],
+  grants: [can.view(Item), can.apply(MarkSeen)],
 })
 
 const projectId = "activity-routes"
@@ -45,9 +55,10 @@ async function createFixture(enabled = true) {
   const host = new SixbHost({
     id: projectId,
     ontology: [Item],
+    actions: [MarkSeen],
     shares: [SharedItem],
-    groups: [observers],
-    roles: [observer],
+    groups: [observers, members],
+    roles: [observer, member],
     storage,
     broker: new InMemoryBroker(),
     lakeStorage: new InMemoryLakeStorage(),
@@ -60,20 +71,20 @@ async function createFixture(enabled = true) {
     new SixbServer({ host, quiet: true, browser: createTestBrowserPolicy() })
   )
 
-  async function user(userId: string, options: { observer?: boolean } = {}) {
+  async function user(userId: string, options: { observer?: boolean; member?: boolean } = {}) {
     await storage.auth.users.create({ projectId, id: userId, email: `${userId}@example.test` })
-    if (options.observer) {
-      await storage.auth.groupMemberships.upsert({
-        projectId,
-        userId,
-        groupId: observers.id,
-        source: "manual",
-      })
+
+    const groups = [
+      ...(options.observer ? [observers.id] : []),
+      ...(options.member ? [members.id] : []),
+    ]
+    for (const groupId of groups) {
+      await storage.auth.groupMemberships.upsert({ projectId, userId, groupId, source: "manual" })
     }
   }
 
   /** A browser session: its cookie, and the CSRF pair a mutation adds. */
-  async function browser(userId: string, options: { observer?: boolean } = {}) {
+  async function browser(userId: string, options: { observer?: boolean; member?: boolean } = {}) {
     await user(userId, options)
     const credential = createSessionCredential(`ses_${userId}`)
     await storage.auth.sessions.create({
@@ -84,6 +95,9 @@ async function createFixture(enabled = true) {
       tokenHash: credential.tokenHash,
       createdAt: new Date(),
       expiresAt: new Date(Date.now() + 86_400_000),
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+      ipAddress: "203.0.113.7",
     })
     return {
       cookie: `sixb_session_app=${credential.cookieValue}; sixb_csrf_app=csrf-token`,
@@ -162,6 +176,97 @@ describe("activity routes", () => {
     // A browser names neither who it is nor whose visit it adds to.
     const impersonating = { userId: "someone-else", events: [{ ...pageView, id: "e2" }] }
     expect((await fixture.post(reader, impersonating)).status).toBe(422)
+  })
+
+  test("a visit's timeline shows the actions its browser session applied", async () => {
+    const fixture = await createFixture()
+    const reader = await fixture.browser("reader", { member: true })
+    const viewer = await fixture.browser("viewer", { observer: true })
+    await createTestSixb(fixture.host)
+      .objects(Item)
+      .upsert({ properties: { id: "one" } })
+
+    await fixture.post(reader)
+    const applied = await fixture.app.fetch(
+      new Request("http://api.localhost/api/actions/markSeen", {
+        method: "POST",
+        headers: { ...reader, "content-type": "application/json" },
+        body: JSON.stringify({
+          subject: { kind: "object", objectTypeId: "Item", primaryId: "one" },
+          runId: "act_seen",
+        }),
+      })
+    )
+    expect(applied.status).toBe(200)
+
+    const visits = await (await fixture.get(`visits${fixture.range}`, viewer)).json()
+    const path = `visits/${visits.visits[0].id}/timeline`
+    const timeline = await (await fixture.get(path, viewer)).json()
+
+    expect(timeline.connection).toEqual({
+      type: "session",
+      device: { browser: "Safari", os: "macOS" },
+      status: "active",
+      createdAt: expect.any(String),
+      lastSeenAt: expect.any(String),
+    })
+    expect(
+      timeline.entries.map(
+        ({ at: _at, executionId: _id, ...entry }: { at: string; executionId?: string }) => entry
+      )
+    ).toEqual([
+      { kind: "page", sequence: 1, route: "/items/:id" },
+      {
+        kind: "action",
+        actionId: "markSeen",
+        runId: "act_seen",
+        status: "succeeded",
+        runVisible: false,
+        object: { objectTypeId: "Item", primaryId: "one" },
+      },
+    ])
+    expect(timeline.truncated).toBe(false)
+    for (const hidden of ["ses_reader", "203.0.113.7", "Mozilla"]) {
+      expect(JSON.stringify(timeline)).not.toContain(hidden)
+    }
+
+    expect((await fixture.get(path, reader)).status).toBe(403)
+    expect((await fixture.get("visits/visit_missing/timeline", viewer)).status).toBe(404)
+  })
+
+  test("a user's connections list their sign-ins with the visits each opened", async () => {
+    const fixture = await createFixture()
+    const reader = await fixture.browser("reader")
+    const viewer = await fixture.browser("viewer", { observer: true })
+    await fixture.post(reader)
+
+    const visits = await (await fixture.get(`visits${fixture.range}`, viewer)).json()
+    const response = await fixture.get("connections?userId=reader", viewer)
+    const page = await response.json()
+
+    expect(page).toEqual({
+      connections: [
+        {
+          type: "session",
+          device: { browser: "Safari", os: "macOS" },
+          status: "active",
+          createdAt: expect.any(String),
+          lastSeenAt: expect.any(String),
+          visits: 1,
+          latestVisits: [expect.objectContaining({ id: visits.visits[0].id, pageViews: 1 })],
+        },
+      ],
+    })
+    for (const hidden of ["ses_reader", "203.0.113.7", "Mozilla"]) {
+      expect(JSON.stringify(page)).not.toContain(hidden)
+    }
+
+    expect((await fixture.get("connections?userId=reader", reader)).status).toBe(403)
+    expect(
+      (await fixture.get("connections?userId=reader&cursor=not%20a%20cursor", viewer)).status
+    ).toBe(422)
+    expect((await fixture.get("connections?userId=reader&cursor=bm9wZQ", viewer)).status).toBe(400)
+    expect((await fixture.get("connections?userId=", viewer)).status).toBe(422)
   })
 
   // Guard proof: drop the credentialTransport check in assertBrowserCapture; the native session

@@ -109,6 +109,9 @@ import type {
   GetActivityVisitData,
   GetActivityVisitErrors,
   GetActivityVisitResponses,
+  GetActivityVisitTimelineData,
+  GetActivityVisitTimelineErrors,
+  GetActivityVisitTimelineResponses,
   GetAgentData,
   GetAgentErrors,
   GetAgentMessageFileContentData,
@@ -249,6 +252,9 @@ import type {
   ListActionRunsResponses,
   ListActionsData,
   ListActionsResponses,
+  ListActivityConnectionsData,
+  ListActivityConnectionsErrors,
+  ListActivityConnectionsResponses,
   ListActivityUsersData,
   ListActivityUsersErrors,
   ListActivityUsersResponses,
@@ -3181,6 +3187,48 @@ export const getActivityVisit = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/activity/visits/{visitId}",
+    ...options,
+  })
+
+/**
+ * Read what one visit did
+ *
+ * Its page views, with the actions, workflows and Agent runs its session started, and the connection it came through. At most 200 page views and 200 recorded executions: see truncated.
+ */
+export const getActivityVisitTimeline = <ThrowOnError extends boolean = false>(
+  options: Options<GetActivityVisitTimelineData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetActivityVisitTimelineResponses,
+    GetActivityVisitTimelineErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/activity/visits/{visitId}/timeline",
+    ...options,
+  })
+
+/**
+ * List a user's sign-ins with the visits each opened
+ *
+ * Newest first, revoked and expired sessions included.
+ */
+export const listActivityConnections = <ThrowOnError extends boolean = false>(
+  options: Options<ListActivityConnectionsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListActivityConnectionsResponses,
+    ListActivityConnectionsErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/activity/connections",
     ...options,
   })
 

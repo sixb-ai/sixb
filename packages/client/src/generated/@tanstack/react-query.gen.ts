@@ -44,6 +44,7 @@ import {
   getActivityCaptureConfig,
   getActivitySummary,
   getActivityVisit,
+  getActivityVisitTimeline,
   getAgent,
   getAgentMessageFileContent,
   getAgentRun,
@@ -86,6 +87,7 @@ import {
   issueSharedAccessGrant,
   listActionRuns,
   listActions,
+  listActivityConnections,
   listActivityUsers,
   listActivityVisits,
   listAgentThreadMessages,
@@ -264,6 +266,9 @@ import type {
   GetActivityVisitData,
   GetActivityVisitError,
   GetActivityVisitResponse,
+  GetActivityVisitTimelineData,
+  GetActivityVisitTimelineError,
+  GetActivityVisitTimelineResponse,
   GetAgentData,
   GetAgentError,
   GetAgentMessageFileContentData,
@@ -386,6 +391,9 @@ import type {
   ListActionRunsResponse,
   ListActionsData,
   ListActionsResponse,
+  ListActivityConnectionsData,
+  ListActivityConnectionsError,
+  ListActivityConnectionsResponse,
   ListActivityUsersData,
   ListActivityUsersError,
   ListActivityUsersResponse,
@@ -5150,6 +5158,109 @@ export const getActivityVisitOptions = (options: Options<GetActivityVisitData>) 
     },
     queryKey: getActivityVisitQueryKey(options),
   })
+
+export const getActivityVisitTimelineQueryKey = (options: Options<GetActivityVisitTimelineData>) =>
+  createQueryKey("getActivityVisitTimeline", options)
+
+/**
+ * Read what one visit did
+ *
+ * Its page views, with the actions, workflows and Agent runs its session started, and the connection it came through. At most 200 page views and 200 recorded executions: see truncated.
+ */
+export const getActivityVisitTimelineOptions = (options: Options<GetActivityVisitTimelineData>) =>
+  queryOptions<
+    GetActivityVisitTimelineResponse,
+    GetActivityVisitTimelineError,
+    GetActivityVisitTimelineResponse,
+    ReturnType<typeof getActivityVisitTimelineQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getActivityVisitTimeline({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getActivityVisitTimelineQueryKey(options),
+  })
+
+export const listActivityConnectionsQueryKey = (options: Options<ListActivityConnectionsData>) =>
+  createQueryKey("listActivityConnections", options)
+
+/**
+ * List a user's sign-ins with the visits each opened
+ *
+ * Newest first, revoked and expired sessions included.
+ */
+export const listActivityConnectionsOptions = (options: Options<ListActivityConnectionsData>) =>
+  queryOptions<
+    ListActivityConnectionsResponse,
+    ListActivityConnectionsError,
+    ListActivityConnectionsResponse,
+    ReturnType<typeof listActivityConnectionsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listActivityConnections({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listActivityConnectionsQueryKey(options),
+  })
+
+export const listActivityConnectionsInfiniteQueryKey = (
+  options: Options<ListActivityConnectionsData>
+): QueryKey<Options<ListActivityConnectionsData>> =>
+  createQueryKey("listActivityConnections", options, true)
+
+/**
+ * List a user's sign-ins with the visits each opened
+ *
+ * Newest first, revoked and expired sessions included.
+ */
+export const listActivityConnectionsInfiniteOptions = (
+  options: Options<ListActivityConnectionsData>
+) =>
+  infiniteQueryOptions<
+    ListActivityConnectionsResponse,
+    ListActivityConnectionsError,
+    InfiniteData<ListActivityConnectionsResponse>,
+    QueryKey<Options<ListActivityConnectionsData>>,
+    | string
+    | Pick<QueryKey<Options<ListActivityConnectionsData>>[0], "body" | "headers" | "path" | "query">
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListActivityConnectionsData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  cursor: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listActivityConnections({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listActivityConnectionsInfiniteQueryKey(options),
+    }
+  )
 
 export const listProjectionsQueryKey = (options?: Options<ListProjectionsData>) =>
   createQueryKey("listProjections", options)

@@ -43498,6 +43498,748 @@
         }
       }
     },
+    "/api/activity/visits/{visitId}/timeline": {
+      "get": {
+        "summary": "Read what one visit did",
+        "description": "Its page views, with the actions, workflows and Agent runs its session started, and the connection it came through. At most 200 page views and 200 recorded executions: see truncated.",
+        "tags": ["Activity"],
+        "operationId": "getActivityVisitTimeline",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "visitId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "visit": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[a-zA-Z0-9_-]{1,128}$"
+                        },
+                        "actor": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["user"]
+                                },
+                                "userId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "userId"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["share"]
+                                },
+                                "grantId": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "grantId"],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "attribution": {
+                          "type": "object",
+                          "properties": {
+                            "source": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 100,
+                              "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                            },
+                            "medium": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 100,
+                              "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                            },
+                            "campaign": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 100,
+                              "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                            },
+                            "referrer": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 253,
+                              "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+                            }
+                          },
+                          "additionalProperties": false,
+                          "nullable": true
+                        },
+                        "startedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "lastSeenAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "pageViews": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "actor",
+                        "attribution",
+                        "startedAt",
+                        "lastSeenAt",
+                        "pageViews"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "connection": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["session"]
+                            },
+                            "device": {
+                              "type": "object",
+                              "properties": {
+                                "browser": {
+                                  "type": "string"
+                                },
+                                "os": {
+                                  "type": "string"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "clientName": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": ["active", "expired", "revoked"]
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "lastSeenAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "revokedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          },
+                          "required": ["type", "device", "status", "createdAt"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["share"]
+                            },
+                            "grantId": {
+                              "type": "string"
+                            },
+                            "definitionId": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": ["active", "expired", "revoked"]
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "revokedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          },
+                          "required": ["type", "grantId", "status", "createdAt"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["page"]
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "sequence": {
+                                "type": "number"
+                              },
+                              "route": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["kind", "at", "sequence", "route"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["action"]
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "executionId": {
+                                "type": "string"
+                              },
+                              "actionId": {
+                                "type": "string"
+                              },
+                              "runId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": ["succeeded", "failed"]
+                                  },
+                                  {
+                                    "type": "string",
+                                    "enum": ["incomplete"]
+                                  }
+                                ]
+                              },
+                              "runVisible": {
+                                "type": "boolean",
+                                "description": "Whether the viewer may read the run itself."
+                              },
+                              "object": {
+                                "type": "object",
+                                "properties": {
+                                  "objectTypeId": {
+                                    "type": "string"
+                                  },
+                                  "primaryId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["objectTypeId", "primaryId"],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "at",
+                              "executionId",
+                              "actionId",
+                              "runId",
+                              "status",
+                              "runVisible"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["workflow"]
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "executionId": {
+                                "type": "string"
+                              },
+                              "workflowId": {
+                                "type": "string"
+                              },
+                              "runId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "queued",
+                                      "running",
+                                      "waiting",
+                                      "succeeded",
+                                      "failed",
+                                      "cancelled"
+                                    ]
+                                  },
+                                  {
+                                    "type": "string",
+                                    "enum": ["incomplete"]
+                                  }
+                                ]
+                              },
+                              "runVisible": {
+                                "type": "boolean",
+                                "description": "Whether the viewer may read the run itself."
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "at",
+                              "executionId",
+                              "workflowId",
+                              "runId",
+                              "status",
+                              "runVisible"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["agent"]
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "executionId": {
+                                "type": "string"
+                              },
+                              "runId": {
+                                "type": "string"
+                              },
+                              "threadId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                              },
+                              "messages": {
+                                "type": "number"
+                              },
+                              "cost": {
+                                "type": "object",
+                                "properties": {
+                                  "amounts": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "currency": {
+                                          "type": "string",
+                                          "pattern": "^[A-Z]{3}$"
+                                        },
+                                        "amountNanos": {
+                                          "type": "string",
+                                          "pattern": "^\\d+$"
+                                        }
+                                      },
+                                      "required": ["currency", "amountNanos"],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "ratedCallCount": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "unpriceableCallCount": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "unvaluedCallCount": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": [
+                                  "amounts",
+                                  "ratedCallCount",
+                                  "unpriceableCallCount",
+                                  "unvaluedCallCount"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "at",
+                              "executionId",
+                              "runId",
+                              "threadId",
+                              "status",
+                              "messages"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["visit", "entries", "truncated"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/activity/connections": {
+      "get": {
+        "summary": "List a user's sign-ins with the visits each opened",
+        "description": "Newest first, revoked and expired sessions included.",
+        "tags": ["Activity"],
+        "operationId": "listActivityConnections",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "description": "The previous page's nextCursor."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "connections": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": ["session"]
+                          },
+                          "device": {
+                            "type": "object",
+                            "properties": {
+                              "browser": {
+                                "type": "string"
+                              },
+                              "os": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "clientName": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["active", "expired", "revoked"]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "lastSeenAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "revokedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "visits": {
+                            "type": "number"
+                          },
+                          "latestVisits": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "pattern": "^[a-zA-Z0-9_-]{1,128}$"
+                                },
+                                "actor": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "enum": ["user"]
+                                        },
+                                        "userId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["type", "userId"],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "enum": ["share"]
+                                        },
+                                        "grantId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["type", "grantId"],
+                                      "additionalProperties": false
+                                    }
+                                  ]
+                                },
+                                "attribution": {
+                                  "type": "object",
+                                  "properties": {
+                                    "source": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 100,
+                                      "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                                    },
+                                    "medium": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 100,
+                                      "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                                    },
+                                    "campaign": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 100,
+                                      "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                                    },
+                                    "referrer": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 253,
+                                      "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+                                    }
+                                  },
+                                  "additionalProperties": false,
+                                  "nullable": true
+                                },
+                                "startedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "lastSeenAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "pageViews": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "actor",
+                                "attribution",
+                                "startedAt",
+                                "lastSeenAt",
+                                "pageViews"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "device",
+                          "status",
+                          "createdAt",
+                          "visits",
+                          "latestVisits"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["connections"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projections": {
       "get": {
         "summary": "List all projection definitions",

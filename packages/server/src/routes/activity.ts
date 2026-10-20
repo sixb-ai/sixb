@@ -1,4 +1,10 @@
-import { AuthorizationError, type SixbHostView } from "@sixb/core"
+import {
+  type ActivityConnection,
+  type ActivityTimelineEntry,
+  type ActivityVisitTimeline,
+  AuthorizationError,
+  type SixbHostView,
+} from "@sixb/core"
 import { getActivityCaptureRuntime } from "@sixb/core/internal/runtime"
 import type { ActivityVisit } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
@@ -16,6 +22,8 @@ import {
   ActivityCalendarSchema,
   ActivityCaptureOptionsSchema,
   ActivityCaptureResultSchema,
+  ActivityConnectionsPageSchema,
+  ActivityConnectionsQuerySchema,
   ActivityPageQuerySchema,
   ActivityPeriodQuerySchema,
   ActivitySummarySchema,
@@ -24,6 +32,7 @@ import {
   ActivityVisitParamsSchema,
   ActivityVisitQuerySchema,
   ActivityVisitsPageSchema,
+  ActivityVisitTimelineSchema,
   CaptureActivityBodySchema,
 } from "../schemas/activity"
 import { ErrorResponseSchema } from "../schemas/common"
@@ -226,6 +235,64 @@ export function registerActivityRoutes(app: Elysia, _host: SixbHostView) {
     }
   )
 
+  app.get(
+    "/api/activity/visits/:visitId/timeline",
+    async (context) => {
+      try {
+        const timeline = await requireRequestSixb(context).activity.timeline(context.params.visitId)
+        if (!timeline) {
+          context.set.status = 404
+          return { error: "Activity visit not found" }
+        }
+
+        return serializeTimeline(timeline)
+      } catch (error) {
+        return handleRouteError(error, context.set)
+      }
+    },
+    {
+      params: ActivityVisitParamsSchema,
+      response: { 200: ActivityVisitTimelineSchema, 404: ErrorResponseSchema, ...errors },
+      detail: {
+        summary: "Read what one visit did",
+        description:
+          "Its page views, with the actions, workflows and Agent runs its session started, and the connection it came through. At most 200 page views and 200 recorded executions: see truncated.",
+        tags: [OPENAPI_TAGS.activity.name],
+        operationId: "getActivityVisitTimeline",
+        security: accessTokenSecurityRequirement("getActivityVisitTimeline"),
+      },
+    }
+  )
+
+  app.get(
+    "/api/activity/connections",
+    async (context) => {
+      try {
+        const page = await requireRequestSixb(context).activity.connections(context.query)
+        return {
+          connections: page.connections.map((connection) => ({
+            ...serializeConnection(connection),
+            latestVisits: connection.latestVisits.map(serializeVisit),
+          })),
+          ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+        }
+      } catch (error) {
+        return handleRouteError(error, context.set)
+      }
+    },
+    {
+      query: ActivityConnectionsQuerySchema,
+      response: { 200: ActivityConnectionsPageSchema, ...errors },
+      detail: {
+        summary: "List a user's sign-ins with the visits each opened",
+        description: "Newest first, revoked and expired sessions included.",
+        tags: [OPENAPI_TAGS.activity.name],
+        operationId: "listActivityConnections",
+        security: accessTokenSecurityRequirement("listActivityConnections"),
+      },
+    }
+  )
+
   return app
 }
 
@@ -254,6 +321,36 @@ function serializeVisit(visit: ActivityVisit) {
     ...visit,
     startedAt: visit.startedAt.toISOString(),
     lastSeenAt: visit.lastSeenAt.toISOString(),
+  }
+}
+
+function serializeTimeline(timeline: ActivityVisitTimeline) {
+  return {
+    visit: serializeVisit(timeline.visit),
+    ...(timeline.connection ? { connection: serializeConnection(timeline.connection) } : {}),
+    entries: timeline.entries.map(serializeEntry),
+    truncated: timeline.truncated,
+  }
+}
+
+function serializeEntry(entry: ActivityTimelineEntry) {
+  const at = entry.at.toISOString()
+  if (entry.kind !== "agent") {
+    return { ...entry, at }
+  }
+
+  const { cost, ...run } = entry
+  return { ...run, at, ...(cost ? { cost: { ...cost, amounts: [...cost.amounts] } } : {}) }
+}
+
+function serializeConnection<T extends ActivityConnection>(connection: T) {
+  return {
+    ...connection,
+    createdAt: connection.createdAt.toISOString(),
+    ...(connection.type === "session" && connection.lastSeenAt
+      ? { lastSeenAt: connection.lastSeenAt.toISOString() }
+      : {}),
+    ...(connection.revokedAt ? { revokedAt: connection.revokedAt.toISOString() } : {}),
   }
 }
 
