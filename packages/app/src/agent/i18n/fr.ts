@@ -527,4 +527,11 @@ export const fr: Translation<AgentMessages> = {
     cancel: "Annuler",
     create: "Créer un nouvel environnement",
   },
+  observed: {
+    readOnly:
+      "Lecture seule. Vous voyez tout ce que l’agent a montré dans cette conversation, quelles que soient vos propres permissions.",
+    empty: "Cette conversation n’a aucun message.",
+    loadFailed: "Impossible de charger cette conversation.",
+    responding: "L’agent répond. Les nouveaux messages apparaissent une fois enregistrés.",
+  },
 }

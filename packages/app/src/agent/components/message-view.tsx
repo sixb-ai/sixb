@@ -15,6 +15,7 @@ import { type FileSource, messageFileSource } from "../../artifacts/file-source"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
 import { isAwaitingFirstToken, type LiveRunState } from "../live-run"
+import { useObservedThread } from "../observed-thread"
 import { normalizeDurableParts } from "../parts"
 import { useLivePublishes } from "../publish-artifact/use-live-publishes"
 import type {
@@ -36,12 +37,16 @@ export const MessageView = memo(function MessageView({ message }: { message: Age
 })
 
 function UserMessage({ message }: { message: AgentMessage }) {
+  const observed = useObservedThread()
   const text = textOf(message)
   const files = filePartsOf(message)
   const context = contextPartsOf(message)
   if (!text && files.length === 0 && context.length === 0) return null
+
+  const author = observed?.authorOf(message)
   return (
     <div className="flex flex-col items-end gap-1.5">
+      {author ? <p className="px-1 text-xs text-muted-foreground">{author}</p> : null}
       <ContextChips entries={context} className="max-w-[min(90%,40rem)] justify-end" />
       {files.length > 0 ? (
         <div className="flex max-w-[min(80%,32rem)] flex-col items-end gap-1.5">
@@ -49,7 +54,12 @@ function UserMessage({ message }: { message: AgentMessage }) {
             <UserFileAttachment
               key={index}
               fileRef={part.fileRef}
-              source={agentMessageFileSource(message, part.fileRef, `/parts/${index}/fileRef`)}
+              source={agentMessageFileSource(
+                message,
+                part.fileRef,
+                `/parts/${index}/fileRef`,
+                observed !== null
+              )}
             />
           ))}
         </div>
@@ -65,12 +75,13 @@ function UserMessage({ message }: { message: AgentMessage }) {
 
 function AssistantMessage({ message }: { message: AgentMessage }) {
   const messages = useAgentMessages()
+  const observed = useObservedThread() !== null
   return (
     <div className="flex flex-col gap-2">
       {message.compaction ? <CompactionResult summary={message.compaction.summary} /> : null}
       <AssistantBody
         parts={normalizeDurableParts(message.parts, {
-          fileSource: (fileRef, path) => agentMessageFileSource(message, fileRef, path),
+          fileSource: (fileRef, path) => agentMessageFileSource(message, fileRef, path, observed),
         })}
       />
       {message.annotations.map((annotation, index) => (
@@ -411,12 +422,14 @@ function contextPartsOf(message: AgentMessage): AgentContextEntryInput[] {
 function agentMessageFileSource(
   message: AgentMessage,
   fileRef: AgentFileRef,
-  path: string
+  path: string,
+  observed: boolean
 ): FileSource {
   return messageFileSource({
     threadId: message.threadId,
     messageId: message.id,
     path,
     fileRef,
+    observed,
   })
 }

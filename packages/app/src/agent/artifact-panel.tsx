@@ -79,6 +79,7 @@ export function ArtifactPanelRoot({
   scopeKey,
   routeTarget = null,
   onRouteTargetChange,
+  pageLinks = true,
 }: {
   readonly children: ReactNode
   readonly compact?: boolean
@@ -90,6 +91,8 @@ export function ArtifactPanelRoot({
   readonly scopeKey: string
   readonly routeTarget?: ArtifactTarget | null
   readonly onRouteTargetChange?: (target: ArtifactTarget | null) => void
+  /** Offer each artifact's own page, to open or to copy a link to. Off for an observer. */
+  readonly pageLinks?: boolean
 }) {
   const messages = useAgentMessages().artifacts
   const idPrefix = useId()
@@ -175,7 +178,10 @@ export function ArtifactPanelRoot({
               },
             }
           : {}),
-        ...(target.type === "artifact" ? { fullPageHref: artifactTargetHref(target) } : {}),
+        ...(target.type === "artifact" && pageLinks
+          ? { fullPageHref: artifactTargetHref(target) }
+          : {}),
+        ...(pageLinks ? {} : { withoutPageLink: true }),
       }}
     />
   ) : null

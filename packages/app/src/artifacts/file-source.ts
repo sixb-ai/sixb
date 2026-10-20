@@ -1,4 +1,9 @@
-import { client, getAgentMessageFileContent, getArtifactFileContent } from "@sixb/client"
+import {
+  client,
+  getAgentMessageFileContent,
+  getArtifactFileContent,
+  getObservedAgentMessageFileContent,
+} from "@sixb/client"
 import { useArtifactMessages } from "./messages"
 
 /** The parts of a stored file reference the viewer reads. */
@@ -66,11 +71,15 @@ export function messageFileSource(input: {
   /** JSON pointer to the file reference in the message, such as `/parts/2/fileRef`. */
   readonly path: string
   readonly fileRef: ViewerFileRef
+  /** Read through the observer's routes: the conversation is someone else's. */
+  readonly observed?: boolean
   readonly baseUrl?: string
 }): FileSource {
-  const routePath = `/api/agent-threads/${encodeURIComponent(input.threadId)}/messages/${encodeURIComponent(
+  const threads = input.observed ? "observed-agent-threads" : "agent-threads"
+  const routePath = `/api/${threads}/${encodeURIComponent(input.threadId)}/messages/${encodeURIComponent(
     input.messageId
   )}/files/content`
+  const read = input.observed ? getObservedAgentMessageFileContent : getAgentMessageFileContent
   const url = (disposition: "inline" | "attachment") =>
     contentUrl(routePath, { path: input.path, disposition }, input.baseUrl)
   return {
@@ -81,7 +90,7 @@ export function messageFileSource(input: {
     downloadUrl: url("attachment"),
     queryKey: ["message-file", input.threadId, input.messageId, input.path, input.fileRef.digest],
     load: async (signal) => {
-      const response = await getAgentMessageFileContent({
+      const response = await read({
         path: { threadId: input.threadId, messageId: input.messageId },
         query: { path: input.path, disposition: "inline" },
         parseAs: "blob",

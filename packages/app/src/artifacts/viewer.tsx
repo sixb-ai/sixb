@@ -79,6 +79,8 @@ export interface ViewerChrome {
   readonly onBack?: () => void
   /** Where "open full page" goes, as a route in the app; omitted on the full page itself. */
   readonly fullPageHref?: string
+  /** No link to the artifact's own page to copy: its reader cannot open it there. */
+  readonly withoutPageLink?: boolean
 }
 
 /** An artifact or a file under its header. One viewer serves the panel, the dialog, and the page. */
@@ -630,7 +632,11 @@ function ArtifactHeader({
         <EntryDownloadMenu version={version} kind={artifact.kind} />
       )}
       {artifact.kind === "page" ? <PageMenu artifactId={artifact.id} /> : null}
-      <CopyLinkButton link={() => artifactLink(target, artifact.latestVersion, location.origin)} />
+      {chrome.withoutPageLink ? null : (
+        <CopyLinkButton
+          link={() => artifactLink(target, artifact.latestVersion, location.origin)}
+        />
+      )}
     </ViewerBar>
   )
 }
