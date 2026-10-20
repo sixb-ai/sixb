@@ -78,3 +78,4 @@ export type {
   ObjectWhereClause,
   TwinObject,
 } from "./runtime/types"
+export type { RedactionReason, Redactions } from "./security/types"

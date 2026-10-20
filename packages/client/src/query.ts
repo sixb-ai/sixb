@@ -121,14 +121,16 @@ export function createHttpQueryExecutor(client?: Client): ObjectQueryExecutor {
 }
 
 // Revive a query row tree: parse ISO timestamps to Date at every hop and carry
-// the `links` attached by `expand` nodes (with edge `linkProperties`). The
-// builder types `links` precisely; here it flows through as runtime data.
+// the `redactions` of each row and the `links` attached by `expand` nodes (with
+// edge `linkProperties`). The builder types `links` precisely; here it flows
+// through as runtime data.
 function reviveQueryRow(row: ObjectQueryObject): ObjectQueryExecutorRow {
   const revived: ObjectQueryExecutorRow = {
     ...(row.score === undefined ? {} : { score: row.score }),
     primaryId: row.primaryId,
     objectTypeId: row.objectTypeId,
     properties: row.properties,
+    ...(row.redactions === undefined ? {} : { redactions: row.redactions }),
     createdAt: new Date(row.createdAt),
     updatedAt: new Date(row.updatedAt),
   }

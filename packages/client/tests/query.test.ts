@@ -179,6 +179,34 @@ describe("objects().query()", () => {
     expect(result.objects[0]?.updatedAt).toEqual(new Date("2026-02-03T04:05:06.000Z"))
   })
 
+  // Remove the `redactions` copy in `reviveQueryRow` and this test fails: a reader without a
+  // clearance could not tell an omitted value from an absent one.
+  test("list() keeps the redactions of rows and expanded rows", async () => {
+    const redactions = { budget: { reason: "missing_clearance" as const } }
+    const customer = {
+      primaryId: "cust-001",
+      objectTypeId: "Customer",
+      properties: { id: "cust-001" },
+      redactions: { name: { reason: "missing_clearance" as const } },
+      createdAt: "2026-01-02T03:04:05.000Z",
+      updatedAt: "2026-01-02T03:04:05.000Z",
+    }
+    const { client } = createTestClient(() =>
+      Response.json({
+        objects: [{ ...row, redactions, links: { customer } }],
+        hasMore: false,
+        total: 1,
+        plan: emptyPlan,
+      })
+    )
+
+    const result = await objects(Project, { client }).query().expand(Project.l.customer).list()
+
+    const project = result.objects[0]
+    expect(project?.redactions).toEqual(redactions)
+    expect(project?.links.customer?.redactions).toEqual(customer.redactions)
+  })
+
   test("first() wraps the query with limit 1", async () => {
     const { client, calls } = createTestClient(() =>
       Response.json({ objects: [row], hasMore: false, total: 1, plan: emptyPlan })
