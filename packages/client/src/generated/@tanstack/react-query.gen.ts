@@ -4377,6 +4377,8 @@ export const getAgentMessageFileContentOptions = (
 
 /**
  * Cancel an agent thread's active run
+ *
+ * Whoever asked for the run, or the thread's owner, can cancel it.
  */
 export const cancelAgentRunMutation = (
   options?: Partial<Options<CancelAgentRunData>>
@@ -4400,6 +4402,8 @@ export const cancelAgentRunMutation = (
 
 /**
  * Retry a failed or interrupted agent run
+ *
+ * Only whoever asked for the run can retry it: it runs again with their rights.
  */
 export const retryAgentRunMutation = (
   options?: Partial<Options<RetryAgentRunData>>

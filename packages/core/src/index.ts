@@ -901,12 +901,14 @@ export type {
   AgentRunsRuntime,
   AgentRuntime,
   AgentRunView,
+  AgentThreadParticipantsRuntime,
   AgentThreadsRuntime,
   ExecutionAgentRunResult,
   ListAgentThreadViewsResult,
   ListExecutionAgentThreadsInput,
   ObservedAgentThreadsRuntime,
 } from "./agents/execution"
+export type { AgentThreadParticipantInput } from "./agents/participants"
 export type { AgentThreadParticipant, AgentThreadView } from "./agents/thread-access"
 export type { ArtifactRequestErrorCode } from "./artifacts/errors"
 export { ArtifactRequestError } from "./artifacts/errors"

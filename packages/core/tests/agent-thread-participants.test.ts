@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { SixbHost } from "../src"
+import { agent, can, defineGroup, defineRole, SixbHost } from "../src"
 import { emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
 import { createTestSixb } from "../src/testing"
@@ -10,12 +10,20 @@ const projectId = "agent-thread-participants"
 const alice = { type: "user", id: "usr_alice" } as const
 const bob = { type: "user", id: "usr_bob" } as const
 
+const agentUsers = defineGroup("agent-users")
+const agentRunner = defineRole("agent.runner", {
+  grantedTo: [agentUsers],
+  grants: [can.run(agent)],
+})
+
 function setup() {
   const deps = createTestRuntimeDeps()
   const host = new SixbHost({
     id: projectId,
     ontology: [],
     models: { language: [testLanguageModel()] },
+    groups: [agentUsers],
+    roles: [agentRunner],
     ...deps,
   })
   return { host, storage: deps.storage }
@@ -31,6 +39,15 @@ async function signedIn(host: Host, id: string, grants = { "run:agent": true }) 
     email: `${id}@example.com`,
     displayName: id.replace("usr_", ""),
   })
+  // Through the project's roles too, as adding a participant checks them.
+  if (grants["run:agent"]) {
+    await host.storage.auth?.groupMemberships.upsert({
+      projectId,
+      userId: id,
+      groupId: agentUsers.id,
+      source: "manual",
+    })
+  }
 
   const sessionId = `session-${id}`
   await host.storage.auth?.sessions.create({
@@ -162,5 +179,185 @@ describe("reading a shared conversation", () => {
     })
     expect((await system.agent.threads.list()).total).toBe(1)
     expect((await system.agent.threads.list({ sharedWithMe: true })).total).toBe(0)
+  })
+})
+
+describe("adding and removing participants", () => {
+  // Guard proof: drop the `access !== "owner"` check in requireOwnedThread; Bob then adds Cleo.
+  test("only the owner adds active users, once each", async () => {
+    const { host } = setup()
+    const owner = await signedIn(host, alice.id)
+    const participant = await signedIn(host, bob.id)
+    const other = await signedIn(host, "usr_cleo")
+    const thread = await owner.agent.threads.create({ title: "Late deals" })
+
+    const shared = await owner.agent.threads.participants.add(thread.id, [bob, bob])
+    expect(shared.participants).toMatchObject([{ principal: bob, addedBy: alice }])
+
+    const again = await owner.agent.threads.participants.add(thread.id, [bob])
+    expect(again.participants).toEqual(shared.participants)
+
+    await expect(
+      participant.agent.threads.participants.add(thread.id, [{ type: "user", id: "usr_cleo" }])
+    ).rejects.toMatchObject({ code: "not_thread_owner" })
+    await expect(
+      other.agent.threads.participants.add(thread.id, [{ type: "user", id: "usr_cleo" }])
+    ).rejects.toMatchObject({ code: "thread_not_found" })
+  })
+
+  test("refuses the owner, unknown or suspended users, and anything but a user", async () => {
+    const { host } = setup()
+    const owner = await signedIn(host, alice.id)
+    await host.storage.auth?.users.create({
+      projectId,
+      id: "usr_gone",
+      email: "gone@example.com",
+      status: "suspended",
+    })
+    const thread = await owner.agent.threads.create({})
+    const add = (users: readonly { type: "user"; id: string }[]) =>
+      owner.agent.threads.participants.add(thread.id, users)
+
+    await expect(add([alice])).rejects.toMatchObject({ code: "invalid_participant" })
+    await expect(add([{ type: "user", id: "usr_nobody" }])).rejects.toMatchObject({
+      code: "invalid_participant",
+      message:
+        "[Sixb] Agent thread participant references user 'usr_nobody', which does not exist.",
+    })
+    await expect(add([{ type: "user", id: "usr_gone" }])).rejects.toMatchObject({
+      code: "invalid_participant",
+    })
+    await expect(
+      add([{ type: "serviceAccount", id: "svc_bot" } as unknown as { type: "user"; id: string }])
+    ).rejects.toMatchObject({ code: "invalid_participant" })
+    await expect(add([])).rejects.toMatchObject({ code: "invalid_participant" })
+
+    // Guard proof: drop the userCanRunAgent check in activeUsers; Dan is then added, though he
+    // could never read the thread.
+    await signedIn(host, "usr_dan", { "run:agent": false })
+    await expect(add([{ type: "user", id: "usr_dan" }])).rejects.toMatchObject({
+      code: "invalid_participant",
+      message:
+        "[Sixb] User 'usr_dan' cannot use the Agent: a role granting can.run(agent) must reach them first.",
+    })
+
+    expect((await owner.agent.threads.getById(thread.id))?.participants).toEqual([])
+  })
+
+  // Guard proof: look emails up with getById in activeUsers; Bob's email then names no user.
+  test("adds users by email, refused in the words an id is", async () => {
+    const { host } = setup()
+    const owner = await signedIn(host, alice.id)
+    await signedIn(host, bob.id)
+    await host.storage.auth?.users.create({
+      projectId,
+      id: "usr_gone",
+      email: "gone@example.com",
+      status: "suspended",
+    })
+    const thread = await owner.agent.threads.create({})
+    const add = (users: Parameters<typeof owner.agent.threads.participants.add>[1]) =>
+      owner.agent.threads.participants.add(thread.id, users)
+
+    const shared = await add([{ email: " USR_BOB@example.com " }, bob])
+    expect(shared.participants.map((participant) => participant.principal)).toEqual([bob])
+
+    await expect(add([{ email: "nobody@example.com" }])).rejects.toMatchObject({
+      code: "invalid_participant",
+      message:
+        "[Sixb] Agent thread participant references user 'nobody@example.com', which does not exist.",
+    })
+    await expect(add([{ email: "gone@example.com" }])).rejects.toMatchObject({
+      code: "invalid_participant",
+      message:
+        "[Sixb] Agent thread participant references user 'gone@example.com', who is suspended. Only active users can be newly referenced; existing references are kept.",
+    })
+    await expect(add([{ email: "usr_alice@example.com" }])).rejects.toMatchObject({
+      code: "invalid_participant",
+      message: "[Sixb] The thread's owner already takes part in it; add other users.",
+    })
+    await expect(add([{ email: "  " }])).rejects.toMatchObject({ code: "invalid_participant" })
+  })
+
+  test("the owner removes anyone, a participant only leaves", async () => {
+    const { host } = setup()
+    const { owner, participant, other, thread } = await sharedThread(host)
+    const dan = { type: "user", id: "usr_dan" } as const
+    await signedIn(host, dan.id)
+    await owner.agent.threads.participants.add(thread.id, [dan])
+
+    await expect(
+      participant.agent.threads.participants.remove(thread.id, dan)
+    ).rejects.toMatchObject({ code: "not_thread_owner" })
+    await expect(
+      participant.agent.threads.participants.remove(thread.id, alice)
+    ).rejects.toMatchObject({ code: "invalid_participant" })
+    await expect(other.agent.threads.participants.remove(thread.id, bob)).rejects.toMatchObject({
+      code: "thread_not_found",
+    })
+
+    await participant.agent.threads.participants.remove(thread.id, bob)
+    expect(await participant.agent.threads.getById(thread.id)).toBeNull()
+
+    await owner.agent.threads.participants.remove(thread.id, dan)
+    await owner.agent.threads.participants.remove(thread.id, dan)
+    expect((await owner.agent.threads.getById(thread.id))?.participants).toEqual([])
+  })
+})
+
+describe("stopping and retrying a turn in a shared thread", () => {
+  // Guard proof: return the run from getControllableRun whatever its requester; Bob then retries
+  // Alice's turn and stops her retry, and Alice retries Bob's turn.
+  test("whoever asked for a turn stops or retries it; the owner also stops any", async () => {
+    const { host, storage } = setup()
+    const { owner, participant, run: alicesTurn, thread } = await sharedThread(host)
+
+    await expect(participant.agent.runs.retry(alicesTurn.id)).rejects.toMatchObject({
+      code: "not_run_requester",
+    })
+
+    const { run: alicesRetry } = await owner.agent.runs.retry(alicesTurn.id)
+    await expect(participant.agent.runs.cancel(alicesRetry.id)).rejects.toMatchObject({
+      code: "not_run_requester",
+    })
+    expect(await owner.agent.runs.cancel(alicesRetry.id)).toMatchObject({ status: "cancelled" })
+
+    // Bob stops his own turn; once it ended, it is no longer active.
+    const { run: bobsTurn } = await participant.agent.runs.request({
+      threadId: thread.id,
+      text: "Why did Acme slip?",
+    })
+    expect(await participant.agent.runs.cancel(bobsTurn.id)).toMatchObject({
+      status: "cancelled",
+    })
+    await expect(participant.agent.runs.cancel(bobsTurn.id)).rejects.toMatchObject({
+      code: "run_not_active",
+    })
+
+    // Bob's failed turn is his to retry: the owner's rights must not answer his words.
+    const { run: failed } = await participant.agent.runs.request({
+      threadId: thread.id,
+      text: "And Globex?",
+    })
+    await storage.agents.runs.finishQueued({ projectId, id: failed.id, status: "failed" })
+
+    await expect(owner.agent.runs.retry(failed.id)).rejects.toMatchObject({
+      code: "not_run_requester",
+    })
+    const { run: retried } = await participant.agent.runs.retry(failed.id)
+    expect(retried).toMatchObject({ triggerMessageId: failed.triggerMessageId, requestedBy: bob })
+  })
+})
+
+describe("a shared thread's sandbox", () => {
+  // Guard proof: drop the `access !== "owner"` check in recreateSandbox; Bob then reaches the
+  // storage transition, which refuses with an invalid-state error instead.
+  test("only the owner recreates it", async () => {
+    const { host } = setup()
+    const { participant, thread } = await sharedThread(host)
+
+    await expect(
+      participant.agent.threads.recreateSandbox(thread.id, { expectedSandboxName: "any" })
+    ).rejects.toMatchObject({ code: "not_thread_owner" })
   })
 })

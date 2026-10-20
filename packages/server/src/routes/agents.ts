@@ -5,22 +5,16 @@ import {
   type FileRef,
   type SixbHostView,
 } from "@sixb/core"
-import {
-  isRetryableAgentRun,
-  publishAgentRunCancel,
-  publishAgentRunFinished,
-} from "@sixb/core/internal/agents"
+import { isRetryableAgentRun } from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
 import { resolveFileRefAtPath } from "@sixb/core/internal/blob-storage"
 import {
   type AgentContextCheckpointRecord,
   type AgentMessageRecord,
   type AgentRunDiagnostic,
-  type AgentRunRecord,
   type AgentStorage,
   AgentStorageError,
   type AgentThreadRecord,
-  type ConversationAgentRunRecord,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { ZodError, z } from "zod"
@@ -168,18 +162,6 @@ async function getAgentMessageFileContentThread(params: {
   return params.authState.sixb.agent.threads.getById(params.threadId)
 }
 
-/** Publish the terminal record core owns; stream delivery stays best-effort at this boundary. */
-async function publishQueuedRunCancellation(
-  host: SixbHostView,
-  run: AgentRunRecord
-): Promise<void> {
-  try {
-    await publishAgentRunFinished(host.broker, run)
-  } catch (error) {
-    console.error(`[SixbServer] Agent run '${run.id}' cancellation stream publish failed:`, error)
-  }
-}
-
 export function handleAgentRouteError(
   error: unknown,
   set: { status?: number | string; headers?: unknown }
@@ -207,10 +189,13 @@ export function handleAgentRouteError(
         break
       case "active_run_exists":
       case "run_not_retryable":
+      case "run_not_active":
       case "sandbox_execution_unavailable":
         set.status = 409
         break
       case "authority_not_inheritable":
+      case "not_thread_owner":
+      case "not_run_requester":
         set.status = 403
         break
       case "storage_unavailable":
@@ -222,6 +207,7 @@ export function handleAgentRouteError(
       case "invalid_model_selection":
       case "invalid_locale":
       case "invalid_message":
+      case "invalid_participant":
       case "model_not_found":
         set.status = 400
         break
@@ -524,8 +510,9 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
         response: {
           200: AgentThreadSchema,
           400: ErrorResponseSchema,
+          403: AgentRequestErrorResponseSchema,
           404: ErrorResponseSchema,
-          409: ErrorResponseSchema,
+          409: AgentRequestErrorResponseSchema,
         },
         detail: {
           summary:
@@ -691,56 +678,11 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             set.status = 404
             return { error: "Agent run not found" }
           }
-          let current = run
-          let cancelledRun: ConversationAgentRunRecord | undefined
-          if (current.status === "queued") {
-            try {
-              const cancelled = await storage.runs.finishQueued({
-                projectId: host.id,
-                id: current.id,
-                status: "cancelled",
-              })
-              if (cancelled.kind !== "conversation") {
-                throw new Error(`[SixbServer] Agent run '${cancelled.id}' changed kind.`)
-              }
-              current = cancelled
-              cancelledRun = cancelled
-            } catch (error) {
-              if (!(error instanceof AgentStorageError) || error.code !== "invalid_state") {
-                throw error
-              }
 
-              // The worker may have started the run after our read but before finishQueued locked
-              // it. Re-read so that pickup race becomes a running-run cancellation instead of an
-              // invalid-state response. A retained control record is safe even if the worker has
-              // not attached its cancel subscription yet.
-              const refreshed = await sixb.agent.runs.getById(current.id)
-              if (!refreshed || refreshed.threadId !== thread.id) {
-                set.status = 404
-                return { error: "Agent run not found" }
-              }
-              current = refreshed
-            }
-          }
-
-          if (cancelledRun) {
-            await publishQueuedRunCancellation(host, cancelledRun)
-          } else if (current.status === "running") {
-            await publishAgentRunCancel(host.broker, { projectId: host.id, runId: current.id })
-          } else {
-            set.status = 409
-            return { error: "Agent run is not active" }
-          }
+          const current = await sixb.agent.runs.cancel(run.id)
 
           set.status = 202
-          const currentView = await sixb.agent.runs.getById(current.id)
-          if (!currentView) {
-            set.status = 404
-            return { error: "Agent run not found" }
-          }
-          return CancelAgentRunResponseSchema.parse({
-            run: serializeAgentRun(currentView),
-          })
+          return CancelAgentRunResponseSchema.parse({ run: serializeAgentRun(current) })
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -750,13 +692,15 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
         body: CancelAgentRunBodySchema,
         response: {
           202: CancelAgentRunResponseSchema,
-          400: ErrorResponseSchema,
+          400: AgentRequestErrorResponseSchema,
+          403: AgentRequestErrorResponseSchema,
           404: ErrorResponseSchema,
-          409: ErrorResponseSchema,
+          409: AgentRequestErrorResponseSchema,
           501: ErrorResponseSchema,
         },
         detail: {
           summary: "Cancel an agent thread's active run",
+          description: "Whoever asked for the run, or the thread's owner, can cancel it.",
           tags: [OPENAPI_TAGS.agentRuns.name],
           operationId: "cancelAgentRun",
           security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
@@ -804,14 +748,17 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
         params: AgentRunParamsSchema.extend({ threadId: z.string().trim().min(1) }),
         response: {
           202: RetryAgentRunResponseSchema,
-          400: ErrorResponseSchema,
+          400: AgentRequestErrorResponseSchema,
+          403: AgentRequestErrorResponseSchema,
           404: ErrorResponseSchema,
-          409: ErrorResponseSchema,
+          409: AgentRequestErrorResponseSchema,
           429: AiUsageLimitErrorResponseSchema,
           501: ErrorResponseSchema,
         },
         detail: {
           summary: "Retry a failed or interrupted agent run",
+          description:
+            "Only whoever asked for the run can retry it: it runs again with their rights.",
           tags: [OPENAPI_TAGS.agentRuns.name],
           operationId: "retryAgentRun",
           security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,

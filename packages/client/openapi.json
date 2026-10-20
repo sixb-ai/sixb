@@ -31051,6 +31051,26 @@
               }
             }
           },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
           "404": {
             "description": "Response for status 404",
             "content": {
@@ -31076,6 +31096,9 @@
                   "type": "object",
                   "properties": {
                     "error": {
+                      "type": "string"
+                    },
+                    "code": {
                       "type": "string"
                     }
                   },
@@ -33140,6 +33163,7 @@
     "/api/agent-threads/{threadId}/cancel": {
       "post": {
         "summary": "Cancel an agent thread's active run",
+        "description": "Whoever asked for the run, or the thread's owner, can cancel it.",
         "tags": ["Agent Runs"],
         "operationId": "cancelAgentRun",
         "security": [
@@ -33530,6 +33554,29 @@
                   "properties": {
                     "error": {
                       "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
                     }
                   },
                   "required": ["error"],
@@ -33564,6 +33611,9 @@
                   "properties": {
                     "error": {
                       "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
                     }
                   },
                   "required": ["error"],
@@ -33595,6 +33645,7 @@
     "/api/agent-threads/{threadId}/runs/{runId}/retry": {
       "post": {
         "summary": "Retry a failed or interrupted agent run",
+        "description": "Only whoever asked for the run can retry it: it runs again with their rights.",
         "tags": ["Agent Runs"],
         "operationId": "retryAgentRun",
         "security": [
@@ -33950,6 +34001,29 @@
                   "properties": {
                     "error": {
                       "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
                     }
                   },
                   "required": ["error"],
@@ -33983,6 +34057,9 @@
                   "type": "object",
                   "properties": {
                     "error": {
+                      "type": "string"
+                    },
+                    "code": {
                       "type": "string"
                     }
                   },

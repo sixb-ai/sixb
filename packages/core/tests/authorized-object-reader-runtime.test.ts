@@ -11,6 +11,7 @@ import { SixbHost } from "../src/runtime/host"
 import { createBoundSixb, type SixbDependencies } from "../src/runtime/sixb"
 import type { SixbRuntimeContext } from "../src/runtime/types"
 import { createSchedulesRuntime } from "../src/schedules/execution"
+import { SecurityRegistry } from "../src/security"
 import { getDatasetVersionMarkings } from "../src/security/dataset-version-markings"
 import { InMemoryStorage } from "../src/storage"
 import { createSyncsRuntime } from "../src/syncs/execution"
@@ -111,7 +112,13 @@ describe("AuthorizedObjectReader runtime binding", () => {
       expect(catalog.list()).toEqual([])
       expect(catalog.getById("guessed")).toBeNull()
     }
-    const agent = createAgentRuntime(runtime, scope.execution)
+    const agent = createAgentRuntime(
+      runtime,
+      scope.execution,
+      undefined,
+      undefined,
+      new SecurityRegistry({})
+    )
     expect(agent.get()).toBeNull()
     expect(await agent.threads.getById("guessed")).toBeNull()
     expect(await agent.threads.list()).toEqual({ threads: [], total: 0, hasMore: false })

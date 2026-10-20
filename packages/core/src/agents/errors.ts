@@ -46,6 +46,10 @@ export type AgentRequestErrorCode =
   | "sandbox_not_configured"
   | "invalid_sandbox_params"
   | "sandbox_execution_unavailable"
+  | "invalid_participant"
+  | "not_thread_owner"
+  | "not_run_requester"
+  | "run_not_active"
 
 /**
  * Raised by {@link requestAgentRun} (the trigger). Callers branch on `code` rather than message text

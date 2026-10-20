@@ -1339,6 +1339,8 @@ describe("agent routes", () => {
       jsonRequest(`/api/agent-threads/${thread.id}/cancel`, "POST", { runId: run.id })
     )
     expect(finished.status).toBe(409)
+    // Guard proof: declare the 409 with ErrorResponseSchema; Elysia then strips the code.
+    expect(await finished.json()).toMatchObject({ code: "run_not_active" })
 
     // A run that belongs to another thread cannot be cancelled through this one.
     const otherThread = await storage.agents.threads.create({

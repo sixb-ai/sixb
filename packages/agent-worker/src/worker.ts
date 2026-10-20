@@ -1,3 +1,4 @@
+import { principalsEqual } from "@sixb/core"
 import { bindAgentModelExecution } from "@sixb/core/internal/agent-execution"
 import {
   createAgentRunExecutionToken,
@@ -39,6 +40,7 @@ import {
   AgentEnvironmentSaveError,
   AgentExecutionLostError,
   AgentFinalizationError,
+  AgentRequesterLeftThreadError,
   AgentRunOwnedElsewhereError,
   AgentTurnInterruptedError,
   AgentTurnTimeoutError,
@@ -359,9 +361,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // is redelivered rather than acked with the thread left silently locked. A user cancel is
       // detected off its own signal so it records `cancelled` however the aborted stream surfaced.
       const aborted =
-        !environmentSaveFailed &&
-        !(error instanceof ModelUsageRecordingError) &&
-        (signal.aborted || cancel.signal.aborted || isAbortError(error))
+        error instanceof AgentRequesterLeftThreadError ||
+        (!environmentSaveFailed &&
+          !(error instanceof ModelUsageRecordingError) &&
+          (signal.aborted || cancel.signal.aborted || isAbortError(error)))
       // A worker stop, unlike a user cancel, leaves the user something to resume.
       const interrupted = aborted && stoppedByWorker(turnSignal, signal)
       const finalized = await this.recordFate(
@@ -394,6 +397,30 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     }
   }
 
+  /**
+   * A shared thread's turn waits in the queue: its requester may leave the thread, or be removed,
+   * before it starts. Such a turn never reaches the model. A turn already running when they leave
+   * finishes, as it already read the thread.
+   */
+  private async assertRequesterTakesPart(
+    context: AgentWorkerContext,
+    run: ConversationAgentRunRecord,
+    thread: AgentThreadRecord | null,
+    execution: ExecutionRecord
+  ): Promise<void> {
+    const requester = execution.requestedBy
+    if (!thread || !requester || principalsEqual(requester, thread.ownerPrincipal)) return
+
+    const participants = await context.storage.agents.threads.listParticipants({
+      projectId: context.id,
+      threadIds: [thread.id],
+    })
+    if (participants.some((participant) => principalsEqual(participant.principal, requester)))
+      return
+
+    throw new AgentRequesterLeftThreadError(run.id)
+  }
+
   /** Resolve everything a turn needs before its first model call. */
   private async prepareConversationTurn(
     context: AgentWorkerContext,
@@ -424,6 +451,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         { details: { runId: run.id, threadId: run.threadId, executionId: run.executionId } }
       )
     }
+    await this.assertRequesterTakesPart(context, run, thread, execution)
+
     const executionContext = createAgentExecutionContext({
       context,
       host: this.host,
