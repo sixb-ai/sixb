@@ -235,8 +235,13 @@ export function assertGrantDefinition(
     )
   }
 
-  if (value.capability === "view" && value.target !== "object" && value.target !== "dataset") {
-    throw createError(`[Sixb] ${field} view grant target must be 'object' or 'dataset'.`)
+  if (
+    value.capability === "view" &&
+    value.target !== "object" &&
+    value.target !== "dataset" &&
+    value.target !== "users"
+  ) {
+    throw createError(`[Sixb] ${field} view grant target must be 'object', 'dataset', or 'users'.`)
   }
 
   if (
@@ -267,9 +272,9 @@ export function assertGrantDefinition(
     throw createError(`[Sixb] ${field} manage grant target must be 'connector' or 'aiUsage'.`)
   }
 
-  // The agent, logs, AI usage, activity and Agent conversations are one surface each, so their
-  // grants select nothing.
-  // The checks above settled the capability and target, so the kind is known.
+  // The member directory, the agent, logs, AI usage, activity and Agent conversations are one
+  // surface each, so their grants select nothing. The checks above settled the capability and
+  // target, so the kind is known.
   if (isSingletonGrantKind(grantKindOf(value as unknown as GrantDefinition))) {
     if (value.selection !== undefined) {
       throw createError(
@@ -503,7 +508,8 @@ function assertGrantReferences(
     }
     return
   }
-  // Logs and AI usage are always there; only targeted grants name ids to check.
+  // The member directory, logs and AI usage are always there; only targeted grants name ids to
+  // check.
   if (!("selection" in grant)) return
   const kind = grantKindOf(grant)
   if (isSingletonGrantKind(kind)) return

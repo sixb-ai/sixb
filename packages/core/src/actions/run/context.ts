@@ -38,6 +38,7 @@ export function toActionRuntimeFacade(runtime: ActionRunContext): ActionRuntimeF
     },
     connector: runtime.sixb.connector,
     models: runtime.sixb.models,
+    users: runtime.sixb.users,
     objects(objectType) {
       return {
         appendTelemetryBatch(items) {

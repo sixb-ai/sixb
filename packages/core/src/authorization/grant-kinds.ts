@@ -13,6 +13,7 @@ import type { GrantDefinition } from "../security/types"
 export type GrantKind =
   | "view:object"
   | "view:dataset"
+  | "view:users"
   | "edit:object"
   | "append:telemetry"
   | "apply:action"
@@ -30,6 +31,7 @@ export type GrantKind =
 
 /** Capabilities over one project-wide surface: held or not, with no ids to select. */
 export type SingletonGrantKind =
+  | "view:users"
   | "run:agent"
   | "observe:logs"
   | "observe:aiUsage"
@@ -91,6 +93,11 @@ export const GRANT_KINDS: {
     universeKey: "datasetIds",
     subject: "dataset",
     fix: "Add it to 'datasets/' or pass it to createSixb({ datasets }).",
+  },
+  "view:users": {
+    singleton: true,
+    subject: "member directory",
+    fix: "Use can.view(project.users).",
   },
   // Deliberately no `expandsSubtypes`: granting writes on a parent type must not
   // silently extend to types added under it later. `view:object` expands because
@@ -210,6 +217,7 @@ export function emptyGrantSets(): MutableGrantIndex {
   return {
     "view:object": new Set(),
     "view:dataset": new Set(),
+    "view:users": false,
     "edit:object": new Set(),
     "append:telemetry": new Set(),
     "apply:action": new Set(),

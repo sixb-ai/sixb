@@ -12,6 +12,7 @@ import type { ObjectType, Property } from "../../ontology"
 import type { InferPropertyUnit, InferPropertyValue } from "../../ontology/inference"
 import type { ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
 import type { ObjectReader } from "../../runtime/types"
+import type { UsersRuntime } from "../../users"
 import type { ActionPrimitiveSchemaValues } from "./params"
 
 export type ActionTargetObject<TObjectType extends ObjectType = ObjectType> = {
@@ -158,6 +159,7 @@ export interface ActionRuntimeFacade {
   readonly blobs: ActionBlobContext
   readonly models: ModelsRuntime
   readonly connector: ConnectorRuntime
+  readonly users: UsersRuntime
   objects<const TObjectType extends ObjectTypeWithPropertyTokens>(
     objectType: TObjectType
   ): ActionTelemetryObjectSet<TObjectType>

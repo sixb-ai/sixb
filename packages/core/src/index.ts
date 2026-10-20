@@ -430,6 +430,11 @@ export type {
   UpdateAiUsageLimitPolicyInput,
 } from "./ai-usage"
 
+// ── Member directory ──────────────────────────────────────
+
+export type { UserStatus } from "./storage"
+export type { ListUsersInput, UserProfile, UsersPage, UsersRuntime } from "./users"
+
 // ── Security Definitions ───────────────────────────────────
 
 export type {
@@ -455,7 +460,6 @@ export type {
   ObserveGrant,
   ObserveGrantTarget,
   ProjectReference,
-  ProjectSurfaceReference,
   RedactionReason,
   Redactions,
   RegisteredSecurityDefinitions,
@@ -465,6 +469,7 @@ export type {
   SecurityDefinitionCatalog,
   Selection,
   ShareGrant,
+  UsersViewGrant,
   ViewGrant,
   ViewGrantTarget,
 } from "./security"

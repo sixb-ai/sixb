@@ -13,6 +13,7 @@ import {
   defineRole,
   defineSync,
   every,
+  project,
   prop,
   type RoleDefinition,
   resolveAuthorizationContext,
@@ -169,6 +170,18 @@ describe("resolveAuthorizationContext", () => {
       expect(context.grants["observe:aiUsage"]).toBe(expected.observe)
       expect(context.grants["manage:aiUsage"]).toBe(expected.manage)
     }
+  })
+
+  test("viewing the member directory grants nothing else", () => {
+    const role = defineRole("directory-reader", {
+      grantedTo: [admins],
+      grants: [can.view(project.users)],
+    })
+    const context = resolve([admins.id], [role])
+
+    expect(context.grants["view:users"]).toBe(true)
+    expect(context.grants["view:object"]).toEqual(new Set())
+    expect(context.grants["observe:logs"]).toBe(false)
   })
 
   test("matches roles by group membership and expands view grants to subtypes", () => {

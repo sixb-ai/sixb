@@ -33,6 +33,7 @@ function context(grants: {
   logs?: boolean
   activity?: boolean
   agentThreads?: boolean
+  users?: boolean
 }): AuthorizationContext {
   return {
     principal: { type: "user", id: "u1" },
@@ -51,6 +52,7 @@ function context(grants: {
       "observe:logs": grants.logs ?? false,
       "observe:activity": grants.activity ?? false,
       "observe:agentThreads": grants.agentThreads ?? false,
+      "view:users": grants.users ?? false,
     },
   }
 }
@@ -165,6 +167,7 @@ describe("evaluate", () => {
       "run:pipeline:pipeline-orders",
     ],
     ["agent.run", { kind: "agent.run" }, { agent: true }, {}, "run:agent"],
+    ["users.view", { kind: "users.view" }, { users: true }, { view: ["quote"] }, "view:users"],
   ] as const)("%s requires its grant and reports the requirement", (_kind, request, held, other, requirement) => {
     expect(evaluate(context(held), request)).toEqual({
       allowed: true,

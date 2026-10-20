@@ -6,6 +6,7 @@ import type { ObjectsRuntime } from "../../objects/execution"
 import type { SixbDefinitions } from "../../runtime/definitions"
 import type { OntologyMutationRuntime } from "../../runtime/ontology-mutations"
 import type { ActionRunRecord, ActionRunStorage, Storage } from "../../storage"
+import type { UsersRuntime } from "../../users"
 import type { ActionsRuntime } from "../execution"
 import type { ActionRunSignals } from "./signals"
 
@@ -16,6 +17,7 @@ export interface ActionExecutionFacade {
   readonly actions: ActionsRuntime
   readonly connector: ConnectorRuntime
   readonly blobs: BlobsRuntime
+  readonly users: UsersRuntime
 }
 
 export interface ActionRunContext {
