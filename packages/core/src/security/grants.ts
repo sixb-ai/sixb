@@ -37,6 +37,7 @@ import type {
   EditGrant,
   ManageGrant,
   ObserveGrant,
+  ProjectSurfaceReference,
   RunGrant,
   Selection,
   ShareGrant,
@@ -258,11 +259,44 @@ function isAgentUsageReference(input: unknown): input is AgentUsageReference {
   )
 }
 
-function observe(input: "logs" | AgentUsageReference): ObserveGrant {
-  if (input !== "logs" && !isAgentUsageReference(input)) {
-    throw new SecurityValidationError('[Sixb] can.observe accepts "logs" or agent.usage.')
+type ObservableReference = ProjectSurfaceReference | AgentUsageReference
+
+/**
+ * Every reference `can.observe` accepts, keyed by its `kind`, which is also its grant target. The
+ * full `Record` is what stops a new `project` member from compiling until it is listed here.
+ */
+const OBSERVABLE_REFERENCES: Readonly<Record<ObservableReference["kind"], string>> = {
+  logs: "project.logs",
+  aiUsage: "agent.usage",
+}
+
+function isObservableReference(input: unknown): input is ObservableReference {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    "kind" in input &&
+    typeof input.kind === "string" &&
+    Object.hasOwn(OBSERVABLE_REFERENCES, input.kind)
+  )
+}
+
+function observe(input: ObservableReference): ObserveGrant {
+  const value: unknown = input
+
+  // Older role files pass the string form. Point them at the reference instead of only rejecting
+  // the input.
+  if (value === "logs") {
+    throw new SecurityValidationError(
+      '[Sixb] can.observe("logs") is now can.observe(project.logs), imported from "@sixb/core".'
+    )
   }
-  return { kind: "grant", capability: "observe", target: input === "logs" ? "logs" : "aiUsage" }
+
+  if (!isObservableReference(value)) {
+    const accepted = Object.values(OBSERVABLE_REFERENCES).join(" or ")
+    throw new SecurityValidationError(`[Sixb] can.observe accepts ${accepted}.`)
+  }
+
+  return { kind: "grant", capability: "observe", target: value.kind }
 }
 
 function manage(input: GrantInput<ConnectorDefinition, "connector">): ManageGrant<"connector">

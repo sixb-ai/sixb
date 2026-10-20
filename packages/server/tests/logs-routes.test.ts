@@ -12,6 +12,7 @@ import {
   InMemoryStorage,
   type LogRunRef,
   noopLoggerProvider,
+  project,
   SixbHost,
   type SixbHostOptions,
 } from "@sixb/core"
@@ -315,7 +316,7 @@ function createTestSixb(
   const logsViewers = defineGroup("logs-viewers")
   const logsObserver = defineRole("logs.observer", {
     grantedTo: [logsViewers],
-    grants: [can.observe("logs")],
+    grants: [can.observe(project.logs)],
   })
   return createSixbInstance({
     id: "logs-test-project",

@@ -25,6 +25,7 @@ import {
   type GroupDefinition,
   type MembershipPolicyDefinition,
   type PipelineDefinition,
+  project,
   prop,
   type RoleDefinition,
   SecurityValidationError,
@@ -388,7 +389,7 @@ describe("role definitions", () => {
   })
 
   test("can.observe exposes explicit project observability capabilities", () => {
-    expect(can.observe("logs")).toEqual({
+    expect(can.observe(project.logs)).toEqual({
       kind: "grant",
       capability: "observe",
       target: "logs",
@@ -410,6 +411,31 @@ describe("role definitions", () => {
     }
     expect(Object.isFrozen(agent)).toBe(true)
     expect(Object.isFrozen(agent.usage)).toBe(true)
+  })
+
+  test("can.observe points the old logs string at project.logs", () => {
+    // Removal proof: without the `"logs"` branch in `observe`, the string gets the generic message.
+    const observe = can.observe as (input: unknown) => unknown
+
+    expect(() => observe("logs")).toThrow(SecurityValidationError)
+    expect(() => observe("logs")).toThrow(
+      '[Sixb] can.observe("logs") is now can.observe(project.logs), imported from "@sixb/core".'
+    )
+  })
+
+  test("can.observe rejects anything but a project surface or agent.usage", () => {
+    // Removal proof: checking `kind` with `in` instead of `Object.hasOwn` accepts `toString`.
+    const observe = can.observe as (input: unknown) => unknown
+    const manage = can.manage as (input: unknown) => unknown
+
+    for (const input of [project, { kind: "project" }, { kind: "toString" }, [project.logs]]) {
+      expect(() => observe(input)).toThrow(
+        "[Sixb] can.observe accepts project.logs or agent.usage."
+      )
+    }
+    expect(() => manage(project.logs)).toThrow(SecurityValidationError)
+    expect(Object.isFrozen(project)).toBe(true)
+    expect(Object.isFrozen(project.logs)).toBe(true)
   })
 
   test("can.run supports sync and pipeline scopes and the project Agent", () => {

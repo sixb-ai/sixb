@@ -16,6 +16,7 @@ export {
   missingMembershipGroupIds,
   resolveMembershipPolicyScope,
 } from "./membership-policies"
+export { project } from "./project"
 export type { SecurityDefinitionCatalog, SecurityRegistryOptions } from "./registry"
 export { SecurityRegistry } from "./registry"
 export type {
@@ -34,6 +35,8 @@ export type {
   MembershipPolicyDefinition,
   ObserveGrant,
   ObserveGrantTarget,
+  ProjectReference,
+  ProjectSurfaceReference,
   RedactionReason,
   Redactions,
   RegisteredSecurityDefinitions,

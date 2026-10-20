@@ -130,7 +130,7 @@ export const GRANT_KINDS: {
   "observe:logs": {
     singleton: true,
     subject: "logs",
-    fix: 'Use can.observe("logs").',
+    fix: "Use can.observe(project.logs).",
   },
   "observe:aiUsage": {
     singleton: true,
