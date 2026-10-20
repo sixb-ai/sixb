@@ -1,8 +1,12 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
-import { client, type GetActionRunResponse } from "@sixb/client"
+import {
+  client,
+  type GetActionRunResponse,
+  type GetActivityVisitTimelineResponse,
+} from "@sixb/client"
 import { getAuthSessionQueryKey } from "@sixb/client/hooks"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, fireEvent, render, renderHook, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, waitFor, within } from "@testing-library/react"
 import { MemoryRouter, useLocation } from "react-router-dom"
 import { SectionsProvider } from "../src/pages"
 import {
@@ -11,6 +15,7 @@ import {
   effectsWaitRemainingMs,
 } from "../src/pages/observability/action-run"
 import { ObservabilityActivityPage } from "../src/pages/observability/activity/page"
+import { VisitEntries } from "../src/pages/observability/activity/timeline"
 import { useActivityUsers } from "../src/pages/observability/activity/users"
 import { ObservabilityAiUsagePage } from "../src/pages/observability/ai-usage/page"
 import { ObservabilityLogsPage } from "../src/pages/observability/logs"
@@ -414,8 +419,9 @@ describe("Activity", () => {
     expect(row.textContent).not.toContain("Alex")
     expect(row.textContent).toContain("Oct 2 · 9:00 AM–9:20 AM UTC")
     fireEvent.click(row)
-    expect(await view.findByText("/invoices/:id")).toBeDefined()
-    expect(view.getByText("9:20:00 AM")).toBeDefined()
+    const steps = await view.findByRole("list", { name: "Steps" })
+    expect(within(steps).getByText("/invoices/:id")).toBeDefined()
+    expect(within(steps).getByText("9:20:00 AM")).toBeDefined()
     expect(view.getByText("launch")).toBeDefined()
     await waitFor(() => expect(view.getByTestId("location").textContent).toContain("visit=visit_1"))
 
@@ -444,7 +450,8 @@ describe("Activity", () => {
       "/observability/activity?user=usr_1&year=2026&visit=visit_1"
     )
 
-    expect(await view.findByText("/invoices/:id")).toBeDefined()
+    const steps = () => within(view.getByRole("list", { name: "Steps" }))
+    expect(await view.findByRole("list", { name: "Steps" })).toBeDefined()
     expect(view.getByRole("link", { name: "Open the run of Mark Paid" }).getAttribute("href")).toBe(
       "/observability/runs/actions/act_1"
     )
@@ -459,15 +466,35 @@ describe("Activity", () => {
     expect(view.getByText("$0.04")).toBeDefined()
     expect(view.getAllByText("Chrome · macOS").length).toBeGreaterThan(0)
 
-    expect(view.getByText("invoices.export")).toBeDefined()
+    // Two steps: /invoices holds the interaction and the runs, /invoices/:id nothing.
+    const [invoices, invoice] = view.getByRole("list", { name: "Steps" }).children
+    expect(invoices?.textContent).toContain("invoices.export")
+    expect(invoices?.textContent).toContain("Mark Paid")
+    expect(invoice?.textContent).toContain("/invoices/:id")
+    expect(invoice?.textContent).not.toContain("Mark Paid")
+    // The visit's header counts its steps, after its time, with how long it lasted.
+    expect(view.getByText("2 steps").parentElement?.parentElement?.textContent).toBe(
+      "·Oct 2 · 9:00 AM–9:20 AM UTC·2 steps·20m"
+    )
+
+    // A kind keeps the steps holding it, each with that kind only; Pages, the page views alone.
     fireEvent.click(view.getByRole("tab", { name: /Interactions/ }))
-    expect(view.getByText("invoices.export")).toBeDefined()
-    expect(view.queryByText("Mark Paid")).toBeNull()
+    expect(steps().getByText("invoices.export")).toBeDefined()
+    expect(steps().queryByText("Mark Paid")).toBeNull()
+    expect(steps().queryByText("/invoices/:id")).toBeNull()
 
     fireEvent.click(view.getByRole("tab", { name: /Actions/ }))
-    expect(view.queryByText("/invoices/:id")).toBeNull()
-    expect(view.queryByText("invoices.export")).toBeNull()
-    expect(view.getByText("Mark Paid")).toBeDefined()
+    expect(steps().getByText("/invoices")).toBeDefined()
+    expect(steps().queryByText("/invoices/:id")).toBeNull()
+    expect(steps().queryByText("invoices.export")).toBeNull()
+    expect(steps().getByText("Mark Paid")).toBeDefined()
+    expect(steps().queryByText("3 messages")).toBeNull()
+
+    fireEvent.click(view.getByRole("tab", { name: /Pages/ }))
+    expect(steps().getByText("/invoices/:id")).toBeDefined()
+    expect(steps().queryByText("invoices.export")).toBeNull()
+    expect(steps().queryByText("Mark Paid")).toBeNull()
+
     fireEvent.click(view.getByRole("tab", { name: /Workflows/ }))
     expect(view.getByText("Nothing of this kind in this visit.")).toBeDefined()
 
@@ -537,5 +564,41 @@ describe("Activity", () => {
     expect(summaries().length).toBe(before + 1)
     view.unmount()
     queryClient.clear()
+  })
+})
+
+describe("a visit's steps", () => {
+  const routes = ["/", "/invoices", "/", "/invoices", "/reports", "/", "/team", "/", "/agents", "/"]
+  const startedAt = Date.parse("2026-10-02T09:00:00.000Z")
+  const entries: GetActivityVisitTimelineResponse["entries"] = routes.map((route, index) => ({
+    kind: "page",
+    at: new Date(startedAt + index * 60_000).toISOString(),
+    sequence: index + 1,
+    route,
+  }))
+  const visit = {
+    id: "visit_1",
+    actor: { type: "user", userId: "usr_1" },
+    attribution: {},
+    startedAt: entries[0]?.at ?? "",
+    lastSeenAt: new Date(startedAt + 9 * 60_000 + 30_000).toISOString(),
+    pageViews: routes.length,
+    interactions: 0,
+  } as const
+
+  // Removal proof: count views per visit instead of per route, and "/" reads as a 10th time.
+  test("a route viewed again says so; the last step ends where the visit did", () => {
+    const view = render(
+      <MemoryRouter>
+        <VisitEntries timeline={{ visit, entries, truncated: false }} />
+      </MemoryRouter>
+    )
+
+    const steps = view.getByRole("list", { name: "Steps" })
+    // "/" five times, "/invoices" twice.
+    expect(within(steps).getAllByText("2nd time")).toHaveLength(2)
+    expect(within(steps).getByText("5th time")).toBeDefined()
+    // The last step lasts until the visit's last activity, where it ended.
+    expect(steps.lastElementChild?.textContent).toContain("30s · end")
   })
 })

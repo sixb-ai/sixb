@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { SectionPage } from "../../section-page"
 import {
+  formatDuration,
   PageSection,
   Panel,
   PanelEmpty,
@@ -478,16 +479,17 @@ function VisitHeader({
   readonly timeline: GetActivityVisitTimelineResponse
   readonly names: ReadonlyMap<string, string>
 }) {
-  const messages = useActivityMessages().source
+  const messages = useActivityMessages()
+  const { count } = useNumbers()
   const format = useUtcFormat()
   const { visit } = timeline
   const facts = [
-    { label: messages.label, value: sourceLabel(visit, messages) },
+    { label: messages.source.label, value: sourceLabel(visit, messages.source) },
     ...(visit.attribution?.medium
-      ? [{ label: messages.medium, value: visit.attribution.medium }]
+      ? [{ label: messages.source.medium, value: visit.attribution.medium }]
       : []),
     ...(visit.attribution?.campaign
-      ? [{ label: messages.campaign, value: visit.attribution.campaign }]
+      ? [{ label: messages.source.campaign, value: visit.attribution.campaign }]
       : []),
   ]
 
@@ -496,9 +498,20 @@ function VisitHeader({
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
         <ActorName visit={visit} names={names} />
       </div>
-      <p className="text-xs text-muted-foreground tabular-nums">
-        <VisitRange visit={visit} format={format} />
-      </p>
+      {/* Each page view is a step: how many, and how long the visit lasted. */}
+      <div className="text-xs text-muted-foreground tabular-nums">
+        <MetaItems
+          items={[
+            <VisitRange key="range" visit={visit} format={format} />,
+            ...(visit.pageViews > 0
+              ? [
+                  messages.visit.steps.count(visit.pageViews, count(visit.pageViews)),
+                  formatDuration(visit.startedAt, visit.lastSeenAt),
+                ]
+              : []),
+          ]}
+        />
+      </div>
       <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
         {facts.map((fact) => (
           <div key={fact.label} className="flex min-w-0 gap-1.5">

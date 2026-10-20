@@ -71,6 +71,14 @@ export const en = {
     messages: (count: number, formatted: string) =>
       plural("en", count, { one: "1 message", other: `${formatted} messages` }),
     openRun: (name: string) => `Open the run of ${name}`,
+    steps: {
+      label: "Steps",
+      earlier: "Before the first page view",
+      again: (view: number) => `${ordinal(view)} time`,
+      end: "end",
+      count: (count: number, formatted: string) =>
+        plural("en", count, { one: "1 step", other: `${formatted} steps` }),
+    },
   },
   connection: {
     label: "Connection",
@@ -112,6 +120,13 @@ export const en = {
 } satisfies MessageTree
 
 export type ActivityMessages = typeof en
+
+/** "2nd", "3rd", "11th". */
+function ordinal(value: number): string {
+  const suffixes: Record<string, string> = { one: "st", two: "nd", few: "rd", other: "th" }
+  const rule = new Intl.PluralRules("en", { type: "ordinal" })
+  return `${value}${suffixes[rule.select(value)] ?? "th"}`
+}
 
 export const fr: Translation<ActivityMessages> = {
   title: "Activité",
@@ -185,6 +200,14 @@ export const fr: Translation<ActivityMessages> = {
     messages: (count: number, formatted: string) =>
       plural("fr", count, { one: `${formatted} message`, other: `${formatted} messages` }),
     openRun: (name: string) => `Ouvrir l’exécution de ${name}`,
+    steps: {
+      label: "Étapes",
+      earlier: "Avant la première page vue",
+      again: (view: number) => `${view}e fois`,
+      end: "fin",
+      count: (count: number, formatted: string) =>
+        plural("fr", count, { one: `${formatted} étape`, other: `${formatted} étapes` }),
+    },
   },
   connection: {
     label: "Connexion",
