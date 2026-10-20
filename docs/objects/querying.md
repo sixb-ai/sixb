@@ -40,7 +40,8 @@ or `null` instead.
 
 Primary-ID comparisons with `eq` or `in` do not need query metadata. To match a
 [user reference](../ontology/properties.md#reference-a-user), pass `userRef(id)`, for example
-`task.p.assignee.eq(userRef("usr_1"))`.
+`task.p.assignee.eq(userRef("usr_1"))`, or `currentUser()` to match
+[the user reading](#match-the-reading-user).
 
 Return an array to require all conditions. Use `or(...)` for alternatives and `not(...)` to negate
 one condition:
@@ -56,6 +57,36 @@ one condition:
 A present `null` differs from a missing property: `exists()` includes `null`, while `eq(null)`
 matches only explicit nulls. `neq(...)` also matches missing properties. Ordered comparisons
 exclude both null and missing values.
+
+### Match the reading user
+
+`currentUser()` stands for the user who runs the query. Compare it with a `ref.user()` property
+using `eq`, `neq`, or `in`, or find it in a list of user references with `contains`:
+
+```ts
+import { currentUser } from "@sixb/core"
+
+const { objects: myTasks } = await sixb
+  .objects(Task)
+  .query()
+  .where((task) =>
+    task.or(task.p.assignee.eq(currentUser()), task.p.reviewers.contains(currentUser()))
+  )
+  .list()
+```
+
+Sixb resolves it on the server when the query runs:
+
+| The query runs for | `currentUser()` matches |
+| --- | --- |
+| A signed-in user: HTTP requests, React apps, the agent in their conversations | That user. |
+| An action or a workflow | The user who requested it, if a user did. |
+| A service account, a schedule, an event, or a shared link | No one. |
+| Any caller while auth is disabled | No one. |
+
+When it matches no one, `eq`, `in`, and `contains` match no objects, and `neq` matches every
+object. Over HTTP and in `sixb objects query`, write it `{ "type": "currentUser" }`. It only
+exists in queries: a write cannot store it.
 
 ## Search text
 

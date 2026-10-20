@@ -545,6 +545,7 @@ class AuthorizedObjectReaderImpl {
         embeddingModels: this.#models.embedding,
         rerankingModels: this.#models.reranking,
         ...(admission === undefined ? {} : { admission }),
+        requestingUser: this.#security.requestingUser,
       }
     }
     return {
@@ -557,6 +558,7 @@ class AuthorizedObjectReaderImpl {
         ? {}
         : { authorization: this.#security.runtime.authorization }),
       ...(admission === undefined ? {} : { admission }),
+      requestingUser: this.#security.requestingUser,
     }
   }
 
@@ -667,6 +669,7 @@ export function createAuthorizedObjectReader(input: {
       projectId,
       ontology: input.ontology,
       ...(input.appliedMarkings === undefined ? {} : { appliedMarkings: input.appliedMarkings }),
+      requestedBy: scope.execution.requestedBy,
     }),
     models: Object.freeze({
       ...(input.embeddingModels === undefined ? {} : { embedding: input.embeddingModels }),

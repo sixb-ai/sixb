@@ -1,5 +1,5 @@
 import { expect, mock, test } from "bun:test"
-import { defineObjectType, OntologyRegistry, prop, SixbHost } from "../src"
+import { currentUser, defineObjectType, OntologyRegistry, prop, ref, SixbHost } from "../src"
 import { bindRequestExecution } from "../src/execution/request"
 import type {
   EmbeddingModel,
@@ -66,6 +66,11 @@ async function setup() {
       }),
       prop("title", "string"),
       prop("secret", "string"),
+      prop(
+        "reviewers",
+        { type: "array", items: ref.user() },
+        { query: { searchable: true, filterable: true } }
+      ),
     ],
     search: { vectors: { content: { source: ["title"], model: embedding } } },
   })
@@ -146,6 +151,20 @@ test("empty candidates skip inference and unknown models fail before query embed
       .list()
   ).rejects.toThrow("not configured")
   expect(f.embed).not.toHaveBeenCalled()
+})
+
+test("reranks candidates filtered by currentUser() for a reader that is not a user", async () => {
+  // Removal proof: bind a list with `matchNone` instead of `containsNone` in `current-user.ts`.
+  // The executor validates the bound vector stage again and refuses `exists` on a list.
+  const f = await setup()
+  const result = await f.sixb
+    .objects(f.Product)
+    .query()
+    .where((o) => o.p.reviewers.contains(currentUser()))
+    .vector("content", "find", { k: 2 })
+    .rerank({ model: f.model })
+    .list()
+  expect(result.objects).toEqual([])
 })
 
 test("invalid compositions and excessive candidate counts fail before inference", async () => {

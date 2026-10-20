@@ -15,7 +15,7 @@ import {
   isTextSchema,
   queryScalarKindForSchema,
 } from "../../ontology/query-capabilities"
-import { isUserRefPropertySchema } from "../../ontology/user-ref"
+import { isCurrentUser, isUserRefPropertySchema } from "../../ontology/user-ref"
 import { validatePropertyValue, validateSchemaValue } from "../../ontology/validation"
 import { MAX_VECTOR_K, normalizeVector, vectorConfiguration } from "../vectors/profile"
 import { hasVectorProfile, isVectorProfileQuery } from "../vectors/query"
@@ -652,7 +652,7 @@ function validatePredicate(
         path,
         ctx
       )
-      validatePredicateValue(predicate.propertyId, predicate.value, shape, path, ctx)
+      validatePredicateValue(predicate.propertyId, predicate.op, predicate.value, shape, path, ctx)
       admitProperty(ctx, {
         state: admissionState,
         propertyId: predicate.propertyId,
@@ -678,7 +678,14 @@ function validatePredicate(
         addIssue(ctx, path, "empty_in_values", "Predicate 'in' must include at least one value")
       }
       predicate.values.forEach((value, index) => {
-        validatePredicateValue(predicate.propertyId, value, shape, `${path}.values[${index}]`, ctx)
+        validatePredicateValue(
+          predicate.propertyId,
+          predicate.op,
+          value,
+          shape,
+          `${path}.values[${index}]`,
+          ctx
+        )
       })
       admitProperty(ctx, {
         state: admissionState,
@@ -859,11 +866,17 @@ function resolveCommonQueryScalarKind(
 
 function validatePredicateValue(
   propertyId: string,
+  op: ObjectQueryPredicate["op"],
   value: unknown,
   shape: ObjectQueryResultShape,
   path: string,
   ctx: QueryValidationContext
 ): void {
+  if (isCurrentUser(value)) {
+    validateCurrentUserPredicate(propertyId, op, shape, path, ctx)
+    return
+  }
+
   for (const { objectType, property } of getPropertiesForResult(propertyId, shape, path, ctx, {
     reportMissing: false,
   })) {
@@ -889,6 +902,11 @@ function validateContainsValue(
   path: string,
   ctx: QueryValidationContext
 ): void {
+  if (isCurrentUser(value)) {
+    validateCurrentUserPredicate(propertyId, "contains", shape, path, ctx)
+    return
+  }
+
   for (const { objectType, property } of getPropertiesForResult(propertyId, shape, path, ctx, {
     reportMissing: false,
   })) {
@@ -939,6 +957,53 @@ function validateContainsValue(
       )
     }
   }
+}
+
+/**
+ * `currentUser()` stands for a user reference: the executor replaces it with the reader's after
+ * validation, so it compares only where a user reference does. `eq`, `neq` and `in` take it on a
+ * `ref.user()` property, `contains` on a list of them.
+ */
+function validateCurrentUserPredicate(
+  propertyId: string,
+  op: ObjectQueryPredicate["op"],
+  shape: ObjectQueryResultShape,
+  path: string,
+  ctx: QueryValidationContext
+): void {
+  if (op !== "eq" && op !== "neq" && op !== "in" && op !== "contains") {
+    addIssue(
+      ctx,
+      path,
+      "current_user_operator_not_supported",
+      `Predicate '${op}' cannot compare currentUser(); use eq, neq, in, or contains.`
+    )
+    return
+  }
+
+  for (const { objectType, property } of getPropertiesForResult(propertyId, shape, path, ctx, {
+    reportMissing: false,
+  })) {
+    if (holdsUserReferences(property.schema, op === "contains", ctx)) continue
+
+    addIssue(
+      ctx,
+      path,
+      "current_user_requires_user_reference",
+      op === "contains"
+        ? `currentUser() can only be found in a list of ref.user() values; '${objectType.id}.${property.id}' is not one.`
+        : `currentUser() can only be compared with a ref.user() property; '${objectType.id}.${property.id}' is not one.`
+    )
+  }
+}
+
+/** Whether the schema is a user reference or, for `contains`, a list of them. */
+function holdsUserReferences(schema: Schema, list: boolean, ctx: QueryValidationContext): boolean {
+  const resolved = resolveValueTypeRefs(schema, ctx.valueTypesById)
+  if (!list) return resolved === "userRef"
+
+  if (typeof resolved !== "object" || resolved.type !== "array") return false
+  return resolveValueTypeRefs(resolved.items, ctx.valueTypesById) === "userRef"
 }
 
 function validateTextQuery(

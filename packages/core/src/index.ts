@@ -3,6 +3,7 @@
 export type {
   ArraySchema,
   ComplexSchema,
+  CurrentUserRef,
   DirectLinkResult,
   DirectLinkTarget,
   EnumSchema,
@@ -49,6 +50,7 @@ export type {
   ValueTypeRefSchema,
 } from "./ontology"
 export {
+  currentUser,
   defineInterface,
   defineObjectType,
   defineOntology,

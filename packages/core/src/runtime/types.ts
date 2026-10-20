@@ -43,6 +43,7 @@ import type {
   ObjectTypeWithPropertyTokens,
   PropertyToken,
 } from "../ontology/tokens"
+import type { CurrentUserRef, UserRef } from "../ontology/user-ref"
 import type { Queues } from "../queues"
 import type { ActionRunRecord, ObjectLinkRow, Redactions, Storage } from "../storage"
 import type { UserProfile } from "../users"
@@ -169,6 +170,17 @@ type PropertyWhereValue<
   TPropertyId extends TObjectType["properties"][number]["id"],
 > = InferPropertyValue<PropertyById<TObjectType, TPropertyId>>
 
+/** A value a predicate compares with a user reference may be `currentUser()` instead. */
+type WithCurrentUser<TValue> = [Extract<NonNullable<TValue>, UserRef>] extends [never]
+  ? TValue
+  : TValue | CurrentUserRef
+
+/** The value `eq`, `neq` and `in` compare: the property's, or the reading user's. */
+type PropertyWhereEqualityValue<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TPropertyId extends TObjectType["properties"][number]["id"],
+> = WithCurrentUser<PropertyWhereValue<TObjectType, TPropertyId>>
+
 type PropertyWhereContainsValue<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TPropertyId extends TObjectType["properties"][number]["id"],
@@ -176,15 +188,25 @@ type PropertyWhereContainsValue<
   NonNullable<PropertyWhereValue<TObjectType, TPropertyId>> extends string
     ? string
     : NonNullable<PropertyWhereValue<TObjectType, TPropertyId>> extends readonly (infer TItem)[]
-      ? TItem
+      ? WithCurrentUser<TItem>
       : NonNullable<PropertyWhereValue<TObjectType, TPropertyId>> extends Record<string, unknown>
         ? string
         : never
 
+type PropertyWhereEqualityClause<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TPropertyId extends TObjectType["properties"][number]["id"],
+> = Omit<ObjectQueryPredicateComparison, "op" | "propertyId" | "value"> & {
+  op: "eq" | "neq"
+  propertyId: TPropertyId
+  value: PropertyWhereEqualityValue<TObjectType, TPropertyId>
+}
+
 type PropertyWhereComparisonClause<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TPropertyId extends TObjectType["properties"][number]["id"],
-> = Omit<ObjectQueryPredicateComparison, "propertyId" | "value"> & {
+> = Omit<ObjectQueryPredicateComparison, "op" | "propertyId" | "value"> & {
+  op: "lt" | "lte" | "gt" | "gte"
   propertyId: TPropertyId
   value: PropertyWhereValue<TObjectType, TPropertyId>
 }
@@ -194,7 +216,7 @@ type PropertyWhereInClause<
   TPropertyId extends TObjectType["properties"][number]["id"],
 > = Omit<ObjectQueryPredicateIn, "propertyId" | "values"> & {
   propertyId: TPropertyId
-  values: readonly PropertyWhereValue<TObjectType, TPropertyId>[]
+  values: readonly PropertyWhereEqualityValue<TObjectType, TPropertyId>[]
 }
 
 type PropertyWhereExistsClause<
@@ -218,11 +240,11 @@ type PropertyPredicate<
   TPropertyId extends TObjectType["properties"][number]["id"],
 > = {
   eq(
-    value: PropertyWhereValue<TObjectType, TPropertyId>
-  ): PropertyWhereComparisonClause<TObjectType, TPropertyId> & { op: "eq" }
+    value: PropertyWhereEqualityValue<TObjectType, TPropertyId>
+  ): PropertyWhereEqualityClause<TObjectType, TPropertyId> & { op: "eq" }
   neq(
-    value: PropertyWhereValue<TObjectType, TPropertyId>
-  ): PropertyWhereComparisonClause<TObjectType, TPropertyId> & { op: "neq" }
+    value: PropertyWhereEqualityValue<TObjectType, TPropertyId>
+  ): PropertyWhereEqualityClause<TObjectType, TPropertyId> & { op: "neq" }
   lt(
     value: PropertyWhereValue<TObjectType, TPropertyId>
   ): PropertyWhereComparisonClause<TObjectType, TPropertyId> & { op: "lt" }
@@ -236,7 +258,7 @@ type PropertyPredicate<
     value: PropertyWhereValue<TObjectType, TPropertyId>
   ): PropertyWhereComparisonClause<TObjectType, TPropertyId> & { op: "gte" }
   in(
-    values: readonly PropertyWhereValue<TObjectType, TPropertyId>[]
+    values: readonly PropertyWhereEqualityValue<TObjectType, TPropertyId>[]
   ): PropertyWhereInClause<TObjectType, TPropertyId>
   exists(value?: boolean): PropertyWhereExistsClause<TObjectType, TPropertyId>
   contains(
@@ -253,6 +275,7 @@ type PropertyWhereClause<TObjectType extends ObjectTypeWithPropertyTokens> =
         | ObjectQueryPredicateContains
     : {
         [TPropertyId in TObjectType["properties"][number]["id"]]:
+          | PropertyWhereEqualityClause<TObjectType, TPropertyId>
           | PropertyWhereComparisonClause<TObjectType, TPropertyId>
           | PropertyWhereInClause<TObjectType, TPropertyId>
           | PropertyWhereExistsClause<TObjectType, TPropertyId>
