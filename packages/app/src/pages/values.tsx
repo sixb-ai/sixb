@@ -8,10 +8,11 @@
  * node cannot be read (an unresolved `valueTypeRef`, a field it does not name), the value is drawn
  * generically and its type is never guessed.
  */
-import { client, objectFileContentUrl } from "@sixb/client"
+import { client, type GetUserResponse, getUser, objectFileContentUrl } from "@sixb/client"
 import { listObjectTypesOptions } from "@sixb/client/hooks"
 import type { UserRef } from "@sixb/core"
 import { type FileRef, fileNameFor, isFileRef } from "@sixb/core/blob-storage"
+import { Avatar, AvatarFallback, AvatarImage } from "@sixb/ui/components"
 import {
   defineMessages,
   type MessageTree,
@@ -20,7 +21,7 @@ import {
   useLocale,
 } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
-import { useQuery } from "@tanstack/react-query"
+import { queryOptions, useQuery } from "@tanstack/react-query"
 import { Box, Download, Eye, FileIcon, UserRound } from "lucide-react"
 import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
@@ -36,6 +37,7 @@ export const en = {
   items: (count: number) => plural("en", count, { one: "1 item", other: `${count} items` }),
   fields: (count: number) => plural("en", count, { one: "1 field", other: `${count} fields` }),
   user: "user",
+  suspended: "Suspended",
   view: "View",
   download: "Download",
   showMore: "Show more",
@@ -52,6 +54,7 @@ export const fr: Translation<typeof en> = {
   items: (count: number) => plural("fr", count, { one: "1 élément", other: `${count} éléments` }),
   fields: (count: number) => plural("fr", count, { one: "1 champ", other: `${count} champs` }),
   user: "utilisateur",
+  suspended: "Compte suspendu",
   view: "Voir",
   download: "Télécharger",
   showMore: "Voir plus",
@@ -511,7 +514,6 @@ function Leaf({
   readonly fileLinks?: FileLinksAt
   readonly path: readonly string[]
 }) {
-  const messages = useValueMessages()
   const locale = useLocale()
   if (position.objectRef) {
     const { objectTypeId, primaryId } = position.objectRef
@@ -529,12 +531,7 @@ function Leaf({
     )
   }
   if (position.userRef) {
-    return (
-      <Ref icon={<UserRound className="size-3 text-sky-600 dark:text-sky-400" />}>
-        {messages.user}
-        <span className="font-mono text-muted-foreground">{position.userRef.id}</span>
-      </Ref>
-    )
+    return <UserRefChip user={position.userRef} />
   }
   if (position.fileRef) {
     return <FileValue file={position.fileRef} links={fileLinks?.(path, position.fileRef) ?? null} />
@@ -581,12 +578,93 @@ function formatPrimitive(value: unknown, type: string | null, locale: string): s
   return null
 }
 
-function Ref({ icon, children }: { readonly icon: ReactNode; readonly children: ReactNode }) {
+function Ref({
+  icon,
+  children,
+  title,
+  className,
+}: {
+  readonly icon: ReactNode
+  readonly children: ReactNode
+  readonly title?: string
+  readonly className?: string
+}) {
   return (
-    <span className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md bg-muted/60 px-2 py-0.5 text-xs font-medium [&>span]:truncate">
+    <span
+      className={cn(
+        "inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md bg-muted/60 px-2 py-0.5 text-xs font-medium [&>span]:truncate",
+        className
+      )}
+      title={title}
+    >
       {icon}
       {children}
     </span>
+  )
+}
+
+// A renamed member shows the new name within this delay.
+const USER_PROFILE_STALE_MS = 5 * 60_000
+
+/**
+ * The member a user reference names, or `null` when the reader cannot see the directory or no
+ * member has the id. Both are answers, cached like a profile, so a page of chips asks once per id.
+ */
+export function userRefProfileQuery(userId: string) {
+  return queryOptions<GetUserResponse | null>({
+    queryKey: ["sixb", "app", "userRefProfile", userId] as const,
+    queryFn: async ({ signal }) => {
+      const { data, error, response } = await getUser({
+        path: { userId },
+        signal,
+        responseStyle: "fields",
+        throwOnError: false,
+      })
+      if (response?.status === 403 || response?.status === 404) return null
+      if (error !== undefined) throw error
+
+      return data
+    },
+    retry: false,
+    staleTime: USER_PROFILE_STALE_MS,
+  })
+}
+
+/**
+ * A user reference carries only an id, so the chip names the member from the directory. Without
+ * `can.view(project.users)`, or for an id no member has, it shows the id.
+ */
+function UserRefChip({ user }: { readonly user: UserRef }) {
+  const messages = useValueMessages()
+  const profile = useQuery(userRefProfileQuery(user.id)).data
+  const icon = <UserRound className="size-3 shrink-0 text-sky-600 dark:text-sky-400" />
+
+  if (!profile) {
+    return (
+      <Ref icon={icon}>
+        {messages.user}
+        <span className="font-mono text-muted-foreground">{user.id}</span>
+      </Ref>
+    )
+  }
+
+  const suspended = profile.status === "suspended"
+  const avatar = (
+    <Avatar className="size-4">
+      {profile.avatarUrl ? <AvatarImage src={profile.avatarUrl} alt="" /> : null}
+      <AvatarFallback className="bg-transparent">{icon}</AvatarFallback>
+    </Avatar>
+  )
+
+  return (
+    <Ref
+      icon={avatar}
+      title={`${profile.email} · ${profile.id}`}
+      className={suspended ? "text-muted-foreground" : undefined}
+    >
+      <span>{profile.displayName ?? profile.email}</span>
+      {suspended ? <span className="font-normal">{messages.suspended}</span> : null}
+    </Ref>
   )
 }
 
