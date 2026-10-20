@@ -14216,17 +14216,25 @@ export type GetActivityCaptureConfigResponse =
 
 export type CaptureActivityData = {
   body: {
-    events: Array<{
-      id: string
-      type: "page.view" | "visit.activity"
-      route: string
-      attribution?: {
-        source?: string
-        medium?: string
-        campaign?: string
-        referrer?: string
-      }
-    }>
+    events: Array<
+      | {
+          id: string
+          type: "page.view" | "visit.activity"
+          route: string
+          attribution?: {
+            source?: string
+            medium?: string
+            campaign?: string
+            referrer?: string
+          }
+        }
+      | {
+          id: string
+          type: "ui.interaction"
+          name: string
+          route: string
+        }
+    >
   }
   path?: never
   query?: never
@@ -14326,6 +14334,7 @@ export type ListActivityVisitsResponses = {
       startedAt: string
       lastSeenAt: string
       pageViews: number
+      interactions: number
     }>
     hasMore: boolean
   }
@@ -14530,6 +14539,7 @@ export type GetActivityVisitTimelineResponses = {
       startedAt: string
       lastSeenAt: string
       pageViews: number
+      interactions: number
     }
     connection?:
       | {
@@ -14557,6 +14567,13 @@ export type GetActivityVisitTimelineResponses = {
           kind: "page"
           at: string
           sequence: number
+          route: string
+        }
+      | {
+          kind: "interaction"
+          at: string
+          sequence: number
+          name: string
           route: string
         }
       | {
@@ -14690,6 +14707,7 @@ export type ListActivityConnectionsResponses = {
         startedAt: string
         lastSeenAt: string
         pageViews: number
+        interactions: number
       }>
     }>
     nextCursor?: string

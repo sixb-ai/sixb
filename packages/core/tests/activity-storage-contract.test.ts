@@ -18,6 +18,10 @@ runActivityStorageContractSuite("InMemoryActivityStorage", {
       pageViews: snapshot.pageViews.filter(
         (pageView) => pageView.projectId !== visit.projectId || pageView.visitId !== visit.id
       ),
+      interactions: snapshot.interactions.filter(
+        (interaction) =>
+          interaction.projectId !== visit.projectId || interaction.visitId !== visit.id
+      ),
     })
   },
 })

@@ -3,6 +3,8 @@ import {
   ACTIVITY_EVENT_ID_PATTERN,
   ACTIVITY_HOSTNAME_PATTERN,
   ACTIVITY_ID_MAX_LENGTH,
+  ACTIVITY_INTERACTION_NAME_MAX_LENGTH,
+  ACTIVITY_INTERACTION_NAME_PATTERN,
   ACTIVITY_LABEL_MAX_LENGTH,
   ACTIVITY_LABEL_PATTERN,
   ACTIVITY_MAX_PAGE_SIZE,
@@ -55,14 +57,28 @@ const ActivityAttributionSchema = z
   })
   .strict()
 
-export const ActivityEventInputSchema = z
-  .object({
-    id: z.string().regex(ACTIVITY_EVENT_ID_PATTERN),
-    type: z.enum(["page.view", "visit.activity"]),
-    route: RouteSchema,
-    attribution: ActivityAttributionSchema.optional(),
-  })
-  .strict()
+export const ActivityEventInputSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      id: z.string().regex(ACTIVITY_EVENT_ID_PATTERN),
+      type: z.enum(["page.view", "visit.activity"]),
+      route: RouteSchema,
+      attribution: ActivityAttributionSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      id: z.string().regex(ACTIVITY_EVENT_ID_PATTERN),
+      type: z.literal("ui.interaction"),
+      name: z
+        .string()
+        .min(1)
+        .max(ACTIVITY_INTERACTION_NAME_MAX_LENGTH)
+        .regex(ACTIVITY_INTERACTION_NAME_PATTERN),
+      route: RouteSchema,
+    })
+    .strict(),
+])
 
 export const CaptureActivityBodySchema = z
   .object({ events: z.array(ActivityEventInputSchema).min(1).max(ACTIVITY_BATCH_LIMIT) })
@@ -98,6 +114,7 @@ const ActivityVisitSchema = z.object({
   startedAt: z.string().datetime(),
   lastSeenAt: z.string().datetime(),
   pageViews: z.number(),
+  interactions: z.number(),
 })
 
 export const ActivityVisitsPageSchema = z.object({
@@ -151,6 +168,13 @@ const ActivityTimelineEntrySchema = z.discriminatedUnion("kind", [
     kind: z.literal("page"),
     at: z.string().datetime(),
     sequence: z.number(),
+    route: z.string(),
+  }),
+  z.object({
+    kind: z.literal("interaction"),
+    at: z.string().datetime(),
+    sequence: z.number(),
+    name: z.string(),
     route: z.string(),
   }),
   z.object({

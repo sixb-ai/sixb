@@ -438,6 +438,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("065-plan-work-payload-statistics", planWorkPayloadStatisticsSql),
     pgSql("066-activity", activitySql),
     pgSql("067-activity-timeline", activityTimelineSql),
+    pgSql("068-activity-interactions", activityInteractionsSql),
   ],
 })
 
@@ -477,3 +478,6 @@ import planWorkPayloadStatisticsSql from "./migrations/065-plan-work-payload-sta
 }
 import activitySql from "./migrations/066-activity.sql" with { type: "text" }
 import activityTimelineSql from "./migrations/067-activity-timeline.sql" with { type: "text" }
+import activityInteractionsSql from "./migrations/068-activity-interactions.sql" with {
+  type: "text",
+}

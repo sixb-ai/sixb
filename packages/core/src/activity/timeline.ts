@@ -15,7 +15,10 @@ import type { WorkflowRunStatus } from "../storage/workflow-runs"
 import { type ActivityConnection, readActivityConnection } from "./connection"
 import type { ActivityVisitView } from "./shares"
 
-/** At most this many page views, and as many recorded executions, make a visit's timeline. */
+/**
+ * At most this many page views and interactions together, and as many recorded executions, make a
+ * visit's timeline.
+ */
 export const ACTIVITY_TIMELINE_LIMIT = 200
 
 /**
@@ -30,6 +33,15 @@ export interface ActivityPageEntry {
   readonly kind: "page"
   readonly at: Date
   readonly sequence: number
+  readonly route: string
+}
+
+/** An interaction the app marked, on the page it happened on. */
+export interface ActivityInteractionEntry {
+  readonly kind: "interaction"
+  readonly at: Date
+  readonly sequence: number
+  readonly name: string
   readonly route: string
 }
 
@@ -74,6 +86,7 @@ export interface ActivityAgentEntry {
 
 export type ActivityTimelineEntry =
   | ActivityPageEntry
+  | ActivityInteractionEntry
   | ActivityActionEntry
   | ActivityWorkflowEntry
   | ActivityAgentEntry
@@ -82,18 +95,22 @@ export interface ActivityVisitTimeline {
   readonly visit: ActivityVisitView
   /** Absent once the session is gone, or without an auth or share store. */
   readonly connection?: ActivityConnection
-  /** By time. Page views and executions at the same instant keep that order. */
+  /**
+   * By time. Page views and interactions come in their sequence, and before executions at the same
+   * instant.
+   */
   readonly entries: readonly ActivityTimelineEntry[]
   /**
-   * More than {@link ACTIVITY_TIMELINE_LIMIT} page views or recorded executions. The timeline then
-   * stops at the last page view, or the last root execution, it could keep.
+   * More than {@link ACTIVITY_TIMELINE_LIMIT} page views and interactions, or recorded executions.
+   * The timeline then stops at the last page view or interaction, or the last root execution, it
+   * could keep.
    */
   readonly truncated: boolean
 }
 
 /**
- * A visit's timeline: its page views, and what its session started while it lasted. One bounded
- * read per source, each batched over the visit; see `README.md`.
+ * A visit's timeline: its page views and interactions, and what its session started while it
+ * lasted. One bounded read per source, each batched over the visit; see `README.md`.
  */
 export async function composeActivityTimeline(
   runtime: SixbRuntimeContext,
@@ -239,17 +256,8 @@ export async function composeActivityTimeline(
     return []
   })
 
-  // Past the last page view or root kept, a source left rows out: the timeline stops there.
-  const cutoffs = [
-    page.hasMore ? page.pageViews.at(-1)?.receivedAt : undefined,
-    ledger.truncated
-      ? executions.filter((execution) => execution.source.type !== "execution").at(-1)?.createdAt
-      : undefined,
-  ].flatMap((at) => (at === undefined ? [] : [at.getTime()]))
-  const cutoff = cutoffs.length > 0 ? Math.min(...cutoffs) : Number.POSITIVE_INFINITY
-
-  // Page views come first at an equal instant: the sort is stable.
-  const entries = [
+  // Recorded entries come first at an equal instant, in their sequence: the sort is stable.
+  const recorded = [
     ...page.pageViews.map(
       (pageView): ActivityPageEntry => ({
         kind: "page",
@@ -258,8 +266,28 @@ export async function composeActivityTimeline(
         route: pageView.route,
       })
     ),
-    ...executionEntries,
-  ]
+    ...page.interactions.map(
+      (interaction): ActivityInteractionEntry => ({
+        kind: "interaction",
+        at: new Date(interaction.receivedAt),
+        sequence: interaction.sequence,
+        name: interaction.name,
+        route: interaction.route,
+      })
+    ),
+  ].sort((left, right) => left.sequence - right.sequence)
+
+  // Past the last page view, interaction or root kept, a source left rows out: the timeline stops
+  // there.
+  const cutoffs = [
+    page.hasMore ? recorded.at(-1)?.at : undefined,
+    ledger.truncated
+      ? executions.filter((execution) => execution.source.type !== "execution").at(-1)?.createdAt
+      : undefined,
+  ].flatMap((at) => (at === undefined ? [] : [at.getTime()]))
+  const cutoff = cutoffs.length > 0 ? Math.min(...cutoffs) : Number.POSITIVE_INFINITY
+
+  const entries = [...recorded, ...executionEntries]
     .filter((entry) => entry.at.getTime() <= cutoff)
     .sort((left, right) => left.at.getTime() - right.at.getTime())
 

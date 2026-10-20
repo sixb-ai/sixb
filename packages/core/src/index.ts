@@ -889,6 +889,7 @@ export type { ActivityVisitActor, ActivityVisitView } from "./activity/shares"
 export type {
   ActivityActionEntry,
   ActivityAgentEntry,
+  ActivityInteractionEntry,
   ActivityPageEntry,
   ActivityTimelineEntry,
   ActivityVisitTimeline,
@@ -1042,6 +1043,7 @@ export type {
   ActivityAttribution,
   ActivityCursor,
   ActivityDay,
+  ActivityInteraction,
   ActivityPageView,
   ActivitySummary,
   ActivityUser,

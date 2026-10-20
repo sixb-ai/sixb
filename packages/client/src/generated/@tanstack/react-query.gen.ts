@@ -5002,7 +5002,7 @@ export const getActivityCaptureConfigOptions = (options?: Options<GetActivityCap
   })
 
 /**
- * Record page views and activity for this browser session
+ * Record page views, activity and interactions for this browser session
  *
  * A browser or shared-link session only; a native client's session gets 403. The visit belongs to the calling session.
  */
@@ -5136,7 +5136,7 @@ export const getActivityVisitTimelineQueryKey = (options: Options<GetActivityVis
 /**
  * Read what one visit did
  *
- * Its page views, with the actions, workflows and Agent runs its session started, and the connection it came through. At most 200 page views and 200 recorded executions: see truncated.
+ * Its page views and interactions, with the actions, workflows and Agent runs its session started, and the connection it came through. At most 200 page views and interactions, and 200 recorded executions: see truncated.
  */
 export const getActivityVisitTimelineOptions = (options: Options<GetActivityVisitTimelineData>) =>
   queryOptions<

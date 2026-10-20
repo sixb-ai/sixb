@@ -5,7 +5,7 @@ import {
   activityCalendarDays,
   parseActivityAttribution,
   planActivityAppend,
-  type StoredActivityPageView,
+  type StoredActivityEvent,
   serializeActivityAttribution,
   validateActivityAppend,
 } from "@sixb/core/internal/storage"
@@ -13,6 +13,7 @@ import type {
   ActivityCalendarInput,
   ActivityCursor,
   ActivityDay,
+  ActivityInteraction,
   ActivityPageView,
   ActivityPeriodInput,
   ActivitySessionVisits,
@@ -50,7 +51,7 @@ export class PgActivityStorage implements ActivityStorage {
       const plan = planActivityAppend(
         input,
         await readSource(sql, input),
-        await readStoredPageViews(sql, input)
+        await readStoredEvents(sql, input)
       )
       if (plan.status !== "append") {
         return { status: plan.status === "duplicate" ? "accepted" : "throttled", accepted: 0 }
@@ -68,19 +69,22 @@ export class PgActivityStorage implements ActivityStorage {
         await sql`
           INSERT INTO activity_visits (
             project_id, id, actor_type, user_id, grant_id, session_id,
-            started_at, last_seen_at, page_views, attribution
+            started_at, last_seen_at, page_views, interactions, attribution
           ) VALUES (
             ${input.projectId}, ${state.visitId}, ${input.actor.type},
             ${input.actor.type === "user" ? input.actor.userId : null},
             ${input.actor.type === "share" ? input.actor.grantId : null},
             ${input.sessionId}, ${lastSeenAt}, ${lastSeenAt}, ${plan.pageViews.length},
-            ${attribution}::text::jsonb
+            ${plan.interactions.length}, ${attribution}::text::jsonb
           )
         `
       } else {
         await sql`
           UPDATE activity_visits
-          SET last_seen_at = ${lastSeenAt}, page_views = page_views + ${plan.pageViews.length}
+          SET
+            last_seen_at = ${lastSeenAt},
+            page_views = page_views + ${plan.pageViews.length},
+            interactions = interactions + ${plan.interactions.length}
           WHERE project_id = ${input.projectId} AND id = ${state.visitId}
         `
       }
@@ -93,6 +97,17 @@ export class PgActivityStorage implements ActivityStorage {
             ${input.projectId}, ${pageView.visitId}, ${pageView.sequence}, ${pageView.id},
             ${pageView.route}, ${pageView.receivedAt},
             ${serializeActivityAttribution(pageView.attribution)}::text::jsonb
+          )
+        `
+      }
+
+      for (const interaction of plan.interactions) {
+        await sql`
+          INSERT INTO activity_interactions (
+            project_id, visit_id, sequence, id, name, route, received_at
+          ) VALUES (
+            ${input.projectId}, ${interaction.visitId}, ${interaction.sequence},
+            ${interaction.id}, ${interaction.name}, ${interaction.route}, ${interaction.receivedAt}
           )
         `
       }
@@ -232,19 +247,36 @@ export class PgActivityStorage implements ActivityStorage {
       return null
     }
 
-    const rows = await this.sql<PageViewRow[]>`
-      SELECT id, visit_id, sequence, route, received_at
+    // Page views and interactions share the visit's sequence, so one bound covers both.
+    const rows = await this.sql<EventRow[]>`
+      SELECT id, visit_id, sequence, route, NULL::text AS name, received_at
       FROM activity_page_views
+      WHERE project_id = ${input.projectId}
+        AND visit_id = ${input.id}
+      UNION ALL
+      SELECT id, visit_id, sequence, route, name, received_at
+      FROM activity_interactions
       WHERE project_id = ${input.projectId}
         AND visit_id = ${input.id}
       ORDER BY sequence
       LIMIT ${input.limit + 1}
     `
 
+    const pageViews: ActivityPageView[] = []
+    const interactions: ActivityInteraction[] = []
+    for (const row of rows.slice(0, input.limit)) {
+      if (row.name === null) {
+        pageViews.push(pageViewFromRow(row))
+      } else {
+        interactions.push({ ...pageViewFromRow(row), name: row.name })
+      }
+    }
+
     return {
       visit: visitFromRow(visit),
       sessionId: visit.session_id,
-      pageViews: rows.slice(0, input.limit).map(pageViewFromRow),
+      pageViews,
+      interactions,
       hasMore: rows.length > input.limit,
     }
   }
@@ -308,7 +340,7 @@ export class PgActivityStorage implements ActivityStorage {
   private visitColumns() {
     return this.sql`
       v.id, v.actor_type, v.user_id, v.grant_id, v.started_at, v.last_seen_at, v.page_views,
-      v.attribution::text AS attribution
+      v.interactions, v.attribution::text AS attribution
     `
   }
 }
@@ -342,22 +374,37 @@ async function readSource(
   }
 }
 
-/** The session's page views whose ids appear in the batch, to recognize retries. */
-async function readStoredPageViews(
+/** The session's page views and interactions with an id of the batch, to recognize retries. */
+async function readStoredEvents(
   sql: SQLClient,
   input: AppendActivityInput
-): Promise<StoredActivityPageView[]> {
-  const rows = await sql<{ id: string; route: string; attribution: string | null }[]>`
-    SELECT p.id, p.route, p.attribution::text AS attribution
+): Promise<StoredActivityEvent[]> {
+  const ids = input.events.map((event) => event.id)
+  const rows = await sql<
+    { id: string; route: string; name: string | null; attribution: string | null }[]
+  >`
+    SELECT p.id, p.route, NULL::text AS name, p.attribution::text AS attribution
     FROM activity_page_views p
     JOIN activity_visits v ON v.project_id = p.project_id AND v.id = p.visit_id
     WHERE p.project_id = ${input.projectId}
-      AND p.id = ANY(${sql.array(input.events.map((event) => event.id))}::text[])
+      AND p.id = ANY(${sql.array(ids)}::text[])
+      AND v.actor_type = ${input.actor.type}
+      AND v.session_id = ${input.sessionId}
+    UNION ALL
+    SELECT i.id, i.route, i.name, NULL::text AS attribution
+    FROM activity_interactions i
+    JOIN activity_visits v ON v.project_id = i.project_id AND v.id = i.visit_id
+    WHERE i.project_id = ${input.projectId}
+      AND i.id = ANY(${sql.array(ids)}::text[])
       AND v.actor_type = ${input.actor.type}
       AND v.session_id = ${input.sessionId}
   `
 
   return rows.map((row) => {
+    if (row.name !== null) {
+      return { id: row.id, route: row.route, name: row.name }
+    }
+
     const attribution = parseActivityAttribution(row.attribution)
     return { id: row.id, route: row.route, ...(attribution ? { attribution } : {}) }
   })
@@ -380,6 +427,7 @@ interface VisitRow {
   readonly started_at: Date | string
   readonly last_seen_at: Date | string
   readonly page_views: number
+  readonly interactions: number
   readonly attribution: string | null
 }
 
@@ -410,6 +458,11 @@ interface PageViewRow {
   readonly received_at: Date | string
 }
 
+/** A page view or, with a name, an interaction. */
+interface EventRow extends PageViewRow {
+  readonly name: string | null
+}
+
 function visitFromRow(row: VisitRow): ActivityVisit {
   return {
     id: row.id,
@@ -418,6 +471,7 @@ function visitFromRow(row: VisitRow): ActivityVisit {
     startedAt: new Date(row.started_at),
     lastSeenAt: new Date(row.last_seen_at),
     pageViews: Number(row.page_views),
+    interactions: Number(row.interactions),
   }
 }
 

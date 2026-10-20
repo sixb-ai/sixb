@@ -230,9 +230,9 @@ async function pageViews(
 /** Entries without what varies between runs: their time and execution id. */
 function stable(entries: readonly ActivityTimelineEntry[] | undefined) {
   return entries?.map((entry) => {
-    if (entry.kind === "page") {
-      const { at: _at, ...page } = entry
-      return page
+    if (entry.kind === "page" || entry.kind === "interaction") {
+      const { at: _at, ...recorded } = entry
+      return recorded
     }
     const { at: _at, executionId: _executionId, ...rest } = entry
     return rest
@@ -240,7 +240,9 @@ function stable(entries: readonly ActivityTimelineEntry[] | undefined) {
 }
 
 function runIds(entries: readonly ActivityTimelineEntry[] | undefined) {
-  return entries?.flatMap((entry) => (entry.kind === "page" ? [] : [entry.runId]))
+  return entries?.flatMap((entry) =>
+    entry.kind === "page" || entry.kind === "interaction" ? [] : [entry.runId]
+  )
 }
 
 function cost(amountNanos: string, ratedCallCount = 1): AiCostSummary {
@@ -574,6 +576,59 @@ describe("activity timeline", () => {
 
     expect(timeline?.truncated).toBe(true)
     expect(stable(timeline?.entries)).toEqual([{ kind: "page", sequence: 1, route: "/page/0" }])
+  })
+
+  // Guard proof: take the last page view rather than the last recorded entry as the cutoff in
+  // composeActivityTimeline; the action among the interactions disappears.
+  test("interactions take their place among page views and runs, and bound the timeline", async () => {
+    const { storage, viewer } = await createFixture()
+    const [visitId] = await pageViews(storage, { offsetsMs: [0, 3 * minute] })
+
+    // 199 interactions after the two page views: the 200 shown stop one short of the last.
+    const sizes = [...Array.from({ length: 9 }, () => 20), 18, 1]
+    let next = 0
+    for (const [index, size] of sizes.entries()) {
+      await storage.activity?.append({
+        projectId,
+        actor: { type: "user", userId: "marie" },
+        sessionId: "ses_marie",
+        events: Array.from({ length: size }, () => ({
+          id: `click-${next++}`,
+          type: "ui.interaction" as const,
+          name: "invoices.row.open",
+          route: "/invoices",
+        })),
+        now: new Date(start.getTime() + (5 + index) * minute),
+        idleTimeoutMs: 30 * minute,
+        newVisitId: "visit_unused",
+      })
+    }
+
+    const among = await executionAt(storage, 8.5 * minute, request("among"))
+    await executionAt(storage, 8.5 * minute + 100, primitive(among, "action", "markPaid", "act_in"))
+    const past = await executionAt(storage, 14.5 * minute, request("past"))
+    await executionAt(
+      storage,
+      14.5 * minute + 100,
+      primitive(past, "action", "markPaid", "act_out")
+    )
+
+    const timeline = await viewer.activity.timeline(visitId ?? "")
+    const entries = timeline?.entries ?? []
+
+    expect(timeline?.truncated).toBe(true)
+    expect(stable(entries.slice(0, 3))).toEqual([
+      { kind: "page", sequence: 1, route: "/page/0" },
+      { kind: "page", sequence: 2, route: "/page/180000" },
+      { kind: "interaction", sequence: 3, name: "invoices.row.open", route: "/invoices" },
+    ])
+    expect(entries.filter((entry) => entry.kind === "interaction")).toHaveLength(198)
+    expect(entries.at(-1)).toMatchObject({ kind: "interaction", sequence: 200 })
+
+    const action = entries.findIndex((entry) => entry.kind === "action")
+    expect(runIds(entries)).toEqual(["act_in"])
+    expect(entries[action - 1]).toMatchObject({ kind: "interaction", sequence: 82 })
+    expect(entries[action + 1]).toMatchObject({ kind: "interaction", sequence: 83 })
   })
 
   test("a user's connections list every sign-in with the visits it opened", async () => {

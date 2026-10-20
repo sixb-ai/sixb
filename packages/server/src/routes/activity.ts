@@ -86,7 +86,7 @@ export function registerActivityRoutes(app: Elysia, _host: SixbHostView) {
       body: CaptureActivityBodySchema,
       response: { 200: ActivityCaptureResultSchema, 429: ActivityCaptureResultSchema, ...errors },
       detail: {
-        summary: "Record page views and activity for this browser session",
+        summary: "Record page views, activity and interactions for this browser session",
         description:
           "A browser or shared-link session only; a native client's session gets 403. The visit belongs to the calling session.",
         tags: [OPENAPI_TAGS.activity.name],
@@ -214,7 +214,7 @@ export function registerActivityRoutes(app: Elysia, _host: SixbHostView) {
       detail: {
         summary: "Read what one visit did",
         description:
-          "Its page views, with the actions, workflows and Agent runs its session started, and the connection it came through. At most 200 page views and 200 recorded executions: see truncated.",
+          "Its page views and interactions, with the actions, workflows and Agent runs its session started, and the connection it came through. At most 200 page views and interactions, and 200 recorded executions: see truncated.",
         tags: [OPENAPI_TAGS.activity.name],
         operationId: "getActivityVisitTimeline",
         security: accessTokenSecurityRequirement("getActivityVisitTimeline"),

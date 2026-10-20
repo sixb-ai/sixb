@@ -14,18 +14,28 @@ export interface ActivityAttribution {
 
 /**
  * `page.view` is a load or a navigation, and is kept. `visit.activity` is foreground activity: it
- * keeps the visit alive and is not stored.
+ * keeps the visit alive and is not stored. `ui.interaction` is something the app marked, such as a
+ * button: it is kept, and keeps the visit alive.
  */
-export type ActivityEventType = "page.view" | "visit.activity"
+export type ActivityEventType = "page.view" | "visit.activity" | "ui.interaction"
 
-export interface ActivityEventInput {
-  /** Chosen by the browser, so a retried event is recognized. */
-  readonly id: string
-  readonly type: ActivityEventType
-  /** File-router pattern, never a concrete URL, search string, title, or DOM content. */
-  readonly route: string
-  readonly attribution?: ActivityAttribution
-}
+export type ActivityEventInput =
+  | {
+      /** Chosen by the browser, so a retried event is recognized. */
+      readonly id: string
+      readonly type: "page.view" | "visit.activity"
+      /** File-router pattern, never a concrete URL, search string, title, or DOM content. */
+      readonly route: string
+      readonly attribution?: ActivityAttribution
+    }
+  | {
+      readonly id: string
+      readonly type: "ui.interaction"
+      /** Chosen by the app's developer, such as `invoices.export`; never a value. */
+      readonly name: string
+      /** The route pattern shown when it happened. */
+      readonly route: string
+    }
 
 export interface ActivityVisit {
   readonly id: string
@@ -36,15 +46,29 @@ export interface ActivityVisit {
   readonly lastSeenAt: Date
   /** Every page view of the visit, including those outside the period that listed it. */
   readonly pageViews: number
+  /** Every interaction of the visit, likewise. */
+  readonly interactions: number
 }
 
 export interface ActivityPageView {
   readonly id: string
   readonly visitId: string
-  /** Position in the visit, from 1. */
+  /** Position in the visit, from 1. Interactions take positions in the same order. */
   readonly sequence: number
   readonly route: string
   /** Server receipt time. Browser delivery is best effort, not an audit trail. */
+  readonly receivedAt: Date
+}
+
+/** An interaction the app marked: its name, and the page it happened on. */
+export interface ActivityInteraction {
+  readonly id: string
+  readonly visitId: string
+  /** Position in the visit, from 1, in the same order as its page views. */
+  readonly sequence: number
+  readonly name: string
+  readonly route: string
+  /** Server receipt time. */
   readonly receivedAt: Date
 }
 
@@ -65,7 +89,7 @@ export interface AppendActivityInput {
 
 export interface AppendActivityResult {
   readonly status: "accepted" | "throttled"
-  /** Events taken into account; a retried page view counts zero. */
+  /** Events taken into account; a retried page view or interaction counts zero. */
   readonly accepted: number
 }
 
@@ -140,7 +164,7 @@ export interface ActivityDay {
 export interface ReadActivityVisitInput {
   readonly projectId: string
   readonly id: string
-  /** Page views kept, from the first. */
+  /** Page views and interactions kept together, from the first. */
   readonly limit: number
 }
 
@@ -148,8 +172,9 @@ export interface ReadActivityVisitInput {
 export interface StoredActivityVisitPage {
   readonly visit: ActivityVisit
   readonly sessionId: string
-  /** Its first page views by sequence. */
+  /** Its first page views and interactions, by their shared sequence. */
   readonly pageViews: readonly ActivityPageView[]
+  readonly interactions: readonly ActivityInteraction[]
   readonly hasMore: boolean
 }
 

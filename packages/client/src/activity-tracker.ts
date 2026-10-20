@@ -3,7 +3,8 @@ import { captureActivity, getActivityCaptureConfig } from "./generated/sdk.gen"
 import type { CaptureActivityData, GetActivityCaptureConfigResponse } from "./generated/types.gen"
 
 type EventInput = CaptureActivityData["body"]["events"][number]
-export type ActivityAttribution = NonNullable<EventInput["attribution"]>
+type VisitEventInput = Exclude<EventInput, { readonly type: "ui.interaction" }>
+export type ActivityAttribution = NonNullable<VisitEventInput["attribution"]>
 
 interface QueuedEvent {
   readonly event: EventInput
@@ -206,7 +207,7 @@ export class ActivityTracker {
     return this.options.document?.visibilityState === "visible"
   }
 
-  private enqueue(type: EventInput["type"]): void {
+  private enqueue(type: VisitEventInput["type"]): void {
     if (!this.enabled || this.route === null || this.abort.signal.aborted) {
       return
     }

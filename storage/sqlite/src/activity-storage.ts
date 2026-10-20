@@ -6,7 +6,7 @@ import {
   activityCalendarDays,
   parseActivityAttribution,
   planActivityAppend,
-  type StoredActivityPageView,
+  type StoredActivityEvent,
   serializeActivityAttribution,
   validateActivityAppend,
 } from "@sixb/core/internal/storage"
@@ -14,6 +14,7 @@ import type {
   ActivityCalendarInput,
   ActivityCursor,
   ActivityDay,
+  ActivityInteraction,
   ActivityPageView,
   ActivityPeriodInput,
   ActivitySessionVisits,
@@ -34,7 +35,7 @@ import { runImmediateTransaction, type SqliteStoreConnection } from "./transacti
 
 const VISIT_COLUMNS = `
   v.id, v.actor_type, v.user_id, v.grant_id, v.started_at, v.last_seen_at, v.page_views,
-  v.attribution
+  v.interactions, v.attribution
 `
 
 // Sorts after every stored timestamp, so a first page starts from the newest row.
@@ -52,7 +53,7 @@ export class SqliteActivityStorage implements ActivityStorage {
     validateActivityAppend(input)
 
     return runImmediateTransaction(this.db, () => {
-      const plan = planActivityAppend(input, this.source(input), this.storedPageViews(input))
+      const plan = planActivityAppend(input, this.source(input), this.storedEvents(input))
       if (plan.status !== "append") {
         return { status: plan.status === "duplicate" ? "accepted" : "throttled", accepted: 0 }
       }
@@ -65,8 +66,8 @@ export class SqliteActivityStorage implements ActivityStorage {
           `
             INSERT INTO activity_visits (
               project_id, id, actor_type, user_id, grant_id, session_id,
-              started_at, last_seen_at, page_views, attribution
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              started_at, last_seen_at, page_views, interactions, attribution
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `,
           input.projectId,
           state.visitId,
@@ -77,6 +78,7 @@ export class SqliteActivityStorage implements ActivityStorage {
           lastSeenAt,
           lastSeenAt,
           plan.pageViews.length,
+          plan.interactions.length,
           plan.newVisit.attribution === null
             ? null
             : serializeActivityAttribution(plan.newVisit.attribution)
@@ -85,11 +87,15 @@ export class SqliteActivityStorage implements ActivityStorage {
         this.run(
           `
             UPDATE activity_visits
-            SET last_seen_at = ?, page_views = page_views + ?
+            SET
+              last_seen_at = ?,
+              page_views = page_views + ?,
+              interactions = interactions + ?
             WHERE project_id = ? AND id = ?
           `,
           lastSeenAt,
           plan.pageViews.length,
+          plan.interactions.length,
           input.projectId,
           state.visitId
         )
@@ -109,6 +115,23 @@ export class SqliteActivityStorage implements ActivityStorage {
           pageView.route,
           pageView.receivedAt.toISOString(),
           serializeActivityAttribution(pageView.attribution)
+        )
+      }
+
+      for (const interaction of plan.interactions) {
+        this.run(
+          `
+            INSERT INTO activity_interactions (
+              project_id, visit_id, sequence, id, name, route, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          `,
+          input.projectId,
+          interaction.visitId,
+          interaction.sequence,
+          interaction.id,
+          interaction.name,
+          interaction.route,
+          interaction.receivedAt.toISOString()
         )
       }
 
@@ -285,23 +308,41 @@ export class SqliteActivityStorage implements ActivityStorage {
       return null
     }
 
-    const rows = this.all<PageViewRow>(
+    // Page views and interactions share the visit's sequence, so one bound covers both.
+    const rows = this.all<EventRow>(
       `
-        SELECT id, visit_id, sequence, route, received_at
+        SELECT id, visit_id, sequence, route, NULL AS name, received_at
         FROM activity_page_views
+        WHERE project_id = ? AND visit_id = ?
+        UNION ALL
+        SELECT id, visit_id, sequence, route, name, received_at
+        FROM activity_interactions
         WHERE project_id = ? AND visit_id = ?
         ORDER BY sequence
         LIMIT ?
       `,
       input.projectId,
       input.id,
+      input.projectId,
+      input.id,
       input.limit + 1
     )
+
+    const pageViews: ActivityPageView[] = []
+    const interactions: ActivityInteraction[] = []
+    for (const row of rows.slice(0, input.limit)) {
+      if (row.name === null) {
+        pageViews.push(pageViewFromRow(row))
+      } else {
+        interactions.push({ ...pageViewFromRow(row), name: row.name })
+      }
+    }
 
     return {
       visit: visitFromRow(visit),
       sessionId: visit.session_id,
-      pageViews: rows.slice(0, input.limit).map(pageViewFromRow),
+      pageViews,
+      interactions,
       hasMore: rows.length > input.limit,
     }
   }
@@ -379,25 +420,47 @@ export class SqliteActivityStorage implements ActivityStorage {
     }
   }
 
-  /** The session's page views whose ids appear in the batch, to recognize retries. */
-  private storedPageViews(input: AppendActivityInput): StoredActivityPageView[] {
-    const rows = this.all<{ id: string; route: string; attribution: string | null }>(
+  /** The session's page views and interactions with an id of the batch, to recognize retries. */
+  private storedEvents(input: AppendActivityInput): StoredActivityEvent[] {
+    const ids = JSON.stringify(input.events.map((event) => event.id))
+    const rows = this.all<{
+      id: string
+      route: string
+      name: string | null
+      attribution: string | null
+    }>(
       `
-        SELECT p.id, p.route, p.attribution
+        SELECT p.id, p.route, NULL AS name, p.attribution
         FROM activity_page_views p
         JOIN activity_visits v ON v.project_id = p.project_id AND v.id = p.visit_id
         WHERE p.project_id = ?
           AND p.id IN (SELECT value FROM json_each(?))
           AND v.actor_type = ?
           AND v.session_id = ?
+        UNION ALL
+        SELECT i.id, i.route, i.name, NULL AS attribution
+        FROM activity_interactions i
+        JOIN activity_visits v ON v.project_id = i.project_id AND v.id = i.visit_id
+        WHERE i.project_id = ?
+          AND i.id IN (SELECT value FROM json_each(?))
+          AND v.actor_type = ?
+          AND v.session_id = ?
       `,
       input.projectId,
-      JSON.stringify(input.events.map((event) => event.id)),
+      ids,
+      input.actor.type,
+      input.sessionId,
+      input.projectId,
+      ids,
       input.actor.type,
       input.sessionId
     )
 
     return rows.map((row) => {
+      if (row.name !== null) {
+        return { id: row.id, route: row.route, name: row.name }
+      }
+
       const attribution = parseActivityAttribution(row.attribution)
       return { id: row.id, route: row.route, ...(attribution ? { attribution } : {}) }
     })
@@ -429,6 +492,7 @@ interface VisitRow {
   readonly started_at: string
   readonly last_seen_at: string
   readonly page_views: number
+  readonly interactions: number
   readonly attribution: string | null
 }
 
@@ -457,6 +521,11 @@ interface PageViewRow {
   readonly sequence: number
   readonly route: string
   readonly received_at: string
+}
+
+/** A page view or, with a name, an interaction. */
+interface EventRow extends PageViewRow {
+  readonly name: string | null
 }
 
 /**
@@ -500,6 +569,7 @@ function visitFromRow(row: VisitRow): ActivityVisit {
     startedAt: new Date(row.started_at),
     lastSeenAt: new Date(row.last_seen_at),
     pageViews: Number(row.page_views),
+    interactions: Number(row.interactions),
   }
 }
 

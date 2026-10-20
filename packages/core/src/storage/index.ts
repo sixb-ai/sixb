@@ -58,6 +58,7 @@ export type {
   ActivityDay,
   ActivityEventInput,
   ActivityEventType,
+  ActivityInteraction,
   ActivityPageView,
   ActivityPeriodInput,
   ActivitySessionVisits,

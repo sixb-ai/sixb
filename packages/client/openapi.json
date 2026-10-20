@@ -42377,7 +42377,7 @@
     },
     "/api/activity/events": {
       "post": {
-        "summary": "Record page views and activity for this browser session",
+        "summary": "Record page views, activity and interactions for this browser session",
         "description": "A browser or shared-link session only; a native client's session gets 403. The visit belongs to the calling session.",
         "tags": ["Activity"],
         "operationId": "captureActivity",
@@ -42403,55 +42403,86 @@
                   "events": {
                     "type": "array",
                     "items": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "pattern": "^[a-zA-Z0-9_-]{1,80}$"
-                        },
-                        "type": {
-                          "type": "string",
-                          "enum": ["page.view", "visit.activity"]
-                        },
-                        "route": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 512,
-                          "pattern": "^\\/"
-                        },
-                        "attribution": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "source": {
+                            "id": {
                               "type": "string",
-                              "minLength": 1,
-                              "maxLength": 100,
-                              "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                              "pattern": "^[a-zA-Z0-9_-]{1,80}$"
                             },
-                            "medium": {
+                            "type": {
                               "type": "string",
-                              "minLength": 1,
-                              "maxLength": 100,
-                              "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                              "enum": ["page.view", "visit.activity"]
                             },
-                            "campaign": {
+                            "route": {
                               "type": "string",
                               "minLength": 1,
-                              "maxLength": 100,
-                              "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                              "maxLength": 512,
+                              "pattern": "^\\/"
                             },
-                            "referrer": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 253,
-                              "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+                            "attribution": {
+                              "type": "object",
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                                },
+                                "medium": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                                },
+                                "campaign": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                                },
+                                "referrer": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 253,
+                                  "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           },
+                          "required": ["id", "type", "route"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[a-zA-Z0-9_-]{1,80}$"
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": ["ui.interaction"]
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 100,
+                              "pattern": "^(?!.*\\d{4})[a-z][a-z0-9_-]{0,39}(?:\\.[a-z][a-z0-9_-]{0,39})*$"
+                            },
+                            "route": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512,
+                              "pattern": "^\\/"
+                            }
+                          },
+                          "required": ["id", "type", "name", "route"],
                           "additionalProperties": false
                         }
-                      },
-                      "required": ["id", "type", "route"],
-                      "additionalProperties": false
+                      ]
                     },
                     "minItems": 1,
                     "maxItems": 20
@@ -42468,55 +42499,86 @@
                   "events": {
                     "type": "array",
                     "items": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "pattern": "^[a-zA-Z0-9_-]{1,80}$"
-                        },
-                        "type": {
-                          "type": "string",
-                          "enum": ["page.view", "visit.activity"]
-                        },
-                        "route": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 512,
-                          "pattern": "^\\/"
-                        },
-                        "attribution": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "source": {
+                            "id": {
                               "type": "string",
-                              "minLength": 1,
-                              "maxLength": 100,
-                              "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                              "pattern": "^[a-zA-Z0-9_-]{1,80}$"
                             },
-                            "medium": {
+                            "type": {
                               "type": "string",
-                              "minLength": 1,
-                              "maxLength": 100,
-                              "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                              "enum": ["page.view", "visit.activity"]
                             },
-                            "campaign": {
+                            "route": {
                               "type": "string",
                               "minLength": 1,
-                              "maxLength": 100,
-                              "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                              "maxLength": 512,
+                              "pattern": "^\\/"
                             },
-                            "referrer": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 253,
-                              "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+                            "attribution": {
+                              "type": "object",
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                                },
+                                "medium": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                                },
+                                "campaign": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                                },
+                                "referrer": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 253,
+                                  "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           },
+                          "required": ["id", "type", "route"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[a-zA-Z0-9_-]{1,80}$"
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": ["ui.interaction"]
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 100,
+                              "pattern": "^(?!.*\\d{4})[a-z][a-z0-9_-]{0,39}(?:\\.[a-z][a-z0-9_-]{0,39})*$"
+                            },
+                            "route": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512,
+                              "pattern": "^\\/"
+                            }
+                          },
+                          "required": ["id", "type", "name", "route"],
                           "additionalProperties": false
                         }
-                      },
-                      "required": ["id", "type", "route"],
-                      "additionalProperties": false
+                      ]
                     },
                     "minItems": 1,
                     "maxItems": 20
@@ -42533,55 +42595,86 @@
                   "events": {
                     "type": "array",
                     "items": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "pattern": "^[a-zA-Z0-9_-]{1,80}$"
-                        },
-                        "type": {
-                          "type": "string",
-                          "enum": ["page.view", "visit.activity"]
-                        },
-                        "route": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 512,
-                          "pattern": "^\\/"
-                        },
-                        "attribution": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "source": {
+                            "id": {
                               "type": "string",
-                              "minLength": 1,
-                              "maxLength": 100,
-                              "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                              "pattern": "^[a-zA-Z0-9_-]{1,80}$"
                             },
-                            "medium": {
+                            "type": {
                               "type": "string",
-                              "minLength": 1,
-                              "maxLength": 100,
-                              "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                              "enum": ["page.view", "visit.activity"]
                             },
-                            "campaign": {
+                            "route": {
                               "type": "string",
                               "minLength": 1,
-                              "maxLength": 100,
-                              "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                              "maxLength": 512,
+                              "pattern": "^\\/"
                             },
-                            "referrer": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 253,
-                              "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+                            "attribution": {
+                              "type": "object",
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                                },
+                                "medium": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                                },
+                                "campaign": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f]*$"
+                                },
+                                "referrer": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 253,
+                                  "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           },
+                          "required": ["id", "type", "route"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[a-zA-Z0-9_-]{1,80}$"
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": ["ui.interaction"]
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 100,
+                              "pattern": "^(?!.*\\d{4})[a-z][a-z0-9_-]{0,39}(?:\\.[a-z][a-z0-9_-]{0,39})*$"
+                            },
+                            "route": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512,
+                              "pattern": "^\\/"
+                            }
+                          },
+                          "required": ["id", "type", "name", "route"],
                           "additionalProperties": false
                         }
-                      },
-                      "required": ["id", "type", "route"],
-                      "additionalProperties": false
+                      ]
                     },
                     "minItems": 1,
                     "maxItems": 20
@@ -42838,6 +42931,9 @@
                           },
                           "pageViews": {
                             "type": "number"
+                          },
+                          "interactions": {
+                            "type": "number"
                           }
                         },
                         "required": [
@@ -42846,7 +42942,8 @@
                           "attribution",
                           "startedAt",
                           "lastSeenAt",
-                          "pageViews"
+                          "pageViews",
+                          "interactions"
                         ],
                         "additionalProperties": false
                       }
@@ -43273,7 +43370,7 @@
     "/api/activity/visits/{visitId}/timeline": {
       "get": {
         "summary": "Read what one visit did",
-        "description": "Its page views, with the actions, workflows and Agent runs its session started, and the connection it came through. At most 200 page views and 200 recorded executions: see truncated.",
+        "description": "Its page views and interactions, with the actions, workflows and Agent runs its session started, and the connection it came through. At most 200 page views and interactions, and 200 recorded executions: see truncated.",
         "tags": ["Activity"],
         "operationId": "getActivityVisitTimeline",
         "security": [
@@ -43386,6 +43483,9 @@
                         },
                         "pageViews": {
                           "type": "number"
+                        },
+                        "interactions": {
+                          "type": "number"
                         }
                       },
                       "required": [
@@ -43394,7 +43494,8 @@
                         "attribution",
                         "startedAt",
                         "lastSeenAt",
-                        "pageViews"
+                        "pageViews",
+                        "interactions"
                       ],
                       "additionalProperties": false
                     },
@@ -43496,6 +43597,30 @@
                               }
                             },
                             "required": ["kind", "at", "sequence", "route"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["interaction"]
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "sequence": {
+                                "type": "number"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "route": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["kind", "at", "sequence", "name", "route"],
                             "additionalProperties": false
                           },
                           {
@@ -43946,6 +44071,9 @@
                                 },
                                 "pageViews": {
                                   "type": "number"
+                                },
+                                "interactions": {
+                                  "type": "number"
                                 }
                               },
                               "required": [
@@ -43954,7 +44082,8 @@
                                 "attribution",
                                 "startedAt",
                                 "lastSeenAt",
-                                "pageViews"
+                                "pageViews",
+                                "interactions"
                               ],
                               "additionalProperties": false
                             }

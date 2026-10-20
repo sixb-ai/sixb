@@ -7,6 +7,7 @@ import type {
   ActivityAttribution,
   ActivityDay,
   ActivityEventInput,
+  ActivityInteraction,
   ActivityPageView,
   AppendActivityInput,
 } from "./types"
@@ -23,6 +24,15 @@ export const ACTIVITY_LABEL_MAX_LENGTH = 100
 export const ACTIVITY_REFERRER_MAX_LENGTH = 253
 export const ACTIVITY_ROUTE_MAX_LENGTH = 512
 export const ACTIVITY_ID_MAX_LENGTH = 256
+/**
+ * An interaction name: lowercase dotted segments, each starting with a letter and at most 40
+ * characters, such as `invoices.row.open`, without a run of four digits. A segment that starts
+ * with a digit, or holds a long number, is usually a value, which names never carry. No pattern
+ * catches every value: names are meant to be constants.
+ */
+export const ACTIVITY_INTERACTION_NAME_PATTERN =
+  /^(?!.*\d{4})[a-z][a-z0-9_-]{0,39}(?:\.[a-z][a-z0-9_-]{0,39})*$/
+export const ACTIVITY_INTERACTION_NAME_MAX_LENGTH = 100
 export const ACTIVITY_MAX_PERIOD_MS = 31 * 24 * 60 * 60_000
 export const ACTIVITY_MAX_PAGE_SIZE = 100
 
@@ -42,16 +52,18 @@ export interface ActivitySourceState {
   readonly visitStartedAt: number | null
   /** Epoch milliseconds. Never moves backwards. */
   readonly lastSeenAt: number
-  /** Sequence of the visit's last page view. */
+  /** Sequence of the visit's last stored event, page view or interaction. */
   readonly sequence: number
   readonly windowStart: number
   readonly windowCount: number
 }
 
-/** A page view already stored for the session, compared with a retry of it. */
-export interface StoredActivityPageView {
+/** A page view or an interaction already stored for the session, compared with a retry of it. */
+export interface StoredActivityEvent {
   readonly id: string
   readonly route: string
+  /** Set for an interaction only. */
+  readonly name?: string
   readonly attribution?: ActivityAttribution
 }
 
@@ -68,7 +80,8 @@ export type ActivityAppendPlan =
       /** Set when the batch starts a visit, with the arrival that visit keeps. */
       readonly newVisit: { readonly attribution: ActivityAttribution | null } | null
       readonly pageViews: readonly PlannedActivityPageView[]
-      /** Events counted against the quota: page views and activity alike. */
+      readonly interactions: readonly ActivityInteraction[]
+      /** Events counted against the quota: page views, activity and interactions alike. */
       readonly accepted: number
       readonly state: ActivitySourceState
     }
@@ -90,7 +103,11 @@ export function validateActivityEvents(events: readonly ActivityEventInput[]): v
     }
     ids.add(event.id)
 
-    if (event.type !== "page.view" && event.type !== "visit.activity") {
+    if (
+      event.type !== "page.view" &&
+      event.type !== "visit.activity" &&
+      event.type !== "ui.interaction"
+    ) {
       throw new Error("[Sixb] Unknown activity event type.")
     }
 
@@ -100,7 +117,21 @@ export function validateActivityEvents(events: readonly ActivityEventInput[]): v
       )
     }
 
-    serializeActivityAttribution(event.attribution)
+    if (event.type !== "ui.interaction") {
+      serializeActivityAttribution(event.attribution)
+      continue
+    }
+
+    if (!isActivityInteractionName(event.name)) {
+      throw new Error(
+        `[Sixb] Activity interaction names are lowercase dotted identifiers such as "invoices.export": each segment starts with a letter, holds at most 40 characters and no run of four digits, and the name at most ${ACTIVITY_INTERACTION_NAME_MAX_LENGTH}.`
+      )
+    }
+
+    // An interaction is its name, route and time: the arrival travels with page views.
+    if (Reflect.get(event, "attribution") !== undefined) {
+      throw new Error("[Sixb] Activity interactions carry no attribution.")
+    }
   }
 }
 
@@ -129,12 +160,12 @@ export function validateActivityAppend(input: AppendActivityInput): void {
 
 /**
  * Plans one batch for one session. `current` is the session's state, absent before its first
- * batch; `stored` holds its page views whose ids appear in the batch.
+ * batch; `stored` holds its page views and interactions whose ids appear in the batch.
  */
 export function planActivityAppend(
   input: AppendActivityInput,
   current: ActivitySourceState | undefined,
-  stored: readonly StoredActivityPageView[]
+  stored: readonly StoredActivityEvent[]
 ): ActivityAppendPlan {
   const fresh = input.events.filter((event) => !isRetry(event, stored))
   if (fresh.length === 0) {
@@ -155,32 +186,73 @@ export function planActivityAppend(
   const visitId = continued?.visitId ?? input.newVisitId
   const previousSequence = continued?.sequence ?? 0
 
-  // A visit opened by activity, someone back on a page after inactivity, starts on that page.
-  const pageViews = fresh
-    .filter((event, index) => event.type === "page.view" || (!continued && index === 0))
-    .map(
-      (event, index): PlannedActivityPageView => ({
+  // Page views and interactions share the visit's sequence, in the order the batch sent them.
+  const pageViews: PlannedActivityPageView[] = []
+  const interactions: ActivityInteraction[] = []
+  let sequence = previousSequence
+
+  fresh.forEach((event, index) => {
+    const receivedAt = new Date(now)
+    const opensVisit = !continued && index === 0
+
+    if (event.type === "ui.interaction") {
+      // Like activity, an interaction that opens a visit starts it on its page. The page view's
+      // id is derived outside the event-id alphabet, so no browser event can claim it.
+      if (opensVisit) {
+        sequence += 1
+        pageViews.push({
+          id: `${event.id}.page`,
+          visitId,
+          sequence,
+          route: event.route,
+          receivedAt,
+          attribution: {},
+        })
+      }
+
+      sequence += 1
+      interactions.push({
         id: event.id,
         visitId,
-        sequence: previousSequence + index + 1,
+        sequence,
+        name: event.name,
         route: event.route,
-        receivedAt: new Date(now),
+        receivedAt,
+      })
+      return
+    }
+
+    // A visit opened by activity, someone back on a page after inactivity, starts on that page.
+    if (event.type === "page.view" || opensVisit) {
+      sequence += 1
+      pageViews.push({
+        id: event.id,
+        visitId,
+        sequence,
+        route: event.route,
+        receivedAt,
         ...(event.attribution === undefined
           ? {}
           : { attribution: structuredClone(event.attribution) }),
       })
-    )
+    }
+  })
+
+  // An interaction carries no arrival: the visit it opens reads as direct.
+  const first = fresh[0]
+  const arrival = first?.type === "ui.interaction" ? {} : first?.attribution
 
   return {
     status: "append",
-    newVisit: continued ? null : { attribution: cloneAttribution(fresh[0]?.attribution) },
+    newVisit: continued ? null : { attribution: cloneAttribution(arrival) },
     pageViews,
+    interactions,
     accepted: fresh.length,
     state: {
       visitId,
       visitStartedAt: continued ? continued.visitStartedAt : now,
       lastSeenAt: now,
-      sequence: previousSequence + pageViews.length,
+      sequence,
       windowStart,
       windowCount: windowCount + fresh.length,
     },
@@ -206,20 +278,24 @@ function continuesVisit(
 
 /**
  * An event whose id is already stored is a retry, and must say the same thing. Stored rows are
- * page views and the activity that opened a visit, so either type can retry one. Other activity
- * is not stored, and is never recognized as a retry.
+ * page views, the activity that opened a visit, and interactions; either of the first two types
+ * can retry a page view. Other activity is not stored, and is never recognized as a retry.
  */
-function isRetry(event: ActivityEventInput, stored: readonly StoredActivityPageView[]): boolean {
+function isRetry(event: ActivityEventInput, stored: readonly StoredActivityEvent[]): boolean {
   const previous = stored.find((candidate) => candidate.id === event.id)
   if (!previous) {
     return false
   }
 
-  if (
-    event.route !== previous.route ||
-    serializeActivityAttribution(event.attribution) !==
-      serializeActivityAttribution(previous.attribution)
-  ) {
+  const same =
+    event.type === "ui.interaction"
+      ? event.name === previous.name && event.route === previous.route
+      : previous.name === undefined &&
+        event.route === previous.route &&
+        serializeActivityAttribution(event.attribution) ===
+          serializeActivityAttribution(previous.attribution)
+
+  if (!same) {
     throw new Error("[Sixb] Activity event id was reused with different content.")
   }
 
@@ -331,6 +407,14 @@ function isAttributionLabel(value: unknown, maxLength: number): value is string 
     value.length <= maxLength &&
     value === value.trim() &&
     ACTIVITY_LABEL_PATTERN.test(value)
+  )
+}
+
+function isActivityInteractionName(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= ACTIVITY_INTERACTION_NAME_MAX_LENGTH &&
+    ACTIVITY_INTERACTION_NAME_PATTERN.test(value)
   )
 }
 
