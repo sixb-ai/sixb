@@ -79,6 +79,48 @@ export interface OrgContact {
   readonly directReports?: readonly DirectoryObject[] | null
   readonly memberOf?: readonly DirectoryObject[] | null
 }
+export interface AssignedLicense {
+  readonly skuId?: string | null
+  /** Service plans of the SKU that are turned off for this user. */
+  readonly disabledPlans?: readonly string[] | null
+}
+/**
+ * A member or guest account in Microsoft Entra ID. Without `select`, Graph returns only its
+ * default identity and contact properties; `accountEnabled`, `userType`, `assignedLicenses`,
+ * `createdDateTime` and the rest are present only when selected.
+ */
+export interface User {
+  readonly id: string
+  readonly deletedDateTime?: string | null
+  readonly accountEnabled?: boolean | null
+  readonly assignedLicenses?: readonly AssignedLicense[] | null
+  readonly businessPhones?: readonly string[] | null
+  readonly companyName?: string | null
+  readonly createdDateTime?: string | null
+  readonly department?: string | null
+  readonly displayName?: string | null
+  readonly employeeId?: string | null
+  readonly givenName?: string | null
+  readonly jobTitle?: string | null
+  /** The primary SMTP address. An address alone does not mean the user has a mailbox. */
+  readonly mail?: string | null
+  readonly mailNickname?: string | null
+  readonly mobilePhone?: string | null
+  readonly officeLocation?: string | null
+  readonly onPremisesSyncEnabled?: boolean | null
+  readonly otherMails?: readonly string[] | null
+  readonly preferredLanguage?: string | null
+  /** For example `SMTP:bob@contoso.com` (primary) and `smtp:bob@sales.contoso.com`. */
+  readonly proxyAddresses?: readonly string[] | null
+  readonly surname?: string | null
+  /** A guest's UPN contains `#EXT#`, for example `bob_fabrikam.com#EXT#@contoso.com`. */
+  readonly userPrincipalName?: string | null
+  readonly userType?: "Member" | "Guest" | null
+  /** Present only when requested with `expand`. */
+  readonly manager?: DirectoryObject | null
+  readonly directReports?: readonly DirectoryObject[] | null
+  readonly memberOf?: readonly DirectoryObject[] | null
+}
 export interface DirectoryQueryOptions extends ListOptions {
   readonly filter?: string
   /**

@@ -1,8 +1,8 @@
 # @sixb/connector-microsoft
 
 Typed Microsoft Graph v1.0 connector for Sixb. Covers SharePoint Online sites, document libraries,
-files, folders, Outlook mail, calendars, personal and organizational contacts and incremental
-synchronization. Uses `@sixb/connector-rest` for HTTP and Microsoft's
+files, folders, Outlook mail, calendars, personal and organizational contacts, directory users and
+incremental synchronization. Uses `@sixb/connector-rest` for HTTP and Microsoft's
 `@azure/msal-node` for application authentication. Targets the global Microsoft 365 cloud.
 
 ## Quick start
@@ -718,6 +718,62 @@ MICROSOFT_DIRECTORY_E2E=1 MICROSOFT_TENANT_ID=... MICROSOFT_CLIENT_ID=... MICROS
 bun test ./connectors/microsoft/tests/directory-contacts.e2e.ts
 ```
 
+## Directory users
+
+`client.directory.users` lists the tenant's member and guest accounts (`/users`), for example to
+find the mailboxes to read with `mail`, `calendar` or `contacts`. Grant the Entra application
+permission **User.Read.All** with admin consent.
+
+```ts
+import { isMailboxNotEnabled } from "@sixb/connector-microsoft"
+
+const { users } = client.directory
+const members = users.listAll({ filter: "userType eq 'Member'", select: ["mail"], top: 999 })
+for await (const user of members) {
+  try {
+    for await (const folder of client.contacts.folders.listAll(user.id)) {
+      console.log(user.mail, folder.displayName)
+    }
+  } catch (error) {
+    if (isMailboxNotEnabled(error)) continue // no Exchange Online mailbox
+    throw error
+  }
+}
+await users.get("ana@contoso.com", { select: ["accountEnabled", "userType", "createdDateTime"] })
+await users.list({
+  filter: "accountEnabled eq true and userType eq 'Member' and assignedLicenses/$count ne 0",
+  advancedQuery: true,
+})
+```
+
+| Surface | Operations |
+| --- | --- |
+| `directory.users` | `list`, `listAll`, `get` |
+
+- Without `select`, Graph returns only `id`, `userPrincipalName`, `mail`, `displayName`, `givenName`,
+  `surname`, `jobTitle`, `businessPhones`, `mobilePhone`, `officeLocation` and `preferredLanguage`.
+  Select `accountEnabled`, `userType`, `assignedLicenses`, `createdDateTime` and the rest by name.
+  Pages hold 100 users unless `top` asks for more, up to 999.
+- `filter`, `search`, `orderBy` and `advancedQuery` work as for organizational contacts. Filters on
+  `assignedLicenses/$count`, `ne` and `endsWith`, and `filter` combined with `orderBy`, need
+  `advancedQuery: true`.
+- `get` takes an object ID or UPN. Guest UPNs (`ana_fabrikam.com#EXT#@contoso.com`) and UPNs that
+  start with `$` work as given.
+- A license is not a mailbox: a shared mailbox needs no license, and some licenses include no
+  Exchange. To reach every mailbox, list the members and skip the accounts without one.
+  `isMailboxNotEnabled` is `true` only for Graph's `404 MailboxNotEnabledForRESTAPI`, which
+  unlicensed admin and service accounts, guests, and inactive, soft-deleted or on-premises
+  mailboxes answer. A user that does not exist answers `404 ErrorInvalidUser` and is not matched.
+
+The read-only live test also needs **Contacts.Read** on one mailbox, and an account without a
+mailbox:
+
+```bash
+MICROSOFT_USERS_E2E=1 MICROSOFT_TENANT_ID=... MICROSOFT_CLIENT_ID=... MICROSOFT_CLIENT_SECRET=... \
+MICROSOFT_USERS_MAILBOX=contacts-test@contoso.com MICROSOFT_USERS_NO_MAILBOX=guest@contoso.com \
+bun test ./connectors/microsoft/tests/directory-users.e2e.ts
+```
+
 ## Graph subscriptions
 
 `client.subscriptions` manages Graph v1.0 basic HTTPS notifications using the connector's
@@ -876,4 +932,6 @@ References: [create](https://learn.microsoft.com/en-us/graph/api/subscription-po
 - [Open extensions](https://learn.microsoft.com/en-us/graph/api/opentypeextension-post-opentypeextension?view=graph-rest-1.0)
 - [Organizational contacts](https://learn.microsoft.com/en-us/graph/api/resources/orgcontact?view=graph-rest-1.0)
 - [Organizational contact delta](https://learn.microsoft.com/en-us/graph/api/orgcontact-delta?view=graph-rest-1.0)
+- [List users](https://learn.microsoft.com/en-us/graph/api/user-list?view=graph-rest-1.0)
+- [Get user](https://learn.microsoft.com/en-us/graph/api/user-get?view=graph-rest-1.0)
 - [Advanced directory queries](https://learn.microsoft.com/en-us/graph/aad-advanced-queries)
