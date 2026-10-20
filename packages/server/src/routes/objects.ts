@@ -39,6 +39,7 @@ import {
   ObjectSearchResponseSchema,
   ObjectsQuerySchema,
   TwinObjectSchema,
+  UniqueViolationErrorResponseSchema,
   UpsertObjectBodySchema,
 } from "../schemas/objects"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
@@ -934,6 +935,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           400: ErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          409: UniqueViolationErrorResponseSchema,
         },
         detail: {
           summary: "Create or update object",

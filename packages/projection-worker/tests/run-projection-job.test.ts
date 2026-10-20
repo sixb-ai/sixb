@@ -2035,6 +2035,64 @@ describe("runProjectionJob", () => {
     })
   })
 
+  test("fails a run whose objects share a unique value and names both", async () => {
+    const Person = defineObjectType({
+      id: "Person",
+      name: "Person",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("email", "string", { unique: true }),
+      ],
+    })
+    const peopleDataset = defineDataset("canonical.people", {
+      schema: [col("person_id", "string"), col("person_email", "string")],
+    })
+    const peopleProjection = defineProjection("people-proj", Person)
+      .fromDataset(peopleDataset)
+      .properties({ id: "person_id", email: "person_email" })
+    const deps = createDeps()
+    const sixb = new SixbHost({
+      id: "projection-worker-tests",
+      ontology: [Person],
+      ...deps,
+      datasets: [peopleDataset],
+      projections: [peopleProjection],
+    })
+    const version = await commitDatasetVersion(deps.lakeStorage, peopleDataset, [
+      { person_id: "p-1", person_email: "same@example.com" },
+      { person_id: "p-2", person_email: "same@example.com" },
+    ])
+
+    const job = {
+      id: "projrun-unique-duplicate",
+      projectionId: "people-proj",
+      projectionKind: "object" as const,
+      datasetId: peopleDataset.id,
+      versionId: version.versionId,
+    }
+    await expect(runProjectionJob({ runtime: createRuntime(sixb), job })).rejects.toBeInstanceOf(
+      MaterializationValidationError
+    )
+
+    const run = await deps.storage.projectionRuns.getById({
+      projectId: sixb.id,
+      id: canonicalRunId(job.id),
+    })
+    expect(run?.status).toBe("failed")
+    expect(run?.error).toMatchObject({
+      code: "projection.execution_failed",
+      message:
+        "Projection execution failed. Objects 'p-1' and 'p-2' of 'Person' have the same 'email', which must be unique.",
+    })
+    expect(
+      await deps.storage.objects.getByPrimaryId({
+        projectId: sixb.id,
+        objectTypeId: Person.id,
+        primaryId: "p-1",
+      })
+    ).toBeNull()
+  })
+
   test("preserves coded internal errors raised after the run is claimed", async () => {
     const deps = createDeps()
     const sixb = createSixb(

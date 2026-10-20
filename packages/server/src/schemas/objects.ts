@@ -4,6 +4,7 @@ import { zodToJsonSchema } from "zod-to-json-schema"
 import { UserProfileSchema } from "./auth"
 import {
   AiUsageLimitErrorResponseSchema,
+  codedErrorResponseSchema,
   JsonValueSchema,
   jsonValueOpenApiOverride,
   RedactionsSchema,
@@ -941,3 +942,8 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
     discriminator: { propertyName: "kind" },
   },
 }
+
+/** A write would give a unique property's value to a second object of the type. */
+export const UniqueViolationErrorResponseSchema = codedErrorResponseSchema([
+  "object.unique_violation",
+])
