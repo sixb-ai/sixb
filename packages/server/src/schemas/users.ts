@@ -1,0 +1,33 @@
+import { z } from "zod"
+import { AuthUserStatusSchema } from "./auth"
+
+export const MAX_USERS_PAGE_LIMIT = 200
+export const MAX_USERS_SEARCH_LENGTH = 200
+
+/** A member as the directory shows them. */
+export const UserProfileSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  displayName: z.string().optional(),
+  avatarUrl: z.string().optional(),
+  status: AuthUserStatusSchema,
+})
+
+export const ListUsersQuerySchema = z.object({
+  /** Which members to list. Defaults to `active`. */
+  status: z.enum(["active", "suspended", "all"]).optional(),
+  /** Part of a display name or email, matched ignoring case. */
+  search: z.string().max(MAX_USERS_SEARCH_LENGTH).optional(),
+  limit: z.coerce.number().int().min(1).max(MAX_USERS_PAGE_LIMIT).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+})
+
+export const ListUsersResponseSchema = z.object({
+  users: z.array(UserProfileSchema),
+  hasMore: z.boolean(),
+  total: z.number(),
+})
+
+export const UserParamsSchema = z.object({
+  userId: z.string().min(1),
+})

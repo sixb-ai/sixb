@@ -85,6 +85,7 @@ import {
   getStatus,
   getSync,
   getTelemetryHistory,
+  getUser,
   getWorkflow,
   getWorkflowAgentNodeExecution,
   getWorkflowIntervention,
@@ -132,6 +133,7 @@ import {
   listSharedAccessGrants,
   listSyncRuns,
   listSyncs,
+  listUsers,
   listWebhookRuns,
   listWorkflowInterventions,
   listWorkflowRuns,
@@ -398,6 +400,9 @@ import type {
   GetTelemetryHistoryData,
   GetTelemetryHistoryError,
   GetTelemetryHistoryResponse,
+  GetUserData,
+  GetUserError,
+  GetUserResponse,
   GetWorkflowAgentNodeExecutionData,
   GetWorkflowAgentNodeExecutionError,
   GetWorkflowAgentNodeExecutionResponse,
@@ -531,6 +536,9 @@ import type {
   ListSyncRunsResponse,
   ListSyncsData,
   ListSyncsResponse,
+  ListUsersData,
+  ListUsersError,
+  ListUsersResponse,
   ListWebhookRunsData,
   ListWebhookRunsError,
   ListWebhookRunsResponse,
@@ -5759,6 +5767,93 @@ export const listActivityConnectionsInfiniteOptions = (
       queryKey: listActivityConnectionsInfiniteQueryKey(options),
     }
   )
+
+export const listUsersQueryKey = (options?: Options<ListUsersData>) =>
+  createQueryKey("listUsers", options)
+
+/**
+ * List project members
+ */
+export const listUsersOptions = (options?: Options<ListUsersData>) =>
+  queryOptions<
+    ListUsersResponse,
+    ListUsersError,
+    ListUsersResponse,
+    ReturnType<typeof listUsersQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listUsers({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listUsersQueryKey(options),
+  })
+
+export const listUsersInfiniteQueryKey = (
+  options?: Options<ListUsersData>
+): QueryKey<Options<ListUsersData>> => createQueryKey("listUsers", options, true)
+
+/**
+ * List project members
+ */
+export const listUsersInfiniteOptions = (options?: Options<ListUsersData>) =>
+  infiniteQueryOptions<
+    ListUsersResponse,
+    ListUsersError,
+    InfiniteData<ListUsersResponse>,
+    QueryKey<Options<ListUsersData>>,
+    number | Pick<QueryKey<Options<ListUsersData>>[0], "body" | "headers" | "path" | "query">
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListUsersData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listUsers({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listUsersInfiniteQueryKey(options),
+    }
+  )
+
+export const getUserQueryKey = (options: Options<GetUserData>) => createQueryKey("getUser", options)
+
+/**
+ * Get a project member
+ */
+export const getUserOptions = (options: Options<GetUserData>) =>
+  queryOptions<GetUserResponse, GetUserError, GetUserResponse, ReturnType<typeof getUserQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getUser({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getUserQueryKey(options),
+  })
 
 export const listProjectionsQueryKey = (options?: Options<ListProjectionsData>) =>
   createQueryKey("listProjections", options)

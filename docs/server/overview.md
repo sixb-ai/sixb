@@ -17,6 +17,7 @@ Open `/docs` on your API server for the generated OpenAPI reference. It includes
 | Datasets | `GET /api/datasets` |
 | Events | `GET /api/events` |
 | Logs | `GET /api/logs` |
+| Members | `GET /api/users` |
 | Project | `GET /api/project` |
 
 For TypeScript callers, the [Client SDK](../client/overview.md) provides typed functions for these endpoints. See [Object queries](object-queries.md) for the JSON query format and [WebSockets](../websockets/overview.md) for live streams.

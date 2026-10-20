@@ -16396,6 +16396,101 @@ export type ListActivityConnectionsResponses = {
 export type ListActivityConnectionsResponse =
   ListActivityConnectionsResponses[keyof ListActivityConnectionsResponses]
 
+export type ListUsersData = {
+  body?: never
+  path?: never
+  query?: {
+    status?: "active" | "suspended" | "all"
+    search?: string
+    limit?: number
+    offset?: number
+  }
+  url: "/api/users"
+}
+
+export type ListUsersErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type ListUsersError = ListUsersErrors[keyof ListUsersErrors]
+
+export type ListUsersResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    users: Array<{
+      id: string
+      email: string
+      displayName?: string
+      avatarUrl?: string
+      status: "active" | "suspended"
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListUsersResponse = ListUsersResponses[keyof ListUsersResponses]
+
+export type GetUserData = {
+  body?: never
+  path: {
+    userId: string
+  }
+  query?: never
+  url: "/api/users/{userId}"
+}
+
+export type GetUserErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetUserError = GetUserErrors[keyof GetUserErrors]
+
+export type GetUserResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    id: string
+    email: string
+    displayName?: string
+    avatarUrl?: string
+    status: "active" | "suspended"
+  }
+}
+
+export type GetUserResponse = GetUserResponses[keyof GetUserResponses]
+
 export type ListProjectionsData = {
   body?: never
   path?: never
