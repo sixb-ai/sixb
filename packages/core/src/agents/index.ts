@@ -161,6 +161,7 @@ export type {
   AgentDescriptor,
   AgentReasoning,
   AgentReference,
+  AgentThreadsReference,
   AgentToolAttachments,
   AgentToolContent,
   AgentToolDefinition,

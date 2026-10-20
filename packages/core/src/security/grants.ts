@@ -9,7 +9,7 @@
 
 import type { ActionDefinition, ObjectActionDefinition } from "../actions/types"
 import { isObjectActionDefinition } from "../actions/validation"
-import type { AgentReference, AgentUsageReference } from "../agents/types"
+import type { AgentReference, AgentThreadsReference, AgentUsageReference } from "../agents/types"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { ObjectType } from "../ontology"
@@ -259,7 +259,7 @@ function isAgentUsageReference(input: unknown): input is AgentUsageReference {
   )
 }
 
-type ObservableReference = ProjectSurfaceReference | AgentUsageReference
+type ObservableReference = ProjectSurfaceReference | AgentUsageReference | AgentThreadsReference
 
 /**
  * Every reference `can.observe` accepts, keyed by its `kind`, which is also its grant target. The
@@ -269,6 +269,7 @@ const OBSERVABLE_REFERENCES: Readonly<Record<ObservableReference["kind"], string
   logs: "project.logs",
   activity: "project.activity",
   aiUsage: "agent.usage",
+  agentThreads: "agent.threads",
 }
 
 function isObservableReference(input: unknown): input is ObservableReference {

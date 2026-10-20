@@ -449,6 +449,11 @@ describe("role definitions", () => {
       { capability: "observe", target: "aiUsage" },
     ],
     [
+      "can.observe takes Agent conversations",
+      can.observe(agent.threads),
+      { capability: "observe", target: "agentThreads" },
+    ],
+    [
       "can.run takes a sync definition",
       can.run(syncAccounts),
       { capability: "run", target: "sync", selection: { all: false, ids: ["sync-accounts"] } },
@@ -546,6 +551,8 @@ describe("role definitions", () => {
     }
     expect(Object.isFrozen(agent)).toBe(true)
     expect(Object.isFrozen(agent.usage)).toBe(true)
+    expect(Object.isFrozen(agent.threads)).toBe(true)
+    expect(() => manage(agent.threads)).toThrow(SecurityValidationError)
   })
 
   test("can.observe points the old logs string at project.logs", () => {
@@ -565,7 +572,7 @@ describe("role definitions", () => {
 
     for (const input of [project, { kind: "project" }, { kind: "toString" }, [project.logs]]) {
       expect(() => observe(input)).toThrow(
-        "[Sixb] can.observe accepts project.logs or project.activity or agent.usage."
+        "[Sixb] can.observe accepts project.logs or project.activity or agent.usage or agent.threads."
       )
     }
     expect(() => manage(project.logs)).toThrow(SecurityValidationError)
@@ -728,6 +735,12 @@ describe("role definitions", () => {
         kind: "grant",
         capability: "observe",
         target: "activity",
+        selection: { all: true, except: [] },
+      },
+      {
+        kind: "grant",
+        capability: "observe",
+        target: "agentThreads",
         selection: { all: true, except: [] },
       },
       {

@@ -10,6 +10,9 @@ const commercial = defineGroup("commercial")
 can.observe(project.logs)
 can.observe(project.activity)
 can.observe(agent.usage)
+can.observe(agent.threads)
+// @ts-expect-error conversations are observed, never managed.
+can.manage(agent.threads)
 // @ts-expect-error project surfaces use the typed project reference.
 can.observe("logs")
 // @ts-expect-error observe takes one of project's surfaces, not the project itself.
