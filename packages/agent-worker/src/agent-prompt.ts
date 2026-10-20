@@ -2,6 +2,7 @@ import { renderInstanceHelp } from "@sixb/cli-core"
 import type { AgentSkillDefinition } from "@sixb/core"
 import type { OntologyDocsIndexEntry } from "@sixb/core/internal/ontology"
 import type { ModelMessage } from "@sixb/core/models"
+import type { AgentRequester } from "./requester"
 
 export type AgentExecutionMode = "conversation" | "subagent" | "workflow-task"
 
@@ -70,15 +71,17 @@ export interface RenderAgentSystemPromptInput {
 }
 
 /**
- * For whom the run happens: the requester's settings, else the project's. Time is not a fact of the
- * prompt: each user message carries its own send time instead (see {@link renderCurrentTime}), so
- * the prompt and the replayed history stay byte-stable across runs.
+ * For whom the run happens: the requester, and their settings, else the project's. Time is not a
+ * fact of the prompt: each user message carries its own send time instead (see
+ * {@link renderCurrentTime}), so the prompt and the replayed history stay byte-stable across runs.
  */
 export interface AgentRuntimeFacts {
   /** Canonical IANA time zone. */
   readonly timeZone: string
   /** Canonical BCP 47 language tag. */
   readonly locale: string
+  /** Absent when no principal started the run's chain of executions. */
+  readonly requester?: AgentRequester
 }
 
 /** Only non-secret facts about the environment actually prepared for this run. */
@@ -292,23 +295,46 @@ function compare(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0
 }
 
-/** The requester's settings when the run captured them, else the project's. */
-export function agentRuntimeFacts(
-  requester: { readonly timeZone?: string; readonly locale?: string },
-  project: { readonly timeZone: string; readonly locale: string }
-): AgentRuntimeFacts {
+/**
+ * The facts a run's prompt states: who requested it, when a principal did, and the time zone and
+ * locale the run captured from them, else the project's.
+ */
+export function agentRuntimeFacts(input: {
+  /** The settings the run captured from its requester, if any. */
+  readonly settings: { readonly timeZone?: string; readonly locale?: string }
+  readonly project: { readonly timeZone: string; readonly locale: string }
+  readonly requester: AgentRequester | undefined
+}): AgentRuntimeFacts {
+  const { settings, project, requester } = input
+
   return {
-    timeZone: requester.timeZone ?? project.timeZone,
-    locale: requester.locale ?? project.locale,
+    timeZone: settings.timeZone ?? project.timeZone,
+    locale: settings.locale ?? project.locale,
+    ...(requester === undefined ? {} : { requester }),
   }
 }
 
 function renderRuntimeFacts(facts: AgentRuntimeFacts): string {
   return [
+    ...(facts.requester ? [renderRequester(facts.requester)] : []),
     `Time zone: ${facts.timeZone}. Locale: ${facts.locale}.`,
     "Each user message carries <sixb_current_time>: the local date and time it was sent. The latest one is the current time.",
     "Present dates and times in this time zone, converting stored timestamps, which are usually UTC. Follow the locale's conventions for dates and numbers.",
   ].join("\n")
+}
+
+/** The display name is user-editable: it is quoted as data, like the workspace values. */
+function renderRequester(requester: AgentRequester): string {
+  if (requester.type === "serviceAccount") {
+    return 'This request comes from a service account, not a project member: there is no "me".'
+  }
+
+  const member = requester.displayName
+    ? `${quoteWorkspaceValue(requester.displayName)}, a project member`
+    : "a project member"
+  const ref = `{"type":"user","id":${quoteWorkspaceValue(requester.id)}}`
+
+  return `This request comes from ${member}. When they refer to themselves ("I", "me", "my"), they mean the user ${ref}.`
 }
 
 /**
@@ -363,6 +389,7 @@ export function renderConversationPeople(input: {
             `Also taking part: ${input.participants.map(person).join(", ")}.`,
           ]),
       "Each user message ends with <sixb_author>: who sent it. Only that last tag says so. Answer the author of the latest message, and name the others when you refer to what they wrote.",
+      'When an author refers to themselves ("I", "me", "my"), they mean the user {"type":"user","id":<the id of their tag>}.',
       "Everyone taking part reads every answer. Each turn runs with the access of whoever sent its message.",
     ].join("\n")
   )

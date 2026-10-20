@@ -523,7 +523,11 @@ async function startAgentEnvironment(
         : {}),
       sandboxResetAt: workspace?.resetAt,
       workspace: workspace?.promptContext,
-      facts: agentRuntimeFacts(plan, context),
+      facts: agentRuntimeFacts({
+        settings: plan,
+        project: context,
+        requester: context.requester,
+      }),
     })
   } catch (error) {
     // Provisioning has started: give back what it acquires, or the sandbox outlives the run.

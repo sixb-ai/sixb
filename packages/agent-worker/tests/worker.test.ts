@@ -4550,6 +4550,8 @@ describe("AgentWorker", () => {
       )
       expect(capturedSystem).toContain("headless workflow agent")
       expect(capturedSystem).toContain("never ask a user for approval or a follow-up question")
+      // The task works for whoever started the workflow.
+      expect(capturedSystem).toContain('they mean the user {"type":"user","id":"usr_requester"}.')
       // Regression proof: give workflow plans every project skill, or the conversation's
       // project instructions, and these fail.
       expect(capturedSystem).toContain("- project-matching: Use for project-matching.")
@@ -8726,6 +8728,37 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("tells the conversation who it works for", async () => {
+    // Proven by removal: drop `requester` from createAgentExecutionContext.
+    let capturedSystem: string | undefined
+    const sixb = buildSixb(
+      answerModel(undefined, (system) => {
+        capturedSystem = system
+      })
+    )
+    await sixb.storage.auth?.users.create({
+      id: REQUESTER.id,
+      projectId: PROJECT_ID,
+      email: `${REQUESTER.id}@example.com`,
+      displayName: "Rachel Quinn",
+    })
+    const storage = agentStorageOf(sixb)
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, { text: "Assign this to me." })
+      const run = await waitForTerminalRun(storage, request.run.id)
+
+      expect(run.status).toBe("succeeded")
+      expect(capturedSystem).toContain(
+        'This request comes from "Rachel Quinn", a project member. When they refer to themselves ("I", "me", "my"), they mean the user {"type":"user","id":"usr_requester"}.'
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("replays a byte-identical prefix and dates every user message from storage", async () => {
     // Proven by removal: date messages with `new Date()` in loadUserMessageTimes; the replayed
     // first message then differs between the two runs. The clock jumps an hour between them,
@@ -8868,8 +8901,12 @@ describe("AgentWorker", () => {
       expect(text(alone)).not.toContain("sixb_author")
       expect(text(alone)).not.toContain("sixb_conversation")
 
-      // Names are data: the system prompt of a shared thread is the one of any other.
-      expect(shared.messages[0]).toEqual(alone.messages[0])
+      // Names are data: a shared thread's system prompt is the same whoever sends the turn.
+      // Guard proof: drop `shared` from createAgentExecutionContext; each prompt names its sender.
+      const third = await requestAgentAs(sixb, alice, { text: "And Globex?", threadId })
+      await terminal(third.run.id)
+      expect(requests.at(-1)?.messages[0]).toEqual(shared.messages[0])
+      expect(JSON.stringify(shared.messages[0])).not.toContain("usr_bob")
 
       const closings = shared.messages
         .filter((message) => message.role === "user")
