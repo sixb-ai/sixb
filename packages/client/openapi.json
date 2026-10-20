@@ -27540,6 +27540,28 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["object.unique_violation"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -28028,7 +28050,8 @@
                             "action.phase_failed",
                             "action.read_conflict",
                             "action.rejected",
-                            "action.timeout"
+                            "action.timeout",
+                            "object.unique_violation"
                           ]
                         },
                         "message": {
@@ -28140,7 +28163,8 @@
                                     "action.phase_failed",
                                     "action.read_conflict",
                                     "action.rejected",
-                                    "action.timeout"
+                                    "action.timeout",
+                                    "object.unique_violation"
                                   ]
                                 },
                                 "message": {
@@ -28231,7 +28255,8 @@
                                     "action.phase_failed",
                                     "action.read_conflict",
                                     "action.rejected",
-                                    "action.timeout"
+                                    "action.timeout",
+                                    "object.unique_violation"
                                   ]
                                 },
                                 "message": {
@@ -28415,6 +28440,7 @@
                         "event.delivery_failed",
                         "internal.unexpected",
                         "queue.enqueue_failed",
+                        "object.unique_violation",
                         "pipeline.step_failed",
                         "projection.definition_invalid",
                         "projection.execution_failed",
@@ -29674,7 +29700,8 @@
                                   "action.phase_failed",
                                   "action.read_conflict",
                                   "action.rejected",
-                                  "action.timeout"
+                                  "action.timeout",
+                                  "object.unique_violation"
                                 ]
                               },
                               "message": {
@@ -29895,7 +29922,8 @@
                             "action.phase_failed",
                             "action.read_conflict",
                             "action.rejected",
-                            "action.timeout"
+                            "action.timeout",
+                            "object.unique_violation"
                           ]
                         },
                         "message": {
@@ -30007,7 +30035,8 @@
                                     "action.phase_failed",
                                     "action.read_conflict",
                                     "action.rejected",
-                                    "action.timeout"
+                                    "action.timeout",
+                                    "object.unique_violation"
                                   ]
                                 },
                                 "message": {
@@ -30098,7 +30127,8 @@
                                     "action.phase_failed",
                                     "action.read_conflict",
                                     "action.rejected",
-                                    "action.timeout"
+                                    "action.timeout",
+                                    "object.unique_violation"
                                   ]
                                 },
                                 "message": {

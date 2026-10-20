@@ -126,6 +126,10 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "The job could not be enqueued.",
     retryable: true,
   },
+  "object.unique_violation": {
+    publicMessage: "Another object already has this unique value.",
+    retryable: false,
+  },
   "pipeline.step_failed": {
     publicMessage: "Pipeline step execution failed.",
     retryable: false,

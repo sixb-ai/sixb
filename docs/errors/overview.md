@@ -58,6 +58,7 @@ To send failures to a monitoring service, configure [onError](../logging/overvie
 | `dataset.version_read_inconsistent` | Yes | Read results conflict with immutable version metadata. | Retry, then inspect lake storage integrity. |
 | `event.delivery_failed` | Yes | A persisted event could not reach the event stream. | Let the outbox retry; inspect the broker if it persists. |
 | `internal.unexpected` | No | The exception has no specific code yet. | Inspect its `onError` report and correlation details. |
+| `object.unique_violation` | No | A write would give a [unique property](../ontology/properties.md#unique-values)'s value to a second object of the type, so nothing was committed. | Write another value, or first take it from the object that holds it. |
 | `pipeline.step_failed` | No | A step failed before committing its output. | Fix the cause and request a new pipeline run. |
 | `projection.definition_invalid` | No | Projection definition is invalid for its ontology or dataset. | Fix the definition and request a new run. |
 | `projection.execution_failed` | No | Projection materialization failed permanently. | Inspect the projection, pinned dataset version, and `onError` report. |

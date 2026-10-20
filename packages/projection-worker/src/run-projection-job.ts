@@ -10,10 +10,12 @@ import {
   createSixbError,
   isSixbError,
   summarizeErrorMessage,
+  withFailureMessage,
 } from "@sixb/core/internal/errors"
 import {
   MaterializationObjectNotFoundError,
   type ProjectionRunTerminalDecision,
+  UniqueValueViolationError,
 } from "@sixb/core/internal/materialization"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import {
@@ -354,7 +356,7 @@ function translateProjectionExecutionError(input: RunProjectionJobInput, error: 
     return error
   }
 
-  return createSixbError(
+  const failure = createSixbError(
     "projection.execution_failed",
     summarizeErrorMessage(error, "Projection execution failed."),
     {
@@ -367,6 +369,26 @@ function translateProjectionExecutionError(input: RunProjectionJobInput, error: 
       },
     }
   )
+  const violation = findUniqueValueViolation(error)
+  if (!violation) return failure
+
+  // The run's operators need the two objects to fix the data; edits and Actions name neither.
+  return withFailureMessage(
+    failure,
+    `Objects '${violation.holderPrimaryId}' and '${violation.claimantPrimaryId}' of ` +
+      `'${violation.objectTypeId}' have the same '${violation.propertyId}', which must be unique.`
+  )
+}
+
+/** The violation behind `error`, however many layers wrapped it as their cause. */
+function findUniqueValueViolation(error: unknown): UniqueValueViolationError | undefined {
+  const seen = new Set<unknown>()
+  for (let current = error; current instanceof Error && !seen.has(current); ) {
+    if (current instanceof UniqueValueViolationError) return current
+    seen.add(current)
+    current = current.cause
+  }
+  return undefined
 }
 
 type ProjectionSuccessfulCompletion =

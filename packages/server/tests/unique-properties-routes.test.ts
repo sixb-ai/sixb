@@ -50,3 +50,24 @@ test("the ontology API reports unique properties", async () => {
     { id: "name", unique: undefined },
   ])
 })
+
+test("a write that takes another object's unique value answers 409", async () => {
+  const app = createApp()
+  const put = (id: string, email: string) =>
+    app.fetch(
+      new Request(`http://localhost/api/objects/${Person.id}/${id}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ properties: { email } }),
+      })
+    )
+
+  expect((await put("ada", "ada@example.com")).status).toBe(200)
+  const refused = await put("bob", "ada@example.com")
+
+  expect(refused.status).toBe(409)
+  expect(await refused.json()).toEqual({
+    error: `[Sixb] Another '${Person.id}' object already has this 'email'.`,
+    code: "object.unique_violation",
+  })
+})

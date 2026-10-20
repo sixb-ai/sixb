@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  defineAction,
   defineObjectType,
   defineValueType,
   link,
@@ -7,6 +8,7 @@ import {
   type Property,
   prop,
   ref,
+  SixbHost,
   stringEnum,
   valueTypeRef,
 } from "../src"
@@ -14,6 +16,8 @@ import { computeOntologyRevision } from "../src/materializer"
 import { renderOntologyDocs } from "../src/ontology/docs-markdown"
 import type { Schema } from "../src/ontology/types"
 import { uniqueValueKey } from "../src/ontology/unique-values"
+import { createTestSixb } from "../src/testing"
+import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const id = prop("id", "string", { primary: true, required: true })
 
@@ -148,4 +152,63 @@ test("ontology docs flag a unique property", () => {
   })
 
   expect(rendered.files[0]?.contents).toContain("| `email` | string (unique) |")
+})
+
+describe("a duplicate unique value at write boundaries", () => {
+  const Person = defineObjectType({
+    id: "Person",
+    name: "Person",
+    properties: [id, prop("email", "string", { unique: true })],
+  })
+  const rename = defineAction("takeEmail")
+    .on(Person)
+    .params({ email: { schema: "string", required: true } })
+    .edits(({ objects, subject, params }) => {
+      objects(Person).byId(subject.primaryId).update({ email: params.email })
+    })
+
+  function createSixb() {
+    const host = new SixbHost({
+      id: "unique-boundaries",
+      ontology: [Person],
+      actions: [rename],
+      ...createTestRuntimeDeps(),
+    })
+    return createTestSixb(host)
+  }
+
+  const message = "[Sixb] Another 'Person' object already has this 'email'."
+
+  test("an object write fails with object.unique_violation, naming no value nor holder", async () => {
+    const sixb = createSixb()
+    await sixb.objects(Person).upsert({ properties: { id: "ada", email: "ada@example.com" } })
+
+    await expect(
+      sixb.objects(Person).upsert({ properties: { id: "bob", email: "ada@example.com" } })
+    ).rejects.toMatchObject({
+      code: "object.unique_violation",
+      message,
+      retryable: false,
+      details: { objectTypeId: "Person", propertyId: "email" },
+    })
+  })
+
+  test("an Action run fails with object.unique_violation", async () => {
+    const sixb = createSixb()
+    await sixb.objects(Person).upsert({ properties: { id: "ada", email: "ada@example.com" } })
+    await sixb.objects(Person).upsert({ properties: { id: "bob", email: "bob@example.com" } })
+
+    const run = await sixb.objects(Person).requestAction({
+      id: "bob",
+      actionId: "takeEmail",
+      params: { email: "ada@example.com" },
+    })
+
+    expect(run.status).toBe("failed")
+    expect(run.error).toMatchObject({
+      code: "object.unique_violation",
+      message: "Another object already has this unique value. Property 'Person.email' is unique.",
+      details: { actionId: "takeEmail", phase: "commit" },
+    })
+  })
 })

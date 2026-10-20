@@ -9200,6 +9200,16 @@ export type UpsertObjectErrors = {
   404: {
     error: string
   }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "object.unique_violation"
+  }
 }
 
 export type UpsertObjectError = UpsertObjectErrors[keyof UpsertObjectErrors]
@@ -9403,6 +9413,7 @@ export type RequestActionErrors = {
       | "event.delivery_failed"
       | "internal.unexpected"
       | "queue.enqueue_failed"
+      | "object.unique_violation"
       | "pipeline.step_failed"
       | "projection.definition_invalid"
       | "projection.execution_failed"
@@ -9463,6 +9474,7 @@ export type RequestActionResponses = {
         | "action.read_conflict"
         | "action.rejected"
         | "action.timeout"
+        | "object.unique_violation"
       message: string
       retryable: boolean
       at: string
@@ -9506,6 +9518,7 @@ export type RequestActionResponses = {
               | "action.read_conflict"
               | "action.rejected"
               | "action.timeout"
+              | "object.unique_violation"
             message: string
             retryable: boolean
             at: string
@@ -9535,6 +9548,7 @@ export type RequestActionResponses = {
               | "action.read_conflict"
               | "action.rejected"
               | "action.timeout"
+              | "object.unique_violation"
             message: string
             retryable: boolean
             at: string
@@ -9970,6 +9984,7 @@ export type ListActionRunsResponses = {
           | "action.read_conflict"
           | "action.rejected"
           | "action.timeout"
+          | "object.unique_violation"
         message: string
         retryable: boolean
         at: string
@@ -10051,6 +10066,7 @@ export type GetActionRunResponses = {
         | "action.read_conflict"
         | "action.rejected"
         | "action.timeout"
+        | "object.unique_violation"
       message: string
       retryable: boolean
       at: string
@@ -10094,6 +10110,7 @@ export type GetActionRunResponses = {
               | "action.read_conflict"
               | "action.rejected"
               | "action.timeout"
+              | "object.unique_violation"
             message: string
             retryable: boolean
             at: string
@@ -10123,6 +10140,7 @@ export type GetActionRunResponses = {
               | "action.read_conflict"
               | "action.rejected"
               | "action.timeout"
+              | "object.unique_violation"
             message: string
             retryable: boolean
             at: string

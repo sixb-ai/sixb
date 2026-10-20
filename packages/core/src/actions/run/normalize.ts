@@ -7,6 +7,7 @@ import {
 } from "../../errors/internal"
 import { isMaterializationConflictError } from "../../materialization/errors"
 import { ActionValidationError } from "../../objects/action/errors"
+import { uniqueViolationError } from "../../objects/unique-violation"
 import { ACTION_RUN_FAILURE_CODES, type ActionRunFailure, type ActionRunPhase } from "../../storage"
 import { parseActionRunFailure } from "../../storage/action-runs/failure"
 import { isActionTimeout } from "./signals"
@@ -90,6 +91,8 @@ export function translateActionPhaseError(
   if (phase === "commit" && isMaterializationConflictError(error) && error.kind === "expectation") {
     return createSixbError("action.read_conflict", error.message, { cause: error, details })
   }
+  const uniqueViolation = phase === "commit" ? uniqueViolationError(error, details) : undefined
+  if (uniqueViolation) return uniqueViolation
 
   return createSixbError(
     "action.phase_failed",
