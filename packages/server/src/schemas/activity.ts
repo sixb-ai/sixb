@@ -125,19 +125,6 @@ export const ActivitySummarySchema = z.object({
   pageViews: z.number(),
 })
 
-export const ActivityVisitPageSchema = z.object({
-  visit: ActivityVisitSchema,
-  pageViews: z.array(
-    z.object({
-      id: z.string(),
-      sequence: z.number(),
-      route: z.string(),
-      receivedAt: z.string().datetime(),
-    })
-  ),
-  hasMore: z.boolean(),
-})
-
 const ActivityConnectionStatusSchema = z.enum(["active", "expired", "revoked"])
 
 const ActivitySessionConnectionSchema = z.object({
@@ -272,8 +259,3 @@ export const ActivityConnectionsQuerySchema = z.object({
 })
 
 export const ActivityVisitParamsSchema = z.object({ visitId: VisitIdSchema })
-
-export const ActivityVisitQuerySchema = z.object({
-  afterSequence: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
-  limit: PageSizeSchema.optional(),
-})

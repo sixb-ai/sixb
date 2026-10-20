@@ -168,10 +168,14 @@ describe("activity routes", () => {
     // The session id joins activity with other records server-side; it is never read back.
     expect(JSON.stringify(page)).not.toContain("ses_reader")
 
-    const timeline = await (await fixture.get(`visits/${page.visits[0].id}`, viewer)).json()
-    expect(timeline.pageViews).toEqual([
-      expect.objectContaining({ id: "e1", sequence: 1, route: "/items/:id" }),
+    const timeline = await (
+      await fixture.get(`visits/${page.visits[0].id}/timeline`, viewer)
+    ).json()
+    expect(timeline.entries).toEqual([
+      expect.objectContaining({ kind: "page", sequence: 1, route: "/items/:id" }),
     ])
+    // The timeline is the one visit read.
+    expect((await fixture.get(`visits/${page.visits[0].id}`, viewer)).status).toBe(404)
 
     // A browser names neither who it is nor whose visit it adds to.
     const impersonating = { userId: "someone-else", events: [{ ...pageView, id: "e2" }] }
@@ -416,7 +420,6 @@ describe("activity routes", () => {
       "calendar",
       "connections",
       "list",
-      "read",
       "summarize",
       "timeline",
       "users",

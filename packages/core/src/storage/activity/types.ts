@@ -140,19 +140,17 @@ export interface ActivityDay {
 export interface ReadActivityVisitInput {
   readonly projectId: string
   readonly id: string
-  readonly afterSequence: number
+  /** Page views kept, from the first. */
   readonly limit: number
 }
 
-export interface ActivityVisitPage {
+/** A visit as core reads it, with the session it belongs to. `sixb.activity` never returns it. */
+export interface StoredActivityVisitPage {
   readonly visit: ActivityVisit
+  readonly sessionId: string
+  /** Its first page views by sequence. */
   readonly pageViews: readonly ActivityPageView[]
   readonly hasMore: boolean
-}
-
-/** A visit as core reads it, with the session it belongs to. `sixb.activity` never returns it. */
-export interface StoredActivityVisitPage extends ActivityVisitPage {
-  readonly sessionId: string
 }
 
 export interface ListActivitySessionVisitsInput {

@@ -237,7 +237,6 @@ export class PgActivityStorage implements ActivityStorage {
       FROM activity_page_views
       WHERE project_id = ${input.projectId}
         AND visit_id = ${input.id}
-        AND sequence > ${input.afterSequence}
       ORDER BY sequence
       LIMIT ${input.limit + 1}
     `

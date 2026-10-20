@@ -28,9 +28,7 @@ import {
   ActivityPeriodQuerySchema,
   ActivitySummarySchema,
   ActivityUsersPageSchema,
-  ActivityVisitPageSchema,
   ActivityVisitParamsSchema,
-  ActivityVisitQuerySchema,
   ActivityVisitsPageSchema,
   ActivityVisitTimelineSchema,
   CaptureActivityBodySchema,
@@ -191,46 +189,6 @@ export function registerActivityRoutes(app: Elysia, _host: SixbHostView) {
         tags: [OPENAPI_TAGS.activity.name],
         operationId: "getActivityCalendar",
         security: accessTokenSecurityRequirement("getActivityCalendar"),
-      },
-    }
-  )
-
-  app.get(
-    "/api/activity/visits/:visitId",
-    async (context) => {
-      try {
-        const page = await requireRequestSixb(context).activity.read(
-          context.params.visitId,
-          context.query
-        )
-        if (!page) {
-          context.set.status = 404
-          return { error: "Activity visit not found" }
-        }
-
-        return {
-          visit: serializeVisit(page.visit),
-          pageViews: page.pageViews.map((pageView) => ({
-            id: pageView.id,
-            sequence: pageView.sequence,
-            route: pageView.route,
-            receivedAt: pageView.receivedAt.toISOString(),
-          })),
-          hasMore: page.hasMore,
-        }
-      } catch (error) {
-        return handleRouteError(error, context.set)
-      }
-    },
-    {
-      params: ActivityVisitParamsSchema,
-      query: ActivityVisitQuerySchema,
-      response: { 200: ActivityVisitPageSchema, 404: ErrorResponseSchema, ...errors },
-      detail: {
-        summary: "Read the page views of one visit",
-        tags: [OPENAPI_TAGS.activity.name],
-        operationId: "getActivityVisit",
-        security: accessTokenSecurityRequirement("getActivityVisit"),
       },
     }
   )

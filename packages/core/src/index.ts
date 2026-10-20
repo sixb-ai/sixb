@@ -884,7 +884,6 @@ export type {
   ActivityOptions,
   ActivityPageQuery,
   ActivityPeriodQuery,
-  ActivityTimelineQuery,
 } from "./activity/service"
 export type { ActivityVisitActor, ActivityVisitView } from "./activity/shares"
 export type {
@@ -1047,7 +1046,6 @@ export type {
   ActivitySummary,
   ActivityUser,
   ActivityVisit,
-  ActivityVisitPage,
   ActivityVisitsPage,
 } from "./storage/activity/types"
 export type { VectorIndexingFailureCode } from "./storage/ontology/vector-indexing"

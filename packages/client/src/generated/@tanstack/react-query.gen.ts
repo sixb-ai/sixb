@@ -43,7 +43,6 @@ import {
   getActivityCalendar,
   getActivityCaptureConfig,
   getActivitySummary,
-  getActivityVisit,
   getActivityVisitTimeline,
   getAgent,
   getAgentMessageFileContent,
@@ -263,9 +262,6 @@ import type {
   GetActivitySummaryData,
   GetActivitySummaryError,
   GetActivitySummaryResponse,
-  GetActivityVisitData,
-  GetActivityVisitError,
-  GetActivityVisitResponse,
   GetActivityVisitTimelineData,
   GetActivityVisitTimelineError,
   GetActivityVisitTimelineResponse,
@@ -5132,31 +5128,6 @@ export const getActivityCalendarOptions = (options: Options<GetActivityCalendarD
       return data
     },
     queryKey: getActivityCalendarQueryKey(options),
-  })
-
-export const getActivityVisitQueryKey = (options: Options<GetActivityVisitData>) =>
-  createQueryKey("getActivityVisit", options)
-
-/**
- * Read the page views of one visit
- */
-export const getActivityVisitOptions = (options: Options<GetActivityVisitData>) =>
-  queryOptions<
-    GetActivityVisitResponse,
-    GetActivityVisitError,
-    GetActivityVisitResponse,
-    ReturnType<typeof getActivityVisitQueryKey>
-  >({
-    queryFn: async ({ queryKey, signal }) => {
-      const { data } = await getActivityVisit({
-        ...options,
-        ...queryKey[0],
-        signal,
-        throwOnError: true,
-      })
-      return data
-    },
-    queryKey: getActivityVisitQueryKey(options),
   })
 
 export const getActivityVisitTimelineQueryKey = (options: Options<GetActivityVisitTimelineData>) =>
