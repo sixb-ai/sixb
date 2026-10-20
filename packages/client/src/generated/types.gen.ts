@@ -14543,6 +14543,232 @@ export type GetActivityVisitResponses = {
 
 export type GetActivityVisitResponse = GetActivityVisitResponses[keyof GetActivityVisitResponses]
 
+export type GetActivityVisitTimelineData = {
+  body?: never
+  path: {
+    visitId: string
+  }
+  query?: never
+  url: "/api/activity/visits/{visitId}/timeline"
+}
+
+export type GetActivityVisitTimelineErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetActivityVisitTimelineError =
+  GetActivityVisitTimelineErrors[keyof GetActivityVisitTimelineErrors]
+
+export type GetActivityVisitTimelineResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    visit: {
+      id: string
+      actor:
+        | {
+            type: "user"
+            userId: string
+          }
+        | {
+            type: "share"
+            grantId: string
+          }
+      attribution: {
+        source?: string
+        medium?: string
+        campaign?: string
+        referrer?: string
+      } | null
+      startedAt: string
+      lastSeenAt: string
+      pageViews: number
+    }
+    connection?:
+      | {
+          type: "session"
+          device: {
+            browser?: string
+            os?: string
+          }
+          clientName?: string
+          status: "active" | "expired" | "revoked"
+          createdAt: string
+          lastSeenAt?: string
+          revokedAt?: string
+        }
+      | {
+          type: "share"
+          grantId: string
+          definitionId?: string
+          status: "active" | "expired" | "revoked"
+          createdAt: string
+          revokedAt?: string
+        }
+    entries: Array<
+      | {
+          kind: "page"
+          at: string
+          sequence: number
+          route: string
+        }
+      | {
+          kind: "action"
+          at: string
+          executionId: string
+          actionId: string
+          runId: string
+          status: "succeeded" | "failed" | "incomplete"
+          /**
+           * Whether the viewer may read the run itself.
+           */
+          runVisible: boolean
+          object?: {
+            objectTypeId: string
+            primaryId: string
+          }
+        }
+      | {
+          kind: "workflow"
+          at: string
+          executionId: string
+          workflowId: string
+          runId: string
+          status:
+            | "queued"
+            | "running"
+            | "waiting"
+            | "succeeded"
+            | "failed"
+            | "cancelled"
+            | "incomplete"
+          /**
+           * Whether the viewer may read the run itself.
+           */
+          runVisible: boolean
+        }
+      | {
+          kind: "agent"
+          at: string
+          executionId: string
+          runId: string
+          threadId: string
+          status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+          messages: number
+          cost?: {
+            amounts: Array<{
+              currency: string
+              amountNanos: string
+            }>
+            ratedCallCount: number
+            unpriceableCallCount: number
+            unvaluedCallCount: number
+          }
+        }
+    >
+    truncated: boolean
+  }
+}
+
+export type GetActivityVisitTimelineResponse =
+  GetActivityVisitTimelineResponses[keyof GetActivityVisitTimelineResponses]
+
+export type ListActivityConnectionsData = {
+  body?: never
+  path?: never
+  query: {
+    userId: string
+    limit?: number
+    /**
+     * The previous page's nextCursor.
+     */
+    cursor?: string
+  }
+  url: "/api/activity/connections"
+}
+
+export type ListActivityConnectionsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type ListActivityConnectionsError =
+  ListActivityConnectionsErrors[keyof ListActivityConnectionsErrors]
+
+export type ListActivityConnectionsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    connections: Array<{
+      type: "session"
+      device: {
+        browser?: string
+        os?: string
+      }
+      clientName?: string
+      status: "active" | "expired" | "revoked"
+      createdAt: string
+      lastSeenAt?: string
+      revokedAt?: string
+      visits: number
+      latestVisits: Array<{
+        id: string
+        actor:
+          | {
+              type: "user"
+              userId: string
+            }
+          | {
+              type: "share"
+              grantId: string
+            }
+        attribution: {
+          source?: string
+          medium?: string
+          campaign?: string
+          referrer?: string
+        } | null
+        startedAt: string
+        lastSeenAt: string
+        pageViews: number
+      }>
+    }>
+    nextCursor?: string
+  }
+}
+
+export type ListActivityConnectionsResponse =
+  ListActivityConnectionsResponses[keyof ListActivityConnectionsResponses]
+
 export type ListProjectionsData = {
   body?: never
   path?: never
