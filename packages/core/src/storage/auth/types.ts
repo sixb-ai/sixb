@@ -460,6 +460,10 @@ export interface CompleteOidcSignInInput {
    * links the user who has this email, or claims this email's invitation for a new user.
    */
   readonly email: string
+  /**
+   * The name and picture the provider sends. Every sign-in sets them on the user, and one left out
+   * keeps the stored value. `updatedAt` moves only when one of them changes.
+   */
   readonly displayName?: string
   readonly avatarUrl?: string
   readonly claims?: Readonly<Record<string, unknown>>

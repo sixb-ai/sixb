@@ -378,6 +378,8 @@ export class InMemoryAuthStorage implements AuthStorage {
         updatedAt: completedAt,
       }
       this.state.users.set(userKey(projectId, user.id), cloneRecord(user))
+    } else {
+      user = this.refreshProviderProfile(user, input, completedAt)
     }
 
     const invitation = this.acceptInvitationAndApplyGroups({
@@ -453,6 +455,24 @@ export class InMemoryAuthStorage implements AuthStorage {
     revokeActiveSessionsForUser(this.state, input.projectId, input.userId, input.suspendedAt)
 
     return cloneRecord(next)
+  }
+
+  // The identity provider owns the name and picture it sends: every sign-in overwrites them, and
+  // one it leaves out keeps the stored value.
+  private refreshProviderProfile(
+    user: UserRecord,
+    input: CompleteOidcSignInInput,
+    updatedAt: Date
+  ): UserRecord {
+    const displayName = input.displayName ?? user.displayName
+    const avatarUrl = input.avatarUrl ?? user.avatarUrl
+    if (displayName === user.displayName && avatarUrl === user.avatarUrl) {
+      return user
+    }
+
+    const next: UserRecord = { ...user, displayName, avatarUrl, updatedAt: cloneDate(updatedAt) }
+    this.state.users.set(userKey(user.projectId, user.id), cloneRecord(next))
+    return next
   }
 
   private acceptInvitationAndApplyGroups(input: {

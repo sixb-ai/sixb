@@ -271,6 +271,27 @@ describe("oidc auth routes", () => {
     })
   })
 
+  // To see this fail, drop the session cache invalidation from AuthRuntime.completeOidcSignIn, or
+  // the profile refresh from the storage's OIDC sign-in.
+  test("every session shows the name the provider sends at the next sign-in", async () => {
+    const { app, client } = createRuntime()
+    const first = await completeSignIn(app)
+    const cookie = `sixb_session_app=${cookieValue(first.headers.get("set-cookie"), "sixb_session_app")}`
+    const readName = async () => {
+      const response = await app.fetch(
+        new Request("http://api.localhost/api/auth/session", { headers: { cookie } })
+      )
+      const body = (await response.json()) as { readonly user?: { readonly displayName?: string } }
+      return body.user?.displayName
+    }
+    expect(await readName()).toBe("Founder")
+
+    client.tokenClaims = { ...client.tokenClaims, name: "Founder Renamed" }
+    expect((await completeSignIn(app)).status).toBe(303)
+
+    expect(await readName()).toBe("Founder Renamed")
+  })
+
   test("callback replay returns a generic error without setting session cookies", async () => {
     const { app } = createRuntime()
     const signIn = await app.fetch(
