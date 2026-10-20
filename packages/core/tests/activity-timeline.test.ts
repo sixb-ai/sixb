@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test"
 import {
   can,
   defineAction,
@@ -47,10 +47,17 @@ const observer = defineRole("observer", {
 
 const projectId = "activity-timeline"
 const start = new Date("2026-10-20T14:02:00.000Z")
+// Every read happens at this instant, so a connection's status never depends on the real clock.
+// Moving it past the fixtures' expiries (e.g. +72 h) turns their "active" connections expired.
+const readAt = new Date(start.getTime() + 10 * 60_000)
 const second = 1_000
 const minute = 60_000
 const chrome =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+
+beforeEach(() => {
+  setSystemTime(readAt)
+})
 
 afterEach(() => {
   setSystemTime()
@@ -112,7 +119,7 @@ async function executionAt(storage: Storage, offsetMs: number, input: CreateExec
   try {
     return await storage.executions.create(input)
   } finally {
-    setSystemTime()
+    setSystemTime(readAt)
   }
 }
 
@@ -325,7 +332,7 @@ describe("activity timeline", () => {
       runId: "run_step",
       sourceExecutionId: workflow.id,
     })
-    setSystemTime()
+    setSystemTime(readAt)
 
     await storage.agents?.threads.create({
       id: "thr_1",
