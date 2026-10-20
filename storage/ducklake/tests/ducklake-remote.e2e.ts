@@ -222,6 +222,21 @@ describe("DuckLakeStorage remote catalogs", () => {
         await expect(storage.getLatestVersion(busy.id)).resolves.toMatchObject({
           versionId: busyLatest.versionId,
         })
+
+        // Red check: gather the candidates from the table's data files and from every snapshot's
+        // changes and commit metadata, then sort them, as 0.1.17 to 0.1.20 did. PostgreSQL then
+        // reads the whole 30k-snapshot history for each of these lookups instead of a few rows.
+        const [, previous] = await storage.listVersions(busy.id, 2)
+        if (!previous) throw new Error("Missing the busy dataset's history")
+        query.mockClear()
+        await storage.getLatestVersion(busy.id)
+        await expect(storage.getVersion(busy.id, previous.versionId)).resolves.toMatchObject({
+          mode: "append",
+          parentVersionId: expect.any(String),
+        })
+        const lookups = query.mock.calls.map(([sql]) => sql)
+        expect(await rowsReadByPostgres(adminSql, lookups)).toBeLessThan(100)
+
         await expect(storage.getLatestVersion(empty.id)).resolves.toMatchObject({
           versionId: emptyVersion.versionId,
           mode: "snapshot",
@@ -1520,6 +1535,45 @@ async function appendPostgresHistory(
     LEFT JOIN ${table("ducklake_snapshot_changes")} changes USING (snapshot_id)
     WHERE changes.snapshot_id IS NULL
   `)
+}
+
+/**
+ * Rows PostgreSQL reads to run the catalog queries DuckDB sent it through `postgres_query`: each
+ * scan's returned and filtered-out rows, from EXPLAIN ANALYZE.
+ */
+async function rowsReadByPostgres(sql: SQL, duckDbQueries: readonly string[]): Promise<number> {
+  let rows = 0
+
+  for (const duckDbQuery of duckDbQueries) {
+    const pushedDown = /postgres_query\('[^']*', '([\s\S]*)'\)\s*$/.exec(duckDbQuery.trim())?.[1]
+    if (pushedDown === undefined) {
+      continue
+    }
+
+    const [explained] = await sql.unsafe(
+      `EXPLAIN (ANALYZE, FORMAT JSON) ${pushedDown.replaceAll("''", "'")}`
+    )
+    rows += scannedRows(explained["QUERY PLAN"][0].Plan)
+  }
+
+  return rows
+}
+
+interface PlanNode {
+  readonly "Relation Name"?: string
+  readonly "Actual Rows": number
+  readonly "Actual Loops": number
+  readonly "Rows Removed by Filter"?: number
+  readonly Plans?: readonly PlanNode[]
+}
+
+function scannedRows(node: PlanNode): number {
+  const own =
+    node["Relation Name"] === undefined
+      ? 0
+      : (node["Actual Rows"] + (node["Rows Removed by Filter"] ?? 0)) * node["Actual Loops"]
+
+  return own + (node.Plans ?? []).reduce((sum, child) => sum + scannedRows(child), 0)
 }
 
 function quotePgIdent(value: string): string {

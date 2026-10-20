@@ -60,9 +60,9 @@ describe("DuckLakeStorage versions and time travel", () => {
       const query = spyOn(runtime, "query")
       try {
         expect(await storage.getLatestVersion(fresh.id)).toBeNull()
-        expect(query.mock.calls.filter(([sql]) => sql.includes("WITH candidate_ids"))).toHaveLength(
-          1
-        )
+        expect(
+          query.mock.calls.filter(([sql]) => sql.includes("ducklake_snapshot_changes"))
+        ).toHaveLength(1)
       } finally {
         query.mockRestore()
       }
