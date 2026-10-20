@@ -11,7 +11,7 @@ In a Sixb `app/`, client configuration and React Query setup are automatic. Star
 | `@sixb/client` | API functions, action helpers, and the shared client. |
 | `@sixb/client/query` | Typed object queries without React. |
 | `@sixb/client/hooks` | React queries, mutations, and live event hooks. |
-| `@sixb/client/browser` | Authentication setup for a standalone browser app. |
+| `@sixb/client/browser` | Authentication setup for a standalone browser app, and [tracking interactions](../apps/activity.md#track-interactions). |
 | `@sixb/client/logs` | Reading and subscribing to run logs. |
 
 ## Configure a client

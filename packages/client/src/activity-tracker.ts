@@ -45,10 +45,21 @@ const REQUEST_TIMEOUT_MS = 10_000
 const FLUSH_DELAY_MS = 500
 const PULSE_INTERVAL_MS = 30_000
 const INPUT_EVENTS = ["pointerdown", "keydown", "touchstart", "scroll"] as const
+const TRACK_ATTRIBUTE = "data-sixb-track"
+/** The same name again within this long is the same interaction: a double click, a burst. */
+const COALESCE_MS = 1_000
+const MAX_REPORTED_NAMES = 20
+const REPORTED_NAME_LENGTH = 40
+
+// The server's rule, from the activity policy: lowercase dotted segments, each starting with a
+// letter, at most 40 characters and without a run of four digits, 100 in all.
+export const INTERACTION_NAME_PATTERN =
+  /^(?!.*\d{4})[a-z][a-z0-9_-]{0,39}(?:\.[a-z][a-z0-9_-]{0,39})*$/
+export const INTERACTION_NAME_MAX_LENGTH = 100
 
 /**
- * Sends page views and foreground activity for one authority. Events live in memory only: they
- * are never persisted, and never carried across a sign-in or another shared link.
+ * Sends page views, foreground activity and marked interactions for one authority. Events live in
+ * memory only: they are never persisted, and never carried across a sign-in or another shared link.
  */
 export class ActivityTracker {
   private readonly abort = new AbortController()
@@ -70,6 +81,10 @@ export class ActivityTracker {
   private hiddenNavigation = false
   private lastInputAt = 0
   private arrivalSent = false
+  /** Invalid names already reported, so a misnamed button warns once; at most twenty. */
+  private readonly invalidNames = new Set<string>()
+  private moreInvalidNames = false
+  private lastInteraction: { readonly name: string; readonly at: number } | undefined
 
   constructor(private readonly options: ActivityTrackerOptions) {
     this.now = options.now ?? Date.now
@@ -91,6 +106,19 @@ export class ActivityTracker {
     this.enqueue("page.view")
   }
 
+  /**
+   * An interaction code reports, on the page now shown. A call is not the person's input: once
+   * they have been idle for the idle timeout it is dropped, so background code cannot keep their
+   * visit going.
+   */
+  interaction(name: string): void {
+    if (this.now() - this.lastInputAt >= this.idleTimeoutMs) {
+      return
+    }
+
+    this.record(name)
+  }
+
   dispose(): void {
     this.enabled = false
     this.abort.abort()
@@ -100,6 +128,7 @@ export class ActivityTracker {
     for (const type of INPUT_EVENTS) {
       this.options.document?.removeEventListener(type, this.onInput, { capture: true })
     }
+    this.options.document?.removeEventListener("click", this.onClick, { capture: true })
     this.options.document?.removeEventListener("visibilitychange", this.onVisibility)
 
     this.queue = []
@@ -154,6 +183,8 @@ export class ActivityTracker {
     for (const type of INPUT_EVENTS) {
       this.options.document?.addEventListener(type, this.onInput, { capture: true, passive: true })
     }
+    // One listener for every marked element, present or rendered later.
+    this.options.document?.addEventListener("click", this.onClick, { capture: true, passive: true })
     this.options.document?.addEventListener("visibilitychange", this.onVisibility)
     this.pulseTimer = setInterval(this.onPulse, PULSE_INTERVAL_MS)
 
@@ -186,6 +217,56 @@ export class ActivityTracker {
     }
   }
 
+  private onClick = (event: Event): void => {
+    // A script's click is not someone using the page.
+    if (!event.isTrusted) {
+      return
+    }
+
+    // The composed path reaches a marked element across shadow roots, as `closest` cannot.
+    const path = event.composedPath()
+    const markedAt = path.findIndex(
+      (target) => isElement(target) && target.hasAttribute(TRACK_ATTRIBUTE)
+    )
+    const marked = path[markedAt]
+    if (!isElement(marked)) {
+      return
+    }
+
+    const within = path.slice(0, markedAt + 1).filter(isElement)
+    if (within.some((element) => isDisabled(element) || forwardsClick(element, marked, path))) {
+      return
+    }
+
+    // A marked click is the person's input, and the interaction reports it.
+    this.lastInputAt = this.now()
+    this.active = false
+    this.record(marked.getAttribute(TRACK_ATTRIBUTE) ?? "")
+  }
+
+  /**
+   * Queues an interaction. Before the settings load, on a page that is not recorded or in a
+   * hidden tab, it is dropped: someone acts on a page they see.
+   */
+  private record(name: string): void {
+    if (!this.enabled || !this.visible() || this.route === null) {
+      return
+    }
+
+    if (!isInteractionName(name)) {
+      this.invalidName(name)
+      return
+    }
+
+    const now = this.now()
+    if (this.lastInteraction?.name === name && now - this.lastInteraction.at < COALESCE_MS) {
+      return
+    }
+    this.lastInteraction = { name, at: now }
+
+    this.push((route) => ({ id: crypto.randomUUID(), type: "ui.interaction", name, route }))
+  }
+
   private onVisibility = (): void => {
     if (this.visible()) {
       this.lastInputAt = this.now()
@@ -208,6 +289,11 @@ export class ActivityTracker {
   }
 
   private enqueue(type: VisitEventInput["type"]): void {
+    this.push((route) => ({ id: crypto.randomUUID(), type, route, ...this.nextAttribution() }))
+  }
+
+  /** Queues the event `build` makes for the route shown, unless it would not be recorded. */
+  private push(build: (route: string) => EventInput): void {
     if (!this.enabled || this.route === null || this.abort.signal.aborted) {
       return
     }
@@ -217,10 +303,7 @@ export class ActivityTracker {
       return
     }
 
-    this.queue.push({
-      event: { id: crypto.randomUUID(), type, route: this.route, ...this.nextAttribution() },
-      queuedAt: this.now(),
-    })
+    this.queue.push({ event: build(this.route), queuedAt: this.now() })
     this.schedule(FLUSH_DELAY_MS)
   }
 
@@ -321,12 +404,70 @@ export class ActivityTracker {
     }
   }
 
+  private invalidName(name: string): void {
+    if (this.invalidNames.has(name)) {
+      return
+    }
+
+    if (this.invalidNames.size >= MAX_REPORTED_NAMES) {
+      if (!this.moreInvalidNames) {
+        this.moreInvalidNames = true
+        this.warn("[SixbClient] More interaction names are invalid; they are not reported.")
+      }
+      return
+    }
+
+    // A prefix only: a misused name may hold a value.
+    const text = String(name)
+    const shown =
+      text.length > REPORTED_NAME_LENGTH ? `${text.slice(0, REPORTED_NAME_LENGTH)}…` : text
+
+    this.invalidNames.add(name)
+    this.warn(
+      `[SixbClient] ${JSON.stringify(shown)} is not an interaction name, so it is not recorded. Use lowercase dotted identifiers such as "invoices.export".`
+    )
+  }
+
   private dropped(count: number): void {
     // Never the route or ids: the warning is for the console, not a record of the visit.
     this.warn(
       `[SixbClient] Activity capture dropped ${count} event(s); visit history may be incomplete.`
     )
   }
+}
+
+function isInteractionName(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= INTERACTION_NAME_MAX_LENGTH &&
+    INTERACTION_NAME_PATTERN.test(value)
+  )
+}
+
+function isElement(value: unknown): value is Element {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof Reflect.get(value, "hasAttribute") === "function"
+  )
+}
+
+function isDisabled(element: Element): boolean {
+  return element.getAttribute("aria-disabled") === "true" || element.matches(":disabled")
+}
+
+/**
+ * A click on a label whose control is inside the same marked element, but not on the control:
+ * the browser forwards it to the control, and that click records the interaction.
+ */
+function forwardsClick(element: Element, marked: Element, path: readonly EventTarget[]): boolean {
+  const control: unknown = Reflect.get(element, "control")
+  return (
+    element.tagName === "LABEL" &&
+    isElement(control) &&
+    marked.contains(control) &&
+    !path.includes(control)
+  )
 }
 
 function retryDelay(failedAttempts: number): number {
@@ -368,6 +509,15 @@ export function startSixbActivityCapture(): void {
 export function recordSixbPageView(route: string | null): void {
   shownRoute = route
   active?.page(route)
+}
+
+/**
+ * Records an interaction that is not a click, such as `invoices.filter.applied`, on the page now
+ * shown. Names are lowercase dotted identifiers and never carry a value. Does nothing while
+ * activity is off, on a page that is not recorded, or before its settings load.
+ */
+export function trackSixbEvent(name: string): void {
+  active?.interaction(name)
 }
 
 export function stopSixbActivityCapture(): void {
