@@ -9,6 +9,7 @@ import type { RuleEvent } from "./rules"
 import type { ScheduleEvent } from "./schedules"
 import type { SyncEvent } from "./syncs"
 import type { TelemetryEvent } from "./telemetry"
+import type { UserEvent } from "./users"
 import type { WorkflowEvent } from "./workflows"
 
 export type { EventExecutor } from "../../materialization/events"
@@ -57,6 +58,14 @@ export type { ScheduleEvent, ScheduleTriggeredEvent } from "./schedules"
 export type { SyncEvent, SyncRunFinishedEvent, SyncRunStartedEvent } from "./syncs"
 export type { TelemetryAppendedEvent, TelemetryEvent } from "./telemetry"
 export type {
+  UserEvent,
+  UserInvitedEvent,
+  UserJoinedEvent,
+  UserProfileUpdatedEvent,
+  UserReactivatedEvent,
+  UserSuspendedEvent,
+} from "./users"
+export type {
   WorkflowEvent,
   WorkflowInterventionCancelledEvent,
   WorkflowInterventionExpiredEvent,
@@ -81,6 +90,7 @@ export type DomainEvent =
   | PipelineEvent
   | WorkflowEvent
   | DatasetEvent
+  | UserEvent
 
 export type OntologyDomainEvent = ObjectEvent | LinkEvent | TelemetryEvent
 export type AuthorableDomainEvent = Exclude<DomainEvent, OntologyDomainEvent>
