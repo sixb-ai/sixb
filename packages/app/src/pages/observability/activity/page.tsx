@@ -370,6 +370,9 @@ function Visits({
             const facts = [
               ...(forUser ? [] : [when]),
               messages.visits.pageViews(visit.pageViews, count(visit.pageViews)),
+              ...(visit.interactions > 0
+                ? [messages.visits.interactions(visit.interactions, count(visit.interactions))]
+                : []),
               sourceLabel(visit, messages.source),
             ]
 

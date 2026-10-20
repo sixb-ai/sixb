@@ -46,8 +46,10 @@ export function VisitEntries({ timeline }: { readonly timeline: Timeline }) {
 
   return (
     <>
-      <div className="overflow-x-auto border-b border-border px-3 py-2">
+      <div className="border-b border-border px-3 py-2">
+        {/* Every kind stays in sight: the chips wrap instead of scrolling. */}
         <ToolbarTabs
+          className="flex-wrap gap-y-1"
           tabs={filters.map((id) => ({
             id,
             label: messages.filters[id],

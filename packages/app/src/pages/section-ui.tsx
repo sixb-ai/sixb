@@ -442,13 +442,15 @@ export function ToolbarTabs<TTab extends string>({
   tabs,
   value,
   onChange,
+  className,
 }: {
   readonly tabs: readonly { readonly id: TTab; readonly label: string; readonly count?: number }[]
   readonly value: TTab
   readonly onChange: (tab: TTab) => void
+  readonly className?: string
 }) {
   return (
-    <div role="tablist" className="flex items-center gap-1">
+    <div role="tablist" className={cn("flex items-center gap-1", className)}>
       {tabs.map((tab) => (
         <button
           key={tab.id}

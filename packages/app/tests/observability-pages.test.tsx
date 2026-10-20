@@ -206,6 +206,7 @@ describe("Activity", () => {
     startedAt: "2026-10-02T09:00:00.000Z",
     lastSeenAt: "2026-10-02T09:20:00.000Z",
     pageViews: 2,
+    interactions: 3,
   }
   const sharedVisit = {
     id: "visit_2",
@@ -214,6 +215,7 @@ describe("Activity", () => {
     startedAt: "2026-10-02T08:00:00.000Z",
     lastSeenAt: "2026-10-02T08:05:00.000Z",
     pageViews: 0,
+    interactions: 0,
   }
   const namedShare = {
     ...sharedVisit,
@@ -271,6 +273,13 @@ describe("Activity", () => {
             entries: [
               { kind: "page", at: visit.startedAt, sequence: 1, route: "/invoices" },
               {
+                kind: "interaction",
+                at: "2026-10-02T09:00:30.000Z",
+                sequence: 2,
+                name: "invoices.export",
+                route: "/invoices",
+              },
+              {
                 kind: "action",
                 at: "2026-10-02T09:01:00.000Z",
                 executionId: "exe_1",
@@ -313,7 +322,7 @@ describe("Activity", () => {
                   unvaluedCallCount: 0,
                 },
               },
-              { kind: "page", at: visit.lastSeenAt, sequence: 2, route: "/invoices/:id" },
+              { kind: "page", at: visit.lastSeenAt, sequence: 3, route: "/invoices/:id" },
             ],
             truncated: true,
           })
@@ -450,15 +459,21 @@ describe("Activity", () => {
     expect(view.getByText("$0.04")).toBeDefined()
     expect(view.getAllByText("Chrome · macOS").length).toBeGreaterThan(0)
 
+    expect(view.getByText("invoices.export")).toBeDefined()
+    fireEvent.click(view.getByRole("tab", { name: /Interactions/ }))
+    expect(view.getByText("invoices.export")).toBeDefined()
+    expect(view.queryByText("Mark Paid")).toBeNull()
+
     fireEvent.click(view.getByRole("tab", { name: /Actions/ }))
     expect(view.queryByText("/invoices/:id")).toBeNull()
+    expect(view.queryByText("invoices.export")).toBeNull()
     expect(view.getByText("Mark Paid")).toBeDefined()
     fireEvent.click(view.getByRole("tab", { name: /Workflows/ }))
     expect(view.getByText("Nothing of this kind in this visit.")).toBeDefined()
 
     expect(
       view.getByText(
-        "This visit did more than the timeline shows: it stops after 200 page views or 200 recorded executions."
+        "This visit did more than the timeline shows: it stops after 200 page views and interactions, or 200 recorded executions."
       )
     ).toBeDefined()
 
@@ -504,7 +519,9 @@ describe("Activity", () => {
       fetch: Object.assign(activityApi(requests), { preconnect: fetch.preconnect }),
     })
     const { view, queryClient } = renderActivity("/observability/activity")
-    await view.findByRole("button", { name: /Alex.*2 page views/ })
+    // Interactions count beside page views, only when there are some.
+    await view.findByRole("button", { name: /Alex.*2 page views.*3 interactions/ })
+    expect(view.queryByText(/0 interactions/)).toBeNull()
     // A shared link has no account: it reads as one, told apart by the end of its id.
     expect(view.getAllByText("Shared link")).toHaveLength(2)
     // A link is named by its share, or by the end of its id once the grant is gone.
