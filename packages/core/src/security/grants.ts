@@ -267,6 +267,7 @@ type ObservableReference = ProjectSurfaceReference | AgentUsageReference
  */
 const OBSERVABLE_REFERENCES: Readonly<Record<ObservableReference["kind"], string>> = {
   logs: "project.logs",
+  activity: "project.activity",
   aiUsage: "agent.usage",
 }
 

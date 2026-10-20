@@ -23,11 +23,17 @@ export type GrantKind =
   | "run:agent"
   | "observe:logs"
   | "observe:aiUsage"
+  | "observe:activity"
   | "manage:connector"
   | "manage:aiUsage"
 
 /** Capabilities over one project-wide surface: held or not, with no ids to select. */
-export type SingletonGrantKind = "run:agent" | "observe:logs" | "observe:aiUsage" | "manage:aiUsage"
+export type SingletonGrantKind =
+  | "run:agent"
+  | "observe:logs"
+  | "observe:aiUsage"
+  | "observe:activity"
+  | "manage:aiUsage"
 export type TargetedGrantKind = Exclude<GrantKind, SingletonGrantKind>
 
 /** Registered id universes a grant kind ranges over, plus subtype expansion. */
@@ -137,6 +143,11 @@ export const GRANT_KINDS: {
     subject: "AI usage",
     fix: "Use can.observe(agent.usage).",
   },
+  "observe:activity": {
+    singleton: true,
+    subject: "activity",
+    fix: "Use can.observe(project.activity).",
+  },
   "manage:connector": {
     universeKey: "connectorIds",
     subject: "connector",
@@ -202,6 +213,7 @@ export function emptyGrantSets(): MutableGrantIndex {
     "run:agent": false,
     "observe:logs": false,
     "observe:aiUsage": false,
+    "observe:activity": false,
     "manage:connector": new Set(),
     "manage:aiUsage": false,
   }
