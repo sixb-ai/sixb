@@ -143,6 +143,10 @@ export const OPENAPI_TAGS = {
     name: "Logs",
     description: "Run log stream",
   },
+  activity: {
+    name: "Activity",
+    description: "Visits and page views in the project's app and its shared links",
+  },
   authSessions: {
     name: "Auth Sessions",
     description: "Authentication sessions and sign-out",

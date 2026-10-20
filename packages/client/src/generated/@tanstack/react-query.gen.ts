@@ -16,6 +16,7 @@ import {
   cancelAgentRun,
   cancelWorkflowIntervention,
   cancelWorkflowRun,
+  captureActivity,
   completeFileUpload,
   countObjects,
   createAgentThread,
@@ -39,6 +40,10 @@ import {
   getAction,
   getActionRun,
   getActionRunFileContent,
+  getActivityCalendar,
+  getActivityCaptureConfig,
+  getActivitySummary,
+  getActivityVisit,
   getAgent,
   getAgentMessageFileContent,
   getAgentRun,
@@ -81,6 +86,8 @@ import {
   issueSharedAccessGrant,
   listActionRuns,
   listActions,
+  listActivityUsers,
+  listActivityVisits,
   listAgentThreadMessages,
   listAgentThreadRuns,
   listAgentThreads,
@@ -174,6 +181,9 @@ import type {
   CancelWorkflowRunData,
   CancelWorkflowRunError,
   CancelWorkflowRunResponse,
+  CaptureActivityData,
+  CaptureActivityError,
+  CaptureActivityResponse,
   CompleteFileUploadData,
   CompleteFileUploadError,
   CompleteFileUploadResponse,
@@ -242,6 +252,18 @@ import type {
   GetActionRunFileContentError,
   GetActionRunFileContentResponse,
   GetActionRunResponse,
+  GetActivityCalendarData,
+  GetActivityCalendarError,
+  GetActivityCalendarResponse,
+  GetActivityCaptureConfigData,
+  GetActivityCaptureConfigError,
+  GetActivityCaptureConfigResponse,
+  GetActivitySummaryData,
+  GetActivitySummaryError,
+  GetActivitySummaryResponse,
+  GetActivityVisitData,
+  GetActivityVisitError,
+  GetActivityVisitResponse,
   GetAgentData,
   GetAgentError,
   GetAgentMessageFileContentData,
@@ -364,6 +386,12 @@ import type {
   ListActionRunsResponse,
   ListActionsData,
   ListActionsResponse,
+  ListActivityUsersData,
+  ListActivityUsersError,
+  ListActivityUsersResponse,
+  ListActivityVisitsData,
+  ListActivityVisitsError,
+  ListActivityVisitsResponse,
   ListAgentThreadMessagesData,
   ListAgentThreadMessagesError,
   ListAgentThreadMessagesResponse,
@@ -4940,6 +4968,187 @@ export const listLogsOptions = (options?: Options<ListLogsData>) =>
       return data
     },
     queryKey: listLogsQueryKey(options),
+  })
+
+export const getActivityCaptureConfigQueryKey = (options?: Options<GetActivityCaptureConfigData>) =>
+  createQueryKey("getActivityCaptureConfig", options)
+
+/**
+ * Read whether this browser session records activity
+ *
+ * A browser or shared-link session only; a native client's session gets 403.
+ */
+export const getActivityCaptureConfigOptions = (options?: Options<GetActivityCaptureConfigData>) =>
+  queryOptions<
+    GetActivityCaptureConfigResponse,
+    GetActivityCaptureConfigError,
+    GetActivityCaptureConfigResponse,
+    ReturnType<typeof getActivityCaptureConfigQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getActivityCaptureConfig({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getActivityCaptureConfigQueryKey(options),
+  })
+
+/**
+ * Record page views and activity for this browser session
+ *
+ * A browser or shared-link session only; a native client's session gets 403. The visit belongs to the calling session.
+ */
+export const captureActivityMutation = (
+  options?: Partial<Options<CaptureActivityData>>
+): UseMutationOptions<
+  CaptureActivityResponse,
+  CaptureActivityError,
+  Options<CaptureActivityData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    CaptureActivityResponse,
+    CaptureActivityError,
+    Options<CaptureActivityData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await captureActivity({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const listActivityVisitsQueryKey = (options: Options<ListActivityVisitsData>) =>
+  createQueryKey("listActivityVisits", options)
+
+/**
+ * List the visits active in a period
+ */
+export const listActivityVisitsOptions = (options: Options<ListActivityVisitsData>) =>
+  queryOptions<
+    ListActivityVisitsResponse,
+    ListActivityVisitsError,
+    ListActivityVisitsResponse,
+    ReturnType<typeof listActivityVisitsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listActivityVisits({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listActivityVisitsQueryKey(options),
+  })
+
+export const listActivityUsersQueryKey = (options: Options<ListActivityUsersData>) =>
+  createQueryKey("listActivityUsers", options)
+
+/**
+ * List the signed-in users active in a period
+ */
+export const listActivityUsersOptions = (options: Options<ListActivityUsersData>) =>
+  queryOptions<
+    ListActivityUsersResponse,
+    ListActivityUsersError,
+    ListActivityUsersResponse,
+    ReturnType<typeof listActivityUsersQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listActivityUsers({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listActivityUsersQueryKey(options),
+  })
+
+export const getActivitySummaryQueryKey = (options: Options<GetActivitySummaryData>) =>
+  createQueryKey("getActivitySummary", options)
+
+/**
+ * Count the users, visits and page views of a period
+ */
+export const getActivitySummaryOptions = (options: Options<GetActivitySummaryData>) =>
+  queryOptions<
+    GetActivitySummaryResponse,
+    GetActivitySummaryError,
+    GetActivitySummaryResponse,
+    ReturnType<typeof getActivitySummaryQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getActivitySummary({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getActivitySummaryQueryKey(options),
+  })
+
+export const getActivityCalendarQueryKey = (options: Options<GetActivityCalendarData>) =>
+  createQueryKey("getActivityCalendar", options)
+
+/**
+ * Read a user's active days in a UTC year
+ */
+export const getActivityCalendarOptions = (options: Options<GetActivityCalendarData>) =>
+  queryOptions<
+    GetActivityCalendarResponse,
+    GetActivityCalendarError,
+    GetActivityCalendarResponse,
+    ReturnType<typeof getActivityCalendarQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getActivityCalendar({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getActivityCalendarQueryKey(options),
+  })
+
+export const getActivityVisitQueryKey = (options: Options<GetActivityVisitData>) =>
+  createQueryKey("getActivityVisit", options)
+
+/**
+ * Read the page views of one visit
+ */
+export const getActivityVisitOptions = (options: Options<GetActivityVisitData>) =>
+  queryOptions<
+    GetActivityVisitResponse,
+    GetActivityVisitError,
+    GetActivityVisitResponse,
+    ReturnType<typeof getActivityVisitQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getActivityVisit({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getActivityVisitQueryKey(options),
   })
 
 export const listProjectionsQueryKey = (options?: Options<ListProjectionsData>) =>

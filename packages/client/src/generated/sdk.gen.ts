@@ -26,6 +26,9 @@ import type {
   CancelWorkflowRunData,
   CancelWorkflowRunErrors,
   CancelWorkflowRunResponses,
+  CaptureActivityData,
+  CaptureActivityErrors,
+  CaptureActivityResponses,
   CompleteFileUploadData,
   CompleteFileUploadErrors,
   CompleteFileUploadResponses,
@@ -94,6 +97,18 @@ import type {
   GetActionRunFileContentErrors,
   GetActionRunFileContentResponses,
   GetActionRunResponses,
+  GetActivityCalendarData,
+  GetActivityCalendarErrors,
+  GetActivityCalendarResponses,
+  GetActivityCaptureConfigData,
+  GetActivityCaptureConfigErrors,
+  GetActivityCaptureConfigResponses,
+  GetActivitySummaryData,
+  GetActivitySummaryErrors,
+  GetActivitySummaryResponses,
+  GetActivityVisitData,
+  GetActivityVisitErrors,
+  GetActivityVisitResponses,
   GetAgentData,
   GetAgentErrors,
   GetAgentMessageFileContentData,
@@ -234,6 +249,12 @@ import type {
   ListActionRunsResponses,
   ListActionsData,
   ListActionsResponses,
+  ListActivityUsersData,
+  ListActivityUsersErrors,
+  ListActivityUsersResponses,
+  ListActivityVisitsData,
+  ListActivityVisitsErrors,
+  ListActivityVisitsResponses,
   ListAgentThreadMessagesData,
   ListAgentThreadMessagesErrors,
   ListAgentThreadMessagesResponses,
@@ -3028,6 +3049,138 @@ export const listLogs = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/logs",
+    ...options,
+  })
+
+/**
+ * Read whether this browser session records activity
+ *
+ * A browser or shared-link session only; a native client's session gets 403.
+ */
+export const getActivityCaptureConfig = <ThrowOnError extends boolean = false>(
+  options?: Options<GetActivityCaptureConfigData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<
+    GetActivityCaptureConfigResponses,
+    GetActivityCaptureConfigErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
+    url: "/api/activity/capture-config",
+    ...options,
+  })
+
+/**
+ * Record page views and activity for this browser session
+ *
+ * A browser or shared-link session only; a native client's session gets 403. The visit belongs to the calling session.
+ */
+export const captureActivity = <ThrowOnError extends boolean = false>(
+  options: Options<CaptureActivityData, ThrowOnError>
+) =>
+  (options.client ?? client).post<CaptureActivityResponses, CaptureActivityErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
+    url: "/api/activity/events",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * List the visits active in a period
+ */
+export const listActivityVisits = <ThrowOnError extends boolean = false>(
+  options: Options<ListActivityVisitsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListActivityVisitsResponses,
+    ListActivityVisitsErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/activity/visits",
+    ...options,
+  })
+
+/**
+ * List the signed-in users active in a period
+ */
+export const listActivityUsers = <ThrowOnError extends boolean = false>(
+  options: Options<ListActivityUsersData, ThrowOnError>
+) =>
+  (options.client ?? client).get<ListActivityUsersResponses, ListActivityUsersErrors, ThrowOnError>(
+    {
+      security: [
+        { scheme: "bearer", type: "http" },
+        { scheme: "bearer", type: "http" },
+      ],
+      url: "/api/activity/users",
+      ...options,
+    }
+  )
+
+/**
+ * Count the users, visits and page views of a period
+ */
+export const getActivitySummary = <ThrowOnError extends boolean = false>(
+  options: Options<GetActivitySummaryData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetActivitySummaryResponses,
+    GetActivitySummaryErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/activity/summary",
+    ...options,
+  })
+
+/**
+ * Read a user's active days in a UTC year
+ */
+export const getActivityCalendar = <ThrowOnError extends boolean = false>(
+  options: Options<GetActivityCalendarData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetActivityCalendarResponses,
+    GetActivityCalendarErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/activity/calendar",
+    ...options,
+  })
+
+/**
+ * Read the page views of one visit
+ */
+export const getActivityVisit = <ThrowOnError extends boolean = false>(
+  options: Options<GetActivityVisitData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetActivityVisitResponses, GetActivityVisitErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/activity/visits/{visitId}",
     ...options,
   })
 

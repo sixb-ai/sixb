@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
+import { takeActivityArrival } from "../src/activity-attribution"
 import {
   createSixbAgentsWebSocketUrl,
   parseAgentRunStreamServerMessage,
@@ -18,6 +19,8 @@ import { createSixbEventsWebSocketUrl } from "../src/events-transport"
 import { objectFileContentUrl } from "../src/file"
 import { client } from "../src/generated/client.gen"
 import {
+  captureActivity,
+  getActivityCaptureConfig,
   listAuthMembers,
   listAuthSessions,
   requestAction,
@@ -554,6 +557,31 @@ describe("browser client auth", () => {
     expect(redirects).toEqual([])
   })
 
+  // Guard proof: drop the activity routes from isAuthRedirectExcludedRequest; a background batch
+  // sends the person to sign in.
+  test("does not auto-redirect background activity requests", async () => {
+    const redirects: string[] = []
+    configureBrowserClient({
+      getCurrentUrl: () => "http://localhost:3001/devices",
+      redirect: (url) => redirects.push(url),
+    })
+    const fetchMock = Object.assign(
+      async () => Response.json({ error: "Authentication required" }, { status: 401 }),
+      { preconnect: fetch.preconnect }
+    ) satisfies typeof fetch
+
+    await getActivityCaptureConfig({ fetch: fetchMock })
+    await captureActivity({
+      body: { events: [{ id: "e1", type: "page.view", route: "/" }] },
+      fetch: fetchMock,
+    })
+    expect(redirects).toEqual([])
+
+    // Any other request still does.
+    await requestSyncRun({ body: {}, path: { syncId: "sync_1" }, fetch: fetchMock })
+    expect(redirects).toHaveLength(1)
+  })
+
   test("does not auto-redirect path-prefixed sign-out requests", async () => {
     const redirects: string[] = []
     configureBrowserClient(
@@ -790,4 +818,74 @@ describe("browser client auth", () => {
 
     expect(redirects).toEqual([])
   })
+})
+
+// Guard proof: remove preserveSixbActivityArrival() from requireSixbBrowserAuthSession; the
+// identity provider replaces the partner that referred the visit.
+test("sign-in keeps the arrival, and a later sign-in redirect does not repeat it", async () => {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+  const stored = new Map<string, string>()
+  const browser = {
+    location: { href: "https://app.example.test/invoices?token=private" },
+    sessionStorage: {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        stored.set(key, value)
+      },
+      removeItem: (key: string) => {
+        stored.delete(key)
+      },
+    },
+  }
+  const signedOut = Object.assign(async () => Response.json({ authenticated: false }), {
+    preconnect: fetch.preconnect,
+  }) satisfies typeof fetch
+  const config: SixbBrowserRuntimeConfig = {
+    api: { baseUrl: "https://api.example.test" },
+    auth: { enabled: true },
+  }
+  const redirects: string[] = []
+
+  try {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: browser })
+    const document = installDocument("visible")
+    Object.defineProperty(document, "referrer", {
+      configurable: true,
+      value: "https://partner.test/private?secret=1",
+    })
+
+    const controller = configureBrowserClient({}, config)
+    client.setConfig({ fetch: signedOut })
+    await requireSixbBrowserAuthSession(config, controller, {
+      redirect: (url) => redirects.push(url),
+    })
+    expect(redirects).toHaveLength(1)
+    expect(stored.size).toBe(1)
+    expect([...stored.values()].join()).not.toContain("private")
+    controller.dispose()
+
+    // Back from the identity provider, the arrival is the partner's, and is consumed.
+    Object.defineProperty(document, "referrer", {
+      configurable: true,
+      value: "https://identity.test/callback",
+    })
+    const returned = configureBrowserClient({}, config)
+    expect(takeActivityArrival()).toEqual({ referrer: "partner.test" })
+    expect(stored.size).toBe(0)
+
+    // Capture took the arrival; an expired session's redirect later carries a direct arrival.
+    client.setConfig({ fetch: signedOut })
+    await requireSixbBrowserAuthSession(config, returned, {
+      redirect: (url) => redirects.push(url),
+    })
+    returned.dispose()
+    configureBrowserClient({}, config)
+    expect(takeActivityArrival()).toEqual({})
+  } finally {
+    if (originalWindow) {
+      Object.defineProperty(globalThis, "window", originalWindow)
+    } else {
+      Reflect.deleteProperty(globalThis, "window")
+    }
+  }
 })

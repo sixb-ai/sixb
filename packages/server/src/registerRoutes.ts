@@ -4,6 +4,7 @@ import type { ResolvedSixbApiBrowserPolicy } from "./auth/browser-origin"
 import type { SharedAccessBoundary } from "./auth/shared-access"
 import { registerActionRunRoutes } from "./routes/action-runs"
 import { registerActionRoutes } from "./routes/actions"
+import { registerActivityRoutes } from "./routes/activity"
 import { registerAgentApiGatewayRoutes } from "./routes/agent-api-gateway"
 import { registerAgentRoutes } from "./routes/agents"
 import { registerAiAccountingRoutes } from "./routes/ai-accounting"
@@ -72,6 +73,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerTelemetryRoutes(app, host)
   registerEventRoutes(app, host)
   registerLogRoutes(app, host)
+  registerActivityRoutes(app, host)
   registerProjectionRoutes(app, host)
   registerWebhookRunRoutes(app, host)
 
