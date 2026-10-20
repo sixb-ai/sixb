@@ -133,6 +133,9 @@ time range, so the same user's other browser, active at the same time, stays out
   time; page views and interactions in their sequence. An action execution without a recorded run
   is `incomplete`: in flight, or interrupted. An Agent run's cost includes everything below it,
   subagents and tools included; a Workflow's Agent steps are not conversations and have no entry.
+  Page views and interactions are at their server receipt, executions at their creation: the
+  app's steps credit an execution to the last page view before it, so one started as the page
+  changed can land in the neighboring step.
 - **Content:** a run shows its thread's message count, never its title or messages. An action
   names its object only when the viewer's own object reader returns it, so object type grants,
   markings and deletion all hide it. `runVisible` says whether the viewer may read the run

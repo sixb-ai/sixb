@@ -5,11 +5,20 @@ import { Bot, FileText, type LucideIcon, MousePointerClick, Workflow, Zap } from
 import { Fragment, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { actionRunHref, objectHref, workflowRunHref } from "../../routes"
-import { humanize, MetaDot, Pill, RunStatusPill, ToolbarTabs, useNumbers } from "../../section-ui"
+import {
+  formatDuration,
+  humanize,
+  MetaDot,
+  Pill,
+  RunStatusPill,
+  ToolbarTabs,
+  useNumbers,
+} from "../../section-ui"
 import { formatChartMoney, nanosToNumber } from "../ai-usage/format"
 import { useUtcFormat } from "./format"
 import { type ActivityMessages, useActivityMessages } from "./messages"
 import { MetaItems } from "./meta-items"
+import { filterSteps, type VisitStep, visitSteps } from "./steps"
 
 type Timeline = GetActivityVisitTimelineResponse
 type Entry = Timeline["entries"][number]
@@ -26,7 +35,10 @@ const icons: Readonly<Record<Entry["kind"], LucideIcon>> = {
   agent: Bot,
 }
 
-/** What a visit did, by time, with a filter by kind that counts each. */
+/**
+ * What a visit did, as steps: each page view, with what happened while it was the last page
+ * viewed. A filter by kind counts each and keeps the steps holding that kind.
+ */
 export function VisitEntries({ timeline }: { readonly timeline: Timeline }) {
   const messages = useActivityMessages().visit
   const [filter, setFilter] = useState<Filter>("all")
@@ -41,8 +53,8 @@ export function VisitEntries({ timeline }: { readonly timeline: Timeline }) {
     return byKind
   }, [timeline.entries])
 
-  const shown =
-    filter === "all" ? timeline.entries : timeline.entries.filter((entry) => entry.kind === filter)
+  const steps = useMemo(() => visitSteps(timeline), [timeline])
+  const shown = filterSteps(steps, filter)
 
   return (
     <>
@@ -65,9 +77,9 @@ export function VisitEntries({ timeline }: { readonly timeline: Timeline }) {
           {filter === "all" ? messages.noPages : messages.nothingOfKind}
         </p>
       ) : (
-        <ol className="divide-y divide-border">
-          {shown.map((entry) => (
-            <EntryRow key={entryKey(entry)} entry={entry} time={time} />
+        <ol aria-label={messages.steps.label} className="py-1.5">
+          {shown.map((step, index) => (
+            <StepRow key={step.key} step={step} time={time} joined={index < shown.length - 1} />
           ))}
         </ol>
       )}
@@ -75,17 +87,102 @@ export function VisitEntries({ timeline }: { readonly timeline: Timeline }) {
   )
 }
 
+/**
+ * A page view on a line joining it to the next, then what happened while it was the last page
+ * viewed. A route viewed before says how many times.
+ */
+function StepRow({
+  step,
+  time,
+  joined,
+}: {
+  readonly step: VisitStep
+  readonly time: (value: string) => string
+  /** Whether a line runs down to the next step shown. */
+  readonly joined: boolean
+}) {
+  const messages = useActivityMessages().visit.steps
+
+  return (
+    <li className="relative flex items-start gap-3 px-4 py-2">
+      {/* From this step's dot to the next one's, which covers its end. */}
+      {joined ? (
+        <span
+          aria-hidden
+          className="absolute top-[1.0625rem] -bottom-[1.0625rem] left-[1.28rem] w-px bg-border"
+        />
+      ) : null}
+      <span
+        aria-hidden
+        className={cn(
+          "relative mt-1.5 size-2.5 shrink-0 rounded-full border-2 bg-card",
+          step.page ? "border-foreground/70" : "border-dashed border-muted-foreground/60"
+        )}
+      />
+
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          {step.page ? (
+            <RoutePattern route={step.page.route} className="font-medium" />
+          ) : (
+            <span className="text-[0.8125rem] font-medium text-muted-foreground italic">
+              {messages.earlier}
+            </span>
+          )}
+          {step.view > 1 ? (
+            <span className="text-xs text-muted-foreground">
+              <span aria-hidden>↩ </span>
+              {messages.again(step.view)}
+            </span>
+          ) : null}
+          <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+            <time dateTime={step.at}>{time(step.at)}</time>
+            <StepDuration step={step} />
+          </span>
+        </div>
+
+        {step.entries.length > 0 ? (
+          <ol className="flex flex-col">
+            {step.entries.map((entry) => (
+              <EntryRow key={entryKey(entry)} entry={entry} time={time} route={step.page?.route} />
+            ))}
+          </ol>
+        ) : null}
+      </div>
+    </li>
+  )
+}
+
+/** How long the step lasted; the visit's last says it ended there. */
+function StepDuration({ step }: { readonly step: VisitStep }) {
+  const messages = useActivityMessages().visit.steps
+  if (step.until === null) {
+    return null
+  }
+
+  // Under a second, the last step is only where the visit ended.
+  const brief = Date.parse(step.until) - Date.parse(step.at) < 1000
+  const duration = step.last && brief ? null : formatDuration(step.at, step.until)
+  const text = [duration, step.last ? messages.end : null].filter(Boolean).join(" · ")
+
+  return <> · {text}</>
+}
+
+/** What happened during a step, at its time in the visit. */
 function EntryRow({
   entry,
   time,
+  route,
 }: {
   readonly entry: Entry
   readonly time: (value: string) => string
+  /** The step's route: an interaction there need not repeat it. */
+  readonly route: string | undefined
 }) {
   const Icon = icons[entry.kind]
 
   return (
-    <li className="flex items-start gap-3 px-4 py-3">
+    <li className="flex items-start gap-3 py-1.5">
       <time
         dateTime={entry.at}
         className="min-w-16 shrink-0 pt-px text-xs text-muted-foreground tabular-nums"
@@ -94,13 +191,19 @@ function EntryRow({
       </time>
       <Icon aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <EntryContent entry={entry} />
+        <EntryContent entry={entry} route={route} />
       </div>
     </li>
   )
 }
 
-function EntryContent({ entry }: { readonly entry: Entry }) {
+function EntryContent({
+  entry,
+  route,
+}: {
+  readonly entry: Entry
+  readonly route: string | undefined
+}) {
   const messages = useActivityMessages().visit
   const locale = useLocale()
   const { count } = useNumbers()
@@ -113,7 +216,9 @@ function EntryContent({ entry }: { readonly entry: Entry }) {
       return (
         <>
           <span className="font-mono text-[0.8125rem] font-medium break-all">{entry.name}</span>
-          <RoutePattern route={entry.route} className="text-xs text-muted-foreground" />
+          {entry.route === route ? null : (
+            <RoutePattern route={entry.route} className="text-xs text-muted-foreground" />
+          )}
         </>
       )
 
