@@ -9,7 +9,7 @@ import {
 import { publishAgentRunCancel } from "@sixb/core/internal/agents"
 import { createSixbError, toSixbFailure } from "@sixb/core/internal/errors"
 import { assertValidFileRefs } from "@sixb/core/internal/ontology"
-import type { Sixb, WorkflowRunView } from "@sixb/core/internal/request-execution"
+import type { WorkflowRunView } from "@sixb/core/internal/request-execution"
 import {
   snapshotWorkflowInterventionResponse,
   type WorkflowInterventionNodeDefinition,
@@ -23,7 +23,7 @@ import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
-import { requestAuthState, requireRequestSixb } from "../auth/scope"
+import { requestActor, requestAuthState, requireRequestSixb } from "../auth/scope"
 import {
   createContextualFileContentResponse,
   fileContentGetResponses,
@@ -175,10 +175,6 @@ function workflowAgentFailurePhase(
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-}
-
-function principalForExecution(sixb: Sixb): Principal {
-  return sixb.execution.requestedBy ?? SYSTEM_PRINCIPAL
 }
 
 function toWorkflowCancellationFailure(input: {
@@ -741,7 +737,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
             projectId: host.id,
             id: intervention.id,
             response,
-            submittedBy: serializePrincipal(principalForExecution(sixb)),
+            submittedBy: serializePrincipal(requestActor(sixb)),
           })
 
           const [job] = await host.queues.workflows.enqueue({
@@ -850,7 +846,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
                 projectId: host.id,
                 id: intervention.id,
                 cancelledAt,
-                cancelledBy: serializePrincipal(principalForExecution(sixb)),
+                cancelledBy: serializePrincipal(requestActor(sixb)),
               })
               const cancelledNode = await tx.workflowRuns.nodes.finish({
                 projectId: host.id,
@@ -1156,7 +1152,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
                   projectId: host.id,
                   id: intervention.id,
                   cancelledAt,
-                  cancelledBy: serializePrincipal(principalForExecution(sixb)),
+                  cancelledBy: serializePrincipal(requestActor(sixb)),
                 })
               }
             }

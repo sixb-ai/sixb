@@ -1,6 +1,12 @@
+import { type Principal, SYSTEM_PRINCIPAL } from "@sixb/core"
+import { type AgentExecutionAuthorization, agentServiceAccountId } from "@sixb/core/internal/agents"
 import type { AuthenticatedRequestAuthSession } from "@sixb/core/internal/auth"
-import type { RequestExecutionAuthorization, Sixb } from "@sixb/core/internal/request-execution"
-import type { AgentRunRecord, ConversationAgentRunRecord } from "@sixb/core/storage"
+import type { Sixb } from "@sixb/core/internal/request-execution"
+import type {
+  AgentRunRecord,
+  ConversationAgentRunRecord,
+  ExecutionRecord,
+} from "@sixb/core/storage"
 import type { ServerAuthGuardDecision } from "./guard"
 
 /**
@@ -20,8 +26,18 @@ export interface RequestAuthState {
     | { readonly kind: "workflow"; readonly nodeRunId: string }
 }
 
+/** The agent run execution a gateway request runs inside, read from server-side records only. */
+export interface AgentGatewayRunExecution {
+  readonly execution: ExecutionRecord
+  readonly actorId?: string
+  readonly runId: string
+  readonly attempt: number
+  readonly authorization: AgentExecutionAuthorization
+}
+
 export interface InternalRequestAuthState {
-  readonly authorization: RequestExecutionAuthorization
+  /** Absent when auth is disabled: the request then runs as an auth-disabled request. */
+  readonly runExecution?: AgentGatewayRunExecution
   readonly agentRun?: AgentRunRecord
   readonly agentExecution?: RequestAuthState["agentExecution"]
 }
@@ -67,6 +83,20 @@ export function requireRequestSixb(context: unknown): Sixb {
     throw new Error("[SixbServer] Execution scope is not available for this route.")
   }
   return sixb
+}
+
+/**
+ * Who performs the request: a managed Agent run's service account, otherwise the requester.
+ * Records of who submitted or cancelled something, and upload-session ownership, name the actor;
+ * what the request starts keeps the requester.
+ */
+export function requestActor(sixb: Pick<Sixb, "execution">): Principal {
+  const { executor, requestedBy } = sixb.execution
+  if (executor.type === "agent" && executor.actorId !== undefined) {
+    return { type: "serviceAccount", id: agentServiceAccountId(executor.actorId) }
+  }
+
+  return requestedBy ?? SYSTEM_PRINCIPAL
 }
 
 /**

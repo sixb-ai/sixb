@@ -1,6 +1,7 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
 import type { OntologyMaintenanceHandle, SixbHostView } from "@sixb/core"
+import { bindAgentGatewayRequestExecution } from "@sixb/core/internal/agent-execution"
 import { ARTIFACT_FRAME_ROUTE_PREFIX } from "@sixb/core/internal/artifacts/frames"
 import { CSRF_HEADER_NAME, setRequestClientAddress } from "@sixb/core/internal/auth"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
@@ -317,15 +318,14 @@ export function createSixbApi(server: SixbServer) {
 
       const internalAuthState = consumeInternalRequestAuthState(request)
       if (internalAuthState) {
-        const { authorization, ...agentState } = internalAuthState
+        const { runExecution, ...agentState } = internalAuthState
         return {
           auth: { kind: "allow" as const, session: null },
           sharedAccessCookies: null,
           ...agentState,
-          sixb: bindRequestExecution(host, {
-            request,
-            authorization,
-          }),
+          sixb: runExecution
+            ? bindAgentGatewayRequestExecution(host, { signal: request.signal, ...runExecution })
+            : bindRequestExecution(host, { request, authorization: { type: "disabled" } }),
         }
       }
 

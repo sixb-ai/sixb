@@ -3,7 +3,6 @@ import {
   DEFAULT_SIMPLE_FILE_UPLOAD_BYTES,
   type FileRef,
   type SixbHostView,
-  SYSTEM_PRINCIPAL,
 } from "@sixb/core"
 import { computeBlobDigest, supportsDirectUpload } from "@sixb/core/blob-storage/server"
 import { canonicalMediaType } from "@sixb/core/internal/blob-storage"
@@ -11,7 +10,7 @@ import { createFileUploadId, createUploadExpiresAt } from "@sixb/core/internal/s
 import { type FileUploadSession, FileUploadSessionError } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
-import { requireRequestSixb } from "../auth/scope"
+import { requestActor, requireRequestSixb } from "../auth/scope"
 import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
@@ -124,7 +123,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
             return unconfiguredStorageResponse(set, "File upload session storage")
           }
           const parsed = CreateFileUploadBodySchema.parse(body)
-          const principal = requireRequestSixb(context).execution.requestedBy ?? SYSTEM_PRINCIPAL
+          const principal = requestActor(requireRequestSixb(context))
           const uploadId = createFileUploadId()
           const expiresAt = createUploadExpiresAt()
           const expectedDigest = parsed.digest as BlobDigest | undefined
@@ -186,7 +185,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           if (!uploadSessions) {
             return unconfiguredStorageResponse(set, "File upload session storage")
           }
-          const principal = requireRequestSixb(context).execution.requestedBy ?? SYSTEM_PRINCIPAL
+          const principal = requestActor(requireRequestSixb(context))
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
           if (session.status !== "pending") {
             throw terminalSessionError(session.status)
@@ -279,7 +278,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           if (!uploadSessions) {
             return unconfiguredStorageResponse(set, "File upload session storage")
           }
-          const principal = requireRequestSixb(context).execution.requestedBy ?? SYSTEM_PRINCIPAL
+          const principal = requestActor(requireRequestSixb(context))
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
           if (session.status !== "pending") {
             throw terminalSessionError(session.status)
@@ -341,7 +340,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           if (!uploadSessions) {
             return unconfiguredStorageResponse(set, "File upload session storage")
           }
-          const principal = requireRequestSixb(context).execution.requestedBy ?? SYSTEM_PRINCIPAL
+          const principal = requestActor(requireRequestSixb(context))
           const parsed = CompleteFileUploadBodySchema.parse(body ?? {})
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
 
@@ -414,7 +413,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           if (!uploadSessions) {
             return unconfiguredStorageResponse(set, "File upload session storage")
           }
-          const principal = requireRequestSixb(context).execution.requestedBy ?? SYSTEM_PRINCIPAL
+          const principal = requestActor(requireRequestSixb(context))
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
 
           if (session.status === "completed") {

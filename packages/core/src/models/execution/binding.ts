@@ -8,7 +8,9 @@ export interface ModelExecutionAttempt {
   readonly embeddingAdmission?: (admit: () => Promise<void>) => Promise<void>
   /**
    * Accounting the execution attempt already owns, such as an Agent run's. Calls then share its
-   * admission and failure state instead of opening a second recorder for the same attempt.
+   * admission and failure state instead of opening a second recorder for the same attempt. Without
+   * it, the binding opens its own recorder — as an agent API gateway request does on the run's
+   * attempt, outside the run's in-memory failure state and cancellation.
    */
   readonly accounting?: AiModelCallRecorder
 }

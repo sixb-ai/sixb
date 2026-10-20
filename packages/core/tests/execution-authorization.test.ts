@@ -4,6 +4,7 @@ import type { Principal } from "../src/auth"
 import { type AuthorizationContext, emptyGrantIndex } from "../src/authorization"
 import { isSixbError } from "../src/errors/internal"
 import {
+  bindAgentGatewayRequestExecution,
   createInheritedAgentExecutionRecord,
   restoreAgentExecutionScope,
 } from "../src/execution/agent"
@@ -36,7 +37,9 @@ import {
   type ExecutionScope,
   type RuntimeAuthorization,
 } from "../src/execution/types"
-import type { SelectedObjectReadScope } from "../src/storage"
+import { SixbHost } from "../src/runtime/host"
+import type { ExecutionRecord, SelectedObjectReadScope } from "../src/storage"
+import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 describe("runtime authorization capabilities", () => {
   test("snapshots shared provenance without making an ordinary process-local scope durable", () => {
@@ -857,6 +860,71 @@ describe("execution scopes", () => {
       correlationId: "correlation-1",
       requestedBy: { type: "user", id: "user-1" },
     })
+  })
+})
+
+describe("agent gateway request binding", () => {
+  const principal = { type: "serviceAccount", id: agentServiceAccountId("research") } as const
+  const authorization = { type: "principal", context: authorizationContext(principal) } as const
+  const execution: ExecutionRecord = {
+    id: "execution-agent-gateway",
+    projectId: "project-1",
+    requestedBy: { type: "user", id: "user-1" },
+    requesterGroupIds: ["group-1"],
+    executor: { type: "agent", runId: "agent-run-gateway" },
+    source: { type: "execution", executionId: "execution-workflow" },
+    correlationId: "correlation-workflow",
+    authorizationRef: { type: "principal", principal },
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+  }
+
+  function host(): SixbHost {
+    return new SixbHost({ id: "project-1", ontology: [], ...createTestRuntimeDeps() })
+  }
+
+  test("binds a request to the run's own execution, as its in-process tools are", () => {
+    const sixb = bindAgentGatewayRequestExecution(host(), {
+      signal: new AbortController().signal,
+      execution,
+      actorId: "research",
+      runId: "agent-run-gateway",
+      attempt: 2,
+      authorization,
+    })
+
+    const restored = restoreAgentExecutionScope({
+      execution,
+      actorId: "research",
+      runId: "agent-run-gateway",
+      authorization,
+    })
+    expect(sixb.execution).toEqual(restored.execution)
+  })
+
+  test("refuses a record that belongs to another run", () => {
+    expect(() =>
+      bindAgentGatewayRequestExecution(host(), {
+        signal: new AbortController().signal,
+        execution,
+        actorId: "research",
+        runId: "agent-run-other",
+        attempt: 1,
+        authorization,
+      })
+    ).toThrow("does not authorize Agent run 'agent-run-other'")
+  })
+
+  test("requires the attempt the request was admitted under", () => {
+    expect(() =>
+      bindAgentGatewayRequestExecution(host(), {
+        signal: new AbortController().signal,
+        execution,
+        actorId: "research",
+        runId: "agent-run-gateway",
+        attempt: 0,
+        authorization,
+      })
+    ).toThrow("Execution attempt must be a positive safe integer")
   })
 })
 
