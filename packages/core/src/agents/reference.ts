@@ -4,4 +4,5 @@ import type { AgentReference } from "./types"
 export const agent: AgentReference = Object.freeze({
   kind: "agent",
   usage: Object.freeze({ kind: "aiUsage" }),
+  threads: Object.freeze({ kind: "agentThreads" }),
 })

@@ -1097,6 +1097,7 @@ export type {
   AgentSkillDefinition,
   AgentStepStartPart,
   AgentTextPart,
+  AgentThreadsReference,
   AgentToolAttachments,
   AgentToolCallPart,
   AgentToolCallState,

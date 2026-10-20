@@ -32,6 +32,7 @@ function context(grants: {
   agent?: boolean
   logs?: boolean
   activity?: boolean
+  agentThreads?: boolean
 }): AuthorizationContext {
   return {
     principal: { type: "user", id: "u1" },
@@ -49,6 +50,7 @@ function context(grants: {
       "run:agent": grants.agent ?? false,
       "observe:logs": grants.logs ?? false,
       "observe:activity": grants.activity ?? false,
+      "observe:agentThreads": grants.agentThreads ?? false,
     },
   }
 }
@@ -112,6 +114,13 @@ describe("evaluate", () => {
       { activity: true },
       { logs: true },
       "observe:activity",
+    ],
+    [
+      "agentThreads.observe",
+      { kind: "agentThreads.observe" },
+      { agentThreads: true },
+      { activity: true },
+      "observe:agentThreads",
     ],
     [
       "object.view",
