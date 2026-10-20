@@ -1,17 +1,20 @@
 import type { Database } from "bun:sqlite"
 import {
   participantsToAdd,
+  planAgentThreadFork,
   snapshotAgentThreadSandboxParams,
   transitionAgentThreadSandbox,
 } from "@sixb/core/internal/agent-run-storage-provider"
 import {
   type AddAgentThreadParticipantsInput,
+  type AgentContextCheckpointRecord,
   AgentStorageError,
   type AgentThreadParticipantRecord,
   type AgentThreadRecord,
   type AgentThreadSandboxState,
   type AgentThreadStore,
   type CreateAgentThreadInput,
+  type ForkAgentThreadInput,
   type ListAgentThreadParticipantsInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
@@ -21,10 +24,13 @@ import {
 import type { SqliteValue } from "../run-list-query"
 import { isUniqueConstraintError } from "../storage-errors"
 import {
+  type AgentContextCheckpointRow,
+  type AgentMessageRow,
   type AgentRunRow,
   type AgentThreadParticipantRow,
   type AgentThreadRow,
   queryAgentList,
+  rowToContextCheckpointRecord,
   rowToParticipantRecord,
   rowToRunRecord,
   rowToThreadRecord,
@@ -105,6 +111,108 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
     }
 
     return this.requireThread(input.projectId, input.id)
+  }
+
+  async fork(input: ForkAgentThreadInput): Promise<AgentThreadRecord> {
+    return this.db
+      .transaction(() => {
+        const source = this.db
+          .query("SELECT id, active_run_id FROM agent_threads WHERE project_id = ? AND id = ?")
+          .get(input.projectId, input.sourceThreadId) as Pick<
+          AgentThreadRow,
+          "id" | "active_run_id"
+        > | null
+
+        if (!source) {
+          throw new AgentStorageError(
+            "thread_not_found",
+            `[SixbSqlite] Agent thread '${input.sourceThreadId}' not found for project '${input.projectId}'.`
+          )
+        }
+
+        const activeRun = source.active_run_id === null ? null : this.findActiveRun(input, source)
+
+        // Only what the plan needs: the parts are copied by the database, not through here.
+        const messages = this.db
+          .query(
+            "SELECT id, seq FROM agent_messages WHERE project_id = ? AND thread_id = ? ORDER BY seq ASC"
+          )
+          .all(input.projectId, source.id) as Pick<AgentMessageRow, "id" | "seq">[]
+
+        const checkpoints = this.db
+          .query(
+            `
+            SELECT * FROM agent_context_checkpoints
+            WHERE project_id = ? AND thread_id = ?
+            ORDER BY summarized_through_seq DESC, created_at DESC, id DESC
+          `
+          )
+          .all(input.projectId, source.id) as AgentContextCheckpointRow[]
+
+        const plan = planAgentThreadFork(
+          input,
+          {
+            ...(activeRun?.trigger_message_id
+              ? { triggerMessageId: activeRun.trigger_message_id }
+              : {}),
+            messages,
+            checkpoints: checkpoints.map(rowToContextCheckpointRecord),
+          },
+          "SixbSqlite"
+        )
+
+        this.insertForkedThread(plan.thread)
+
+        this.db
+          .query(
+            `
+            INSERT INTO agent_messages (
+              project_id,
+              id,
+              thread_id,
+              run_id,
+              role,
+              author_principal_type,
+              author_principal_id,
+              seq,
+              parts,
+              metadata,
+              content_version,
+              created_at,
+              completed_at
+            )
+            SELECT
+              message.project_id,
+              json_extract(copy.value, '$[1]'),
+              ?,
+              message.run_id,
+              message.role,
+              message.author_principal_type,
+              message.author_principal_id,
+              message.seq,
+              message.parts,
+              message.metadata,
+              message.content_version,
+              message.created_at,
+              message.completed_at
+            FROM json_each(?) AS copy
+            JOIN agent_messages AS message
+              ON message.project_id = ? AND message.id = json_extract(copy.value, '$[0]')
+          `
+          )
+          .run(
+            plan.thread.id,
+            JSON.stringify(plan.messages.map((copy) => [copy.sourceId, copy.id])),
+            input.projectId
+          )
+
+        if (plan.checkpoint) {
+          this.insertCopiedCheckpoint(plan.checkpoint)
+        }
+
+        return this.requireThread(input.projectId, input.id)
+      })
+      .immediate()
   }
 
   async getById(params: { projectId: string; id: string }): Promise<AgentThreadRecord | null> {
@@ -270,6 +378,101 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
       .all(projectId, JSON.stringify(threadIds)) as AgentThreadParticipantRow[]
 
     return rows.map(rowToParticipantRecord)
+  }
+
+  private findActiveRun(
+    input: ForkAgentThreadInput,
+    source: Pick<AgentThreadRow, "active_run_id">
+  ): Pick<AgentRunRow, "trigger_message_id"> | null {
+    return this.db
+      .query("SELECT trigger_message_id FROM agent_runs WHERE project_id = ? AND id = ?")
+      .get(input.projectId, source.active_run_id) as Pick<AgentRunRow, "trigger_message_id"> | null
+  }
+
+  private insertForkedThread(thread: AgentThreadRecord): void {
+    try {
+      this.db
+        .query(
+          `
+          INSERT INTO agent_threads (
+            project_id,
+            id,
+            owner_principal_type,
+            owner_principal_id,
+            title,
+            sandbox_params,
+            sandbox_state,
+            status,
+            active_run_id,
+            last_message_at,
+            message_count,
+            created_at,
+            updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+        `
+        )
+        .run(
+          thread.projectId,
+          thread.id,
+          thread.ownerPrincipal.type,
+          thread.ownerPrincipal.id,
+          thread.title ?? null,
+          thread.sandboxParams === undefined ? null : JSON.stringify(thread.sandboxParams),
+          thread.sandboxState === undefined ? null : JSON.stringify(thread.sandboxState),
+          thread.status,
+          thread.lastMessageAt?.toISOString() ?? null,
+          thread.messageCount,
+          thread.createdAt.toISOString(),
+          thread.updatedAt.toISOString()
+        )
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new AgentStorageError(
+          "duplicate_id",
+          `[SixbSqlite] Agent thread '${thread.id}' already exists for project '${thread.projectId}'.`
+        )
+      }
+
+      throw error
+    }
+  }
+
+  private insertCopiedCheckpoint(checkpoint: AgentContextCheckpointRecord): void {
+    this.db
+      .query(
+        `
+        INSERT INTO agent_context_checkpoints (
+          project_id,
+          id,
+          thread_id,
+          created_by_run_id,
+          reason,
+          summary,
+          summary_format_version,
+          summarized_through_seq,
+          observed_head_seq,
+          estimated_input_tokens_before,
+          estimated_input_tokens_after,
+          summary_model_id,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+      )
+      .run(
+        checkpoint.projectId,
+        checkpoint.id,
+        checkpoint.threadId,
+        checkpoint.createdByRunId,
+        checkpoint.reason,
+        checkpoint.summary,
+        checkpoint.summaryFormatVersion,
+        checkpoint.summarizedThroughSeq,
+        checkpoint.observedHeadSeq,
+        checkpoint.estimatedInputTokensBefore,
+        checkpoint.estimatedInputTokensAfter,
+        checkpoint.summaryModelId,
+        checkpoint.createdAt.toISOString()
+      )
   }
 
   private requireThread(projectId: string, id: string): AgentThreadRecord {

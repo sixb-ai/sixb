@@ -86,6 +86,29 @@ export interface CreateAgentThreadInput {
   readonly updatedAt?: Date
 }
 
+/**
+ * A new thread holding a copy of another thread's finished messages. A turn still running is left
+ * behind: what came from its trigger message on is not copied. Copies keep their `seq`, content,
+ * author and `runId`, and get new ids. Runs are not copied, so the fork's runs, usage and cost are
+ * its own; copied answers still show their run's diagnostics.
+ *
+ * Only the latest checkpoint the copy can use comes along, so the markers of earlier compactions
+ * are not in the fork. The fork has no `lastMessageAt` until its first new message, so it sorts
+ * by its creation.
+ */
+export interface ForkAgentThreadInput {
+  readonly projectId: string
+  /** The thread whose history is copied. */
+  readonly sourceThreadId: string
+  readonly id: string
+  readonly ownerPrincipal: Principal
+  readonly title?: string
+  readonly sandboxParams?: AgentThreadSandboxParams
+  /** Provider name of the fork's new sandbox; given exactly when `sandboxParams` is. */
+  readonly sandboxName?: string
+  readonly createdAt?: Date
+}
+
 export interface ListAgentThreadsInput {
   readonly projectId: string
   readonly statuses?: readonly AgentThreadStatus[]
@@ -398,7 +421,10 @@ export interface AgentMessageRecord {
   readonly id: string
   readonly projectId: string
   readonly threadId: string
-  /** The run that produced this message; `null` for user-authored messages. */
+  /**
+   * The run that produced this message; `null` for user-authored messages. A message copied by a
+   * fork keeps the run that produced it, which belongs to the thread it was copied from.
+   */
   readonly runId: string | null
   readonly role: AgentMessageRole
   /** Principal that authored this persisted message: caller for user messages, agent identity later for assistant messages. */
@@ -463,6 +489,7 @@ export interface AgentContextCheckpointRecord {
   readonly id: string
   readonly projectId: string
   readonly threadId: string
+  /** A fork's copy keeps the run that wrote the summary, in the thread it was copied from. */
   readonly createdByRunId: string
   readonly previousCheckpointId?: string
   readonly reason: AgentContextCheckpointReason
@@ -504,6 +531,8 @@ export interface AgentThreadStore {
   /** Atomic run-fenced transition, or explicit idle-thread recreation. */
   transitionSandbox(input: TransitionAgentThreadSandboxInput): Promise<AgentThreadSandboxState>
   create(input: CreateAgentThreadInput): Promise<AgentThreadRecord>
+  /** Create a thread holding a copy of another's finished history, in one transaction. */
+  fork(input: ForkAgentThreadInput): Promise<AgentThreadRecord>
   getById(params: { projectId: string; id: string }): Promise<AgentThreadRecord | null>
   /** The threads found, in first-occurrence input order; a missing one is omitted. */
   getByIds(params: {

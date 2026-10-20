@@ -1,30 +1,36 @@
 import {
   participantsToAdd,
+  planAgentThreadFork,
   snapshotAgentThreadSandboxParams,
   transitionAgentThreadSandbox,
 } from "@sixb/core/internal/agent-run-storage-provider"
 import {
   type AddAgentThreadParticipantsInput,
+  type AgentContextCheckpointRecord,
   AgentStorageError,
   type AgentThreadParticipantRecord,
   type AgentThreadRecord,
   type AgentThreadSandboxState,
   type AgentThreadStore,
   type CreateAgentThreadInput,
+  type ForkAgentThreadInput,
   type ListAgentThreadParticipantsInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
   type RemoveAgentThreadParticipantInput,
   type TransitionAgentThreadSandboxInput,
 } from "@sixb/core/storage"
-import type { SqlParameter } from "../pg-client"
-import { isUniqueViolation } from "../storage-errors"
+import type { SQLClient, SqlParameter } from "../pg-client"
+import { isUniqueViolation, isUniqueViolationOf } from "../storage-errors"
 import { type PgStoreClient, runPgTransaction } from "../transactions"
 import {
+  type AgentContextCheckpointRow,
+  type AgentMessageRow,
   type AgentRunRow,
   type AgentThreadParticipantRow,
   type AgentThreadRow,
   queryAgentList,
+  rowToContextCheckpointRecord,
   rowToParticipantRecord,
   rowToRunRecord,
   rowToThreadRecord,
@@ -97,6 +103,146 @@ export class PgAgentThreadStore implements AgentThreadStore {
       return rowToThreadRecord(row)
     } catch (error) {
       if (isUniqueViolation(error)) {
+        throw new AgentStorageError(
+          "duplicate_id",
+          `[SixbPg] Agent thread '${input.id}' already exists for project '${input.projectId}'.`
+        )
+      }
+
+      throw error
+    }
+  }
+
+  async fork(input: ForkAgentThreadInput): Promise<AgentThreadRecord> {
+    try {
+      return await runPgTransaction(this.sql, async (tx) => {
+        // A share lock holds back the writes that take the thread for update: an admitted request
+        // or a finalized answer lands before the copy or after it, never inside it.
+        const [source] = await tx<Pick<AgentThreadRow, "id" | "active_run_id">[]>`
+          SELECT id, active_run_id FROM agent_threads
+          WHERE project_id = ${input.projectId} AND id = ${input.sourceThreadId}
+          FOR SHARE
+        `
+
+        if (!source) {
+          throw new AgentStorageError(
+            "thread_not_found",
+            `[SixbPg] Agent thread '${input.sourceThreadId}' not found for project '${input.projectId}'.`
+          )
+        }
+
+        const [activeRun] =
+          source.active_run_id === null
+            ? []
+            : await tx<{ trigger_message_id: string | null }[]>`
+                SELECT trigger_message_id FROM agent_runs
+                WHERE project_id = ${input.projectId} AND id = ${source.active_run_id}
+              `
+
+        // Only what the plan needs: the parts are copied by the database, not through here.
+        const messages = await tx<Pick<AgentMessageRow, "id" | "seq">[]>`
+          SELECT id, seq FROM agent_messages
+          WHERE project_id = ${input.projectId} AND thread_id = ${source.id}
+          ORDER BY seq ASC
+        `
+        const checkpoints = await tx<AgentContextCheckpointRow[]>`
+          SELECT * FROM agent_context_checkpoints
+          WHERE project_id = ${input.projectId} AND thread_id = ${source.id}
+          ORDER BY summarized_through_seq DESC, created_at DESC, id DESC
+        `
+
+        const plan = planAgentThreadFork(
+          input,
+          {
+            ...(activeRun?.trigger_message_id
+              ? { triggerMessageId: activeRun.trigger_message_id }
+              : {}),
+            messages: messages.map((message) => ({ id: message.id, seq: Number(message.seq) })),
+            checkpoints: checkpoints.map(rowToContextCheckpointRecord),
+          },
+          "SixbPg"
+        )
+        const { thread } = plan
+
+        const [row] = await tx<AgentThreadRow[]>`
+          INSERT INTO agent_threads (
+            project_id,
+            id,
+            owner_principal_type,
+            owner_principal_id,
+            title,
+            sandbox_params,
+            sandbox_state,
+            status,
+            last_message_at,
+            message_count,
+            created_at,
+            updated_at
+          ) VALUES (
+            ${thread.projectId},
+            ${thread.id},
+            ${thread.ownerPrincipal.type},
+            ${thread.ownerPrincipal.id},
+            ${thread.title ?? null},
+            ${thread.sandboxParams === undefined ? null : JSON.stringify(thread.sandboxParams)}::text::jsonb,
+            ${thread.sandboxState === undefined ? null : JSON.stringify(thread.sandboxState)}::text::jsonb,
+            ${thread.status},
+            ${thread.lastMessageAt ?? null},
+            ${thread.messageCount},
+            ${thread.createdAt},
+            ${thread.updatedAt}
+          )
+          RETURNING *
+        `
+
+        if (plan.messages.length > 0) {
+          await tx`
+            INSERT INTO agent_messages (
+              project_id,
+              id,
+              thread_id,
+              run_id,
+              role,
+              author_principal_type,
+              author_principal_id,
+              seq,
+              parts,
+              metadata,
+              content_version,
+              created_at,
+              completed_at
+            )
+            SELECT
+              message.project_id,
+              copy.id,
+              ${thread.id},
+              message.run_id,
+              message.role,
+              message.author_principal_type,
+              message.author_principal_id,
+              message.seq,
+              message.parts,
+              message.metadata,
+              message.content_version,
+              message.created_at,
+              message.completed_at
+            FROM unnest(
+              ${tx.array(plan.messages.map((copy) => copy.sourceId))}::text[],
+              ${tx.array(plan.messages.map((copy) => copy.id))}::text[]
+            ) AS copy(source_id, id)
+            JOIN agent_messages AS message
+              ON message.project_id = ${input.projectId} AND message.id = copy.source_id
+          `
+        }
+
+        if (plan.checkpoint) {
+          await insertCopiedCheckpoint(tx, plan.checkpoint)
+        }
+
+        return rowToThreadRecord(row)
+      })
+    } catch (error) {
+      if (isUniqueViolationOf(error, "agent_threads_pkey")) {
         throw new AgentStorageError(
           "duplicate_id",
           `[SixbPg] Agent thread '${input.id}' already exists for project '${input.projectId}'.`
@@ -271,4 +417,41 @@ async function selectParticipants(
   `
 
   return rows.map(rowToParticipantRecord)
+}
+
+async function insertCopiedCheckpoint(
+  tx: SQLClient,
+  checkpoint: AgentContextCheckpointRecord
+): Promise<void> {
+  await tx`
+    INSERT INTO agent_context_checkpoints (
+      project_id,
+      id,
+      thread_id,
+      created_by_run_id,
+      reason,
+      summary,
+      summary_format_version,
+      summarized_through_seq,
+      observed_head_seq,
+      estimated_input_tokens_before,
+      estimated_input_tokens_after,
+      summary_model_id,
+      created_at
+    ) VALUES (
+      ${checkpoint.projectId},
+      ${checkpoint.id},
+      ${checkpoint.threadId},
+      ${checkpoint.createdByRunId},
+      ${checkpoint.reason},
+      ${checkpoint.summary},
+      ${checkpoint.summaryFormatVersion},
+      ${checkpoint.summarizedThroughSeq},
+      ${checkpoint.observedHeadSeq},
+      ${checkpoint.estimatedInputTokensBefore},
+      ${checkpoint.estimatedInputTokensAfter},
+      ${checkpoint.summaryModelId},
+      ${checkpoint.createdAt}
+    )
+  `
 }

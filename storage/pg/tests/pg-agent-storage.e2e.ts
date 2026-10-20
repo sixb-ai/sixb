@@ -313,4 +313,133 @@ describe("PostgresStorage agents", () => {
       await disposeTestStorage(storage)
     }
   }, 10_000)
+
+  test("forks after an answer being finalized, never in the middle of it", async () => {
+    // Removal proof: drop `FOR SHARE` from the fork's source read; the fork no longer waits, and
+    // leaves behind a turn whose answer commits right after.
+    const { storage } = await createTestStorage()
+    const finishAllowed = Promise.withResolvers<void>()
+
+    try {
+      await prepareCheckpointCandidate(storage)
+      const appended = Promise.withResolvers<void>()
+
+      const finalization = storage.transaction(async (tx) => {
+        const agents = tx.agents
+        if (!agents) throw new Error("Expected agent storage in transaction.")
+
+        await agents.messages.append({
+          id: "msg_4",
+          projectId: "p",
+          threadId: "thr_lock_order",
+          runId: "run_2",
+          role: "assistant",
+          parts: [{ type: "text", text: "four" }],
+        })
+        appended.resolve()
+        await finishAllowed.promise
+
+        return agents.runs.finish({
+          id: "run_2",
+          projectId: "p",
+          executionToken: "execution_2",
+          status: "succeeded",
+        })
+      })
+
+      await settleWithin(appended.promise, 2_000)
+      let forked = false
+      const fork = storage.agents.threads
+        .fork({
+          projectId: "p",
+          sourceThreadId: "thr_lock_order",
+          id: "thr_fork",
+          ownerPrincipal: { type: "user", id: "usr_2" },
+        })
+        .finally(() => {
+          forked = true
+        })
+
+      await Bun.sleep(100)
+      expect(forked).toBe(false)
+
+      finishAllowed.resolve()
+      await settleWithin(finalization, 5_000)
+      expect(await settleWithin(fork, 5_000)).toMatchObject({ messageCount: 4 })
+    } finally {
+      // A failed expectation must not leave the held transaction blocking the cleanup.
+      finishAllowed.resolve()
+      await storage.dropSchema()
+      await storage.close()
+    }
+  }, 10_000)
+
+  test("finalizes an answer after a fork in progress, which leaves the turn behind", async () => {
+    const { storage } = await createTestStorage()
+    const commitAllowed = Promise.withResolvers<void>()
+
+    try {
+      await prepareCheckpointCandidate(storage)
+      const forked = Promise.withResolvers<void>()
+
+      const fork = storage.transaction(async (tx) => {
+        const agents = tx.agents
+        if (!agents) throw new Error("Expected agent storage in transaction.")
+
+        const thread = await agents.threads.fork({
+          projectId: "p",
+          sourceThreadId: "thr_lock_order",
+          id: "thr_fork",
+          ownerPrincipal: { type: "user", id: "usr_2" },
+        })
+        forked.resolve()
+        await commitAllowed.promise
+
+        return thread
+      })
+
+      await settleWithin(forked.promise, 2_000)
+      let finalized = false
+      const finalization = storage
+        .transaction(async (tx) => {
+          const agents = tx.agents
+          if (!agents) throw new Error("Expected agent storage in transaction.")
+
+          await agents.messages.append({
+            id: "msg_4",
+            projectId: "p",
+            threadId: "thr_lock_order",
+            runId: "run_2",
+            role: "assistant",
+            parts: [{ type: "text", text: "four" }],
+          })
+          return agents.runs.finish({
+            id: "run_2",
+            projectId: "p",
+            executionToken: "execution_2",
+            status: "succeeded",
+          })
+        })
+        .finally(() => {
+          finalized = true
+        })
+
+      await Bun.sleep(100)
+      expect(finalized).toBe(false)
+
+      commitAllowed.resolve()
+      expect(await settleWithin(fork, 5_000)).toMatchObject({ messageCount: 2 })
+      await settleWithin(finalization, 5_000)
+
+      const copied = await storage.agents.messages.list({ projectId: "p", threadId: "thr_fork" })
+      expect(copied.total).toBe(2)
+      expect(
+        await storage.agents.threads.getById({ projectId: "p", id: "thr_lock_order" })
+      ).toMatchObject({ activeRunId: null, messageCount: 4 })
+    } finally {
+      commitAllowed.resolve()
+      await storage.dropSchema()
+      await storage.close()
+    }
+  }, 10_000)
 })
