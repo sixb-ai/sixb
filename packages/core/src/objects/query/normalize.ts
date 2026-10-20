@@ -1,6 +1,7 @@
 import type {
   ObjectExpansion,
   ObjectQuery,
+  ObjectQueryExpand,
   ObjectQueryPredicate,
   ObjectQuerySet,
   ObjectQuerySortField,
@@ -63,7 +64,7 @@ function normalizeNode(query: ObjectQuery): ObjectQuery {
         properties: query.properties ? uniqueStrings(query.properties) : undefined,
       }
     case "expand":
-      return normalizeExpand(query.input, query.expansions)
+      return normalizeExpand(query)
   }
 }
 
@@ -87,30 +88,45 @@ function hoistExpand(query: ObjectQuery): ObjectQuery {
   const inner = query.input
   const rebuilt = normalizeObjectQuery({ ...query, input: inner.input })
   if (rebuilt.kind === "expand") {
-    return {
-      kind: "expand",
-      input: rebuilt.input,
-      expansions: normalizeExpansions([...inner.expansions, ...rebuilt.expansions]),
-    }
+    return expandNode(
+      rebuilt.input,
+      normalizeExpansions([...inner.expansions, ...rebuilt.expansions]),
+      uniqueSortedStrings([...(inner.users ?? []), ...(rebuilt.users ?? [])])
+    )
   }
-  return { kind: "expand", input: rebuilt, expansions: inner.expansions }
+  return expandNode(rebuilt, inner.expansions, inner.users ?? [])
 }
 
-function normalizeExpand(input: ObjectQuery, expansions: readonly ObjectExpansion[]): ObjectQuery {
-  const normalizedInput = normalizeObjectQuery(input)
-  const normalizedExpansions = normalizeExpansions(expansions)
+function normalizeExpand(query: ObjectQueryExpand): ObjectQuery {
+  const normalizedInput = normalizeObjectQuery(query.input)
+  const normalizedExpansions = normalizeExpansions(query.expansions)
+  const users = uniqueSortedStrings(query.users ?? [])
 
   // A directly-nested expand (`a.expand(X).expand(Y)` builds
   // `expand(expand(start, [X]), [Y])`) collapses into one outermost expand.
   if (normalizedInput.kind === "expand") {
-    return {
-      kind: "expand",
-      input: normalizedInput.input,
-      expansions: normalizeExpansions([...normalizedInput.expansions, ...normalizedExpansions]),
-    }
+    return expandNode(
+      normalizedInput.input,
+      normalizeExpansions([...normalizedInput.expansions, ...normalizedExpansions]),
+      uniqueSortedStrings([...(normalizedInput.users ?? []), ...users])
+    )
   }
 
-  return { kind: "expand", input: normalizedInput, expansions: normalizedExpansions }
+  return expandNode(normalizedInput, normalizedExpansions, users)
+}
+
+// `users` is left out when empty, so a query that expands no user property keeps its usual shape.
+function expandNode(
+  input: ObjectQuery,
+  expansions: readonly ObjectExpansion[],
+  users: readonly string[]
+): ObjectQueryExpand {
+  return {
+    kind: "expand",
+    input,
+    expansions,
+    ...(users.length > 0 ? { users } : {}),
+  }
 }
 
 function normalizeExpansions(expansions: readonly ObjectExpansion[]): ObjectExpansion[] {
@@ -129,8 +145,11 @@ function normalizeExpansions(expansions: readonly ObjectExpansion[]): ObjectExpa
   })
 }
 
+// Every field is copied by name: a new `ObjectExpansion` field must be added here, or
+// normalization drops it.
 function normalizeExpansion(expansion: ObjectExpansion): ObjectExpansion {
   const nested = expansion.expand ? normalizeExpansions(expansion.expand) : []
+  const users = uniqueSortedStrings(expansion.users ?? [])
   return {
     linkId: expansion.linkId,
     direction: expansion.direction,
@@ -140,15 +159,22 @@ function normalizeExpansion(expansion: ObjectExpansion): ObjectExpansion {
     ...(expansion.limit !== undefined ? { limit: expansion.limit } : {}),
     ...(expansion.orderBy ? { orderBy: expansion.orderBy.map((field) => ({ ...field })) } : {}),
     ...(nested.length > 0 ? { expand: nested } : {}),
+    ...(users.length > 0 ? { users } : {}),
   }
 }
 
 // Two expansions of the same link in the same direction are one hydration; their
-// nested expansions merge so the normalized tree never double-hydrates a link.
+// nested expansions and user properties merge so the normalized tree never
+// double-hydrates a link.
 function mergeExpansion(a: ObjectExpansion, b: ObjectExpansion): ObjectExpansion {
   const nested = normalizeExpansions([...(a.expand ?? []), ...(b.expand ?? [])])
-  const { expand: _existing, ...base } = a
-  return nested.length > 0 ? { ...base, expand: nested } : base
+  const users = uniqueSortedStrings([...(a.users ?? []), ...(b.users ?? [])])
+  const { expand: _expand, users: _users, ...base } = a
+  return {
+    ...base,
+    ...(nested.length > 0 ? { expand: nested } : {}),
+    ...(users.length > 0 ? { users } : {}),
+  }
 }
 
 function expansionKey(expansion: ObjectExpansion): string {
@@ -252,6 +278,11 @@ function normalizeLimit(input: ObjectQuery, limit: number): ObjectQuery {
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values)]
+}
+
+// Expanded user properties are a set: sorting them gives equivalent queries one cache key.
+function uniqueSortedStrings(values: readonly string[]): string[] {
+  return uniqueStrings(values).sort(compareStrings)
 }
 
 function uniqueRefs(

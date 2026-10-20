@@ -130,7 +130,8 @@ A signed-in `Principal` whose `type` is `"user"` is already a user reference. Us
 cannot be sorted, searched as text, or listed in `search.exact`.
 
 To show the member's name, email, or avatar, read the
-[member directory](../auth/members.md#read-the-member-directory).
+[member directory](../auth/members.md#read-the-member-directory), or include the profiles in a
+query with [`expand()`](../objects/querying.md#include-the-members-a-property-names).
 
 User references are set by your code, actions, and workflows. Projections, telemetry properties,
 link properties, and action parameters of a [share](../auth/shared-access.md) cannot use them yet. For a

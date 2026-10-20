@@ -28,6 +28,7 @@ export type {
   ShareScopedGrant,
   ShareScopedViewGrant,
 } from "../shares/access-plan"
+export type { UserProfile } from "../users"
 export type {
   ActionRunEffectsRecord,
   ActionRunFailure,
@@ -503,6 +504,7 @@ export type {
   ObjectReadStorage,
   ObjectRow,
   ObjectRowLinks,
+  ObjectRowUsers,
   ObjectStorage,
   QueryObjectLinksInput,
   QueryObjectLinksResult,

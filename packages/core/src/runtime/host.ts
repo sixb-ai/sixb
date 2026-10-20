@@ -367,6 +367,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       embeddingModels,
       rerankingModels,
       appliedMarkings: this.appliedMarkings,
+      users: this.storage.auth?.users,
     })
 
     const runtime: SixbRuntimeContext = {

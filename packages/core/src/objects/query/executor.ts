@@ -38,6 +38,7 @@ import { usePrimaryIdLookups } from "./primary-id"
 import { rerankObjectCandidates } from "./reranking-executor"
 import { findQueryReranking } from "./reranking-query"
 import { compareQueryScalarValues, queryScalarValuesEqual } from "./scalar-values"
+import { withoutUserExpansions } from "./user-expansions"
 import {
   type AdmittedObjectQuery,
   type ObjectQuerySemanticAdmission,
@@ -417,7 +418,7 @@ export async function facetObjects(
  *
  * Grants are checked first so a denial never describes properties of a type the caller cannot
  * view. The admitted query is the one executed: an admission may narrow it, as markings narrow
- * default text fields.
+ * default text fields. Its user expansions are removed: storage never resolves profiles.
  */
 function validateExecutableQuery(
   input: { readonly projectId: string; readonly query: ObjectQuery },
@@ -433,8 +434,12 @@ function validateExecutableQuery(
   const normalized = normalizeObjectQuery(input.query)
   const validated = validateObjectQuery(normalized, validationOptions)
   assertQueryViewable(input.projectId, validated, options)
-  if (!options.admission) return { ...validated, admissionState: {} }
-  return validateObjectQueryWithAdmission(normalized, validationOptions, options.admission)
+
+  const admitted = options.admission
+    ? validateObjectQueryWithAdmission(normalized, validationOptions, options.admission)
+    : { ...validated, admissionState: {} }
+
+  return { ...admitted, query: withoutUserExpansions(admitted.query) }
 }
 
 // Authorization happens at planning time: a scoped query must hold a view

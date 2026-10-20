@@ -7,6 +7,7 @@
  */
 import type { ObjectQueryFacetsResult } from "../../runtime/types"
 import type { Redactions } from "../../security/types"
+import type { UserProfile } from "../../users"
 import type { ObjectQueryExplanation } from "../query/explain"
 import type { ObjectQuery } from "../query/ir"
 import type { ValidatedObjectQuery } from "../query/validate"
@@ -25,6 +26,8 @@ export type ObjectQueryExecutorRow = {
    * over the same light row shape so both executors (the server's full
    * `ObjectRow` and the client's wire-reconstructed row) satisfy it. */
   links?: ObjectQueryExecutorLinks
+  /** Member profiles attached by an `expand` node, keyed by `ref.user()` property id. */
+  users?: Record<string, UserProfile | readonly UserProfile[] | null>
 }
 
 export type ObjectQueryExecutorLinks = Record<string, ObjectQueryExecutorLinkValue>

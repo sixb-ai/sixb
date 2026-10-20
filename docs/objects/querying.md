@@ -261,6 +261,35 @@ For a `"many"` link, limit and sort the related objects returned for each parent
 
 Relationship properties, when present, are available as `linkProperties` on the related object.
 
+### Include the members a property names
+
+Pass a [`ref.user()` property](../ontology/properties.md#reference-a-user) to `expand()` to
+include each member's profile under `.users`: their `id`, `email`, `displayName`, `avatarUrl`,
+and `status`. The property value itself stays `{ type: "user", id }`:
+
+```ts
+const { objects: tasks } = await sixb
+  .objects(Task)
+  .query()
+  .expand(Task.p.assignee)
+  .expand(Task.p.reviewers)
+  .expand(Task.l.team, (team) => team.expand(Team.p.lead))
+  .limit(25)
+  .list()
+
+console.log(tasks[0]?.users.assignee?.displayName)
+console.log(tasks[0]?.links.team?.users.lead?.email)
+```
+
+- A single reference gives a profile, or `null` when the property is empty or no member has
+  that ID. Suspended members are included, with their status.
+- An array of references gives the members found, in order.
+- A query that projects its properties must also project the expanded user properties.
+- Profiles come from the [member directory](../auth/members.md#read-the-member-directory), so
+  they require `can.view(project.users)`. Without it, or when the reader cannot read the property,
+  its entry is absent from `.users` and the query still succeeds. Shared links never include
+  profiles.
+
 ## Pass queries around
 
 Type a query parameter as `ObjectQueryBuilder`. It accepts any query that returns that type,
