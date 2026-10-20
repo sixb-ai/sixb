@@ -202,14 +202,13 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: true,
     sharedSession: true,
   },
-  // A read: POST only so the value, an email say, stays out of URLs and their logs. NOT
-  // agent-proxied yet: the agent CLI has no command that calls it.
+  // A read: POST only so the value, an email say, stays out of URLs and their logs.
   {
     operationId: "getObjectByUniqueProperty",
     method: "POST",
     path: "/api/objects/:objectTypeId/by/:propertyId",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
     sharedSession: true,
   },
   // The four write routes. Bearer-capable because their execution facade enforces authorization

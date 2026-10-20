@@ -77,6 +77,7 @@ const CLI_API_ROUTES = [
   "GET /api/object-types/:objectTypeId",
   "GET /api/objects",
   "POST /api/objects/query",
+  "POST /api/objects/:objectTypeId/by/:propertyId",
   "POST /api/objects/query/links",
   "POST /api/objects/query/count",
   "POST /api/objects/query/exists",
