@@ -103,6 +103,22 @@ export class SqliteAuthUserStore implements AuthUserStore {
     return row ? rowToUserRecord(row) : null
   }
 
+  async getByIds(params: {
+    readonly projectId: string
+    readonly ids: readonly string[]
+  }): Promise<readonly UserRecord[]> {
+    const ids = [...new Set(params.ids)]
+    if (ids.length === 0) return []
+
+    const rows = this.db
+      .query(
+        `SELECT * FROM auth_users WHERE project_id = ? AND id IN (${ids.map(() => "?").join(", ")})`
+      )
+      .all(params.projectId, ...ids) as SqliteAuthUserRow[]
+
+    return rows.map(rowToUserRecord)
+  }
+
   async getByEmail(params: {
     readonly projectId: string
     readonly email: string

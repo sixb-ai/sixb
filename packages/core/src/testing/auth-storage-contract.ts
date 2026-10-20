@@ -199,6 +199,32 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
+    test("reads users by id in one call, skipping unknown ids and other projects", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage, { id: "usr_ava", email: "ava@acme.com" })
+        await createUser(storage, { id: "usr_ben", email: "ben@acme.com", status: "suspended" })
+        await createUser(storage, {
+          id: "usr_other",
+          email: "cleo@acme.com",
+          projectId: otherProjectId,
+        })
+
+        const users = await storage.users.getByIds({
+          projectId,
+          ids: ["usr_ben", "usr_missing", "usr_ava", "usr_other", "usr_ava"],
+        })
+
+        const byId = [...users].sort((a, b) => a.id.localeCompare(b.id))
+        expect(byId.map((user) => [user.id, user.email, user.status])).toEqual([
+          ["usr_ava", "ava@acme.com", "active"],
+          ["usr_ben", "ben@acme.com", "suspended"],
+        ])
+        expect(byId[0]?.createdAt).toEqual(at("2026-05-14T10:00:00.000Z"))
+
+        expect(await storage.users.getByIds({ projectId, ids: [] })).toEqual([])
+      })
+    })
+
     test("searches users by display name or email, ignoring case", async () => {
       await withStorage(async (storage) => {
         const people = [

@@ -90,6 +90,23 @@ export class PgAuthUserStore implements AuthUserStore {
     return row ? rowToUserRecord(row) : null
   }
 
+  async getByIds(params: {
+    readonly projectId: string
+    readonly ids: readonly string[]
+  }): Promise<readonly UserRecord[]> {
+    const ids = [...new Set(params.ids)]
+    if (ids.length === 0) return []
+
+    const rows = await this.sql<PgAuthUserRow[]>`
+      SELECT *
+      FROM auth_users
+      WHERE project_id = ${params.projectId}
+        AND id IN ${this.sql(ids)}
+    `
+
+    return rows.map(rowToUserRecord)
+  }
+
   async getByEmail(params: {
     readonly projectId: string
     readonly email: string
