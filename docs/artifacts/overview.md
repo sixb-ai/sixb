@@ -405,10 +405,9 @@ link to that section. A link to the latest version keeps following the artifact 
 are published; a link copied from an earlier version stays on it.
 
 Only the artifact's owner can open it. Server code that runs as the system, outside any user's
-request, reaches every artifact in the project. When someone with `can.observe(agent.threads)`
-[reads another user's conversation](../apps/activity.md#read-a-conversation), they also see,
-read-only, the versions the agent published in it, and only those: a version published from code
-does not show, and the artifact never joins their own list or gets a page of theirs.
+request, reaches every artifact in the project. Someone who
+[reads another user's conversation](../apps/activity.md#read-a-conversation) also sees, read-only,
+the versions the agent published in it.
 
 ## Theme an artifact
 

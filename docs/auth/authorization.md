@@ -55,7 +55,7 @@ Pass a definition, an array of definitions, or a selector such as `every.object(
 | `can.manage(accounting)` | Manage a connector's OAuth accounts. `can.manage(agent.usage)` manages AI limits. |
 | `can.observe(project.logs)` | Read captured logs. `can.observe(agent.usage)` reads AI usage. |
 | `can.observe(project.activity)` | Read the app's [visits and page views](../apps/activity.md). |
-| `can.observe(agent.threads)` | Read other users' [conversations with the agent](../apps/activity.md#read-a-conversation), read-only, with what it published in them. The app opens them from Activity, which also takes `can.observe(project.activity)`. It shows everything the agent showed those users, whatever the reader's own permissions. |
+| `can.observe(agent.threads)` | Read other users' [agent conversations](../apps/activity.md#read-a-conversation), read-only. It shows everything the agent showed them, whatever the reader's own permissions. |
 | `can.share(invoiceShare)` | Issue and revoke links from a [Share definition](shared-access.md). |
 
 `agent`, `can`, `every`, and `project` are exported from `@sixb/core`.
