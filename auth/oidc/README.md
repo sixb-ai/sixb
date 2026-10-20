@@ -59,6 +59,9 @@ A user is identified by the provider's subject (`sub`). Their address matters on
 sign-in: it links an existing user with that email, or claims that address's invitation or
 bootstrap entry. After that, a changed address at the provider signs in to the same user.
 
+The user's name and picture come from the `name` and `picture` claims, and every sign-in updates
+them. A claim the provider stops sending leaves the stored value as it was.
+
 Every sign-in needs an address the provider vouches for. Google, Okta, Auth0, and Keycloak vouch
 with `email_verified`, which the default `trustedEmail` reads. Some providers send it as the string
 `"true"`; that counts too.

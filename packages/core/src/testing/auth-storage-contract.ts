@@ -106,6 +106,43 @@ async function completeOidcSignInForAva(
   })
 }
 
+// Signs Ava in through the "okta" provider with the profile it sends, and returns her user.
+async function signInWithOidcProfile(
+  storage: AuthStorage,
+  input: {
+    readonly attemptId: string
+    readonly completedAt: string
+    readonly displayName?: string
+    readonly avatarUrl?: string
+  }
+): Promise<UserRecord> {
+  await storage.oidcAuthorizationAttempts.create({
+    id: input.attemptId,
+    projectId,
+    strategyId: "okta",
+    stateHash: `${input.attemptId}-state`,
+    nonceHash: "nonce-hash",
+    codeVerifier: "verifier",
+    createdAt: at("2026-05-14T10:00:00.000Z"),
+    expiresAt: at("2026-05-14T11:00:00.000Z"),
+  })
+
+  const result = await storage.completeOidcSignIn({
+    projectId,
+    oidcAuthorizationAttemptId: input.attemptId,
+    stateHash: `${input.attemptId}-state`,
+    completedAt: at(input.completedAt),
+    subject: "00u1",
+    email: "ava@acme.com",
+    displayName: input.displayName,
+    avatarUrl: input.avatarUrl,
+    newUserId: "usr_unused",
+    session: sessionInput(`ses_${input.attemptId}`),
+  })
+
+  return result.user
+}
+
 /**
  * Runs the shared `AuthStorage` contract against any storage implementation.
  *
@@ -1853,6 +1890,108 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
         expect(result.user.id).toBe("usr_existing")
         expect(result.identity).toMatchObject({ subject: "00u1", userId: "usr_existing" })
         await expect(storage.users.getById({ projectId, id: "usr_unused" })).resolves.toBeNull()
+      })
+    })
+
+    // To see these fail, return the stored user unchanged from the storage's OIDC sign-in.
+    test("refreshes the profile the provider sends on every OIDC sign-in", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+
+        // The first sign-in links Ava by her email, the second finds her identity.
+        const linked = await signInWithOidcProfile(storage, {
+          attemptId: "oidc_1",
+          completedAt: "2026-05-14T10:01:00.000Z",
+          displayName: "Ava Lovelace",
+          avatarUrl: "https://images.acme.com/ava-1.png",
+        })
+        expect(linked).toMatchObject({
+          id: "usr_1",
+          displayName: "Ava Lovelace",
+          avatarUrl: "https://images.acme.com/ava-1.png",
+          updatedAt: at("2026-05-14T10:01:00.000Z"),
+        })
+
+        await signInWithOidcProfile(storage, {
+          attemptId: "oidc_2",
+          completedAt: "2026-05-14T10:02:00.000Z",
+          displayName: "Ava King",
+          avatarUrl: "https://images.acme.com/ava-2.png",
+        })
+        await expect(storage.users.getById({ projectId, id: "usr_1" })).resolves.toMatchObject({
+          displayName: "Ava King",
+          avatarUrl: "https://images.acme.com/ava-2.png",
+          updatedAt: at("2026-05-14T10:02:00.000Z"),
+        })
+      })
+    })
+
+    test("keeps the profile fields the provider leaves out", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await signInWithOidcProfile(storage, {
+          attemptId: "oidc_1",
+          completedAt: "2026-05-14T10:01:00.000Z",
+          displayName: "Ava Lovelace",
+          avatarUrl: "https://images.acme.com/ava.png",
+        })
+
+        const user = await signInWithOidcProfile(storage, {
+          attemptId: "oidc_2",
+          completedAt: "2026-05-14T10:02:00.000Z",
+        })
+
+        expect(user).toMatchObject({
+          displayName: "Ava Lovelace",
+          avatarUrl: "https://images.acme.com/ava.png",
+        })
+      })
+    })
+
+    test("leaves updatedAt alone when the provider sends the same profile", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        const profile = {
+          displayName: "Ava Lovelace",
+          avatarUrl: "https://images.acme.com/ava.png",
+        }
+        await signInWithOidcProfile(storage, {
+          attemptId: "oidc_1",
+          completedAt: "2026-05-14T10:01:00.000Z",
+          ...profile,
+        })
+
+        const user = await signInWithOidcProfile(storage, {
+          attemptId: "oidc_2",
+          completedAt: "2026-05-14T10:02:00.000Z",
+          ...profile,
+        })
+
+        expect(user.updatedAt).toEqual(at("2026-05-14T10:01:00.000Z"))
+        await expect(storage.users.getById({ projectId, id: "usr_1" })).resolves.toMatchObject({
+          updatedAt: at("2026-05-14T10:01:00.000Z"),
+        })
+      })
+    })
+
+    test("leaves a suspended user's profile alone when their OIDC sign-in is refused", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage, { status: "suspended" })
+
+        await expectAuthError(
+          signInWithOidcProfile(storage, {
+            attemptId: "oidc_1",
+            completedAt: "2026-05-14T10:01:00.000Z",
+            displayName: "Ava Lovelace",
+            avatarUrl: "https://images.acme.com/ava.png",
+          }),
+          "suspended_user"
+        )
+
+        const user = await storage.users.getById({ projectId, id: "usr_1" })
+        expect(user?.displayName).toBeUndefined()
+        expect(user?.avatarUrl).toBeUndefined()
+        expect(user?.updatedAt).toEqual(at("2026-05-14T10:00:00.000Z"))
       })
     })
 

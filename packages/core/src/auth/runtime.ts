@@ -647,13 +647,19 @@ export class AuthRuntime {
       )
     }
 
-    return strategy.completeOidcSignIn({
+    const result = await strategy.completeOidcSignIn({
       projectId: this.projectId,
       authStorage: this.requireAuthStorage(),
       requestUrl: input.requestUrl,
       requestOrigin: input.requestOrigin,
       session: input.session,
     })
+
+    // The provider may have changed the person's name, picture or directory groups, which their
+    // other sessions hold in the cache.
+    this.sessionCache?.invalidateUser(result.user.id)
+
+    return result
   }
 
   /**

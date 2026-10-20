@@ -32,7 +32,7 @@ import { SqliteAuthUserIdentityStore } from "./identities"
 import { SqliteAuthInvitationStore } from "./invitations"
 import { SqliteAuthMagicLinkStore } from "./magic-links"
 import { SqliteAuthOidcAuthorizationAttemptStore } from "./oidc-attempts"
-import type { SqliteAuthMagicLinkRow, SqliteAuthOidcAttemptRow } from "./rows"
+import type { SqliteAuthMagicLinkRow, SqliteAuthOidcAttemptRow, SqliteAuthUserRow } from "./rows"
 import { rowToIdentityRecord, rowToUserRecord, serializeOptionalRecord } from "./rows"
 import { SqliteAuthServiceAccountGroupMembershipStore } from "./service-account-group-memberships"
 import { SqliteAuthServiceAccountStore } from "./service-accounts"
@@ -297,7 +297,7 @@ export class SqliteAuthStorage implements AuthStorage {
               email,
               now: completedAt,
             })
-        let userRow = identity
+        const userRow = identity
           ? getUserRowById(this.db, { projectId, id: identity.user_id })
           : getUserRowByEmail(this.db, { projectId, email })
         const shouldCreateUser = !identity && !userRow
@@ -348,8 +348,9 @@ export class SqliteAuthStorage implements AuthStorage {
 
         this.consumeOidcAttempt(input, completedAt, projectId)
 
+        let user: UserRecord
         if (!userRow) {
-          const user = this.insertUser({
+          user = this.insertUser({
             id: newUserId ?? assertNonEmpty(input.newUserId, "User id"),
             projectId,
             email,
@@ -357,19 +358,10 @@ export class SqliteAuthStorage implements AuthStorage {
             avatarUrl: input.avatarUrl,
             createdAt: completedAt,
           })
-          userRow = {
-            project_id: user.projectId,
-            id: user.id,
-            email: user.email,
-            display_name: user.displayName ?? null,
-            avatar_url: user.avatarUrl ?? null,
-            status: user.status,
-            created_at: toIso(user.createdAt),
-            updated_at: toIso(user.updatedAt),
-          }
+        } else {
+          user = this.refreshProviderProfile(userRow, input, completedAt)
         }
 
-        const user = rowToUserRecord(userRow)
         const invitation = this.acceptInvitationAndApplyGroups({
           activeInvitation,
           completedAt,
@@ -524,6 +516,40 @@ export class SqliteAuthStorage implements AuthStorage {
         `[Sixb] OIDC authorization attempt '${id}' is expired for project '${projectId}'.`
       )
     }
+  }
+
+  // The identity provider owns the name and picture it sends: every sign-in overwrites them, and
+  // one it leaves out keeps the stored value.
+  private refreshProviderProfile(
+    row: SqliteAuthUserRow,
+    input: CompleteOidcSignInInput,
+    updatedAt: Date
+  ): UserRecord {
+    const displayName = input.displayName ?? row.display_name
+    const avatarUrl = input.avatarUrl ?? row.avatar_url
+    if (displayName === row.display_name && avatarUrl === row.avatar_url) {
+      return rowToUserRecord(row)
+    }
+
+    this.db
+      .query(
+        `
+        UPDATE auth_users
+        SET display_name = ?,
+            avatar_url = ?,
+            updated_at = ?
+        WHERE project_id = ?
+          AND id = ?
+      `
+      )
+      .run(displayName, avatarUrl, toIso(updatedAt), row.project_id, row.id)
+
+    return rowToUserRecord({
+      ...row,
+      display_name: displayName,
+      avatar_url: avatarUrl,
+      updated_at: toIso(updatedAt),
+    })
   }
 
   private insertUser(input: {
