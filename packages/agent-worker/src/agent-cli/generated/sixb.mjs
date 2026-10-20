@@ -454,6 +454,7 @@ Predicates use op, not kind:
   {"op":"in","propertyId":"status","values":["open","blocked"]}
   {"op":"exists","propertyId":"dueDate","value":true}
   {"op":"contains","propertyId":"tags","value":"urgent"}
+  {"op":"eq","propertyId":"assignee","value":{"type":"currentUser"}}  the caller, on a user reference: neq, in, contains too
 
 Every field shown is required except includeSubtypes, fields, pageToken, properties, a sort
 direction, an expansion's limit, and users. Sort by relevance after text or vector with
@@ -553,6 +554,7 @@ var QUERY_EXAMPLES = {
   not: `{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"not","item":{"op":"eq","propertyId":"status","value":"churned"}}},"limit":${CLI_LIMITS.list.default}}`,
   in: `{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"in","propertyId":"status","values":["active","trial"]}},"limit":${CLI_LIMITS.list.default}}`,
   exists: `{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"exists","propertyId":"accountManager","value":false}},"limit":${CLI_LIMITS.list.default}}`,
+  mine: `{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Task"},"predicate":{"op":"eq","propertyId":"assignee","value":{"type":"currentUser"}}},"limit":${CLI_LIMITS.list.default}}`,
   project: `{"kind":"project","input":{"kind":"limit","input":{"kind":"start","objectTypeId":"Customer"},"limit":${CLI_LIMITS.list.default}},"properties":["name","status"]}`,
   incoming: '{"kind":"traverse","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment"}',
   expand: `{"kind":"expand","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"expansions":[{"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment","limit":${CLI_LIMITS.list.default}}]}`,

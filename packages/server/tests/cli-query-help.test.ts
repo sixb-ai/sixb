@@ -81,11 +81,16 @@ describe("sixb objects query help", () => {
       ].sort()
     )
     expect([...ops].sort()).toEqual(["and", "contains", "eq", "exists", "in", "not"])
+    expect(shapes).toContainEqual({
+      op: "eq",
+      propertyId: "assignee",
+      value: { type: "currentUser" },
+    })
   })
 
   test("ships examples the API accepts, including each composite predicate", async () => {
     const names = (await cli("objects", "query", "--example", "list")).trim().split(" ")
-    expect(names).toEqual(expect.arrayContaining(["and", "not", "in", "exists", "project"]))
+    expect(names).toEqual(expect.arrayContaining(["and", "not", "in", "exists", "mine", "project"]))
 
     for (const name of names) {
       const example: unknown = JSON.parse(await cli("objects", "query", "--example", name))
