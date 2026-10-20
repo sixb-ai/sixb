@@ -124,32 +124,31 @@ export class SqliteAuthUserStore implements AuthUserStore {
       )
     }
 
+    // One statement, so an omitted field keeps whatever a concurrent update wrote to it.
     const updatedAt = dateOrNow(input.updatedAt)
-    this.db
+    const row = this.db
       .query(
         `
         UPDATE auth_users
-        SET display_name = ?,
-            avatar_url = ?,
+        SET display_name = CASE WHEN ? THEN ? ELSE display_name END,
+            avatar_url = CASE WHEN ? THEN ? ELSE avatar_url END,
             updated_at = ?
         WHERE project_id = ?
           AND id = ?
+        RETURNING *
       `
       )
-      .run(
+      .get(
+        input.displayName === undefined ? 0 : 1,
         input.displayName ?? null,
+        input.avatarUrl === undefined ? 0 : 1,
         input.avatarUrl ?? null,
         toIso(updatedAt),
         input.projectId,
         input.id
-      )
+      ) as SqliteAuthUserRow
 
-    return rowToUserRecord({
-      ...existing,
-      display_name: input.displayName ?? null,
-      avatar_url: input.avatarUrl ?? null,
-      updated_at: toIso(updatedAt),
-    })
+    return rowToUserRecord(row)
   }
 
   async updateStatus(input: UpdateAuthUserStatusInput): Promise<UserRecord> {

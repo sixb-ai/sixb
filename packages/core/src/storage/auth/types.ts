@@ -190,11 +190,12 @@ export interface CreateAuthUserInput {
   readonly updatedAt?: Date
 }
 
+/** Omitted fields stay unchanged, and `null` clears one. */
 export interface UpdateAuthUserProfileInput {
   readonly projectId: string
   readonly id: string
-  readonly displayName?: string
-  readonly avatarUrl?: string
+  readonly displayName?: string | null
+  readonly avatarUrl?: string | null
   readonly updatedAt?: Date
 }
 
@@ -500,6 +501,7 @@ export interface AuthUserStore {
     readonly projectId: string
     readonly email: string
   }): Promise<UserRecord | null>
+  /** Update only the provided fields; omitted fields must remain unchanged atomically. */
   updateProfile(input: UpdateAuthUserProfileInput): Promise<UserRecord>
   updateStatus(input: UpdateAuthUserStatusInput): Promise<UserRecord>
   list(input: ListAuthUsersInput): Promise<ListAuthUsersResult>
