@@ -155,6 +155,12 @@ export interface ObjectQueryExpand {
   kind: "expand"
   input: ObjectQuery
   expansions: readonly ObjectExpansion[]
+  /**
+   * `ref.user()` properties whose members' profiles attach under each row's `users`, keyed by
+   * property id. Profiles come from the member directory, not object storage: the core executor
+   * removes this field before planning, so storage providers never receive it.
+   */
+  users?: readonly string[]
 }
 
 export interface ObjectExpansion {
@@ -169,6 +175,8 @@ export interface ObjectExpansion {
   orderBy?: readonly ObjectQuerySortField[]
   /** Nested expansions, hydrated from the target objects of this expansion. */
   expand?: readonly ObjectExpansion[]
+  /** `ref.user()` properties of the target objects whose profiles attach under their `users`. */
+  users?: readonly string[]
   /**
    * Resolved link cardinality, driving the attached value shape: `"one"` yields a
    * single object (or `null`), `"many"` yields an array.

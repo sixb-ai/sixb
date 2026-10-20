@@ -15,6 +15,7 @@ import {
   isTextSchema,
   queryScalarKindForSchema,
 } from "../../ontology/query-capabilities"
+import { isUserRefPropertySchema } from "../../ontology/user-ref"
 import { validatePropertyValue, validateSchemaValue } from "../../ontology/validation"
 import { MAX_VECTOR_K, normalizeVector, vectorConfiguration } from "../vectors/profile"
 import { hasVectorProfile, isVectorProfileQuery } from "../vectors/query"
@@ -516,6 +517,11 @@ function dispatchQueryNode(
     }
     case "expand": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
+
+      // Profiles are read for the rows a query returns. On a set operand they would have no row to
+      // attach to, so only the outermost expand, where normalization puts it, may name them.
+      const usersAllowed = path === "$"
+
       // expand is output-shaping: it attaches links without changing the matched
       // set, so the result type is the input's result type.
       const expansions = validateExpansions(
@@ -523,8 +529,12 @@ function dispatchQueryNode(
         input.result,
         input.admissionState,
         `${path}.expansions`,
-        ctx
+        ctx,
+        usersAllowed
       )
+      validateUserExpansions(query.users, input.result, `${path}.users`, ctx, usersAllowed)
+      validateUserExpansionsProjected(query.users, input.query, `${path}.users`, ctx)
+
       return {
         result: input.result,
         query: { ...query, input: input.query, expansions },
@@ -1221,10 +1231,11 @@ function validateExpansions(
   shape: ObjectQueryResultShape,
   admissionState: ObjectQueryAdmissionState,
   path: string,
-  ctx: QueryValidationContext
+  ctx: QueryValidationContext,
+  usersAllowed: boolean
 ): ObjectExpansion[] {
   return expansions.map((expansion, index) =>
-    validateExpansion(expansion, shape, admissionState, `${path}[${index}]`, ctx)
+    validateExpansion(expansion, shape, admissionState, `${path}[${index}]`, ctx, usersAllowed)
   )
 }
 
@@ -1233,7 +1244,8 @@ function validateExpansion(
   shape: ObjectQueryResultShape,
   admissionState: ObjectQueryAdmissionState,
   path: string,
-  ctx: QueryValidationContext
+  ctx: QueryValidationContext,
+  usersAllowed: boolean
 ): ObjectExpansion {
   if (!expansion.linkId) {
     addIssue(ctx, path, "missing_expand_link", "expand.linkId is required")
@@ -1289,10 +1301,147 @@ function validateExpansion(
       )
     : undefined
   const expand = expansion.expand
-    ? validateExpansions(expansion.expand, targetShape, targetAdmissionState, `${path}.expand`, ctx)
+    ? validateExpansions(
+        expansion.expand,
+        targetShape,
+        targetAdmissionState,
+        `${path}.expand`,
+        ctx,
+        usersAllowed
+      )
     : undefined
+  validateUserExpansions(expansion.users, targetShape, `${path}.users`, ctx, usersAllowed)
 
   return { ...expansion, orderBy, expand }
+}
+
+/**
+ * Each expanded user property must be a `ref.user()` property, or an array of them, on at least
+ * one type of the shape, like an expanded link. Telemetry cannot hold user references.
+ *
+ * No admission sees it: a profile is never returned to a delegated reader, and a marked value the
+ * reader cannot read is removed before its profile would be looked up.
+ *
+ * `usersAllowed` is false under any expand but the outermost one, at every depth.
+ */
+function validateUserExpansions(
+  users: readonly string[] | undefined,
+  shape: ObjectQueryResultShape,
+  path: string,
+  ctx: QueryValidationContext,
+  usersAllowed: boolean
+): void {
+  if (users === undefined) return
+
+  if (!Array.isArray(users)) {
+    addIssue(ctx, path, "invalid_user_expansion", "expand.users must be an array of property ids")
+    return
+  }
+
+  if (!usersAllowed && users.length > 0) {
+    addIssue(
+      ctx,
+      path,
+      "invalid_user_expansion",
+      "Only the outermost expand can expand user properties; a set operand cannot."
+    )
+    return
+  }
+
+  users.forEach((propertyId, index) => {
+    const propertyPath = `${path}[${index}]`
+
+    if (typeof propertyId !== "string" || propertyId.length === 0) {
+      addIssue(ctx, propertyPath, "invalid_user_expansion", "expand.users ids must not be empty")
+      return
+    }
+
+    const declared = getPropertiesForResult(propertyId, shape, propertyPath, ctx, {
+      reportMissing: false,
+    })
+    if (declared.length === 0) {
+      addIssue(
+        ctx,
+        propertyPath,
+        "unknown_property",
+        `Expansion references property '${propertyId}' not present on result type ${shape.objectTypeIds.join(
+          " | "
+        )} (an expand abandoned by a later traverse?)`
+      )
+      return
+    }
+
+    for (const { objectType, property } of declared) {
+      if (isUserRefPropertySchema(property.schema)) continue
+      addIssue(
+        ctx,
+        propertyPath,
+        "invalid_user_expansion",
+        `Property '${propertyId}' on '${objectType.id}' is not a ref.user() property; expand() takes a link or a user property.`
+      )
+    }
+  })
+}
+
+/**
+ * A projection that leaves out an expanded user property would make its profile read as "no
+ * user". Refuse it instead.
+ */
+function validateUserExpansionsProjected(
+  users: readonly string[] | undefined,
+  input: ObjectQuery,
+  path: string,
+  ctx: QueryValidationContext
+): void {
+  if (!Array.isArray(users)) return
+
+  const projected = projectedProperties(input)
+  if (projected === undefined) return
+
+  users.forEach((propertyId, index) => {
+    if (projected.includes(propertyId)) return
+    addIssue(
+      ctx,
+      `${path}[${index}]`,
+      "invalid_user_expansion",
+      `Expanded user property '${propertyId}' must be projected too.`
+    )
+  })
+}
+
+/**
+ * The properties a row keeps, from the projections below the expand on the same result type, or
+ * `undefined` when every property is kept. A set keeps only what each operand keeps.
+ */
+function projectedProperties(query: ObjectQuery): readonly string[] | undefined {
+  switch (query.kind) {
+    case "project":
+      return query.properties
+    case "set":
+      return keptByEveryOperand(query.inputs.map(projectedProperties))
+    case "filter":
+    case "text":
+    case "vector":
+    case "rerank":
+    case "sort":
+    case "limit":
+    case "page":
+      return projectedProperties(query.input)
+    default:
+      return undefined
+  }
+}
+
+// An operand without a projection keeps every property, so it narrows nothing.
+function keptByEveryOperand(
+  projections: readonly (readonly string[] | undefined)[]
+): readonly string[] | undefined {
+  const projected = projections.filter((properties) => properties !== undefined)
+  if (projected.length === 0) return undefined
+
+  return projected.reduce((kept, properties) =>
+    kept.filter((propertyId) => properties.includes(propertyId))
+  )
 }
 
 function resolveOutgoingExpansionTargets(

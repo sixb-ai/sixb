@@ -91,7 +91,7 @@ export function createUsersRuntime(runtime: SixbRuntimeContext): UsersRuntime {
 }
 
 /** Only the fields the directory shows: no project id, no timestamps. */
-function toUserProfile(record: UserRecord): UserProfile {
+export function toUserProfile(record: UserRecord): UserProfile {
   return {
     id: record.id,
     email: record.email,

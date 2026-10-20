@@ -68,6 +68,8 @@ const assignee = await sixb.users.get(userRef("usr_1"))
 
 Over HTTP, `GET /api/users?search=ava&status=all` takes the same options as query parameters, and `GET /api/users/:userId` returns one member or `404`. Both accept [access tokens](#service-accounts-and-tokens). In React, use [`useUsers`](../client/overview.md#list-members). From a terminal or the agent's sandbox, use `sixb users list`, `sixb users search <text>`, and `sixb users get <user-id>`.
 
+An object query can include the profiles of the members a property names, with [`expand(Task.p.assignee)`](../objects/querying.md#include-the-members-a-property-names). It reads the same directory and needs the same grant.
+
 Trusted code, such as workflows and actions, can always read the directory. An action or a workflow can therefore return directory data to a caller who lacks the grant, so return only what that caller should see. The agent and its tools read it with the permissions they run with: in a conversation, those of the person who asked. Shared links never read it.
 
 ## Service accounts and tokens

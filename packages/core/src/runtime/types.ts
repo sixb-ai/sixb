@@ -45,6 +45,7 @@ import type {
 } from "../ontology/tokens"
 import type { Queues } from "../queues"
 import type { ActionRunRecord, ObjectLinkRow, Redactions, Storage } from "../storage"
+import type { UserProfile } from "../users"
 // ── Shared runtime context ──────────────────────────────────
 
 /**
@@ -628,6 +629,32 @@ type WithExpansion<
     : TRow
   : TRow
 
+/** A `ref.user()` property, or an array of them: the properties `.expand()` resolves to profiles. */
+type UserPropertyToken<TObjectTypeId extends string> = PropertyToken<
+  TObjectTypeId,
+  string,
+  Property & {
+    readonly schema: "userRef" | { readonly type: "array"; readonly items: "userRef" }
+  }
+>
+
+/** One profile, or `null` when empty or no member has the id; the members found for an array. */
+type UserExpansionValue<TToken extends UserPropertyToken<string>> =
+  TToken["property"]["schema"] extends "userRef" ? UserProfile | null : UserProfile[]
+
+/**
+ * Add the `users` entry of one expanded user property to `TRow`, distributing over a polymorphic
+ * row like {@link WithExpansion}. The entry is optional: it is absent when the reader may not view
+ * the member directory or cannot read the property.
+ */
+type WithUserExpansion<TRow, TToken extends UserPropertyToken<string>> = TRow extends {
+  objectTypeId: infer TObjectTypeId
+}
+  ? TToken["objectTypeId"] extends TObjectTypeId
+    ? TRow & { users: { [K in TToken["id"]]?: UserExpansionValue<TToken> } }
+    : TRow
+  : TRow
+
 /**
  * The nested-expansion callback for a link token's resolved target type. `TChildRow`
  * is inferred from the returned builder, recovering the nested `.links` shape.
@@ -652,6 +679,10 @@ export interface ObjectExpandBuilder<
   in out TObjectType extends ObjectTypeWithPropertyTokens,
   out TRow = ExpandedTargetRow<TObjectType>,
 > {
+  /** Attach the profiles of the members a `ref.user()` property names, under `users`. */
+  expand<TToken extends UserPropertyToken<TObjectType["id"]>>(
+    property: TToken
+  ): ObjectExpandBuilder<TObjectType, WithUserExpansion<TRow, TToken>>
   expand<
     TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>,
     TChildRow = ExpandedTargetRow<ObjectTypeForLinkTarget<TObjectType, TLinkToken>>,
@@ -727,7 +758,15 @@ export interface ObjectQueryBuilder<
    * optional `linkProperties` and its own nested `.links`). Targets are precise
    * when they are registered or linked directly, and otherwise degrade to the
    * loose base.
+   *
+   * Given a `ref.user()` property, or an array of them, it attaches the members' profiles
+   * under `users` instead (`row.users.assignee`): a profile or `null` for one reference, the
+   * members found for an array. The entry is absent unless the reader has
+   * `can.view(project.users)`, and for a value the reader cannot read.
    */
+  expand<TToken extends UserPropertyToken<TObjectType["id"]>>(
+    property: TToken
+  ): ObjectQueryBuilder<TObjectType, WithUserExpansion<TRow, TToken>>
   expand<
     TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>,
     TChildRow = ExpandedTargetRow<ObjectTypeForLinkTarget<TObjectType, TLinkToken>>,

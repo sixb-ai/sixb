@@ -1,4 +1,5 @@
 import { assertNever } from "../assert-never"
+import { isRuntimeAllowed } from "../authorization"
 import type { EmbeddingModelCatalog, RerankingModelCatalog } from "../models/catalog"
 import type { AuthorizedOntologyView } from "../objects/authorized-ontology-view"
 import {
@@ -30,6 +31,8 @@ import { validateObjectFacetRequests } from "../objects/query/executor"
 import type { ObjectQuery } from "../objects/query/ir"
 import { assertLinkQueryReadable } from "../objects/query/link-query-clearance"
 import { preflightObjectQueryLinks } from "../objects/query/links"
+import { normalizeObjectQuery } from "../objects/query/normalize"
+import { userExpansionPlan } from "../objects/query/user-expansions"
 import {
   type AdmittedObjectQuery,
   composeObjectQueryAdmissions,
@@ -45,6 +48,7 @@ import {
 import type { OntologyRegistry } from "../ontology"
 import type { AppliedMarkings } from "../security/applied-markings"
 import type {
+  AuthUserStore,
   LinkBatchKey,
   ObjectFacetRequest,
   ObjectLinkRow,
@@ -57,6 +61,7 @@ import { captureExecutionScope, resolveExecutionScopeAuthorization } from "./aut
 import type { Clearance, EventSources } from "./object-reader-clearance"
 import { ObjectReaderOntology } from "./object-reader-ontology"
 import { ObjectReaderSecurity, type ResolvedExecutionAuthority } from "./object-reader-security"
+import { attachUserProfiles } from "./object-reader-users"
 import type { ExecutionScope } from "./types"
 
 type GetObjectInput = Omit<Parameters<ObjectReadStorage["getByPrimaryId"]>[0], "projectId">
@@ -85,13 +90,15 @@ const readerConstructionKey = Object.freeze({})
  *
  * Its state is grouped as a project is: the ontology it resolves against, the security of the
  * authority (its delegation and clearance included), the model catalogs search uses, and the
- * storage it reads. Each group decides what belongs to it; the reader composes them.
+ * storage it reads, with the member directory that expanded user properties resolve against.
+ * Each group decides what belongs to it; the reader composes them.
  */
 class AuthorizedObjectReaderImpl {
   readonly #ontology: ObjectReaderOntology
   readonly #security: ObjectReaderSecurity
   readonly #models: ObjectReaderModels
   readonly #storage: ObjectReadStorage
+  readonly #users: AuthUserStore | undefined
 
   constructor(
     key: typeof readerConstructionKey,
@@ -100,6 +107,7 @@ class AuthorizedObjectReaderImpl {
       readonly security: ObjectReaderSecurity
       readonly models: ObjectReaderModels
       readonly storage: ObjectReadStorage
+      readonly users?: AuthUserStore
     }
   ) {
     if (key !== readerConstructionKey) {
@@ -109,6 +117,7 @@ class AuthorizedObjectReaderImpl {
     this.#security = input.security
     this.#models = input.models
     this.#storage = input.storage
+    this.#users = input.users
   }
 
   static assertBound(reader: AuthorizedObjectReaderImpl, scope: ExecutionScope): void {
@@ -337,11 +346,14 @@ class AuthorizedObjectReaderImpl {
       },
       this.#queryExecutorOptions(clearance)
     )
-    return this.#detachRows(
+    const detached = this.#detachRows(
       { ...result, objects: result.objects.map((row) => this.#omitHidden(row, clearance)) },
       (detached) => detached.objects,
       clearance
     )
+
+    await this.#attachUsers(detached.objects, query)
+    return detached
   }
 
   async queryLinks(
@@ -560,6 +572,24 @@ class AuthorizedObjectReaderImpl {
     return selected ?? admission
   }
 
+  /**
+   * Resolve the user properties the query expands on rows already detached and redacted. Only an
+   * authority that may view the directory reads profiles; a delegated one never does.
+   */
+  async #attachUsers(rows: readonly ObjectRow[], query: ObjectQuery): Promise<void> {
+    const plan = userExpansionPlan(normalizeObjectQuery(query))
+    if (!plan) return
+
+    await attachUserProfiles({
+      rows,
+      plan,
+      ontology: this.#ontology.registry,
+      projectId: this.#security.runtime.projectId,
+      canViewUsers: isRuntimeAllowed(this.#security.runtime, { kind: "users.view" }),
+      users: this.#users,
+    })
+  }
+
   #omitHidden<TRow extends ObjectRow>(row: TRow, clearance: Clearance): TRow {
     return clearance ? omitHiddenProperties(row, clearance) : row
   }
@@ -622,6 +652,8 @@ export function createAuthorizedObjectReader(input: {
   readonly objectStorage: ObjectStorage
   /** Markings of the dataset versions projections applied; the code's markings alone without. */
   readonly appliedMarkings?: AppliedMarkings
+  /** The member directory expanded user properties resolve against. */
+  readonly users?: AuthUserStore
 }): AuthorizedObjectReader {
   const scope = captureExecutionScope(input.scope)
   const projectId = scope.execution.projectId
@@ -641,6 +673,7 @@ export function createAuthorizedObjectReader(input: {
       ...(input.rerankingModels === undefined ? {} : { reranking: input.rerankingModels }),
     }),
     storage,
+    ...(input.users === undefined ? {} : { users: input.users }),
   })
   Object.freeze(reader)
   return reader

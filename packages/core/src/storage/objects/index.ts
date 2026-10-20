@@ -45,6 +45,7 @@ export type {
   ObjectReadStorage,
   ObjectRow,
   ObjectRowLinks,
+  ObjectRowUsers,
   ObjectStorage,
   QueryObjectLinksInput,
   QueryObjectLinksResult,

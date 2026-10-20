@@ -36,6 +36,15 @@ export function isUserRef(value: unknown): value is UserRef {
 }
 
 /**
+ * A `ref.user()` schema, or an array of them: the property schemas whose members a query can
+ * expand into profiles.
+ */
+export function isUserRefPropertySchema(schema: Schema): boolean {
+  if (schema === "userRef") return true
+  return typeof schema === "object" && schema.type === "array" && schema.items === "userRef"
+}
+
+/**
  * Collect the user ids a value holds at `userRef` positions of its schema, however deeply nested.
  *
  * Positions whose value does not match the schema are skipped: shape validation reports them.
