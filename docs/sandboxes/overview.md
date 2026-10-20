@@ -149,6 +149,8 @@ const thread = await sixb.agent.threads.create({
 Use `sandbox: {}` for a static recipe; omit `sandbox` for a fresh environment per run.
 Parameters are immutable, validated against the factory schema, and must not contain secrets.
 Thread responses expose them as `sandboxParams`; `sandboxState` describes the current sandbox.
+A [continued conversation](../models/overview.md#continue-a-conversation) keeps the parameters
+and starts with a fresh sandbox.
 
 The first run prepares the environment; subsequent runs resume files and uncommitted edits.
 Sixb saves before finalization. If the provider confirms saved state is lost, Sixb creates a fresh

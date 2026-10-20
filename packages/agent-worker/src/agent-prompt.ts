@@ -110,7 +110,7 @@ export function renderAgentSystemPrompt(input: RenderAgentSystemPromptInput): st
     promptSection(
       "sandbox_state",
       input.sandboxResetAt
-        ? `The sandbox was recreated at ${input.sandboxResetAt}. Local files and uncommitted edits from before that time were not recovered. Conversation history, attachments, and published artifacts remain available. Inspect the current environment before relying on earlier filesystem results, and recover or redo missing work within the user's authorization.`
+        ? `The sandbox was reset at ${input.sandboxResetAt}. Local files and uncommitted edits from before that time are not in it, including the paths earlier tool calls used. Conversation history and attachments remain available: read attachments from the current $SIXB_ATTACHMENTS list. Inspect the current environment before relying on earlier filesystem results, and recover or redo missing work within the user's authorization.`
         : undefined
     ),
     promptSection("agent_instructions", input.instructions),

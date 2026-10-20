@@ -1472,6 +1472,113 @@ describe("agent routes", () => {
     expect(ownerFileContent.status).toBe(200)
     expect(await ownerFileContent.text()).toBe("owner attachment")
   })
+
+  test("forks a readable thread into the caller's own, files and diagnostics included", async () => {
+    // Removal proof: keep only the thread's own runs in readThreadMessages' diagnostics lookup;
+    // the copied answer loses its step-limit annotation.
+    const { app, storage, sixb } = createApp({ auth: true })
+    const owner = await seedSession(storage, "usr_owner")
+    const other = await seedSession(storage, "usr_other")
+
+    const attachment = await sixb.blobStorage.put({
+      body: new TextEncoder().encode("pipeline export"),
+      fileName: "pipeline.csv",
+      mediaType: "text/csv",
+    })
+    await storage.agents.threads.create({
+      id: "deals",
+      projectId: sixb.id,
+      ownerPrincipal: { type: "user", id: "usr_owner" },
+      title: "Slipped deals",
+    })
+    await storage.agents.messages.append({
+      id: "question",
+      projectId: sixb.id,
+      threadId: "deals",
+      runId: null,
+      role: "user",
+      parts: [
+        { type: "text", text: "Which deals slipped?" },
+        { type: "file", fileRef: attachment },
+      ],
+    })
+
+    const executionToken = createAgentRunExecutionToken()
+    await createStartedRun(storage, {
+      id: "run-answered",
+      projectId: sixb.id,
+      threadId: "deals",
+      triggerMessageId: "question",
+      execution: testExecution(executionToken),
+    })
+    await storage.agents.messages.append({
+      id: "answer",
+      projectId: sixb.id,
+      threadId: "deals",
+      runId: "run-answered",
+      role: "assistant",
+      parts: [{ type: "text", text: "Acme and Globex." }],
+    })
+    const diagnostics = [
+      {
+        code: "step_limit_reached" as const,
+        severity: "warning" as const,
+        scope: "run" as const,
+        message: "The Agent reached its 100-step limit before producing a final answer.",
+      },
+    ]
+    await storage.agents.runs.finish({
+      id: "run-answered",
+      projectId: sixb.id,
+      executionToken,
+      status: "succeeded",
+      diagnostics,
+    })
+
+    // A turn still running stays behind.
+    const running = await app.fetch(
+      jsonRequest("/api/agent-threads/deals/messages", "POST", { text: "Why?" }, owner.csrfHeaders)
+    )
+    expect(running.status).toBe(202)
+
+    const hidden = await app.fetch(
+      jsonRequest("/api/agent-threads/deals/fork", "POST", {}, other.csrfHeaders)
+    )
+    expect(hidden.status).toBe(404)
+
+    const response = await app.fetch(
+      jsonRequest("/api/agent-threads/deals/fork", "POST", {}, owner.csrfHeaders)
+    )
+    expect(response.status).toBe(201)
+    const { thread } = (await response.json()) as { thread: { id: string } }
+    expect(thread).toMatchObject({
+      ownerPrincipal: { type: "user", id: "usr_owner" },
+      title: "Slipped deals",
+      activeRunId: null,
+      messageCount: 2,
+    })
+
+    const messages = await app.fetch(
+      new Request(`http://localhost/api/agent-threads/${thread.id}/messages`, {
+        headers: owner.headers,
+      })
+    )
+    const { messages: copied } = (await messages.json()) as {
+      messages: { id: string; runId: string | null; annotations: unknown[] }[]
+    }
+    expect(copied.map((message) => message.runId)).toEqual([null, "run-answered"])
+    expect(copied[0]?.id).not.toBe("question")
+    expect(copied[1]?.annotations).toEqual(diagnostics)
+
+    const file = await app.fetch(
+      new Request(
+        `http://localhost/api/agent-threads/${thread.id}/messages/${copied[0]?.id}/files/content?path=${encodeURIComponent("/parts/1/fileRef")}`,
+        { headers: owner.headers }
+      )
+    )
+    expect(file.status).toBe(200)
+    expect(await file.text()).toBe("pipeline export")
+  })
 })
 
 describe("a thread's participants over HTTP", () => {
@@ -1641,5 +1748,50 @@ describe("a thread's participants over HTTP", () => {
     expect(left.status).toBe(204)
     expect(await left.text()).toBe("")
     expect((await get(path, bob)).status).toBe(404)
+  })
+
+  test("a participant forks the thread into their own; once removed, they get 404", async () => {
+    const { app, storage, sixb } = createApp({ auth: true })
+    const alice = await seedSession(storage, "usr_alice")
+    const bob = await seedSession(storage, "usr_bob")
+    await storage.auth.users.updateProfile({
+      projectId: sixb.id,
+      id: "usr_bob",
+      displayName: "Bob Durand",
+    })
+
+    const post = (path: string, body: unknown, as: { csrfHeaders: Record<string, string> }) =>
+      app.fetch(jsonRequest(path, "POST", body, as.csrfHeaders))
+
+    const created = await post("/api/agent-threads", { title: "Late deals" }, alice)
+    const { thread } = (await created.json()) as { thread: { id: string } }
+    const path = `/api/agent-threads/${thread.id}`
+    expect((await post(`${path}/messages`, { text: "Which slipped?" }, alice)).status).toBe(202)
+    expect(
+      (await post(`${path}/participants`, { users: [{ type: "user", id: "usr_bob" }] }, alice))
+        .status
+    ).toBe(200)
+
+    const forked = await post(`${path}/fork`, {}, bob)
+    expect(forked.status).toBe(201)
+    expect(await forked.json()).toMatchObject({
+      thread: {
+        ownerPrincipal: { type: "user", id: "usr_bob" },
+        owner: { type: "user", id: "usr_bob", displayName: "Bob Durand" },
+        title: "Late deals",
+        participants: [],
+        // Alice's question is still being answered: it stays behind.
+        messageCount: 0,
+      },
+    })
+
+    const removed = await app.fetch(
+      new Request(`http://localhost${path}/participants/usr_bob`, {
+        method: "DELETE",
+        headers: alice.csrfHeaders,
+      })
+    )
+    expect(removed.status).toBe(204)
+    expect((await post(`${path}/fork`, {}, bob)).status).toBe(404)
   })
 })

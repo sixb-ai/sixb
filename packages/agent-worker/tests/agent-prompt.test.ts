@@ -20,13 +20,13 @@ describe("agent system prompt", () => {
   test("marks a durable filesystem reset without discarding conversation context", () => {
     const sandboxResetAt = "2026-01-01T00:00:00.000Z"
     const prompt = renderAgentSystemPrompt({ mode: "conversation", skills: [], sandboxResetAt })
-    expect(prompt).toContain(`<sandbox_state>\nThe sandbox was recreated at ${sandboxResetAt}`)
+    expect(prompt).toContain(`<sandbox_state>\nThe sandbox was reset at ${sandboxResetAt}`)
     expect(prompt).toContain(
-      "Local files and uncommitted edits from before that time were not recovered"
+      "Local files and uncommitted edits from before that time are not in it, including the paths earlier tool calls used"
     )
-    expect(prompt).toContain(
-      "Conversation history, attachments, and published artifacts remain available"
-    )
+    // A fork resets its sandbox too: its attachments live at new paths, and it copies no artifacts.
+    expect(prompt).toContain("read attachments from the current $SIXB_ATTACHMENTS list")
+    expect(prompt).not.toContain("published artifacts")
     expect(prompt).toContain("within the user's authorization")
     expect(renderAgentSystemPrompt({ mode: "conversation", skills: [] })).not.toContain(
       "<sandbox_state>"

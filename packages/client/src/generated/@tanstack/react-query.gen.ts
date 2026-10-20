@@ -40,6 +40,7 @@ import {
   exchangeSharedAccess,
   existsObjects,
   facetObjects,
+  forkAgentThread,
   getAction,
   getActionRun,
   getActionRunFileContent,
@@ -263,6 +264,9 @@ import type {
   FacetObjectsData,
   FacetObjectsError,
   FacetObjectsResponse,
+  ForkAgentThreadData,
+  ForkAgentThreadError,
+  ForkAgentThreadResponse,
   GetActionData,
   GetActionError,
   GetActionResponse,
@@ -4276,6 +4280,33 @@ export const removeAgentThreadParticipantMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await removeAgentThreadParticipant({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Continue an agent thread in a new one the caller owns
+ */
+export const forkAgentThreadMutation = (
+  options?: Partial<Options<ForkAgentThreadData>>
+): UseMutationOptions<
+  ForkAgentThreadResponse,
+  ForkAgentThreadError,
+  Options<ForkAgentThreadData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    ForkAgentThreadResponse,
+    ForkAgentThreadError,
+    Options<ForkAgentThreadData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await forkAgentThread({
         ...options,
         ...fnOptions,
         throwOnError: true,

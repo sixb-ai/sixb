@@ -162,6 +162,24 @@ Over HTTP: `POST /api/agent-threads/:threadId/participants` with `{ "users": [..
 `DELETE /api/agent-threads/:threadId/participants/:userId`, and
 `GET /api/agent-threads?sharedWithMe=true`.
 
+## Continue a conversation
+
+Copy a conversation of yours, or one [shared with you](#share-a-conversation), into a new one
+that belongs to you alone, with no participants:
+
+```ts
+const mine = await sixb.agent.threads.fork(thread.id)
+```
+
+- The copy holds the finished messages and their files. A turn still running is not copied.
+- In the copy, the agent works with the permissions of its owner.
+- The artifacts the agent published in the original stay there.
+- The copy starts with a new [sandbox](../sandboxes/overview.md#keep-files-across-conversation-runs).
+  Files from the original's sandbox are not in it, and the agent is told so.
+
+Over HTTP, call `POST /api/agent-threads/:threadId/fork`, or `forkAgentThread` from the
+[generated client](../client/overview.md).
+
 ## Use in a workflow
 
 An [AI workflow step](../workflows/overview.md#add-an-ai-task) gives the same harness a specific

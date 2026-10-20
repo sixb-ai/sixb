@@ -355,9 +355,11 @@ export async function readThreadMessages(
     storage.runs.getByIds({ projectId, ids: runIds }),
     storage.checkpoints.getByRunIds({ projectId, threadId: thread.id, runIds }),
   ])
+  // A message's run is written by the store, never by a client: a message a fork copied keeps
+  // the run that produced it, in the source thread, and shows that run's diagnostics.
   const diagnosticsByRunId = new Map(
     runs
-      .filter((run) => run.kind === "conversation" && run.threadId === thread.id)
+      .filter((run) => run.kind === "conversation")
       .map((run) => [run.id, run.diagnostics ?? []] as const)
   )
   const checkpointsByRunId = new Map(
@@ -640,6 +642,43 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             "The thread's owner removes anyone; a participant removes only themself, to leave. Removing someone who does not take part changes nothing.",
           tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "removeAgentThreadParticipant",
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .post(
+      "/api/agent-threads/:threadId/fork",
+      async (context) => {
+        const { params, set } = context
+        const sixb = requireRequestSixb(context)
+        try {
+          if (!host.storage.agents) {
+            return missingAgentStorageResponse(set)
+          }
+
+          const thread = await sixb.agent.threads.fork(params.threadId)
+
+          set.status = 201
+          return CreateAgentThreadResponseSchema.parse({
+            thread: await serializeThread(host, thread),
+          })
+        } catch (error) {
+          return handleAgentRouteError(error, set)
+        }
+      },
+      {
+        params: AgentThreadParamsSchema,
+        response: {
+          201: CreateAgentThreadResponseSchema,
+          // Coded: the source's sandbox params may not suit the current sandbox configuration.
+          400: AgentRequestErrorResponseSchema,
+          404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Continue an agent thread in a new one the caller owns",
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          operationId: "forkAgentThread",
           security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
