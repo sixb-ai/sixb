@@ -13,7 +13,7 @@ import {
 import { client } from "./generated/client.gen"
 
 export { preserveSixbActivityArrival } from "./activity-attribution"
-export { recordSixbPageView, startSixbActivityCapture } from "./activity-tracker"
+export { recordSixbPageView, startSixbActivityCapture, trackSixbEvent } from "./activity-tracker"
 export type { SixbApiErrorCode, SixbApiErrorInit } from "./api"
 export { isSixbApiError, SixbApiError } from "./api"
 
