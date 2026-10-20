@@ -323,9 +323,7 @@ export function createSixbApi(server: SixbServer) {
           auth: { kind: "allow" as const, session: null },
           sharedAccessCookies: null,
           ...agentState,
-          sixb: runExecution
-            ? bindAgentGatewayRequestExecution(host, { signal: request.signal, ...runExecution })
-            : bindRequestExecution(host, { request, authorization: { type: "disabled" } }),
+          sixb: bindAgentGatewayRequestExecution(host, { signal: request.signal, ...runExecution }),
         }
       }
 

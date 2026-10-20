@@ -164,23 +164,20 @@ async function resolveAgentRunAuthState(
     return jsonError(403, "Agent API gateway capability is not valid for this run.")
   }
 
-  if (!host.auth.isEnabled()) {
-    return {
-      agentExecution: runState.agentExecution,
-      ...(runState.agentRun === undefined ? {} : { agentRun: runState.agentRun }),
-    }
-  }
-
-  const auth = host.storage.auth
-  if (!auth) {
-    return jsonError(501, "Agent API gateway is not configured for authenticated agent access.")
-  }
   const execution = await host.storage.executions.getById({
     projectId: host.id,
     id: runState.run.executionId,
   })
   if (!execution) {
     return jsonError(403, "Agent run execution is not available.")
+  }
+
+  // Authority comes from the record whether auth is enabled or not: an auth-disabled record is
+  // unrestricted, and a workflow AI task has its groups, as for its in-process tools. Only a record
+  // naming a principal needs auth storage.
+  const auth = host.storage.auth
+  if (!auth && execution.authorizationRef.type !== "disabled") {
+    return jsonError(501, "Agent API gateway is not configured for authenticated agent access.")
   }
 
   let authorization: AgentExecutionAuthorization
@@ -257,7 +254,7 @@ function toGatewayRunState(
 
 async function resolveGatewayRunAuthorization(input: {
   readonly host: SixbHostView
-  readonly auth: AuthStorage
+  readonly auth: AuthStorage | undefined
   readonly runState: GatewayRunState
   readonly execution: ExecutionRecord
 }): Promise<AgentExecutionAuthorization> {
