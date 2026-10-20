@@ -50,11 +50,13 @@ const IDENTITIES = "ontology_replacement_plan_identities"
 const SORT_KEY = "encode(convert_to(identity_key, 'UTF8'), 'hex')"
 
 /**
- * Rows a plan writes at once before its tables are analyzed again. Autovacuum lags behind a bulk
- * write, and with the statistics of near-empty tables the planner scans a plan's whole work for
- * each keyed lookup instead of seeking it.
+ * Rows a plan writes before its tables are analyzed again: identities when it opens or expands,
+ * work once a stream has staged it. Every plan fills and empties the same tables, so their
+ * statistics describe the plans that were there when they were last analyzed. Until they describe
+ * this one, the planner expects none of its rows and reads its whole work for each key it looks
+ * up. Below this many rows, those reads cost less than an ANALYZE.
  */
-const ANALYZE_ROWS = 10_000
+const ANALYZE_ROWS = 1_000
 
 /** The plan a session applies: its work rows carry the candidate's source version as `work_id`. */
 export interface PgReplacementPlan {
@@ -240,7 +242,7 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
     input: StreamReplacementPlanStateInput
   ): AsyncIterable<ReplacementPlanStatePage> {
     assertPageRows(input.pageRows)
-    await runPgTransaction(this.sql, async (sql) => {
+    const versionId = await runPgTransaction(this.sql, async (sql) => {
       const { candidate } = await requirePlan(sql, input)
       if (input.entityKind === "object" && candidate.projection_kind !== "object") {
         throw new MaterializationConflictError(
@@ -258,6 +260,7 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
         const expanded = await expandLinks(sql, candidate.version_id, input.projectId, "pending")
         if (expanded >= ANALYZE_ROWS && !isWithinPgTransaction(this.sql)) await analyzePlans(sql)
       }
+      return candidate.version_id
     })
     let after = ""
     let streamed = 0
@@ -296,8 +299,8 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
       if (!page) {
         // Every page is staged by now: later lookups and the commit join this work. Never in the
         // commit transaction, where ANALYZE would hold a lock other commits queue behind.
-        if (streamed >= ANALYZE_ROWS && !isWithinPgTransaction(this.sql)) {
-          await analyzePlans(this.sql)
+        if (streamed > 0 && !isWithinPgTransaction(this.sql)) {
+          await analyzeStagedWork(this.sql, versionId)
         }
         return
       }
@@ -992,6 +995,21 @@ async function purgeTouches(sql: SQLClient, projectId: string, limit: number): P
 
 async function analyzePlans(sql: SQLClient): Promise<void> {
   await sql`ANALYZE ${sql(IDENTITIES)}, ${sql(PG_PLAN_WORK_TABLE)}`
+}
+
+/**
+ * Analyzes the plan tables once the plan holds `ANALYZE_ROWS` rows of work. Counted in work rows,
+ * not identities: an object stages its classification, its existence, its change and its event.
+ */
+async function analyzeStagedWork(sql: SQLClient, versionId: string): Promise<void> {
+  const [staged] = await sql<{ readonly rows: number | string }[]>`
+    SELECT COUNT(*) AS rows FROM (
+      SELECT 1 FROM ${sql(PG_PLAN_WORK_TABLE)} WHERE work_id = ${versionId} LIMIT ${ANALYZE_ROWS}
+    ) AS work
+  `
+
+  if (Number(staged?.rows ?? 0) < ANALYZE_ROWS) return
+  await analyzePlans(sql)
 }
 
 /**
