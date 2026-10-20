@@ -3,6 +3,7 @@ import type { ObjectLink, ObjectType, PrimitiveSchema, Property, Schema, ValueTy
 import { OntologyValidationError } from "../errors"
 import { primitiveTraits } from "../primitives"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../tokens"
+import { uniqueValueKind } from "../unique-values"
 import { validateSchemaValue } from "./schema"
 
 export function assertObjectTypeRegistered(
@@ -170,6 +171,7 @@ export function validatePropertyDefinitions(
   for (const [typeId, objectType] of objectTypesById) {
     for (const property of objectType.properties) {
       assertNoObjectRefSchema(property, `Property '${typeId}.${property.id}'`, valueTypesById)
+      assertUniquePropertyDefinition(typeId, property, valueTypesById)
       if (property.mode !== "telemetry") continue
       // Telemetry stores time-series samples, not references, even when the reference is nested.
       const primitive = findPrimitiveSchema(
@@ -187,6 +189,11 @@ export function validatePropertyDefinitions(
       for (const property of link.properties ?? []) {
         const path = `Link property '${typeId}.${link.id}.${property.id}'`
         assertNoObjectRefSchema(property, path, valueTypesById)
+        if (property.unique) {
+          throw new OntologyValidationError(
+            `[Sixb] ${path} cannot be unique. Unique values are supported on object properties only.`
+          )
+        }
         // Link edits do not check that referenced users exist and are active.
         if (
           findPrimitiveSchema(property.schema, valueTypesById, (schema) => schema === "userRef")
@@ -198,6 +205,42 @@ export function validatePropertyDefinitions(
       }
     }
   }
+}
+
+/**
+ * A unique property is a static object property whose values compare as exact keys. Primary
+ * properties are unique by construction.
+ */
+function assertUniquePropertyDefinition(
+  typeId: string,
+  property: Property,
+  valueTypesById: ReadonlyMap<string, ValueType>
+): void {
+  if (!property.unique) return
+  const path = `Unique property '${typeId}.${property.id}'`
+
+  if (property.primary) {
+    throw new OntologyValidationError(
+      `[Sixb] ${path} is primary, and primary properties are already unique. Remove unique: true.`
+    )
+  }
+
+  if (property.mode === "telemetry") {
+    throw new OntologyValidationError(`[Sixb] ${path} cannot be a telemetry property.`)
+  }
+
+  if (uniqueValueKind(property.schema, valueTypesById) === undefined) {
+    throw new OntologyValidationError(
+      `[Sixb] ${path} cannot use ${schemaLabel(property.schema)}. ` +
+        "Unique values must be strings, uuids, integers, dates, enums or user references."
+    )
+  }
+}
+
+function schemaLabel(schema: Schema): string {
+  if (typeof schema === "string") return schema
+  if (schema.type === "valueTypeRef") return `value type '${schema.valueTypeId}'`
+  return schema.type
 }
 
 export function validatePropertyValue(

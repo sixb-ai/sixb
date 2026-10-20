@@ -8521,6 +8521,7 @@ export type ListObjectTypesResponses = {
       required?: boolean
       nullable?: boolean
       primary?: boolean
+      unique?: boolean
       semanticType?: string
       schema?: unknown
       query?: {
@@ -8576,6 +8577,7 @@ export type ListObjectTypesResponses = {
         required?: boolean
         nullable?: boolean
         primary?: boolean
+        unique?: boolean
         semanticType?: string
         schema?: unknown
         query?: {
@@ -8646,6 +8648,7 @@ export type GetObjectTypeResponses = {
       required?: boolean
       nullable?: boolean
       primary?: boolean
+      unique?: boolean
       semanticType?: string
       schema?: unknown
       query?: {
@@ -8701,6 +8704,7 @@ export type GetObjectTypeResponses = {
         required?: boolean
         nullable?: boolean
         primary?: boolean
+        unique?: boolean
         semanticType?: string
         schema?: unknown
         query?: {

@@ -227,6 +227,9 @@ function normalizeProperty(property: Property): JsonValue {
     required: property.required ?? false,
     nullable: property.nullable ?? false,
     primary: property.primary ?? false,
+    // A projection planned before a property became unique carries no claims for its values, so
+    // it must not commit after. Written only when set: other ontologies keep their revision.
+    ...(property.unique ? { unique: true } : {}),
     mode: property.mode ?? "static",
     semanticType: property.semanticType ?? null,
   }
