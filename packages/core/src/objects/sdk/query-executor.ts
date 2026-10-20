@@ -6,6 +6,7 @@
  * against the HTTP query routes, so both share one builder.
  */
 import type { ObjectQueryFacetsResult } from "../../runtime/types"
+import type { Redactions } from "../../security/types"
 import type { ObjectQueryExplanation } from "../query/explain"
 import type { ObjectQuery } from "../query/ir"
 import type { ValidatedObjectQuery } from "../query/validate"
@@ -15,6 +16,8 @@ export type ObjectQueryExecutorRow = {
   primaryId: string
   objectTypeId: string
   properties: Record<string, unknown>
+  /** Properties omitted because the reader lacks a clearance, keyed by property id. */
+  redactions?: Redactions
   createdAt: Date
   updatedAt: Date
   /** Linked objects attached by an `expand` node, keyed by link id. The builder
