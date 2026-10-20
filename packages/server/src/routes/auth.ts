@@ -2758,17 +2758,8 @@ function serializeManagedMember(member: Omit<MemberSummary, "capabilities">) {
   }
 }
 
-function serializeOwnProfile(profile: OwnProfile) {
-  return {
-    profile: {
-      id: profile.user.id,
-      email: profile.user.email,
-      displayName: profile.user.displayName,
-      avatarUrl: profile.user.avatarUrl,
-      status: profile.user.status,
-    },
-    managedFields: [...profile.managedFields],
-  }
+function serializeOwnProfile(own: OwnProfile) {
+  return { profile: own.profile, managedFields: [...own.managedFields] }
 }
 
 function serializeMemberUser(user: UserRecord) {

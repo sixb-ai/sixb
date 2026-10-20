@@ -37,6 +37,15 @@ export const AuthAccessTokenStatusSchema = z.enum(["active", "expired", "revoked
 export const AuthServiceAccountStatusSchema = z.enum(["active", "suspended"])
 export const AuthUserStatusSchema = z.enum(["active", "suspended"])
 
+/** A member as the directory shows them. */
+export const UserProfileSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  displayName: z.string().optional(),
+  avatarUrl: z.string().optional(),
+  status: AuthUserStatusSchema,
+})
+
 export const AuthAccessTokenSubjectSchema = z.object({
   type: z.enum(["user", "serviceAccount"]),
   id: z.string(),
@@ -295,13 +304,7 @@ export const AuthSessionResponseSchema = z.union([
 export const AuthProfileFieldSchema = z.enum(["displayName", "avatarUrl"])
 
 export const AuthProfileResponseSchema = z.object({
-  profile: z.object({
-    id: z.string(),
-    email: z.string(),
-    displayName: z.string().optional(),
-    avatarUrl: z.string().optional(),
-    status: AuthUserStatusSchema,
-  }),
+  profile: UserProfileSchema,
   /** Set by the identity provider at every sign-in, so they cannot be changed here. */
   managedFields: z.array(AuthProfileFieldSchema),
 })

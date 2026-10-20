@@ -830,10 +830,10 @@ describe("SixbHost auth runtime", () => {
     const pictured = await sixb.auth.updateProfile(caller, {
       avatarUrl: " https://Images.ACME.com/ava photo.png ",
     })
-    expect(pictured.user.avatarUrl).toBe("https://images.acme.com/ava%20photo.png")
+    expect(pictured.profile.avatarUrl).toBe("https://images.acme.com/ava%20photo.png")
 
     const cleared = await sixb.auth.updateProfile(caller, { avatarUrl: "" })
-    expect(cleared.user.avatarUrl).toBeUndefined()
+    expect(cleared.profile.avatarUrl).toBeUndefined()
   })
 
   test("manages every field one of the person's identities with the provider manages", async () => {
@@ -873,21 +873,21 @@ describe("SixbHost auth runtime", () => {
     }
 
     const named = await sixb.auth.updateProfile(caller, { displayName: "  Ava Lovelace  " })
-    expect(named.user.displayName).toBe("Ava Lovelace")
+    expect(named.profile.displayName).toBe("Ava Lovelace")
     // The limit counts characters as people see them, and keeps the joiner emoji are built with.
     const family = "👩\u200D👩\u200D👧"
     const emoji = await sixb.auth.updateProfile(caller, {
       displayName: `${"😀".repeat(95)}${family}`,
     })
-    expect(emoji.user.displayName).toBe(`${"😀".repeat(95)}${family}`)
+    expect(emoji.profile.displayName).toBe(`${"😀".repeat(95)}${family}`)
     const unnamed = await sixb.auth.updateProfile(caller, { displayName: "   " })
-    expect(unnamed.user.displayName).toBeUndefined()
+    expect(unnamed.profile.displayName).toBeUndefined()
 
     // A picture served by your own machine is fine over plain http.
     const local = await sixb.auth.updateProfile(caller, {
       avatarUrl: "http://localhost:3000/ava.png",
     })
-    expect(local.user.avatarUrl).toBe("http://localhost:3000/ava.png")
+    expect(local.profile.avatarUrl).toBe("http://localhost:3000/ava.png")
   })
 
   test("verifies double-submit CSRF tokens", () => {
