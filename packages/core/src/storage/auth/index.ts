@@ -57,6 +57,7 @@ export type {
   SuspendUserAndRevokeSessionsInput,
   UpdateAuthServiceAccountInput,
   UpdateAuthUserProfileInput,
+  UpdateAuthUserResult,
   UpdateAuthUserStatusInput,
   UpsertAuthGroupMembershipInput,
   UpsertAuthServiceAccountGroupMembershipInput,

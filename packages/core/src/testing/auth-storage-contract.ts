@@ -3,6 +3,7 @@ import type {
   AuthStorage,
   AuthStorageErrorCode,
   CompleteAuthSessionInput,
+  CompleteSignInResult,
   ListAuthUsersInput,
   UserRecord,
 } from "../storage/auth"
@@ -107,7 +108,7 @@ async function completeOidcSignInForAva(
   })
 }
 
-// Signs Ava in through the "okta" provider with the profile it sends, and returns her user.
+// Signs Ava in through the "okta" provider with the profile it sends.
 async function signInWithOidcProfile(
   storage: AuthStorage,
   input: {
@@ -116,7 +117,7 @@ async function signInWithOidcProfile(
     readonly displayName?: string
     readonly avatarUrl?: string
   }
-): Promise<UserRecord> {
+): Promise<CompleteSignInResult> {
   await storage.oidcAuthorizationAttempts.create({
     id: input.attemptId,
     projectId,
@@ -128,7 +129,7 @@ async function signInWithOidcProfile(
     expiresAt: at("2026-05-14T11:00:00.000Z"),
   })
 
-  const result = await storage.completeOidcSignIn({
+  return storage.completeOidcSignIn({
     projectId,
     oidcAuthorizationAttemptId: input.attemptId,
     stateHash: `${input.attemptId}-state`,
@@ -140,8 +141,6 @@ async function signInWithOidcProfile(
     newUserId: "usr_unused",
     session: sessionInput(`ses_${input.attemptId}`),
   })
-
-  return result.user
 }
 
 /**
@@ -321,7 +320,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           displayName: "Ava King",
           updatedAt: at("2026-05-14T10:02:00.000Z"),
         })
-        expect(renamed).toMatchObject({
+        expect(renamed.user).toMatchObject({
           displayName: "Ava King",
           avatarUrl: "https://images.acme.com/ava.png",
           updatedAt: at("2026-05-14T10:02:00.000Z"),
@@ -333,12 +332,97 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           avatarUrl: null,
           updatedAt: at("2026-05-14T10:03:00.000Z"),
         })
-        expect(cleared.displayName).toBe("Ava King")
-        expect(cleared.avatarUrl).toBeUndefined()
-        await expect(storage.users.getById({ projectId, id: "usr_1" })).resolves.toEqual(cleared)
+        expect(cleared.user.displayName).toBe("Ava King")
+        expect(cleared.user.avatarUrl).toBeUndefined()
+        await expect(storage.users.getById({ projectId, id: "usr_1" })).resolves.toEqual(
+          cleared.user
+        )
 
         await expectAuthError(
           storage.users.updateProfile({ projectId, id: "usr_missing", displayName: "Nobody" }),
+          "missing_user"
+        )
+      })
+    })
+
+    // To see this fail, return the user as updated in place of the user before the update.
+    test("returns the user as a profile update found them", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+
+        const named = await storage.users.updateProfile({
+          projectId,
+          id: "usr_1",
+          displayName: "Ava Lovelace",
+          updatedAt: at("2026-05-14T10:01:00.000Z"),
+        })
+        expect(named.previousUser).toMatchObject({
+          id: "usr_1",
+          updatedAt: at("2026-05-14T10:00:00.000Z"),
+        })
+        expect(named.previousUser.displayName).toBeUndefined()
+
+        const renamed = await storage.users.updateProfile({
+          projectId,
+          id: "usr_1",
+          displayName: "Ava King",
+          updatedAt: at("2026-05-14T10:02:00.000Z"),
+        })
+        expect(renamed.previousUser).toEqual(named.user)
+      })
+    })
+
+    // To see this fail, write the profile even when the values it is given are the stored ones.
+    test("leaves a profile alone when an update gives it the values it has", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        const named = await storage.users.updateProfile({
+          projectId,
+          id: "usr_1",
+          displayName: "Ava Lovelace",
+          updatedAt: at("2026-05-14T10:01:00.000Z"),
+        })
+
+        const unchanged = await storage.users.updateProfile({
+          projectId,
+          id: "usr_1",
+          displayName: "Ava Lovelace",
+          avatarUrl: null,
+          updatedAt: at("2026-05-14T10:02:00.000Z"),
+        })
+
+        expect(unchanged).toEqual({ user: named.user, previousUser: named.user })
+        await expect(storage.users.getById({ projectId, id: "usr_1" })).resolves.toEqual(named.user)
+      })
+    })
+
+    // To see this fail, return the updated user as the previous one.
+    test("returns the user as a status change found them", async () => {
+      await withStorage(async (storage) => {
+        const ava = await createUser(storage)
+
+        const suspended = await storage.users.updateStatus({
+          projectId,
+          id: "usr_1",
+          status: "suspended",
+          updatedAt: at("2026-05-14T10:01:00.000Z"),
+        })
+        expect(suspended.user).toMatchObject({
+          status: "suspended",
+          updatedAt: at("2026-05-14T10:01:00.000Z"),
+        })
+        expect(suspended.previousUser).toEqual(ava)
+
+        const reactivated = await storage.users.updateStatus({
+          projectId,
+          id: "usr_1",
+          status: "active",
+          updatedAt: at("2026-05-14T10:02:00.000Z"),
+        })
+        expect(reactivated.previousUser).toEqual(suspended.user)
+
+        await expectAuthError(
+          storage.users.updateStatus({ projectId, id: "usr_missing", status: "active" }),
           "missing_user"
         )
       })
@@ -1679,7 +1763,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
 
     test("completes magic-link sign-in for an existing user", async () => {
       await withStorage(async (storage) => {
-        await createUser(storage)
+        const ava = await createUser(storage)
         await storage.sessions.create({
           id: "ses_old",
           projectId,
@@ -1709,6 +1793,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
         })
 
         expect(result.user.id).toBe("usr_1")
+        expect(result.previousUser).toEqual(ava)
         expect(result.session).toMatchObject({
           id: "ses_new",
           strategyId: "magic-link",
@@ -1767,6 +1852,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           id: "inv_1",
           status: "accepted",
         })
+        expect(result.previousUser).toBeNull()
         const memberships = await storage.groupMemberships.listForUser({
           projectId,
           userId: "usr_new",
@@ -1936,7 +2022,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
 
     test("completes OIDC sign-in through an existing identity", async () => {
       await withStorage(async (storage) => {
-        await createUser(storage, { id: "usr_oidc", email: "ava@acme.com" })
+        const ava = await createUser(storage, { id: "usr_oidc", email: "ava@acme.com" })
         await storage.identities.upsert({
           projectId,
           strategyId: "okta",
@@ -1968,6 +2054,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           session: sessionInput("ses_oidc"),
         })
 
+        expect(result.previousUser).toEqual(ava)
         expect(result.identity).toMatchObject({
           strategyId: "okta",
           subject: "00u1",
@@ -2017,7 +2104,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
         await createUser(storage)
 
         // The first sign-in links Ava by her email, the second finds her identity.
-        const linked = await signInWithOidcProfile(storage, {
+        const { user: linked } = await signInWithOidcProfile(storage, {
           attemptId: "oidc_1",
           completedAt: "2026-05-14T10:01:00.000Z",
           displayName: "Ava Lovelace",
@@ -2030,12 +2117,14 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           updatedAt: at("2026-05-14T10:01:00.000Z"),
         })
 
-        await signInWithOidcProfile(storage, {
+        const refreshed = await signInWithOidcProfile(storage, {
           attemptId: "oidc_2",
           completedAt: "2026-05-14T10:02:00.000Z",
           displayName: "Ava King",
           avatarUrl: "https://images.acme.com/ava-2.png",
         })
+        // The sign-in also says what it changed: it returns the user as it found them.
+        expect(refreshed.previousUser).toEqual(linked)
         await expect(storage.users.getById({ projectId, id: "usr_1" })).resolves.toMatchObject({
           displayName: "Ava King",
           avatarUrl: "https://images.acme.com/ava-2.png",
@@ -2054,7 +2143,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           avatarUrl: "https://images.acme.com/ava.png",
         })
 
-        const user = await signInWithOidcProfile(storage, {
+        const { user } = await signInWithOidcProfile(storage, {
           attemptId: "oidc_2",
           completedAt: "2026-05-14T10:02:00.000Z",
         })
@@ -2079,7 +2168,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           ...profile,
         })
 
-        const user = await signInWithOidcProfile(storage, {
+        const { user } = await signInWithOidcProfile(storage, {
           attemptId: "oidc_2",
           completedAt: "2026-05-14T10:02:00.000Z",
           ...profile,
@@ -2151,6 +2240,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           email: "ava@acme.com",
           displayName: "Ava Chen",
         })
+        expect(result.previousUser).toBeNull()
         expect(result.invitation).toMatchObject({
           id: "inv_oidc",
           status: "accepted",
@@ -2269,9 +2359,10 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
+    // To see this fail, return the suspended user as the previous one.
     test("suspends users and revokes active sessions immediately", async () => {
       await withStorage(async (storage) => {
-        await createUser(storage)
+        const ava = await createUser(storage)
         await storage.sessions.create({
           id: "ses_1",
           projectId,
@@ -2297,7 +2388,8 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           suspendedAt: at("2026-05-14T10:05:00.000Z"),
         })
 
-        expect(suspended.status).toBe("suspended")
+        expect(suspended.user.status).toBe("suspended")
+        expect(suspended.previousUser).toEqual(ava)
         await expect(storage.sessions.getById({ projectId, id: "ses_1" })).resolves.toMatchObject({
           revokedAt: at("2026-05-14T10:05:00.000Z"),
         })

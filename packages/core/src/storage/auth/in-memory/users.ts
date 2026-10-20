@@ -6,6 +6,7 @@ import type {
   ListAuthUsersInput,
   ListAuthUsersResult,
   UpdateAuthUserProfileInput,
+  UpdateAuthUserResult,
   UpdateAuthUserStatusInput,
   UserRecord,
 } from "../types"
@@ -86,7 +87,7 @@ export class InMemoryAuthUserStore implements AuthUserStore {
     return cloneOptionalRecord(getUserByEmail(this.state, params.projectId, params.email))
   }
 
-  async updateProfile(input: UpdateAuthUserProfileInput): Promise<UserRecord> {
+  async updateProfile(input: UpdateAuthUserProfileInput): Promise<UpdateAuthUserResult> {
     const key = userKey(input.projectId, input.id)
     const existing = this.state.users.get(key)
 
@@ -97,17 +98,23 @@ export class InMemoryAuthUserStore implements AuthUserStore {
       )
     }
 
+    const displayName = profileValue(input.displayName, existing.displayName)
+    const avatarUrl = profileValue(input.avatarUrl, existing.avatarUrl)
+    if (displayName === existing.displayName && avatarUrl === existing.avatarUrl) {
+      return { user: cloneRecord(existing), previousUser: cloneRecord(existing) }
+    }
+
     const next: UserRecord = {
       ...existing,
-      displayName: profileValue(input.displayName, existing.displayName),
-      avatarUrl: profileValue(input.avatarUrl, existing.avatarUrl),
+      displayName,
+      avatarUrl,
       updatedAt: dateOrNow(input.updatedAt),
     }
     this.state.users.set(key, cloneRecord(next))
-    return cloneRecord(next)
+    return { user: cloneRecord(next), previousUser: cloneRecord(existing) }
   }
 
-  async updateStatus(input: UpdateAuthUserStatusInput): Promise<UserRecord> {
+  async updateStatus(input: UpdateAuthUserStatusInput): Promise<UpdateAuthUserResult> {
     const key = userKey(input.projectId, input.id)
     const existing = this.state.users.get(key)
 
@@ -124,7 +131,7 @@ export class InMemoryAuthUserStore implements AuthUserStore {
       updatedAt: dateOrNow(input.updatedAt),
     }
     this.state.users.set(key, cloneRecord(next))
-    return cloneRecord(next)
+    return { user: cloneRecord(next), previousUser: cloneRecord(existing) }
   }
 
   async list(input: ListAuthUsersInput): Promise<ListAuthUsersResult> {
