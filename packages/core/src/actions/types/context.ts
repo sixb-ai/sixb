@@ -1,6 +1,7 @@
 import type { BlobsRuntime } from "../../blob-storage/execution"
 import type { ConnectorRuntime } from "../../connectors"
 import type { RecordEditsContext } from "../../edits"
+import type { AuthorizablePrincipal } from "../../execution/types"
 import type { Logger } from "../../logging"
 import type {
   EffectiveLinkChange,
@@ -11,6 +12,7 @@ import type { ModelsRuntime } from "../../models/generation-types"
 import type { ObjectType, Property } from "../../ontology"
 import type { InferPropertyUnit, InferPropertyValue } from "../../ontology/inference"
 import type { ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
+import type { UserRef } from "../../ontology/user-ref"
 import type { ObjectReader } from "../../runtime/types"
 import type { UsersRuntime } from "../../users"
 import type { ActionPrimitiveSchemaValues } from "./params"
@@ -43,9 +45,13 @@ type InferActionSnapshotPropertyValue<TPropertyToken> = TPropertyToken extends {
 
 type InferActionSnapshotSchemaValue<TSchema> = TSchema extends keyof ActionPrimitiveSchemaValues
   ? ActionPrimitiveSchemaValues[TSchema]
-  : TSchema extends { readonly type: "enum"; readonly values: readonly (infer TValue)[] }
-    ? TValue
-    : unknown
+  : TSchema extends "userRef"
+    ? UserRef
+    : TSchema extends { readonly type: "array"; readonly items: "userRef" }
+      ? readonly UserRef[]
+      : TSchema extends { readonly type: "enum"; readonly values: readonly (infer TValue)[] }
+        ? TValue
+        : unknown
 
 export type ActionSubject = { readonly kind: "none" } | ActionObjectSubject
 
@@ -186,6 +192,15 @@ export interface BaseActionPhaseContext<TParams extends Record<string, unknown>>
   readonly run: ActionRunPhaseInfo
   readonly params: TParams
   readonly subject: ActionSubject
+  /**
+   * On whose behalf the run happens: the user or service account that started the chain of
+   * executions it belongs to, meaning the caller, or whoever started the workflow or agent run that
+   * requested it. It does not mean they approved this exact request: an agent's request carries it
+   * too. `undefined` when no principal did, as for a schedule, an event or a shared link. Once
+   * narrowed with `requestedBy?.type === "user"`, it is a `ref.user()` value you can compare or
+   * store.
+   */
+  readonly requestedBy: AuthorizablePrincipal | undefined
   /**
    * Aborts when the caller cancels the run or it runs out of time: a run has 30 seconds until its
    * writeback succeeds or its edits commit, and its effects have 30 more after the commit. Forward

@@ -107,5 +107,6 @@ function buildActionContext(
     ontologyMutations: execution.ontologyMutations,
     sixb,
     actions: host.definitions.actions,
+    requestedBy: execution.sixb.execution.requestedBy,
   }
 }

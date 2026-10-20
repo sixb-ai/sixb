@@ -95,6 +95,50 @@ fails the run as `action.phase_failed`, without its message: the caller gets
 
 Validation checks are read-only. You can attach more than one validator.
 
+## Know who requested the run
+
+Every handler receives `requestedBy`, the principal behind the run: `{ type: "user", id }` or
+`{ type: "serviceAccount", id }`, or `undefined` when no one requested it.
+
+| The run was requested by | `requestedBy` |
+| --- | --- |
+| A signed-in user, from the app or the API | That user |
+| A [service account or its token](../auth/members.md#service-accounts-and-tokens) | That service account |
+| A workflow step or the agent | Whoever started the workflow or the agent conversation |
+| A schedule, an event, a [shared link](../auth/shared-access.md), or a project without `auth` | `undefined` |
+
+`requestedBy` says on whose behalf the run happens, not that this person approved this exact
+request: when the agent requests an action, in a conversation or a workflow AI task, it is still
+the person who started that conversation or workflow.
+
+Once you check `requestedBy?.type === "user"`, the value is a
+[user reference](../ontology/properties.md#reference-a-user): compare it with one, or store it.
+For example, let only the assignee close a ticket:
+
+```ts
+.validate(({ target, requestedBy }) => {
+  const assignee = target.properties.assignee
+  if (requestedBy?.type !== "user" || assignee?.id !== requestedBy.id) {
+    return { error: "Only the assignee can close this ticket." }
+  }
+})
+```
+
+Or record who created a note:
+
+```ts
+.validate(({ requestedBy }) => {
+  if (requestedBy?.type !== "user") {
+    return { error: "Only a project member can create a note." }
+  }
+})
+.edits(({ objects, params, requestedBy }) => {
+  // The validator rejected every other requester.
+  if (requestedBy?.type !== "user") return
+  objects(Note).create({ title: params.title, owner: requestedBy })
+})
+```
+
 ## Call external systems
 
 Use `.writeback()` before `.edits()` when a change depends on an external call. Return the data

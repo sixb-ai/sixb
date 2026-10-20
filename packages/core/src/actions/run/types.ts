@@ -1,5 +1,6 @@
 import type { BlobsRuntime } from "../../blob-storage/execution"
 import type { ConnectorRuntime } from "../../connectors/execution"
+import type { AuthorizablePrincipal } from "../../execution/types"
 import type { LoggingService } from "../../logging/service"
 import type { ModelsRuntime } from "../../models/generation-types"
 import type { ObjectsRuntime } from "../../objects/execution"
@@ -29,6 +30,8 @@ export interface ActionRunContext {
   readonly ontologyMutations: OntologyMutationRuntime
   readonly sixb: ActionExecutionFacade
   readonly actions: Pick<SixbDefinitions["actions"], "getById">
+  /** Who started the chain of executions the run belongs to, when a principal did. */
+  readonly requestedBy: AuthorizablePrincipal | undefined
 }
 
 /**
