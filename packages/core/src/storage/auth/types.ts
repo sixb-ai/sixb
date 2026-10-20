@@ -503,6 +503,11 @@ export interface SuspendUserAndRevokeSessionsInput {
 export interface AuthUserStore {
   create(input: CreateAuthUserInput): Promise<UserRecord>
   getById(params: { readonly projectId: string; readonly id: string }): Promise<UserRecord | null>
+  /** The users of the project with these ids, in any order. Ids no user has are skipped. */
+  getByIds(params: {
+    readonly projectId: string
+    readonly ids: readonly string[]
+  }): Promise<readonly UserRecord[]>
   getByEmail(params: {
     readonly projectId: string
     readonly email: string

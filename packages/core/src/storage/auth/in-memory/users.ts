@@ -69,6 +69,16 @@ export class InMemoryAuthUserStore implements AuthUserStore {
     return cloneOptionalRecord(record)
   }
 
+  async getByIds(params: {
+    readonly projectId: string
+    readonly ids: readonly string[]
+  }): Promise<readonly UserRecord[]> {
+    return [...new Set(params.ids)].flatMap((id) => {
+      const record = this.state.users.get(userKey(params.projectId, id))
+      return record ? [cloneRecord(record)] : []
+    })
+  }
+
   async getByEmail(params: {
     readonly projectId: string
     readonly email: string
