@@ -159,6 +159,10 @@ export const OPENAPI_TAGS = {
     name: "Auth Members",
     description: "User membership administration",
   },
+  users: {
+    name: "Users",
+    description: "Project member directory",
+  },
   authInvitations: {
     name: "Auth Invitations",
     description: "User invitations",

@@ -66,6 +66,8 @@ const assignee = await sixb.users.get(userRef("usr_1"))
 | `list({ status, search, limit, offset })` | `{ users, hasMore, total }`, oldest member first. `status` is `"active"` (the default), `"suspended"`, or `"all"`. `search` matches part of a name or email, ignoring case, and has at most 200 characters. `limit` is 1 to 200, 50 by default. |
 | `get(userRef(id))` | `{ id, email, displayName?, avatarUrl?, status }`, or `null` when no member has this id. |
 
+Over HTTP, `GET /api/users?search=ava&status=all` takes the same options as query parameters, and `GET /api/users/:userId` returns one member or `404`. Both accept [access tokens](#service-accounts-and-tokens).
+
 Trusted code, such as workflows and actions, can always read the directory. An action or a workflow can therefore return directory data to a caller who lacks the grant, so return only what that caller should see. The agent and its tools read it with the permissions they run with: in a conversation, those of the person who asked. Shared links never read it.
 
 ## Service accounts and tokens

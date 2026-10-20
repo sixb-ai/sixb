@@ -229,6 +229,9 @@ import type {
   GetTelemetryHistoryData,
   GetTelemetryHistoryErrors,
   GetTelemetryHistoryResponses,
+  GetUserData,
+  GetUserErrors,
+  GetUserResponses,
   GetWorkflowAgentNodeExecutionData,
   GetWorkflowAgentNodeExecutionErrors,
   GetWorkflowAgentNodeExecutionResponses,
@@ -380,6 +383,9 @@ import type {
   ListSyncRunsResponses,
   ListSyncsData,
   ListSyncsResponses,
+  ListUsersData,
+  ListUsersErrors,
+  ListUsersResponses,
   ListWebhookRunsData,
   ListWebhookRunsErrors,
   ListWebhookRunsResponses,
@@ -3505,6 +3511,36 @@ export const listActivityConnections = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/activity/connections",
+    ...options,
+  })
+
+/**
+ * List project members
+ */
+export const listUsers = <ThrowOnError extends boolean = false>(
+  options?: Options<ListUsersData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListUsersResponses, ListUsersErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/users",
+    ...options,
+  })
+
+/**
+ * Get a project member
+ */
+export const getUser = <ThrowOnError extends boolean = false>(
+  options: Options<GetUserData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetUserResponses, GetUserErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/users/{userId}",
     ...options,
   })
 
