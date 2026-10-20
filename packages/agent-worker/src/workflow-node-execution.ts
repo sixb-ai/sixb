@@ -169,7 +169,7 @@ export async function executeWorkflowAgentNode(
       authorizationRef: durableExecution.authorizationRef,
       security: input.host.definitions.security,
     })
-    const executionContext = createAgentExecutionContext({
+    const executionContext = await createAgentExecutionContext({
       context,
       host: input.host,
       execution: durableExecution,
