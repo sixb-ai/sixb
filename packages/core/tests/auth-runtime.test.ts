@@ -747,6 +747,31 @@ describe("SixbHost auth runtime", () => {
     ).toThrow("bootstrapGroups references unknown group 'missing-group'")
   })
 
+  test("completes a sign-in only through a strategy of that kind", async () => {
+    const sixb = new SixbHost({
+      ontology: [] as const,
+      ...createTestRuntimeDeps(),
+      auth: authStrategy,
+    })
+    const session = {
+      id: "ses_1",
+      tokenHash: "hash",
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    }
+
+    await expect(
+      sixb.auth.completeMagicLinkSignIn({ magicLinkId: "ml_1", token: "token", session })
+    ).rejects.toMatchObject({ code: "invalid_auth_config" })
+    await expect(
+      sixb.auth.completeOidcSignIn({
+        requestUrl: "http://localhost/auth/callback",
+        requestOrigin: "http://localhost",
+        session,
+      })
+    ).rejects.toMatchObject({ code: "invalid_auth_config" })
+  })
+
   test("verifies double-submit CSRF tokens", () => {
     const request = new Request("http://localhost/api/objects", {
       method: "PUT",

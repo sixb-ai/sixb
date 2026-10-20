@@ -1597,7 +1597,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           ) {
             return completeMagicLinkCallback({
               host,
-              strategy,
               options,
               request,
               magicLinkId,
@@ -1628,9 +1627,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
                 "[SixbServer] OIDC callback reached a browser that did not start this sign-in."
               )
             }
-            const result = await strategy.completeOidcSignIn({
-              projectId: host.id,
-              authStorage: requireAuthStorage(host),
+            const result = await host.auth.completeOidcSignIn({
               requestUrl: request.url,
               requestOrigin: options.resolveAuthRequestOrigin(request),
               session: {
@@ -1695,7 +1692,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
 
         return completeMagicLinkCallback({
           host,
-          strategy,
           options,
           request,
           magicLinkId,
@@ -1873,7 +1869,6 @@ function callbackCookieHeader(params: {
 // path on GET. Consumes the single-use token and mints the session cookies.
 async function completeMagicLinkCallback(input: {
   readonly host: SixbHostView
-  readonly strategy: MagicLinkAuthStrategy
   readonly options: AuthRoutesOptions
   readonly request: Request
   readonly magicLinkId: string
@@ -1886,9 +1881,7 @@ async function completeMagicLinkCallback(input: {
   const device = resolveSessionDevice(input.request)
 
   try {
-    const result = await input.strategy.completeMagicLinkSignIn({
-      projectId: input.host.id,
-      authStorage: requireAuthStorage(input.host),
+    const result = await input.host.auth.completeMagicLinkSignIn({
       magicLinkId: input.magicLinkId,
       token: input.token,
       session: {
