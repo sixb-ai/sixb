@@ -11688,6 +11688,584 @@ export type GetAgentRunResponses = {
 
 export type GetAgentRunResponse = GetAgentRunResponses[keyof GetAgentRunResponses]
 
+export type GetObservedAgentThreadData = {
+  body?: never
+  path: {
+    threadId: string
+  }
+  query?: never
+  url: "/api/observed-agent-threads/{threadId}"
+}
+
+export type GetObservedAgentThreadErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type GetObservedAgentThreadError =
+  GetObservedAgentThreadErrors[keyof GetObservedAgentThreadErrors]
+
+export type GetObservedAgentThreadResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    sandboxState?: {
+      name: string
+      status: "new" | "busy" | "ready" | "blocked" | "unavailable"
+      initialized: boolean
+    }
+    id: string
+    projectId: string
+    ownerPrincipal: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    title?: string
+    sandboxParams?: {
+      [key: string]:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
+    }
+    status: "active" | "archived"
+    activeRunId: string | null
+    lastMessageAt?: string
+    messageCount: number
+    createdAt: string
+    updatedAt: string
+  }
+}
+
+export type GetObservedAgentThreadResponse =
+  GetObservedAgentThreadResponses[keyof GetObservedAgentThreadResponses]
+
+export type ListObservedAgentThreadMessagesData = {
+  body?: never
+  path: {
+    threadId: string
+  }
+  query?: {
+    role?: "system" | "user" | "assistant"
+    limit?: string
+    offset?: string
+    order?: "asc" | "desc"
+  }
+  url: "/api/observed-agent-threads/{threadId}/messages"
+}
+
+export type ListObservedAgentThreadMessagesErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ListObservedAgentThreadMessagesError =
+  ListObservedAgentThreadMessagesErrors[keyof ListObservedAgentThreadMessagesErrors]
+
+export type ListObservedAgentThreadMessagesResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    messages: Array<{
+      id: string
+      projectId: string
+      threadId: string
+      runId: string | null
+      role: "system" | "user" | "assistant"
+      authorPrincipal?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      seq: number
+      parts: Array<
+        | {
+            type: "text"
+            text: string
+            /**
+             * Any JSON-compatible value.
+             */
+            providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+        | {
+            type: "continuation"
+          }
+        | {
+            type: "reasoning"
+            text: string
+            /**
+             * Any JSON-compatible value.
+             */
+            providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+        | {
+            type: "step-start"
+          }
+        | {
+            type: "file"
+            fileRef: {
+              blobId: string
+              digest: string
+              sizeBytes: number
+              fileName?: string
+              mediaType?: string
+              logicalPath?: string
+            }
+            /**
+             * Any JSON-compatible value.
+             */
+            providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+        | {
+            type: "provider-state"
+            providerId: string
+            /**
+             * Any JSON-compatible value.
+             */
+            data:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+        | {
+            context:
+              | {
+                  kind: "object"
+                  ref: {
+                    objectTypeId: string
+                    primaryId: string
+                  }
+                  /**
+                   * Shown in the chat instead of the object's title. Never sent to the model.
+                   */
+                  label?: string
+                }
+              | {
+                  kind: "app-state"
+                  id: string
+                  label: string
+                  description: string
+                  /**
+                   * Any JSON-compatible value.
+                   */
+                  value:
+                    | string
+                    | number
+                    | boolean
+                    | Array<unknown>
+                    | {
+                        [key: string]: unknown
+                      }
+                    | null
+                }
+            origin: "ambient" | "explicit"
+            type: "context"
+          }
+        | {
+            type: "tool-call"
+            toolCallId: string
+            toolName: string
+            dynamic?: boolean
+            providerExecuted?: boolean
+            /**
+             * Any JSON-compatible value.
+             */
+            input:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            /**
+             * Any JSON-compatible value.
+             */
+            providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            state: "output-available"
+            /**
+             * Any JSON-compatible value.
+             */
+            output:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+        | {
+            type: "tool-call"
+            toolCallId: string
+            toolName: string
+            dynamic?: boolean
+            providerExecuted?: boolean
+            /**
+             * Any JSON-compatible value.
+             */
+            input:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            /**
+             * Any JSON-compatible value.
+             */
+            providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            state: "output-error"
+            errorText: string
+          }
+      >
+      annotations: Array<{
+        code: "step_limit_reached"
+        severity: "warning" | "error"
+        scope: "run"
+        message: string
+      }>
+      compaction?: {
+        checkpointId: string
+        summary: string
+        createdAt: string
+      }
+      /**
+       * Any JSON-compatible value.
+       */
+      metadata?:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
+      contentVersion: number
+      createdAt: string
+      completedAt?: string
+    }>
+    hasMore: boolean
+    total: number
+    authors: Array<{
+      type: "user" | "serviceAccount" | "system"
+      id: string
+      displayName?: string
+    }>
+  }
+}
+
+export type ListObservedAgentThreadMessagesResponse =
+  ListObservedAgentThreadMessagesResponses[keyof ListObservedAgentThreadMessagesResponses]
+
+export type GetObservedAgentMessageFileContentData = {
+  body?: never
+  path: {
+    threadId: string
+    messageId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
+  }
+  url: "/api/observed-agent-threads/{threadId}/messages/{messageId}/files/content"
+}
+
+export type GetObservedAgentMessageFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+  /**
+   * The storage role backing this content is not configured
+   */
+  501: ErrorResponse
+}
+
+export type GetObservedAgentMessageFileContentError =
+  GetObservedAgentMessageFileContentErrors[keyof GetObservedAgentMessageFileContentErrors]
+
+export type GetObservedAgentMessageFileContentResponses = {
+  /**
+   * File content
+   */
+  200: Blob | File
+  /**
+   * Partial file content
+   */
+  206: Blob | File
+}
+
+export type GetObservedAgentMessageFileContentResponse =
+  GetObservedAgentMessageFileContentResponses[keyof GetObservedAgentMessageFileContentResponses]
+
+export type ListObservedAgentThreadRunsData = {
+  body?: never
+  path: {
+    threadId: string
+  }
+  query?: {
+    status?: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+    limit?: string
+    offset?: string
+    order?: "asc" | "desc"
+  }
+  url: "/api/observed-agent-threads/{threadId}/runs"
+}
+
+export type ListObservedAgentThreadRunsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ListObservedAgentThreadRunsError =
+  ListObservedAgentThreadRunsErrors[keyof ListObservedAgentThreadRunsErrors]
+
+export type ListObservedAgentThreadRunsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    runs: Array<{
+      id: string
+      projectId: string
+      threadId: string
+      triggerMessageId: string
+      requestedBy?: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      model?: {
+        provider: string
+        modelId: string
+      }
+      reasoning?:
+        | "provider-default"
+        | "none"
+        | "minimal"
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | "max"
+        | {
+            budgetTokens: number
+          }
+      modelId?: string
+      finishReason?:
+        | "stop"
+        | "length"
+        | "content-filter"
+        | "tool-calls"
+        | "timeout"
+        | "interrupted"
+        | "error"
+        | "other"
+        | "unknown"
+      usage?: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        /**
+         * Audio content duration in milliseconds; not billed duration.
+         */
+        audioDurationMs?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      cost?: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      diagnostics?: Array<{
+        code: "step_limit_reached"
+        severity: "warning" | "error"
+        scope: "run"
+        message: string
+      }>
+      error?: {
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "agent.execution_failed"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        httpStatus?: number
+        redacted?: true
+        truncated?: true
+      }
+      attempt: number
+      streamId: string
+      createdAt: string
+      startedAt?: string
+      completedAt?: string
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListObservedAgentThreadRunsResponse =
+  ListObservedAgentThreadRunsResponses[keyof ListObservedAgentThreadRunsResponses]
+
 export type ListArtifactsData = {
   body?: never
   path?: never
@@ -15251,6 +15829,9 @@ export type GetActivityVisitTimelineResponses = {
           executionId: string
           runId: string
           threadId: string
+          thread?: {
+            title?: string
+          }
           status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
           messages: number
           cost?: {

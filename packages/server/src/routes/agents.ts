@@ -72,7 +72,9 @@ const AgentMessageFileContentQuerySchema = FileContentQuerySchema.extend({
     .regex(/^\/parts(?:\/|$)/, "Agent message file content paths must start with /parts/"),
 })
 
-function serializeThread(thread: AgentThreadRecord): ReturnType<typeof AgentThreadSchema.parse> {
+export function serializeThread(
+  thread: AgentThreadRecord
+): ReturnType<typeof AgentThreadSchema.parse> {
   return AgentThreadSchema.parse({
     id: thread.id,
     projectId: thread.projectId,
@@ -178,7 +180,7 @@ async function publishQueuedRunCancellation(
   }
 }
 
-function handleAgentRouteError(
+export function handleAgentRouteError(
   error: unknown,
   set: { status?: number | string; headers?: unknown }
 ):
@@ -235,7 +237,7 @@ function missingAgentStorageResponse(set: { status?: number | string }): { error
   return unconfiguredStorageResponse(set, "Agent storage")
 }
 
-async function agentMessageFileContentResponse(
+export async function agentMessageFileContentResponse(
   host: SixbHostView,
   context: {
     readonly params: { readonly threadId: string; readonly messageId: string }
@@ -243,7 +245,11 @@ async function agentMessageFileContentResponse(
     readonly request: Request
     readonly set: { status?: number | string }
   },
-  options: { readonly head?: boolean } = {}
+  options: {
+    readonly head?: boolean
+    /** Who may read the thread. Default: its owner, or the Agent run working in it. */
+    readonly readThread?: () => Promise<Pick<AgentThreadRecord, "id"> | null>
+  } = {}
 ) {
   const authState = requestAuthState(context)
 
@@ -254,12 +260,14 @@ async function agentMessageFileContentResponse(
     }
 
     const parsed = AgentMessageFileContentQuerySchema.parse(context.query)
-    const thread = await getAgentMessageFileContentThread({
-      authState,
-      storage,
-      projectId: host.id,
-      threadId: context.params.threadId,
-    })
+    const thread = options.readThread
+      ? await options.readThread()
+      : await getAgentMessageFileContentThread({
+          authState,
+          storage,
+          projectId: host.id,
+          threadId: context.params.threadId,
+        })
     if (!thread) {
       context.set.status = 404
       return { error: "File not found" }
@@ -300,6 +308,52 @@ async function agentMessageFileContentResponse(
     }
 
     throw error
+  }
+}
+
+/** A page of a thread's messages, with their runs' diagnostics and compactions. */
+export async function readThreadMessages(
+  projectId: string,
+  storage: AgentStorage,
+  thread: AgentThreadRecord,
+  query: z.infer<typeof AgentMessagesQuerySchema>
+) {
+  const result = await storage.messages.list({
+    projectId,
+    threadId: thread.id,
+    roles: query.role ? [query.role] : undefined,
+    limit: parseOptionalInt(query.limit),
+    offset: parseOptionalInt(query.offset),
+    order: query.order,
+  })
+  const runIds = result.messages.flatMap((message) =>
+    message.runId === null ? [] : [message.runId]
+  )
+  const [runs, checkpoints] = await Promise.all([
+    storage.runs.getByIds({ projectId, ids: runIds }),
+    storage.checkpoints.getByRunIds({ projectId, runIds }),
+  ])
+  const diagnosticsByRunId = new Map(
+    runs
+      .filter((run) => run.kind === "conversation" && run.threadId === thread.id)
+      .map((run) => [run.id, run.diagnostics ?? []] as const)
+  )
+  const checkpointsByRunId = new Map(
+    checkpoints
+      .filter((checkpoint) => checkpoint.threadId === thread.id)
+      .map((checkpoint) => [checkpoint.createdByRunId, checkpoint] as const)
+  )
+
+  return {
+    messages: result.messages.map((message) =>
+      serializeMessage(
+        message,
+        message.runId === null ? [] : (diagnosticsByRunId.get(message.runId) ?? []),
+        message.runId === null ? undefined : checkpointsByRunId.get(message.runId)
+      )
+    ),
+    hasMore: result.hasMore,
+    total: result.total,
   }
 }
 
@@ -500,45 +554,9 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           }
 
           const parsed = AgentMessagesQuerySchema.parse(query)
-          const limit = parseOptionalInt(parsed.limit)
-          const offset = parseOptionalInt(parsed.offset)
-          const result = await storage.messages.list({
-            projectId: host.id,
-            threadId: thread.id,
-            roles: parsed.role ? [parsed.role] : undefined,
-            limit,
-            offset,
-            order: parsed.order,
-          })
-          const runIds = result.messages.flatMap((message) =>
-            message.runId === null ? [] : [message.runId]
+          return AgentMessageListResponseSchema.parse(
+            await readThreadMessages(host.id, storage, thread, parsed)
           )
-          const [runs, checkpoints] = await Promise.all([
-            storage.runs.getByIds({ projectId: host.id, ids: runIds }),
-            storage.checkpoints.getByRunIds({ projectId: host.id, runIds }),
-          ])
-          const diagnosticsByRunId = new Map(
-            runs
-              .filter((run) => run.kind === "conversation" && run.threadId === thread.id)
-              .map((run) => [run.id, run.diagnostics ?? []] as const)
-          )
-          const checkpointsByRunId = new Map(
-            checkpoints
-              .filter((checkpoint) => checkpoint.threadId === thread.id)
-              .map((checkpoint) => [checkpoint.createdByRunId, checkpoint] as const)
-          )
-
-          return AgentMessageListResponseSchema.parse({
-            messages: result.messages.map((message) =>
-              serializeMessage(
-                message,
-                message.runId === null ? [] : (diagnosticsByRunId.get(message.runId) ?? []),
-                message.runId === null ? undefined : checkpointsByRunId.get(message.runId)
-              )
-            ),
-            hasMore: result.hasMore,
-            total: result.total,
-          })
         } catch (error) {
           return handleAgentRouteError(error, set)
         }

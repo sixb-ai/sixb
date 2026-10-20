@@ -186,6 +186,12 @@ import type {
   GetObjectTypeData,
   GetObjectTypeErrors,
   GetObjectTypeResponses,
+  GetObservedAgentMessageFileContentData,
+  GetObservedAgentMessageFileContentErrors,
+  GetObservedAgentMessageFileContentResponses,
+  GetObservedAgentThreadData,
+  GetObservedAgentThreadErrors,
+  GetObservedAgentThreadResponses,
   GetPipelineData,
   GetPipelineErrors,
   GetPipelineResponses,
@@ -333,6 +339,12 @@ import type {
   ListObjectsResponses,
   ListObjectTypesData,
   ListObjectTypesResponses,
+  ListObservedAgentThreadMessagesData,
+  ListObservedAgentThreadMessagesErrors,
+  ListObservedAgentThreadMessagesResponses,
+  ListObservedAgentThreadRunsData,
+  ListObservedAgentThreadRunsErrors,
+  ListObservedAgentThreadRunsResponses,
   ListPendingConnectorConnectionRunsData,
   ListPendingConnectorConnectionRunsErrors,
   ListPendingConnectorConnectionRunsResponses,
@@ -2718,6 +2730,78 @@ export const getAgentRun = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<GetAgentRunResponses, GetAgentRunErrors, ThrowOnError>({
     security: [{ scheme: "bearer", type: "http" }],
     url: "/api/agent-runs/{runId}",
+    ...options,
+  })
+
+/**
+ * Read another user's agent thread
+ *
+ * Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.
+ */
+export const getObservedAgentThread = <ThrowOnError extends boolean = false>(
+  options: Options<GetObservedAgentThreadData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetObservedAgentThreadResponses,
+    GetObservedAgentThreadErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/observed-agent-threads/{threadId}",
+    ...options,
+  })
+
+/**
+ * List another user's agent thread messages
+ *
+ * Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route. `authors` names who wrote the page's messages.
+ */
+export const listObservedAgentThreadMessages = <ThrowOnError extends boolean = false>(
+  options: Options<ListObservedAgentThreadMessagesData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListObservedAgentThreadMessagesResponses,
+    ListObservedAgentThreadMessagesErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/observed-agent-threads/{threadId}/messages",
+    ...options,
+  })
+
+/**
+ * Get a file of another user's agent message
+ *
+ * Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.
+ */
+export const getObservedAgentMessageFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<GetObservedAgentMessageFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetObservedAgentMessageFileContentResponses,
+    GetObservedAgentMessageFileContentErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/observed-agent-threads/{threadId}/messages/{messageId}/files/content",
+    ...options,
+  })
+
+/**
+ * List another user's agent thread runs
+ *
+ * Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.
+ */
+export const listObservedAgentThreadRuns = <ThrowOnError extends boolean = false>(
+  options: Options<ListObservedAgentThreadRunsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListObservedAgentThreadRunsResponses,
+    ListObservedAgentThreadRunsErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/observed-agent-threads/{threadId}/runs",
     ...options,
   })
 

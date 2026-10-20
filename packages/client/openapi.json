@@ -34865,6 +34865,1550 @@
         }
       }
     },
+    "/api/observed-agent-threads/{threadId}": {
+      "get": {
+        "summary": "Read another user's agent thread",
+        "description": "Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.",
+        "tags": ["Agent Threads"],
+        "operationId": "getObservedAgentThread",
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sandboxState": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["new", "busy", "ready", "blocked", "unavailable"]
+                        },
+                        "initialized": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["name", "status", "initialized"],
+                      "additionalProperties": false
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "type": "string"
+                    },
+                    "ownerPrincipal": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "sandboxParams": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "description": "Any JSON-compatible value.",
+                        "nullable": true,
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "array",
+                            "items": {}
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        ]
+                      }
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["active", "archived"]
+                    },
+                    "activeRunId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "lastMessageAt": {
+                      "type": "string"
+                    },
+                    "messageCount": {
+                      "type": "number"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "projectId",
+                    "ownerPrincipal",
+                    "status",
+                    "activeRunId",
+                    "messageCount",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/observed-agent-threads/{threadId}/messages": {
+      "get": {
+        "summary": "List another user's agent thread messages",
+        "description": "Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route. `authors` names who wrote the page's messages.",
+        "tags": ["Agent Threads"],
+        "operationId": "listObservedAgentThreadMessages",
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["system", "user", "assistant"]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "projectId": {
+                            "type": "string"
+                          },
+                          "threadId": {
+                            "type": "string"
+                          },
+                          "runId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "role": {
+                            "type": "string",
+                            "enum": ["system", "user", "assistant"]
+                          },
+                          "authorPrincipal": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "seq": {
+                            "type": "number"
+                          },
+                          "parts": {
+                            "type": "array",
+                            "items": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["text"]
+                                    },
+                                    "text": {
+                                      "type": "string"
+                                    },
+                                    "providerMetadata": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["type", "text"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["continuation"]
+                                    }
+                                  },
+                                  "required": ["type"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["reasoning"]
+                                    },
+                                    "text": {
+                                      "type": "string"
+                                    },
+                                    "providerMetadata": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["type", "text"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["step-start"]
+                                    }
+                                  },
+                                  "required": ["type"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["file"]
+                                    },
+                                    "fileRef": {
+                                      "type": "object",
+                                      "properties": {
+                                        "blobId": {
+                                          "type": "string"
+                                        },
+                                        "digest": {
+                                          "type": "string",
+                                          "pattern": "^sha256:[a-f0-9]{64}$"
+                                        },
+                                        "sizeBytes": {
+                                          "type": "integer",
+                                          "minimum": 0
+                                        },
+                                        "fileName": {
+                                          "type": "string"
+                                        },
+                                        "mediaType": {
+                                          "type": "string"
+                                        },
+                                        "logicalPath": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["blobId", "digest", "sizeBytes"],
+                                      "additionalProperties": false
+                                    },
+                                    "providerMetadata": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["type", "fileRef"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["provider-state"]
+                                    },
+                                    "providerId": {
+                                      "type": "string"
+                                    },
+                                    "data": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["type", "providerId", "data"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "context": {
+                                      "anyOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "enum": ["object"]
+                                            },
+                                            "ref": {
+                                              "type": "object",
+                                              "properties": {
+                                                "objectTypeId": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                },
+                                                "primaryId": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                }
+                                              },
+                                              "required": ["objectTypeId", "primaryId"],
+                                              "additionalProperties": false
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 200,
+                                              "description": "Shown in the chat instead of the object's title. Never sent to the model."
+                                            }
+                                          },
+                                          "required": ["kind", "ref"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "enum": ["app-state"]
+                                            },
+                                            "id": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "description": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "value": {
+                                              "description": "Any JSON-compatible value.",
+                                              "nullable": true,
+                                              "anyOf": [
+                                                {
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "type": "number"
+                                                },
+                                                {
+                                                  "type": "boolean"
+                                                },
+                                                {
+                                                  "type": "array",
+                                                  "items": {}
+                                                },
+                                                {
+                                                  "type": "object",
+                                                  "additionalProperties": true
+                                                }
+                                              ]
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "id",
+                                            "label",
+                                            "description",
+                                            "value"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      ]
+                                    },
+                                    "origin": {
+                                      "type": "string",
+                                      "enum": ["ambient", "explicit"]
+                                    },
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["context"]
+                                    }
+                                  },
+                                  "required": ["context", "origin", "type"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["tool-call"]
+                                    },
+                                    "toolCallId": {
+                                      "type": "string"
+                                    },
+                                    "toolName": {
+                                      "type": "string"
+                                    },
+                                    "dynamic": {
+                                      "type": "boolean"
+                                    },
+                                    "providerExecuted": {
+                                      "type": "boolean"
+                                    },
+                                    "input": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    },
+                                    "providerMetadata": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    },
+                                    "state": {
+                                      "type": "string",
+                                      "enum": ["output-available"]
+                                    },
+                                    "output": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "toolCallId",
+                                    "toolName",
+                                    "input",
+                                    "state",
+                                    "output"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["tool-call"]
+                                    },
+                                    "toolCallId": {
+                                      "type": "string"
+                                    },
+                                    "toolName": {
+                                      "type": "string"
+                                    },
+                                    "dynamic": {
+                                      "type": "boolean"
+                                    },
+                                    "providerExecuted": {
+                                      "type": "boolean"
+                                    },
+                                    "input": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    },
+                                    "providerMetadata": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    },
+                                    "state": {
+                                      "type": "string",
+                                      "enum": ["output-error"]
+                                    },
+                                    "errorText": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "toolCallId",
+                                    "toolName",
+                                    "input",
+                                    "state",
+                                    "errorText"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            }
+                          },
+                          "annotations": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": ["step_limit_reached"]
+                                },
+                                "severity": {
+                                  "type": "string",
+                                  "enum": ["warning", "error"]
+                                },
+                                "scope": {
+                                  "type": "string",
+                                  "enum": ["run"]
+                                },
+                                "message": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["code", "severity", "scope", "message"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "compaction": {
+                            "type": "object",
+                            "properties": {
+                              "checkpointId": {
+                                "type": "string"
+                              },
+                              "summary": {
+                                "type": "string"
+                              },
+                              "createdAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["checkpointId", "summary", "createdAt"],
+                            "additionalProperties": false
+                          },
+                          "metadata": {
+                            "description": "Any JSON-compatible value.",
+                            "nullable": true,
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            ]
+                          },
+                          "contentVersion": {
+                            "type": "number"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "completedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "projectId",
+                          "threadId",
+                          "runId",
+                          "role",
+                          "seq",
+                          "parts",
+                          "annotations",
+                          "contentVersion",
+                          "createdAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "total": {
+                      "type": "number"
+                    },
+                    "authors": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": ["user", "serviceAccount", "system"]
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "displayName": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["type", "id"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["messages", "hasMore", "total", "authors"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/observed-agent-threads/{threadId}/messages/{messageId}/files/content": {
+      "get": {
+        "summary": "Get a file of another user's agent message",
+        "description": "Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.",
+        "tags": ["Agent Threads"],
+        "operationId": "getObservedAgentMessageFileContent",
+        "responses": {
+          "200": {
+            "description": "File content",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Partial file content",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "File representation is unchanged; reuse the privately cached content"
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "Requested byte range is not satisfiable"
+          },
+          "501": {
+            "description": "The storage role backing this content is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "disposition",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["inline", "attachment"]
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Client cache key; the route still resolves the current file"
+            }
+          }
+        ]
+      }
+    },
+    "/api/observed-agent-threads/{threadId}/runs": {
+      "get": {
+        "summary": "List another user's agent thread runs",
+        "description": "Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.",
+        "tags": ["Agent Runs"],
+        "operationId": "listObservedAgentThreadRuns",
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "projectId": {
+                            "type": "string"
+                          },
+                          "threadId": {
+                            "type": "string"
+                          },
+                          "triggerMessageId": {
+                            "type": "string"
+                          },
+                          "requestedBy": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                          },
+                          "model": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "modelId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["provider", "modelId"],
+                            "additionalProperties": false
+                          },
+                          "reasoning": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "provider-default",
+                                  "none",
+                                  "minimal",
+                                  "low",
+                                  "medium",
+                                  "high",
+                                  "xhigh",
+                                  "max"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "budgetTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": ["budgetTokens"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "modelId": {
+                            "type": "string"
+                          },
+                          "finishReason": {
+                            "type": "string",
+                            "enum": [
+                              "stop",
+                              "length",
+                              "content-filter",
+                              "tool-calls",
+                              "timeout",
+                              "interrupted",
+                              "error",
+                              "other",
+                              "unknown"
+                            ]
+                          },
+                          "usage": {
+                            "type": "object",
+                            "properties": {
+                              "inputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "outputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "totalTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "uncachedInputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "cacheReadInputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "cacheWriteInputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "textOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "reasoningOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "audioDurationMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Audio content duration in milliseconds; not billed duration."
+                              },
+                              "reportingStatus": {
+                                "type": "string",
+                                "enum": ["complete", "partial", "unavailable"]
+                              }
+                            },
+                            "required": ["reportingStatus"],
+                            "additionalProperties": false
+                          },
+                          "cost": {
+                            "type": "object",
+                            "properties": {
+                              "amounts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "currency": {
+                                      "type": "string",
+                                      "pattern": "^[A-Z]{3}$"
+                                    },
+                                    "amountNanos": {
+                                      "type": "string",
+                                      "pattern": "^\\d+$"
+                                    }
+                                  },
+                                  "required": ["currency", "amountNanos"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "ratedCallCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "unpriceableCallCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "unvaluedCallCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "amounts",
+                              "ratedCallCount",
+                              "unpriceableCallCount",
+                              "unvaluedCallCount"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "diagnostics": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": ["step_limit_reached"]
+                                },
+                                "severity": {
+                                  "type": "string",
+                                  "enum": ["warning", "error"]
+                                },
+                                "scope": {
+                                  "type": "string",
+                                  "enum": ["run"]
+                                },
+                                "message": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["code", "severity", "scope", "message"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "error": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "agent.execution_failed",
+                                  "ai.usage_limit_exceeded",
+                                  "ai.usage_limit_unavailable"
+                                ]
+                              },
+                              "message": {
+                                "type": "string",
+                                "maxLength": 4096
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              },
+                              "httpStatus": {
+                                "type": "integer",
+                                "minimum": 100,
+                                "maximum": 599
+                              },
+                              "redacted": {
+                                "type": "boolean",
+                                "enum": [true]
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "enum": [true]
+                              }
+                            },
+                            "required": ["code", "message", "retryable", "at"],
+                            "additionalProperties": false
+                          },
+                          "attempt": {
+                            "type": "number"
+                          },
+                          "streamId": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "startedAt": {
+                            "type": "string"
+                          },
+                          "completedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "projectId",
+                          "threadId",
+                          "triggerMessageId",
+                          "status",
+                          "attempt",
+                          "streamId",
+                          "createdAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["runs", "hasMore", "total"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/artifacts": {
       "get": {
         "summary": "List artifacts",
@@ -45339,6 +46883,15 @@
                               },
                               "threadId": {
                                 "type": "string"
+                              },
+                              "thread": {
+                                "type": "object",
+                                "properties": {
+                                  "title": {
+                                    "type": "string"
+                                  }
+                                },
+                                "additionalProperties": false
                               },
                               "status": {
                                 "type": "string",

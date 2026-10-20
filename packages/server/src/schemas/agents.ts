@@ -244,6 +244,15 @@ export const AgentMessageListResponseSchema = z.object({
   total: z.number(),
 })
 
+/** Who wrote messages of a page, by their `authorPrincipal`, with an account's display name. */
+export const ObservedAgentMessageAuthorSchema = AgentPrincipalSchema.extend({
+  displayName: z.string().optional(),
+})
+
+export const ObservedAgentMessageListResponseSchema = AgentMessageListResponseSchema.extend({
+  authors: z.array(ObservedAgentMessageAuthorSchema),
+})
+
 export const PostAgentMessageBodySchema = z
   .object({
     /** Required unless `continue` is set. */

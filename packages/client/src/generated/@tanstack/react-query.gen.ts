@@ -70,6 +70,8 @@ import {
   getObject,
   getObjectFileContent,
   getObjectType,
+  getObservedAgentMessageFileContent,
+  getObservedAgentThread,
   getPipeline,
   getPipelineRun,
   getProjectInfo,
@@ -115,6 +117,8 @@ import {
   listModels,
   listObjects,
   listObjectTypes,
+  listObservedAgentThreadMessages,
+  listObservedAgentThreadRuns,
   listPendingConnectorConnectionRuns,
   listPipelineRuns,
   listPipelines,
@@ -346,6 +350,12 @@ import type {
   GetObjectTypeData,
   GetObjectTypeError,
   GetObjectTypeResponse,
+  GetObservedAgentMessageFileContentData,
+  GetObservedAgentMessageFileContentError,
+  GetObservedAgentMessageFileContentResponse,
+  GetObservedAgentThreadData,
+  GetObservedAgentThreadError,
+  GetObservedAgentThreadResponse,
   GetPipelineData,
   GetPipelineError,
   GetPipelineResponse,
@@ -475,6 +485,12 @@ import type {
   ListObjectsResponse,
   ListObjectTypesData,
   ListObjectTypesResponse,
+  ListObservedAgentThreadMessagesData,
+  ListObservedAgentThreadMessagesError,
+  ListObservedAgentThreadMessagesResponse,
+  ListObservedAgentThreadRunsData,
+  ListObservedAgentThreadRunsError,
+  ListObservedAgentThreadRunsResponse,
   ListPendingConnectorConnectionRunsData,
   ListPendingConnectorConnectionRunsError,
   ListPendingConnectorConnectionRunsResponse,
@@ -4499,6 +4515,227 @@ export const getAgentRunOptions = (options: Options<GetAgentRunData>) =>
     },
     queryKey: getAgentRunQueryKey(options),
   })
+
+export const getObservedAgentThreadQueryKey = (options: Options<GetObservedAgentThreadData>) =>
+  createQueryKey("getObservedAgentThread", options)
+
+/**
+ * Read another user's agent thread
+ *
+ * Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.
+ */
+export const getObservedAgentThreadOptions = (options: Options<GetObservedAgentThreadData>) =>
+  queryOptions<
+    GetObservedAgentThreadResponse,
+    GetObservedAgentThreadError,
+    GetObservedAgentThreadResponse,
+    ReturnType<typeof getObservedAgentThreadQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getObservedAgentThread({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getObservedAgentThreadQueryKey(options),
+  })
+
+export const listObservedAgentThreadMessagesQueryKey = (
+  options: Options<ListObservedAgentThreadMessagesData>
+) => createQueryKey("listObservedAgentThreadMessages", options)
+
+/**
+ * List another user's agent thread messages
+ *
+ * Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route. `authors` names who wrote the page's messages.
+ */
+export const listObservedAgentThreadMessagesOptions = (
+  options: Options<ListObservedAgentThreadMessagesData>
+) =>
+  queryOptions<
+    ListObservedAgentThreadMessagesResponse,
+    ListObservedAgentThreadMessagesError,
+    ListObservedAgentThreadMessagesResponse,
+    ReturnType<typeof listObservedAgentThreadMessagesQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listObservedAgentThreadMessages({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listObservedAgentThreadMessagesQueryKey(options),
+  })
+
+export const listObservedAgentThreadMessagesInfiniteQueryKey = (
+  options: Options<ListObservedAgentThreadMessagesData>
+): QueryKey<Options<ListObservedAgentThreadMessagesData>> =>
+  createQueryKey("listObservedAgentThreadMessages", options, true)
+
+/**
+ * List another user's agent thread messages
+ *
+ * Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route. `authors` names who wrote the page's messages.
+ */
+export const listObservedAgentThreadMessagesInfiniteOptions = (
+  options: Options<ListObservedAgentThreadMessagesData>
+) =>
+  infiniteQueryOptions<
+    ListObservedAgentThreadMessagesResponse,
+    ListObservedAgentThreadMessagesError,
+    InfiniteData<ListObservedAgentThreadMessagesResponse>,
+    QueryKey<Options<ListObservedAgentThreadMessagesData>>,
+    | string
+    | Pick<
+        QueryKey<Options<ListObservedAgentThreadMessagesData>>[0],
+        "body" | "headers" | "path" | "query"
+      >
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListObservedAgentThreadMessagesData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listObservedAgentThreadMessages({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listObservedAgentThreadMessagesInfiniteQueryKey(options),
+    }
+  )
+
+export const getObservedAgentMessageFileContentQueryKey = (
+  options: Options<GetObservedAgentMessageFileContentData>
+) => createQueryKey("getObservedAgentMessageFileContent", options)
+
+/**
+ * Get a file of another user's agent message
+ *
+ * Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.
+ */
+export const getObservedAgentMessageFileContentOptions = (
+  options: Options<GetObservedAgentMessageFileContentData>
+) =>
+  queryOptions<
+    GetObservedAgentMessageFileContentResponse,
+    GetObservedAgentMessageFileContentError,
+    GetObservedAgentMessageFileContentResponse,
+    ReturnType<typeof getObservedAgentMessageFileContentQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getObservedAgentMessageFileContent({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getObservedAgentMessageFileContentQueryKey(options),
+  })
+
+export const listObservedAgentThreadRunsQueryKey = (
+  options: Options<ListObservedAgentThreadRunsData>
+) => createQueryKey("listObservedAgentThreadRuns", options)
+
+/**
+ * List another user's agent thread runs
+ *
+ * Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.
+ */
+export const listObservedAgentThreadRunsOptions = (
+  options: Options<ListObservedAgentThreadRunsData>
+) =>
+  queryOptions<
+    ListObservedAgentThreadRunsResponse,
+    ListObservedAgentThreadRunsError,
+    ListObservedAgentThreadRunsResponse,
+    ReturnType<typeof listObservedAgentThreadRunsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listObservedAgentThreadRuns({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listObservedAgentThreadRunsQueryKey(options),
+  })
+
+export const listObservedAgentThreadRunsInfiniteQueryKey = (
+  options: Options<ListObservedAgentThreadRunsData>
+): QueryKey<Options<ListObservedAgentThreadRunsData>> =>
+  createQueryKey("listObservedAgentThreadRuns", options, true)
+
+/**
+ * List another user's agent thread runs
+ *
+ * Read-only, whoever owns the thread. Takes can.observe(agent.threads); the response matches the owner's route.
+ */
+export const listObservedAgentThreadRunsInfiniteOptions = (
+  options: Options<ListObservedAgentThreadRunsData>
+) =>
+  infiniteQueryOptions<
+    ListObservedAgentThreadRunsResponse,
+    ListObservedAgentThreadRunsError,
+    InfiniteData<ListObservedAgentThreadRunsResponse>,
+    QueryKey<Options<ListObservedAgentThreadRunsData>>,
+    | string
+    | Pick<
+        QueryKey<Options<ListObservedAgentThreadRunsData>>[0],
+        "body" | "headers" | "path" | "query"
+      >
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListObservedAgentThreadRunsData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listObservedAgentThreadRuns({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listObservedAgentThreadRunsInfiniteQueryKey(options),
+    }
+  )
 
 export const listArtifactsQueryKey = (options?: Options<ListArtifactsData>) =>
   createQueryKey("listArtifacts", options)
