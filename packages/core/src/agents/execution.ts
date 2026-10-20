@@ -2,7 +2,6 @@ import {
   createObservedAgentArtifactsRuntime,
   type ObservedAgentArtifactsRuntime,
 } from "../artifacts/observed"
-import { principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized, isRuntimeAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
@@ -12,7 +11,6 @@ import { resolveExecutionUsage } from "../runtime/ai-usage"
 import type { SixbDependencies } from "../runtime/sixb"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type {
-  AgentThreadRecord,
   ConversationAgentRunRecord,
   ListAgentRunsInput,
   ListAgentRunsResult,
@@ -31,20 +29,26 @@ import {
 } from "./request"
 import { assertNoAgentSelector } from "./retired-config"
 import { normalizeSandboxBinding } from "./sandbox"
+import {
+  type AgentThreadView,
+  agentThreadViews,
+  createAgentThreadAccessRule,
+} from "./thread-access"
 import type { AgentDescriptor } from "./types"
 
 export type ExecutionAgentRequestInput = Omit<RequestAgentRunInput, "principal">
 
-/** Execution ownership tokens never leave the storage/worker boundary. */
-function publicThread(thread: AgentThreadRecord): AgentThreadRecord {
-  if (!thread.sandboxState) return thread
-  const { name, status, initialized } = thread.sandboxState
-  return { ...thread, sandboxState: { name, status, initialized } }
-}
 export type ListExecutionAgentThreadsInput = Omit<
   ListAgentThreadsInput,
-  "projectId" | "ownerPrincipal"
->
+  "projectId" | "ownerPrincipal" | "participantPrincipal"
+> & {
+  /** The threads other users added the caller to, instead of the caller's own. */
+  readonly sharedWithMe?: boolean
+}
+
+export interface ListAgentThreadViewsResult extends Omit<ListAgentThreadsResult, "threads"> {
+  readonly threads: readonly AgentThreadView[]
+}
 
 export type CreateExecutionAgentThreadInput<
   TParams extends Record<string, unknown> = Record<string, unknown>,
@@ -60,10 +64,12 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
     recreateSandbox(
       threadId: string,
       input: { readonly expectedSandboxName: string }
-    ): Promise<AgentThreadRecord>
-    create(input: CreateExecutionAgentThreadInput<TParams>): Promise<AgentThreadRecord>
-    getById(threadId: string): Promise<AgentThreadRecord | null>
-    list(input?: ListExecutionAgentThreadsInput): Promise<ListAgentThreadsResult>
+    ): Promise<AgentThreadView>
+    create(input: CreateExecutionAgentThreadInput<TParams>): Promise<AgentThreadView>
+    /** A thread the caller owns or takes part in. */
+    getById(threadId: string): Promise<AgentThreadView | null>
+    /** The caller's own threads, or with `sharedWithMe` the ones other users added it to. */
+    list(input?: ListExecutionAgentThreadsInput): Promise<ListAgentThreadViewsResult>
   }
 
 /**
@@ -72,7 +78,7 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
  */
 export interface ObservedAgentThreadsRuntime {
   /** Throws an `AuthorizationError` without `can.observe(agent.threads)`. */
-  getById(threadId: string): Promise<AgentThreadRecord | null>
+  getById(threadId: string): Promise<AgentThreadView | null>
   /** The thread's conversation runs; `null` when the thread does not exist. */
   listRuns(
     threadId: string,
@@ -127,21 +133,12 @@ export function createAgentRuntime<
   sandbox?: SixbDependencies["sandbox"]
 ): AgentRuntime<TParams> {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
-  const principal = authority.type === "principal" ? authority.context.principal : SYSTEM_PRINCIPAL
+  const rule = createAgentThreadAccessRule(runtime, authority)
+  const principal = rule.caller
   const allowed = () => isRuntimeAllowed(runtime, { kind: "agent.run" })
 
-  const getVisibleThreadRecord = async (threadId: string): Promise<AgentThreadRecord | null> => {
-    if (authority.type === "denied" || authority.type === "delegated") return null
-    const thread =
-      (await runtime.storage.agents?.threads.getById({
-        projectId: runtime.projectId,
-        id: threadId,
-      })) ?? null
-    if (!thread || !allowed()) return null
-    return authority.type === "principal" && !principalsEqual(principal, thread.ownerPrincipal)
-      ? null
-      : publicThread(thread)
-  }
+  const getVisibleThreadRecord = async (threadId: string): Promise<AgentThreadView | null> =>
+    (await rule.read(threadId))?.thread ?? null
 
   const getAgent = (): AgentDescriptor | null => {
     if (authority.type === "denied" || authority.type === "delegated") return null
@@ -190,7 +187,8 @@ export function createAgentRuntime<
           expectedSandboxName: input.expectedSandboxName,
           name: createAgentThreadSandboxName(runtime.projectId, threadId),
         })
-        return publicThread({ ...thread, sandboxState })
+        const [view] = await agentThreadViews(runtime, [{ ...thread, sandboxState }])
+        return view ?? thread
       },
       create: async (input) => {
         assertNoAgentSelector(input)
@@ -215,28 +213,36 @@ export function createAgentRuntime<
           input.sandbox === undefined
             ? undefined
             : normalizeSandboxBinding(sandbox?.definition, input.sandbox, runtime.ontology)
-        return storage.threads.create({
+        const created = await storage.threads.create({
           ...(binding === undefined ? {} : { sandboxParams: binding }),
           id: input.id ?? createAgentThreadId(),
           projectId: runtime.projectId,
           ownerPrincipal: principal,
           ...(input.title === undefined ? {} : { title: input.title }),
         })
+        return { ...created, participants: [] }
       },
       getById: getVisibleThreadRecord,
-      list: async (input = {}) => {
+      list: async ({ sharedWithMe, ...input } = {}) => {
         assertNoAgentSelector(input)
-        if (authority.type === "denied" || authority.type === "delegated") {
-          return { threads: [], hasMore: false, total: 0 }
-        }
+        const none = { threads: [], hasMore: false, total: 0 }
+        if (authority.type === "denied" || authority.type === "delegated") return none
+
         const storage = runtime.storage.agents
-        if (!storage || !allowed()) return { threads: [], hasMore: false, total: 0 }
+        if (!storage || !allowed()) return none
+
+        // Code without a caller owns every thread, so nothing is shared with it.
+        const caller = authority.type === "principal" ? principal : undefined
+        if (sharedWithMe && caller?.type !== "user") return none
+
         const result = await storage.threads.list({
           ...input,
           projectId: runtime.projectId,
-          ownerPrincipal: authority.type === "principal" ? principal : undefined,
+          ...(sharedWithMe && caller?.type === "user"
+            ? { participantPrincipal: caller }
+            : { ownerPrincipal: caller }),
         })
-        return { ...result, threads: result.threads.map(publicThread) }
+        return { ...result, threads: await agentThreadViews(runtime, result.threads) }
       },
     },
     runs: {
@@ -285,14 +291,17 @@ export function createAgentRuntime<
 function createObservedAgentThreadsRuntime(
   runtime: SixbRuntimeContext
 ): ObservedAgentThreadsRuntime {
-  const getById = async (threadId: string): Promise<AgentThreadRecord | null> => {
+  const getById = async (threadId: string): Promise<AgentThreadView | null> => {
     assertAuthorized(runtime, { kind: "agentThreads.observe" })
 
     const thread = await runtime.storage.agents?.threads.getById({
       projectId: runtime.projectId,
       id: threadId,
     })
-    return thread ? publicThread(thread) : null
+    if (!thread) return null
+
+    const [view] = await agentThreadViews(runtime, [thread])
+    return view ?? null
   }
 
   return {
