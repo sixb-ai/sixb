@@ -8,6 +8,7 @@ import {
   link,
   OntologyRegistry,
   prop,
+  ScheduleValidationError,
 } from "../src"
 import { DomainEventService } from "../src/events"
 import type { OntologyMaterializationEvent } from "../src/materialization/events"
@@ -92,6 +93,27 @@ describe("evaluateEventSchedule", () => {
       createdAt: "2026-01-01T00:00:00.000Z",
       producer: { kind: "sync", id: "sync-invoices", runId: "run-1" },
     })
+  })
+
+  test("builds a member's occurrence context from the selected event", async () => {
+    const schedule = defineSchedule("member-joined").on(events.users().joined())
+    const runtime = new DomainEventService({ projectId: "test", broker: new InMemoryBroker() })
+    const user = { id: "usr_ava", email: "ava@acme.com", status: "active" } as const
+    const [joined, suspended] = await runtime.append({
+      events: [
+        { type: "user.joined", payload: { user, invitationId: "inv_ava" } },
+        {
+          type: "user.suspended",
+          payload: { user, requestedBy: { type: "user", id: "usr_admin" } },
+        },
+      ],
+    })
+
+    expect(evaluateEventSchedule(schedule, joined!)?.event).toEqual({
+      user,
+      invitationId: "inv_ava",
+    })
+    expect(evaluateEventSchedule(schedule, suspended!)).toBeNull()
   })
 })
 
@@ -346,5 +368,31 @@ describe("validateSchedulesAtStartup", () => {
         registeredPipelineIds: new Set([pipeline.id]),
       })
     ).not.toThrow()
+  })
+
+  test("validates member event sources", () => {
+    const ontology = new OntologyRegistry({ sources: [Invoice, Payment] })
+
+    expect(() =>
+      validateSchedulesAtStartup(
+        [defineSchedule("member-joined").on(events.users().joined())],
+        ontology
+      )
+    ).not.toThrow()
+    expect(() => defineSchedule("any-member-event").on(events.users())).toThrow(
+      ScheduleValidationError
+    )
+    expect(() =>
+      validateSchedulesAtStartup(
+        [
+          {
+            kind: "schedule",
+            id: "member-objects",
+            trigger: { type: "event", source: { topic: "users", types: ["object.created"] } },
+          },
+        ],
+        ontology
+      )
+    ).toThrow('unsupported member event type "object.created"')
   })
 })

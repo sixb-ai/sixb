@@ -11,6 +11,13 @@ const ruleEventTypes = new Set(["rule.triggered", "rule.resolved"])
 const datasetEventTypes = new Set(["dataset.version.committed"])
 const syncEventTypes = new Set(["sync.run.finished"])
 const pipelineEventTypes = new Set(["pipeline.run.finished"])
+const userEventTypes = new Set([
+  "user.joined",
+  "user.suspended",
+  "user.reactivated",
+  "user.invited",
+  "user.profile.updated",
+])
 const runStatuses = new Set(["succeeded", "failed", "cancelled"])
 const linkIdentityFields = new Set(["target.objectTypeId", "target.primaryId"])
 
@@ -147,9 +154,11 @@ function assertEventSourceShape(
       assertNonEmptyString(value.pipelineId, `${path} pipelineId`, createError)
       assertRunStatus(value.runStatus, path, createError)
       return
+    case "users":
+      return
     default:
       throw createError(
-        `${path} must select object, link, rule, dataset, sync, or pipeline events.`
+        `${path} must select object, link, rule, dataset, sync, pipeline, or member events.`
       )
   }
 }
@@ -234,6 +243,9 @@ function validateEventSchedule(
         "pipeline"
       )
       return
+    case "users":
+      validateMemberSource(schedule)
+      return
   }
 }
 
@@ -291,6 +303,16 @@ function validateRegisteredSource(
   if (schedule.trigger.condition) {
     throw new ScheduleValidationError(
       `Schedule "${schedule.id}": ${sourceKind} event sources do not support .where() conditions.`
+    )
+  }
+}
+
+// The project has one member directory, so a member event source names nothing to look up.
+function validateMemberSource(schedule: EventScheduleDefinition): void {
+  validateEventTypes(schedule, userEventTypes, "member")
+  if (schedule.trigger.condition) {
+    throw new ScheduleValidationError(
+      `Schedule "${schedule.id}": member event sources do not support .where() conditions.`
     )
   }
 }

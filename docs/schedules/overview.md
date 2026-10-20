@@ -69,7 +69,8 @@ Attach it with `.when(highValueInvoice)`, just like a timer. For workflows that 
 use `.when(schedule, mapper)` to turn event data into that input. See
 [workflow event schedules](../workflows/overview.md#start-a-workflow) for an example.
 
-You can also select link changes, rule signals, dataset updates, and sync or pipeline outcomes.
+You can also select link changes, rule signals, dataset updates, sync or pipeline outcomes, and
+[member changes](../auth/members.md#react-to-member-changes) such as `events.users().joined()`.
 Conditions are supported on object and link events only.
 
 Event schedules start work when an event occurs. Use [rules](../rules/overview.md) when you need

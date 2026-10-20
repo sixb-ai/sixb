@@ -655,6 +655,57 @@ describe("OrchestratorWorker", () => {
     ).toHaveLength(1)
   })
 
+  test("a member's first sign-in starts a workflow with input mapped from the event", async () => {
+    const memberJoined = defineSchedule("member-joined").on(events.users().joined())
+    const welcome = defineWorkflow("welcome-member")
+      .input({ userId: "string", email: "string" })
+      .when(memberJoined, ({ event }) => ({ userId: event.user.id, email: event.user.email }))
+      .then(
+        defineWorkflowStep("greet")
+          .input({ userId: "string", email: "string" })
+          .output({})
+          .run(() => ({}))
+      )
+    const routes = compileRoutes({
+      schedules: [memberJoined],
+      syncs: [],
+      pipelines: [],
+      workflows: [welcome],
+    })
+    const eventRuntime = createEvents()
+    const queues = new InMemoryQueues()
+    const dispatches: WorkflowDispatchInput[] = []
+    await startWorker(
+      eventRuntime,
+      queues,
+      routes,
+      PROJECT_ID,
+      undefined,
+      createTestWorkflowRunDispatcher(queues, dispatches)
+    )
+
+    const user = { id: "usr_ava", email: "ava@acme.com", status: "active" } as const
+    await eventRuntime.append({
+      events: [
+        {
+          type: "user.suspended",
+          payload: { user, requestedBy: { type: "user", id: "usr_admin" } },
+        },
+      ],
+    })
+    const [joined] = await eventRuntime.append({
+      events: [{ type: "user.joined", payload: { user } }],
+    })
+
+    await waitFor(() => dispatches.length === 1)
+    expect(dispatches[0]).toMatchObject({
+      workflowId: welcome.id,
+      input: { userId: "usr_ava", email: "ava@acme.com" },
+      scheduleId: memberJoined.id,
+      source: { type: "event", eventId: joined!.id },
+    })
+  })
+
   test("dataset commits pass the immutable version to the Projection dispatcher", async () => {
     const descriptor = invoiceProjectionDescriptor()
     const routes = compileRoutes({

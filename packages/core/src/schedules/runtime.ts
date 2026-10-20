@@ -106,6 +106,12 @@ export function buildEventScheduleContext(event: DomainEvent): RuntimeEventSched
       return { ...event.payload }
     case "pipeline.run.finished":
       return { ...event.payload }
+    case "user.joined":
+    case "user.suspended":
+    case "user.reactivated":
+    case "user.invited":
+    case "user.profile.updated":
+      return { ...event.payload }
     default:
       return null
   }

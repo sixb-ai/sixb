@@ -142,3 +142,21 @@ defineWorkflow("empty-triggered-workflow")
       .output({})
       .run(() => ({}))
   )
+
+const memberJoined = defineSchedule("member-joined").on(events.users().joined())
+
+defineSchedule("member-joined-where")
+  .on(events.users().joined())
+  // @ts-expect-error member event sources have no conditions
+  .where(() => undefined)
+
+defineWorkflow("welcome-member")
+  .input({ userId: "string", email: "string" })
+  .when(memberJoined, ({ event }) => {
+    event.invitationId satisfies string | undefined
+
+    // @ts-expect-error a joined member has no requester
+    event.requestedBy
+
+    return { userId: event.user.id, email: event.user.email }
+  })
