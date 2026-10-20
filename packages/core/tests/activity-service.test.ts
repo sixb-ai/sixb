@@ -23,7 +23,8 @@ test("history and the calendar stay readable years after collection", async () =
 
   const visits = await service.list(range)
   expect(visits.visits).toHaveLength(1)
-  expect((await service.read(visits.visits[0]?.id ?? ""))?.pageViews[0]?.id).toBe("old")
+  const visit = await service.readWithSession({ id: visits.visits[0]?.id ?? "", limit: 10 })
+  expect(visit?.pageViews[0]?.id).toBe("old")
 
   expect(await service.calendar({ userId: "u", year: 2024 })).toEqual({
     userId: "u",
@@ -57,7 +58,7 @@ test("the service validates settings, identifiers, periods and calendar years", 
   expect(() => service.list({ from: range.from, to: new Date("2024-04-01T00:00:00Z") })).toThrow(
     "31 days"
   )
-  expect(() => service.read("../other")).toThrow("visit id")
+  expect(() => service.readWithSession({ id: "../other", limit: 1 })).toThrow("visit id")
 
   for (const userId of ["", "   ", "x".repeat(257)]) {
     expect(() => service.list({ ...range, userId })).toThrow("userId")

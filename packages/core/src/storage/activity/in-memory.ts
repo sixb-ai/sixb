@@ -188,9 +188,7 @@ export class InMemoryActivityStorage implements ActivityStorage {
       return null
     }
 
-    const pageViews = this.pageViewsOf(visit)
-      .filter((pageView) => pageView.sequence > input.afterSequence)
-      .sort((left, right) => left.sequence - right.sequence)
+    const pageViews = this.pageViewsOf(visit).sort((left, right) => left.sequence - right.sequence)
 
     return {
       visit: toVisit(visit),

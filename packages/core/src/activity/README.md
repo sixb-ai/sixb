@@ -84,8 +84,9 @@ new one with its next event.
   reuses that grant for the share connection's status.
 - Visit and user cursors use last activity plus id, newest first. Ids compare byte by byte
   (`COLLATE "C"` in PostgreSQL); generated visit ids are ASCII, so every provider orders them alike.
-  Timelines use sequence. Live activity can move a visit between pages, so clients deduplicate
-  ids and offer a refresh.
+  A visit's page views read by sequence, the first 200 of them in its timeline, which is the only
+  read of one visit. Live activity can move a visit between pages, so clients deduplicate ids and
+  offer a refresh.
 
 ## Timeline and connections
 

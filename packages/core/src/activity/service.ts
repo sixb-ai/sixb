@@ -17,7 +17,6 @@ import type {
   ActivityStorage,
   ActivitySummary,
   ActivityUsersPage,
-  ActivityVisitPage,
   ActivityVisitsPage,
   ListActivitySessionVisitsInput,
   StoredActivityVisitPage,
@@ -71,13 +70,6 @@ export interface ActivityCalendar {
   readonly userId: string
   readonly year: number
   readonly days: readonly ActivityDay[]
-}
-
-export interface ActivityTimelineQuery {
-  /** Page views after this sequence. Default: 0, from the first. */
-  readonly afterSequence?: number
-  /** 1 to 100. Default: 50. */
-  readonly limit?: number
 }
 
 /** The session whose browser sent a batch, from its verified authorization. */
@@ -178,41 +170,23 @@ export class ActivityService {
     return { userId: query.userId, year: query.year, days }
   }
 
-  read(id: string, query: ActivityTimelineQuery = {}): Promise<ActivityVisitPage | null> {
-    const page = this.readWithSession({
-      id,
-      afterSequence: query.afterSequence ?? 0,
-      limit: pageLimit(query.limit),
-    })
-
-    // The session id joins a visit with what its session did; reads never return it.
-    return page.then((stored) => {
-      if (!stored) {
-        return null
-      }
-      const { sessionId: _sessionId, ...visit } = stored
-      return visit
-    })
-  }
-
-  /** A visit and the session it belongs to, which only core reads: see `read`. */
+  /**
+   * A visit, its first page views, and the session it belongs to: the timeline joins on it, and it
+   * never leaves core.
+   */
   readWithSession(input: {
     readonly id: string
-    readonly afterSequence?: number
     readonly limit: number
   }): Promise<StoredActivityVisitPage | null> {
-    const { id, limit } = input
-    const afterSequence = input.afterSequence ?? 0
-    if (
-      typeof id !== "string" ||
-      !ACTIVITY_VISIT_ID_PATTERN.test(id) ||
-      !Number.isSafeInteger(afterSequence) ||
-      afterSequence < 0
-    ) {
-      throw new Error("[Sixb] Invalid activity visit id or sequence.")
+    if (typeof input.id !== "string" || !ACTIVITY_VISIT_ID_PATTERN.test(input.id)) {
+      throw new Error("[Sixb] Invalid activity visit id.")
     }
 
-    return this.requireStorage().read({ projectId: this.projectId, id, afterSequence, limit })
+    return this.requireStorage().read({
+      projectId: this.projectId,
+      id: input.id,
+      limit: input.limit,
+    })
   }
 
   connectionsQuery(query: ActivityConnectionsQuery): {

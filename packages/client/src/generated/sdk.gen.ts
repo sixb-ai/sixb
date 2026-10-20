@@ -106,9 +106,6 @@ import type {
   GetActivitySummaryData,
   GetActivitySummaryErrors,
   GetActivitySummaryResponses,
-  GetActivityVisitData,
-  GetActivityVisitErrors,
-  GetActivityVisitResponses,
   GetActivityVisitTimelineData,
   GetActivityVisitTimelineErrors,
   GetActivityVisitTimelineResponses,
@@ -3172,21 +3169,6 @@ export const getActivityCalendar = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/activity/calendar",
-    ...options,
-  })
-
-/**
- * Read the page views of one visit
- */
-export const getActivityVisit = <ThrowOnError extends boolean = false>(
-  options: Options<GetActivityVisitData, ThrowOnError>
-) =>
-  (options.client ?? client).get<GetActivityVisitResponses, GetActivityVisitErrors, ThrowOnError>({
-    security: [
-      { scheme: "bearer", type: "http" },
-      { scheme: "bearer", type: "http" },
-    ],
-    url: "/api/activity/visits/{visitId}",
     ...options,
   })
 

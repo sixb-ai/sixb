@@ -1,12 +1,7 @@
 import { AuthorizationError, assertAuthorized } from "../authorization"
 import { getAuthorizationRef } from "../execution/authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
-import type {
-  ActivityEventInput,
-  ActivitySummary,
-  ActivityUser,
-  ActivityVisitPage,
-} from "../storage/activity/types"
+import type { ActivityEventInput, ActivitySummary, ActivityUser } from "../storage/activity/types"
 import {
   type ActivityConnectionsPage,
   type ActivityConnectionsQuery,
@@ -21,7 +16,6 @@ import type {
   ActivityPeriodQuery,
   ActivityService,
   ActivitySource,
-  ActivityTimelineQuery,
 } from "./service"
 import { type ActivityVisitView, nameSharedVisit, nameSharedVisits } from "./shares"
 import {
@@ -48,10 +42,6 @@ export interface ActivityRuntime {
   users(query: ActivityPageQuery): Promise<ActivityUsersResult>
   summarize(query: ActivityPeriodQuery): Promise<ActivitySummary>
   calendar(query: ActivityCalendarQuery): Promise<ActivityCalendar>
-  read(
-    visitId: string,
-    query?: ActivityTimelineQuery
-  ): Promise<(Omit<ActivityVisitPage, "visit"> & { readonly visit: ActivityVisitView }) | null>
   /**
    * The visit's page views with the actions, workflows and Agent runs its session started, and
    * the connection it came through. Bounded: see `truncated`.
@@ -112,16 +102,6 @@ export function createActivityRuntime(
     async calendar(query) {
       assertObservable()
       return service.calendar(query)
-    },
-
-    async read(visitId, query) {
-      assertObservable()
-      const page = await service.read(visitId, query)
-      if (!page) {
-        return null
-      }
-
-      return { ...page, visit: (await nameSharedVisit(runtime, page.visit)).visit }
     },
 
     async timeline(visitId) {

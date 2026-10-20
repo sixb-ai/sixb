@@ -480,7 +480,7 @@ export function runActivityStorageContractSuite<TStorage extends Storage>(
       })
     })
 
-    test("the timeline pages through a visit by sequence", async () => {
+    test("a visit reads its first page views by sequence", async () => {
       await withActivity(async (activity) => {
         for (const id of ["one", "two", "three"]) {
           await activity.append(batch(id, { newVisitId: "visit-timeline" }))
@@ -493,14 +493,13 @@ export function runActivityStorageContractSuite<TStorage extends Storage>(
         ])
         expect(first?.hasMore).toBe(true)
 
-        const rest = await activity.read({
-          projectId,
-          id: "visit-timeline",
-          afterSequence: 2,
-          limit: 2,
-        })
-        expect(rest?.pageViews.map((view) => [view.id, view.sequence])).toEqual([["three", 3]])
-        expect(rest?.hasMore).toBe(false)
+        const all = await read(activity, "visit-timeline", 3)
+        expect(all?.pageViews.map((view) => [view.id, view.sequence])).toEqual([
+          ["one", 1],
+          ["two", 2],
+          ["three", 3],
+        ])
+        expect(all?.hasMore).toBe(false)
       })
     })
 
@@ -641,5 +640,5 @@ function later(minutes: number): Date {
 }
 
 function read(activity: ActivityStorage, id: string, limit = 10, project = projectId) {
-  return activity.read({ projectId: project, id, afterSequence: 0, limit })
+  return activity.read({ projectId: project, id, limit })
 }

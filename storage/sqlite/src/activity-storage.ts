@@ -289,13 +289,12 @@ export class SqliteActivityStorage implements ActivityStorage {
       `
         SELECT id, visit_id, sequence, route, received_at
         FROM activity_page_views
-        WHERE project_id = ? AND visit_id = ? AND sequence > ?
+        WHERE project_id = ? AND visit_id = ?
         ORDER BY sequence
         LIMIT ?
       `,
       input.projectId,
       input.id,
-      input.afterSequence,
       input.limit + 1
     )
 

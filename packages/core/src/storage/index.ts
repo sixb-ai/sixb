@@ -66,7 +66,6 @@ export type {
   ActivityUser,
   ActivityUsersPage,
   ActivityVisit,
-  ActivityVisitPage,
   ActivityVisitsPage,
   AppendActivityInput,
   AppendActivityResult,
