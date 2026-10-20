@@ -114,6 +114,7 @@ export type {
   DeleteAgentMessagesByRunInput,
   FinishAgentRunInput,
   FinishQueuedAgentRunInput,
+  ForkAgentThreadInput,
   ListAgentMessagesInput,
   ListAgentMessagesResult,
   ListAgentRunsInput,

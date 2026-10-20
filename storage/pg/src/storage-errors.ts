@@ -81,6 +81,13 @@ export function isUniqueViolation(error: unknown): boolean {
   return pgErrorCode(error) === UNIQUE_VIOLATION
 }
 
+/** True when the error is a unique violation of exactly the named constraint. */
+export function isUniqueViolationOf(error: unknown, constraint: string): boolean {
+  if (!isUniqueViolation(error)) return false
+
+  return (error as { readonly constraint_name?: unknown }).constraint_name === constraint
+}
+
 /** True when the error is a PostgreSQL foreign-key violation (SQLSTATE 23503). */
 export function isForeignKeyViolation(error: unknown): boolean {
   return pgErrorCode(error) === FOREIGN_KEY_VIOLATION

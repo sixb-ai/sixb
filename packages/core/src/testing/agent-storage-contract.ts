@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { AGENT_MESSAGE_CONTENT_VERSION } from "../agents/message"
+import { projectAgentThreadModelContext } from "../agents/thread-context-projection"
 import type { Principal } from "../auth"
 import type { SixbFailure } from "../errors/types"
 import {
@@ -14,6 +15,7 @@ import {
   type CreateAgentRunInput,
   type CreateAgentThreadInput,
   type CreateSubagentRunInput,
+  type ForkAgentThreadInput,
   type StartAgentRunInput,
 } from "../storage/agents"
 import type { AuthStorage } from "../storage/auth"
@@ -39,6 +41,7 @@ export interface AgentStorageContractSuiteOptions<
 const projectId = "project-a"
 const otherProjectId = "project-b"
 const owner: Principal = { type: "user", id: "usr_1" }
+const otherUser: Principal = { type: "user", id: "usr_2" }
 const serviceAccount: Extract<Principal, { readonly type: "serviceAccount" }> = {
   type: "serviceAccount",
   id: "svc_agent_sales",
@@ -290,6 +293,141 @@ async function prepareCheckpointCandidate(
     storage,
     fixture,
     runInput({ id: "run_2", triggerMessageId: "m3", execution: execution("exec_2") })
+  )
+}
+
+const forkedFile = {
+  blobId: "blob_report",
+  digest: `sha256:${"a".repeat(64)}`,
+  sizeBytes: 12,
+  fileName: "report.csv",
+  mediaType: "text/csv",
+} as const
+
+function forkInput(overrides: Partial<ForkAgentThreadInput> = {}): ForkAgentThreadInput {
+  return {
+    projectId,
+    sourceThreadId: "thr_1",
+    id: "thr_fork",
+    ownerPrincipal: otherUser,
+    title: "Slipped deals",
+    createdAt: at("2026-06-23T11:00:00.000Z"),
+    ...overrides,
+  }
+}
+
+/**
+ * Two finished turns, then a third still running, each compacted by the run that follows:
+ * `checkpoint_1` (written by finished `run_2`) and `checkpoint_2` (written by running `run_3`,
+ * anchored on its trigger `m5`).
+ */
+async function prepareForkSource(
+  storage: AgentStorage,
+  fixture: AgentStorageContractStorage
+): Promise<void> {
+  await storage.threads.create(threadInput({ title: "Slipped deals" }))
+  await storage.messages.append({
+    id: "m1",
+    projectId,
+    threadId: "thr_1",
+    runId: null,
+    role: "user",
+    authorPrincipal: owner,
+    parts: [
+      { type: "text", text: "Which deals slipped?" },
+      { type: "file", fileRef: forkedFile },
+    ],
+    metadata: { source: "chat" },
+    createdAt: at("2026-06-23T10:00:01.000Z"),
+  })
+  await createAndStartRun(storage, fixture, runInput({ id: "run_1", triggerMessageId: "m1" }))
+  await storage.messages.append({
+    id: "m2",
+    projectId,
+    threadId: "thr_1",
+    runId: "run_1",
+    role: "assistant",
+    authorPrincipal: owner,
+    parts: [
+      { type: "step-start" },
+      {
+        type: "tool-call",
+        toolCallId: "call_1",
+        toolName: "bash",
+        input: { cmd: "report" },
+        state: "output-available",
+        output: { file: forkedFile },
+      },
+      { type: "text", text: "Three deals slipped." },
+    ],
+    createdAt: at("2026-06-23T10:00:02.000Z"),
+    completedAt: at("2026-06-23T10:00:03.000Z"),
+  })
+  await storage.runs.finish({
+    id: "run_1",
+    projectId,
+    executionToken: "exec_1",
+    status: "succeeded",
+  })
+
+  await storage.messages.append({
+    id: "m3",
+    projectId,
+    threadId: "thr_1",
+    runId: null,
+    role: "user",
+    authorPrincipal: owner,
+    parts: [{ type: "text", text: "Why did Acme slip?" }],
+    createdAt: at("2026-06-23T10:00:04.000Z"),
+  })
+  await createAndStartRun(
+    storage,
+    fixture,
+    runInput({ id: "run_2", triggerMessageId: "m3", execution: execution("exec_2") })
+  )
+  await storage.checkpoints.create(checkpointInput())
+  await storage.messages.append({
+    id: "m4",
+    projectId,
+    threadId: "thr_1",
+    runId: "run_2",
+    role: "assistant",
+    parts: [{ type: "text", text: "Legal review." }],
+    createdAt: at("2026-06-23T10:00:05.000Z"),
+  })
+  await storage.runs.finish({
+    id: "run_2",
+    projectId,
+    executionToken: "exec_2",
+    status: "succeeded",
+  })
+
+  await storage.messages.append({
+    id: "m5",
+    projectId,
+    threadId: "thr_1",
+    runId: null,
+    role: "user",
+    parts: [{ type: "text", text: "Draft the emails." }],
+    createdAt: at("2026-06-23T10:00:06.000Z"),
+  })
+  await createAndStartRun(
+    storage,
+    fixture,
+    runInput({ id: "run_3", triggerMessageId: "m5", execution: execution("exec_3") })
+  )
+  await storage.checkpoints.create(
+    checkpointInput({
+      id: "checkpoint_2",
+      createdByRunId: "run_3",
+      expectedPreviousCheckpointId: "checkpoint_1",
+      expectedHeadSeq: 5,
+      executionToken: "exec_3",
+      summary: "Three deals slipped; Acme waits on legal review.",
+      summarizedThroughSeq: 4,
+      observedHeadSeq: 5,
+      createdAt: at("2026-06-23T10:05:00.000Z"),
+    })
   )
 }
 
@@ -1938,6 +2076,264 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         expect(await storage.checkpoints.getLatest({ projectId, threadId: "thr_1" })).toEqual(
           second
         )
+      })
+    })
+
+    test("forks the finished history into a thread its caller owns alone", async () => {
+      // Removal proof: copy every message while a turn is running; `m5` lands in the fork.
+      await withStorage(async (storage, fixture) => {
+        await prepareForkSource(storage, fixture)
+        const sourceBefore = await storage.threads.getById({ projectId, id: "thr_1" })
+        const source = await storage.messages.list({ projectId, threadId: "thr_1" })
+
+        const fork = await storage.threads.fork(forkInput())
+
+        expect(fork).toEqual({
+          id: "thr_fork",
+          projectId,
+          ownerPrincipal: otherUser,
+          title: "Slipped deals",
+          status: "active",
+          activeRunId: null,
+          messageCount: 4,
+          createdAt: at("2026-06-23T11:00:00.000Z"),
+          updatedAt: at("2026-06-23T11:00:00.000Z"),
+        })
+        expect(await storage.threads.getById({ projectId, id: "thr_fork" })).toEqual(fork)
+
+        const copied = await storage.messages.list({ projectId, threadId: "thr_fork" })
+        const finished = source.messages.slice(0, 4)
+        expect(copied.messages.map(({ id: _id, threadId: _threadId, ...rest }) => rest)).toEqual(
+          finished.map(({ id: _id, threadId: _threadId, ...rest }) => rest)
+        )
+        expect(copied.messages.every((message) => message.threadId === "thr_fork")).toBe(true)
+
+        const copiedIds = copied.messages.map((message) => message.id)
+        expect(new Set(copiedIds).size).toBe(4)
+        expect(copiedIds.some((id) => source.messages.some((message) => message.id === id))).toBe(
+          false
+        )
+
+        // A fork of an old conversation sorts with what its owner just did.
+        // Removal proof: give the fork the last copied message's time; it sorts after the source.
+        const listed = await storage.threads.list({ projectId })
+        expect(listed.threads.map((thread) => thread.id)).toEqual(["thr_fork", "thr_1"])
+
+        // The source keeps everything, its running turn included.
+        expect(await storage.threads.getById({ projectId, id: "thr_1" })).toEqual(sourceBefore)
+        expect((await storage.messages.list({ projectId, threadId: "thr_1" })).messages).toEqual(
+          source.messages
+        )
+
+        const next = await storage.messages.append({
+          id: "m_fork_next",
+          projectId,
+          threadId: "thr_fork",
+          runId: null,
+          role: "user",
+          parts: [{ type: "text", text: "Draft them for me." }],
+        })
+        expect(next.seq).toBe(5)
+        expect(await storage.threads.getById({ projectId, id: "thr_fork" })).toMatchObject({
+          messageCount: 5,
+          lastMessageAt: next.createdAt,
+        })
+      })
+    })
+
+    test("copies a failed last turn with the checkpoint it wrote", async () => {
+      await withStorage(async (storage, fixture) => {
+        await prepareForkSource(storage, fixture)
+        await storage.runs.finish({
+          id: "run_3",
+          projectId,
+          executionToken: "exec_3",
+          status: "failed",
+        })
+
+        const fork = await storage.threads.fork(forkInput())
+
+        expect(fork.messageCount).toBe(5)
+        expect(
+          await storage.checkpoints.getLatest({ projectId, threadId: "thr_fork" })
+        ).toMatchObject({ createdByRunId: "run_3", summarizedThroughSeq: 4, observedHeadSeq: 5 })
+      })
+    })
+
+    test("forks a fork, which copies the same run's checkpoint again", async () => {
+      await withStorage(async (storage, fixture) => {
+        await prepareForkSource(storage, fixture)
+        await storage.threads.fork(forkInput())
+
+        const second = await storage.threads.fork(
+          forkInput({ id: "thr_fork_of_fork", sourceThreadId: "thr_fork" })
+        )
+
+        expect(second.messageCount).toBe(4)
+        const copies = await Promise.all(
+          ["thr_1", "thr_fork", "thr_fork_of_fork"].map((threadId) =>
+            storage.checkpoints.getByRunIds({ projectId, threadId, runIds: ["run_2"] })
+          )
+        )
+        expect(copies.map(([checkpoint]) => checkpoint?.threadId)).toEqual([
+          "thr_1",
+          "thr_fork",
+          "thr_fork_of_fork",
+        ])
+        expect(new Set(copies.map(([checkpoint]) => checkpoint?.id)).size).toBe(3)
+        expect(
+          await storage.checkpoints.getLatest({ projectId, threadId: "thr_fork_of_fork" })
+        ).toEqual(copies[2]?.[0])
+      })
+    })
+
+    test("keeps the latest checkpoint that does not anchor on the running turn", async () => {
+      // Removal proof: drop the observed-head condition when choosing the checkpoint; the fork
+      // keeps `checkpoint_2`, which anchors on the running turn's message the fork does not have.
+      await withStorage(async (storage, fixture) => {
+        await prepareForkSource(storage, fixture)
+        const [first, second] = await storage.checkpoints.getByRunIds({
+          projectId,
+          threadId: "thr_1",
+          runIds: ["run_2", "run_3"],
+        })
+
+        await storage.threads.fork(forkInput())
+
+        const kept = await storage.checkpoints.getLatest({ projectId, threadId: "thr_fork" })
+        if (!kept || !first) throw new Error("Expected the fork to keep checkpoint_1.")
+
+        const { id: keptId, threadId: keptThreadId, previousCheckpointId, ...copied } = kept
+        const { id: _firstId, threadId: _firstThreadId, ...original } = first
+        expect(copied).toEqual(original)
+        expect(keptId).not.toBe(first.id)
+        expect(keptThreadId).toBe("thr_fork")
+        expect(previousCheckpointId).toBeUndefined()
+
+        // The fork's projection reads the kept checkpoint and the copied tail after it.
+        const tail = await storage.messages.list({
+          projectId,
+          threadId: "thr_fork",
+          afterSeq: kept.summarizedThroughSeq,
+          order: "asc",
+        })
+        expect(
+          projectAgentThreadModelContext({ checkpoint: kept, messages: tail.messages })
+        ).toHaveLength(3)
+
+        await expect(
+          storage.checkpoints.getByRunIds({ projectId, threadId: "thr_fork", runIds: ["run_2"] })
+        ).resolves.toEqual([kept])
+        await expect(
+          storage.checkpoints.getByRunIds({
+            projectId,
+            threadId: "thr_1",
+            runIds: ["run_2", "run_3"],
+          })
+        ).resolves.toEqual([first, second])
+
+        // Once the turn has finished, the checkpoint it wrote anchors on copied history.
+        await storage.messages.append({
+          id: "m6",
+          projectId,
+          threadId: "thr_1",
+          runId: "run_3",
+          role: "assistant",
+          parts: [{ type: "text", text: "Drafted." }],
+        })
+        await storage.runs.finish({
+          id: "run_3",
+          projectId,
+          executionToken: "exec_3",
+          status: "succeeded",
+        })
+        await storage.threads.fork(forkInput({ id: "thr_fork_2" }))
+
+        expect(
+          await storage.checkpoints.getLatest({ projectId, threadId: "thr_fork_2" })
+        ).toMatchObject({
+          createdByRunId: "run_3",
+          threadId: "thr_fork_2",
+          summarizedThroughSeq: 4,
+          observedHeadSeq: 5,
+        })
+        expect((await storage.threads.getById({ projectId, id: "thr_fork_2" }))?.messageCount).toBe(
+          6
+        )
+      })
+    })
+
+    test("forks an empty thread and rejects a missing source or a taken id", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput())
+
+        const fork = await storage.threads.fork(forkInput({ title: undefined }))
+        expect(fork).toMatchObject({ messageCount: 0, activeRunId: null })
+        expect(fork.createdAt).toEqual(at("2026-06-23T11:00:00.000Z"))
+        expect(fork.lastMessageAt).toBeUndefined()
+        expect(fork.title).toBeUndefined()
+
+        await expectAgentError(storage.threads.fork(forkInput()), "duplicate_id")
+        await expectAgentError(
+          storage.threads.fork(forkInput({ id: "thr_other", sourceThreadId: "missing" })),
+          "thread_not_found"
+        )
+        await expectAgentError(
+          storage.threads.fork(forkInput({ id: "thr_other", projectId: otherProjectId })),
+          "thread_not_found"
+        )
+      })
+    })
+
+    test("starts a forked workspace with a new, reset sandbox", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput({ sandboxParams: { repo: "deals" } }))
+
+        const fork = await storage.threads.fork(
+          forkInput({ sandboxParams: { repo: "deals" }, sandboxName: "sixb-sb-fork" })
+        )
+        expect(fork.sandboxParams).toEqual({ repo: "deals" })
+        expect(fork.sandboxState).toEqual({
+          name: "sixb-sb-fork",
+          status: "new",
+          initialized: false,
+          resetAt: "2026-06-23T11:00:00.000Z",
+        })
+
+        await expectAgentError(
+          storage.threads.fork(forkInput({ id: "thr_2", sandboxParams: { repo: "deals" } })),
+          "invalid_input"
+        )
+        await expectAgentError(
+          storage.threads.fork(forkInput({ id: "thr_2", sandboxName: "sixb-sb-fork" })),
+          "invalid_input"
+        )
+        await expectAgentError(
+          storage.threads.fork(
+            forkInput({ id: "thr_2", sandboxParams: {}, sandboxName: "../invalid" })
+          ),
+          "invalid_input"
+        )
+        expect(await storage.threads.getById({ projectId, id: "thr_2" })).toBeNull()
+      })
+    })
+
+    test("rolls back a fork with its containing storage transaction", async () => {
+      await withStorage(async (storage, fixture) => {
+        await prepareForkSource(storage, fixture)
+        const rollback = new Error("rollback fork")
+
+        await expect(
+          fixture.transaction(async (tx) => {
+            if (!tx.agents) throw new Error("Expected agent storage in transaction.")
+            await tx.agents.threads.fork(forkInput())
+            throw rollback
+          })
+        ).rejects.toBe(rollback)
+
+        expect(await storage.threads.getById({ projectId, id: "thr_fork" })).toBeNull()
+        expect((await storage.messages.list({ projectId, threadId: "thr_fork" })).total).toBe(0)
+        expect(await storage.checkpoints.getLatest({ projectId, threadId: "thr_fork" })).toBeNull()
       })
     })
   })

@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util"
+import { createAgentMessageId, createCopiedAgentContextCheckpointId } from "../../agents/ids"
 import { AGENT_REASONING_LEVELS } from "../../agents/types"
 import type { UserPrincipal } from "../../auth"
 import { isJsonObject, isPlainRecord } from "../../json"
@@ -18,10 +19,13 @@ import type {
   ConversationAgentRunSpec,
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
+  ForkAgentThreadInput,
   SubagentRunRecord,
   SubagentRunResult,
   TransitionAgentThreadSandboxInput,
 } from "./types"
+
+const SANDBOX_NAME_PATTERN = /^[a-zA-Z0-9-]{1,80}$/
 
 /** Shared state machine. Providers must lock the run, then thread, around this decision/write. */
 export function transitionAgentThreadSandbox(
@@ -33,7 +37,7 @@ export function transitionAgentThreadSandbox(
     throw new AgentStorageError("invalid_state", `[Sixb] Sandbox ${message}`)
   }
   if (!thread?.sandboxParams) return fail("is not configured on this thread.")
-  if (!/^[a-zA-Z0-9-]{1,80}$/.test(input.name)) return fail("name is invalid.")
+  if (!SANDBOX_NAME_PATTERN.test(input.name)) return fail("name is invalid.")
   const state = thread.sandboxState
   if (input.action === "recreate") {
     if (thread.activeRunId !== null) return fail("cannot be recreated during an active run.")
@@ -91,7 +95,7 @@ export function transitionAgentThreadSandbox(
     if (
       !state.initialized ||
       input.nextName === state.name ||
-      !/^[a-zA-Z0-9-]{1,80}$/.test(input.nextName)
+      !SANDBOX_NAME_PATTERN.test(input.nextName)
     ) {
       return fail("replacement requires initialized state and a fresh valid name.")
     }
@@ -160,6 +164,116 @@ export function compareAgentThreadParticipants(
     Buffer.compare(Buffer.from(left.principal.id), Buffer.from(right.principal.id)) ||
     Buffer.compare(Buffer.from(left.threadId), Buffer.from(right.threadId))
   )
+}
+
+/** What a fork reads from its source thread, inside the provider's transaction. */
+export interface AgentThreadForkSource {
+  /** The active run's trigger message, when a turn is running. */
+  readonly triggerMessageId?: string
+  /** Every message of the source, ordered by ascending `seq`. */
+  readonly messages: readonly Pick<AgentMessageRecord, "id" | "seq">[]
+  /** Every checkpoint of the source, latest first, in `getLatest` order. */
+  readonly checkpoints: readonly AgentContextCheckpointRecord[]
+}
+
+/** The rows a provider writes for a fork. */
+export interface AgentThreadForkPlan {
+  readonly thread: AgentThreadRecord
+  /** The source messages to copy, in `seq` order, with the id of each copy. */
+  readonly messages: readonly { readonly sourceId: string; readonly id: string }[]
+  readonly checkpoint?: AgentContextCheckpointRecord
+}
+
+/**
+ * Decide what a fork copies. While a turn is running, the fork copies what came before its trigger
+ * message, so the copy never has a gap; otherwise it copies everything. Copies keep their `seq`,
+ * so the latest checkpoint whose observed head was copied projects unchanged.
+ *
+ * The plan mints the ids of the copies: which messages are copied is only known here, under the
+ * provider's lock, so the caller cannot supply them.
+ */
+export function planAgentThreadFork(
+  input: ForkAgentThreadInput,
+  source: AgentThreadForkSource,
+  prefix = "Sixb"
+): AgentThreadForkPlan {
+  const createdAt = new Date(input.createdAt ?? new Date())
+  const sandboxState = forkedSandboxState(input, createdAt, prefix)
+
+  const trigger = source.messages.find((message) => message.id === source.triggerMessageId)
+  const copied =
+    trigger === undefined
+      ? source.messages
+      : source.messages.filter((message) => message.seq < trigger.seq)
+  const lastCopiedSeq = copied.at(-1)?.seq ?? 0
+
+  const checkpoint = source.checkpoints.find(
+    (candidate) => candidate.observedHeadSeq <= lastCopiedSeq
+  )
+
+  const thread: AgentThreadRecord = {
+    id: input.id,
+    projectId: input.projectId,
+    ownerPrincipal: structuredClone(input.ownerPrincipal),
+    ...(input.title === undefined ? {} : { title: input.title }),
+    ...(input.sandboxParams === undefined
+      ? {}
+      : { sandboxParams: snapshotAgentThreadSandboxParams(input.sandboxParams) }),
+    ...(sandboxState === undefined ? {} : { sandboxState }),
+    status: "active",
+    activeRunId: null,
+    // No `lastMessageAt` until the fork's first new message: threads sort by it, else by their
+    // creation, so a fork of an old conversation sorts with what its owner just did.
+    messageCount: copied.length,
+    createdAt,
+    updatedAt: createdAt,
+  }
+
+  return {
+    thread,
+    messages: copied.map((message) => ({ sourceId: message.id, id: createAgentMessageId() })),
+    ...(checkpoint === undefined ? {} : { checkpoint: copyCheckpoint(checkpoint, input.id) }),
+  }
+}
+
+/**
+ * The copy starts the fork's chain: its predecessors stay in the source. Its `createdByRunId`
+ * still names the source run, under a foreign key that restricts deletion: deleting runs or
+ * threads later must account for the forks that copied their checkpoints.
+ */
+function copyCheckpoint(
+  checkpoint: AgentContextCheckpointRecord,
+  threadId: string
+): AgentContextCheckpointRecord {
+  const { previousCheckpointId: _previous, ...copied } = structuredClone(checkpoint)
+  return { ...copied, id: createCopiedAgentContextCheckpointId(), threadId }
+}
+
+/** A fresh sandbox, reset at the fork, so the Agent knows earlier local files are not there. */
+function forkedSandboxState(
+  input: ForkAgentThreadInput,
+  createdAt: Date,
+  prefix: string
+): AgentThreadSandboxState | undefined {
+  if ((input.sandboxParams === undefined) !== (input.sandboxName === undefined)) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] A forked thread needs a sandbox name exactly when it has sandbox params.`
+    )
+  }
+
+  if (input.sandboxName === undefined) return undefined
+
+  if (!SANDBOX_NAME_PATTERN.test(input.sandboxName)) {
+    throw new AgentStorageError("invalid_input", `[${prefix}] Sandbox name is invalid.`)
+  }
+
+  return {
+    name: input.sandboxName,
+    status: "new",
+    initialized: false,
+    resetAt: createdAt.toISOString(),
+  }
 }
 
 /** Validate the provider-neutral model selection captured for a conversational turn. */

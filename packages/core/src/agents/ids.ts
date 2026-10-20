@@ -46,6 +46,11 @@ export function agentContextCheckpointId(runId: string): string {
   return `agt_ctx_${runId}`
 }
 
+/** A checkpoint copied into a fork; the source's checkpoint keeps its run-derived id. */
+export function createCopiedAgentContextCheckpointId(): string {
+  return `agt_ctx_copy_${randomUUID()}`
+}
+
 /** A queue delivery's fencing token for writes to an `agent_runs` record. */
 export function createAgentRunExecutionToken(): string {
   return `agt_exec_${randomUUID()}`

@@ -16,6 +16,7 @@ import {
   assertSubagentRunResult,
   compareAgentThreadParticipants,
   participantsToAdd,
+  planAgentThreadFork,
   snapshotAgentThreadSandboxParams,
   subagentRunMatchesCreateInput,
   transitionAgentThreadSandbox,
@@ -44,6 +45,7 @@ import type {
   DeleteAgentMessagesByRunInput,
   FinishAgentRunInput,
   FinishQueuedAgentRunInput,
+  ForkAgentThreadInput,
   ListAgentMessagesInput,
   ListAgentMessagesResult,
   ListAgentRunsInput,
@@ -175,6 +177,67 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
 
     this.state.threads.set(threadKey, clone(record))
     return clone(record)
+  }
+
+  async fork(input: ForkAgentThreadInput): Promise<AgentThreadRecord> {
+    // No `await` between reading the source and writing the fork: one in-memory critical section.
+    const source = this.state.threads.get(key(input.projectId, input.sourceThreadId))
+    if (!source) {
+      throw new AgentStorageError(
+        "thread_not_found",
+        `[Sixb] Agent thread '${input.sourceThreadId}' not found for project '${input.projectId}'.`
+      )
+    }
+
+    const forkKey = key(input.projectId, input.id)
+    if (this.state.threads.has(forkKey)) {
+      throw new AgentStorageError(
+        "duplicate_id",
+        `[Sixb] Agent thread '${input.id}' already exists for project '${input.projectId}'.`
+      )
+    }
+
+    const activeRun =
+      source.activeRunId === null
+        ? undefined
+        : this.state.runs.get(key(input.projectId, source.activeRunId))
+
+    const messages = [...this.state.messages.values()]
+      .filter((message) => message.projectId === input.projectId)
+      .filter((message) => message.threadId === source.id)
+      .sort((left, right) => left.seq - right.seq)
+
+    const checkpoints = [...this.state.checkpoints.values()]
+      .filter((checkpoint) => checkpoint.projectId === input.projectId)
+      .filter((checkpoint) => checkpoint.threadId === source.id)
+      .sort(compareLatestCheckpoints)
+
+    const plan = planAgentThreadFork(input, {
+      ...(activeRun?.kind === "conversation"
+        ? { triggerMessageId: activeRun.triggerMessageId }
+        : {}),
+      messages,
+      checkpoints,
+    })
+
+    this.state.threads.set(forkKey, clone(plan.thread))
+
+    const copyIds = new Map(plan.messages.map((copy) => [copy.sourceId, copy.id]))
+    for (const message of messages) {
+      const id = copyIds.get(message.id)
+      if (id === undefined) continue
+
+      this.state.messages.set(
+        key(input.projectId, id),
+        clone({ ...message, id, threadId: input.id })
+      )
+    }
+
+    if (plan.checkpoint) {
+      this.state.checkpoints.set(key(input.projectId, plan.checkpoint.id), clone(plan.checkpoint))
+    }
+
+    return clone(plan.thread)
   }
 
   async getById(params: { projectId: string; id: string }): Promise<AgentThreadRecord | null> {
@@ -873,14 +936,21 @@ class InMemoryAgentContextCheckpointStore implements AgentContextCheckpointStore
         .filter(
           (checkpoint) => checkpoint.projectId === projectId && checkpoint.threadId === threadId
         )
-        .sort(
-          (left, right) =>
-            right.summarizedThroughSeq - left.summarizedThroughSeq ||
-            right.createdAt.getTime() - left.createdAt.getTime() ||
-            right.id.localeCompare(left.id)
-        )[0] ?? null
+        .sort(compareLatestCheckpoints)[0] ?? null
     )
   }
+}
+
+/** The order `getLatest` reads: the furthest boundary, then the newest. */
+function compareLatestCheckpoints(
+  left: AgentContextCheckpointRecord,
+  right: AgentContextCheckpointRecord
+): number {
+  return (
+    right.summarizedThroughSeq - left.summarizedThroughSeq ||
+    right.createdAt.getTime() - left.createdAt.getTime() ||
+    right.id.localeCompare(left.id)
+  )
 }
 
 export class InMemoryAgentStorage implements AgentStorage {
