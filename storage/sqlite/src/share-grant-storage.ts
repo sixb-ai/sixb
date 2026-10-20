@@ -9,6 +9,7 @@ import {
 import type {
   CreateShareGrantInput,
   GetShareGrantByIdInput,
+  GetShareGrantsByIdsInput,
   ListShareGrantsInput,
   ListShareGrantsResult,
   RevokeShareGrantInput,
@@ -83,6 +84,30 @@ export class SqliteShareGrantStorage implements ShareGrantStorage {
   async getById(input: GetShareGrantByIdInput): Promise<ShareGrantRecord | null> {
     const normalized = normalizeGetShareGrantByIdInput(input)
     return this.getRow(normalized.projectId, normalized.id)
+  }
+
+  async getByIds(input: GetShareGrantsByIdsInput): Promise<readonly ShareGrantRecord[]> {
+    const ids = [...new Set(input.ids)]
+    if (ids.length === 0) {
+      return []
+    }
+
+    const rows = this.db
+      .query(
+        `
+        SELECT *
+        FROM share_grants
+        WHERE project_id = ?
+          AND id IN (SELECT value FROM json_each(?))
+      `
+      )
+      .all(input.projectId, JSON.stringify(ids)) as SqliteShareGrantRow[]
+
+    const byId = new Map(rows.map((row) => [row.id, row]))
+    return ids.flatMap((id) => {
+      const row = byId.get(id)
+      return row ? [rowToRecord(row)] : []
+    })
   }
 
   async list(input: ListShareGrantsInput): Promise<ListShareGrantsResult> {

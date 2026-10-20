@@ -4,6 +4,7 @@ export { InMemoryShareGrantStorage } from "./in-memory"
 export type {
   CreateShareGrantInput,
   GetShareGrantByIdInput,
+  GetShareGrantsByIdsInput,
   ListShareGrantsInput,
   ListShareGrantsResult,
   RevokeShareGrantInput,

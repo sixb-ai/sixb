@@ -42787,6 +42787,9 @@
                                   },
                                   "grantId": {
                                     "type": "string"
+                                  },
+                                  "definitionId": {
+                                    "type": "string"
                                   }
                                 },
                                 "required": ["type", "grantId"],
@@ -43351,6 +43354,9 @@
                                 },
                                 "grantId": {
                                   "type": "string"
+                                },
+                                "definitionId": {
+                                  "type": "string"
                                 }
                               },
                               "required": ["type", "grantId"],
@@ -43562,6 +43568,9 @@
                                   "enum": ["share"]
                                 },
                                 "grantId": {
+                                  "type": "string"
+                                },
+                                "definitionId": {
                                   "type": "string"
                                 }
                               },
@@ -44119,6 +44128,9 @@
                                           "enum": ["share"]
                                         },
                                         "grantId": {
+                                          "type": "string"
+                                        },
+                                        "definitionId": {
                                           "type": "string"
                                         }
                                       },

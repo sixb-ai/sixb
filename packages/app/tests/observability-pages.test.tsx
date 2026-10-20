@@ -215,6 +215,11 @@ describe("Activity", () => {
     lastSeenAt: "2026-10-02T08:05:00.000Z",
     pageViews: 0,
   }
+  const namedShare = {
+    ...sharedVisit,
+    id: "visit_3",
+    actor: { type: "share", grantId: "shr_2", definitionId: "invoiceShare" },
+  }
 
   function activityApi(requests: string[]) {
     return async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -253,7 +258,7 @@ describe("Activity", () => {
                 }
           )
         case "/api/activity/visits":
-          return Response.json({ visits: [visit, sharedVisit], hasMore: false })
+          return Response.json({ visits: [visit, sharedVisit, namedShare], hasMore: false })
         case "/api/activity/visits/visit_1/timeline":
           return Response.json({
             visit,
@@ -501,7 +506,9 @@ describe("Activity", () => {
     const { view, queryClient } = renderActivity("/observability/activity")
     await view.findByRole("button", { name: /Alex.*2 page views/ })
     // A shared link has no account: it reads as one, told apart by the end of its id.
-    expect(view.getByText("Shared link")).toBeDefined()
+    expect(view.getAllByText("Shared link")).toHaveLength(2)
+    // A link is named by its share, or by the end of its id once the grant is gone.
+    expect(view.getByText("invoiceShare")).toBeDefined()
     expect(view.getByText("Link ending shr1")).toBeDefined()
     const summaries = () =>
       requests.filter((request) => request.startsWith("/api/activity/summary"))

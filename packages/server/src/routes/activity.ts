@@ -2,11 +2,11 @@ import {
   type ActivityConnection,
   type ActivityTimelineEntry,
   type ActivityVisitTimeline,
+  type ActivityVisitView,
   AuthorizationError,
   type SixbHostView,
 } from "@sixb/core"
 import { getActivityCaptureRuntime } from "@sixb/core/internal/runtime"
-import type { ActivityVisit } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement, credentialTransport } from "../auth/access-token-boundary"
 import { requestCaller, requireRequestSixb } from "../auth/scope"
@@ -316,7 +316,7 @@ function pageQuery(query: {
   }
 }
 
-function serializeVisit(visit: ActivityVisit) {
+function serializeVisit(visit: ActivityVisitView) {
   return {
     ...visit,
     startedAt: visit.startedAt.toISOString(),

@@ -37,7 +37,7 @@ import {
   parseActivityDay,
   parseActivityRange,
 } from "./period"
-import { ConnectionLine, VisitEntries } from "./timeline"
+import { ConnectionLine, sharedLinkName, VisitEntries } from "./timeline"
 import { UserFilter, useActivityUsers } from "./users"
 
 type Visit = ListActivityVisitsResponse["visits"][number]
@@ -533,8 +533,6 @@ function ActorName({
     return <span className="truncate">{names.get(visit.actor.userId) ?? visit.actor.userId}</span>
   }
 
-  // The grant holds no title to show; the end of its id tells links apart, the full id copies.
-  const suffix = visit.actor.grantId.replace(/[^a-zA-Z0-9]/g, "").slice(-6)
   return (
     <>
       <span className="shrink-0">{messages.sharedLink}</span>
@@ -542,7 +540,7 @@ function ActorName({
         className="truncate text-xs font-normal text-muted-foreground"
         title={visit.actor.grantId}
       >
-        {messages.sharedLinkId(suffix)}
+        {sharedLinkName(visit.actor, messages)}
       </span>
     </>
   )

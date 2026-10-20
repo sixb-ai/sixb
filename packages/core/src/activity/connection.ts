@@ -1,6 +1,7 @@
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { ActivityVisit, StoredActivityVisitPage } from "../storage/activity/types"
 import type { SessionRecord } from "../storage/auth"
+import type { ShareGrantRecord } from "../storage/share-grants"
 import { type ActivityDevice, describeUserAgent } from "./device"
 import type { ActivityService } from "./service"
 
@@ -137,10 +138,14 @@ export function decodeActivityConnectionsCursor(value: string): ActivityConnecti
   throw new Error("[Sixb] Invalid activity connections cursor.")
 }
 
-/** The session a visit came through: a sign-in, or a shared link. */
+/**
+ * The session a visit came through: a sign-in, or a shared link, whose grant the caller read with
+ * the visit's share name.
+ */
 export async function readActivityConnection(
   runtime: SixbRuntimeContext,
   page: StoredActivityVisitPage,
+  grant: ShareGrantRecord | undefined,
   now: Date
 ): Promise<ActivityConnection | undefined> {
   const { storage, projectId } = runtime
@@ -151,10 +156,7 @@ export async function readActivityConnection(
     return session ? sessionConnection(session, now) : undefined
   }
 
-  const [session, grant] = await Promise.all([
-    storage.shareSessions?.getById({ projectId, id: page.sessionId }),
-    storage.shareGrants?.getById({ projectId, id: actor.grantId }),
-  ])
+  const session = await storage.shareSessions?.getById({ projectId, id: page.sessionId })
   if (!session) {
     return undefined
   }

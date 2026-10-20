@@ -624,6 +624,93 @@ describe("activity timeline", () => {
       viewer.activity.connections({ userId: "marie", cursor: "not-a-cursor" })
     ).rejects.toThrow("cursor")
   })
+
+  // Guard proof: return `service.list(query)` unchanged from the runtime's list; the shared visit
+  // keeps only its grant id. Read a share connection's status from its session alone; the revoked
+  // link reads as active.
+  test("shared visits are named by their link's share, read once for the page", async () => {
+    const fixture = await createFixture()
+    const { storage } = fixture
+
+    await storage.shareGrants.create({
+      id: "shr_invoice",
+      projectId,
+      definitionId: "invoiceShare",
+      target: { objectTypeId: "Invoice", primaryId: "inv-1" },
+      issuedBy: { type: "user", id: "marie" },
+      authoritySnapshot: { version: 1, access: { grants: [] } },
+      tokenHash: "a".repeat(64),
+      destinationPath: "/invoices/inv-1",
+      createdAt: start,
+      expiresAt: new Date(start.getTime() + 24 * 60 * minute),
+    })
+    for (const grantId of ["shr_invoice", "shr_gone"]) {
+      await storage.activity.append({
+        projectId,
+        actor: { type: "share", grantId },
+        sessionId: `shs_${grantId}`,
+        events: [{ id: grantId, type: "page.view", route: "/invoices/:invoiceId" }],
+        now: start,
+        idleTimeoutMs: 30 * minute,
+        newVisitId: `visit_${grantId}`,
+      })
+    }
+    await storage.shareSessions.create({
+      id: "shs_shr_invoice",
+      projectId,
+      grantId: "shr_invoice",
+      tokenHash: "b".repeat(64),
+      createdAt: start,
+      expiresAt: new Date(start.getTime() + 60 * minute),
+      absoluteExpiresAt: new Date(start.getTime() + 24 * 60 * minute),
+    })
+
+    const reads: (readonly string[])[] = []
+    const getByIds = storage.shareGrants.getByIds.bind(storage.shareGrants)
+    storage.shareGrants.getByIds = (input) => {
+      reads.push(input.ids)
+      return getByIds(input)
+    }
+
+    const page = await fixture.viewer.activity.list({
+      from: new Date(start.getTime() - minute),
+      to: new Date(start.getTime() + minute),
+    })
+
+    expect(
+      page.visits
+        .map((visit) => visit.actor)
+        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+    ).toEqual([
+      { type: "share", grantId: "shr_gone" },
+      { type: "share", grantId: "shr_invoice", definitionId: "invoiceShare" },
+    ])
+    expect(reads).toHaveLength(1)
+
+    const timeline = await fixture.viewer.activity.timeline("visit_shr_invoice")
+    expect(timeline?.visit.actor).toEqual({
+      type: "share",
+      grantId: "shr_invoice",
+      definitionId: "invoiceShare",
+    })
+    expect(timeline?.connection).toMatchObject({ type: "share", status: "active" })
+
+    // A session lasts no longer than its link: revoking the grant ends it too.
+    await storage.shareGrants.revoke({
+      projectId,
+      id: "shr_invoice",
+      revokedAt: new Date(start.getTime() + minute),
+      revokedBy: { type: "user", id: "marie" },
+    })
+    expect((await fixture.viewer.activity.timeline("visit_shr_invoice"))?.connection).toEqual({
+      type: "share",
+      grantId: "shr_invoice",
+      definitionId: "invoiceShare",
+      status: "revoked",
+      createdAt: start,
+      revokedAt: new Date(start.getTime() + minute),
+    })
+  })
 })
 
 // Guard proof: drop the unreadable types from runVisible in composeActivityTimeline; the sealed

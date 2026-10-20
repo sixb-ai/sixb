@@ -10,6 +10,7 @@ import {
 import type {
   CreateShareGrantInput,
   GetShareGrantByIdInput,
+  GetShareGrantsByIdsInput,
   ListShareGrantsInput,
   ListShareGrantsResult,
   RevokeShareGrantInput,
@@ -41,6 +42,13 @@ export class InMemoryShareGrantStorage implements ShareGrantStorage {
     const normalized = normalizeGetShareGrantByIdInput(input)
     const record = this.rows.get(rowKey(normalized.projectId, normalized.id))
     return record ? cloneShareGrantRecord(record) : null
+  }
+
+  async getByIds(input: GetShareGrantsByIdsInput): Promise<readonly ShareGrantRecord[]> {
+    return [...new Set(input.ids)].flatMap((id) => {
+      const record = this.rows.get(rowKey(input.projectId, id))
+      return record ? [cloneShareGrantRecord(record)] : []
+    })
   }
 
   async list(input: ListShareGrantsInput): Promise<ListShareGrantsResult> {

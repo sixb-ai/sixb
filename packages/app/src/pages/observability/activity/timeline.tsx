@@ -7,7 +7,7 @@ import { actionRunHref, objectHref, workflowRunHref } from "../../routes"
 import { humanize, MetaDot, Pill, RunStatusPill, ToolbarTabs, useNumbers } from "../../section-ui"
 import { formatChartMoney, nanosToNumber } from "../ai-usage/format"
 import { useUtcFormat } from "./format"
-import { useActivityMessages } from "./messages"
+import { type ActivityMessages, useActivityMessages } from "./messages"
 import { MetaItems } from "./meta-items"
 
 type Timeline = GetActivityVisitTimelineResponse
@@ -221,16 +221,14 @@ export function ConnectionLine({ connection }: { readonly connection: Connection
   const messages = useActivityMessages()
   const format = useUtcFormat()
 
+  // A shared link is named by the visit's header; its connection says when it was opened.
   const facts =
     connection.type === "session"
       ? [
           connectionDevice(connection, messages.connection.unknownDevice),
           messages.connection.signedIn(`${format.at(connection.createdAt)} ${messages.utc}`),
         ]
-      : [
-          messages.connection.sharedLink(connection.definitionId ?? connection.grantId),
-          messages.connection.opened(`${format.at(connection.createdAt)} ${messages.utc}`),
-        ]
+      : [messages.connection.opened(`${format.at(connection.createdAt)} ${messages.utc}`)]
 
   // No line of it starts or ends on a separator, however it wraps.
   return (
@@ -252,6 +250,19 @@ export function ConnectionStatus({ status }: { readonly status: Connection["stat
   const messages = useActivityMessages().connection.status
   const tone = status === "active" ? "ok" : status === "revoked" ? "error" : "muted"
   return <Pill tone={tone}>{messages[status]}</Pill>
+}
+
+/**
+ * A shared link by its share definition, or by the end of its grant id once the grant is gone; the
+ * full id is the element's title.
+ */
+export function sharedLinkName(
+  link: { readonly grantId: string; readonly definitionId?: string },
+  messages: ActivityMessages["visits"]
+): string {
+  return (
+    link.definitionId ?? messages.sharedLinkId(link.grantId.replace(/[^a-zA-Z0-9]/g, "").slice(-6))
+  )
 }
 
 /** "Chrome · macOS", a native client's own label, or Unknown device. */

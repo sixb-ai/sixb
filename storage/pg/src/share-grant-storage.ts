@@ -8,6 +8,7 @@ import {
 import type {
   CreateShareGrantInput,
   GetShareGrantByIdInput,
+  GetShareGrantsByIdsInput,
   ListShareGrantsInput,
   ListShareGrantsResult,
   RevokeShareGrantInput,
@@ -83,6 +84,26 @@ export class PgShareGrantStorage implements ShareGrantStorage {
       WHERE project_id = ${normalized.projectId} AND id = ${normalized.id}
     `
     return row ? recordFromRow(row) : null
+  }
+
+  async getByIds(input: GetShareGrantsByIdsInput): Promise<readonly ShareGrantRecord[]> {
+    const ids = [...new Set(input.ids)]
+    if (ids.length === 0) {
+      return []
+    }
+
+    const rows = await this.sql<PgShareGrantRow[]>`
+      SELECT *
+      FROM share_grants
+      WHERE project_id = ${input.projectId}
+        AND id = ANY(${this.sql.array(ids)}::text[])
+    `
+
+    const byId = new Map(rows.map((row) => [row.id, row]))
+    return ids.flatMap((id) => {
+      const row = byId.get(id)
+      return row ? [recordFromRow(row)] : []
+    })
   }
 
   async list(input: ListShareGrantsInput): Promise<ListShareGrantsResult> {

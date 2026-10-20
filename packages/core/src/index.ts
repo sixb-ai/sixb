@@ -873,7 +873,11 @@ export type {
   ActivityUserConnection,
 } from "./activity/connection"
 export type { ActivityDevice } from "./activity/device"
-export type { ActivityRuntime, ActivityUsersResult } from "./activity/execution"
+export type {
+  ActivityRuntime,
+  ActivityUsersResult,
+  ActivityVisitList,
+} from "./activity/execution"
 export type {
   ActivityCalendar,
   ActivityCalendarQuery,
@@ -882,6 +886,7 @@ export type {
   ActivityPeriodQuery,
   ActivityTimelineQuery,
 } from "./activity/service"
+export type { ActivityVisitActor, ActivityVisitView } from "./activity/shares"
 export type {
   ActivityActionEntry,
   ActivityAgentEntry,

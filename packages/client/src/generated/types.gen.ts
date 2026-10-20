@@ -14315,6 +14315,7 @@ export type ListActivityVisitsResponses = {
         | {
             type: "share"
             grantId: string
+            definitionId?: string
           }
       attribution: {
         source?: string
@@ -14520,6 +14521,7 @@ export type GetActivityVisitResponses = {
         | {
             type: "share"
             grantId: string
+            definitionId?: string
           }
       attribution: {
         source?: string
@@ -14591,6 +14593,7 @@ export type GetActivityVisitTimelineResponses = {
         | {
             type: "share"
             grantId: string
+            definitionId?: string
           }
       attribution: {
         source?: string
@@ -14750,6 +14753,7 @@ export type ListActivityConnectionsResponses = {
           | {
               type: "share"
               grantId: string
+              definitionId?: string
             }
         attribution: {
           source?: string

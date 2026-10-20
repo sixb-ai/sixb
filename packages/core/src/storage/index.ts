@@ -720,6 +720,7 @@ export { InMemoryRulesStorage } from "./rules"
 export type {
   CreateShareGrantInput,
   GetShareGrantByIdInput,
+  GetShareGrantsByIdsInput,
   ListShareGrantsInput,
   ListShareGrantsResult,
   RevokeShareGrantInput,
