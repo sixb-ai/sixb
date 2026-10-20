@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
+import { events } from "@sixb/core"
 import type { StoredDomainEvent } from "@sixb/core/internal/events"
-import { routeKeysForEvent } from "../src/route-key"
+import { eventScheduleRouteKeyForSelector, routeKeysForEvent } from "../src/route-key"
 import type { OrchestratorRouteKey } from "../src/types"
 
 const base = {
@@ -111,8 +112,26 @@ const cases: readonly [string, StoredDomainEvent, readonly OrchestratorRouteKey[
     },
     ["event-schedule:rule.triggered:invoice.at-risk"],
   ],
+  [
+    "member events route to one project-wide key per type",
+    {
+      ...base,
+      id: "evt-joined",
+      type: "user.joined",
+      topic: "users",
+      partitionKey: "usr_ava",
+      payload: { user: { id: "usr_ava", email: "ava@acme.com", status: "active" } },
+    },
+    ["event-schedule:user.joined:users"],
+  ],
 ]
 
 test.each(cases)("routeKeysForEvent: %s", (_name, event, expected) => {
   expect(routeKeysForEvent(event)).toEqual([...expected])
+})
+
+test("a member event schedule listens on the key its events route to", () => {
+  expect(eventScheduleRouteKeyForSelector("user.joined", events.users().joined())).toBe(
+    "event-schedule:user.joined:users"
+  )
 })

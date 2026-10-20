@@ -58,6 +58,10 @@ export {
   type SyncEventSelectorContext,
   type SyncEventSelectorEvent,
   type SyncEventToken,
+  type UserEventSelectorBuilder,
+  type UserEventSelectorContext,
+  type UserEventSelectorEvent,
+  type UserEventSelectorOperation,
 } from "./selectors"
 export {
   createDomainEventService,

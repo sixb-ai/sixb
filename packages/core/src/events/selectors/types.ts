@@ -7,6 +7,7 @@ import type {
   DomainEvent,
   PipelineRunFinishedEvent,
   SyncRunFinishedEvent,
+  UserEvent,
 } from "../types"
 
 declare const eventSelectorContextType: unique symbol
@@ -78,6 +79,20 @@ export type PipelineEventSelectorContext<
   readonly operation: TOperation
 }
 
+export type UserEventSelectorOperation =
+  | "joined"
+  | "suspended"
+  | "reactivated"
+  | "invited"
+  | "profileUpdated"
+
+export type UserEventSelectorContext<
+  TOperation extends UserEventSelectorOperation = UserEventSelectorOperation,
+> = {
+  readonly kind: "user"
+  readonly operation: TOperation
+}
+
 export type EventSelectorContext =
   | ObjectEventSelectorContext
   | LinkEventSelectorContext
@@ -85,6 +100,7 @@ export type EventSelectorContext =
   | DatasetEventSelectorContext
   | SyncEventSelectorContext
   | PipelineEventSelectorContext
+  | UserEventSelectorContext
 
 export type InferEventSelectorContext<TSelector> = TSelector extends {
   readonly [eventSelectorContextType]?: infer TContext
@@ -109,7 +125,9 @@ export type EventSelectorEvent<TContext> =
             ? SyncEventSelectorEvent<TSync, TOperation>
             : TContext extends PipelineEventSelectorContext<infer TPipeline, infer TOperation>
               ? PipelineEventSelectorEvent<TPipeline, TOperation>
-              : never
+              : TContext extends UserEventSelectorContext<infer TOperation>
+                ? UserEventSelectorEvent<TOperation>
+                : never
 
 export interface ObjectEventSelectorEvent<TObjectType extends ObjectTypeWithTokens> {
   readonly object: {
@@ -159,6 +177,19 @@ export type PipelineEventSelectorEvent<
   readonly pipelineId: TPipeline["id"]
   readonly status: TOperation
 }
+
+type UserEventTypeOf = {
+  readonly joined: "user.joined"
+  readonly suspended: "user.suspended"
+  readonly reactivated: "user.reactivated"
+  readonly invited: "user.invited"
+  readonly profileUpdated: "user.profile.updated"
+}
+
+/** The payload of the member event an operation selects. */
+export type UserEventSelectorEvent<
+  TOperation extends UserEventSelectorOperation = UserEventSelectorOperation,
+> = Extract<UserEvent, { type: UserEventTypeOf[TOperation] }>["payload"]
 
 export interface EventSelectorSpec<TContext = EventSelectorContext> {
   readonly [eventSelectorContextType]?: TContext

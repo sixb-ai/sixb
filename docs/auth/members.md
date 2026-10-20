@@ -72,6 +72,46 @@ An object query can include the profiles of the members a property names, with [
 
 Trusted code, such as workflows and actions, can always read the directory. An action or a workflow can therefore return directory data to a caller who lacks the grant, so return only what that caller should see. The agent and its tools read it with the permissions they run with: in a conversation, those of the person who asked. Shared links never read it.
 
+## React to member changes
+
+Sixb publishes an event when membership changes. Use them to onboard new members, sync a directory, or audit changes:
+
+| Event | When | Payload |
+| --- | --- | --- |
+| `user.joined` | A person signs in for the first time, which creates their account. | `user`, `invitationId` when they accepted an invitation |
+| `user.invited` | An invitation is created, and sent when your sign-in method sends invitations. Inviting the same person again publishes it again. | `invitationId`, `email`, `expiresAt`, `requestedBy` |
+| `user.suspended`, `user.reactivated` | An administrator changes the member's status. | `user`, `requestedBy` |
+| `user.profile.updated` | The member's name or picture changes. | `user`, `changes`, and `requestedBy` when the member edited it. Without `requestedBy`, their identity provider changed it at sign-in. |
+
+`user` is the member's profile, as [`sixb.users.get`](#read-the-member-directory) returns it. `changes` holds only the fields that changed, each with its operation (`created`, `updated` or `cleared`) and values. Saving the values a member already has, such as the same name, publishes nothing.
+
+Select them with `events.users()` in a schedule, and start a workflow from it:
+
+```ts
+// schedules/member-joined.ts
+import { defineSchedule, events } from "@sixb/core"
+
+export const memberJoined = defineSchedule("member-joined").on(events.users().joined())
+```
+
+```ts
+// workflows/welcome-member.ts
+import { defineWorkflow } from "@sixb/core"
+import { memberJoined } from "../schedules/member-joined"
+import { sendWelcome } from "./steps/send-welcome"
+
+export const welcomeMember = defineWorkflow("welcome-member")
+  .input({ email: "string" })
+  .when(memberJoined, ({ event }) => ({ email: event.user.email }))
+  .then(sendWelcome)
+```
+
+The other selectors are `.invited()`, `.suspended()`, `.reactivated()`, and `.profileUpdated()`.
+
+Reading these events requires `can.view(project.users)`, like the directory. Workflows and other trusted code always receive them.
+
+An event is published after the change is saved. If the event stream is unavailable at that moment, the change is kept, the event is lost, and the failure is reported to [`onError`](../logging/overview.md#report-failures) as `event.delivery.failed`. Do not rely on these events as the only record of membership: read the directory for the current state.
+
 ## Service accounts and tokens
 
 Choose the credential that matches the caller:
