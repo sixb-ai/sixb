@@ -659,7 +659,7 @@ describe("activity timeline", () => {
         runId: `run_${index}`,
         sourceExecutionId: root.id,
       })
-      setSystemTime()
+      setSystemTime(readAt)
 
       await storage.agents.threads.create({
         id: `thr_${index}`,
