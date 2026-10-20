@@ -331,7 +331,7 @@ export async function claimProjectionExecution(
       ...input.datasetVersion,
       createdAt: new Date(input.datasetVersion.createdAt).toISOString(),
     },
-    ontologyRevision: projections.ontologyRevision,
+    ontologyRevision: resolved.ontologyRevision,
     projectionRevision: resolved.projectionRevision,
     ownershipHash: resolved.ownershipHash,
   }

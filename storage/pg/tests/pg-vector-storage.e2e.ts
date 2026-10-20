@@ -420,7 +420,7 @@ describe("PostgreSQL vector storage", () => {
             projectionKind: "object",
             protocol: "replacement",
             datasetVersion,
-            ontologyRevision: projections.ontologyRevision,
+            ontologyRevision: resolved.ontologyRevision,
             projectionRevision: resolved.projectionRevision,
             ownershipHash: resolved.ownershipHash,
           },

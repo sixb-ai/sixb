@@ -2001,7 +2001,7 @@ async function claim(
   const identityBase = {
     projectionId: input.projectionId,
     datasetVersion: input.datasetVersion,
-    ontologyRevision: projections.ontologyRevision,
+    ontologyRevision: resolved.ontologyRevision,
     projectionRevision: resolved.projectionRevision,
     ownershipHash: resolved.ownershipHash,
   }
