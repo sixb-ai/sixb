@@ -1,5 +1,6 @@
 import { assertNever } from "../assert-never"
 import { isRuntimeAllowed } from "../authorization"
+import { AuthorizationError } from "../authorization/errors"
 import type { EmbeddingModelCatalog, RerankingModelCatalog } from "../models/catalog"
 import type { AuthorizedOntologyView } from "../objects/authorized-ontology-view"
 import {
@@ -63,9 +64,16 @@ import { ObjectReaderOntology } from "./object-reader-ontology"
 import { ObjectReaderSecurity, type ResolvedExecutionAuthority } from "./object-reader-security"
 import { attachUserProfiles } from "./object-reader-users"
 import type { ExecutionScope } from "./types"
+import { uniqueLookupKey } from "./unique-lookup"
 
 type GetObjectInput = Omit<Parameters<ObjectReadStorage["getByPrimaryId"]>[0], "projectId">
 type GetObjectsInput = Omit<Parameters<ObjectReadStorage["getByPrimaryIdBatch"]>[0], "projectId">
+/** A caller's value, validated and keyed against the property's schema. */
+interface GetByUniqueValueInput {
+  readonly objectTypeId: string
+  readonly propertyId: string
+  readonly value: unknown
+}
 type SelectObjectPropertiesInput = Parameters<ObjectReadStorage["selectsObjectProperties"]>[0]
 type CanReadObjectPropertyInput = SelectObjectPropertiesInput["items"][number]
 type CanReadObjectPropertiesBatchInput = Omit<SelectObjectPropertiesInput, "projectId">
@@ -161,6 +169,41 @@ class AuthorizedObjectReaderImpl {
     this.#security.assertObjectTypesViewable([request.objectTypeId], clearance)
     const row = await this.#storage.getByPrimaryId({
       ...request,
+      projectId: this.#security.runtime.projectId,
+    })
+    return this.#detachRows(
+      row && this.#omitHidden(row, clearance),
+      (detached) => [detached],
+      clearance
+    )
+  }
+
+  /**
+   * The object of exactly `objectTypeId` holding a unique property's value, or null. A lookup by a
+   * marked property would reveal its value, so it needs the clearance a query predicate needs.
+   */
+  async getByUniqueValue(input: GetByUniqueValueInput): Promise<ObjectRow | null> {
+    const request = snapshotReadValue({
+      objectTypeId: input.objectTypeId,
+      propertyId: input.propertyId,
+      value: input.value,
+    })
+    const clearance = await this.#security.clearance.current()
+    this.#security.assertObjectTypesViewable([request.objectTypeId], clearance)
+
+    const valueKey = uniqueLookupKey(this.#ontology.registry, request)
+    const marking = clearance?.missingMarking(request.objectTypeId, request.propertyId)
+    if (marking !== undefined) {
+      throw new AuthorizationError(
+        `clearance:marking:${marking}`,
+        `[Sixb] Cannot look up '${request.objectTypeId}.${request.propertyId}' by value: it requires clearance for marking '${marking}'.`
+      )
+    }
+
+    const row = await this.#storage.getByUniqueValue({
+      objectTypeId: request.objectTypeId,
+      propertyId: request.propertyId,
+      valueKey,
       projectId: this.#security.runtime.projectId,
     })
     return this.#detachRows(

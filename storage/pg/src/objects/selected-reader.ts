@@ -75,6 +75,10 @@ export function createPgSelectedReader(
       assertProject(input.projectId)
       return read((reader) => reader.getByPrimaryId(input))
     },
+    getByUniqueValue: async (input) => {
+      assertProject(input.projectId)
+      return read((reader) => reader.getByUniqueValue(input))
+    },
     selectsObjectProperties: async (input) => {
       assertProject(input.projectId)
       return read((reader) => reader.selectsObjectProperties(input))

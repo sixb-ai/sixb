@@ -77,6 +77,10 @@ export function createSqliteSelectedReader(
       assertProject(input.projectId)
       return read(() => reader.getByPrimaryId(input))
     },
+    getByUniqueValue: async (input) => {
+      assertProject(input.projectId)
+      return read(() => reader.getByUniqueValue(input))
+    },
     selectsObjectProperties: async (input) => {
       assertProject(input.projectId)
       return read(() => reader.selectsObjectProperties(input))

@@ -8,6 +8,7 @@ import type {
 } from "../../objects/query"
 import type { Redactions } from "../../security/types"
 import type { UserProfile } from "../../users"
+import type { UniqueValueRef } from "../ontology/materializations"
 import type { ObjectReadExecutionLimits } from "./execution-limits"
 import type { LinkBatchKey, ObjectBatchKey } from "./keys"
 
@@ -302,6 +303,12 @@ export interface ObjectReadStorage {
     objectTypeId: string
     primaryId: string
   }): Promise<ObjectRow | null>
+
+  /**
+   * The object holding a value of a unique property, by the key core computes for it, or null. A
+   * selected reader answers null unless that object is in its scope and selects the property.
+   */
+  getByUniqueValue(params: { projectId: string } & UniqueValueRef): Promise<ObjectRow | null>
 
   /**
    * Check whether each requested property belongs to the reader's selection.

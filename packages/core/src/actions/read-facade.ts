@@ -292,6 +292,11 @@ function recordObjectReads<TObjectType extends ObjectTypeWithPropertyTokens>(
       recorder.observeObject(ref(id), row && storageRow(row))
       return row
     },
+    async getBy(property, value) {
+      const row = await objectSet.getBy(property, value)
+      if (row) recorder.observeObject(ref(row.primaryId), storageRow(row))
+      return row
+    },
     query() {
       // Recording at the executor covers every terminal of every refinement, present and future.
       return decorateObjectQueryExecutor(objectSet.query(), (executor) =>

@@ -1348,6 +1348,7 @@ describe("bound Sixb surface", () => {
         "exists",
         "facet",
         "get",
+        "getBy",
         "getLatestTelemetry",
         "getPrimaryPropertyId",
         "getTelemetryHistory",
