@@ -165,7 +165,7 @@ Query nodes compose through input:
   limit     {"kind":"limit","input":<query>,"limit":${CLI_LIMITS.list.default}}
   page      {"kind":"page","input":<query>,"pageSize":${CLI_LIMITS.list.default},"pageToken":"from nextPageToken"}
   project   {"kind":"project","input":<query>,"properties":["name","status"]}
-  expand    {"kind":"expand","input":<query>,"expansions":[{"linkId":"link","direction":"outgoing","limit":5}]}
+  expand    {"kind":"expand","input":<query>,"expansions":[{"linkId":"link","direction":"outgoing","limit":5}],"users":["assignee"]}
   vector    {"kind":"vector","input":<start|filter>,"vector":"text","profile":"name","k":10}
   rerank    {"kind":"rerank","input":<vector>,"model":{"provider":"provider","modelId":"model"}}
 
@@ -178,8 +178,12 @@ Predicates use op, not kind:
   {"op":"contains","propertyId":"tags","value":"urgent"}
 
 Every field shown is required except includeSubtypes, fields, pageToken, properties, a sort
-direction, and an expansion's limit. Sort by relevance after text or vector with
+direction, an expansion's limit, and users. Sort by relevance after text or vector with
 {"kind":"relevance"}. Wrap the outermost node in project to return only the properties you need.
+
+An expand's users, or an expansion's, lists user-reference properties: each row then carries the
+members' profiles under users (id, email, displayName, avatarUrl, status). Without access to the
+member directory, users is empty.
 
 Traversal and expansion directions are outgoing or incoming. For incoming relationships, the link
 is declared on the child/source type; add sourceObjectTypeId when needed to disambiguate it.
@@ -278,6 +282,7 @@ export const QUERY_EXAMPLES: Readonly<Record<string, string>> = {
   incoming:
     '{"kind":"traverse","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment"}',
   expand: `{"kind":"expand","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"expansions":[{"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment","limit":${CLI_LIMITS.list.default}}]}`,
+  users: `{"kind":"expand","input":{"kind":"limit","input":{"kind":"start","objectTypeId":"Task"},"limit":${CLI_LIMITS.list.default}},"expansions":[],"users":["assignee"]}`,
   sort: `{"kind":"limit","input":{"kind":"sort","input":{"kind":"start","objectTypeId":"Customer"},"fields":[{"kind":"property","propertyId":"name","direction":"asc"}]},"limit":${CLI_LIMITS.list.default}}`,
   page: `{"kind":"page","input":{"kind":"start","objectTypeId":"Customer"},"pageSize":${CLI_LIMITS.list.default}}`,
   vector: `{"kind":"vector","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Product"},"predicate":{"op":"eq","propertyId":"status","value":"active"}},"vector":"waterproof trail shoes","profile":"content","k":${CLI_LIMITS.search.default}}`,

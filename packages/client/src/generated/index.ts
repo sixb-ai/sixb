@@ -840,6 +840,7 @@ export type {
   ObjectQueryRequest,
   ObjectQueryResponse,
   ObjectQuerySortField,
+  ObjectQueryUserValue,
   ObjectRef,
   PostAgentThreadMessageData,
   PostAgentThreadMessageError,
@@ -1031,4 +1032,5 @@ export type {
   UpsertObjectLinkResponses,
   UpsertObjectResponse,
   UpsertObjectResponses,
+  UserProfile,
 } from "./types.gen"
