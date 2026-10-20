@@ -125,8 +125,8 @@ describe("agent API gateway", () => {
 
     const objectTypes = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
     expect(objectTypes.status).toBe(200)
-    // Regression guard: remove the auth-disabled branch in resolveAgentRunAuthState and this must
-    // fail because the principal-scoped Agent role deliberately cannot view PrivateNote.
+    // The run's auth-disabled execution stays unrestricted: the Agent role deliberately cannot
+    // view PrivateNote, so resolving this run as a principal would hide it.
     await expect(objectTypes.json()).resolves.toEqual([
       expect.objectContaining({ id: "contract" }),
       expect.objectContaining({ id: "device" }),
@@ -751,6 +751,43 @@ describe("runs gateway requests inside the agent run's execution", () => {
       "limit-agent": { meter: "tokens.total", amount: 0 },
     })
   })
+
+  // Removal proof: restore the `!host.auth.isEnabled()` shortcut in resolveAgentRunAuthState and
+  // both fail — the request becomes a root auth-disabled request, unrestricted for a workflow task.
+  test("keeps an auth-disabled conversation unrestricted inside its execution", async () => {
+    const { app, gatewayBaseUrl, agentExecutionId, storage } = await createGatewayRuntime({
+      auth: false,
+    })
+
+    const actionRunId = await labelDeviceThroughGateway(app, gatewayBaseUrl)
+
+    const execution = await actionRunExecution(storage, actionRunId)
+    expect(execution).toMatchObject({
+      source: { type: "execution", executionId: agentExecutionId },
+      correlationId: "request-main",
+    })
+    expect(execution.requestedBy).toBeUndefined()
+  })
+
+  test("limits an auth-disabled workflow AI task to its groups", async () => {
+    const { app, gatewayBaseUrl, agentExecutionId, storage } = await createGatewayRuntime({
+      auth: false,
+      executionKind: "workflow",
+    })
+
+    const objectTypes = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
+    expect(objectTypes.status).toBe(200)
+    await expect(objectTypes.json()).resolves.toEqual([
+      expect.objectContaining({ id: "contract" }),
+      expect.objectContaining({ id: "device" }),
+    ])
+
+    const actionRunId = await labelDeviceThroughGateway(app, gatewayBaseUrl)
+    await expect(actionRunExecution(storage, actionRunId)).resolves.toMatchObject({
+      source: { type: "execution", executionId: agentExecutionId },
+      requestedBy: { type: "user", id: "usr_requester" },
+    })
+  })
 })
 
 async function labelDeviceThroughGateway(
@@ -1012,7 +1049,7 @@ async function createGatewayRuntime(
     }
   } else if (options.executionKind === "subagent") {
     const parentRunId = "parent-run-1"
-    const parentExecutionId = await createMainAgentExecution(storage, parentRunId)
+    const parentExecutionId = await createMainAgentExecution(storage, parentRunId, options)
     const parentExecution = {
       token: createAgentRunExecutionToken(),
       queueLeaseExpiresAt: new Date(Date.now() + 60_000),
@@ -1078,7 +1115,7 @@ async function createGatewayRuntime(
       createdAt: NOW,
       updatedAt: NOW,
     })
-    agentExecutionId = await createMainAgentExecution(storage, runId)
+    agentExecutionId = await createMainAgentExecution(storage, runId, options)
     await storage.agents.runs.create({
       id: runId,
       projectId: PROJECT_ID,
@@ -1118,7 +1155,28 @@ async function createGatewayRuntime(
   }
 }
 
-async function createMainAgentExecution(storage: InMemoryStorage, runId: string): Promise<string> {
+async function createMainAgentExecution(
+  storage: InMemoryStorage,
+  runId: string,
+  options: { readonly auth?: boolean }
+): Promise<string> {
+  const executionId = "execution-agent"
+  if (options.auth === false) {
+    const parent = await storage.executions.create({
+      id: "execution-main-request",
+      projectId: PROJECT_ID,
+      requesterGroupIds: [],
+      executor: { type: "request", requestId: "request-main" },
+      source: { type: "http", requestId: "request-main" },
+      correlationId: "request-main",
+      authorizationRef: { type: "disabled" },
+    })
+    await storage.executions.create(
+      createInheritedAgentExecutionRecord({ id: executionId, parent, runId })
+    )
+    return executionId
+  }
+
   const userId = "usr_requester"
   const sessionId = "session-agent"
   await storage.auth.users.create({
@@ -1158,7 +1216,6 @@ async function createMainAgentExecution(storage: InMemoryStorage, runId: string)
       credential: { type: "session", id: sessionId },
     },
   })
-  const executionId = "execution-agent"
   await storage.executions.create(
     createInheritedAgentExecutionRecord({ id: executionId, parent, runId })
   )

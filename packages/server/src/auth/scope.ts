@@ -36,8 +36,7 @@ export interface AgentGatewayRunExecution {
 }
 
 export interface InternalRequestAuthState {
-  /** Absent when auth is disabled: the request then runs as an auth-disabled request. */
-  readonly runExecution?: AgentGatewayRunExecution
+  readonly runExecution: AgentGatewayRunExecution
   readonly agentRun?: AgentRunRecord
   readonly agentExecution?: RequestAuthState["agentExecution"]
 }
