@@ -137,6 +137,7 @@ sixb objects inspect Invoice inv-1
 | `actions`, `action-runs` | Request actions and inspect runs. |
 | `workflows`, `workflow-runs` | Start workflows and inspect runs. |
 | `files` | Upload and download files. |
+| `users` | List and search the [member directory](../auth/members.md#read-the-member-directory), for example `sixb users search ava`. |
 
 These commands return JSON. Use scoped help for the operation you need, such as `sixb objects --help`.
 

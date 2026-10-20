@@ -99,6 +99,8 @@ const CLI_API_ROUTES = [
   "GET /api/workflow-runs/:runId",
   "GET /api/workflow-runs/:runId/files/content",
   "GET /api/objects/search",
+  "GET /api/users",
+  "GET /api/users/:userId",
 ] as const
 
 const INTENTIONAL_CLI_ROUTE_ALTERNATIVES = new Map([

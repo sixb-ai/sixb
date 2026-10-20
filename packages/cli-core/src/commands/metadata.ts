@@ -51,6 +51,13 @@ Actions and workflows:
 Files:
   sixb files upload|download ...
 
+Members:
+  sixb users search <text>            Find members by name or email
+  sixb users list|get ...
+
+A user parameter or property is {"type":"user","id":"<user-id>"}. Find the id with
+\`sixb users search <name>\`.
+
 Run \`sixb <group> --help\` or \`sixb <group> <command> --help\` for exact arguments.
 For query IR, run \`sixb objects query --help\` and \`sixb objects query --example list\`.`
 
@@ -233,6 +240,19 @@ List options:
   sixb workflows start <workflow-id> [--file <path|->]
 
 The JSON file contains the workflow input object. Use - to read standard input.`,
+  users: `Usage:
+  sixb users list [options]
+  sixb users search <text> [options]
+  sixb users get <user-id>
+
+Options:
+  --status active|suspended|all       Defaults to active
+  --limit <1-${CLI_LIMITS.users.maximum}>                     Defaults to ${CLI_LIMITS.users.default}
+  --offset <n>                        Non-negative; defaults to 0
+
+\`users search\` matches part of a display name or email, ignoring case. Each member is
+{"id","email","displayName","avatarUrl","status"}; a user parameter takes
+{"type":"user","id":"<id>"}. Reading members requires can.view(project.users).`,
   "workflow-runs": `Usage:
   sixb workflow-runs list [options]
   sixb workflow-runs get <run-id>
