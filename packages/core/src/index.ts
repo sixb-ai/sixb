@@ -863,6 +863,16 @@ export type {
 // ── Runtime ─────────────────────────────────────────────────
 
 export type { ActionRunsRuntime, ActionsRuntime } from "./actions/execution"
+export type {
+  ActivityConnection,
+  ActivityConnectionStatus,
+  ActivityConnectionsPage,
+  ActivityConnectionsQuery,
+  ActivitySessionConnection,
+  ActivityShareConnection,
+  ActivityUserConnection,
+} from "./activity/connection"
+export type { ActivityDevice } from "./activity/device"
 export type { ActivityRuntime, ActivityUsersResult } from "./activity/execution"
 export type {
   ActivityCalendar,
@@ -872,6 +882,14 @@ export type {
   ActivityPeriodQuery,
   ActivityTimelineQuery,
 } from "./activity/service"
+export type {
+  ActivityActionEntry,
+  ActivityAgentEntry,
+  ActivityPageEntry,
+  ActivityTimelineEntry,
+  ActivityVisitTimeline,
+  ActivityWorkflowEntry,
+} from "./activity/timeline"
 export type {
   AgentRunListResult,
   AgentRunsRuntime,

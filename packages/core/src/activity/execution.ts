@@ -8,6 +8,11 @@ import type {
   ActivityVisitPage,
   ActivityVisitsPage,
 } from "../storage/activity/types"
+import {
+  type ActivityConnectionsPage,
+  type ActivityConnectionsQuery,
+  readActivityConnections,
+} from "./connection"
 import type {
   ActivityCalendar,
   ActivityCalendarQuery,
@@ -19,6 +24,11 @@ import type {
   ActivitySource,
   ActivityTimelineQuery,
 } from "./service"
+import {
+  ACTIVITY_TIMELINE_LIMIT,
+  type ActivityVisitTimeline,
+  composeActivityTimeline,
+} from "./timeline"
 
 export interface ActivityUsersResult {
   /** `displayName` is the account's profile name; no other profile field is read. */
@@ -33,6 +43,13 @@ export interface ActivityRuntime {
   summarize(query: ActivityPeriodQuery): Promise<ActivitySummary>
   calendar(query: ActivityCalendarQuery): Promise<ActivityCalendar>
   read(visitId: string, query?: ActivityTimelineQuery): Promise<ActivityVisitPage | null>
+  /**
+   * The visit's page views with the actions, workflows and Agent runs its session started, and
+   * the connection it came through. Bounded: see `truncated`.
+   */
+  timeline(visitId: string): Promise<ActivityVisitTimeline | null>
+  /** A user's sign-ins, newest first, with the visits each opened. */
+  connections(query: ActivityConnectionsQuery): Promise<ActivityConnectionsPage>
 }
 
 /**
@@ -90,6 +107,17 @@ export function createActivityRuntime(
     async read(visitId, query) {
       assertObservable()
       return service.read(visitId, query)
+    },
+
+    async timeline(visitId) {
+      assertObservable()
+      const page = await service.readWithSession({ id: visitId, limit: ACTIVITY_TIMELINE_LIMIT })
+      return page ? composeActivityTimeline(runtime, page, new Date()) : null
+    },
+
+    async connections(query) {
+      assertObservable()
+      return readActivityConnections(runtime, service, query, new Date())
     },
   }
 }

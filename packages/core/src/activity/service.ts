@@ -13,12 +13,20 @@ import type {
   ActivityDay,
   ActivityEventInput,
   ActivityPeriodInput,
+  ActivitySessionVisits,
   ActivityStorage,
   ActivitySummary,
   ActivityUsersPage,
   ActivityVisitPage,
   ActivityVisitsPage,
+  ListActivitySessionVisitsInput,
+  StoredActivityVisitPage,
 } from "../storage/activity/types"
+import {
+  type ActivityConnectionsCursor,
+  type ActivityConnectionsQuery,
+  decodeActivityConnectionsCursor,
+} from "./connection"
 
 export interface ActivityOptions {
   /** Record visits and page views in the project's app and its shared links. Off by default. */
@@ -79,6 +87,7 @@ export interface ActivitySource {
 }
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60_000
+const ACTIVITY_CONNECTION_VISITS = 5
 const MAX_IDLE_TIMEOUT_MS = 24 * 60 * 60_000
 
 /** Validates queries and holds the project's activity settings. Authorization is the caller's. */
@@ -169,8 +178,31 @@ export class ActivityService {
     return { userId: query.userId, year: query.year, days }
   }
 
-  async read(id: string, query: ActivityTimelineQuery = {}): Promise<ActivityVisitPage | null> {
-    const afterSequence = query.afterSequence ?? 0
+  read(id: string, query: ActivityTimelineQuery = {}): Promise<ActivityVisitPage | null> {
+    const page = this.readWithSession({
+      id,
+      afterSequence: query.afterSequence ?? 0,
+      limit: pageLimit(query.limit),
+    })
+
+    // The session id joins a visit with what its session did; reads never return it.
+    return page.then((stored) => {
+      if (!stored) {
+        return null
+      }
+      const { sessionId: _sessionId, ...visit } = stored
+      return visit
+    })
+  }
+
+  /** A visit and the session it belongs to, which only core reads: see `read`. */
+  readWithSession(input: {
+    readonly id: string
+    readonly afterSequence?: number
+    readonly limit: number
+  }): Promise<StoredActivityVisitPage | null> {
+    const { id, limit } = input
+    const afterSequence = input.afterSequence ?? 0
     if (
       typeof id !== "string" ||
       !ACTIVITY_VISIT_ID_PATTERN.test(id) ||
@@ -180,19 +212,34 @@ export class ActivityService {
       throw new Error("[Sixb] Invalid activity visit id or sequence.")
     }
 
-    const page = await this.requireStorage().read({
-      projectId: this.projectId,
-      id,
-      afterSequence,
-      limit: pageLimit(query.limit),
-    })
-    if (!page) {
-      return null
-    }
+    return this.requireStorage().read({ projectId: this.projectId, id, afterSequence, limit })
+  }
 
-    // The session id joins a visit with what its session did; reads never return it.
-    const { sessionId: _sessionId, ...visit } = page
-    return visit
+  connectionsQuery(query: ActivityConnectionsQuery): {
+    readonly userId: string
+    readonly limit: number
+    readonly before?: ActivityConnectionsCursor
+  } {
+    validateUserId(query.userId)
+
+    return {
+      userId: query.userId,
+      limit: pageLimit(query.limit ?? 20),
+      ...(query.cursor === undefined
+        ? {}
+        : { before: decodeActivityConnectionsCursor(query.cursor) }),
+    }
+  }
+
+  /** Each session's visit count and latest visits: a connection shows those, the calendar the rest. */
+  sessionVisits(
+    input: Omit<ListActivitySessionVisitsInput, "projectId" | "limit">
+  ): Promise<readonly ActivitySessionVisits[]> {
+    return this.requireStorage().sessionVisits({
+      ...input,
+      projectId: this.projectId,
+      limit: ACTIVITY_CONNECTION_VISITS,
+    })
   }
 
   private period(query: ActivityPeriodQuery): ActivityPeriodInput {

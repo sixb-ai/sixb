@@ -15,6 +15,7 @@ import {
   defineRole,
   link,
   type ProjectionDefinition,
+  project,
   prop,
   resolveAuthorizationContext,
   SixbHost,
@@ -165,7 +166,12 @@ export interface AppliedProject {
  * recorded it.
  */
 export async function createAppliedProject(
-  options: { readonly variant?: InvoiceProjection; readonly marked?: boolean } = {}
+  options: {
+    readonly variant?: InvoiceProjection
+    readonly marked?: boolean
+    /** Records activity, which both groups may observe. */
+    readonly activity?: boolean
+  } = {}
 ): Promise<AppliedProject> {
   const lake = new InMemoryLakeStorage()
   const datasets =
@@ -189,7 +195,16 @@ export async function createAppliedProject(
     ontology: [Customer, Invoice],
     markings: [financial, pii],
     groups: [sales, finance],
-    roles,
+    roles: options.activity
+      ? [
+          ...roles,
+          defineRole("activity-observer", {
+            grantedTo: [sales, finance],
+            grants: [can.observe(project.activity)],
+          }),
+        ]
+      : roles,
+    ...(options.activity ? { activity: { enabled: true } } : {}),
     datasets,
     pipelines: [definePipeline("finance").then(normalize)],
     projections: [invoicesProjection(options.variant ?? "plain")],
