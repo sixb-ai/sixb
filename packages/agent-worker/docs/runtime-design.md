@@ -33,9 +33,11 @@ the CLI and gateway (everything else returns `403`):
 | Workflows | `GET /api/workflows`, `GET /api/workflows/:workflowId`, `POST .../:workflowId/runs`, `GET /api/workflow-runs`, `GET /api/workflow-runs/:runId` |
 | Files | `POST /api/files`, object/action/workflow-run/message `GET .../files/content` routes |
 
-Requests run under the agent's [execution identity](../../../docs/models/tools-and-authorization.md), so the agent can only see
-and act on what its groups allow — the same checks as any other caller, and only while the run is
-active.
+Requests run inside the run's own [execution](../../../docs/models/tools-and-authorization.md), like its project tools:
+what they start is part of the run, keeps the run's requester, and counts toward its usage. The
+agent can only see and act on what its groups allow — the same checks as any other caller; a
+workflow task keeps its groups when auth is disabled. Access is checked when a request is admitted,
+so only while the run is active; a request admitted before the run ends still finishes in it.
 
 The upload route keeps its normal simple-file ceiling and gets a route-specific gateway body limit;
 other gateway requests remain capped at 1 MB. Staged and direct-provider uploads are not exposed.
@@ -47,8 +49,9 @@ infrastructure or administration routes remain outside the gateway.
 Project tools run in the worker, not the sandbox. Their `sixb` is the run's execution-bound SDK,
 with the authority the gateway resolves; its type shows only object reads, actions, models and
 connectors. The model supplies only ids, and the SDK checks every read and request against the
-requester. Tool authority is resolved once, at turn start, while the gateway re-resolves it on every
-request. Their model calls use the run's accounting recorder.
+run's authority: the user's access for a conversation, the task's groups for a workflow task. Tool
+authority is resolved once, at turn start, while the gateway re-resolves it on every request. Their
+model calls use the run's accounting recorder; a gateway request gets its own, on the run's attempt.
 Their `attachments` open a manifest key only in a message of the run's own thread, like the
 gateway's message file route, or among a workflow task's input files.
 
