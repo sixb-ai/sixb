@@ -110,10 +110,13 @@ async function handleAgentApiGatewayRequest(input: {
     throw error
   }
   const internalUrl = new URL(`${upstreamPath}${sourceUrl.search}`, input.request.url)
+  // The caller's signal travels with the request: a sandbox client that gives up cancels the
+  // forwarded work, model calls included.
   const internalRequest = new Request(internalUrl, {
     method: input.request.method,
     headers: forwardedRequestHeaders(input.request.headers),
     body,
+    signal: input.request.signal,
   })
 
   registerInternalRequestAuthState(internalRequest, authState)
