@@ -36,6 +36,7 @@ A visit's timeline lists, by time and filterable by kind:
 | Entry | What it shows |
 | --- | --- |
 | Pages | Route patterns, such as `/invoices/:invoiceId` |
+| Interactions | The elements you [mark](#track-interactions) |
 | Actions and workflows | The runs the visit's session started, with their outcome |
 | Agent runs | Status, messages and cost |
 
@@ -43,11 +44,30 @@ Above it, the connection names the browser and system, or the shared link. A use
 lists their sign-ins with the visits each opened.
 
 An action names its object, and links to its run, only if you may read them. A visit shows at most
-200 page views and 200 runs, and says when it stops short.
+200 page views and interactions and 200 runs, and says when it stops short.
+
+## Track interactions
+
+Mark what people click, or call `trackSixbEvent` for what is not a click:
+
+```tsx
+<Button data-sixb-track="invoices.export">Export</Button>
+```
+
+```ts
+import { trackSixbEvent } from "@sixb/client/browser"
+
+trackSixbEvent("invoices.filter.applied")
+```
+
+- Names are constants in lowercase dotted segments, such as `invoices.row.open`. Names that look
+  like values, such as `invoices.123`, are refused: never put an id or user input in a name.
+- Sixb records the name, the page and the time, never the element's text or a value.
+- Call `trackSixbEvent` in response to something the person did, not on each keystroke.
 
 ## Privacy and limits
 
-- Never recorded: URLs and their values, page contents, form values and IP addresses.
+- Never recorded: URLs and their values, page contents, form values, element text and IP addresses.
 - The built-in Data, Observability, Ontology and Settings pages are not recorded.
 - Use SQLite or PostgreSQL to keep history across restarts. It has no automatic expiration.
 - Browsers can fail to deliver events: use activity to understand usage, not as an audit trail.
