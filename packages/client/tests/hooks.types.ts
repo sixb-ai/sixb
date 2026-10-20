@@ -6,6 +6,7 @@ import {
   type TelemetryHistoryPoint,
   type TelemetryHistoryPoints,
   telemetryHistoryQueryOptions,
+  usersQueryOptions,
 } from "../src/hooks"
 
 /**
@@ -104,3 +105,21 @@ bulkTelemetryHistoryQueryOptions({
   // @ts-expect-error telemetry property tokens must belong to the selected object type
   properties: [OtherMetricSeries.p.value],
 })
+
+// The directory page carries the profile fields the server returns.
+type UsersPage = Awaited<ReturnType<NonNullable<ReturnType<typeof usersQueryOptions>["queryFn"]>>>
+type _userProfile = Expect<
+  Equal<
+    UsersPage["users"][number],
+    {
+      id: string
+      email: string
+      displayName?: string
+      avatarUrl?: string
+      status: "active" | "suspended"
+    }
+  >
+>
+
+// @ts-expect-error the directory lists active, suspended, or all members.
+usersQueryOptions({ status: "invited" })
