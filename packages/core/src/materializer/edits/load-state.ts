@@ -10,9 +10,11 @@ import type { MaterializerContext } from "../context"
 import { loadState, oneStateRequest } from "../effective/load-state"
 import { resolveEffectiveLinkSlotMember, usableLinkSlotOverride } from "../effective/resolve"
 import { buildEditReadSet, isKnownLinkRef, linkCardinality } from "./read-set"
+import { WorkingUniqueValues } from "./unique-values"
 import {
   distinctCardinalityOneScopes,
   type EditWorkingState,
+  type LoadingEditWorkingState,
   mergeWorkingState,
   resolveLinkEdge,
   resolveObject,
@@ -23,9 +25,11 @@ export async function loadEditWorkingState(
   context: MaterializerContext,
   storage: OntologyMaterializationStorage,
   session: MaterializationSession,
-  operations: Parameters<typeof buildEditReadSet>[1]
+  operations: Parameters<typeof buildEditReadSet>[1],
+  /** Continue mode checks unique values per item; storage checks an atomic commit as a whole. */
+  options: { readonly checkUniqueValuesPerItem: boolean }
 ): Promise<EditWorkingState> {
-  const state: EditWorkingState = {
+  const state: LoadingEditWorkingState = {
     objects: new Map(),
     links: {
       edges: new Map(),
@@ -35,7 +39,7 @@ export async function loadEditWorkingState(
   const readSet = buildEditReadSet(context.ontology, operations)
   const explicitLinkKeys = new Set(readSet.links.map(linkRefKey))
   const incidentLinks = new Map<string, MaterializationLinkState>()
-  const loadedState: EditWorkingState = {
+  const loadedState: LoadingEditWorkingState = {
     objects: state.objects,
     links: {
       edges: new Map(),
@@ -75,7 +79,11 @@ export async function loadEditWorkingState(
     [...incidentLinks.values()],
     revivingObjects
   )
-  return state
+
+  const uniqueValues = options.checkUniqueValuesPerItem
+    ? await WorkingUniqueValues.load(context, storage, session, operations, state.objects)
+    : WorkingUniqueValues.untracked(context.ontology)
+  return { ...state, uniqueValues }
 }
 
 function isRevivingObjectOperation(
@@ -95,7 +103,7 @@ async function mergeIncidentState(
   context: MaterializerContext,
   storage: OntologyMaterializationStorage,
   session: MaterializationSession,
-  state: EditWorkingState,
+  state: LoadingEditWorkingState,
   incidentStates: readonly MaterializationLinkState[],
   revivingObjects: ReadonlySet<string>
 ): Promise<void> {
@@ -175,7 +183,7 @@ async function mergeMissingLinkSlotEndpoints(
   context: MaterializerContext,
   storage: OntologyMaterializationStorage,
   session: MaterializationSession,
-  state: EditWorkingState
+  state: LoadingEditWorkingState
 ): Promise<void> {
   const missing = new Map<string, OntologyObjectRef>()
   for (const working of state.links.slots.values()) {
@@ -203,7 +211,7 @@ async function mergeLoadedState(
   context: MaterializerContext,
   storage: OntologyMaterializationStorage,
   session: MaterializationSession,
-  state: EditWorkingState,
+  state: LoadingEditWorkingState,
   request: MaterializationStateRequestChunk
 ): Promise<void> {
   const loaded = await loadState(context, storage, session, request)

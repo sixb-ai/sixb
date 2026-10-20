@@ -225,6 +225,58 @@ export function runUniqueValuesContractSuite<TStorage extends Storage>(
     })
   })
 
+  // Removal proof: drop the `assertDistinct` calls of continue mode in `materializer/edits/
+  // commit.ts`; storage then refuses the duplicate and fails the whole batch.
+  test(`${name} fails only the colliding item of a continue-mode batch`, async () => {
+    await withStorage(async (storage) => {
+      const edits = editor(storage)
+      await edits.commit([create("a", { email: "a@example.com" })])
+
+      const result = await edits.commitEach([
+        create("b", { email: "b@example.com" }),
+        create("c", { email: "a@example.com" }),
+        create("d", { email: "b@example.com" }),
+        create("e", { email: "e@example.com" }),
+      ])
+
+      const message = `[Sixb] Another '${Person.id}' object already has this 'email'.`
+      expect(result.outcomes.map((outcome) => (outcome.ok ? "ok" : outcome.error))).toEqual([
+        "ok",
+        { code: "validation", message },
+        { code: "validation", message },
+        "ok",
+      ])
+      expect(await emails(storage, ["b", "c", "d", "e"])).toEqual([
+        "b@example.com",
+        undefined,
+        undefined,
+        "e@example.com",
+      ])
+    })
+  })
+
+  test(`${name} lets a continue-mode group swap values as a whole`, async () => {
+    await withStorage(async (storage) => {
+      const edits = editor(storage)
+      await edits.commit([
+        create("a", { email: "1@example.com" }),
+        create("b", { email: "2@example.com" }),
+      ])
+
+      const result = await edits.commitEach(
+        [
+          setEmail("a", "2@example.com"),
+          setEmail("b", "1@example.com"),
+          { ...setEmail("b", "2@example.com"), id: "email-b-again" },
+        ],
+        [["email-a", "email-b"]]
+      )
+
+      expect(result.outcomes.map((outcome) => outcome.ok)).toEqual([true, true, false])
+      expect(await emails(storage, ["a", "b"])).toEqual(["2@example.com", "1@example.com"])
+    })
+  })
+
   test(`${name} refuses two objects claiming one value in the same commit`, async () => {
     await withStorage(async (storage) => {
       const edits = editor(storage)
@@ -451,17 +503,28 @@ function editor(storage: Storage, registry: OntologyRegistry = ontology) {
       correlationId: "unique-values-contract-correlation",
     })
   )
-  let ordinal = 0
+  const requestId = () => `unique-edit-${crypto.randomUUID()}`
   return {
     commit(operations: readonly OntologyEditOperation[]) {
-      ordinal += 1
       return materializer.edits.commit({
         mode: "atomic",
-        source: { kind: "runtime", requestId: `unique-edit-${crypto.randomUUID()}-${ordinal}` },
+        source: { kind: "runtime", requestId: requestId() },
         operations,
         expectedObjects: [],
         expectedLinks: [],
         expectedLinkScopes: [],
+      })
+    },
+    /** Applies each operation alone, keeping those that succeed. */
+    commitEach(
+      operations: readonly OntologyEditOperation[],
+      operationGroups?: readonly (readonly string[])[]
+    ) {
+      return materializer.edits.commit({
+        mode: "continue",
+        source: { kind: "runtime", requestId: requestId() },
+        operations,
+        ...(operationGroups ? { operationGroups } : {}),
       })
     },
   }

@@ -63,6 +63,7 @@ import {
   toIsoString,
 } from "./shared"
 import { activateSourceRoots } from "./source-roots"
+import { pgUniqueHolders } from "./unique-values"
 
 interface TelemetrySummaryRow {
   readonly classified_points: number | string
@@ -201,6 +202,17 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
         const stored = await reader.exactPoints(points.slice(offset, offset + input.pageRows))
         if (stored.length > 0) {
           yield { objects: [], links: [], linkScopes: [], points: stored }
+        }
+      }
+      const uniqueValues = request.uniqueValues ?? []
+      for (let offset = 0; offset < uniqueValues.length; offset += input.pageRows) {
+        const uniqueHolders = await pgUniqueHolders(
+          this.sql,
+          session.header.commit.projectId,
+          uniqueValues.slice(offset, offset + input.pageRows)
+        )
+        if (uniqueHolders.length > 0) {
+          yield { objects: [], links: [], linkScopes: [], points: [], uniqueHolders }
         }
       }
     }

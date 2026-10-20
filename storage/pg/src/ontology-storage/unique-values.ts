@@ -3,9 +3,11 @@ import {
   uniqueValueViolation,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
+  ExactUniqueValueWrite,
   OntologyUniqueValueStorage,
   PreparedUniqueProperty,
   UniqueValueEntry,
+  UniqueValueRef,
 } from "@sixb/core/storage"
 import type postgres from "postgres"
 import type { SQLClient } from "../pg-client"
@@ -132,6 +134,43 @@ export function heldValue(sql: SQLClient, projectId: string) {
       AND stored.value_hash = sha256(convert_to(candidates.value_key, 'UTF8'))
       AND stored.value_key = candidates.value_key
   `
+}
+
+/** The objects holding these unique values; a value no object holds is left out. */
+export async function pgUniqueHolders(
+  sql: SQLClient,
+  projectId: string,
+  values: readonly UniqueValueRef[]
+): Promise<ExactUniqueValueWrite[]> {
+  if (values.length === 0) return []
+  const requested = values.map((value) => ({
+    object_type_id: value.objectTypeId,
+    property_id: value.propertyId,
+    value_key: value.valueKey,
+  }))
+  const rows = await sql<
+    {
+      readonly object_type_id: string
+      readonly property_id: string
+      readonly value_key: string
+      readonly primary_id: string
+    }[]
+  >`
+    WITH candidates AS MATERIALIZED (
+      SELECT * FROM jsonb_to_recordset(${jsonParameter(sql, requested)}::jsonb)
+        AS requested(object_type_id text, property_id text, value_key text)
+    )
+    SELECT candidates.object_type_id, candidates.property_id, candidates.value_key,
+      held.primary_id
+    FROM candidates
+    CROSS JOIN LATERAL (${heldValue(sql, projectId)} LIMIT 1) AS held
+  `
+  return rows.map((row) => ({
+    objectTypeId: row.object_type_id,
+    propertyId: row.property_id,
+    valueKey: row.value_key,
+    primaryId: row.primary_id,
+  }))
 }
 
 export class PgOntologyUniqueValueStorage implements OntologyUniqueValueStorage {

@@ -189,7 +189,8 @@ async function executeEditTransaction(
     context,
     storage.ontology.materializations,
     session,
-    command.input.operations
+    command.input.operations,
+    { checkUniqueValuesPerItem: command.input.mode === "continue" }
   )
   const outcomes = applyEditOperations(context, workingState, command)
   const changes = await stageEditPlan(
@@ -275,6 +276,7 @@ function applyEditOperations(
   for (const unit of units) {
     outcomes.push(...applyEditExecutionUnit(context, state, command, unit))
   }
+
   return outcomes
 }
 
@@ -296,10 +298,21 @@ function applyOneEditOperation(
   operation: OntologyEditOperation,
   command: PreparedEditCommit
 ): OntologyOperationOutcome {
+  const journal: EditUndoJournal = []
   try {
-    return applyEditOperation(context, state, operation, command.identity, command.users)
+    const outcome = applyEditOperation(
+      context,
+      state,
+      operation,
+      command.identity,
+      command.users,
+      journal
+    )
+    if (command.input.mode === "continue") state.uniqueValues.assertDistinct()
+    return outcome
   } catch (error) {
     if (!isRecoverableEditValidation(command.input, error)) throw error
+    undoEditJournal(journal)
     return { id: operation.id, ok: false, error: { code: "validation", message: error.message } }
   }
 }
@@ -341,6 +354,17 @@ function applyEditOperationGroup(
       return failedEditGroup(group, outcome.error.message)
     }
     applied.push(outcome)
+  }
+
+  // A group applies as a whole: values may move between its objects.
+  if (command.input.mode === "continue") {
+    try {
+      state.uniqueValues.assertDistinct()
+    } catch (error) {
+      if (!isRecoverableEditValidation(command.input, error)) throw error
+      undoEditJournal(journal)
+      return failedEditGroup(group, error.message)
+    }
   }
   return applied
 }
