@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import {
+  type AuthorizablePrincipal,
   can,
   defineAction,
   defineGroup,
@@ -91,10 +92,21 @@ const PrivateNote = defineObjectType({
   properties: [prop("id", "string", { required: true, primary: true })],
 })
 
+/** The requester each phase of a `label-device` run saw, in order. */
+const labelDeviceRequesters: {
+  readonly phase: "validate" | "edits"
+  readonly requestedBy: AuthorizablePrincipal | undefined
+}[] = []
+
 const labelDevice = defineAction("label-device")
   .on(Device)
   .params({})
-  .edits(() => {})
+  .validate(({ requestedBy }) => {
+    labelDeviceRequesters.push({ phase: "validate", requestedBy })
+  })
+  .edits(({ requestedBy }) => {
+    labelDeviceRequesters.push({ phase: "edits", requestedBy })
+  })
 
 const inspectDevice = defineWorkflowStep("inspect-device")
   .input({ document: "fileRef" })
@@ -635,6 +647,7 @@ describe("runs gateway requests inside the agent run's execution", () => {
     const { app, gatewayBaseUrl, agentExecutionId, storage } = await createGatewayRuntime({
       executionKind: "workflow",
     })
+    labelDeviceRequesters.length = 0
 
     const actionRunId = await labelDeviceThroughGateway(app, gatewayBaseUrl)
 
@@ -643,6 +656,12 @@ describe("runs gateway requests inside the agent run's execution", () => {
       requestedBy: { type: "user", id: "usr_requester" },
       correlationId: "test_correlation:parent-workflow-run",
     })
+    // The action's own handlers see the workflow's requester too.
+    const workflowRequester = { type: "user", id: "usr_requester" } as const
+    expect(labelDeviceRequesters).toEqual([
+      { phase: "validate", requestedBy: workflowRequester },
+      { phase: "edits", requestedBy: workflowRequester },
+    ])
 
     // The requester can view notes; the task's groups cannot, and they still decide.
     const objectTypes = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
