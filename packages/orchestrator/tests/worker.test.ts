@@ -889,7 +889,6 @@ describe("OrchestratorWorker", () => {
         "[SixbOrchestrator] Dataset 'raw.invoices' version ancestry contains a cycle at 'schema-cycle'.",
       details: {
         projectId: PROJECT_ID,
-        projectionId: descriptor.projectionId,
         datasetId: rawInvoices.id,
         versionId: schemaVersion.versionId,
       },
