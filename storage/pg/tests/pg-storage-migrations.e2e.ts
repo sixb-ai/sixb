@@ -361,6 +361,7 @@ describe("Postgres storage migrations", () => {
             "063-artifacts",
             "064-drop-output-diagnostics",
             "065-plan-work-payload-statistics",
+            "066-activity",
           ],
         },
       ])
@@ -819,6 +820,13 @@ describe("Postgres storage migrations", () => {
           id: "065-plan-work-payload-statistics",
           status: "applied",
           version: 65,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "066-activity",
+          status: "applied",
+          version: 66,
         },
       ])
     })
@@ -3332,6 +3340,13 @@ describe("Postgres storage migrations", () => {
           id: "065-plan-work-payload-statistics",
           status: "applied",
           version: 65,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "066-activity",
+          status: "applied",
+          version: 66,
         },
       ])
     } finally {

@@ -49,6 +49,7 @@ export type { PgObjectTextCountIndex } from "./objects/text-count-index"
 
 import { PgOntologyStorage, type PgOntologyTransactionContext } from "./ontology-storage"
 import { PgActionRunStorage } from "./pg-action-run-storage"
+import { PgActivityStorage } from "./pg-activity-storage"
 import { PgAiCostStorage } from "./pg-ai-cost-storage"
 import { PgAiLimitStorage } from "./pg-ai-limit-storage"
 import { PgAiUsageStorage } from "./pg-ai-usage-storage"
@@ -185,6 +186,7 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
   readonly shareSessions: PgShareSessionStorage
   readonly fileUploadSessions: PgFileUploadSessionStorage
   readonly fileDownloadGrants: PgFileDownloadGrantStorage
+  readonly activity: PgActivityStorage
   readonly migrators: readonly StorageMigrator[]
 
   private readonly sql: SQL
@@ -272,6 +274,7 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
     this.shareSessions = createOperationScopedFacade(stores.shareSessions, scope)
     this.fileUploadSessions = createOperationScopedFacade(stores.fileUploadSessions, scope)
     this.fileDownloadGrants = createOperationScopedFacade(stores.fileDownloadGrants, scope)
+    this.activity = createOperationScopedFacade(stores.activity, scope)
     registerPostgresStorageTestingAdapter(this, (durationMs) =>
       stores.connectorConnections.advanceTimeForTesting(durationMs)
     )
@@ -435,6 +438,7 @@ function createPostgresStores(
     shareSessions,
     fileUploadSessions: new PgFileUploadSessionStorage(sql),
     fileDownloadGrants: new PgFileDownloadGrantStorage(sql),
+    activity: new PgActivityStorage(sql),
   }
 }
 
@@ -462,6 +466,7 @@ interface PostgresStoreSet {
   readonly shareSessions: PgShareSessionStorage
   readonly fileUploadSessions: PgFileUploadSessionStorage
   readonly fileDownloadGrants: PgFileDownloadGrantStorage
+  readonly activity: PgActivityStorage
 }
 
 function resolveTimeoutMillis(value: number | undefined, label: string): number | undefined {

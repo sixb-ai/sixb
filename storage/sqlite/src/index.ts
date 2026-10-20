@@ -32,6 +32,7 @@ import {
   StorageTransactionError,
 } from "@sixb/core/storage"
 import { SqliteActionRunStorage } from "./action-run-storage"
+import { SqliteActivityStorage } from "./activity-storage"
 import { SqliteAgentStorage } from "./agents"
 import { SqliteAiCostStorage } from "./ai-cost-storage"
 import { SqliteAiLimitStorage } from "./ai-limit-storage"
@@ -108,6 +109,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly connectorConnections: SqliteConnectorConnectionStorage
   readonly fileUploadSessions: SqliteFileUploadSessionStorage
   readonly fileDownloadGrants: SqliteFileDownloadGrantStorage
+  readonly activity: SqliteActivityStorage
   readonly migrators: readonly StorageMigrator[]
 
   private readonly connection: SqliteStoreConnection
@@ -173,6 +175,7 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.connectorConnections = createOperationScopedFacade(stores.connectorConnections, scope)
     this.fileUploadSessions = createOperationScopedFacade(stores.fileUploadSessions, scope)
     this.fileDownloadGrants = createOperationScopedFacade(stores.fileDownloadGrants, scope)
+    this.activity = createOperationScopedFacade(stores.activity, scope)
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
     registerSqliteStorageTestingAdapter(this, {
       advanceConnectorConnectionTime: (durationMs) =>
@@ -338,6 +341,7 @@ function createSqliteStores(
     connectorConnections: new SqliteConnectorConnectionStorage(connection),
     fileUploadSessions: new SqliteFileUploadSessionStorage(connection),
     fileDownloadGrants: new SqliteFileDownloadGrantStorage(connection),
+    activity: new SqliteActivityStorage(connection),
   }
 }
 
@@ -365,6 +369,7 @@ interface SqliteStoreSet {
   readonly connectorConnections: SqliteConnectorConnectionStorage
   readonly fileUploadSessions: SqliteFileUploadSessionStorage
   readonly fileDownloadGrants: SqliteFileDownloadGrantStorage
+  readonly activity: SqliteActivityStorage
 }
 
 export { migrateSqliteStorage } from "./migrations"
