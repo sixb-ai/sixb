@@ -145,6 +145,8 @@ export interface MagicLinkCallbackInput {
   readonly magicLinkId: string
   readonly token: string
   readonly session: CompleteAuthSessionInput
+  /** The name the person gave. Used only when this sign-in creates their account. */
+  readonly displayName?: string
   readonly now?: Date
 }
 
@@ -162,6 +164,8 @@ export interface MagicLinkPeekInput {
 
 export interface MagicLinkPeekResult {
   readonly email: string
+  /** The link will create an account, so the confirmation page may ask for a name. */
+  readonly firstSignIn?: true
 }
 
 export interface MagicLinkAuthStrategy extends InvitationDeliveryAuthStrategy {

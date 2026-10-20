@@ -239,9 +239,9 @@ describe("magicLink", () => {
         now: now ?? at("2026-05-16T10:01:00.000Z"),
       })
 
-    // Valid link peeks the email — repeatedly, without consuming it.
-    await expect(peek(token)).resolves.toEqual({ email: "ava@acme.com" })
-    await expect(peek(token)).resolves.toEqual({ email: "ava@acme.com" })
+    // Valid link peeks the email — repeatedly, without consuming it. Ava has no account yet.
+    await expect(peek(token)).resolves.toEqual({ email: "ava@acme.com", firstSignIn: true })
+    await expect(peek(token)).resolves.toEqual({ email: "ava@acme.com", firstSignIn: true })
     await expect(peek("wrong-token")).resolves.toBeNull()
     await expect(peek(token, at("2026-05-16T10:16:00.000Z"))).resolves.toBeNull()
 
@@ -260,6 +260,51 @@ describe("magicLink", () => {
       },
     })
     await expect(peek(token, at("2026-05-16T10:03:00.000Z"))).resolves.toBeNull()
+  })
+
+  // To see this fail, drop `newUserDisplayName` from completeMagicLinkSignIn, or have peek always
+  // answer `firstSignIn: true`.
+  test("names a new member at their first sign-in, and only then", async () => {
+    const storage = new InMemoryAuthStorage()
+    const { messages, sendMagicLink } = createSender()
+    const strategy = magicLink({
+      allowedDomains: ["acme.com"],
+      bootstrapUsers: ["ava@acme.com"],
+      sendMagicLink,
+      rateLimit: false,
+    })
+    const signIn = async (displayName: string, sessionId: string) => {
+      await requestMagicLink({ storage, strategy, email: "ava@acme.com" })
+      const link = linkFromLatestMessage(messages)
+      const magicLinkId = link.searchParams.get("magicLinkId") ?? ""
+      const token = link.searchParams.get("token") ?? ""
+      const now = at("2026-05-16T10:05:00.000Z")
+      const peeked = await strategy.peekMagicLink?.({
+        projectId,
+        authStorage: storage,
+        magicLinkId,
+        token,
+        now,
+      })
+      const result = await strategy.completeMagicLinkSignIn({
+        projectId,
+        authStorage: storage,
+        magicLinkId,
+        token,
+        session: sessionInput(sessionId),
+        displayName,
+        now,
+      })
+      return { peeked, user: result.user }
+    }
+
+    const first = await signIn("Ava Lovelace", "ses_1")
+    expect(first.peeked).toEqual({ email: "ava@acme.com", firstSignIn: true })
+    expect(first.user.displayName).toBe("Ava Lovelace")
+
+    const second = await signIn("Someone Else", "ses_2")
+    expect(second.peeked).toEqual({ email: "ava@acme.com" })
+    expect(second.user.displayName).toBe("Ava Lovelace")
   })
 
   test("does not send for unknown, suspended, or disallowed emails", async () => {

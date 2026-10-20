@@ -40,6 +40,13 @@ export const auth = magicLink({
 Delivery is yours: the strategy renders the message and expects you to send it. Failures surface as
 `MagicLinkError`.
 
+## Names
+
+When a link creates an account, the confirmation page asks the new member for their name. They can
+leave it empty and set it later in Settings › Personal. A link that signs in an existing member
+never changes their name. Someone who opens their own link in the browser that requested it skips
+the confirmation page, so they set their name in Settings.
+
 ## Rate limiting is per email
 
 The limiter is keyed by email address and shared by one API process. Requests past `perMinute` or
