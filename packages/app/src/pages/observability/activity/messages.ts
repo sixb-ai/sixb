@@ -48,12 +48,46 @@ export const en = {
     notRecorded: "Not recorded",
   },
   visit: {
-    title: "Pages viewed",
-    select: "Select a visit to see the pages viewed in it.",
+    title: "Timeline",
+    select: "Select a visit to see its pages, actions, workflows and Agent runs.",
     noPages: "No page was viewed: this visit only shows activity on a page opened earlier.",
-    loadMore: "Load more pages",
+    nothingOfKind: "Nothing of this kind in this visit.",
     unavailable: "This visit could not be loaded.",
-    note: "Times are when Sixb received them, in UTC. Routes are patterns: their values and the page contents are not recorded.",
+    note: "Times are in UTC. Routes are patterns: their values and the page contents are not recorded. Actions, workflows and Agent runs are those the visit's session started.",
+    truncated:
+      "This visit did more than the timeline shows: it stops after 200 page views or 200 recorded executions.",
+    filters: {
+      all: "All",
+      page: "Pages",
+      action: "Actions",
+      workflow: "Workflows",
+      agent: "Agent",
+    },
+    incomplete: "Not finished",
+    agentRun: "Agent run",
+    messages: (count: number, formatted: string) =>
+      plural("en", count, { one: "1 message", other: `${formatted} messages` }),
+    openRun: (name: string) => `Open the run of ${name}`,
+  },
+  connection: {
+    label: "Connection",
+    unknownDevice: "Unknown device",
+    sharedLink: (link: string) => `Shared link ${link}`,
+    status: { active: "Active", expired: "Expired", revoked: "Revoked" },
+    signedIn: (date: string) => `Signed in ${date}`,
+    opened: (date: string) => `Opened ${date}`,
+    lastSeen: (date: string) => `last seen ${date}`,
+  },
+  connections: {
+    title: "Connections",
+    description: "Each sign-in of this user, newest first, with the visits it opened.",
+    empty: "This user has no sign-in recorded.",
+    unavailable: "The connections could not be loaded.",
+    visits: (count: number, formatted: string) =>
+      plural("en", count, { one: "1 visit", other: `${formatted} visits` }),
+    earlier: (count: number, formatted: string) =>
+      plural("en", count, { one: "1 earlier visit", other: `${formatted} earlier visits` }),
+    loadMore: "Load more connections",
   },
   calendar: {
     title: "Activity",
@@ -124,13 +158,52 @@ export const fr: Translation<ActivityMessages> = {
     notRecorded: "Non enregistrée",
   },
   visit: {
-    title: "Pages consultées",
-    select: "Sélectionnez une visite pour voir les pages consultées.",
+    title: "Chronologie",
+    select:
+      "Sélectionnez une visite pour voir ses pages, actions, workflows et exécutions de l’agent.",
     noPages:
       "Aucune page consultée : cette visite ne montre que de l’activité sur une page ouverte plus tôt.",
-    loadMore: "Charger plus de pages",
+    nothingOfKind: "Rien de ce type dans cette visite.",
     unavailable: "Cette visite n’a pas pu être chargée.",
-    note: "Les heures sont celles de réception par Sixb, en UTC. Les routes sont des modèles : leurs valeurs et le contenu des pages ne sont pas enregistrés.",
+    note: "Les heures sont en UTC. Les routes sont des modèles : leurs valeurs et le contenu des pages ne sont pas enregistrés. Les actions, workflows et exécutions de l’agent sont ceux lancés par la session de la visite.",
+    truncated:
+      "Cette visite en a fait plus que ce que montre la chronologie : elle s’arrête après 200 pages vues ou 200 exécutions enregistrées.",
+    filters: {
+      all: "Tout",
+      page: "Pages",
+      action: "Actions",
+      workflow: "Workflows",
+      agent: "Agent",
+    },
+    incomplete: "Non terminée",
+    agentRun: "Exécution de l’agent",
+    messages: (count: number, formatted: string) =>
+      plural("fr", count, { one: `${formatted} message`, other: `${formatted} messages` }),
+    openRun: (name: string) => `Ouvrir l’exécution de ${name}`,
+  },
+  connection: {
+    label: "Connexion",
+    unknownDevice: "Appareil inconnu",
+    sharedLink: (link: string) => `Lien partagé ${link}`,
+    status: { active: "Active", expired: "Expirée", revoked: "Révoquée" },
+    signedIn: (date: string) => `Connecté le ${date}`,
+    opened: (date: string) => `Ouvert le ${date}`,
+    lastSeen: (date: string) => `vu pour la dernière fois le ${date}`,
+  },
+  connections: {
+    title: "Connexions",
+    description:
+      "Chaque connexion de cet utilisateur, de la plus récente à la plus ancienne, avec les visites ouvertes.",
+    empty: "Aucune connexion enregistrée pour cet utilisateur.",
+    unavailable: "Les connexions n’ont pas pu être chargées.",
+    visits: (count: number, formatted: string) =>
+      plural("fr", count, { one: `${formatted} visite`, other: `${formatted} visites` }),
+    earlier: (count: number, formatted: string) =>
+      plural("fr", count, {
+        one: `${formatted} visite plus ancienne`,
+        other: `${formatted} visites plus anciennes`,
+      }),
+    loadMore: "Charger plus de connexions",
   },
   calendar: {
     title: "Activité",
