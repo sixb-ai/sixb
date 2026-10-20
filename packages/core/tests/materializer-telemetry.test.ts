@@ -91,7 +91,7 @@ describe("ontology materializer telemetry", () => {
         projectionKind: "telemetry",
         protocol: "telemetry",
         datasetVersion,
-        ontologyRevision: projections.ontologyRevision,
+        ontologyRevision: resolved.ontologyRevision,
         projectionRevision: resolved.projectionRevision,
         ownershipHash: resolved.ownershipHash,
       },

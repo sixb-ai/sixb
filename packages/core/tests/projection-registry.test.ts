@@ -6,6 +6,7 @@ import {
   defineProjection,
   defineValueType,
   link,
+  type ObjectTypeWithPropertyTokens,
   OntologyRegistry,
   ProjectionValidationError,
   prop,
@@ -128,7 +129,7 @@ describe("projection registry", () => {
       projectionKind: "object",
       protocol: "replacement",
       datasetId: "rooms",
-      ontologyRevision: projectionRegistry.ontologyRevision,
+      ontologyRevision: resolved.ontologyRevision,
       projectionRevision: resolved.projectionRevision,
       ownershipHash: resolved.ownershipHash,
     })
@@ -137,6 +138,7 @@ describe("projection registry", () => {
     expect(projectionRegistry.resolveDispatch("temperatures")).toMatchObject({
       projectionKind: "telemetry",
       protocol: "telemetry",
+      ontologyRevision: projectionRegistry.resolveTelemetry("temperatures").ontologyRevision,
     })
     expect(() => projectionRegistry.resolveDispatch("missing")).toThrow("Unknown projection")
 
@@ -592,5 +594,149 @@ describe("projection registry", () => {
     expect(mostRecent(nullableRooms, "updated_at")).toThrow(
       "must reference a non-null timestamp dataset column"
     )
+  })
+})
+
+// Each test below covers one part of `computeProjectionOntologyRevision`: drop that part from the
+// hash and its test fails. Returning `computeOntologyRevision(ontology)` instead, the project-wide
+// hash every projection used to pin, fails the first one.
+describe("projection ontology revisions", () => {
+  const Liters = defineValueType({ id: "Liters", name: "Liters", schema: "double" })
+  const Flow = defineValueType({
+    id: "Flow",
+    name: "Flow",
+    schema: {
+      type: "object",
+      properties: { value: { schema: valueTypeRef("Liters"), required: true } },
+    },
+  })
+  const Vessel = defineObjectType({
+    id: "Vessel",
+    name: "Vessel",
+    properties: [prop("id", "string", { primary: true, required: true })],
+  })
+  const Storage = defineObjectType({
+    id: "Storage",
+    name: "Storage",
+    properties: [prop("id", "string", { primary: true, required: true })],
+  })
+  const Tank = defineObjectType({
+    id: "Tank",
+    name: "Tank",
+    extends: Vessel,
+    properties: [prop("capacity", "double")],
+  })
+  const Equipment = defineObjectType({
+    id: "Equipment",
+    name: "Equipment",
+    properties: [prop("id", "string", { primary: true, required: true })],
+  })
+  const Pump = defineObjectType({
+    id: "Pump",
+    name: "Pump",
+    extends: Equipment,
+    properties: [
+      prop("flowRate", valueTypeRef("Flow")),
+      prop("pressure", "double", { mode: "telemetry" }),
+    ],
+    links: [link("feeds", Tank), link("drains", Tank)],
+  })
+  const Unrelated = defineObjectType({
+    id: "Unrelated",
+    name: "Unrelated",
+    properties: [prop("id", "string", { primary: true, required: true })],
+  })
+
+  const pumps = defineDataset("pumps", {
+    schema: [col("pump_id", "string"), col("tank_id", "string")],
+  })
+  const pumpTanks = defineDataset("pump-tanks", {
+    schema: [col("pump_id", "string"), col("tank_id", "string")],
+  })
+  const pressures = defineDataset("pressures", {
+    schema: [col("pump_id", "string"), col("observed_at", "timestamp"), col("value", "float64")],
+  })
+  const projections = [
+    defineProjection("pumps", Pump)
+      .fromDataset(pumps)
+      .properties({ id: "pump_id" })
+      .withLinks({ feeds: { link: Pump.l.feeds, sourceField: "tank_id", target: Tank } }),
+    defineProjection("pump-drains", Pump.l.drains)
+      .fromDataset(pumpTanks)
+      .sourceField("pump_id")
+      .targetField("tank_id"),
+    defineProjection("pump-pressures", Pump.p.pressure)
+      .fromDataset(pressures)
+      .points({ objectId: "pump_id", at: "observed_at", value: "value" }),
+  ]
+  const baseline: readonly ObjectTypeWithPropertyTokens[] = [Equipment, Pump, Vessel, Storage, Tank]
+
+  /** Each projection's revision, with `changed` types replacing the baseline ones of the same id. */
+  function revisions(
+    changed: readonly ObjectTypeWithPropertyTokens[] = [],
+    valueTypes: readonly ValueType[] = [Flow, Liters]
+  ): Record<string, string> {
+    const objectTypes = new Map(baseline.map((type) => [type.id, type] as const))
+    for (const type of changed) objectTypes.set(type.id, type)
+    const ontology = new OntologyRegistry({
+      sources: [
+        { id: "revisions", version: "1", objectTypes: [...objectTypes.values()], valueTypes },
+      ],
+    })
+    const registry = new ProjectionRegistry({
+      projections,
+      ontology,
+      datasetsById: datasets(pumps, pumpTanks, pressures),
+    })
+    return Object.fromEntries(
+      registry
+        .getDispatchDescriptors()
+        .map((descriptor) => [descriptor.projectionId, descriptor.ontologyRevision])
+    )
+  }
+
+  function withProperty(
+    type: ObjectTypeWithPropertyTokens,
+    propertyId: string
+  ): ObjectTypeWithPropertyTokens {
+    return { ...type, properties: [...type.properties, prop(propertyId, "string")] }
+  }
+
+  const before = revisions()
+
+  test("ignores object types a projection does not read", () => {
+    expect(revisions([Unrelated])).toEqual(before)
+    expect(revisions([withProperty(Unrelated, "note")])).toEqual(before)
+    // A link target's own properties are not read; only what it is a subtype of.
+    expect(revisions([withProperty(Tank, "note")])).toEqual(before)
+  })
+
+  test("changes with the written type, including what it inherits", () => {
+    const after = revisions([withProperty(Pump, "note")])
+    const inherited = revisions([withProperty(Equipment, "note")])
+    for (const projectionId of Object.keys(before)) {
+      expect(after[projectionId], projectionId).not.toBe(before[projectionId])
+      expect(inherited[projectionId], projectionId).not.toBe(before[projectionId])
+    }
+  })
+
+  test("changes with the supertypes of a link target", () => {
+    const changes = [
+      revisions([{ ...Tank, parents: [...(Tank.parents ?? []), "Storage"] }]),
+      revisions([{ ...Tank, extends: "Storage", parents: ["Storage"] }]),
+    ]
+    for (const after of changes) {
+      expect(after.pumps).not.toBe(before.pumps)
+      expect(after["pump-drains"]).not.toBe(before["pump-drains"])
+      expect(after["pump-pressures"]).toBe(before["pump-pressures"])
+    }
+  })
+
+  test("changes with a value type the written type reaches transitively", () => {
+    const changedLiters = defineValueType({ id: "Liters", name: "Liters", schema: "integer" })
+    const after = revisions([], [Flow, changedLiters])
+    for (const projectionId of Object.keys(before)) {
+      expect(after[projectionId], projectionId).not.toBe(before[projectionId])
+    }
   })
 })

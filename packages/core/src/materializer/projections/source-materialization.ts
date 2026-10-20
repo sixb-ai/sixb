@@ -39,6 +39,7 @@ export async function stageProjectionMaterialization(
     readonly execution: ProjectionExecution
     readonly projectionKind: "object" | "link"
     readonly datasetVersion: PinnedDatasetVersion
+    readonly ontologyRevision: string
     readonly projectionRevision: string
     readonly ownershipHash: string
     readonly createdAt: string
@@ -60,7 +61,7 @@ export async function stageProjectionMaterialization(
     datasetVersion: input.datasetVersion,
     projectionRevision: input.projectionRevision,
     ownershipHash: input.ownershipHash,
-    ontologyRevision: context.projectionRegistry.ontologyRevision,
+    ontologyRevision: input.ontologyRevision,
     createdAt: input.createdAt,
     ...(input.base ? { base: input.base } : {}),
   })
