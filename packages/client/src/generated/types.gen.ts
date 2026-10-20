@@ -14176,6 +14176,373 @@ export type ListLogsResponses = {
 
 export type ListLogsResponse = ListLogsResponses[keyof ListLogsResponses]
 
+export type GetActivityCaptureConfigData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/activity/capture-config"
+}
+
+export type GetActivityCaptureConfigErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type GetActivityCaptureConfigError =
+  GetActivityCaptureConfigErrors[keyof GetActivityCaptureConfigErrors]
+
+export type GetActivityCaptureConfigResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    enabled: boolean
+    idleTimeoutMs: number
+  }
+}
+
+export type GetActivityCaptureConfigResponse =
+  GetActivityCaptureConfigResponses[keyof GetActivityCaptureConfigResponses]
+
+export type CaptureActivityData = {
+  body: {
+    events: Array<{
+      id: string
+      type: "page.view" | "visit.activity"
+      route: string
+      attribution?: {
+        source?: string
+        medium?: string
+        campaign?: string
+        referrer?: string
+      }
+    }>
+  }
+  path?: never
+  query?: never
+  url: "/api/activity/events"
+}
+
+export type CaptureActivityErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 429
+   */
+  429: {
+    status: "accepted" | "disabled" | "throttled"
+    accepted: number
+  }
+}
+
+export type CaptureActivityError = CaptureActivityErrors[keyof CaptureActivityErrors]
+
+export type CaptureActivityResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    status: "accepted" | "disabled" | "throttled"
+    accepted: number
+  }
+}
+
+export type CaptureActivityResponse = CaptureActivityResponses[keyof CaptureActivityResponses]
+
+export type ListActivityVisitsData = {
+  body?: never
+  path?: never
+  query: {
+    from: string
+    to: string
+    userId?: string
+    limit?: number
+    beforeAt?: string
+    beforeId?: string
+  }
+  url: "/api/activity/visits"
+}
+
+export type ListActivityVisitsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type ListActivityVisitsError = ListActivityVisitsErrors[keyof ListActivityVisitsErrors]
+
+export type ListActivityVisitsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    visits: Array<{
+      id: string
+      actor:
+        | {
+            type: "user"
+            userId: string
+          }
+        | {
+            type: "share"
+            grantId: string
+          }
+      attribution: {
+        source?: string
+        medium?: string
+        campaign?: string
+        referrer?: string
+      } | null
+      startedAt: string
+      lastSeenAt: string
+      pageViews: number
+    }>
+    hasMore: boolean
+  }
+}
+
+export type ListActivityVisitsResponse =
+  ListActivityVisitsResponses[keyof ListActivityVisitsResponses]
+
+export type ListActivityUsersData = {
+  body?: never
+  path?: never
+  query: {
+    from: string
+    to: string
+    userId?: string
+    limit?: number
+    beforeAt?: string
+    beforeId?: string
+  }
+  url: "/api/activity/users"
+}
+
+export type ListActivityUsersErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type ListActivityUsersError = ListActivityUsersErrors[keyof ListActivityUsersErrors]
+
+export type ListActivityUsersResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    users: Array<{
+      userId: string
+      displayName?: string
+      lastSeenAt: string
+      visits: number
+      pageViews: number
+    }>
+    hasMore: boolean
+  }
+}
+
+export type ListActivityUsersResponse = ListActivityUsersResponses[keyof ListActivityUsersResponses]
+
+export type GetActivitySummaryData = {
+  body?: never
+  path?: never
+  query: {
+    from: string
+    to: string
+    userId?: string
+  }
+  url: "/api/activity/summary"
+}
+
+export type GetActivitySummaryErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type GetActivitySummaryError = GetActivitySummaryErrors[keyof GetActivitySummaryErrors]
+
+export type GetActivitySummaryResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    users: number
+    visits: number
+    sharedVisits: number
+    pageViews: number
+  }
+}
+
+export type GetActivitySummaryResponse =
+  GetActivitySummaryResponses[keyof GetActivitySummaryResponses]
+
+export type GetActivityCalendarData = {
+  body?: never
+  path?: never
+  query: {
+    userId: string
+    year: number
+  }
+  url: "/api/activity/calendar"
+}
+
+export type GetActivityCalendarErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type GetActivityCalendarError = GetActivityCalendarErrors[keyof GetActivityCalendarErrors]
+
+export type GetActivityCalendarResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    userId: string
+    year: number
+    days: Array<{
+      day: string
+      visits: number
+      pageViews: number
+    }>
+  }
+}
+
+export type GetActivityCalendarResponse =
+  GetActivityCalendarResponses[keyof GetActivityCalendarResponses]
+
+export type GetActivityVisitData = {
+  body?: never
+  path: {
+    visitId: string
+  }
+  query?: {
+    afterSequence?: number
+    limit?: number
+  }
+  url: "/api/activity/visits/{visitId}"
+}
+
+export type GetActivityVisitErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetActivityVisitError = GetActivityVisitErrors[keyof GetActivityVisitErrors]
+
+export type GetActivityVisitResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    visit: {
+      id: string
+      actor:
+        | {
+            type: "user"
+            userId: string
+          }
+        | {
+            type: "share"
+            grantId: string
+          }
+      attribution: {
+        source?: string
+        medium?: string
+        campaign?: string
+        referrer?: string
+      } | null
+      startedAt: string
+      lastSeenAt: string
+      pageViews: number
+    }
+    pageViews: Array<{
+      id: string
+      sequence: number
+      route: string
+      receivedAt: string
+    }>
+    hasMore: boolean
+  }
+}
+
+export type GetActivityVisitResponse = GetActivityVisitResponses[keyof GetActivityVisitResponses]
+
 export type ListProjectionsData = {
   body?: never
   path?: never

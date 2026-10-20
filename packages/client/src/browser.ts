@@ -1,3 +1,5 @@
+import { prepareActivityArrival, preserveSixbActivityArrival } from "./activity-attribution"
+import { stopSixbActivityCapture } from "./activity-tracker"
 import {
   configureSixbClient as configureGeneratedSixbClient,
   normalizeSixbApiBaseUrl,
@@ -10,6 +12,8 @@ import {
 } from "./client-authority"
 import { client } from "./generated/client.gen"
 
+export { preserveSixbActivityArrival } from "./activity-attribution"
+export { recordSixbPageView, startSixbActivityCapture } from "./activity-tracker"
 export type { SixbApiErrorCode, SixbApiErrorInit } from "./api"
 export { isSixbApiError, SixbApiError } from "./api"
 
@@ -111,6 +115,7 @@ export function configureSixbBrowserClient(
   options: SixbBrowserClientOptions = {}
 ): SixbBrowserClientController {
   activeBrowserController?.dispose()
+  prepareActivityArrival(config.api.baseUrl, "app")
 
   let csrfToken: string | null = null
   let disposed = false
@@ -161,6 +166,7 @@ export function configureSixbBrowserClient(
         ((url: string) => {
           if (typeof window !== "undefined") window.location.assign(url)
         })
+      preserveSixbActivityArrival()
       redirect(createSixbSignInUrl(config, currentUrl))
     } catch {
       // Allow a later response to retry navigation without replacing the original API error.
@@ -179,6 +185,7 @@ export function configureSixbBrowserClient(
     dispose() {
       if (disposed) return
       disposed = true
+      stopSixbActivityCapture()
       csrfToken = null
       disposeActivity()
       client.interceptors.response.eject(authResponseInterceptorId)
@@ -203,6 +210,7 @@ export function configureSixbSharedBrowserClient(
 ): SixbSharedBrowserClientController {
   activeBrowserController?.dispose()
   assertSharedAccessGrantId(options.grantId)
+  prepareActivityArrival(config.api.baseUrl, `share:${options.grantId}`)
 
   const previousConfig = client.getConfig()
   const previousSharedAuthority = getClientSharedGrantId(client)
@@ -265,6 +273,7 @@ export function configureSixbSharedBrowserClient(
     dispose() {
       if (disposed) return
       disposed = true
+      stopSixbActivityCapture()
       csrfToken = null
       disposeActivity()
       client.interceptors.response.eject(responseInterceptorId)
@@ -425,10 +434,13 @@ function isAuthRedirectExcludedRequest(
   const apiUrl = new URL(normalizeSixbApiBaseUrl(config.api.baseUrl), requestUrl)
   const apiPath = apiUrl.pathname.replace(/\/+$/, "")
   const method = request.method.toUpperCase()
+  // Activity is background traffic: an expired session shows on the user's next real request.
   return (
     requestUrl.origin === apiUrl.origin &&
     ((method === "GET" && requestUrl.pathname === `${apiPath}/api/auth/session`) ||
-      (method === "POST" && requestUrl.pathname === `${apiPath}/api/auth/sign-out`))
+      (method === "POST" && requestUrl.pathname === `${apiPath}/api/auth/sign-out`) ||
+      (method === "GET" && requestUrl.pathname === `${apiPath}/api/activity/capture-config`) ||
+      (method === "POST" && requestUrl.pathname === `${apiPath}/api/activity/events`))
   )
 }
 
@@ -469,6 +481,7 @@ export async function requireSixbBrowserAuthSession(
   }
   const returnTo = options.returnTo ?? window.location.href
   const redirect = options.redirect ?? ((url: string) => window.location.assign(url))
+  preserveSixbActivityArrival()
   redirect(createSixbSignInUrl(config, returnTo))
   return data
 }
