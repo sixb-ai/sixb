@@ -40,6 +40,7 @@ export function Combobox({
   searchPlaceholder,
   emptyLabel,
   disabled = false,
+  required = false,
   className,
   "aria-describedby": ariaDescribedBy,
   hasMore = false,
@@ -47,6 +48,7 @@ export function Combobox({
   loadingLabel,
   loadMoreLabel,
   onLoadMore,
+  onSearchChange,
 }: {
   readonly id?: string
   readonly value?: string
@@ -56,6 +58,8 @@ export function Combobox({
   readonly searchPlaceholder?: string
   readonly emptyLabel?: string
   readonly disabled?: boolean
+  /** Announces the field as required; a button cannot carry the native `required`. */
+  readonly required?: boolean
   readonly className?: string
   readonly "aria-describedby"?: string
   readonly hasMore?: boolean
@@ -63,6 +67,11 @@ export function Combobox({
   readonly loadingLabel?: string
   readonly loadMoreLabel?: string
   readonly onLoadMore?: () => void
+  /**
+   * Search on the caller's side, such as on a server: receives the text as it is typed, and the
+   * list shows `options` as given instead of filtering them. Called with "" when the list closes.
+   */
+  readonly onSearchChange?: (search: string) => void
 }) {
   const messages = useUiMessages().combobox
   const [open, setOpen] = useState(false)
@@ -99,10 +108,18 @@ export function Combobox({
     [requestLoadMore]
   )
 
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      setOpen(next)
+      if (!next) onSearchChange?.("")
+    },
+    [onSearchChange]
+  )
+
   const portalContainer = triggerRef.current?.closest<HTMLElement>("[data-slot='dialog-content']")
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <Button
           type="button"
@@ -112,6 +129,7 @@ export function Combobox({
           role="combobox"
           aria-expanded={open}
           aria-describedby={ariaDescribedBy}
+          aria-required={required || undefined}
           disabled={disabled}
           className={cn("w-full justify-between bg-background", className)}
         >
@@ -126,8 +144,11 @@ export function Combobox({
         className="w-[var(--radix-popover-trigger-width)] p-0"
         align="start"
       >
-        <Command>
-          <CommandInput placeholder={searchPlaceholder ?? messages.search} />
+        <Command shouldFilter={onSearchChange === undefined}>
+          <CommandInput
+            placeholder={searchPlaceholder ?? messages.search}
+            onValueChange={onSearchChange}
+          />
           <CommandList
             className="overscroll-contain"
             style={{ maxHeight: "18rem", overflowY: "auto" }}
@@ -143,7 +164,7 @@ export function Combobox({
                   disabled={option.disabled}
                   onSelect={() => {
                     onValueChange(option.value)
-                    setOpen(false)
+                    handleOpenChange(false)
                   }}
                 >
                   <Check
