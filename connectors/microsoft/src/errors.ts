@@ -57,3 +57,17 @@ export class MicrosoftApiError extends Error {
     this.location = response.headers.get("location") ?? undefined
   }
 }
+
+/**
+ * Whether a mail, calendar or contacts call failed because the user has no Exchange Online
+ * mailbox: an unlicensed admin or service account, a guest, or a mailbox that is inactive,
+ * soft-deleted or hosted on-premises. A user that does not exist fails differently
+ * (`ErrorInvalidUser`), as does every other error.
+ */
+export function isMailboxNotEnabled(error: unknown): boolean {
+  return (
+    error instanceof MicrosoftApiError &&
+    error.status === 404 &&
+    error.code === "MailboxNotEnabledForRESTAPI"
+  )
+}

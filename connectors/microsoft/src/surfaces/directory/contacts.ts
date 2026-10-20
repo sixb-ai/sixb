@@ -8,8 +8,9 @@ import type {
   DirectoryQueryOptions,
   OrgContact,
 } from "../../types/directory"
-import { nonEmpty, query, resource, segment } from "../../validation"
+import { query, resource, segment } from "../../validation"
 import { type OrgContactDeltaResource, orgContactDeltaResource } from "./delta"
+import { directoryList, directoryListAll } from "./query"
 
 /** Graph documents only `$select` for these relationships. */
 export type DirectorySelectOptions = RequestOptions & { readonly select?: readonly string[] }
@@ -48,23 +49,6 @@ export interface OrgContactsResource {
   ): AsyncIterable<DirectoryObject>
 }
 
-/** Query string and headers, including Graph's advanced-query mode when it is required. */
-export function directoryRequest(
-  options: DirectoryQueryOptions | undefined,
-  advanced = options?.advancedQuery === true
-): { readonly path: string; readonly headers?: HeadersInit } {
-  const eventual = advanced || options?.search !== undefined
-  if (eventual && options?.expand !== undefined)
-    throw new MicrosoftConfigurationError("Graph does not support expand in advanced queries.")
-  const params = new URLSearchParams(query(options).slice(1))
-  if (options?.filter !== undefined) params.set("$filter", nonEmpty(options.filter, "filter"))
-  if (options?.search !== undefined) params.set("$search", nonEmpty(options.search, "search"))
-  if (advanced) params.set("$count", "true")
-  return {
-    path: params.size ? `?${params}` : "",
-    ...(eventual ? { headers: { ConsistencyLevel: "eventual" } } : {}),
-  }
-}
 function selectOnly(options?: DirectorySelectOptions): string {
   for (const key of ["expand", "top", "orderBy", "filter", "search"])
     if (options && key in options)
@@ -74,27 +58,6 @@ function selectOnly(options?: DirectorySelectOptions): string {
 const contactPath = (id: string) => `contacts/${segment(id, "orgContactId")}`
 
 export function orgContactsResource(http: MicrosoftHttp): OrgContactsResource {
-  const list = async <T extends { id: string }>(
-    path: string,
-    options?: DirectoryQueryOptions,
-    advanced?: boolean
-  ): Promise<DirectoryPage<T>> => {
-    const request = directoryRequest(options, advanced)
-    return page<T>(
-      await http.json(`${path}${request.path}`, {
-        headers: request.headers,
-        signal: options?.signal,
-      })
-    )
-  }
-  const listAll = <T extends { id: string }>(
-    path: string,
-    options?: DirectoryQueryOptions,
-    advanced?: boolean
-  ): AsyncIterable<T> => {
-    const request = directoryRequest(options, advanced)
-    return allPages(http, `${path}${request.path}`, options, request.headers)
-  }
   // Membership queries take options only in advanced mode; a plain listing needs no header.
   const membership = (options?: DirectoryMembershipOptions) =>
     [options?.filter, options?.search, options?.select, options?.top].some(
@@ -102,8 +65,8 @@ export function orgContactsResource(http: MicrosoftHttp): OrgContactsResource {
     )
   return {
     delta: orgContactDeltaResource(http),
-    list: async (options) => list("contacts", options),
-    listAll: (options) => listAll("contacts", options),
+    list: async (options) => directoryList(http, "contacts", options),
+    listAll: (options) => directoryListAll(http, "contacts", options),
     async get(id, options) {
       return resource(
         await http.json(`${contactPath(id)}${query(options)}`, { signal: options?.signal })
@@ -126,12 +89,12 @@ export function orgContactsResource(http: MicrosoftHttp): OrgContactsResource {
     listAllDirectReports: (id, options) =>
       allPages(http, `${contactPath(id)}/directReports${selectOnly(options)}`, options),
     listMemberOf: async (id, options) =>
-      list(`${contactPath(id)}/memberOf`, options, membership(options)),
+      directoryList(http, `${contactPath(id)}/memberOf`, options, membership(options)),
     listAllMemberOf: (id, options) =>
-      listAll(`${contactPath(id)}/memberOf`, options, membership(options)),
+      directoryListAll(http, `${contactPath(id)}/memberOf`, options, membership(options)),
     listTransitiveMemberOf: async (id, options) =>
-      list(`${contactPath(id)}/transitiveMemberOf`, options, membership(options)),
+      directoryList(http, `${contactPath(id)}/transitiveMemberOf`, options, membership(options)),
     listAllTransitiveMemberOf: (id, options) =>
-      listAll(`${contactPath(id)}/transitiveMemberOf`, options, membership(options)),
+      directoryListAll(http, `${contactPath(id)}/transitiveMemberOf`, options, membership(options)),
   }
 }
