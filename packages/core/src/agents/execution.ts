@@ -1,3 +1,7 @@
+import {
+  createObservedAgentArtifactsRuntime,
+  type ObservedAgentArtifactsRuntime,
+} from "../artifacts/observed"
 import { principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized, isRuntimeAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
@@ -62,6 +66,22 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
     list(input?: ListExecutionAgentThreadsInput): Promise<ListAgentThreadsResult>
   }
 
+/**
+ * Any user's conversation, read-only, for a caller with `can.observe(agent.threads)`. Nothing here
+ * checks who owns or takes part in a thread, and nothing writes: those stay on `threads` and `runs`.
+ */
+export interface ObservedAgentThreadsRuntime {
+  /** Throws an `AuthorizationError` without `can.observe(agent.threads)`. */
+  getById(threadId: string): Promise<AgentThreadRecord | null>
+  /** The thread's conversation runs; `null` when the thread does not exist. */
+  listRuns(
+    threadId: string,
+    input?: Omit<ListAgentRunsInput, "projectId" | "threadId">
+  ): Promise<AgentRunListResult | null>
+  /** What the Agent published in conversations, whoever owns it. `sixb.artifacts` stays the caller's. */
+  readonly artifacts: ObservedAgentArtifactsRuntime
+}
+
 export interface AgentRunsRuntime {
   request(input: ExecutionAgentRequestInput): Promise<ExecutionAgentRunResult>
   retry(runId: string): Promise<ExecutionAgentRunResult>
@@ -94,6 +114,8 @@ export type AgentRuntime<TParams extends Record<string, unknown> = Record<string
   get(): AgentDescriptor | null
   readonly threads: AgentThreadsRuntime<TParams>
   readonly runs: AgentRunsRuntime
+  /** Other users' conversations, read-only, with `can.observe(agent.threads)`. */
+  readonly observed: ObservedAgentThreadsRuntime
 }
 
 export function createAgentRuntime<
@@ -252,22 +274,58 @@ export function createAgentRuntime<
       getById: getRun,
       listForThread: async (threadId, input = {}) => {
         assertNoAgentSelector(input)
-        const storage = runtime.storage.agents
-        if (!storage || !(await getVisibleThreadRecord(threadId))) return null
-        const result = await storage.runs.list({
-          ...input,
-          projectId: runtime.projectId,
-          threadId,
-        })
-        return {
-          ...result,
-          runs: await attachRunViews(
-            runtime,
-            result.runs.filter((run) => run.kind === "conversation")
-          ),
-        }
+        if (!(await getVisibleThreadRecord(threadId))) return null
+        return listConversationRuns(runtime, threadId, input)
       },
     },
+    observed: createObservedAgentThreadsRuntime(runtime),
+  }
+}
+
+function createObservedAgentThreadsRuntime(
+  runtime: SixbRuntimeContext
+): ObservedAgentThreadsRuntime {
+  const getById = async (threadId: string): Promise<AgentThreadRecord | null> => {
+    assertAuthorized(runtime, { kind: "agentThreads.observe" })
+
+    const thread = await runtime.storage.agents?.threads.getById({
+      projectId: runtime.projectId,
+      id: threadId,
+    })
+    return thread ? publicThread(thread) : null
+  }
+
+  return {
+    getById,
+
+    async listRuns(threadId, input = {}) {
+      assertNoAgentSelector(input)
+      if (!(await getById(threadId))) {
+        return null
+      }
+      return listConversationRuns(runtime, threadId, input)
+    },
+
+    artifacts: createObservedAgentArtifactsRuntime(runtime),
+  }
+}
+
+/** A thread's conversation runs with their views; whoever calls it has decided who may read them. */
+async function listConversationRuns(
+  runtime: SixbRuntimeContext,
+  threadId: string,
+  input: Omit<ListAgentRunsInput, "projectId" | "threadId">
+): Promise<AgentRunListResult | null> {
+  const storage = runtime.storage.agents
+  if (!storage) return null
+
+  const result = await storage.runs.list({ ...input, projectId: runtime.projectId, threadId })
+  return {
+    ...result,
+    runs: await attachRunViews(
+      runtime,
+      result.runs.filter((run) => run.kind === "conversation")
+    ),
   }
 }
 

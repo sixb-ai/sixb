@@ -136,7 +136,10 @@ time range, so the same user's other browser, active at the same time, stays out
   Page views and interactions are at their server receipt, executions at their creation: the
   app's steps credit an execution to the last page view before it, so one started as the page
   changed can land in the neighboring step.
-- **Content:** a run shows its thread's message count, never its title or messages. An action
+- **Content:** a run shows its thread's message count, never its messages. Its title, under
+  `thread`, only for a viewer who also holds `can.observe(agent.threads)`, the grant that opens
+  the conversation itself (`sixb.agent.observed`); `thread` is also what tells the app it may link
+  there. Activity alone never reveals a conversation. An action
   names its object only when the viewer's own object reader returns it, so object type grants,
   markings and deletion all hide it. `runVisible` says whether the viewer may read the run
   itself, decided as the runs reads decide it (`canViewActionRun` and the subject type's

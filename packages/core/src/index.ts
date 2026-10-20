@@ -902,6 +902,7 @@ export type {
   AgentRunView,
   AgentThreadsRuntime,
   ExecutionAgentRunResult,
+  ObservedAgentThreadsRuntime,
 } from "./agents/execution"
 export type { ArtifactRequestErrorCode } from "./artifacts/errors"
 export { ArtifactRequestError } from "./artifacts/errors"
@@ -914,6 +915,7 @@ export type {
   PublishArtifactRuntimeInput,
 } from "./artifacts/execution"
 export type { ArtifactKind } from "./artifacts/kinds"
+export type { ObservedAgentArtifactsRuntime } from "./artifacts/observed"
 export type { ArtifactOutline } from "./artifacts/outline"
 export type { PublishedArtifact } from "./artifacts/publish/publish"
 export type { ArtifactReference } from "./artifacts/references"
