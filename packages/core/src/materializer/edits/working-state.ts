@@ -29,6 +29,8 @@ import {
   usableLinkSlotOverride,
 } from "../effective/resolve"
 import { linkCardinality } from "./read-set"
+import type { WorkingUniqueValues } from "./unique-values"
+
 export interface WorkingObject {
   ref: OntologyObjectRef
   source: MaterializationObjectState["source"]
@@ -75,11 +77,16 @@ export interface EditWorkingState {
     readonly edges: Map<string, WorkingLinkEdge>
     readonly slots: Map<string, WorkingLinkSlot>
   }
+  /** Who holds the unique values the operations could take, kept current as they apply. */
+  readonly uniqueValues: WorkingUniqueValues
 }
+
+/** The working state while it loads, before its unique value holders are read. */
+export type LoadingEditWorkingState = Omit<EditWorkingState, "uniqueValues">
 
 export function mergeWorkingState(
   ontology: OntologyRegistry,
-  working: EditWorkingState,
+  working: LoadingEditWorkingState,
   state: MaterializationStatePage
 ): void {
   for (const object of state.objects) {

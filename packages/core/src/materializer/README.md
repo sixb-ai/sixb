@@ -148,7 +148,7 @@ failed in between replaces nothing, and releases the candidate like any other en
 ordered edit operations
   -> transaction-local EditWorkingState
   -> update object, link-edge, and link-slot overrides
-  -> validate effective objects, endpoints, and cardinality
+  -> validate effective objects, endpoints, cardinality, and unique values
   -> diff final working state against commit-start state
   -> plan and finalize one commit
 ```
@@ -157,6 +157,12 @@ ordered edit operations
 its mutable overrides let operation N+1 observe operation N. In `continue` mode, a rejected
 operation rolls back only its working override; provider and infrastructure failures abort the
 whole transaction.
+
+Unique property values are kept in a table of their own, maintained by every object change: its
+plan releases the values the object gives up in the first apply phase and claims those it takes in
+the last, so a commit can move values between objects. Storage refuses a claim on a value another
+object holds. A `continue` batch checks the same rule first, on the holders it loads with its
+state (`edits/unique-values.ts`), so only the colliding item fails.
 
 Action-backed edits carry the run's terminal record. The commit validates the trusted Action
 execution and the record's `executionId`, then inserts the record in its own transaction before new

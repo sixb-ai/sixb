@@ -122,6 +122,8 @@ export interface MaterializationStatePage {
   readonly links: readonly MaterializationLinkState[]
   readonly linkScopes: readonly MaterializationLinkScopeState[]
   readonly points: readonly StoredTelemetryPoint[]
+  /** The objects holding requested unique values; a value no object holds is left out. */
+  readonly uniqueHolders?: readonly ExactUniqueValueWrite[]
 }
 
 export interface SourceReplacementObjectState extends Omit<MaterializationObjectState, "source"> {
@@ -147,6 +149,8 @@ export interface MaterializationStateRequestChunk {
     readonly series: TelemetrySeriesRef
     readonly at: string
   }[]
+  /** Unique values whose holders to read. */
+  readonly uniqueValues?: readonly UniqueValueRef[]
 }
 
 /**

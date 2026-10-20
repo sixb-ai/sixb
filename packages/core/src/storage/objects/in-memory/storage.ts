@@ -99,6 +99,7 @@ interface InMemoryObjectMaterializerAdapter {
     linkId: string,
     visit: (row: ObjectLinkRow) => void
   ): void
+  getUniqueHolder(projectId: string, value: UniqueValueRef): string | null
   releaseUniqueValue(projectId: string, value: ExactUniqueValueWrite): void
   /** Throws `UniqueValueViolationError` when another object holds the value. */
   claimUniqueValue(projectId: string, value: ExactUniqueValueClaim): void
@@ -160,6 +161,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
           if (row.linkId === linkId) visit(structuredClone(row))
         }
       },
+      getUniqueHolder: (projectId, value) => this.uniqueHolder(projectId, value) ?? null,
       releaseUniqueValue: (projectId, value) => this.releaseUniqueValue(projectId, value),
       claimUniqueValue: (projectId, value) => this.claimUniqueValue(projectId, value),
       listPreparedUniqueProperties: (projectId) =>
