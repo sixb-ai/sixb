@@ -10,6 +10,7 @@ import {
   defineRole,
   defineWorkflow,
   defineWorkflowStep,
+  type EmbeddingModel,
   type FileRef,
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -56,10 +57,26 @@ const Contract = defineObjectType({
   properties: [prop("id", "string", { required: true, primary: true })],
 })
 
+// Every search text costs 7 input tokens, so usage rows and limit consumption are exact.
+const deviceEmbeddings: EmbeddingModel = {
+  providerId: "test",
+  modelId: "device-embeddings",
+  definition: {
+    kind: "embedding",
+    providerId: "test",
+    modelId: "device-embeddings",
+    dimensions: 3,
+  },
+  async embed({ texts }) {
+    return { vectors: texts.map(() => [1, 0, 0]), usage: { inputTokens: 7 } }
+  },
+}
+
 const Device = defineObjectType({
   id: "device",
   name: "Device",
   properties: [prop("id", "string", { required: true, primary: true }), prop("label", "string")],
+  search: { vectors: { content: { source: ["label"], model: deviceEmbeddings } } },
   links: [
     link("contract", Contract, {
       cardinality: "one",
@@ -92,6 +109,14 @@ const agentRuntime = defineGroup("agent-runtime")
 const agentRole = defineRole("agent.runtime", {
   grantedTo: [agentRuntime],
   grants: [can.view(Device), can.view(Contract), can.apply(labelDevice), can.run(inspectDevices)],
+})
+
+// The workflow's requester can read notes; its AI task cannot. Nothing a task's request starts may
+// widen the task's access to its requester's.
+const noteReaders = defineGroup("note-readers")
+const noteReaderRole = defineRole("note.reader", {
+  grantedTo: [noteReaders],
+  grants: [can.view(PrivateNote)],
 })
 
 describe("agent API gateway", () => {
@@ -574,6 +599,194 @@ describe("agent API gateway", () => {
   })
 })
 
+// Removal proof: bind gateway requests with `bindRequestExecution` again in server.ts and every test
+// here fails — what a request starts gets a fresh root `http` execution as parent, a new correlation
+// id, and the agent's service account as requester for a workflow AI task.
+describe("runs gateway requests inside the agent run's execution", () => {
+  test("keeps a conversation's requester and correlation on the actions it requests", async () => {
+    const { app, gatewayBaseUrl, agentExecutionId, storage } = await createGatewayRuntime()
+    const agentExecution = await executionById(storage, agentExecutionId)
+
+    const actionRunId = await labelDeviceThroughGateway(app, gatewayBaseUrl)
+
+    await expect(actionRunExecution(storage, actionRunId)).resolves.toMatchObject({
+      source: { type: "execution", executionId: agentExecutionId },
+      requestedBy: { type: "user", id: "usr_requester" },
+      correlationId: "request-main",
+      requesterGroupIds: agentExecution.requesterGroupIds,
+    })
+  })
+
+  test("makes a subagent's actions children of the subagent's execution", async () => {
+    const { app, gatewayBaseUrl, agentExecutionId, storage } = await createGatewayRuntime({
+      executionKind: "subagent",
+    })
+
+    const actionRunId = await labelDeviceThroughGateway(app, gatewayBaseUrl)
+
+    await expect(actionRunExecution(storage, actionRunId)).resolves.toMatchObject({
+      source: { type: "execution", executionId: agentExecutionId },
+      requestedBy: { type: "user", id: "usr_requester" },
+      correlationId: "request-main",
+    })
+  })
+
+  test("keeps the workflow's requester while a workflow AI task keeps its own access", async () => {
+    const { app, gatewayBaseUrl, agentExecutionId, storage } = await createGatewayRuntime({
+      executionKind: "workflow",
+    })
+
+    const actionRunId = await labelDeviceThroughGateway(app, gatewayBaseUrl)
+
+    await expect(actionRunExecution(storage, actionRunId)).resolves.toMatchObject({
+      source: { type: "execution", executionId: agentExecutionId },
+      requestedBy: { type: "user", id: "usr_requester" },
+      correlationId: "test_correlation:parent-workflow-run",
+    })
+
+    // The requester can view notes; the task's groups cannot, and they still decide.
+    const objectTypes = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
+    expect(objectTypes.status).toBe(200)
+    await expect(objectTypes.json()).resolves.toEqual([
+      expect.objectContaining({ id: "contract" }),
+      expect.objectContaining({ id: "device" }),
+    ])
+  })
+
+  test("makes a workflow a conversation starts a child of the agent's execution", async () => {
+    const { app, gatewayBaseUrl, agentExecutionId, sixb, storage } = await createGatewayRuntime()
+    const document = await sixb.blobStorage.put({
+      body: new TextEncoder().encode("device report"),
+      fileName: "report.txt",
+      mediaType: "text/plain",
+    })
+
+    const response = await app.fetch(
+      new Request(`${gatewayBaseUrl}/api/workflows/inspect-devices/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ input: { document: fileRefJson(document) } }),
+      })
+    )
+    expect(response.status).toBe(202)
+    const { runId } = (await response.json()) as { runId: string }
+
+    const workflowRun = await storage.workflowRuns.getById({ projectId: PROJECT_ID, id: runId })
+    if (!workflowRun) throw new Error("Expected the requested workflow run.")
+    await expect(executionById(storage, workflowRun.executionId)).resolves.toMatchObject({
+      source: { type: "execution", executionId: agentExecutionId },
+      requestedBy: { type: "user", id: "usr_requester" },
+      correlationId: "request-main",
+    })
+  })
+
+  test("ignores request and correlation ids the caller sends", async () => {
+    const { app, gatewayBaseUrl, agentExecutionId, storage } = await createGatewayRuntime()
+
+    const actionRunId = await labelDeviceThroughGateway(app, gatewayBaseUrl, {
+      "x-correlation-id": "forged-correlation",
+      "x-request-id": "forged-request",
+    })
+
+    await expect(actionRunExecution(storage, actionRunId)).resolves.toMatchObject({
+      source: { type: "execution", executionId: agentExecutionId },
+      correlationId: "request-main",
+    })
+  })
+
+  // Removal proof: pass `attempt: 1` instead of the run's attempt to
+  // bindModelExecutionAttempt in bindAgentGatewayRequestExecution and the usage row's attempt is 1.
+  test("accounts a search's embedding to the run's execution, attempt and requester", async () => {
+    const { app, gatewayBaseUrl, agentExecutionId, storage } = await createGatewayRuntime({
+      executionKind: "workflow",
+      attempt: 2,
+    })
+    for (const [id, subject] of [
+      ["limit-requester", { type: "user", id: "usr_requester" }],
+      ["limit-agent", { type: "serviceAccount", id: "svc_agent_assistant" }],
+    ] as const) {
+      await storage.aiLimits.createPolicy({
+        id,
+        projectId: PROJECT_ID,
+        subject,
+        limit: { meter: "tokens.total", amount: 1_000 },
+      })
+    }
+
+    const search = await app.fetch(
+      new Request(`${gatewayBaseUrl}/api/objects/query`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "vector",
+            input: { kind: "start", objectTypeId: "device" },
+            profile: "content",
+            vector: "fan",
+            k: 1,
+          },
+        }),
+      })
+    )
+    expect(search.status).toBe(200)
+
+    await expect(
+      storage.aiUsage.getLatestForExecution({
+        projectId: PROJECT_ID,
+        executionId: agentExecutionId,
+      })
+    ).resolves.toMatchObject({
+      executionId: agentExecutionId,
+      attempt: 2,
+      usage: { inputTokens: 7 },
+    })
+
+    // The limit subject is the workflow's requester, not the task's service account.
+    const statuses = await storage.aiLimits.listPolicyStatuses({ projectId: PROJECT_ID })
+    const consumed = Object.fromEntries(
+      statuses.map((status) => [status.policy.id, status.consumption.actual])
+    )
+    expect(consumed).toEqual({
+      "limit-requester": { meter: "tokens.total", amount: 7 },
+      "limit-agent": { meter: "tokens.total", amount: 0 },
+    })
+  })
+})
+
+async function labelDeviceThroughGateway(
+  app: ReturnType<typeof createSixbApi>,
+  gatewayBaseUrl: string,
+  headers: Readonly<Record<string, string>> = {}
+): Promise<string> {
+  const response = await app.fetch(
+    new Request(`${gatewayBaseUrl}/api/actions/label-device`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        subject: { kind: "object", objectTypeId: "device", primaryId: "fan-1" },
+      }),
+    })
+  )
+  expect(response.status).toBe(200)
+
+  const run = (await response.json()) as { id: string }
+  return run.id
+}
+
+async function actionRunExecution(storage: InMemoryStorage, actionRunId: string) {
+  const run = await storage.actionRuns.getById({ projectId: PROJECT_ID, id: actionRunId })
+  if (!run) throw new Error(`Expected action run '${actionRunId}'.`)
+
+  return executionById(storage, run.executionId)
+}
+
+async function executionById(storage: InMemoryStorage, id: string) {
+  const execution = await storage.executions.getById({ projectId: PROJECT_ID, id })
+  if (!execution) throw new Error(`Expected execution '${id}'.`)
+
+  return execution
+}
+
 async function runAgentCli(
   baseUrl: string,
   args: readonly string[]
@@ -604,12 +817,15 @@ async function createGatewayRuntime(
     readonly auth?: boolean
     readonly executionKind?: "conversation" | "subagent" | "workflow"
     readonly queueLeaseExpiresAt?: Date
+    /** A workflow AI task's delivery attempt: above 1, the task was redelivered. */
+    readonly attempt?: number
   } = {}
 ): Promise<{
   readonly app: ReturnType<typeof createSixbApi>
   readonly gatewayBaseUrl: string
   readonly executionToken: string
   readonly runId: string
+  readonly agentExecutionId: string
   readonly storage: InMemoryStorage
   readonly sixb: SixbHost
 }> {
@@ -619,8 +835,9 @@ async function createGatewayRuntime(
     ontology: [Contract, Device, PrivateNote],
     actions: [labelDevice],
     workflows: [inspectDevices],
-    groups: [agentRuntime],
-    roles: [agentRole],
+    groups: [agentRuntime, noteReaders],
+    roles: [agentRole, noteReaderRole],
+    models: { embedding: [deviceEmbeddings] },
     broker: new InMemoryBroker(),
     storage,
     lakeStorage: new InMemoryLakeStorage(),
@@ -719,11 +936,27 @@ async function createGatewayRuntime(
     token: createAgentRunExecutionToken(),
     queueLeaseExpiresAt: options.queueLeaseExpiresAt ?? new Date(Date.now() + 60_000),
   }
+  let agentExecutionId: string
   if (options.executionKind === "workflow") {
+    await storage.auth.users.create({
+      id: "usr_requester",
+      projectId: PROJECT_ID,
+      email: "requester@example.com",
+      createdAt: NOW,
+      updatedAt: NOW,
+    })
+    await storage.auth.groupMemberships.upsert({
+      projectId: PROJECT_ID,
+      userId: "usr_requester",
+      groupId: noteReaders.id,
+      source: "manual",
+      createdAt: NOW,
+    })
     const parentWorkflowExecutionId = await createTestWorkflowExecution(storage.executions, {
       projectId: PROJECT_ID,
       workflowId: inspectDevices.id,
       runId: "parent-workflow-run",
+      requestedBy: { type: "user", id: "usr_requester" },
     })
     await storage.workflowRuns.queue({
       id: "parent-workflow-run",
@@ -750,7 +983,7 @@ async function createGatewayRuntime(
       input: {},
       startedAt: NOW,
     })
-    const executionId = await createTestAgentExecution(storage, {
+    agentExecutionId = await createTestAgentExecution(storage, {
       projectId: PROJECT_ID,
       actorId: "assistant",
       runId,
@@ -759,7 +992,7 @@ async function createGatewayRuntime(
     await storage.workflowRuns.agentNodes.create({
       projectId: PROJECT_ID,
       nodeRunId: runId,
-      executionId,
+      executionId: agentExecutionId,
       actorId: "assistant",
       prompt: "Inspect devices.",
       createdAt: NOW,
@@ -770,6 +1003,13 @@ async function createGatewayRuntime(
       execution,
       startedAt: NOW,
     })
+    for (let attempt = 1; attempt < (options.attempt ?? 1); attempt += 1) {
+      await storage.workflowRuns.agentNodes.reclaim({
+        projectId: PROJECT_ID,
+        nodeRunId: runId,
+        execution,
+      })
+    }
   } else if (options.executionKind === "subagent") {
     const parentRunId = "parent-run-1"
     const parentExecutionId = await createMainAgentExecution(storage, parentRunId)
@@ -804,14 +1044,14 @@ async function createGatewayRuntime(
       id: parentExecutionId,
     })
     if (!parent) throw new Error("Expected the parent Agent execution.")
-    const executionId = "execution-child-agent"
+    agentExecutionId = "execution-child-agent"
     await storage.executions.create(
-      createInheritedAgentExecutionRecord({ id: executionId, parent, runId })
+      createInheritedAgentExecutionRecord({ id: agentExecutionId, parent, runId })
     )
     await storage.agents.runs.createSubagent({
       id: runId,
       projectId: PROJECT_ID,
-      executionId,
+      executionId: agentExecutionId,
       parentRunId,
       parentExecutionToken: parentExecution.token,
       spawnKey: "inspect",
@@ -838,11 +1078,11 @@ async function createGatewayRuntime(
       createdAt: NOW,
       updatedAt: NOW,
     })
-    const executionId = await createMainAgentExecution(storage, runId)
+    agentExecutionId = await createMainAgentExecution(storage, runId)
     await storage.agents.runs.create({
       id: runId,
       projectId: PROJECT_ID,
-      executionId,
+      executionId: agentExecutionId,
       threadId,
       triggerMessageId: "msg-1",
       spec: { model: { provider: "test", modelId: "test-model" } },
@@ -872,6 +1112,7 @@ async function createGatewayRuntime(
     )}/${encodeURIComponent(capability)}`,
     executionToken: execution.token,
     runId,
+    agentExecutionId,
     storage,
     sixb,
   }
@@ -907,7 +1148,7 @@ async function createMainAgentExecution(storage: InMemoryStorage, runId: string)
     id: "execution-main-request",
     projectId: PROJECT_ID,
     requestedBy: { type: "user", id: userId },
-    requesterGroupIds: [],
+    requesterGroupIds: [agentRuntime.id],
     executor: { type: "request", requestId: "request-main" },
     source: { type: "http", requestId: "request-main" },
     correlationId: "request-main",
