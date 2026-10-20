@@ -20,8 +20,10 @@ import {
   InMemoryStorage,
   link,
   prop,
+  ref,
   SixbHost,
   SYSTEM_PRINCIPAL,
+  userRef,
 } from "@sixb/core"
 import { createInheritedAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
 import {
@@ -76,7 +78,11 @@ const deviceEmbeddings: EmbeddingModel = {
 const Device = defineObjectType({
   id: "device",
   name: "Device",
-  properties: [prop("id", "string", { required: true, primary: true }), prop("label", "string")],
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("label", "string"),
+    prop("owner", ref.user(), { query: { searchable: true, filterable: true } }),
+  ],
   search: { vectors: { content: { source: ["label"], model: deviceEmbeddings } } },
   links: [
     link("contract", Contract, {
@@ -176,6 +182,37 @@ describe("agent API gateway", () => {
     )
     expect(count.status).toBe(200)
     await expect(count.json()).resolves.toMatchObject({ count: 1 })
+  })
+
+  test("binds currentUser() to the user who requested the agent run", async () => {
+    // A conversation works for its user; a workflow AI task for the workflow's requester, not the
+    // agent's service account.
+    for (const executionKind of ["conversation", "workflow"] as const) {
+      const { app, gatewayBaseUrl, sixb } = await createGatewayRuntime({ executionKind })
+      await createTestSixb(sixb).objects.upsert("device", {
+        id: "fan-2",
+        owner: userRef("usr_requester"),
+      })
+
+      const response = await app.fetch(
+        new Request(`${gatewayBaseUrl}/api/objects/query`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            query: {
+              kind: "filter",
+              predicate: { op: "eq", propertyId: "owner", value: { type: "currentUser" } },
+              input: { kind: "start", objectTypeId: "device" },
+            },
+          }),
+        })
+      )
+
+      expect({ executionKind, status: response.status }).toEqual({ executionKind, status: 200 })
+      await expect(response.json()).resolves.toMatchObject({
+        objects: [expect.objectContaining({ primaryId: "fan-2" })],
+      })
+    }
   })
 
   test("restores child authority without allowing recursive workflows", async () => {

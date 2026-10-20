@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, link, prop, ref, stringEnum } from "@sixb/core"
 import { createClient, createConfig } from "../src/generated/client"
-import { objects, SixbQueryError } from "../src/query"
+import { currentUser, objects, SixbQueryError } from "../src/query"
 
 const Customer = defineObjectType({
   id: "Customer",
@@ -134,6 +134,31 @@ describe("objects().query()", () => {
     })
     expect(JSON.stringify(calls[2]?.body)).not.toContain("server-only")
     expect(JSON.stringify(calls[2]?.body)).not.toContain("definition")
+  })
+
+  test("sends currentUser() as { type: 'currentUser' } for the server to bind", async () => {
+    const Task = defineObjectType({
+      id: "Task",
+      name: "Task",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("assignee", ref.user(), { query: { searchable: true, filterable: true } }),
+      ],
+    })
+    const { client, calls } = createTestClient(() => Response.json({ count: 0, plan: emptyPlan }))
+
+    await objects(Task, { client })
+      .query()
+      .where((task) => task.p.assignee.eq(currentUser()))
+      .count()
+
+    expect(calls[0]?.body).toEqual({
+      query: {
+        kind: "filter",
+        predicate: { op: "eq", propertyId: "assignee", value: { type: "currentUser" } },
+        input: { kind: "start", objectTypeId: "Task" },
+      },
+    })
   })
 
   test("list() posts the normalized IR and revives row dates", async () => {
