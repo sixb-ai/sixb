@@ -1,15 +1,20 @@
 import {
+  participantsToAdd,
   snapshotAgentThreadSandboxParams,
   transitionAgentThreadSandbox,
 } from "@sixb/core/internal/agent-run-storage-provider"
 import {
+  type AddAgentThreadParticipantsInput,
   AgentStorageError,
+  type AgentThreadParticipantRecord,
   type AgentThreadRecord,
   type AgentThreadSandboxState,
   type AgentThreadStore,
   type CreateAgentThreadInput,
+  type ListAgentThreadParticipantsInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
+  type RemoveAgentThreadParticipantInput,
   type TransitionAgentThreadSandboxInput,
 } from "@sixb/core/storage"
 import type { SqlParameter } from "../pg-client"
@@ -17,8 +22,10 @@ import { isUniqueViolation } from "../storage-errors"
 import { type PgStoreClient, runPgTransaction } from "../transactions"
 import {
   type AgentRunRow,
+  type AgentThreadParticipantRow,
   type AgentThreadRow,
   queryAgentList,
+  rowToParticipantRecord,
   rowToRunRecord,
   rowToThreadRecord,
 } from "./rows"
@@ -151,6 +158,17 @@ export class PgAgentThreadStore implements AgentThreadStore {
       params.push(input.ownerPrincipal.type, input.ownerPrincipal.id)
     }
 
+    if (input.participantPrincipal) {
+      whereClauses.push(`EXISTS (
+        SELECT 1 FROM agent_thread_participants participant
+        WHERE participant.project_id = agent_threads.project_id
+          AND participant.thread_id = agent_threads.id
+          AND participant.principal_type = $${index++}
+          AND participant.principal_id = $${index++}
+      )`)
+      params.push(input.participantPrincipal.type, input.participantPrincipal.id)
+    }
+
     const dir = input.order === "asc" ? "ASC" : "DESC"
     const { rows, total, hasMore } = await queryAgentList<AgentThreadRow>({
       sql: this.sql,
@@ -165,4 +183,92 @@ export class PgAgentThreadStore implements AgentThreadStore {
 
     return { threads: rows.map(rowToThreadRecord), hasMore, total }
   }
+
+  async addParticipants(
+    input: AddAgentThreadParticipantsInput
+  ): Promise<readonly AgentThreadParticipantRecord[]> {
+    return runPgTransaction(this.sql, async (tx) => {
+      // Concurrent adds to one thread queue on its row, so the limit counts every participant.
+      const [thread] = await tx<{ id: string }[]>`
+        SELECT id FROM agent_threads
+        WHERE project_id = ${input.projectId} AND id = ${input.threadId}
+        FOR UPDATE
+      `
+      if (!thread) {
+        throw new AgentStorageError(
+          "thread_not_found",
+          `[SixbPg] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      const existing = await selectParticipants(tx, input.projectId, [input.threadId])
+      const added = participantsToAdd(input, existing, "SixbPg")
+      const addedAt = input.addedAt ?? new Date()
+
+      for (const principal of added) {
+        await tx`
+          INSERT INTO agent_thread_participants (
+            project_id,
+            thread_id,
+            principal_type,
+            principal_id,
+            added_at,
+            added_by_type,
+            added_by_id
+          ) VALUES (
+            ${input.projectId},
+            ${input.threadId},
+            ${principal.type},
+            ${principal.id},
+            ${addedAt},
+            ${input.addedBy.type},
+            ${input.addedBy.id}
+          )
+        `
+      }
+
+      return added.length === 0
+        ? existing
+        : selectParticipants(tx, input.projectId, [input.threadId])
+    })
+  }
+
+  async removeParticipant(input: RemoveAgentThreadParticipantInput): Promise<boolean> {
+    const rows = await this.sql<{ principal_id: string }[]>`
+      DELETE FROM agent_thread_participants
+      WHERE project_id = ${input.projectId}
+        AND thread_id = ${input.threadId}
+        AND principal_type = ${input.principal.type}
+        AND principal_id = ${input.principal.id}
+      RETURNING principal_id
+    `
+
+    return rows.length > 0
+  }
+
+  async listParticipants(
+    input: ListAgentThreadParticipantsInput
+  ): Promise<readonly AgentThreadParticipantRecord[]> {
+    return selectParticipants(this.sql, input.projectId, [...new Set(input.threadIds)])
+  }
+}
+
+async function selectParticipants(
+  sql: PgStoreClient,
+  projectId: string,
+  threadIds: readonly string[]
+): Promise<AgentThreadParticipantRecord[]> {
+  if (threadIds.length === 0) {
+    return []
+  }
+
+  const rows = await sql<AgentThreadParticipantRow[]>`
+    SELECT *
+    FROM agent_thread_participants
+    WHERE project_id = ${projectId}
+      AND thread_id = ANY(${sql.array([...threadIds])}::text[])
+    ORDER BY added_at, principal_id COLLATE "C", thread_id COLLATE "C"
+  `
+
+  return rows.map(rowToParticipantRecord)
 }

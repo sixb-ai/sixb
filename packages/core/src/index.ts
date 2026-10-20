@@ -398,6 +398,7 @@ export type {
   MembershipOperationCapabilities,
   Principal,
   SixbAuthConfig,
+  UserPrincipal,
 } from "./auth"
 export { principalsEqual, SYSTEM_PRINCIPAL } from "./auth"
 

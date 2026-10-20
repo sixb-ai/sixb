@@ -17,6 +17,9 @@ export type Principal =
   | { readonly type: "serviceAccount"; readonly id: string }
   | { readonly type: "system"; readonly id: string }
 
+/** A signed-in person: the only principal who talks to the Agent or takes part in a thread. */
+export type UserPrincipal = Extract<Principal, { readonly type: "user" }>
+
 /**
  * The canonical principal for system-originated writes (runs triggered without a caller,
  * worker fallbacks, decode-time defaults). Import this everywhere instead of inlining a

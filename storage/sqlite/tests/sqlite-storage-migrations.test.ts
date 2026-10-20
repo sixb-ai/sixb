@@ -187,6 +187,7 @@ const shippedMigrationIds = [
   "066-activity-interactions",
   "067-artifact-kinds",
   "068-artifact-state",
+  "069-agent-thread-participants",
 ]
 
 afterEach(async () => {

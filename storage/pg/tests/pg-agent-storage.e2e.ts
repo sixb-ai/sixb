@@ -164,6 +164,65 @@ describe("PostgresStorage agents", () => {
     }
   })
 
+  // Guard proof: drop FOR UPDATE from PgAgentThreadStore.addParticipants; the second add then
+  // reads the committed participants only, both commit, and the thread holds three.
+  test("an add waits for one still adding to the same thread, so the limit holds", async () => {
+    const { storage } = await createTestStorage()
+    const alice = { type: "user", id: "usr_alice" } as const
+    const input = (id: string) => ({
+      projectId: "p",
+      threadId: "thr_shared",
+      principals: [{ type: "user", id } as const],
+      addedBy: alice,
+      maxParticipants: 2,
+    })
+
+    try {
+      await storage.agents.threads.create({
+        projectId: "p",
+        id: "thr_shared",
+        ownerPrincipal: alice,
+      })
+      await storage.agents.threads.addParticipants(input("usr_bob"))
+
+      let added: () => void = () => {}
+      const addedInTransaction = new Promise<void>((resolve) => {
+        added = resolve
+      })
+      let commit: () => void = () => {}
+      const committing = new Promise<void>((resolve) => {
+        commit = resolve
+      })
+      const first = storage.transaction(async (tx) => {
+        await tx.agents?.threads.addParticipants(input("usr_cleo"))
+        added()
+        await committing
+      })
+
+      await settleWithin(addedInTransaction, 2_000)
+      const second = storage.agents.threads.addParticipants(input("usr_dan")).then(
+        () => "added",
+        (error: unknown) => error
+      )
+      await Bun.sleep(100)
+      commit()
+      await first
+
+      expect(await settleWithin(second, 2_000)).toMatchObject({ code: "participant_limit" })
+      expect(
+        (
+          await storage.agents.threads.listParticipants({
+            projectId: "p",
+            threadIds: ["thr_shared"],
+          })
+        ).map((participant) => participant.principal.id)
+      ).toEqual(["usr_bob", "usr_cleo"])
+    } finally {
+      await storage.dropSchema()
+      await storage.close()
+    }
+  })
+
   test("uses one run-then-thread lock order for finalization and checkpoint creation", async () => {
     const { storage, connectionString } = await createTestStorage()
 

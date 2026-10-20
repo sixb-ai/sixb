@@ -107,6 +107,7 @@ const SHIPPED_MIGRATIONS = [
   "068-activity-interactions",
   "069-artifact-kinds",
   "070-artifact-state",
+  "071-agent-thread-participants",
 ]
 
 const steps = postgresStorageMigrations.steps
