@@ -880,6 +880,12 @@ export type UniquePropertyToken<TObjectType extends ObjectTypeWithPropertyTokens
         { readonly property: { readonly unique: true } }
       >
 
+/** The value `getBy` takes for a unique property: the value a write gives it, never `null`. */
+export type UniquePropertyValue<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TToken extends UniquePropertyToken<TObjectType>,
+> = NonNullable<ObjectTypeProperties<TObjectType>[TToken["id"]]>
+
 /**
  * The reads of an object set, declared once: `sixb.objects(Type)`, a Workflow step's
  * `sixb.objects(Type)` and an Action's `read.objects(Type)` add only their own writes on top.
@@ -894,7 +900,7 @@ export interface ObjectReadSet<in out TObjectType extends ObjectTypeWithProperty
    */
   getBy<TToken extends UniquePropertyToken<TObjectType>>(
     property: TToken,
-    value: NonNullable<ObjectTypeProperties<TObjectType>[TToken["id"]]>
+    value: UniquePropertyValue<TObjectType, TToken>
   ): Promise<TwinObject<TObjectType> | null>
 
   /** Build an executable provider-neutral object query rooted at this object type. */

@@ -16,11 +16,20 @@ import type {
   ObjectQueryExecutorRow,
   ObjectQueryRow,
   ObjectTypeWithPropertyTokens,
+  TwinObject,
+  UniquePropertyToken,
+  UniquePropertyValue,
 } from "@sixb/core/query"
 import { createObjectQueryBuilder } from "@sixb/core/query"
-import { isSixbApiError } from "./api"
+import { isSixbApiError, SixbApiError } from "./api"
 import type { Client } from "./generated/client"
-import { countObjects, existsObjects, facetObjects, queryObjects } from "./generated/sdk.gen"
+import {
+  countObjects,
+  existsObjects,
+  facetObjects,
+  getObjectByUniqueProperty,
+  queryObjects,
+} from "./generated/sdk.gen"
 import type {
   ObjectQueryIssue,
   ObjectQueryObject,
@@ -51,17 +60,84 @@ export type ClientObjectQueryBuilder<
   TRow = ObjectQueryRow<TObjectType>,
 > = ObjectQueryBuilder<TObjectType, TRow>
 
+export interface ClientObjectSet<TObjectType extends ObjectTypeWithPropertyTokens> {
+  query(): ClientObjectQueryBuilder<TObjectType>
+  /**
+   * The object of exactly this type holding a value of a unique property, or null when none does
+   * or the caller may not read it. Other failures throw `SixbApiError`.
+   */
+  getBy<TToken extends UniquePropertyToken<TObjectType>>(
+    property: TToken,
+    value: UniquePropertyValue<TObjectType, TToken>
+  ): Promise<TwinObject<TObjectType> | null>
+}
+
 export function objects<TObjectType extends ObjectTypeWithPropertyTokens>(
   objectType: TObjectType,
   options?: SixbQueryClientOptions
-): { query: () => ClientObjectQueryBuilder<TObjectType> } {
+): ClientObjectSet<TObjectType> {
   return {
     query: () =>
       createObjectQueryBuilder<TObjectType>({
         query: { kind: "start", objectTypeId: objectType.id },
         executor: createHttpQueryExecutor(options?.client),
       }),
+    getBy: (property, value) => {
+      if (property.objectTypeId !== objectType.id) {
+        throw new SixbQueryError(
+          `[SixbClient] Property token ${property.objectTypeId}.${property.id} cannot be used with ${objectType.id}.`
+        )
+      }
+      return getObjectBy(objectType, property.id, value, options?.client)
+    },
   }
+}
+
+async function getObjectBy<TObjectType extends ObjectTypeWithPropertyTokens>(
+  objectType: TObjectType,
+  propertyId: string,
+  value: unknown,
+  client?: Client
+): Promise<TwinObject<TObjectType> | null> {
+  const { data, error, request, response } = await getObjectByUniqueProperty({
+    client,
+    responseStyle: "fields",
+    throwOnError: false,
+    path: { objectTypeId: objectType.id, propertyId },
+    // Dates travel as the ISO strings writes accept.
+    body: { value: value instanceof Date ? value.toISOString() : value },
+  })
+  if (isObjectNotFound(response?.status, error)) return null
+
+  if (error || !data) {
+    if (isSixbApiError(error)) throw error
+    throw new SixbApiError("[SixbClient] Object lookup by unique property failed", {
+      status: response?.status ?? 0,
+      statusText: response?.statusText ?? "",
+      url: request?.url ?? "",
+      method: request?.method ?? "POST",
+      body: error,
+    })
+  }
+
+  return {
+    ...data,
+    createdAt: new Date(data.createdAt),
+    updatedAt: new Date(data.updatedAt),
+  } as unknown as TwinObject<TObjectType>
+}
+
+/** The route's own 404, which a lookup that found nothing answers; any other 404 is a failure. */
+function isObjectNotFound(status: number | undefined, error: unknown): boolean {
+  const body = isSixbApiError(error) ? error.body : error
+  const notFound = isSixbApiError(error) ? error.status === 404 : status === 404
+  return (
+    notFound &&
+    typeof body === "object" &&
+    body !== null &&
+    "error" in body &&
+    body.error === "Object not found"
+  )
 }
 
 export function createHttpQueryExecutor(client?: Client): ObjectQueryExecutor {

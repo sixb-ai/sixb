@@ -186,6 +186,9 @@ import type {
   GetLatestTelemetryData,
   GetLatestTelemetryErrors,
   GetLatestTelemetryResponses,
+  GetObjectByUniquePropertyData,
+  GetObjectByUniquePropertyErrors,
+  GetObjectByUniquePropertyResponses,
   GetObjectData,
   GetObjectErrors,
   GetObjectFileContentData,
@@ -2320,6 +2323,33 @@ export const upsertObject = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/objects/{objectTypeId}/{objectId}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Get object by a unique property
+ *
+ * Returns the object of exactly this type that holds the value, compared as writes store it.
+ */
+export const getObjectByUniqueProperty = <ThrowOnError extends boolean = false>(
+  options: Options<GetObjectByUniquePropertyData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    GetObjectByUniquePropertyResponses,
+    GetObjectByUniquePropertyErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
+    url: "/api/objects/{objectTypeId}/by/{propertyId}",
     ...options,
     headers: {
       "Content-Type": "application/json",

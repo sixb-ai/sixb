@@ -122,6 +122,17 @@ export const UpsertObjectBodySchema = z.object({
   properties: z.record(z.unknown()),
 })
 
+export const UniquePropertyParamsSchema = z.object({
+  objectTypeId: z.string().min(1),
+  propertyId: z.string().min(1),
+})
+
+export const GetObjectByUniquePropertyBodySchema = z.object({
+  value: z
+    .unknown()
+    .describe("A value of the unique property, as a write would give it: a date as an ISO string."),
+})
+
 export const ObjectQueryPredicateSchema: z.ZodType<unknown> = z.lazy(() =>
   z.union([
     z

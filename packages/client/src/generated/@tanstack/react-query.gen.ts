@@ -71,6 +71,7 @@ import {
   getDatasetVersion,
   getLatestTelemetry,
   getObject,
+  getObjectByUniqueProperty,
   getObjectFileContent,
   getObjectType,
   getObservedAgentMessageFileContent,
@@ -357,6 +358,9 @@ import type {
   GetLatestTelemetryData,
   GetLatestTelemetryError,
   GetLatestTelemetryResponse,
+  GetObjectByUniquePropertyData,
+  GetObjectByUniquePropertyError,
+  GetObjectByUniquePropertyResponse,
   GetObjectData,
   GetObjectError,
   GetObjectFileContentData,
@@ -3796,6 +3800,35 @@ export const upsertObjectMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await upsertObject({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Get object by a unique property
+ *
+ * Returns the object of exactly this type that holds the value, compared as writes store it.
+ */
+export const getObjectByUniquePropertyMutation = (
+  options?: Partial<Options<GetObjectByUniquePropertyData>>
+): UseMutationOptions<
+  GetObjectByUniquePropertyResponse,
+  GetObjectByUniquePropertyError,
+  Options<GetObjectByUniquePropertyData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    GetObjectByUniquePropertyResponse,
+    GetObjectByUniquePropertyError,
+    Options<GetObjectByUniquePropertyData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await getObjectByUniqueProperty({
         ...options,
         ...fnOptions,
         throwOnError: true,
