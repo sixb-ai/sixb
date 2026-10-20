@@ -209,6 +209,12 @@ export interface UpdateAuthUserStatusInput {
 export interface ListAuthUsersInput {
   readonly projectId: string
   readonly statuses?: readonly UserStatus[]
+  /**
+   * Keep users whose display name or email contains this text, ignoring case. Matched literally:
+   * `%` and `_` are plain characters. `total` and `hasMore` count only the matches. SQLite ignores
+   * case for ASCII letters only.
+   */
+  readonly search?: string
   readonly limit?: number
   readonly offset?: number
   readonly order?: "asc" | "desc"

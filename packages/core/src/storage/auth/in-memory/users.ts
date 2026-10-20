@@ -123,10 +123,12 @@ export class InMemoryAuthUserStore implements AuthUserStore {
     }
 
     const statuses = input.statuses ? new Set(input.statuses) : null
+    const search = input.search?.toLowerCase()
     const order = input.order ?? "desc"
     const rows = [...this.state.users.values()]
       .filter((user) => user.projectId === input.projectId)
       .filter((user) => (statuses ? statuses.has(user.status) : true))
+      .filter((user) => (search === undefined ? true : userMatches(user, search)))
       .sort((a, b) => compareByCreatedAt(a, b, order))
 
     const page = paginate(rows, input)
@@ -144,4 +146,11 @@ function profileValue(
   current: string | undefined
 ): string | undefined {
   return value === undefined ? current : (value ?? undefined)
+}
+
+function userMatches(user: UserRecord, search: string): boolean {
+  return (
+    (user.displayName?.toLowerCase().includes(search) ?? false) ||
+    user.email.toLowerCase().includes(search)
+  )
 }

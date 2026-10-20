@@ -197,6 +197,15 @@ export class SqliteAuthUserStore implements AuthUserStore {
       args.push(...input.statuses)
     }
 
+    // `instr` matches literally, so `%` and `_` need no escaping. Both sides fold through the same
+    // `lower()`, which ignores case for ASCII letters only: "émilie" does not find "Émilie" here.
+    if (input.search !== undefined) {
+      whereClauses.push(
+        "(instr(lower(coalesce(display_name, '')), lower(?)) > 0 OR instr(lower(email), lower(?)) > 0)"
+      )
+      args.push(input.search, input.search)
+    }
+
     const where = `WHERE ${whereClauses.join(" AND ")}`
     const order = input.order === "asc" ? "ASC" : "DESC"
     const totalRow = this.db

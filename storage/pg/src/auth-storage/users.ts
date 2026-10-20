@@ -172,6 +172,15 @@ export class PgAuthUserStore implements AuthUserStore {
       params.push(...input.statuses)
     }
 
+    // `strpos` matches literally, so `%` and `_` need no escaping. Both sides fold through `lower()`.
+    if (input.search !== undefined) {
+      const index = nextIndex++
+      whereClauses.push(
+        `(strpos(lower(coalesce(display_name, '')), lower($${index})) > 0 OR strpos(lower(email), lower($${index})) > 0)`
+      )
+      params.push(input.search)
+    }
+
     const where = `WHERE ${whereClauses.join(" AND ")}`
     const order = input.order === "asc" ? "ASC" : "DESC"
     const [totalRow] = await this.sql.unsafe<{ readonly count: string | number }[]>(
