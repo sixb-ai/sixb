@@ -3,13 +3,9 @@ import type { Elysia } from "elysia"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
+import { UserProfileSchema } from "../schemas/auth"
 import { ErrorResponseSchema } from "../schemas/common"
-import {
-  ListUsersQuerySchema,
-  ListUsersResponseSchema,
-  UserParamsSchema,
-  UserProfileSchema,
-} from "../schemas/users"
+import { ListUsersQuerySchema, ListUsersResponseSchema, UserParamsSchema } from "../schemas/users"
 import { handleRouteError } from "../utils/http"
 
 export function registerUserRoutes(app: Elysia, _host: SixbHostView) {

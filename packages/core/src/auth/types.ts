@@ -12,6 +12,7 @@ import type {
   UserIdentityRecord,
   UserRecord,
 } from "../storage/auth"
+import type { UserProfile } from "../users"
 
 export type Principal =
   | { readonly type: "user"; readonly id: string }
@@ -391,7 +392,7 @@ export interface ReactivateMemberResult {
 
 /** The signed-in person's own profile. */
 export interface OwnProfile {
-  readonly user: UserRecord
+  readonly profile: UserProfile
   /** The fields their identity provider sets at sign-in, which they cannot edit here. */
   readonly managedFields: readonly ProfileField[]
 }

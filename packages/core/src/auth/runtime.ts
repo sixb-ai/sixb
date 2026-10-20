@@ -23,6 +23,7 @@ import {
   type UserRecord,
 } from "../storage/auth"
 import { paginate } from "../storage/pagination"
+import { toUserProfile } from "../users/execution"
 import {
   createAccessTokenCredential,
   getBearerAccessTokenValue,
@@ -1229,7 +1230,10 @@ export class AuthRuntime {
       )
     }
 
-    return { user, managedFields: await this.managedProfileFields(storage, user.id) }
+    return {
+      profile: toUserProfile(user),
+      managedFields: await this.managedProfileFields(storage, user.id),
+    }
   }
 
   /**
@@ -1263,7 +1267,7 @@ export class AuthRuntime {
     // Every session of this person caches their profile; drop them so all show the change.
     this.sessionCache?.invalidateUser(user.id)
 
-    return { user, managedFields }
+    return { profile: toUserProfile(user), managedFields }
   }
 
   // The fields the active strategy's provider sets at sign-in, through any of the person's

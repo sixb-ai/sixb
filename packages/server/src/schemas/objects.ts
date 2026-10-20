@@ -1,13 +1,13 @@
 import type { ElysiaOpenAPIConfig } from "@elysiajs/openapi"
 import { z } from "zod"
 import { zodToJsonSchema } from "zod-to-json-schema"
+import { UserProfileSchema } from "./auth"
 import {
   AiUsageLimitErrorResponseSchema,
   JsonValueSchema,
   jsonValueOpenApiOverride,
   RedactionsSchema,
 } from "./common"
-import { UserProfileSchema } from "./users"
 
 type OpenApiSchema = NonNullable<
   NonNullable<NonNullable<ElysiaOpenAPIConfig["documentation"]>["components"]>["schemas"]
