@@ -8,6 +8,7 @@ import {
   type AgentMessageRecord,
   type AgentRunDiagnostic,
   type AgentRunRecord,
+  type AgentThreadParticipantRecord,
   type AgentThreadRecord,
   type AgentThreadSandboxState,
   type ConversationAgentRunSpec,
@@ -33,6 +34,16 @@ export interface AgentThreadRow {
   message_count: number
   created_at: string
   updated_at: string
+}
+
+export interface AgentThreadParticipantRow {
+  project_id: string
+  thread_id: string
+  principal_type: "user"
+  principal_id: string
+  added_at: string
+  added_by_type: Principal["type"]
+  added_by_id: string
 }
 
 export interface AgentRunRow {
@@ -209,6 +220,18 @@ export function rowToContextCheckpointRecord(
     estimatedInputTokensAfter: row.estimated_input_tokens_after,
     summaryModelId: row.summary_model_id,
     createdAt: new Date(row.created_at),
+  }
+}
+
+export function rowToParticipantRecord(
+  row: AgentThreadParticipantRow
+): AgentThreadParticipantRecord {
+  return {
+    projectId: row.project_id,
+    threadId: row.thread_id,
+    principal: { type: "user", id: row.principal_id },
+    addedAt: new Date(row.added_at),
+    addedBy: { type: row.added_by_type, id: row.added_by_id },
   }
 }
 

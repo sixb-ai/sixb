@@ -14,11 +14,14 @@ import {
   assertCreateAgentContextCheckpointInput,
   assertCreateSubagentRunInput,
   assertSubagentRunResult,
+  compareAgentThreadParticipants,
+  participantsToAdd,
   snapshotAgentThreadSandboxParams,
   subagentRunMatchesCreateInput,
   transitionAgentThreadSandbox,
 } from "./provider"
 import type {
+  AddAgentThreadParticipantsInput,
   AgentContextCheckpointRecord,
   AgentContextCheckpointStore,
   AgentMessageRecord,
@@ -27,6 +30,7 @@ import type {
   AgentRunRecord,
   AgentRunStore,
   AgentStorage,
+  AgentThreadParticipantRecord,
   AgentThreadRecord,
   AgentThreadSandboxState,
   AgentThreadStore,
@@ -44,9 +48,11 @@ import type {
   ListAgentMessagesResult,
   ListAgentRunsInput,
   ListAgentRunsResult,
+  ListAgentThreadParticipantsInput,
   ListAgentThreadsInput,
   ListAgentThreadsResult,
   ReclaimAgentRunInput,
+  RemoveAgentThreadParticipantInput,
   StartAgentRunInput,
   SubagentRunRecord,
   TransitionAgentThreadSandboxInput,
@@ -105,6 +111,8 @@ function applyWindow<T>(rows: T[], offset = 0, limit?: number): Window<T> {
  */
 interface AgentStoreState {
   readonly threads: Map<string, AgentThreadRecord>
+  /** By thread key; each thread's participants in the order they were added. */
+  readonly participants: Map<string, AgentThreadParticipantRecord[]>
   readonly runs: Map<string, AgentRunRecord>
   readonly messages: Map<string, AgentMessageRecord>
   readonly checkpoints: Map<string, AgentContextCheckpointRecord>
@@ -112,6 +120,7 @@ interface AgentStoreState {
 
 export interface InMemoryAgentStorageSnapshot {
   readonly threads: Map<string, AgentThreadRecord>
+  readonly participants: Map<string, AgentThreadParticipantRecord[]>
   readonly runs: Map<string, AgentRunRecord>
   readonly messages: Map<string, AgentMessageRecord>
   readonly checkpoints: Map<string, AgentContextCheckpointRecord>
@@ -192,6 +201,14 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
       .filter((thread) =>
         input.ownerPrincipal ? principalsEqual(thread.ownerPrincipal, input.ownerPrincipal) : true
       )
+      .filter((thread) => {
+        const participant = input.participantPrincipal
+        if (!participant) return true
+
+        return this.participantsOf(thread.projectId, thread.id).some(
+          (record) => record.principal.id === participant.id
+        )
+      })
       .sort((a, b) =>
         compareByDate(
           a.lastMessageAt ?? a.createdAt,
@@ -204,6 +221,55 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
 
     const { page, hasMore, total } = applyWindow(filtered, input.offset, input.limit)
     return { threads: page.map(clone), hasMore, total }
+  }
+
+  async addParticipants(
+    input: AddAgentThreadParticipantsInput
+  ): Promise<readonly AgentThreadParticipantRecord[]> {
+    const threadKey = key(input.projectId, input.threadId)
+    if (!this.state.threads.has(threadKey)) {
+      throw new AgentStorageError(
+        "thread_not_found",
+        `[Sixb] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
+      )
+    }
+
+    // No `await` from here on: the read and the write are one critical section.
+    const existing = this.participantsOf(input.projectId, input.threadId)
+    const addedAt = new Date(input.addedAt ?? new Date())
+    const added = participantsToAdd(input, existing).map((principal) => ({
+      projectId: input.projectId,
+      threadId: input.threadId,
+      principal,
+      addedAt: new Date(addedAt),
+      addedBy: clone(input.addedBy),
+    }))
+
+    const participants = [...existing, ...added].sort(compareAgentThreadParticipants)
+    this.state.participants.set(threadKey, participants)
+    return clone(participants)
+  }
+
+  async removeParticipant(input: RemoveAgentThreadParticipantInput): Promise<boolean> {
+    const threadKey = key(input.projectId, input.threadId)
+    const existing = this.state.participants.get(threadKey)
+    const kept = existing?.filter((record) => record.principal.id !== input.principal.id)
+    if (!existing || !kept || kept.length === existing.length) return false
+
+    this.state.participants.set(threadKey, kept)
+    return true
+  }
+
+  async listParticipants(
+    input: ListAgentThreadParticipantsInput
+  ): Promise<readonly AgentThreadParticipantRecord[]> {
+    return [...new Set(input.threadIds)]
+      .flatMap((threadId) => clone(this.participantsOf(input.projectId, threadId)))
+      .sort(compareAgentThreadParticipants)
+  }
+
+  private participantsOf(projectId: string, threadId: string): AgentThreadParticipantRecord[] {
+    return this.state.participants.get(key(projectId, threadId)) ?? []
   }
 }
 
@@ -817,6 +883,7 @@ class InMemoryAgentContextCheckpointStore implements AgentContextCheckpointStore
 export class InMemoryAgentStorage implements AgentStorage {
   private readonly state: AgentStoreState = {
     threads: new Map(),
+    participants: new Map(),
     runs: new Map(),
     messages: new Map(),
     checkpoints: new Map(),
@@ -837,6 +904,7 @@ export class InMemoryAgentStorage implements AgentStorage {
   snapshot(): InMemoryAgentStorageSnapshot {
     return {
       threads: structuredClone(this.state.threads),
+      participants: structuredClone(this.state.participants),
       runs: structuredClone(this.state.runs),
       messages: structuredClone(this.state.messages),
       checkpoints: structuredClone(this.state.checkpoints),
@@ -845,6 +913,7 @@ export class InMemoryAgentStorage implements AgentStorage {
 
   restore(snapshot: InMemoryAgentStorageSnapshot): void {
     replace(this.state.threads, snapshot.threads)
+    replace(this.state.participants, snapshot.participants)
     replace(this.state.runs, snapshot.runs)
     replace(this.state.messages, snapshot.messages)
     replace(this.state.checkpoints, snapshot.checkpoints)

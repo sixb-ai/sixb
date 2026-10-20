@@ -3,11 +3,13 @@ import { AGENT_MESSAGE_CONTENT_VERSION } from "../agents/message"
 import type { Principal } from "../auth"
 import type { SixbFailure } from "../errors/types"
 import {
+  type AddAgentThreadParticipantsInput,
   type AgentRunExecution,
   type AgentRunFailureCode,
   type AgentStorage,
   AgentStorageError,
   type AgentStorageErrorCode,
+  type AgentThreadParticipantRecord,
   type CreateAgentContextCheckpointInput,
   type CreateAgentRunInput,
   type CreateAgentThreadInput,
@@ -69,6 +71,30 @@ function threadInput(overrides: Partial<CreateAgentThreadInput> = {}): CreateAge
     ownerPrincipal: owner,
     createdAt: at("2026-06-23T10:00:00.000Z"),
     ...overrides,
+  }
+}
+
+function participantsInput(
+  userIds: readonly string[],
+  addedAt = at("2026-06-23T11:00:00.000Z")
+): AddAgentThreadParticipantsInput {
+  return {
+    projectId,
+    threadId: "thr_1",
+    principals: userIds.map((id) => ({ type: "user", id })),
+    addedBy: owner,
+    maxParticipants: 10,
+    addedAt,
+  }
+}
+
+function participant(userId: string, addedAt: Date): AgentThreadParticipantRecord {
+  return {
+    projectId,
+    threadId: "thr_1",
+    principal: { type: "user", id: userId },
+    addedAt,
+    addedBy: owner,
   }
 }
 
@@ -620,6 +646,200 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         })
         expect(secondPage.threads.map((thread) => thread.id)).toEqual(["thr_c"])
         expect(secondPage.hasMore).toBe(false)
+      })
+    })
+
+    // ── participants ───────────────────────────────────────────────────────────────────────────
+
+    test("adds participants once and keeps when and by whom they were first added", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput())
+
+        const first = await storage.threads.addParticipants(
+          participantsInput(["usr_cleo", "usr_bob"], at("2026-06-23T11:00:00.000Z"))
+        )
+        expect(first).toEqual([
+          participant("usr_bob", at("2026-06-23T11:00:00.000Z")),
+          participant("usr_cleo", at("2026-06-23T11:00:00.000Z")),
+        ])
+
+        const again = await storage.threads.addParticipants({
+          ...participantsInput(["usr_cleo", "usr_dan"], at("2026-06-23T12:00:00.000Z")),
+          addedBy: { type: "system", id: "system" },
+        })
+        expect(again).toEqual([
+          participant("usr_bob", at("2026-06-23T11:00:00.000Z")),
+          participant("usr_cleo", at("2026-06-23T11:00:00.000Z")),
+          {
+            ...participant("usr_dan", at("2026-06-23T12:00:00.000Z")),
+            addedBy: { type: "system", id: "system" },
+          },
+        ])
+
+        expect(
+          await storage.threads.listParticipants({ projectId, threadIds: ["thr_1", "thr_1"] })
+        ).toEqual(again)
+      })
+    })
+
+    // Regression proof: compare ids with localeCompare in compareAgentThreadParticipants; it puts
+    // "usr_a" before "usr_B", where PostgreSQL's "C" collation and SQLite put "usr_B" first.
+    test("orders participants added at once by their ids' bytes, alike everywhere", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput())
+        await storage.threads.create(threadInput({ id: "thr_2" }))
+        for (const threadId of ["thr_2", "thr_1"]) {
+          await storage.threads.addParticipants({
+            ...participantsInput(["usr_a", "usr_B", "usr_é"]),
+            threadId,
+          })
+        }
+
+        const listed = await storage.threads.listParticipants({
+          projectId,
+          threadIds: ["thr_2", "thr_1"],
+        })
+        expect(listed.map((record) => `${record.principal.id}@${record.threadId}`)).toEqual([
+          "usr_B@thr_1",
+          "usr_B@thr_2",
+          "usr_a@thr_1",
+          "usr_a@thr_2",
+          "usr_é@thr_1",
+          "usr_é@thr_2",
+        ])
+      })
+    })
+
+    test("lets one of several adds racing for the last place win", async () => {
+      // Concurrent calls rarely interleave here; the PostgreSQL suite holds a transaction open to
+      // prove its row lock. This checks the outcome every provider must give.
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput())
+        await storage.threads.addParticipants(participantsInput(["usr_bob"]))
+
+        const racers = ["usr_cleo", "usr_dan", "usr_eve", "usr_fay", "usr_gus"]
+        const race = await Promise.allSettled(
+          racers.map((id) =>
+            storage.threads.addParticipants({ ...participantsInput([id]), maxParticipants: 2 })
+          )
+        )
+        expect(race.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+        for (const result of race) {
+          if (result.status === "rejected") {
+            expect(result.reason).toMatchObject({ code: "participant_limit" })
+          }
+        }
+
+        expect(
+          await storage.threads.listParticipants({ projectId, threadIds: ["thr_1"] })
+        ).toHaveLength(2)
+      })
+    })
+
+    test("refuses participants past the limit, and missing threads", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput())
+        await storage.threads.addParticipants(participantsInput(["usr_bob"]))
+
+        // Regression proof: drop the limit check in participantsToAdd; the third user is added.
+        await expectAgentError(
+          storage.threads.addParticipants({
+            ...participantsInput(["usr_cleo", "usr_dan"]),
+            maxParticipants: 2,
+          }),
+          "participant_limit"
+        )
+        await expectAgentError(
+          storage.threads.addParticipants({ ...participantsInput(["usr_bob"]), threadId: "nope" }),
+          "thread_not_found"
+        )
+
+        // A refused add adds no one, and someone already there does not count twice.
+        const kept = await storage.threads.addParticipants({
+          ...participantsInput(["usr_bob", "usr_cleo"]),
+          maxParticipants: 2,
+        })
+        expect(kept.map((record) => record.principal.id)).toEqual(["usr_bob", "usr_cleo"])
+      })
+    })
+
+    test("removes a participant and lists the threads shared with a user", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(
+          threadInput({ id: "thr_a", createdAt: at("2026-06-23T10:00:00.000Z") })
+        )
+        await storage.threads.create(
+          threadInput({ id: "thr_b", createdAt: at("2026-06-23T10:01:00.000Z") })
+        )
+        await storage.threads.create(
+          threadInput({ id: "thr_c", createdAt: at("2026-06-23T10:02:00.000Z") })
+        )
+        await storage.threads.create(threadInput({ id: "thr_a", projectId: otherProjectId }))
+        for (const threadId of ["thr_a", "thr_c"]) {
+          await storage.threads.addParticipants({ ...participantsInput(["usr_bob"]), threadId })
+        }
+        await storage.threads.addParticipants({
+          ...participantsInput(["usr_bob"]),
+          projectId: otherProjectId,
+          threadId: "thr_a",
+        })
+
+        const bob = { type: "user", id: "usr_bob" } as const
+        const shared = await storage.threads.list({
+          projectId,
+          participantPrincipal: bob,
+          order: "asc",
+        })
+        expect(shared.threads.map((thread) => thread.id)).toEqual(["thr_a", "thr_c"])
+        expect(shared.total).toBe(2)
+
+        const page = await storage.threads.list({
+          projectId,
+          participantPrincipal: bob,
+          order: "desc",
+          limit: 1,
+        })
+        expect(page.threads.map((thread) => thread.id)).toEqual(["thr_c"])
+        expect(page.hasMore).toBe(true)
+
+        expect(
+          await storage.threads.removeParticipant({ projectId, threadId: "thr_a", principal: bob })
+        ).toBe(true)
+        expect(
+          await storage.threads.removeParticipant({ projectId, threadId: "thr_a", principal: bob })
+        ).toBe(false)
+        expect(
+          await storage.threads.removeParticipant({ projectId, threadId: "nope", principal: bob })
+        ).toBe(false)
+
+        const after = await storage.threads.list({ projectId, participantPrincipal: bob })
+        expect(after.threads.map((thread) => thread.id)).toEqual(["thr_c"])
+        expect(
+          await storage.threads.listParticipants({ projectId, threadIds: ["thr_a", "thr_b"] })
+        ).toEqual([])
+        expect(
+          await storage.threads.listParticipants({
+            projectId: otherProjectId,
+            threadIds: ["thr_a"],
+          })
+        ).toHaveLength(1)
+      })
+    })
+
+    test("rolls participants back with their transaction", async () => {
+      await withStorage(async (storage, fixture) => {
+        await storage.threads.create(threadInput())
+
+        await expect(
+          fixture.transaction(async (tx) => {
+            await tx.agents?.threads.addParticipants(participantsInput(["usr_bob"]))
+            throw new Error("rollback")
+          })
+        ).rejects.toThrow("rollback")
+
+        expect(await storage.threads.listParticipants({ projectId, threadIds: ["thr_1"] })).toEqual(
+          []
+        )
       })
     })
 

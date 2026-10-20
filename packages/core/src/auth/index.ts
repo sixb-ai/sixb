@@ -136,6 +136,7 @@ export type {
   UnauthenticatedAuthSession,
   UpdateMemberGroupsInput,
   UpdateMemberGroupsResult,
+  UserPrincipal,
 } from "./types"
 export { principalsEqual, SYSTEM_PRINCIPAL } from "./types"
 export {

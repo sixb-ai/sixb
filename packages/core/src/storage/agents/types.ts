@@ -1,6 +1,6 @@
 import type { AgentMessage, AgentMessagePart, AgentMessageRole } from "../../agents/message"
 import type { AgentReasoning } from "../../agents/types"
-import type { Principal } from "../../auth"
+import type { Principal, UserPrincipal } from "../../auth"
 import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { JsonValue } from "../../json"
 import type { LanguageModelRef } from "../../models"
@@ -90,6 +90,8 @@ export interface ListAgentThreadsInput {
   readonly projectId: string
   readonly statuses?: readonly AgentThreadStatus[]
   readonly ownerPrincipal?: Principal
+  /** Only the threads this user takes part in. */
+  readonly participantPrincipal?: UserPrincipal
   readonly limit?: number
   readonly offset?: number
   readonly order?: "asc" | "desc"
@@ -99,6 +101,41 @@ export interface ListAgentThreadsResult {
   readonly threads: readonly AgentThreadRecord[]
   readonly hasMore: boolean
   readonly total: number
+}
+
+// ── agent_thread_participants — the users a thread's owner added to it ─────────────────────────
+
+export interface AgentThreadParticipantRecord {
+  readonly projectId: string
+  readonly threadId: string
+  readonly principal: UserPrincipal
+  readonly addedAt: Date
+  readonly addedBy: Principal
+}
+
+export interface AddAgentThreadParticipantsInput {
+  readonly projectId: string
+  readonly threadId: string
+  /**
+   * Distinct users, checked by the caller. Someone already taking part keeps when and by whom they
+   * were first added.
+   */
+  readonly principals: readonly UserPrincipal[]
+  readonly addedBy: Principal
+  /** Refused with `participant_limit`, adding no one, when the thread would hold more. */
+  readonly maxParticipants: number
+  readonly addedAt?: Date
+}
+
+export interface RemoveAgentThreadParticipantInput {
+  readonly projectId: string
+  readonly threadId: string
+  readonly principal: UserPrincipal
+}
+
+export interface ListAgentThreadParticipantsInput {
+  readonly projectId: string
+  readonly threadIds: readonly string[]
 }
 
 // ── agent_runs — one loop execution (the worker job; attribution + fencing) ───────────────────
@@ -474,6 +511,16 @@ export interface AgentThreadStore {
     readonly ids: readonly string[]
   }): Promise<readonly AgentThreadRecord[]>
   list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult>
+  /** Add users atomically and return every participant of the thread afterwards. */
+  addParticipants(
+    input: AddAgentThreadParticipantsInput
+  ): Promise<readonly AgentThreadParticipantRecord[]>
+  /** Whether the user took part until now. */
+  removeParticipant(input: RemoveAgentThreadParticipantInput): Promise<boolean>
+  /** The participants of these threads, oldest first, then by user id and thread id. */
+  listParticipants(
+    input: ListAgentThreadParticipantsInput
+  ): Promise<readonly AgentThreadParticipantRecord[]>
 }
 
 export interface AgentRunStore {

@@ -1,14 +1,17 @@
 import { isDeepStrictEqual } from "node:util"
 import { AGENT_REASONING_LEVELS } from "../../agents/types"
+import type { UserPrincipal } from "../../auth"
 import { isJsonObject, isPlainRecord } from "../../json"
 import { isModelReasoning } from "../../models/language-model"
 import type { ExecutionRecord, ExecutionStorage } from "../executions"
 import { findAgentRunExecution } from "../executions/run-link"
 import { AgentStorageError } from "./errors"
 import type {
+  AddAgentThreadParticipantsInput,
   AgentContextCheckpointRecord,
   AgentMessageRecord,
   AgentRunRecord,
+  AgentThreadParticipantRecord,
   AgentThreadRecord,
   AgentThreadSandboxParams,
   AgentThreadSandboxState,
@@ -119,6 +122,44 @@ export function snapshotAgentThreadSandboxParams(value: unknown): AgentThreadSan
     )
   }
   return structuredClone(value)
+}
+
+/**
+ * The users an add actually adds: those not already taking part. Providers call it under the
+ * thread's lock with the participants they read there, so the cap holds across concurrent adds.
+ * Who may be added is the caller's decision; this enforces only the cap.
+ */
+export function participantsToAdd(
+  input: AddAgentThreadParticipantsInput,
+  existing: readonly AgentThreadParticipantRecord[],
+  prefix = "Sixb"
+): readonly UserPrincipal[] {
+  const taken = new Set(existing.map((participant) => participant.principal.id))
+  const added = input.principals.filter((principal) => !taken.has(principal.id))
+
+  if (existing.length + added.length > input.maxParticipants) {
+    throw new AgentStorageError(
+      "participant_limit",
+      `[${prefix}] Agent thread '${input.threadId}' can have at most ${input.maxParticipants} participants.`
+    )
+  }
+
+  return added
+}
+
+/**
+ * Participants oldest first, then by user id and thread id compared as UTF-8 bytes: the order
+ * PostgreSQL's "C" collation and SQLite's binary one give, so every provider lists them alike.
+ */
+export function compareAgentThreadParticipants(
+  left: AgentThreadParticipantRecord,
+  right: AgentThreadParticipantRecord
+): number {
+  return (
+    left.addedAt.getTime() - right.addedAt.getTime() ||
+    Buffer.compare(Buffer.from(left.principal.id), Buffer.from(right.principal.id)) ||
+    Buffer.compare(Buffer.from(left.threadId), Buffer.from(right.threadId))
+  )
 }
 
 /** Validate the provider-neutral model selection captured for a conversational turn. */

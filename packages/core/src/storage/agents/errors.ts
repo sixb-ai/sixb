@@ -7,6 +7,7 @@ export type AgentStorageErrorCode =
   | "invalid_state"
   | "execution_lost"
   | "duplicate_id"
+  | "participant_limit"
 
 /**
  * Error for agent-storage invariants and invalid state transitions (single-flight, execution

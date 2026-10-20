@@ -1,24 +1,31 @@
 import type { Database } from "bun:sqlite"
 import {
+  participantsToAdd,
   snapshotAgentThreadSandboxParams,
   transitionAgentThreadSandbox,
 } from "@sixb/core/internal/agent-run-storage-provider"
 import {
+  type AddAgentThreadParticipantsInput,
   AgentStorageError,
+  type AgentThreadParticipantRecord,
   type AgentThreadRecord,
   type AgentThreadSandboxState,
   type AgentThreadStore,
   type CreateAgentThreadInput,
+  type ListAgentThreadParticipantsInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
+  type RemoveAgentThreadParticipantInput,
   type TransitionAgentThreadSandboxInput,
 } from "@sixb/core/storage"
 import type { SqliteValue } from "../run-list-query"
 import { isUniqueConstraintError } from "../storage-errors"
 import {
   type AgentRunRow,
+  type AgentThreadParticipantRow,
   type AgentThreadRow,
   queryAgentList,
+  rowToParticipantRecord,
   rowToRunRecord,
   rowToThreadRecord,
 } from "./rows"
@@ -153,6 +160,17 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
       args.push(input.ownerPrincipal.type, input.ownerPrincipal.id)
     }
 
+    if (input.participantPrincipal) {
+      whereClauses.push(`EXISTS (
+        SELECT 1 FROM agent_thread_participants participant
+        WHERE participant.project_id = agent_threads.project_id
+          AND participant.thread_id = agent_threads.id
+          AND participant.principal_type = ?
+          AND participant.principal_id = ?
+      )`)
+      args.push(input.participantPrincipal.type, input.participantPrincipal.id)
+    }
+
     const dir = input.order === "asc" ? "ASC" : "DESC"
     const { rows, total, hasMore } = queryAgentList<AgentThreadRow>({
       db: this.db,
@@ -165,6 +183,93 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
     })
 
     return { threads: rows.map(rowToThreadRecord), hasMore, total }
+  }
+
+  async addParticipants(
+    input: AddAgentThreadParticipantsInput
+  ): Promise<readonly AgentThreadParticipantRecord[]> {
+    return this.db
+      .transaction(() => {
+        const thread = this.db
+          .query("SELECT id FROM agent_threads WHERE project_id = ? AND id = ?")
+          .get(input.projectId, input.threadId)
+        if (!thread) {
+          throw new AgentStorageError(
+            "thread_not_found",
+            `[SixbSqlite] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
+          )
+        }
+
+        const existing = this.selectParticipants(input.projectId, [input.threadId])
+        const added = participantsToAdd(input, existing, "SixbSqlite")
+        const addedAt = (input.addedAt ?? new Date()).toISOString()
+
+        const insert = this.db.query(`
+          INSERT INTO agent_thread_participants (
+            project_id,
+            thread_id,
+            principal_type,
+            principal_id,
+            added_at,
+            added_by_type,
+            added_by_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `)
+        for (const principal of added) {
+          insert.run(
+            input.projectId,
+            input.threadId,
+            principal.type,
+            principal.id,
+            addedAt,
+            input.addedBy.type,
+            input.addedBy.id
+          )
+        }
+
+        return added.length === 0
+          ? existing
+          : this.selectParticipants(input.projectId, [input.threadId])
+      })
+      .immediate()
+  }
+
+  async removeParticipant(input: RemoveAgentThreadParticipantInput): Promise<boolean> {
+    const result = this.db
+      .query(`
+        DELETE FROM agent_thread_participants
+        WHERE project_id = ? AND thread_id = ? AND principal_type = ? AND principal_id = ?
+      `)
+      .run(input.projectId, input.threadId, input.principal.type, input.principal.id)
+
+    return result.changes > 0
+  }
+
+  async listParticipants(
+    input: ListAgentThreadParticipantsInput
+  ): Promise<readonly AgentThreadParticipantRecord[]> {
+    return this.selectParticipants(input.projectId, [...new Set(input.threadIds)])
+  }
+
+  private selectParticipants(
+    projectId: string,
+    threadIds: readonly string[]
+  ): AgentThreadParticipantRecord[] {
+    if (threadIds.length === 0) {
+      return []
+    }
+
+    const rows = this.db
+      .query(`
+        SELECT *
+        FROM agent_thread_participants
+        WHERE project_id = ?
+          AND thread_id IN (SELECT value FROM json_each(?))
+        ORDER BY added_at, principal_id, thread_id
+      `)
+      .all(projectId, JSON.stringify(threadIds)) as AgentThreadParticipantRow[]
+
+    return rows.map(rowToParticipantRecord)
   }
 
   private requireThread(projectId: string, id: string): AgentThreadRecord {

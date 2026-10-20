@@ -3,6 +3,7 @@ export { AgentStorageError } from "./errors"
 export type { InMemoryAgentStorageSnapshot } from "./in-memory"
 export { InMemoryAgentStorage } from "./in-memory"
 export type {
+  AddAgentThreadParticipantsInput,
   AgentContextCheckpointReason,
   AgentContextCheckpointRecord,
   AgentContextCheckpointStore,
@@ -21,6 +22,7 @@ export type {
   AgentRunStatus,
   AgentRunStore,
   AgentStorage,
+  AgentThreadParticipantRecord,
   AgentThreadRecord,
   AgentThreadSandboxParams,
   AgentThreadSandboxState,
@@ -41,9 +43,11 @@ export type {
   ListAgentMessagesResult,
   ListAgentRunsInput,
   ListAgentRunsResult,
+  ListAgentThreadParticipantsInput,
   ListAgentThreadsInput,
   ListAgentThreadsResult,
   ReclaimAgentRunInput,
+  RemoveAgentThreadParticipantInput,
   StartAgentRunInput,
   SubagentRunRecord,
   SubagentRunResult,

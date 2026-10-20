@@ -4,7 +4,7 @@
  * A type in a public interface signature must be exported from the same subpath as the interface, or
  * the interface cannot be implemented from outside the package.
  */
-export type { Principal } from "../auth"
+export type { Principal, UserPrincipal } from "../auth"
 export type { ConnectorAccountCandidate } from "../connectors"
 export type { SealedConnectorCredential } from "../connectors/credentials"
 export type { SixbFailure } from "../errors/types"
@@ -77,6 +77,7 @@ export type {
   StoredActivityVisitPage,
 } from "./activity"
 export type {
+  AddAgentThreadParticipantsInput,
   AgentContextCheckpointReason,
   AgentContextCheckpointRecord,
   AgentContextCheckpointStore,
@@ -96,6 +97,7 @@ export type {
   AgentRunStore,
   AgentStorage,
   AgentStorageErrorCode,
+  AgentThreadParticipantRecord,
   AgentThreadRecord,
   AgentThreadSandboxParams,
   AgentThreadSandboxState,
@@ -116,9 +118,11 @@ export type {
   ListAgentMessagesResult,
   ListAgentRunsInput,
   ListAgentRunsResult,
+  ListAgentThreadParticipantsInput,
   ListAgentThreadsInput,
   ListAgentThreadsResult,
   ReclaimAgentRunInput,
+  RemoveAgentThreadParticipantInput,
   StartAgentRunInput,
   SubagentRunRecord,
   SubagentRunResult,
