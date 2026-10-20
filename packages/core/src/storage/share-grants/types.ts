@@ -43,6 +43,11 @@ export interface GetShareGrantByIdInput {
   readonly id: string
 }
 
+export interface GetShareGrantsByIdsInput {
+  readonly projectId: string
+  readonly ids: readonly string[]
+}
+
 export interface ListShareGrantsInput {
   readonly projectId: string
   readonly definitionId?: string
@@ -95,6 +100,9 @@ export interface ShareGrantStorage {
 
   /** Load one project-scoped grant, including expired or revoked grants, or return null. */
   getById(input: GetShareGrantByIdInput): Promise<ShareGrantRecord | null>
+
+  /** The grants found, revoked and expired ones included, in first-occurrence input order. */
+  getByIds(input: GetShareGrantsByIdsInput): Promise<readonly ShareGrantRecord[]>
 
   /**
    * List in deterministic `createdAt DESC, id DESC` order. Expired and revoked rows are excluded

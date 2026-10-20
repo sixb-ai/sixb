@@ -72,7 +72,6 @@ export const en = {
   connection: {
     label: "Connection",
     unknownDevice: "Unknown device",
-    sharedLink: (link: string) => `Shared link ${link}`,
     status: { active: "Active", expired: "Expired", revoked: "Revoked" },
     signedIn: (date: string) => `Signed in ${date}`,
     opened: (date: string) => `Opened ${date}`,
@@ -184,7 +183,6 @@ export const fr: Translation<ActivityMessages> = {
   connection: {
     label: "Connexion",
     unknownDevice: "Appareil inconnu",
-    sharedLink: (link: string) => `Lien partagé ${link}`,
     status: { active: "Active", expired: "Expirée", revoked: "Révoquée" },
     signedIn: (date: string) => `Connecté le ${date}`,
     opened: (date: string) => `Ouvert le ${date}`,

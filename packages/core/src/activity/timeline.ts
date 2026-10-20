@@ -10,8 +10,10 @@ import type { AgentRunStatus, ConversationAgentRunRecord } from "../storage/agen
 import type { AiCostSummary } from "../storage/ai-cost"
 import type { ExecutionRecord } from "../storage/executions"
 import { objectBatchKey } from "../storage/objects/keys"
+import type { ShareGrantRecord } from "../storage/share-grants"
 import type { WorkflowRunStatus } from "../storage/workflow-runs"
 import { type ActivityConnection, readActivityConnection } from "./connection"
+import type { ActivityVisitView } from "./shares"
 
 /** At most this many page views, and as many recorded executions, make a visit's timeline. */
 export const ACTIVITY_TIMELINE_LIMIT = 200
@@ -77,7 +79,7 @@ export type ActivityTimelineEntry =
   | ActivityAgentEntry
 
 export interface ActivityVisitTimeline {
-  readonly visit: ActivityVisit
+  readonly visit: ActivityVisitView
   /** Absent once the session is gone, or without an auth or share store. */
   readonly connection?: ActivityConnection
   /** By time. Page views and executions at the same instant keep that order. */
@@ -95,10 +97,16 @@ export interface ActivityVisitTimeline {
  */
 export async function composeActivityTimeline(
   runtime: SixbRuntimeContext,
-  page: StoredActivityVisitPage,
+  input: {
+    readonly page: StoredActivityVisitPage
+    /** The visit, named by its link's share. */
+    readonly visit: ActivityVisitView
+    /** That link's grant, read with the name. */
+    readonly grant?: ShareGrantRecord
+  },
   now: Date
 ): Promise<ActivityVisitTimeline> {
-  const { visit } = page
+  const { page, visit } = input
   const { storage, projectId } = runtime
 
   const [ledger, connection] = await Promise.all([
@@ -108,7 +116,7 @@ export async function composeActivityTimeline(
       ...sessionWindow(visit),
       limit: ACTIVITY_TIMELINE_LIMIT,
     }),
-    readActivityConnection(runtime, page, now),
+    readActivityConnection(runtime, page, input.grant, now),
   ])
   const executions = ledger.executions
 

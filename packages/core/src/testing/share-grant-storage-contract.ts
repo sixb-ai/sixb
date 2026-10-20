@@ -80,6 +80,21 @@ export function runShareGrantStorageContractSuite<TStorage extends ShareGrantSto
       })
     })
 
+    test("reads several grants at once, in the order asked", async () => {
+      await withStorage(async (storage) => {
+        const first = await storage.create(grantInput())
+        const second = await storage.create(
+          grantInput({ id: "shr_2", tokenHash: "b".repeat(64), definitionId: "invoice" })
+        )
+        await storage.create(grantInput({ id: "shr_3", projectId: "other-project" }))
+
+        await expect(
+          storage.getByIds({ projectId, ids: ["shr_2", "missing", "shr_1", "shr_2", "shr_3"] })
+        ).resolves.toEqual([second, first])
+        await expect(storage.getByIds({ projectId, ids: [] })).resolves.toEqual([])
+      })
+    })
+
     test("lists a bounded deterministic page with total and hasMore", async () => {
       await withStorage(async (storage) => {
         await storage.create(grantInput({ id: "shr_a", tokenHash: "b".repeat(64) }))

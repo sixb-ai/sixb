@@ -6,7 +6,6 @@ import type {
   ActivitySummary,
   ActivityUser,
   ActivityVisitPage,
-  ActivityVisitsPage,
 } from "../storage/activity/types"
 import {
   type ActivityConnectionsPage,
@@ -24,11 +23,17 @@ import type {
   ActivitySource,
   ActivityTimelineQuery,
 } from "./service"
+import { type ActivityVisitView, nameSharedVisit, nameSharedVisits } from "./shares"
 import {
   ACTIVITY_TIMELINE_LIMIT,
   type ActivityVisitTimeline,
   composeActivityTimeline,
 } from "./timeline"
+
+export interface ActivityVisitList {
+  readonly visits: readonly ActivityVisitView[]
+  readonly hasMore: boolean
+}
 
 export interface ActivityUsersResult {
   /** `displayName` is the account's profile name; no other profile field is read. */
@@ -38,11 +43,15 @@ export interface ActivityUsersResult {
 
 /** `sixb.activity`: the app's recorded visits. Every read needs `can.observe(project.activity)`. */
 export interface ActivityRuntime {
-  list(query: ActivityPageQuery): Promise<ActivityVisitsPage>
+  /** Shared visits name their link's share: see `ActivityVisitView`. */
+  list(query: ActivityPageQuery): Promise<ActivityVisitList>
   users(query: ActivityPageQuery): Promise<ActivityUsersResult>
   summarize(query: ActivityPeriodQuery): Promise<ActivitySummary>
   calendar(query: ActivityCalendarQuery): Promise<ActivityCalendar>
-  read(visitId: string, query?: ActivityTimelineQuery): Promise<ActivityVisitPage | null>
+  read(
+    visitId: string,
+    query?: ActivityTimelineQuery
+  ): Promise<(Omit<ActivityVisitPage, "visit"> & { readonly visit: ActivityVisitView }) | null>
   /**
    * The visit's page views with the actions, workflows and Agent runs its session started, and
    * the connection it came through. Bounded: see `truncated`.
@@ -75,7 +84,8 @@ export function createActivityRuntime(
   return {
     async list(query) {
       assertObservable()
-      return service.list(query)
+      const page = await service.list(query)
+      return { ...page, visits: await nameSharedVisits(runtime, page.visits) }
     },
 
     async users(query) {
@@ -106,13 +116,23 @@ export function createActivityRuntime(
 
     async read(visitId, query) {
       assertObservable()
-      return service.read(visitId, query)
+      const page = await service.read(visitId, query)
+      if (!page) {
+        return null
+      }
+
+      return { ...page, visit: (await nameSharedVisit(runtime, page.visit)).visit }
     },
 
     async timeline(visitId) {
       assertObservable()
       const page = await service.readWithSession({ id: visitId, limit: ACTIVITY_TIMELINE_LIMIT })
-      return page ? composeActivityTimeline(runtime, page, new Date()) : null
+      if (!page) {
+        return null
+      }
+
+      const shared = await nameSharedVisit(runtime, page.visit)
+      return composeActivityTimeline(runtime, { ...shared, page }, new Date())
     },
 
     async connections(query) {

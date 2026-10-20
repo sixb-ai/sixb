@@ -78,7 +78,10 @@ new one with its next event.
 - The calendar covers one UTC year from the user's visits; days are expanded by the policy, so
   every provider counts them alike.
 - User filters precede counts and pagination. Display names resolve only for the accounts of
-  one page; no emails or other profile fields are returned.
+  one page; no emails or other profile fields are returned. Shared visits name their link's share
+  definition (`actor.definitionId` on `ActivityVisitView`, never on the stored actor), from one
+  grant read for the page or visit; a grant that is gone leaves the grant id alone. The timeline
+  reuses that grant for the share connection's status.
 - Visit and user cursors use last activity plus id, newest first. Ids compare byte by byte
   (`COLLATE "C"` in PostgreSQL); generated visit ids are ASCII, so every provider orders them alike.
   Timelines use sequence. Live activity can move a visit between pages, so clients deduplicate

@@ -28,14 +28,14 @@ const Item = defineObjectType({
   name: "Item",
   properties: [prop("id", "string", { required: true, primary: true })],
 })
-const SharedItem = defineShare("shared-item", {
-  target: Item,
-  grants: ({ target }) => [can.view(target)],
-})
 const MarkSeen = defineAction("markSeen")
   .on(Item)
   .params({})
   .writeback(() => ({}))
+const SharedItem = defineShare("shared-item", {
+  target: Item,
+  grants: ({ target }) => [can.view(target), can.apply(MarkSeen).on(target)],
+})
 const observers = defineGroup("observers")
 const observer = defineRole("observer", {
   grantedTo: [observers],
@@ -470,13 +470,49 @@ describe("activity routes", () => {
     expect((await fixture.post(shared)).status).toBe(200)
     expect((await fixture.get(`summary${fixture.range}`, shared)).status).toBe(403)
 
+    // An action the visitor applies through the link is the shared visit's.
+    const applied = await fixture.app.fetch(
+      new Request("http://api.localhost/api/actions/markSeen", {
+        method: "POST",
+        headers: { ...shared, "content-type": "application/json" },
+        body: JSON.stringify({
+          subject: { kind: "object", objectTypeId: "Item", primaryId: "one" },
+          runId: "act_shared",
+        }),
+      })
+    )
+    expect(applied.status).toBe(200)
+
     const page = await (await fixture.get(`visits${fixture.range}`, ambient)).json()
+    // The visit names the link's share, read with the visits; never the session.
     expect(page.visits.map((visit: { actor: unknown }) => visit.actor)).toEqual([
-      { type: "share", grantId: invitation.grant.id },
+      { type: "share", grantId: invitation.grant.id, definitionId: "shared-item" },
     ])
+    const timeline = await (
+      await fixture.get(`visits/${page.visits[0].id}/timeline`, ambient)
+    ).json()
+    expect(timeline.visit.actor.definitionId).toBe("shared-item")
+    expect(
+      timeline.entries.flatMap((entry: { kind: string; runId?: string }) =>
+        entry.kind === "action" ? [entry.runId] : []
+      )
+    ).toEqual(["act_shared"])
+    expect(timeline.connection).toMatchObject({
+      type: "share",
+      grantId: invitation.grant.id,
+      definitionId: "shared-item",
+      status: "active",
+    })
     expect((await (await fixture.get(`summary${fixture.range}`, ambient)).json()).users).toBe(0)
 
     await issuer.shares.revoke(invitation.grant.id)
     expect((await fixture.post(shared, { events: [{ ...pageView, id: "e2" }] })).status).toBe(401)
+
+    // Revoking the link ends its session too, as its connection says.
+    const revoked = await (
+      await fixture.get(`visits/${page.visits[0].id}/timeline`, ambient)
+    ).json()
+    expect(revoked.connection).toMatchObject({ type: "share", status: "revoked" })
+    expect(revoked.connection.revokedAt).toEqual(expect.any(String))
   })
 })

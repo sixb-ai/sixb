@@ -84,7 +84,11 @@ export const ActivityCaptureResultSchema = z.object({
 
 const ActivityActorSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("user"), userId: z.string() }),
-  z.object({ type: z.literal("share"), grantId: z.string() }),
+  z.object({
+    type: z.literal("share"),
+    grantId: z.string(),
+    definitionId: z.string().optional(),
+  }),
 ])
 
 const ActivityVisitSchema = z.object({
