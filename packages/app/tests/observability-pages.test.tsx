@@ -185,7 +185,7 @@ describe("Logs", () => {
     )
 
     expect(
-      await view.findByText('Seeing logs takes can.observe("logs") in one of your roles.')
+      await view.findByText("Seeing logs takes can.observe(project.logs) in one of your roles.")
     ).toBeDefined()
     expect(sockets?.opened.length ?? 0).toBe(opened)
     view.unmount()

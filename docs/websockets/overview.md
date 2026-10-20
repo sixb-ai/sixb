@@ -9,7 +9,7 @@ Connect to the API origin using `wss://` in production. Connections use an authe
 | Endpoint | Streams | Access |
 | --- | --- | --- |
 | `/ws/events` | Domain events. | Events are filtered by the caller's resource permissions. |
-| `/ws/logs` | Handler logs. | Requires `can.observe("logs")`. |
+| `/ws/logs` | Handler logs. | Requires `can.observe(project.logs)`. |
 | `/ws/agents` | Agent run output and activity. | Requires access to the agent and requested run. |
 
 After receiving `connected`, send a subscription message. The server acknowledges it with `subscribed`. Send `unsubscribe` or close the socket when finished. Errors arrive as a message with `type: "error"` and a `message` string. A message you send can be at most 64 KiB; the server closes a connection that sends a larger one.

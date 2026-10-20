@@ -1,4 +1,4 @@
-import { agent, can, defineGroup, defineMembershipPolicy } from "../src"
+import { agent, can, defineGroup, defineMembershipPolicy, project } from "../src"
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
@@ -7,8 +7,12 @@ type Expect<T extends true> = T
 const securityAdmins = defineGroup("security-admins")
 const commercial = defineGroup("commercial")
 
-can.observe("logs")
+can.observe(project.logs)
 can.observe(agent.usage)
+// @ts-expect-error project surfaces use the typed project reference.
+can.observe("logs")
+// @ts-expect-error observe takes one of project's surfaces, not the project itself.
+can.observe(project)
 can.manage(agent.usage)
 // @ts-expect-error AI usage permissions use the typed project capability reference.
 can.observe("aiUsage")

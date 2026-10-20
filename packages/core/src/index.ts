@@ -451,6 +451,8 @@ export type {
   MembershipPolicyDefinition,
   ObserveGrant,
   ObserveGrantTarget,
+  ProjectReference,
+  ProjectSurfaceReference,
   RedactionReason,
   Redactions,
   RegisteredSecurityDefinitions,
@@ -470,6 +472,7 @@ export {
   defineMembershipPolicy,
   defineRole,
   every,
+  project,
   SecurityValidationError,
 } from "./security"
 

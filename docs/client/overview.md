@@ -163,6 +163,6 @@ const stop = logs.actions().run("run-1").subscribe((line) => {
 // Call stop() when the subscription is no longer needed.
 ```
 
-Other selectors include `logs.all()`, `logs.syncs()`, `logs.pipelines()`, and `logs.workflows()`. Add `.level("warn")` for warnings and errors. Reading logs requires `can.observe("logs")`; subscriptions use browser sessions.
+Other selectors include `logs.all()`, `logs.syncs()`, `logs.pipelines()`, and `logs.workflows()`. Add `.level("warn")` for warnings and errors. Reading logs requires `can.observe(project.logs)`; subscriptions use browser sessions.
 
 For live data, see [Events & subscriptions](events.md). For error handling, see [Errors](../errors/overview.md).

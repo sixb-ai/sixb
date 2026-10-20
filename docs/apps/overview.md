@@ -263,7 +263,7 @@ those who can open Ontology. A sync, pipeline, projection or webhook run opens t
 [Data](#data) that shows it.
 
 Each page shows what the API lets the person read. Runs follow the grants of what ran, such as
-`can.run` on a workflow or `can.apply` on an action. Logs need `can.observe("logs")`, AI usage
+`can.run` on a workflow or `can.apply` on an action. Logs need `can.observe(project.logs)`, AI usage
 needs `can.observe(agent.usage)`, and changing limits needs `can.manage(agent.usage)`. See
 [Authorization](../auth/authorization.md).
 
