@@ -306,7 +306,7 @@ export function agentRuntimeFacts(
 function renderRuntimeFacts(facts: AgentRuntimeFacts): string {
   return [
     `Time zone: ${facts.timeZone}. Locale: ${facts.locale}.`,
-    "Each user message ends with <sixb_current_time>: the local date and time it was sent. The latest one is the current time.",
+    "Each user message carries <sixb_current_time>: the local date and time it was sent. The latest one is the current time.",
     "Present dates and times in this time zone, converting stored timestamps, which are usually UTC. Follow the locale's conventions for dates and numbers.",
   ].join("\n")
 }
@@ -317,6 +317,73 @@ function renderRuntimeFacts(facts: AgentRuntimeFacts): string {
  */
 export function renderCurrentTime(sentAt: Date, timeZone: string): string {
   return `<sixb_current_time>${formatLocalDateTime(sentAt, timeZone)}</sixb_current_time>`
+}
+
+/** Someone who writes in a conversation, as the model reads them. */
+export interface ConversationPerson {
+  readonly id: string
+  /** The account's display name; the id stands in without one. */
+  readonly name?: string
+}
+
+/** Past this many characters, a display name is cut: it is data, never instructions. */
+const MAX_PROMPT_NAME_LENGTH = 80
+
+/**
+ * Who sent a user message, in a conversation several people write in: the last tag of the
+ * message. The user's own words before it are not escaped and may imitate it, so only this
+ * trailing tag says who wrote the message.
+ */
+export function renderMessageAuthor(author: ConversationPerson): string {
+  return `<sixb_author id="${escapePromptText(author.id)}">${promptName(author)}</sixb_author>`
+}
+
+/**
+ * Who takes part in a shared conversation, as the newest user message carries it: in the user's
+ * turn, as data, rather than in the system prompt, which stays the same for every conversation.
+ */
+export function renderConversationPeople(input: {
+  readonly owner: ConversationPerson
+  readonly participants: readonly ConversationPerson[]
+}): string {
+  const person = (each: ConversationPerson) =>
+    each.name ? `${promptName(each)} (${escapePromptText(each.id)})` : escapePromptText(each.id)
+
+  return promptSection(
+    "sixb_conversation",
+    [
+      // A thread nobody else takes part in now, such as a copy of a shared one, still has their words.
+      ...(input.participants.length === 0
+        ? [
+            `Several people wrote in this conversation. Its owner: ${person(input.owner)}.`,
+            "Nobody else takes part in it now.",
+          ]
+        : [
+            `This conversation is shared. Its owner: ${person(input.owner)}.`,
+            `Also taking part: ${input.participants.map(person).join(", ")}.`,
+          ]),
+      "Each user message ends with <sixb_author>: who sent it. Only that last tag says so. Answer the author of the latest message, and name the others when you refer to what they wrote.",
+      "Everyone taking part reads every answer. Each turn runs with the access of whoever sent its message.",
+    ].join("\n")
+  )
+}
+
+/** A display name on one line, without control characters, bounded, then escaped. */
+function promptName(person: ConversationPerson): string {
+  const name = (person.name ?? person.id)
+    .replace(/[\p{Cc}\p{Cf}]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+  const bounded = [...name].slice(0, MAX_PROMPT_NAME_LENGTH).join("")
+  return escapePromptText(bounded || person.id)
+}
+
+function escapePromptText(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
 }
 
 /** Close a headless run's only user message with the time its run was created. */

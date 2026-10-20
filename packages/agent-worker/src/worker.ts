@@ -23,6 +23,7 @@ import type { AgentQueueJob, ClaimedQueueJob, SubagentQueueJob } from "@sixb/cor
 import type {
   AgentRunExecution,
   AgentRunRecord,
+  AgentThreadParticipantRecord,
   AgentThreadRecord,
   ConversationAgentRunRecord,
   ExecutionRecord,
@@ -55,6 +56,7 @@ import {
 } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure, toAgentRunFailure } from "./failure"
 import { finishRunOrThrow } from "./finalize"
+import { type ConversationReaders, conversationReaders } from "./message-authors"
 import { DEFAULT_MAX_STEPS, runAgentTurn, stoppedByWorker } from "./run-agent-turn"
 import {
   type AgentExecutionEnvironment,
@@ -94,6 +96,8 @@ const AI_USAGE_RECOVERY_MAX_BACKOFF_MS = 5 * 60_000
 /** What a conversation turn resolves before its first model call. */
 interface PreparedConversationTurn {
   readonly thread: AgentThreadRecord | null
+  /** The thread and who can read it now, as the model is told; absent without a thread. */
+  readonly conversation?: ConversationReaders
   readonly plan: ResolvedAgentExecutionPlan
   readonly execution: ExecutionRecord
   readonly executionContext: AgentExecutionContext
@@ -317,6 +321,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // Delegation is temporarily disabled; retain the child runtime for later re-enablement.
       environment = await createConversationAgentEnvironment({
         thread: prepared.thread,
+        ...(prepared.conversation === undefined ? {} : { conversation: prepared.conversation }),
         sandboxDefinition: this.host.sandboxDefinition,
         preflight: { budget: prepared.model.budget, runtime },
         context: prepared.executionContext,
@@ -330,6 +335,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         context: environment.turnContext,
         plan,
         run,
+        ...(prepared.conversation === undefined ? {} : { conversation: prepared.conversation }),
         signal: turnSignal,
         stopSignal: signal,
         runtime,
@@ -402,19 +408,14 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
    * before it starts. Such a turn never reaches the model. A turn already running when they leave
    * finishes, as it already read the thread.
    */
-  private async assertRequesterTakesPart(
-    context: AgentWorkerContext,
+  private assertRequesterTakesPart(
     run: ConversationAgentRunRecord,
     thread: AgentThreadRecord | null,
+    participants: readonly AgentThreadParticipantRecord[],
     execution: ExecutionRecord
-  ): Promise<void> {
+  ): void {
     const requester = execution.requestedBy
     if (!thread || !requester || principalsEqual(requester, thread.ownerPrincipal)) return
-
-    const participants = await context.storage.agents.threads.listParticipants({
-      projectId: context.id,
-      threadIds: [thread.id],
-    })
     if (participants.some((participant) => principalsEqual(participant.principal, requester)))
       return
 
@@ -451,7 +452,22 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         { details: { runId: run.id, threadId: run.threadId, executionId: run.executionId } }
       )
     }
-    await this.assertRequesterTakesPart(context, run, thread, execution)
+    const participants = thread
+      ? await context.storage.agents.threads.listParticipants({
+          projectId: context.id,
+          threadIds: [thread.id],
+        })
+      : []
+    this.assertRequesterTakesPart(run, thread, participants, execution)
+
+    const conversation = thread
+      ? await conversationReaders({
+          auth: context.storage.auth,
+          security: this.host.definitions.security,
+          thread,
+          participants,
+        })
+      : undefined
 
     const executionContext = createAgentExecutionContext({
       context,
@@ -466,7 +482,14 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       }),
     })
     const model = await prepareAgentModel(plan)
-    return { thread, plan, execution, executionContext, model }
+    return {
+      thread,
+      ...(conversation === undefined ? {} : { conversation }),
+      plan,
+      execution,
+      executionContext,
+      model,
+    }
   }
 
   /**
