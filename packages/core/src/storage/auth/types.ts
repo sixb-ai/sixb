@@ -199,6 +199,12 @@ export interface UpdateAuthUserProfileInput {
   readonly updatedAt?: Date
 }
 
+/** A change to one user, with the user as the change found them, read in the same atomic step. */
+export interface UpdateAuthUserResult {
+  readonly user: UserRecord
+  readonly previousUser: UserRecord
+}
+
 export interface UpdateAuthUserStatusInput {
   readonly projectId: string
   readonly id: string
@@ -492,6 +498,11 @@ export interface CompleteSignInResult {
   readonly identity?: UserIdentityRecord
   readonly invitation?: InvitationRecord
   readonly groupMemberships: readonly GroupMembershipRecord[]
+  /**
+   * The user as this sign-in found them, before it changed their profile, or `null` when this
+   * sign-in created them.
+   */
+  readonly previousUser: UserRecord | null
 }
 
 export interface SuspendUserAndRevokeSessionsInput {
@@ -512,9 +523,12 @@ export interface AuthUserStore {
     readonly projectId: string
     readonly email: string
   }): Promise<UserRecord | null>
-  /** Update only the provided fields; omitted fields must remain unchanged atomically. */
-  updateProfile(input: UpdateAuthUserProfileInput): Promise<UserRecord>
-  updateStatus(input: UpdateAuthUserStatusInput): Promise<UserRecord>
+  /**
+   * Update only the provided fields; omitted fields must remain unchanged atomically. When no
+   * value changes, nothing is written, so `updatedAt` stays as it was.
+   */
+  updateProfile(input: UpdateAuthUserProfileInput): Promise<UpdateAuthUserResult>
+  updateStatus(input: UpdateAuthUserStatusInput): Promise<UpdateAuthUserResult>
   list(input: ListAuthUsersInput): Promise<ListAuthUsersResult>
 }
 
@@ -783,5 +797,7 @@ export interface AuthStorage {
   completeDeviceAuthorization(
     input: CompleteDeviceAuthorizationInput
   ): Promise<CompleteDeviceAuthorizationResult>
-  suspendUserAndRevokeSessions(input: SuspendUserAndRevokeSessionsInput): Promise<UserRecord>
+  suspendUserAndRevokeSessions(
+    input: SuspendUserAndRevokeSessionsInput
+  ): Promise<UpdateAuthUserResult>
 }

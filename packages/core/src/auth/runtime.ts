@@ -1182,7 +1182,7 @@ export class AuthRuntime {
       )
     }
 
-    const suspended = await storage.suspendUserAndRevokeSessions({
+    const { user: suspended } = await storage.suspendUserAndRevokeSessions({
       projectId: this.projectId,
       userId: user.id,
       suspendedAt: new Date(),
@@ -1209,7 +1209,7 @@ export class AuthRuntime {
     )
 
     // Reactivation restores access but not sessions; the user signs in again.
-    const reactivated = await storage.users.updateStatus({
+    const { user: reactivated } = await storage.users.updateStatus({
       projectId: this.projectId,
       id: user.id,
       status: "active",
@@ -1257,7 +1257,7 @@ export class AuthRuntime {
       )
     }
 
-    const user = await storage.users.updateProfile({
+    const { user, previousUser } = await storage.users.updateProfile({
       projectId: this.projectId,
       id: caller.user.id,
       ...changes,
@@ -1265,7 +1265,11 @@ export class AuthRuntime {
     })
 
     // Every session of this person caches their profile; drop them so all show the change.
-    this.sessionCache?.invalidateUser(user.id)
+    const changed =
+      user.displayName !== previousUser.displayName || user.avatarUrl !== previousUser.avatarUrl
+    if (changed) {
+      this.sessionCache?.invalidateUser(user.id)
+    }
 
     return { profile: toUserProfile(user), managedFields }
   }

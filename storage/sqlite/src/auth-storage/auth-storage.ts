@@ -12,6 +12,7 @@ import type {
   InvitationRecord,
   SessionRecord,
   SuspendUserAndRevokeSessionsInput,
+  UpdateAuthUserResult,
   UserIdentityRecord,
   UserRecord,
 } from "@sixb/core/storage"
@@ -216,16 +217,17 @@ export class SqliteAuthStorage implements AuthStorage {
           consumedAt: completedAt,
         })
 
-        const user = existingUserRow
-          ? rowToUserRecord(existingUserRow)
-          : this.insertUser({
-              id: newUserId ?? assertNonEmpty(input.newUserId, "User id"),
-              projectId,
-              email: magicLink.email,
-              displayName: input.newUserDisplayName,
-              avatarUrl: input.newUserAvatarUrl,
-              createdAt: completedAt,
-            })
+        const previousUser = existingUserRow ? rowToUserRecord(existingUserRow) : null
+        const user =
+          previousUser ??
+          this.insertUser({
+            id: newUserId ?? assertNonEmpty(input.newUserId, "User id"),
+            projectId,
+            email: magicLink.email,
+            displayName: input.newUserDisplayName,
+            avatarUrl: input.newUserAvatarUrl,
+            createdAt: completedAt,
+          })
 
         const invitation = this.acceptInvitationAndApplyGroups({
           activeInvitation,
@@ -253,6 +255,7 @@ export class SqliteAuthStorage implements AuthStorage {
           session,
           invitation: invitation.invitation,
           groupMemberships,
+          previousUser,
         }
       }
     )
@@ -348,6 +351,7 @@ export class SqliteAuthStorage implements AuthStorage {
 
         this.consumeOidcAttempt(input, completedAt, projectId)
 
+        const previousUser = userRow ? rowToUserRecord(userRow) : null
         let user: UserRecord
         if (!userRow) {
           user = this.insertUser({
@@ -404,6 +408,7 @@ export class SqliteAuthStorage implements AuthStorage {
           identity: nextIdentity,
           invitation: invitation.invitation,
           groupMemberships,
+          previousUser,
         }
       }
     )
@@ -417,7 +422,7 @@ export class SqliteAuthStorage implements AuthStorage {
 
   async suspendUserAndRevokeSessions(
     input: SuspendUserAndRevokeSessionsInput
-  ): Promise<UserRecord> {
+  ): Promise<UpdateAuthUserResult> {
     return runImmediateTransaction(this.db, () => {
       const existing = getUserRowById(this.db, {
         projectId: input.projectId,
@@ -448,11 +453,12 @@ export class SqliteAuthStorage implements AuthStorage {
         revokedAt: input.suspendedAt,
       })
 
-      return rowToUserRecord({
+      const user = rowToUserRecord({
         ...existing,
         status: "suspended",
         updated_at: toIso(input.suspendedAt),
       })
+      return { user, previousUser: rowToUserRecord(existing) }
     })
   }
 

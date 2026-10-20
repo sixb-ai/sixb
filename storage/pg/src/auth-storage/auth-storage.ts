@@ -11,6 +11,7 @@ import type {
   InvitationRecord,
   SessionRecord,
   SuspendUserAndRevokeSessionsInput,
+  UpdateAuthUserResult,
   UserIdentityRecord,
   UserRecord,
 } from "@sixb/core/storage"
@@ -256,16 +257,17 @@ export class PgAuthStorage implements AuthStorage {
           consumedAt: completedAt,
         })
 
-        const user = existingUserRow
-          ? rowToUserRecord(existingUserRow)
-          : await this.insertUser(tx, {
-              id: newUserId ?? assertNonEmpty(input.newUserId, "User id"),
-              projectId,
-              email,
-              displayName: input.newUserDisplayName,
-              avatarUrl: input.newUserAvatarUrl,
-              createdAt: completedAt,
-            })
+        const previousUser = existingUserRow ? rowToUserRecord(existingUserRow) : null
+        const user =
+          previousUser ??
+          (await this.insertUser(tx, {
+            id: newUserId ?? assertNonEmpty(input.newUserId, "User id"),
+            projectId,
+            email,
+            displayName: input.newUserDisplayName,
+            avatarUrl: input.newUserAvatarUrl,
+            createdAt: completedAt,
+          }))
 
         const invitation = await this.acceptInvitationAndApplyGroups(tx, {
           activeInvitation,
@@ -293,6 +295,7 @@ export class PgAuthStorage implements AuthStorage {
           session,
           invitation: invitation.invitation,
           groupMemberships,
+          previousUser,
         }
       }
     )
@@ -410,6 +413,7 @@ export class PgAuthStorage implements AuthStorage {
         ])
         await this.consumeOidcAttempt(input, completedAt, projectId, tx)
 
+        const previousUser = userRow ? rowToUserRecord(userRow) : null
         let user: UserRecord
         if (!userRow) {
           user = await this.insertUser(tx, {
@@ -476,6 +480,7 @@ export class PgAuthStorage implements AuthStorage {
           identity: nextIdentity,
           invitation: invitation.invitation,
           groupMemberships,
+          previousUser,
         }
       }
     )
@@ -489,7 +494,7 @@ export class PgAuthStorage implements AuthStorage {
 
   async suspendUserAndRevokeSessions(
     input: SuspendUserAndRevokeSessionsInput
-  ): Promise<UserRecord> {
+  ): Promise<UpdateAuthUserResult> {
     return runPgTransaction(this.sql, async (tx) => {
       await lockAdvisoryKeys(tx, [authLockKey("sessions", input.projectId, input.userId)])
       const existing = await getUserRowById(
@@ -523,7 +528,7 @@ export class PgAuthStorage implements AuthStorage {
         revokedAt: input.suspendedAt,
       })
 
-      return rowToUserRecord(updated)
+      return { user: rowToUserRecord(updated), previousUser: rowToUserRecord(existing) }
     })
   }
 

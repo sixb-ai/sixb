@@ -4,11 +4,12 @@ import type {
   ListAuthUsersInput,
   ListAuthUsersResult,
   UpdateAuthUserProfileInput,
+  UpdateAuthUserResult,
   UpdateAuthUserStatusInput,
   UserRecord,
 } from "@sixb/core/storage"
 import { AuthStorageError } from "@sixb/core/storage"
-import type { PgStoreClient } from "../transactions"
+import { type PgStoreClient, runPgTransaction } from "../transactions"
 import type { PgAuthUserRow } from "./rows"
 import { rowToUserRecord } from "./rows"
 import {
@@ -115,64 +116,83 @@ export class PgAuthUserStore implements AuthUserStore {
     return row ? rowToUserRecord(row) : null
   }
 
-  async updateProfile(input: UpdateAuthUserProfileInput): Promise<UserRecord> {
-    const existing = await getUserRowById(this.sql, {
-      projectId: input.projectId,
-      id: input.id,
-    })
-
-    if (!existing) {
-      throw new AuthStorageError(
-        "missing_user",
-        `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
+  async updateProfile(input: UpdateAuthUserProfileInput): Promise<UpdateAuthUserResult> {
+    // The row stays locked until the update, so the user it returns as previous is the one it
+    // changed, and an omitted field keeps whatever a concurrent update wrote to it.
+    return runPgTransaction(this.sql, async (tx) => {
+      const existing = await getUserRowById(
+        tx,
+        {
+          projectId: input.projectId,
+          id: input.id,
+        },
+        { forUpdate: true }
       )
-    }
 
-    // One statement, so an omitted field keeps whatever a concurrent update wrote to it.
-    const updatedAt = dateOrNow(input.updatedAt)
-    const [row] = await this.sql<PgAuthUserRow[]>`
-      UPDATE auth_users
-      SET display_name = CASE
-            WHEN ${input.displayName !== undefined}::boolean THEN ${input.displayName ?? null}::text
-            ELSE display_name
-          END,
-          avatar_url = CASE
-            WHEN ${input.avatarUrl !== undefined}::boolean THEN ${input.avatarUrl ?? null}::text
-            ELSE avatar_url
-          END,
-          updated_at = ${updatedAt}
-      WHERE project_id = ${input.projectId}
-        AND id = ${input.id}
-      RETURNING *
-    `
+      if (!existing) {
+        throw new AuthStorageError(
+          "missing_user",
+          `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
 
-    return rowToUserRecord(row)
+      const previousUser = rowToUserRecord(existing)
+      if (!changesProfile(previousUser, input)) {
+        return { user: previousUser, previousUser }
+      }
+
+      const updatedAt = dateOrNow(input.updatedAt)
+      const [row] = await tx<PgAuthUserRow[]>`
+        UPDATE auth_users
+        SET display_name = CASE
+              WHEN ${input.displayName !== undefined}::boolean THEN ${input.displayName ?? null}::text
+              ELSE display_name
+            END,
+            avatar_url = CASE
+              WHEN ${input.avatarUrl !== undefined}::boolean THEN ${input.avatarUrl ?? null}::text
+              ELSE avatar_url
+            END,
+            updated_at = ${updatedAt}
+        WHERE project_id = ${input.projectId}
+          AND id = ${input.id}
+        RETURNING *
+      `
+
+      return { user: rowToUserRecord(row), previousUser }
+    })
   }
 
-  async updateStatus(input: UpdateAuthUserStatusInput): Promise<UserRecord> {
-    const existing = await getUserRowById(this.sql, {
-      projectId: input.projectId,
-      id: input.id,
-    })
-
-    if (!existing) {
-      throw new AuthStorageError(
-        "missing_user",
-        `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
+  async updateStatus(input: UpdateAuthUserStatusInput): Promise<UpdateAuthUserResult> {
+    // Locked like a profile update, so two status changes cannot both report the same previous one.
+    return runPgTransaction(this.sql, async (tx) => {
+      const existing = await getUserRowById(
+        tx,
+        {
+          projectId: input.projectId,
+          id: input.id,
+        },
+        { forUpdate: true }
       )
-    }
 
-    const updatedAt = dateOrNow(input.updatedAt)
-    const [row] = await this.sql<PgAuthUserRow[]>`
-      UPDATE auth_users
-      SET status = ${input.status},
-          updated_at = ${updatedAt}
-      WHERE project_id = ${input.projectId}
-        AND id = ${input.id}
-      RETURNING *
-    `
+      if (!existing) {
+        throw new AuthStorageError(
+          "missing_user",
+          `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
 
-    return rowToUserRecord(row)
+      const updatedAt = dateOrNow(input.updatedAt)
+      const [row] = await tx<PgAuthUserRow[]>`
+        UPDATE auth_users
+        SET status = ${input.status},
+            updated_at = ${updatedAt}
+        WHERE project_id = ${input.projectId}
+          AND id = ${input.id}
+        RETURNING *
+      `
+
+      return { user: rowToUserRecord(row), previousUser: rowToUserRecord(existing) }
+    })
   }
 
   async list(input: ListAuthUsersInput): Promise<ListAuthUsersResult> {
@@ -226,4 +246,13 @@ export class PgAuthUserStore implements AuthUserStore {
       total,
     }
   }
+}
+
+// Omitted keeps the stored value, and `null` clears it.
+function changesProfile(user: UserRecord, input: UpdateAuthUserProfileInput): boolean {
+  const displayName =
+    input.displayName === undefined ? user.displayName : (input.displayName ?? undefined)
+  const avatarUrl = input.avatarUrl === undefined ? user.avatarUrl : (input.avatarUrl ?? undefined)
+
+  return displayName !== user.displayName || avatarUrl !== user.avatarUrl
 }

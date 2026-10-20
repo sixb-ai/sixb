@@ -11,6 +11,7 @@ import type {
   InvitationRecord,
   SessionRecord,
   SuspendUserAndRevokeSessionsInput,
+  UpdateAuthUserResult,
   UserIdentityRecord,
   UserRecord,
 } from "../types"
@@ -241,6 +242,7 @@ export class InMemoryAuthStorage implements AuthStorage {
       consumedAt: completedAt,
     })
 
+    const previousUser = existingUser ? cloneRecord(existingUser) : null
     let user = existingUser
     if (!user) {
       user = {
@@ -283,6 +285,7 @@ export class InMemoryAuthStorage implements AuthStorage {
       session: cloneRecord(session),
       invitation: invitation.invitation ? cloneRecord(invitation.invitation) : undefined,
       groupMemberships: memberships.map(cloneRecord),
+      previousUser,
     }
   }
 
@@ -366,6 +369,7 @@ export class InMemoryAuthStorage implements AuthStorage {
 
     this.consumeOidcAttempt(input, completedAt, projectId)
 
+    const previousUser = user ? cloneRecord(user) : null
     if (!user) {
       user = {
         id: newUserId ?? assertNonEmpty(input.newUserId, "User id"),
@@ -430,12 +434,13 @@ export class InMemoryAuthStorage implements AuthStorage {
       identity: cloneRecord(nextIdentity),
       invitation: invitation.invitation ? cloneRecord(invitation.invitation) : undefined,
       groupMemberships: memberships.map(cloneRecord),
+      previousUser,
     }
   }
 
   async suspendUserAndRevokeSessions(
     input: SuspendUserAndRevokeSessionsInput
-  ): Promise<UserRecord> {
+  ): Promise<UpdateAuthUserResult> {
     const key = userKey(input.projectId, input.userId)
     const existing = this.state.users.get(key)
 
@@ -454,7 +459,7 @@ export class InMemoryAuthStorage implements AuthStorage {
     this.state.users.set(key, cloneRecord(next))
     revokeActiveSessionsForUser(this.state, input.projectId, input.userId, input.suspendedAt)
 
-    return cloneRecord(next)
+    return { user: cloneRecord(next), previousUser: cloneRecord(existing) }
   }
 
   // The identity provider owns the name and picture it sends: every sign-in overwrites them, and
