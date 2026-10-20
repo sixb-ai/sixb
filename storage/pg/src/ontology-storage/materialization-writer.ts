@@ -16,6 +16,7 @@ import {
 import type { MaterializationPlanWorkItem } from "@sixb/core/storage"
 import type postgres from "postgres"
 import type { SQL, SQLClient } from "../pg-client"
+import { claimPgUniqueValues, heldValue } from "./unique-values"
 
 export interface PgStagedPlanTarget {
   /** The work table and the id its rows carry: a session's temp table, or a durable plan. */
@@ -24,11 +25,19 @@ export interface PgStagedPlanTarget {
   readonly projectId: string
   readonly commitId: string
   readonly committedAt: string
+  /** Whether unique value items were staged; probed in the work table when unknown. */
+  readonly uniqueWork?: PgUniqueWork
+}
+
+export interface PgUniqueWork {
+  readonly releases: boolean
+  readonly claims: boolean
 }
 
 export interface PgAppliedPlan {
   readonly objectWrites: number
   readonly linkWrites: number
+  readonly uniqueValueWrites: number
   readonly eventCount: number
 }
 
@@ -55,13 +64,32 @@ export class PgMaterializationWriter {
     await this.applyObjectOverrides(target)
     await this.applyLinkOverrides(target)
     await this.applyPoints(target)
+    const uniqueWork = target.uniqueWork ?? (await this.stagedUniqueWork(target))
+    if (uniqueWork.releases) await this.releaseUniqueValues(target)
     let linkWrites = await this.deleteLinks(target)
     let objectWrites = await this.deleteObjects(target)
     objectWrites += await this.upsertObjects(target)
     linkWrites += await this.upsertLinks(target)
+    const uniqueValueWrites = uniqueWork.claims ? await this.claimUniqueValues(target) : 0
     const eventCount = await this.writeOutbox(target)
     await this.writeTouches(target)
-    return { objectWrites, linkWrites, eventCount }
+    return { objectWrites, linkWrites, uniqueValueWrites, eventCount }
+  }
+
+  /** Two probes of the work table's lane index: a commit with no unique values runs nothing else. */
+  private async stagedUniqueWork(target: PgStagedPlanTarget): Promise<PgUniqueWork> {
+    const probe = (kind: "unique-value-release" | "unique-value-claim") => this.sql`
+      EXISTS (
+        SELECT 1 FROM ${this.sql(target.workTable)}
+        WHERE work_id = ${target.workId} AND lane = 'apply'
+          AND major_order = ${materializationApplyPhase(kind)}
+          AND minor_order = ${materializationPlanKindRank(kind)}
+      )
+    `
+    const [row] = await this.sql<{ readonly releases: boolean; readonly claims: boolean }[]>`
+      SELECT ${probe("unique-value-release")} AS releases, ${probe("unique-value-claim")} AS claims
+    `
+    return { releases: row?.releases ?? false, claims: row?.claims ?? false }
   }
 
   /** The staged values of one plan item kind, as `value`. */
@@ -330,6 +358,51 @@ export class PgMaterializationWriter {
     )
   }
 
+  /** The staged unique values of one item kind, as the columns their table keys them by. */
+  private stagedUniqueValues(
+    target: PgStagedPlanTarget,
+    kind: "unique-value-release" | "unique-value-claim"
+  ) {
+    return this.sql`
+      SELECT value->>'objectTypeId' AS object_type_id, value->>'propertyId' AS property_id,
+        value->>'valueKey' AS value_key, value->>'primaryId' AS primary_id,
+        value->>'keyKind' AS key_kind, (value->>'keyVersion')::integer AS key_version
+      FROM (${this.staged(target, kind)}) AS staged
+    `
+  }
+
+  /** A value whose row already names another object, or none, is simply no longer this one's. */
+  private async releaseUniqueValues(target: PgStagedPlanTarget): Promise<void> {
+    await this.sql`
+      WITH candidates AS MATERIALIZED (
+        ${this.stagedUniqueValues(target, "unique-value-release")}
+      ), released AS (
+        SELECT candidates.object_type_id, candidates.property_id, held.value_hash
+        FROM candidates
+        CROSS JOIN LATERAL (
+          ${heldValue(this.sql, target.projectId)}
+            AND stored.primary_id = candidates.primary_id
+          LIMIT 1
+        ) AS held
+      )
+      DELETE FROM object_unique_values AS stored USING released
+      WHERE stored.project_id = ${target.projectId}
+        AND stored.object_type_id = released.object_type_id
+        AND stored.property_id = released.property_id
+        AND stored.value_hash = released.value_hash
+    `
+  }
+
+  /** Runs once every release of the commit has applied, so values can move between objects. */
+  private async claimUniqueValues(target: PgStagedPlanTarget): Promise<number> {
+    return claimPgUniqueValues(
+      this.sql,
+      target.projectId,
+      this.stagedUniqueValues(target, "unique-value-claim"),
+      { requirePrepared: true }
+    )
+  }
+
   private async deleteLinks(target: PgStagedPlanTarget): Promise<number> {
     const candidates = this.staged(target, "link-delete")
     return this.write(
@@ -586,6 +659,8 @@ export class PgMaterializationWriter {
           END AS ref
       ) AS entity
       WHERE work.work_id = ${target.workId} AND work.lane = 'apply'
+        -- Unique values are no plan input: a stale claim fails when it applies.
+        AND entity.kind IS NOT NULL
     `
   }
 

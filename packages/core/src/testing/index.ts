@@ -162,6 +162,10 @@ export {
   queueTestSyncRun,
   startTestSyncRun,
 } from "./sync-execution"
+export {
+  runUniqueValuesContractSuite,
+  type UniqueValuesContractProvider,
+} from "./unique-values-contract"
 export { startTestWebhookRun } from "./webhook-execution"
 export {
   runWebhookRunStorageContractSuite,

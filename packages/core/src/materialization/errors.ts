@@ -44,6 +44,43 @@ export class MaterializationObjectNotFoundError extends MaterializationValidatio
 }
 
 /**
+ * A unique property value that another object of the type already holds.
+ *
+ * The message names only the type and the property, so a caller learns that the value is taken
+ * and nothing more. The holder and the claimant are kept for messages that may name them.
+ */
+export class UniqueValueViolationError extends MaterializationValidationError {
+  override readonly name = "UniqueValueViolationError"
+
+  constructor(
+    readonly objectTypeId: string,
+    readonly propertyId: string,
+    readonly holderPrimaryId: string,
+    readonly claimantPrimaryId: string
+  ) {
+    super(`Another '${objectTypeId}' object already has this '${propertyId}'.`)
+  }
+}
+
+/**
+ * A write to a unique property whose stored values were never built, or were built with other
+ * keys: `sixb db migrate` prepares them. Writes stay refused until then, rather than accept a
+ * value they cannot check.
+ */
+export class UniquePropertyNotPreparedError extends Error {
+  readonly name = "UniquePropertyNotPreparedError"
+
+  constructor(
+    readonly objectTypeId: string,
+    readonly propertyId: string
+  ) {
+    super(
+      `[Sixb] Unique property '${objectTypeId}.${propertyId}' is not prepared. Run \`sixb db migrate\`.`
+    )
+  }
+}
+
+/**
  * Abort reason for an explicit, terminal cancellation of a materialization.
  *
  * Generic aborts (worker shutdown, delivery loss, timeout) remain retryable and preserve staged

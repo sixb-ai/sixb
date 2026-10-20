@@ -14,6 +14,7 @@ import {
 import type { ObjectTypeWithPropertyTokens } from "./tokens"
 import { createLinkTokenMap, createPropertyTokenMap } from "./tokens"
 import type { ObjectType, Schema, ValueType } from "./types"
+import { type UniquePropertyDefinition, uniquePropertiesOf } from "./unique-values"
 import {
   validatePrimaryProperties,
   validatePropertyDefinitions,
@@ -179,6 +180,7 @@ export class OntologyRegistry implements OntologyDefinitionCatalog {
   private readonly valueTypesById = new Map<string, ValueType>()
   private readonly subTypesById = new Map<string, Set<string>>()
   private readonly primaryByTypeId: Map<string, string>
+  private readonly uniqueByTypeId = new Map<string, readonly UniquePropertyDefinition[]>()
 
   constructor(options: OntologyRegistryOptions) {
     const { objectTypes, valueTypes } = collectOntology(options.sources)
@@ -209,6 +211,7 @@ export class OntologyRegistry implements OntologyDefinitionCatalog {
         })
     }
     this.primaryByTypeId = validatePrimaryProperties(this.objectTypesById)
+    this.indexUniqueProperties()
   }
 
   // ── Public read API ──────────────────────────────────────
@@ -242,6 +245,11 @@ export class OntologyRegistry implements OntologyDefinitionCatalog {
     const id = this.primaryByTypeId.get(objectTypeId)
     if (!id) throw new OntologyNotFoundError(formatUnknownObjectTypeMessage(objectTypeId))
     return id
+  }
+
+  /** The unique properties of a type, its inherited ones included. Empty for an unknown type. */
+  listUniqueProperties(objectTypeId: string): readonly UniquePropertyDefinition[] {
+    return this.uniqueByTypeId.get(objectTypeId) ?? []
   }
 
   /** Collect all transitive sub-types of the given object type id. */
@@ -313,6 +321,14 @@ export class OntologyRegistry implements OntologyDefinitionCatalog {
   }
 
   // ── Private initialization ───────────────────────────────
+
+  /** Every write consults the unique properties of its type: resolve their kinds once. */
+  private indexUniqueProperties(): void {
+    for (const [typeId, objectType] of this.objectTypesById) {
+      const unique = uniquePropertiesOf(objectType, this.valueTypesById)
+      if (unique.length > 0) this.uniqueByTypeId.set(typeId, unique)
+    }
+  }
 
   /**
    * Build the subtype graph from `extends` and `parents` declarations.

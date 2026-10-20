@@ -111,7 +111,9 @@ function touchAppliedWorkStatement(workTable: string): string {
       END AS ref
     FROM ${workTable}
     WHERE work_id = $workId AND lane = 'apply'
-  )`
+  )
+  -- Unique values are no plan input: a stale claim fails when it applies.
+  WHERE kind IS NOT NULL`
 }
 
 export class SqliteOntologyMaterializationStorage implements OntologyMaterializationStorage {

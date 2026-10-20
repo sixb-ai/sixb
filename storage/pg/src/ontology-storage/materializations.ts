@@ -238,9 +238,11 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       projectId: commit.projectId,
       commitId: commit.id,
       committedAt: commit.committedAt,
+      ...(session.plan ? {} : { uniqueWork: session.uniqueWork }),
     })
     session.changedObjects = applied.objectWrites
     session.changedLinks = applied.linkWrites
+    session.changedUniqueValues = applied.uniqueValueWrites
     session.appliedEventCount = applied.eventCount
     return { eventCount: applied.eventCount }
   }
@@ -256,6 +258,11 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     // With empty/stale statistics, a link lookup can scan every edge sharing its target.
     await refreshMaterializedStatistics(this.sql, "objects", session.changedObjects)
     await refreshMaterializedStatistics(this.sql, "links", session.changedLinks)
+    await refreshMaterializedStatistics(
+      this.sql,
+      "object_unique_values",
+      session.changedUniqueValues
+    )
     const record = await this.insertCommit(session.header, input)
     await this.sessions.release(session)
     return { commit: record }
@@ -743,7 +750,7 @@ function databaseCount(value: number | string | undefined): number {
  * count can still include a previous transaction's manually analyzed writes at this point. */
 async function refreshMaterializedStatistics(
   sql: SQLClient,
-  table: "objects" | "links",
+  table: "objects" | "links" | "object_unique_values",
   changed: number
 ): Promise<void> {
   if (changed < 1_000) return

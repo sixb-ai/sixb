@@ -35,6 +35,7 @@ import { validateEffectiveObject } from "../effective/validate"
 import {
   appendEffectiveLinkWork,
   appendEffectiveObjectWork,
+  appendUniqueValueWork,
   classificationWork,
   eventWork,
   planWork,
@@ -143,11 +144,12 @@ function planReplacementObject(
   }
 
   if (!change) return work
-  appendObjectChangeWork(work, sortKey, change)
+  appendObjectChangeWork(context, work, sortKey, change)
   return work
 }
 
 function appendObjectChangeWork(
+  context: Pick<MaterializerContext, "ontology">,
   work: MaterializationWorkRecord[],
   sortKey: string,
   change: EffectiveObjectChange
@@ -155,6 +157,7 @@ function appendObjectChangeWork(
   const items: MaterializationPlanWorkItem[] = []
   appendEffectiveObjectWork(items, change)
   for (const item of items) work.push(planWork(item, sortKey))
+  appendUniqueValueWork(work, change, context.ontology)
   work.push(eventWork(buildObjectMaterializationEventDraft(change)))
 }
 

@@ -110,6 +110,7 @@ const SHIPPED_MIGRATIONS = [
   "070-artifact-state",
   "071-agent-thread-participants",
   "072-forked-context-checkpoints",
+  "073-unique-values",
 ]
 
 const steps = postgresStorageMigrations.steps

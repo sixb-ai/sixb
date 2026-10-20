@@ -168,6 +168,7 @@ framework-owned structures have not been manually dropped or changed.
 run `bun sixb db migrate` before starting the new release. Ordinary indexes build concurrently. A text
 hint also adds STORED generated columns: the initial call rewrites the objects table under an
 exclusive lock.
+Making a property unique reads every object of its type once, in one serializable transaction.
 Provide all definitions together, allow temporary disk headroom, and measure projection throughput.
 Preparation attempts to install `pg_trgm` in `public`; the database administrator must provide that
 extension when the maintenance role cannot install it.

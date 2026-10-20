@@ -4,6 +4,7 @@ import {
   prepareObjectQueries,
 } from "../objects/query-preparation"
 import type { Storage } from "../types"
+import { prepareUniqueProperties } from "./prepare-unique-properties"
 import type {
   MigrationCapableStorage,
   MigrationReport,
@@ -15,7 +16,10 @@ export function isMigrationCapableStorage(storage: Storage): storage is Migratio
   return Array.isArray((storage as { migrators?: unknown }).migrators)
 }
 
-/** Run schema migrations, then prepare query indexes when the provider supports it. */
+/**
+ * Run schema migrations, then, given the project's ontology, prepare query indexes when the
+ * provider supports it and the stored values of unique properties.
+ */
 export async function migrateStorage(
   storage: Storage,
   options?: StorageMigrationOptions
@@ -34,6 +38,9 @@ export async function migrateStorage(
       console.warn(`[Sixb] ${warning}`)
     }
   }
+
+  // Not part of the status: it only reads and writes rows, and says when it builds values.
+  if (options) await prepareUniqueProperties({ ...options, storage })
 
   let status: StorageMigrationResult["status"] = "skipped"
   if (reports.length > 0 || queries) {

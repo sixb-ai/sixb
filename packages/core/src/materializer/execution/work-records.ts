@@ -1,11 +1,16 @@
 import { stableJsonStringify } from "../../json"
 import type { EffectiveLinkChange, EffectiveObjectChange } from "../../materialization/model"
+import { canonicalIdentitySortKey } from "../../materialization/refs"
+import type { OntologyRegistry } from "../../ontology"
+import { UNIQUE_VALUE_KEY_VERSION, uniqueValueKey } from "../../ontology/unique-values"
 import type {
+  ExactUniqueValueWrite,
   MaterializationClassificationWorkRecord,
   MaterializationEventWorkRecord,
   MaterializationPlanWorkItem,
   MaterializationPlanWorkRecord,
   MaterializationWorkEntityKind,
+  MaterializationWorkRecord,
 } from "../../storage/ontology"
 import { materializationApplyPhase } from "../../storage/ontology/materializations"
 import type { WorkingLinkEdge, WorkingLinkSlot, WorkingObject } from "../edits/working-state"
@@ -129,6 +134,48 @@ export function appendEffectiveObjectWork(
           : { ref: change.ref, exists: false },
       },
     })
+  }
+}
+
+/**
+ * Releases the unique values an object change gives up and claims those it takes. Storage applies
+ * every release of a commit before its first claim, so values can move between its objects.
+ */
+export function appendUniqueValueWork(
+  work: MaterializationWorkRecord[],
+  change: EffectiveObjectChange,
+  ontology: OntologyRegistry
+): void {
+  const properties = ontology.listUniqueProperties(change.ref.objectTypeId)
+  if (properties.length === 0) return
+
+  const before = change.before?.properties
+  const after = change.kind === "deleted" ? undefined : change.after.properties
+
+  for (const { propertyId, kind } of properties) {
+    const released = uniqueValueKey(kind, before?.[propertyId])
+    const claimed = uniqueValueKey(kind, after?.[propertyId])
+    if (released === claimed) continue
+
+    const sortKey = canonicalIdentitySortKey([
+      change.ref.objectTypeId,
+      change.ref.primaryId,
+      propertyId,
+    ])
+    const value = (valueKey: string): ExactUniqueValueWrite => ({
+      objectTypeId: change.ref.objectTypeId,
+      propertyId,
+      valueKey,
+      primaryId: change.ref.primaryId,
+    })
+
+    if (released !== null) {
+      work.push(planWork({ kind: "unique-value-release", value: value(released) }, sortKey))
+    }
+    if (claimed !== null) {
+      const claim = { ...value(claimed), keyKind: kind, keyVersion: UNIQUE_VALUE_KEY_VERSION }
+      work.push(planWork({ kind: "unique-value-claim", value: claim }, sortKey))
+    }
   }
 }
 
