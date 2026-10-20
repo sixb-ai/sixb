@@ -4,4 +4,5 @@ import type { ProjectReference } from "./types"
 export const project: ProjectReference = Object.freeze({
   kind: "project",
   logs: Object.freeze({ kind: "logs" }),
+  activity: Object.freeze({ kind: "activity" }),
 })

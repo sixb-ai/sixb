@@ -31,6 +31,7 @@ function context(grants: {
   pipelines?: readonly string[]
   agent?: boolean
   logs?: boolean
+  activity?: boolean
 }): AuthorizationContext {
   return {
     principal: { type: "user", id: "u1" },
@@ -47,6 +48,7 @@ function context(grants: {
       "run:pipeline": new Set(grants.pipelines ?? []),
       "run:agent": grants.agent ?? false,
       "observe:logs": grants.logs ?? false,
+      "observe:activity": grants.activity ?? false,
     },
   }
 }
@@ -109,6 +111,19 @@ describe("evaluate", () => {
       allowed: false,
       requirements: ["observe:logs"],
       missing: ["observe:logs"],
+    })
+  })
+
+  test("requires the explicit project activity observation capability", () => {
+    expect(evaluate(context({ activity: true }), { kind: "activity.observe" })).toEqual({
+      allowed: true,
+      requirements: ["observe:activity"],
+      missing: [],
+    })
+    expect(evaluate(context({ logs: true }), { kind: "activity.observe" })).toEqual({
+      allowed: false,
+      requirements: ["observe:activity"],
+      missing: ["observe:activity"],
     })
   })
 

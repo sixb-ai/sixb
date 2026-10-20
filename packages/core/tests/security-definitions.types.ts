@@ -8,6 +8,7 @@ const securityAdmins = defineGroup("security-admins")
 const commercial = defineGroup("commercial")
 
 can.observe(project.logs)
+can.observe(project.activity)
 can.observe(agent.usage)
 // @ts-expect-error project surfaces use the typed project reference.
 can.observe("logs")

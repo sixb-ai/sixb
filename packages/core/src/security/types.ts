@@ -116,7 +116,7 @@ export interface AgentRunGrant {
   readonly target: "agent"
 }
 
-export type ObserveGrantTarget = "logs" | "aiUsage"
+export type ObserveGrantTarget = "logs" | "aiUsage" | "activity"
 
 /**
  * Project-wide surfaces used in security grants such as `can.observe(project.logs)`. Each member's
@@ -126,12 +126,17 @@ export interface ProjectReference {
   readonly kind: "project"
   /** The project's captured logs. */
   readonly logs: { readonly kind: "logs" }
+  /** Visits and page views recorded in the project's app. */
+  readonly activity: { readonly kind: "activity" }
 }
 
 /** Any member of `project`, such as `project.logs`. */
 export type ProjectSurfaceReference = ProjectReference[Exclude<keyof ProjectReference, "kind">]
 
-/** Read the project's logs or its AI usage. Each is one surface, so there is nothing to select. */
+/**
+ * Read the project's logs, its AI usage or its app activity. Each is one surface, so there is
+ * nothing to select.
+ */
 export interface ObserveGrant {
   readonly kind: "grant"
   readonly capability: "observe"

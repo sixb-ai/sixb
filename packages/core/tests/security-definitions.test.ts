@@ -394,6 +394,11 @@ describe("role definitions", () => {
       capability: "observe",
       target: "logs",
     })
+    expect(can.observe(project.activity)).toEqual({
+      kind: "grant",
+      capability: "observe",
+      target: "activity",
+    })
     expect(can.observe(agent.usage)).toEqual({
       kind: "grant",
       capability: "observe",
@@ -430,12 +435,13 @@ describe("role definitions", () => {
 
     for (const input of [project, { kind: "project" }, { kind: "toString" }, [project.logs]]) {
       expect(() => observe(input)).toThrow(
-        "[Sixb] can.observe accepts project.logs or agent.usage."
+        "[Sixb] can.observe accepts project.logs or project.activity or agent.usage."
       )
     }
     expect(() => manage(project.logs)).toThrow(SecurityValidationError)
     expect(Object.isFrozen(project)).toBe(true)
     expect(Object.isFrozen(project.logs)).toBe(true)
+    expect(Object.isFrozen(project.activity)).toBe(true)
   })
 
   test("can.run supports sync and pipeline scopes and the project Agent", () => {
@@ -783,6 +789,12 @@ describe("role definitions", () => {
         kind: "grant",
         capability: "observe",
         target: "logs",
+        selection: { all: true, except: [] },
+      },
+      {
+        kind: "grant",
+        capability: "observe",
+        target: "activity",
         selection: { all: true, except: [] },
       },
       {
