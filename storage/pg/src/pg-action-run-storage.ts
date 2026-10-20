@@ -136,6 +136,29 @@ export class PgActionRunStorage implements ActionRunStorage {
     return row ? rowToActionRunRecord(row) : null
   }
 
+  async getByExecutionIds(params: {
+    readonly projectId: string
+    readonly executionIds: readonly string[]
+  }): Promise<readonly ActionRunRecord[]> {
+    const executionIds = [...new Set(params.executionIds)]
+    if (executionIds.length === 0) {
+      return []
+    }
+
+    const rows = await this.sql<DatabaseRow[]>`
+      SELECT *
+      FROM action_runs
+      WHERE project_id = ${params.projectId}
+        AND execution_id = ANY(${this.sql.array(executionIds)}::text[])
+    `
+
+    const byExecution = new Map(rows.map((row) => [row.execution_id, row]))
+    return executionIds.flatMap((executionId) => {
+      const row = byExecution.get(executionId)
+      return row ? [rowToActionRunRecord(row)] : []
+    })
+  }
+
   async list(input: ListActionRunsInput): Promise<ListActionRunsResult> {
     if ((input.statuses && input.statuses.length === 0) || input.actionIds?.length === 0) {
       return {

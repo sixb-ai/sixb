@@ -358,6 +358,33 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
     return row ? rowToWorkflowRunRecord(row) : null
   }
 
+  async getByExecutionIds(params: {
+    readonly projectId: string
+    readonly executionIds: readonly string[]
+  }): Promise<readonly WorkflowRunRecord[]> {
+    const executionIds = [...new Set(params.executionIds)]
+    if (executionIds.length === 0) {
+      return []
+    }
+
+    const rows = this.db
+      .query(
+        `
+        SELECT *
+        FROM workflow_runs
+        WHERE project_id = ?
+          AND execution_id IN (SELECT value FROM json_each(?))
+      `
+      )
+      .all(params.projectId, JSON.stringify(executionIds)) as WorkflowRunDatabaseRow[]
+
+    const byExecution = new Map(rows.map((row) => [row.execution_id, row]))
+    return executionIds.flatMap((executionId) => {
+      const row = byExecution.get(executionId)
+      return row ? [rowToWorkflowRunRecord(row)] : []
+    })
+  }
+
   async list(input: ListWorkflowRunsInput): Promise<ListWorkflowRunsResult> {
     if (hasEmptyStatuses(input) || input.workflowIds?.length === 0) {
       return {

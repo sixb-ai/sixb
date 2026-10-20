@@ -11,6 +11,18 @@ export {
   validateExecutionRecordReferences,
 } from "./validation"
 
+/** Oldest first, then by id compared byte by byte: the order `listBySession` returns. */
+export function compareExecutionCreation(
+  left: Pick<ExecutionRecord, "createdAt" | "id">,
+  right: Pick<ExecutionRecord, "createdAt" | "id">
+): number {
+  const byTime = left.createdAt.getTime() - right.createdAt.getTime()
+  if (byTime !== 0) {
+    return byTime
+  }
+  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+}
+
 /** Provider-neutral flattened representation used by the SQL adapters. */
 export interface ExecutionStorageRow {
   readonly projectId: string

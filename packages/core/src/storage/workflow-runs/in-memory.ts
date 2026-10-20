@@ -267,6 +267,22 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     return record ? cloneRecord(record) : null
   }
 
+  async getByExecutionIds(params: {
+    readonly projectId: string
+    readonly executionIds: readonly string[]
+  }): Promise<readonly WorkflowRunRecord[]> {
+    const byExecution = new Map(
+      [...this.runs.values()]
+        .filter((record) => record.projectId === params.projectId)
+        .map((record) => [record.executionId, record])
+    )
+
+    return [...new Set(params.executionIds)].flatMap((executionId) => {
+      const record = byExecution.get(executionId)
+      return record ? [cloneRecord(record)] : []
+    })
+  }
+
   async list(input: ListWorkflowRunsInput): Promise<ListWorkflowRunsResult> {
     if (hasEmptyStatuses(input) || input.workflowIds?.length === 0) {
       return {

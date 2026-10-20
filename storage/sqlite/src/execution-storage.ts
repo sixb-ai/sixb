@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import {
+  compareExecutionCreation,
   type ExecutionStorageRow,
   executionRecordFromStorageRow,
   executionRecordToStorageRow,
@@ -9,6 +10,8 @@ import type {
   CreateExecutionInput,
   ExecutionRecord,
   ExecutionStorage,
+  ListSessionExecutionsInput,
+  SessionExecutions,
   ShareSessionStorage,
 } from "@sixb/core/storage"
 import { ExecutionStorageError } from "@sixb/core/storage"
@@ -114,6 +117,59 @@ export class SqliteExecutionStorage implements ExecutionStorage {
       .get(params.projectId, params.id) as SqliteExecutionRow | null
 
     return row ? sqliteExecutionRecord(row) : null
+  }
+
+  async listBySession(input: ListSessionExecutionsInput): Promise<SessionExecutions> {
+    const sessionColumn =
+      input.session.type === "user" ? "authority_session_id" : "authority_delegation_session_id"
+
+    // The queue is ordered by depth, so the walk takes roots, then their children level by level,
+    // the earliest first, and the limit stops it: a large tree costs no more than the rows
+    // returned. CROSS JOIN keeps the walk driven by the rows found: statistics taken on a small
+    // ledger choose to scan every child.
+    const rows = this.db
+      .query(
+        `
+        WITH RECURSIVE tree AS (
+          SELECT roots.*, 0 AS depth
+          FROM (
+            SELECT *
+            FROM executions
+            WHERE project_id = ?
+              AND ${sessionColumn} = ?
+              AND parent_execution_id IS NULL
+              AND created_at >= ?
+              AND created_at < ?
+            ORDER BY created_at, id
+            LIMIT ?
+          ) roots
+          UNION ALL
+          SELECT child.*, tree.depth + 1
+          FROM tree
+          CROSS JOIN executions child
+            ON child.project_id = tree.project_id
+            AND child.parent_execution_id = tree.id
+          ORDER BY depth, created_at, id
+          LIMIT ?
+        )
+        SELECT * FROM tree
+      `
+      )
+      .all(
+        input.projectId,
+        input.session.id,
+        input.from.toISOString(),
+        input.to.toISOString(),
+        input.limit + 1,
+        input.limit + 1
+      ) as SqliteExecutionRow[]
+
+    // Rows come out in walk order, so the first `limit` are the ones the contract keeps.
+    const kept = rows.slice(0, input.limit).map(sqliteExecutionRecord)
+    return {
+      executions: kept.sort(compareExecutionCreation),
+      truncated: rows.length > input.limit,
+    }
   }
 }
 

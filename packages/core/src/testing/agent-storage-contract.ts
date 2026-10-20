@@ -565,6 +565,20 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    test("reads several threads at once, in the order asked", async () => {
+      await withStorage(async (storage) => {
+        const first = await storage.threads.create(threadInput())
+        const second = await storage.threads.create(threadInput({ id: "thr_2" }))
+        await storage.threads.create(threadInput({ id: "thr_3", projectId: otherProjectId }))
+
+        await expect(
+          storage.threads.getByIds({ projectId, ids: ["thr_2", "missing", "thr_1", "thr_2"] })
+        ).resolves.toEqual([second, first])
+        await expect(storage.threads.getByIds({ projectId, ids: ["thr_3"] })).resolves.toEqual([])
+        await expect(storage.threads.getByIds({ projectId, ids: [] })).resolves.toEqual([])
+      })
+    })
+
     test("lists threads with filters, ordering, and pagination", async () => {
       await withStorage(async (storage) => {
         await storage.threads.create(

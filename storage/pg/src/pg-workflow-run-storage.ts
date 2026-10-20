@@ -314,6 +314,29 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
     return row ? rowToWorkflowRunRecord(row) : null
   }
 
+  async getByExecutionIds(params: {
+    readonly projectId: string
+    readonly executionIds: readonly string[]
+  }): Promise<readonly WorkflowRunRecord[]> {
+    const executionIds = [...new Set(params.executionIds)]
+    if (executionIds.length === 0) {
+      return []
+    }
+
+    const rows = await this.sql<WorkflowRunDatabaseRow[]>`
+      SELECT *
+      FROM workflow_runs
+      WHERE project_id = ${params.projectId}
+        AND execution_id = ANY(${this.sql.array(executionIds)}::text[])
+    `
+
+    const byExecution = new Map(rows.map((row) => [row.execution_id, row]))
+    return executionIds.flatMap((executionId) => {
+      const row = byExecution.get(executionId)
+      return row ? [rowToWorkflowRunRecord(row)] : []
+    })
+  }
+
   async list(input: ListWorkflowRunsInput): Promise<ListWorkflowRunsResult> {
     if (hasEmptyStatuses(input) || input.workflowIds?.length === 0) {
       return {

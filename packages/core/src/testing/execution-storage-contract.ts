@@ -1,7 +1,8 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, setSystemTime, test } from "bun:test"
 import type { AuthStorage } from "../storage/auth"
 import type {
   CreateExecutionInput,
+  ExecutionRecord,
   ExecutionStorage,
   TrustedPrimitiveKind,
 } from "../storage/executions"
@@ -338,6 +339,126 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
       })
     })
 
+    test("lists a session's roots in a window and everything they caused", async () => {
+      // Removal proof: drop `parent_execution_id IS NULL` from a provider's root read; the Agent
+      // execution, which copies the session, is listed twice.
+      await withStorage(async (storage) => {
+        await seedAuth(storage.auth)
+        await seedSharedSession(storage)
+
+        const userRequest = (id: string) =>
+          principalRequest({ id, credential: { type: "session", id: "session-user" } })
+
+        await createAt(storage, -60_000, userRequest("before"))
+        const root = await createAt(storage, 0, userRequest("root"))
+        await createAt(storage, 1_000, childOf(root, trustedPrimitive("root-action")))
+        await createAt(
+          storage,
+          2_000,
+          principalRequest({
+            id: "other-user",
+            principal: { type: "user", id: "user-other" },
+            credential: { type: "session", id: "session-other" },
+          })
+        )
+        await createAt(storage, 3_000, delegatedRequest("shared"))
+        await createAt(storage, 4_000, {
+          ...childOf(root, agentExecution("root-agent")),
+          authorizationRef: root.authorizationRef,
+        })
+        await createAt(storage, 10 * 60_000, userRequest("after"))
+        // A descendant counts whenever it was created, after the window too.
+        await createAt(
+          storage,
+          11 * 60_000,
+          childOf(
+            { id: "root-action", correlationId: root.correlationId },
+            trustedPrimitive("late-workflow", {}, "workflow")
+          )
+        )
+
+        const window = {
+          projectId,
+          from: new Date(createdAt.getTime() - 1_000),
+          to: new Date(createdAt.getTime() + 5 * 60_000),
+          limit: 10,
+        }
+
+        const user = await storage.executions.listBySession({
+          ...window,
+          session: { type: "user", id: "session-user" },
+        })
+        expect(user.truncated).toBe(false)
+        expect(user.executions.map((execution) => execution.id)).toEqual([
+          "root",
+          "root-action",
+          "root-agent",
+          "late-workflow",
+        ])
+        expect(user.executions[0]).toEqual(root)
+
+        const shared = await storage.executions.listBySession({
+          ...window,
+          session: { type: "share", id: "share-session-one" },
+        })
+        expect(shared.executions.map((execution) => execution.id)).toEqual(["shared"])
+
+        // The session id is not a credential of any other kind.
+        await expect(
+          storage.executions.listBySession({
+            ...window,
+            session: { type: "share", id: "session-user" },
+          })
+        ).resolves.toEqual({ executions: [], truncated: false })
+      })
+    })
+
+    test("bounds a session's executions, keeping roots and the earliest first", async () => {
+      await withStorage(async (storage) => {
+        await seedAuth(storage.auth)
+
+        for (const [index, id] of ["first", "second", "third"].entries()) {
+          const root = await createAt(
+            storage,
+            index * 1_000,
+            principalRequest({ id, credential: { type: "session", id: "session-user" } })
+          )
+          await createAt(storage, index * 1_000 + 500, childOf(root, trustedPrimitive(`${id}-run`)))
+        }
+
+        const list = (limit: number) =>
+          storage.executions.listBySession({
+            projectId,
+            session: { type: "user", id: "session-user" },
+            from: createdAt,
+            to: new Date(createdAt.getTime() + 60_000),
+            limit,
+          })
+
+        const roots = await list(2)
+        expect(roots.truncated).toBe(true)
+        expect(roots.executions.map((execution) => execution.id)).toEqual(["first", "second"])
+
+        const partial = await list(4)
+        expect(partial.truncated).toBe(true)
+        expect(partial.executions).toHaveLength(4)
+        expect(partial.executions.map((execution) => execution.id)).toEqual(
+          expect.arrayContaining(["first", "second", "third"])
+        )
+
+        const all = await list(6)
+        expect(all.truncated).toBe(false)
+        expect(all.executions.map((execution) => execution.id)).toEqual([
+          "first",
+          "first-run",
+          "second",
+          "second-run",
+          "third",
+          "third-run",
+        ])
+      })
+    })
+
     test("participates in storage transactions and rollback", async () => {
       await withStorage(async (storage) => {
         await expect(
@@ -353,6 +474,31 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
       })
     })
   })
+}
+
+/** Creates an execution at `offsetMs` after the fixtures' creation time: storage stamps it. */
+async function createAt(
+  storage: ExecutionStorageContractStorage,
+  offsetMs: number,
+  input: CreateExecutionInput
+): Promise<ExecutionRecord> {
+  setSystemTime(new Date(createdAt.getTime() + offsetMs))
+  try {
+    return await storage.executions.create(input)
+  } finally {
+    setSystemTime()
+  }
+}
+
+function childOf(
+  parent: Pick<ExecutionRecord, "id" | "correlationId">,
+  input: CreateExecutionInput
+): CreateExecutionInput {
+  return {
+    ...input,
+    source: { type: "execution", executionId: parent.id },
+    correlationId: parent.correlationId,
+  }
 }
 
 async function seedAuth(auth: AuthStorage): Promise<void> {

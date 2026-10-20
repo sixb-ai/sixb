@@ -109,6 +109,24 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
     })
   }
 
+  async getByExecutionIds(params: {
+    readonly projectId: string
+    readonly executionIds: readonly string[]
+  }): Promise<readonly ActionRunRecord[]> {
+    return this.runRootOperation(() => {
+      const byExecution = new Map(
+        [...this.rows.values()]
+          .filter((record) => record.projectId === params.projectId)
+          .map((record) => [record.executionId, record])
+      )
+
+      return [...new Set(params.executionIds)].flatMap((executionId) => {
+        const record = byExecution.get(executionId)
+        return record ? [cloneActionRunRecord(record)] : []
+      })
+    })
+  }
+
   async list(input: ListActionRunsInput): Promise<ListActionRunsResult> {
     return this.runRootOperation(() => {
       if (input.actionIds?.length === 0) {

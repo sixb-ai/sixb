@@ -1,4 +1,5 @@
 import {
+  compareExecutionCreation,
   type ExecutionStorageRow,
   executionRecordFromStorageRow,
   executionRecordToStorageRow,
@@ -8,6 +9,8 @@ import type {
   CreateExecutionInput,
   ExecutionRecord,
   ExecutionStorage,
+  ListSessionExecutionsInput,
+  SessionExecutions,
   ShareSessionStorage,
 } from "@sixb/core/storage"
 import { ExecutionStorageError } from "@sixb/core/storage"
@@ -110,6 +113,55 @@ export class PgExecutionStorage implements ExecutionStorage {
       WHERE project_id = ${params.projectId} AND id = ${params.id}
     `
     return row ? pgExecutionRecord(row) : null
+  }
+
+  async listBySession(input: ListSessionExecutionsInput): Promise<SessionExecutions> {
+    const session =
+      input.session.type === "user"
+        ? this.sql`authority_session_id = ${input.session.id}`
+        : this.sql`authority_delegation_session_id = ${input.session.id}`
+
+    // Each iteration of a recursive query reads the rows the previous one produced, so the walk goes
+    // level by level, roots first; with no ORDER BY outside, PostgreSQL evaluates only the rows the
+    // limit returns. Within the last level reached, which rows come first is unspecified.
+    const rows = await this.sql<(PgExecutionRow & { readonly depth: number })[]>`
+      WITH RECURSIVE tree AS (
+        (
+          SELECT *, 0 AS depth
+          FROM executions
+          WHERE project_id = ${input.projectId}
+            AND ${session}
+            AND parent_execution_id IS NULL
+            AND created_at >= ${input.from}
+            AND created_at < ${input.to}
+          ORDER BY created_at, id
+          LIMIT ${input.limit + 1}
+        )
+        UNION ALL
+        SELECT child.*, tree.depth + 1
+        FROM tree
+        JOIN executions child
+          ON child.project_id = tree.project_id
+          AND child.parent_execution_id = tree.id
+      )
+      SELECT * FROM tree
+      LIMIT ${input.limit + 1}
+    `
+
+    // Keep the first `limit` by depth, then oldest first, as the contract keeps them.
+    const records = rows
+      .map((row) => ({ depth: row.depth, record: pgExecutionRecord(row) }))
+      .sort(
+        (left, right) =>
+          left.depth - right.depth || compareExecutionCreation(left.record, right.record)
+      )
+      .slice(0, input.limit)
+      .map(({ record }) => record)
+
+    return {
+      executions: records.sort(compareExecutionCreation),
+      truncated: rows.length > input.limit,
+    }
   }
 }
 

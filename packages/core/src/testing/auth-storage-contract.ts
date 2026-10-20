@@ -292,6 +292,53 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
+    test("lists all of a user's sessions, revoked and expired ones too, newest first", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await createUser(storage, { id: "usr_2", email: "ben@acme.com" })
+
+        const session = (id: string, createdAt: string, userId = "usr_1") =>
+          storage.sessions.create({
+            id,
+            projectId,
+            userId,
+            strategyId: "magic-link",
+            tokenHash: `hash-${id}`,
+            createdAt: at(createdAt),
+            expiresAt: at("2026-05-15T10:00:00.000Z"),
+          })
+
+        await session("ses_oldest", "2026-05-14T10:00:00.000Z")
+        await session("ses_revoked", "2026-05-14T10:01:00.000Z")
+        // Created at the same instant as the one above: the cursor skips within the tie.
+        await session("ses_also", "2026-05-14T10:01:00.000Z")
+        await session("ses_newest", "2026-05-14T10:02:00.000Z")
+        await session("ses_other", "2026-05-14T10:03:00.000Z", "usr_2")
+        await storage.sessions.revoke({
+          projectId,
+          id: "ses_revoked",
+          revokedAt: at("2026-05-14T10:05:00.000Z"),
+        })
+
+        const first = await storage.sessions.listByUserId({ projectId, userId: "usr_1", limit: 2 })
+        expect(first.hasMore).toBe(true)
+        expect(first.sessions.map((entry) => entry.id)).toEqual(["ses_newest", "ses_revoked"])
+        expect(first.sessions[1]?.revokedAt?.toISOString()).toBe("2026-05-14T10:05:00.000Z")
+
+        const rest = await storage.sessions.listByUserId({
+          projectId,
+          userId: "usr_1",
+          limit: 2,
+          before: { createdAt: at("2026-05-14T10:01:00.000Z"), skip: 1 },
+        })
+        expect(rest.hasMore).toBe(false)
+        expect(rest.sessions.map((entry) => entry.id)).toEqual(["ses_also", "ses_oldest"])
+        await expect(
+          storage.sessions.listByUserId({ projectId: otherProjectId, userId: "usr_1", limit: 2 })
+        ).resolves.toEqual({ sessions: [], hasMore: false })
+      })
+    })
+
     test("persists and enforces an optional absolute session deadline", async () => {
       await withStorage(async (storage) => {
         await createUser(storage)

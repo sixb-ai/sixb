@@ -150,6 +150,28 @@ export interface ActivityVisitPage {
   readonly hasMore: boolean
 }
 
+/** A visit as core reads it, with the session it belongs to. `sixb.activity` never returns it. */
+export interface StoredActivityVisitPage extends ActivityVisitPage {
+  readonly sessionId: string
+}
+
+export interface ListActivitySessionVisitsInput {
+  readonly projectId: string
+  readonly userId: string
+  /** The account's `SessionRecord` ids. */
+  readonly sessionIds: readonly string[]
+  /** Latest visits kept per session. */
+  readonly limit: number
+}
+
+export interface ActivitySessionVisits {
+  readonly sessionId: string
+  /** Every visit the session opened. */
+  readonly visits: number
+  /** Its latest visits by start, newest first, at most `limit`. */
+  readonly latest: readonly ActivityVisit[]
+}
+
 export interface ActivityStorage {
   /**
    * Assigns the visit, deduplicates and counts the session's quota atomically, including across API
@@ -160,5 +182,7 @@ export interface ActivityStorage {
   users(input: ListActivityUsersInput): Promise<ActivityUsersPage>
   summarize(input: ActivityPeriodInput): Promise<ActivitySummary>
   calendar(input: ActivityCalendarInput): Promise<readonly ActivityDay[]>
-  read(input: ReadActivityVisitInput): Promise<ActivityVisitPage | null>
+  read(input: ReadActivityVisitInput): Promise<StoredActivityVisitPage | null>
+  /** The visits of these sessions of one account. A session without any is omitted. */
+  sessionVisits(input: ListActivitySessionVisitsInput): Promise<readonly ActivitySessionVisits[]>
 }

@@ -44,6 +44,34 @@ export type CreateExecutionInput = Omit<ExecutionRecord, "createdAt" | "requeste
   readonly requesterGroupIds?: readonly string[]
 }
 
+/**
+ * The verified session a root execution came through: a signed-in user's `SessionRecord`, held as
+ * its authority credential, or a shared link's session, held by its delegation.
+ */
+export type ExecutionSessionRef =
+  | { readonly type: "user"; readonly id: string }
+  | { readonly type: "share"; readonly id: string }
+
+export interface ListSessionExecutionsInput {
+  readonly projectId: string
+  readonly session: ExecutionSessionRef
+  /** Roots, executions without a parent, created in `[from, to)`. */
+  readonly from: Date
+  readonly to: Date
+  /** Roots and descendants together. */
+  readonly limit: number
+}
+
+export interface SessionExecutions {
+  /** The roots and every descendant, whenever it was created, ordered by `createdAt` then id. */
+  readonly executions: readonly ExecutionRecord[]
+  /**
+   * More than `limit` were found. Roots are kept before descendants, the earliest first; which
+   * descendants are left out is otherwise unspecified.
+   */
+  readonly truncated: boolean
+}
+
 /** Immutable execution ledger. Records can be created and read, never updated or deleted. */
 export interface ExecutionStorage {
   create(input: CreateExecutionInput): Promise<ExecutionRecord>
@@ -51,4 +79,6 @@ export interface ExecutionStorage {
     readonly projectId: string
     readonly id: string
   }): Promise<ExecutionRecord | null>
+  /** What one session started: its roots in a window, and what they caused through `source`. */
+  listBySession(input: ListSessionExecutionsInput): Promise<SessionExecutions>
 }

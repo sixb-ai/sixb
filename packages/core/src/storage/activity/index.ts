@@ -9,6 +9,7 @@ export type {
   ActivityEventType,
   ActivityPageView,
   ActivityPeriodInput,
+  ActivitySessionVisits,
   ActivityStorage,
   ActivitySummary,
   ActivityUser,
@@ -18,7 +19,9 @@ export type {
   ActivityVisitsPage,
   AppendActivityInput,
   AppendActivityResult,
+  ListActivitySessionVisitsInput,
   ListActivityUsersInput,
   ListActivityVisitsInput,
   ReadActivityVisitInput,
+  StoredActivityVisitPage,
 } from "./types"
