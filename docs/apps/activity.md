@@ -38,7 +38,7 @@ A visit's timeline lists, by time and filterable by kind:
 | Pages | Route patterns, such as `/invoices/:invoiceId` |
 | Interactions | The elements you [mark](#track-interactions) |
 | Actions and workflows | The runs the visit's session started, with their outcome |
-| Agent runs | Status, messages and cost |
+| Agent runs | Status, messages and cost; the [conversation](#read-a-conversation) with `agent.threads` |
 
 Above it, the connection names the browser and system, or the shared link. A user's view also
 lists their sign-ins with the visits each opened.
@@ -66,6 +66,18 @@ trackSixbEvent("invoices.filter.applied")
   like values, such as `invoices.123`, are refused: never put an id or user input in a name.
 - Sixb records the name, the page and the time, never the element's text or a value.
 - Call `trackSixbEvent` in response to something the person did, not on each keystroke.
+
+## Read a conversation
+
+`can.observe(agent.threads)` opens, read-only, the conversation behind a visit's Agent run: its
+messages, tools, files and the artifacts published in it.
+
+> The agent answers with the permissions of the person talking to it. This grant shows everything
+> the agent showed them, **whatever your own permissions**. Grant it only to people who may read
+> all of it.
+
+Opening a conversation from a visit also takes `can.observe(project.activity)`. Access tokens
+cannot read other users' conversations.
 
 ## Privacy and limits
 
