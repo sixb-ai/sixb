@@ -148,6 +148,28 @@ const download = <a href={url}>Download invoice</a>
 
 Use `inline` for images, video, and audio. Opened directly, an `inline` URL displays common images, PDFs, and plain text in the browser; other types, including HTML and SVG, download instead. Pass the current file reference so the URL updates when the property changes. Native links use browser sessions; bearer-token callers must fetch file content through an authenticated request.
 
+## List members
+
+In React, `useUsers` reads one page of the [member directory](../auth/members.md#read-the-member-directory). It takes `status`, `search`, `limit`, and `offset`, plus the usual query options such as `enabled` and `staleTime`:
+
+```tsx
+import { useUsers } from "@sixb/client/hooks"
+
+function Team() {
+  const { data } = useUsers({ search: "ava", limit: 20 })
+
+  return (
+    <ul>
+      {data?.users.map((user) => (
+        <li key={user.id}>{user.displayName ?? user.email}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+It lists active members unless you pass `status: "suspended"` or `"all"`. `useUser(userRef)` reads one member, from a user reference or an id; its data is `null` when no member has that id. Both require `can.view(project.users)`.
+
 ## Read run logs
 
 Read or subscribe to captured logs with the logs builder:
