@@ -65,6 +65,32 @@ object can leave required properties unchanged; see [Create or update an object]
 
 The [primary property](object-types.md#give-objects-an-identity) is always a required string.
 
+## Unique values
+
+Set `unique: true` when no two objects of a type may share a value, such as an email or an
+external key:
+
+```ts
+prop("email", "string", { unique: true })
+prop("account", ref.user(), { nullable: true, unique: true })
+```
+
+A write that would give a value to a second object is refused, whichever way it arrives: your
+code, an action, or a projection.
+
+- Strings, UUIDs, integers, dates, enums, user references, and value types of those can be unique.
+- Values compare exactly: `Ada@example.com` and `ada@example.com` are different values. Normalize
+  values before writing them if they should match.
+- `null` and missing values never conflict.
+- Uniqueness holds within one object type. A subtype that inherits the property keeps its own
+  values, so a `Person` and an `Employee` may share one.
+- One write can move values between objects, such as swapping the emails of two people.
+
+When a property becomes unique, startup (or `sixb db migrate`) collects the values that existing
+objects hold. If two objects share a value, startup fails and names both: fix the data, then start
+again. Add `unique` in a release where instances still running the previous version no longer write
+that type: values they write during the rollout are not checked.
+
 ## Structured values
 
 Use arrays for lists, objects for named fields, and maps for dynamic keys:

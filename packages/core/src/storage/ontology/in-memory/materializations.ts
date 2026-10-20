@@ -503,6 +503,14 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         this.assertLinkSync(item.expected, projectId)
         getInMemoryObjectMaterializerAdapter(this.objects).applyExactLink(item.row, projectId)
       })
+    for (const item of chunk.unique.releases)
+      write("unique.release", () => {
+        getInMemoryObjectMaterializerAdapter(this.objects).releaseUniqueValue(projectId, item)
+      })
+    for (const item of chunk.unique.claims)
+      write("unique.claim", () => {
+        getInMemoryObjectMaterializerAdapter(this.objects).claimUniqueValue(projectId, item)
+      })
     for (const item of chunk.timeseries.pointUpserts)
       write("timeseries.point.upsert", () => {
         this.assertPoint(item.expected, projectId)

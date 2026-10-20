@@ -189,6 +189,7 @@ const shippedMigrationIds = [
   "068-artifact-state",
   "069-agent-thread-participants",
   "070-forked-context-checkpoints",
+  "071-unique-values",
 ]
 
 afterEach(async () => {

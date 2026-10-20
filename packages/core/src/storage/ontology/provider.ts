@@ -66,6 +66,7 @@ export {
   type ExactEffectiveWrites,
   type ExactOverrideWrites,
   type ExactTimeseriesWrites,
+  type ExactUniqueValueWrites,
   type MaterializationPlanChunk,
   materializationChunkRows,
   materializationOutboxWrite,
@@ -75,6 +76,8 @@ export {
   type OutboxEventContext,
   type PreparedReplacementIdentity,
   prepareReplacementIdentities,
+  uniquePropertyNotPrepared,
+  uniqueValueViolation,
   workUniquenessKey,
 } from "./provider-work"
 

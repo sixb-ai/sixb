@@ -1,5 +1,13 @@
 import type { EffectiveLinkSnapshot, EffectiveObjectSnapshot } from "../../../materialization/model"
 import { hasVectorProfile } from "../../../objects/vectors/query"
+import { uniqueValueKey } from "../../../ontology/unique-values"
+import type {
+  ExactUniqueValueClaim,
+  ExactUniqueValueWrite,
+  UniqueValueRef,
+} from "../../ontology/materializations"
+import { uniqueValueViolation } from "../../ontology/provider-work"
+import type { PreparedUniqueProperty, UniqueValueEntry } from "../../ontology/unique-values"
 import type { StoredObjectVector } from "../../ontology/vectors"
 import type { ObjectReadExecutionLimits } from "../execution-limits"
 import { type LinkBatchKey, type ObjectBatchKey, objectBatchKey } from "../keys"
@@ -44,6 +52,13 @@ import { createInMemorySelectedReader } from "./selected-reader"
 export interface InMemoryObjectStorageSnapshot {
   readonly rows: Map<string, Map<string, ObjectRow>>
   readonly links: Map<string, Map<string, ObjectLinkRow>>
+  readonly uniqueValues: Map<string, Map<string, string>>
+  readonly uniqueProperties: Map<string, InMemoryPreparedUniqueProperty>
+}
+
+interface InMemoryPreparedUniqueProperty extends PreparedUniqueProperty {
+  readonly projectId: string
+  readonly preparedAt: string
 }
 
 type VectorReader = (
@@ -84,6 +99,18 @@ interface InMemoryObjectMaterializerAdapter {
     linkId: string,
     visit: (row: ObjectLinkRow) => void
   ): void
+  releaseUniqueValue(projectId: string, value: ExactUniqueValueWrite): void
+  /** Throws `UniqueValueViolationError` when another object holds the value. */
+  claimUniqueValue(projectId: string, value: ExactUniqueValueClaim): void
+  listPreparedUniqueProperties(projectId: string): PreparedUniqueProperty[]
+  clearUniqueProperty(projectId: string, objectTypeId: string, propertyId: string): void
+  insertUniqueValues(
+    projectId: string,
+    objectTypeId: string,
+    propertyId: string,
+    entries: readonly UniqueValueEntry[]
+  ): void
+  markUniquePropertyPrepared(input: InMemoryPreparedUniqueProperty): void
 }
 
 const materializerAdapters = new WeakMap<InMemoryObjectStorage, InMemoryObjectMaterializerAdapter>()
@@ -100,6 +127,9 @@ export function getInMemoryObjectMaterializerAdapter(
 export class InMemoryObjectStorage implements ObjectStorage {
   private readonly rows = new Map<string, Map<string, ObjectRow>>()
   private readonly links = new Map<string, Map<string, ObjectLinkRow>>()
+  /** Holder primary ids by value key, for each unique property of a project. */
+  private readonly uniqueValues = new Map<string, Map<string, string>>()
+  private readonly uniqueProperties = new Map<string, InMemoryPreparedUniqueProperty>()
 
   private vectorReader?: VectorReader
 
@@ -130,6 +160,33 @@ export class InMemoryObjectStorage implements ObjectStorage {
           if (row.linkId === linkId) visit(structuredClone(row))
         }
       },
+      releaseUniqueValue: (projectId, value) => this.releaseUniqueValue(projectId, value),
+      claimUniqueValue: (projectId, value) => this.claimUniqueValue(projectId, value),
+      listPreparedUniqueProperties: (projectId) =>
+        [...this.uniqueProperties.values()]
+          .filter((prepared) => prepared.projectId === projectId)
+          .map(({ objectTypeId, propertyId, keyKind, keyVersion }) => ({
+            objectTypeId,
+            propertyId,
+            keyKind,
+            keyVersion,
+          })),
+      clearUniqueProperty: (projectId, objectTypeId, propertyId) => {
+        const key = uniquePropertyKey(projectId, objectTypeId, propertyId)
+        this.uniqueValues.delete(key)
+        this.uniqueProperties.delete(key)
+      },
+      insertUniqueValues: (projectId, objectTypeId, propertyId, entries) => {
+        for (const { valueKey, primaryId } of entries) {
+          this.holdUniqueValue(projectId, { objectTypeId, propertyId, valueKey, primaryId })
+        }
+      },
+      markUniquePropertyPrepared: (input) => {
+        this.uniqueProperties.set(
+          uniquePropertyKey(input.projectId, input.objectTypeId, input.propertyId),
+          { ...input }
+        )
+      },
     })
   }
 
@@ -137,6 +194,8 @@ export class InMemoryObjectStorage implements ObjectStorage {
     return {
       rows: cloneObjectBuckets(this.rows),
       links: cloneLinkBuckets(this.links),
+      uniqueValues: cloneUniqueValues(this.uniqueValues),
+      uniqueProperties: new Map(this.uniqueProperties),
     }
   }
 
@@ -150,6 +209,75 @@ export class InMemoryObjectStorage implements ObjectStorage {
     for (const [key, bucket] of cloneLinkBuckets(snapshot.links)) {
       this.links.set(key, bucket)
     }
+
+    this.uniqueValues.clear()
+    for (const [key, holders] of cloneUniqueValues(snapshot.uniqueValues)) {
+      this.uniqueValues.set(key, holders)
+    }
+
+    this.uniqueProperties.clear()
+    for (const [key, prepared] of snapshot.uniqueProperties) {
+      this.uniqueProperties.set(key, prepared)
+    }
+  }
+
+  /** The object holding a unique value, or undefined when none does. */
+  private uniqueHolder(projectId: string, value: UniqueValueRef): string | undefined {
+    return this.uniqueValues
+      .get(uniquePropertyKey(projectId, value.objectTypeId, value.propertyId))
+      ?.get(value.valueKey)
+  }
+
+  private releaseUniqueValue(projectId: string, value: ExactUniqueValueWrite): void {
+    if (this.uniqueHolder(projectId, value) !== value.primaryId) return
+    this.uniqueValues
+      .get(uniquePropertyKey(projectId, value.objectTypeId, value.propertyId))
+      ?.delete(value.valueKey)
+  }
+
+  private claimUniqueValue(projectId: string, claim: ExactUniqueValueClaim): void {
+    this.prepareUniqueProperty(projectId, claim)
+    this.holdUniqueValue(projectId, claim)
+  }
+
+  /**
+   * The in-memory store holds every object, so it builds a property's values the first time a
+   * claim needs them, where SQL stores refuse until `sixb db migrate` built them. A boot
+   * therefore needs no preparation, and a store shared by two ontologies rebuilds what changed.
+   */
+  private prepareUniqueProperty(projectId: string, claim: ExactUniqueValueClaim): void {
+    const key = uniquePropertyKey(projectId, claim.objectTypeId, claim.propertyId)
+    const prepared = this.uniqueProperties.get(key)
+    if (prepared?.keyKind === claim.keyKind && prepared.keyVersion === claim.keyVersion) return
+
+    this.uniqueValues.delete(key)
+    const bucket = this.rows.get(objectRowKey(projectId, claim.objectTypeId))
+    for (const row of bucket?.values() ?? []) {
+      const valueKey = uniqueValueKey(claim.keyKind, row.properties[claim.propertyId])
+      if (valueKey === null) continue
+      this.holdUniqueValue(projectId, { ...claim, valueKey, primaryId: row.primaryId })
+    }
+
+    this.uniqueProperties.set(key, {
+      projectId,
+      objectTypeId: claim.objectTypeId,
+      propertyId: claim.propertyId,
+      keyKind: claim.keyKind,
+      keyVersion: claim.keyVersion,
+      preparedAt: new Date().toISOString(),
+    })
+  }
+
+  private holdUniqueValue(projectId: string, value: ExactUniqueValueWrite): void {
+    const holder = this.uniqueHolder(projectId, value)
+    if (holder !== undefined && holder !== value.primaryId) {
+      throw uniqueValueViolation(value, holder, value.primaryId)
+    }
+
+    const key = uniquePropertyKey(projectId, value.objectTypeId, value.propertyId)
+    const holders = this.uniqueValues.get(key) ?? new Map<string, string>()
+    this.uniqueValues.set(key, holders)
+    holders.set(value.valueKey, value.primaryId)
   }
 
   private getExactObjectRow(
@@ -586,6 +714,16 @@ function cloneObjectBuckets(
     )
   }
   return clone
+}
+
+function uniquePropertyKey(projectId: string, objectTypeId: string, propertyId: string): string {
+  return JSON.stringify([projectId, objectTypeId, propertyId])
+}
+
+function cloneUniqueValues(
+  values: Map<string, Map<string, string>>
+): Map<string, Map<string, string>> {
+  return new Map([...values].map(([key, holders]) => [key, new Map(holders)]))
 }
 
 function cloneLinkBuckets(

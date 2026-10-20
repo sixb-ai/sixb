@@ -1256,6 +1256,7 @@ describe("in-memory ontology storage", () => {
       },
       effective: { objectUpserts: [], objectDeletes: [], linkUpserts: [], linkDeletes: [] },
       timeseries: { pointUpserts: [] },
+      unique: { releases: [], claims: [] },
       outbox: [],
     })
     const stagedPlanItem = (

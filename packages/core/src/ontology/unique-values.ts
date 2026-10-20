@@ -8,11 +8,23 @@
  * number of objects may hold them.
  */
 import { primitiveTraits } from "./primitives"
-import type { Schema, ValueType } from "./types"
+import type { ObjectType, Schema, ValueType } from "./types"
 import { isUserRef } from "./user-ref"
 
 /** How the values of a unique property compare. */
 export type UniqueValueKind = "string" | "integer" | "userRef"
+
+/**
+ * The version of the keys below. Storage records the version each property was prepared with:
+ * changing how keys are computed means bumping it, which rebuilds every unique property.
+ */
+export const UNIQUE_VALUE_KEY_VERSION = 1
+
+/** A unique property of an object type. */
+export interface UniquePropertyDefinition {
+  readonly propertyId: string
+  readonly kind: UniqueValueKind
+}
 
 /**
  * The kind of a schema that can be unique, through value types: strings, uuids, dates, integers,
@@ -39,6 +51,20 @@ export function uniqueValueKind(
     valueTypesById,
     new Set([...seenValueTypeIds, schema.valueTypeId])
   )
+}
+
+/** The unique properties of an object type, with how their values compare. */
+export function uniquePropertiesOf(
+  objectType: Pick<ObjectType, "properties">,
+  valueTypesById: ReadonlyMap<string, ValueType>
+): UniquePropertyDefinition[] {
+  const unique: UniquePropertyDefinition[] = []
+  for (const property of objectType.properties) {
+    if (!property.unique) continue
+    const kind = uniqueValueKind(property.schema, valueTypesById)
+    if (kind) unique.push({ propertyId: property.id, kind })
+  }
+  return unique
 }
 
 /**

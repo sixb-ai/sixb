@@ -22,6 +22,7 @@ import {
   type InMemoryOntologyStorageTestingAdapter,
   registerInMemoryOntologyStorageTestingAdapter,
 } from "./testing"
+import { InMemoryOntologyUniqueValueStorage } from "./unique-values"
 
 export type InMemoryOntologyStorageSnapshot = InMemoryOntologyState
 
@@ -45,6 +46,7 @@ export class InMemoryOntologyStorage implements OntologyStorage {
   readonly materializations: InMemoryOntologyMaterializationStorage
   readonly replacementPlans: InMemoryOntologyReplacementPlanStorage
   readonly outbox: InMemoryOntologyOutboxStorage
+  readonly uniqueValues: InMemoryOntologyUniqueValueStorage
   private testHooks: InMemoryOntologyStorageTestHooks = {}
   private readonly testingAdapter: InMemoryOntologyStorageTestingAdapter = {
     setTestHooks: (hooks) => this.setTestHooks(hooks),
@@ -81,6 +83,7 @@ export class InMemoryOntologyStorage implements OntologyStorage {
       options.runRootOperation,
       options.readExecution
     )
+    this.uniqueValues = new InMemoryOntologyUniqueValueStorage(objects, options.runRootOperation)
     const hooks: InMemoryOntologyStorageTestHooks = {
       beforeRead: (boundary) => this.testHooks.beforeRead?.(boundary),
       beforeWrite: (boundary, ordinal) => this.testHooks.beforeWrite?.(boundary, ordinal),
