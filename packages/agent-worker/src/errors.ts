@@ -25,6 +25,20 @@ export class AgentContextCompactionError extends Error {
   }
 }
 
+/**
+ * Whoever asked for a queued turn no longer owns or takes part in its thread: they left it, or its
+ * owner removed them. The turn ends cancelled without reaching the model.
+ */
+export class AgentRequesterLeftThreadError extends Error {
+  readonly name = "AgentRequesterLeftThreadError"
+
+  constructor(readonly runId: string) {
+    super(
+      `[SixbAgentWorker] Agent run '${runId}' was cancelled: whoever asked for it no longer takes part in its thread.`
+    )
+  }
+}
+
 /** This delivery's execution token is stale, so it must make no further durable writes. */
 export class AgentExecutionLostError extends Error {
   readonly name = "AgentExecutionLostError"

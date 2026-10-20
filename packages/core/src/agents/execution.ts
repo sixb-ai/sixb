@@ -2,6 +2,7 @@ import {
   createObservedAgentArtifactsRuntime,
   type ObservedAgentArtifactsRuntime,
 } from "../artifacts/observed"
+import { principalsEqual, type UserPrincipal } from "../auth"
 import { assertAuthorized, isRuntimeAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
@@ -10,6 +11,7 @@ import { resolveExecutionCosts } from "../runtime/ai-cost"
 import { resolveExecutionUsage } from "../runtime/ai-usage"
 import type { SixbDependencies } from "../runtime/sixb"
 import type { SixbRuntimeContext } from "../runtime/types"
+import type { SecurityDefinitionCatalog } from "../security"
 import type {
   ConversationAgentRunRecord,
   ListAgentRunsInput,
@@ -19,8 +21,14 @@ import type {
 } from "../storage/agents"
 import type { AiCostSummary } from "../storage/ai-cost"
 import type { AiModelCallUsage } from "../storage/ai-usage"
+import { cancelAgentRun } from "./cancel"
 import { AgentRequestError } from "./errors"
 import { createAgentThreadId, createAgentThreadSandboxName } from "./ids"
+import {
+  type AgentThreadParticipantInput,
+  addAgentThreadParticipants,
+  removeAgentThreadParticipant,
+} from "./participants"
 import {
   type RequestAgentRunInput,
   type RequestAgentRunResult,
@@ -60,7 +68,7 @@ export type CreateExecutionAgentThreadInput<
 
 export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record<string, unknown>> =
   {
-    /** Start fresh after uncertain recovery; never deletes the previous sandbox. */
+    /** Start fresh after uncertain recovery; never deletes the previous sandbox. Owner only. */
     recreateSandbox(
       threadId: string,
       input: { readonly expectedSandboxName: string }
@@ -70,7 +78,28 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
     getById(threadId: string): Promise<AgentThreadView | null>
     /** The caller's own threads, or with `sharedWithMe` the ones other users added it to. */
     list(input?: ListExecutionAgentThreadsInput): Promise<ListAgentThreadViewsResult>
+    /** Who else reads the conversation and talks in it. */
+    readonly participants: AgentThreadParticipantsRuntime
   }
+
+/**
+ * Participants read the whole conversation, its files and its live stream, and send messages that
+ * run with their own rights. Nothing checks what they may see: the conversation holds what the
+ * Agent read with the rights of whoever asked.
+ */
+export interface AgentThreadParticipantsRuntime {
+  /**
+   * Add active users of the project, by id or by email; only the thread's owner can. Someone
+   * already taking part keeps when and by whom they were added. Returns the thread with every
+   * participant.
+   */
+  add(threadId: string, users: readonly AgentThreadParticipantInput[]): Promise<AgentThreadView>
+  /**
+   * The owner removes anyone; a participant removes only themself, to leave. Removing someone who
+   * does not take part changes nothing.
+   */
+  remove(threadId: string, user: UserPrincipal): Promise<void>
+}
 
 /**
  * Any user's conversation, read-only, for a caller with `can.observe(agent.threads)`. Nothing here
@@ -90,7 +119,13 @@ export interface ObservedAgentThreadsRuntime {
 
 export interface AgentRunsRuntime {
   request(input: ExecutionAgentRequestInput): Promise<ExecutionAgentRunResult>
+  /** Retry a failed or interrupted turn; only whoever asked for it can, as it runs with their rights. */
   retry(runId: string): Promise<ExecutionAgentRunResult>
+  /**
+   * Stop a turn; whoever asked for it, or the thread's owner, can. A queued turn is cancelled when
+   * this returns; a running one is still running, with the stop signal sent to its worker.
+   */
+  cancel(runId: string): Promise<AgentRunView>
   getById(runId: string): Promise<AgentRunView | null>
   listForThread(
     threadId: string,
@@ -129,8 +164,9 @@ export function createAgentRuntime<
 >(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  models?: ModelCatalog,
-  sandbox?: SixbDependencies["sandbox"]
+  models: ModelCatalog | undefined,
+  sandbox: SixbDependencies["sandbox"] | undefined,
+  security: SecurityDefinitionCatalog
 ): AgentRuntime<TParams> {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
   const rule = createAgentThreadAccessRule(runtime, authority)
@@ -167,13 +203,56 @@ export function createAgentRuntime<
     return run ? attachRunView(runtime, run) : null
   }
 
+  /**
+   * A turn the caller may stop or retry. Whoever asked for it may do both; the thread's owner may
+   * also stop any turn, but retrying one would run it again with the owner's rights on someone
+   * else's words. Code without a caller acts on every turn.
+   */
+  const getControllableRun = async (
+    runId: string,
+    action: "cancel" | "retry"
+  ): Promise<ConversationAgentRunRecord> => {
+    const run = await runtime.storage.agents?.runs.getById({
+      projectId: runtime.projectId,
+      id: runId,
+    })
+    const readable = run?.kind === "conversation" ? await rule.read(run.threadId) : null
+    if (run?.kind !== "conversation" || !readable) {
+      throw new AgentRequestError("run_not_found", `[Sixb] Agent run '${runId}' was not found.`)
+    }
+
+    if (authority.type !== "principal") return run
+    if (action === "cancel" && readable.access === "owner") return run
+
+    const execution = await runtime.storage.executions.getById({
+      projectId: runtime.projectId,
+      id: run.executionId,
+    })
+    if (execution?.requestedBy && principalsEqual(execution.requestedBy, principal)) return run
+
+    throw new AgentRequestError(
+      "not_run_requester",
+      action === "cancel"
+        ? `[Sixb] Only whoever asked for Agent run '${runId}', or the thread's owner, can stop it.`
+        : `[Sixb] Only whoever asked for Agent run '${runId}' can retry it: it runs again with their rights.`
+    )
+  }
+
   return {
     get: getAgent,
     threads: {
       recreateSandbox: async (threadId, input) => {
-        const thread = await getVisibleThreadRecord(threadId)
-        if (!thread)
+        const readable = await rule.read(threadId)
+        if (!readable)
           throw new AgentRequestError("thread_not_found", "[Sixb] Agent thread not found.")
+        if (readable.access !== "owner") {
+          throw new AgentRequestError(
+            "not_thread_owner",
+            `[Sixb] Only the owner of Agent thread '${threadId}' can recreate its sandbox.`
+          )
+        }
+
+        const thread = readable.thread
         const storage = runtime.storage.agents
         if (!storage)
           throw new AgentRequestError(
@@ -244,6 +323,11 @@ export function createAgentRuntime<
         })
         return { ...result, threads: await agentThreadViews(runtime, result.threads) }
       },
+      participants: {
+        add: (threadId, users) =>
+          addAgentThreadParticipants(runtime, rule, security, threadId, users),
+        remove: (threadId, user) => removeAgentThreadParticipant(runtime, rule, threadId, user),
+      },
     },
     runs: {
       request: async (input) => {
@@ -266,16 +350,17 @@ export function createAgentRuntime<
         return { ...result, run: await attachRunView(runtime, result.run) }
       },
       retry: async (runId) => {
-        const failedRun = await getVisibleRunRecord(runId)
-        if (!failedRun) {
-          throw new AgentRequestError("run_not_found", `[Sixb] Agent run '${runId}' was not found.`)
-        }
+        const failedRun = await getControllableRun(runId, "retry")
         const agent = getAgent()
         if (!agent) {
           throw new AgentRequestError("agent_not_found", "[Sixb] The project Agent is unavailable.")
         }
         const result = await retryAgentRun(runtime, execution, models?.language, failedRun)
         return { ...result, run: await attachRunView(runtime, result.run) }
+      },
+      cancel: async (runId) => {
+        const run = await getControllableRun(runId, "cancel")
+        return attachRunView(runtime, await cancelAgentRun(runtime, run))
       },
       getById: getRun,
       listForThread: async (threadId, input = {}) => {

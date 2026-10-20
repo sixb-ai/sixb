@@ -10402,6 +10402,13 @@ export type RecreateAgentThreadSandboxErrors = {
     error: string
   }
   /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    code?: string
+  }
+  /**
    * Response for status 404
    */
   404: {
@@ -10412,6 +10419,7 @@ export type RecreateAgentThreadSandboxErrors = {
    */
   409: {
     error: string
+    code?: string
   }
 }
 
@@ -11098,6 +11106,14 @@ export type CancelAgentRunErrors = {
    */
   400: {
     error: string
+    code?: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    code?: string
   }
   /**
    * Response for status 404
@@ -11110,6 +11126,7 @@ export type CancelAgentRunErrors = {
    */
   409: {
     error: string
+    code?: string
   }
   /**
    * Response for status 501
@@ -11246,6 +11263,14 @@ export type RetryAgentRunErrors = {
    */
   400: {
     error: string
+    code?: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    code?: string
   }
   /**
    * Response for status 404
@@ -11258,6 +11283,7 @@ export type RetryAgentRunErrors = {
    */
   409: {
     error: string
+    code?: string
   }
   /**
    * Response for status 429

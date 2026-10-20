@@ -8670,6 +8670,62 @@ describe("AgentWorker", () => {
     }
   })
 
+  // Guard proof: drop `assertRequesterTakesPart` from prepareConversationTurn; Bob's turn then
+  // reaches the model after he was removed.
+  test("cancels a queued turn whose requester left the shared thread, without the model", async () => {
+    let calls = 0
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async () => {
+        calls += 1
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "Done" },
+          { type: "text-end", id: "answer" },
+          finish("stop"),
+        ])
+      },
+    })
+    const sixb = buildSixb(model)
+    const storage = agentStorageOf(sixb)
+    const alice = { type: "user", id: "usr_alice" } as const
+    const bob = { type: "user", id: "usr_bob" } as const
+
+    const first = await requestAgentAs(sixb, alice, { text: "Which deals slipped?" })
+    const threadId = first.run.threadId
+    await storage.runs.finishQueued({ projectId: PROJECT_ID, id: first.run.id, status: "failed" })
+    await storage.threads.addParticipants({
+      projectId: PROJECT_ID,
+      threadId,
+      principals: [bob],
+      addedBy: alice,
+      maxParticipants: 50,
+    })
+    const asked = await requestAgentAs(sixb, bob, { text: "Why did Acme slip?", threadId })
+    await storage.threads.removeParticipant({ projectId: PROJECT_ID, threadId, principal: bob })
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const run = await waitFor(
+        async () => {
+          const found = await storage.runs.getById({ projectId: PROJECT_ID, id: asked.run.id })
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
+        },
+        { label: "removed requester's run terminal" }
+      )
+
+      expect(run).toMatchObject({ status: "cancelled", error: { code: "runtime.cancelled" } })
+      expect(calls).toBe(0)
+      expect(await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })).toMatchObject({
+        activeRunId: null,
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("replays a byte-identical prefix and dates every user message from storage", async () => {
     // Proven by removal: date messages with `new Date()` in loadUserMessageTimes; the replayed
     // first message then differs between the two runs. The clock jumps an hour between them,

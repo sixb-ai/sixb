@@ -2673,6 +2673,8 @@ export const headAgentMessageFileContent = <ThrowOnError extends boolean = false
 
 /**
  * Cancel an agent thread's active run
+ *
+ * Whoever asked for the run, or the thread's owner, can cancel it.
  */
 export const cancelAgentRun = <ThrowOnError extends boolean = false>(
   options: Options<CancelAgentRunData, ThrowOnError>
@@ -2692,6 +2694,8 @@ export const cancelAgentRun = <ThrowOnError extends boolean = false>(
 
 /**
  * Retry a failed or interrupted agent run
+ *
+ * Only whoever asked for the run can retry it: it runs again with their rights.
  */
 export const retryAgentRun = <ThrowOnError extends boolean = false>(
   options: Options<RetryAgentRunData, ThrowOnError>

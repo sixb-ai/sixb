@@ -143,7 +143,8 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
       runtime,
       execution,
       dependencies.definitions.models,
-      dependencies.sandbox
+      dependencies.sandbox,
+      dependencies.definitions.security
     ),
     artifacts: createArtifactsRuntime(runtime, dependencies.blobStorage),
     models: createModelsRuntime(

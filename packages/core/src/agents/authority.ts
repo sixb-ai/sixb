@@ -1,6 +1,6 @@
 import { principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
 import type { AuthorizationContext } from "../authorization"
-import { resolveAuthorizationContext } from "../authorization"
+import { isAllowed, resolveAuthorizationContext } from "../authorization"
 import { createSixbError } from "../errors/internal"
 import type { AuthorizablePrincipal, AuthorizationRef } from "../execution"
 import { type PropertyClearance, resolvePropertyClearance } from "../objects/property-clearance"
@@ -231,6 +231,29 @@ export async function resolveAgentExecutionAuthorization(input: {
       roles: input.security.listResolvedRoles(),
     }),
   }
+}
+
+/**
+ * Whether a user may talk to the Agent now, through the groups they belong to and the project's
+ * roles: who is added to a conversation, or named to the model as taking part in it.
+ */
+export async function userCanRunAgent(input: {
+  readonly auth: AuthStorage
+  readonly projectId: string
+  readonly userId: string
+  readonly security: SecurityDefinitionCatalog
+}): Promise<boolean> {
+  const memberships = await input.auth.groupMemberships.listForUser({
+    projectId: input.projectId,
+    userId: input.userId,
+  })
+
+  const context = resolveAuthorizationContext({
+    principal: { type: "user", id: input.userId },
+    groupIds: memberships.map((membership) => membership.groupId),
+    roles: input.security.listResolvedRoles(),
+  })
+  return isAllowed(context, { kind: "agent.run" })
 }
 
 /** Revalidate the durable user authority inherited by a conversational or child Agent. */
