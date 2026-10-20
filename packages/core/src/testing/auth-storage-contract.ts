@@ -3,6 +3,7 @@ import type {
   AuthStorage,
   AuthStorageErrorCode,
   CompleteAuthSessionInput,
+  ListAuthUsersInput,
   UserRecord,
 } from "../storage/auth"
 import { AuthStorageError } from "../storage/auth"
@@ -195,6 +196,56 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
 
         const page = await storage.users.list({ projectId, statuses: ["active"] })
         expect(page.users.map((row) => row.id)).toEqual(["usr_1"])
+      })
+    })
+
+    test("searches users by display name or email, ignoring case", async () => {
+      await withStorage(async (storage) => {
+        const people = [
+          { id: "usr_ava", email: "ava@acme.com", displayName: "Ava Martin" },
+          { id: "usr_ben", email: "ben@martin-family.org", displayName: "Ben Okafor" },
+          { id: "usr_cleo", email: "cleo@acme.com", status: "suspended" as const },
+          { id: "usr_dan", email: "dan@acme.com", displayName: "Dan 100%_sure" },
+          { id: "usr_emilie", email: "emilie@roy.fr", displayName: "Émilie Roy" },
+        ]
+        for (const [index, person] of people.entries()) {
+          await storage.users.create({
+            ...person,
+            projectId,
+            createdAt: at(`2026-05-14T10:0${index}:00.000Z`),
+          })
+        }
+        await storage.users.create({
+          id: "usr_other",
+          projectId: otherProjectId,
+          email: "martin@acme.com",
+          createdAt: at("2026-05-14T10:09:00.000Z"),
+        })
+
+        const ids = async (input: Omit<ListAuthUsersInput, "projectId">) => {
+          const page = await storage.users.list({ projectId, order: "asc", ...input })
+          return page.users.map((row) => row.id)
+        }
+
+        // A name, an email, either side of the match, and no other project.
+        expect(await ids({ search: "MARTIN" })).toEqual(["usr_ava", "usr_ben"])
+        expect(await ids({ search: "@acme" })).toEqual(["usr_ava", "usr_cleo", "usr_dan"])
+        expect(await ids({ search: "Cleo" })).toEqual(["usr_cleo"])
+        expect(await ids({ search: "cleo", statuses: ["active"] })).toEqual([])
+
+        // Text outside ASCII matches as typed, on every provider.
+        expect(await ids({ search: "Émilie" })).toEqual(["usr_emilie"])
+        expect(await ids({ search: "milie R" })).toEqual(["usr_emilie"])
+
+        // Wildcard characters are plain text.
+        expect(await ids({ search: "%" })).toEqual(["usr_dan"])
+        expect(await ids({ search: "0%_s" })).toEqual(["usr_dan"])
+        expect(await ids({ search: "_" })).toEqual(["usr_dan"])
+
+        const page = await storage.users.list({ projectId, search: "acme", limit: 2, order: "asc" })
+        expect(page.users.map((row) => row.id)).toEqual(["usr_ava", "usr_cleo"])
+        expect(page.total).toBe(3)
+        expect(page.hasMore).toBe(true)
       })
     })
 
