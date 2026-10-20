@@ -27,6 +27,7 @@ import {
   type ObjectEventSelectorBuilder as CoreObjectEventSelectorBuilder,
   type PipelineEventSelectorBuilder as CorePipelineEventSelectorBuilder,
   type SyncEventSelectorBuilder as CoreSyncEventSelectorBuilder,
+  type UserEventSelectorBuilder as CoreUserEventSelectorBuilder,
   type DatasetEventToken,
   type EventSelectorSpec,
   eventSelectorSpec,
@@ -275,6 +276,17 @@ export interface EventsPipelineBuilder<
   cancelled(): EventsPipelineBuilder<TPipeline, PipelineFinishedEventOf<TPipeline, "cancelled">>
 }
 
+/** Member events, project-wide: `events.users().joined()`. */
+export interface EventsUsersBuilder<TEvent extends SixbEvent> extends SubscribableEvents<TEvent> {
+  /** A person signed in for the first time, which created their account. */
+  joined(): EventsUsersBuilder<SixbEventOfType<"user.joined">>
+  suspended(): EventsUsersBuilder<SixbEventOfType<"user.suspended">>
+  reactivated(): EventsUsersBuilder<SixbEventOfType<"user.reactivated">>
+  invited(): EventsUsersBuilder<SixbEventOfType<"user.invited">>
+  /** A member's name or picture changed, by their own edit or their identity provider. */
+  profileUpdated(): EventsUsersBuilder<SixbEventOfType<"user.profile.updated">>
+}
+
 /**
  * The minimal builder contract the React hooks consume: a filter spec plus a
  * typed `subscribe`. Every builder surface satisfies it, and the hooks infer
@@ -373,6 +385,7 @@ type CoreEventSelector =
   | CoreDatasetEventSelectorBuilder<DatasetEventToken>
   | CoreSyncEventSelectorBuilder<SyncEventToken>
   | CorePipelineEventSelectorBuilder<PipelineEventToken>
+  | CoreUserEventSelectorBuilder
 
 /**
  * One immutable implementation backs every builder surface. Each method returns
@@ -512,8 +525,38 @@ class EventsBuilderImpl {
     return this.withFilter({ topic: "rules", types: ["rule.resolved"] })
   }
 
+  joined(): EventsBuilderImpl {
+    return this.withMemberSelector((selector) => selector.joined())
+  }
+
+  suspended(): EventsBuilderImpl {
+    return this.withMemberSelector((selector) => selector.suspended())
+  }
+
+  reactivated(): EventsBuilderImpl {
+    return this.withMemberSelector((selector) => selector.reactivated())
+  }
+
+  invited(): EventsBuilderImpl {
+    return this.withMemberSelector((selector) => selector.invited())
+  }
+
+  profileUpdated(): EventsBuilderImpl {
+    return this.withMemberSelector((selector) => selector.profileUpdated())
+  }
+
   subscribe(handler: (event: SixbEvent) => void, options?: EventSubscribeOptions): () => void {
     return this.params.executor.subscribe(this.params.filter, handler, options)
+  }
+
+  private withMemberSelector(
+    select: (selector: CoreUserEventSelectorBuilder) => EventSelectorSpec<unknown>
+  ): EventsBuilderImpl {
+    const selector = this.params.selector
+    if (selector && "profileUpdated" in selector) {
+      return this.withSelectorSpec(select(selector))
+    }
+    return this
   }
 
   private withFilter(delta: Partial<EventsFilterSpec>): EventsBuilderImpl {
@@ -610,6 +653,8 @@ export interface SixbEventsApi {
   workflows(options?: SixbEventsClientOptions): EventsRunBuilder<SixbEventOfTopic<"workflows">>
   pipelines(options?: SixbEventsClientOptions): EventsRunBuilder<SixbEventOfTopic<"pipelines">>
   syncs(options?: SixbEventsClientOptions): EventsRunBuilder<SixbEventOfTopic<"syncs">>
+  /** Member events. Reading them requires `can.view(project.users)`. */
+  users(options?: SixbEventsClientOptions): EventsUsersBuilder<SixbEventOfTopic<"users">>
 }
 
 function topicBuilder<TEvent extends SixbEvent>(
@@ -668,5 +713,11 @@ eventsApi.datasets = (options) => topicBuilder("datasets", options)
 eventsApi.workflows = (options) => runBuilder("workflows", options)
 eventsApi.pipelines = (options) => runBuilder("pipelines", options)
 eventsApi.syncs = (options) => runBuilder("syncs", options)
+eventsApi.users = (options) => {
+  const selector = selectEvents.users()
+  return createBuilder(eventSelectorSpec(selector), options, {
+    selector,
+  }) as unknown as EventsUsersBuilder<SixbEventOfTopic<"users">>
+}
 
 export const events: SixbEventsApi = eventsApi
