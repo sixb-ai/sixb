@@ -36,6 +36,7 @@ const Report = defineObjectType({
   properties: [
     prop("id", "string", { required: true, primary: true }),
     prop("name", "string", { required: true }),
+    prop("code", "string", { unique: true }),
     prop("attachment", "fileRef"),
   ],
   links: [link("items", ReportItem, { properties: [prop("position", "integer")] })],
@@ -105,6 +106,35 @@ describe("shared-access request boundary", () => {
     const sibling = await query("report-2")
     expect(sibling.status).toBe(200)
     expect(await sibling.json()).toMatchObject({ links: [], objects: [] })
+  })
+
+  // A shared session reads only its selection: the shared report by its code, never a sibling's.
+  test("finds a shared object by a unique property, and nothing outside the share", async () => {
+    const fixture = await createFixture()
+    const invitation = await issueGrant(fixture, "report-1")
+    const exchanged = await exchange(fixture, invitation)
+    const cookies = requestCookieHeader(getSetCookies(exchanged))
+    const { csrfToken } = await sharedSessionBody(exchanged)
+    const getBy = (code: string) =>
+      fixture.app.fetch(
+        new Request(`http://api.localhost/api/objects/${Report.id}/by/code`, {
+          method: "POST",
+          headers: {
+            cookie: cookies,
+            "content-type": "application/json",
+            "x-sixb-csrf": csrfToken,
+            [SHARED_ACCESS_GRANT_HEADER_NAME]: invitation.grant.id,
+          },
+          body: JSON.stringify({ value: code }),
+        })
+      )
+
+    const shared = await getBy("R-1")
+    expect(shared.status).toBe(200)
+    expect(await shared.json()).toMatchObject({ primaryId: "report-1" })
+
+    const sibling = await getBy("R-2")
+    expect(sibling.status).toBe(404)
   })
 
   test("binds only shared authority and never falls back to ambient or bearer auth", async () => {
@@ -582,12 +612,12 @@ async function createFixture() {
   await createTestSixb(host)
     .objects(Report)
     .upsert({
-      properties: { id: "report-1", name: "First", attachment },
+      properties: { id: "report-1", name: "First", code: "R-1", attachment },
     })
   await createTestSixb(host)
     .objects(Report)
     .upsert({
-      properties: { id: "report-2", name: "Second" },
+      properties: { id: "report-2", name: "Second", code: "R-2" },
     })
   const issuer = createTestSixb(host, {
     authorization: resolveAuthorizationContext({

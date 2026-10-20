@@ -27,6 +27,14 @@ const result = await objects(Invoice)
 
 Rows include `primaryId`, `objectTypeId`, typed `properties`, and `Date` timestamps. Use [relationship expansion](../objects/querying.md#include-related-objects) to include linked objects.
 
+To find one object by a [unique property](../ontology/properties.md#unique-values), use `getBy`:
+
+```ts
+const invoice = await objects(Invoice).getBy(Invoice.p.number, "INV-2026-001")
+```
+
+It resolves to `null` when no object holds the value or the caller cannot view the type. It rejects with `SixbApiError` on other failures, such as a 403 for a [marked](../auth/markings.md) property the caller has no clearance for.
+
 ### Match the signed-in user
 
 `@sixb/client/query` also exports `currentUser()`. The server replaces it with the user who sends

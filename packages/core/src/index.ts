@@ -1042,6 +1042,7 @@ export type {
   TelemetryPropertyToken,
   TwinObject,
   UniquePropertyToken,
+  UniquePropertyValue,
 } from "./runtime"
 export {
   ConnectorError,

@@ -62,4 +62,5 @@ export type {
   TelemetryPropertyToken,
   TwinObject,
   UniquePropertyToken,
+  UniquePropertyValue,
 } from "./types"

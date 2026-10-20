@@ -9237,6 +9237,69 @@ export type UpsertObjectResponses = {
 
 export type UpsertObjectResponse = UpsertObjectResponses[keyof UpsertObjectResponses]
 
+export type GetObjectByUniquePropertyData = {
+  body: {
+    /**
+     * A value of the unique property, as a write would give it: a date as an ISO string.
+     */
+    value?: unknown
+  }
+  path: {
+    objectTypeId: string
+    propertyId: string
+  }
+  query?: never
+  url: "/api/objects/{objectTypeId}/by/{propertyId}"
+}
+
+export type GetObjectByUniquePropertyErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetObjectByUniquePropertyError =
+  GetObjectByUniquePropertyErrors[keyof GetObjectByUniquePropertyErrors]
+
+export type GetObjectByUniquePropertyResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    score?: number
+    primaryId: string
+    objectTypeId: string
+    properties: {
+      [key: string]: unknown
+    }
+    redactions?: {
+      [key: string]: {
+        reason: "missing_clearance"
+      }
+    }
+    createdAt: string
+    updatedAt: string
+  }
+}
+
+export type GetObjectByUniquePropertyResponse =
+  GetObjectByUniquePropertyResponses[keyof GetObjectByUniquePropertyResponses]
+
 export type ListActionsData = {
   body?: never
   path?: never

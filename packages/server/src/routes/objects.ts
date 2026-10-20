@@ -28,6 +28,7 @@ import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
 import {
+  GetObjectByUniquePropertyBodySchema,
   ObjectListResponseSchema,
   ObjectParamsSchema,
   ObjectQueryCountRequestSchema,
@@ -39,6 +40,7 @@ import {
   ObjectSearchResponseSchema,
   ObjectsQuerySchema,
   TwinObjectSchema,
+  UniquePropertyParamsSchema,
   UniqueViolationErrorResponseSchema,
   UpsertObjectBodySchema,
 } from "../schemas/objects"
@@ -902,6 +904,53 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           tags: [OPENAPI_TAGS.objects.name],
           operationId: "getObject",
           security: accessTokenSecurityRequirement("getObject"),
+        },
+      }
+    )
+    .post(
+      "/api/objects/:objectTypeId/by/:propertyId",
+      async (context) => {
+        const { params, body, set } = context
+        const sixb = requireRequestSixb(context)
+
+        try {
+          const row = await sixb.objects.getBy(params.objectTypeId, params.propertyId, body.value)
+          if (!row) {
+            set.status = 404
+            return { error: "Object not found" }
+          }
+
+          return serializeObject(row)
+        } catch (error) {
+          if (!(error instanceof AuthorizationError)) return handleRouteError(error, set)
+
+          // A type the caller cannot view looks missing, like `getObject`. On a type it views, the
+          // refusal depends only on the request, as for a filter on a marked property.
+          if (!sixb.objects.getTypeById(params.objectTypeId)) {
+            set.status = 404
+            return { error: "Object not found" }
+          }
+
+          set.status = 403
+          return { error: error.message }
+        }
+      },
+      {
+        params: UniquePropertyParamsSchema,
+        body: GetObjectByUniquePropertyBodySchema,
+        response: {
+          200: TwinObjectSchema,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Get object by a unique property",
+          description:
+            "Returns the object of exactly this type that holds the value, compared as writes store it.",
+          tags: [OPENAPI_TAGS.objects.name],
+          operationId: "getObjectByUniqueProperty",
+          security: accessTokenSecurityRequirement("getObjectByUniqueProperty"),
         },
       }
     )
