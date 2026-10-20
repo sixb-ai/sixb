@@ -76,8 +76,12 @@ import type {
   ListServiceAccountAccessTokensInput,
   ListServiceAccountAccessTokensResult,
   ListServiceAccountsResult,
+  MagicLinkCallbackInput,
+  MagicLinkCallbackResult,
   MemberSummary,
   MembershipCapabilities,
+  OidcCallbackInput,
+  OidcCallbackResult,
   ReactivateMemberInput,
   ReactivateMemberResult,
   ResolvedAuthConfig,
@@ -97,6 +101,8 @@ import type {
 import {
   assertNonEmpty,
   isInvitationDeliveryAuthStrategy,
+  isMagicLinkAuthStrategy,
+  isOidcAuthStrategy,
   normalizePagination,
   resolveAuthConfig,
   resolveInvitationExpiresAt,
@@ -603,6 +609,51 @@ export class AuthRuntime {
     } catch {
       // Touch is non-critical; ignore failures so auth still succeeds.
     }
+  }
+
+  /**
+   * Finish a magic-link sign-in: consume the link and start the session the server minted. Every
+   * sign-in goes through the runtime, so what follows one is decided here and not in each route.
+   */
+  async completeMagicLinkSignIn(
+    input: Pick<MagicLinkCallbackInput, "magicLinkId" | "token" | "session">
+  ): Promise<MagicLinkCallbackResult> {
+    const strategy = this.getStrategy()
+    if (!isMagicLinkAuthStrategy(strategy)) {
+      throw new AuthRuntimeError(
+        "invalid_auth_config",
+        "[Sixb] The active auth strategy does not support magic-link sign-in."
+      )
+    }
+
+    return strategy.completeMagicLinkSignIn({
+      projectId: this.projectId,
+      authStorage: this.requireAuthStorage(),
+      magicLinkId: input.magicLinkId,
+      token: input.token,
+      session: input.session,
+    })
+  }
+
+  /** Finish an OIDC sign-in from the provider's callback and start the session the server minted. */
+  async completeOidcSignIn(
+    input: Pick<OidcCallbackInput, "requestUrl" | "requestOrigin" | "session">
+  ): Promise<OidcCallbackResult> {
+    const strategy = this.getStrategy()
+    if (!isOidcAuthStrategy(strategy)) {
+      throw new AuthRuntimeError(
+        "invalid_auth_config",
+        "[Sixb] The active auth strategy does not support OIDC sign-in."
+      )
+    }
+
+    return strategy.completeOidcSignIn({
+      projectId: this.projectId,
+      authStorage: this.requireAuthStorage(),
+      requestUrl: input.requestUrl,
+      requestOrigin: input.requestOrigin,
+      session: input.session,
+    })
   }
 
   /**
