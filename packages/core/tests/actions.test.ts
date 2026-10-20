@@ -1065,9 +1065,73 @@ describe("requestAction", () => {
 
     expect(run).toMatchObject({
       status: "failed",
-      error: { code: "action.phase_failed", details: { phase: "validation" } },
+      error: { code: "action.rejected", details: { phase: "validation" } },
     })
     expect(writebacks).toBe(0)
+  })
+
+  // Guard proof, each alone: drop `withFailureMessage` in `actions/validators.ts` (the message
+  // becomes the code's public one), the ActionValidationError branch of
+  // `translateActionPhaseError` (the code becomes `action.phase_failed`), or `explanationIsMessage`
+  // from `action.rejected` in `errors/catalog.ts` (the message gets a prefix). Drop
+  // `action.rejected` from `UNREPORTED_FAILURE_CODES` (`actions/run/run-action.ts`), and the
+  // rejection is reported to `onError` as well.
+  test("shows a validator's returned rejection to the caller, but not a thrown error", async () => {
+    const guardedTemperature = defineAction("setTemperature")
+      .on(Room)
+      .params({ target: param("double") })
+      .validate(({ params }) => {
+        if (params.target > 30) throw new Error("secret-token-123 rejected by upstream")
+        return params.target < 10 ? { error: "The target must be at least 10 °C." } : undefined
+      })
+      .writeback(() => {})
+    const runtimeDeps = createTestRuntimeDeps()
+    const reports: SixbErrorContext[] = []
+    const sixb = createTestSixb({
+      id: "action-test",
+      ontology: [Room],
+      actions: [actionDefinition(guardedTemperature)],
+      onError: (_error, context) => {
+        reports.push(context)
+      },
+      ...runtimeDeps,
+    })
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:1", externalId: "R1", name: "Room 1" },
+    })
+    const request = (target: number) =>
+      sixb
+        .objects(Room)
+        .requestAction({ id: "room:1", actionId: "setTemperature", params: { target } })
+
+    const rejected = await request(5)
+    const thrown = await request(40)
+
+    expect(rejected).toMatchObject({
+      status: "failed",
+      error: {
+        code: "action.rejected",
+        message: "The target must be at least 10 °C.",
+        retryable: false,
+        details: { phase: "validation" },
+      },
+    })
+    const recorded = await runtimeDeps.storage.actionRuns.getById({
+      projectId: "action-test",
+      id: rejected.id,
+    })
+    expect(recorded?.error).toEqual(rejected.error)
+
+    expect(thrown).toMatchObject({
+      status: "failed",
+      error: { code: "action.phase_failed", message: "Action execution failed." },
+    })
+
+    // A rejection is the caller's to read, not a failure to monitor: only the thrown error is reported.
+    await flushSixbErrors(sixb)
+    expect(reports).toMatchObject([
+      { type: "run.failed", run: { runId: thrown.id }, failure: { code: "action.phase_failed" } },
+    ])
   })
 
   test("allows inherited actions on subtypes", async () => {

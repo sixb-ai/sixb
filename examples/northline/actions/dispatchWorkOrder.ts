@@ -18,12 +18,12 @@ export const dispatchWorkOrder = defineAction("dispatch-work-order", {
   })
   .validate(({ params, target }) => {
     if (target.properties.status !== "triage") {
-      throw new Error(
-        `[Northline] Cannot dispatch ${target.properties.number}: the case is '${target.properties.status}'.`
-      )
+      return {
+        error: `Cannot dispatch ${target.properties.number}: the case is '${target.properties.status}'.`,
+      }
     }
     if (params.scheduledEnd <= params.scheduledStart) {
-      throw new Error("[Northline] Cannot dispatch work: the service window is invalid.")
+      return { error: "Cannot dispatch work: the service window is invalid." }
     }
   })
   .writeback(async ({ params, run, sixb, target }) => {

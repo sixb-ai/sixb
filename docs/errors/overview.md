@@ -34,6 +34,7 @@ To send failures to a monitoring service, configure [onError](../logging/overvie
 | --- | --- | --- | --- |
 | `action.phase_failed` | No | An Action phase could not complete successfully. | Inspect `details.phase` and the native error reported to `onError`. |
 | `action.read_conflict` | Yes | Data the Action read changed before each of its three commit attempts, so nothing was committed. | Request a new run; if the Action has a writeback, check the external system first. |
+| `action.rejected` | No | A validator returned `{ error }`: `message` is that error, as the Action wrote it. | Show the message to the requester; change the request before trying again. |
 | `action.run_in_progress` | Yes | A request reused the `runId` of a run that the same process is still executing. | Retry with the same `runId` once it finishes to get its outcome. |
 | `action.timeout` | No | Validation, writeback, or edits did not finish within 30 seconds, so nothing was committed. On a run's `effects`, the effects did not finish within 30 seconds of the commit. | If the Action has a writeback, check the external system before requesting a new run. Move longer work into a workflow. |
 | `agent.execution_failed` | No | An active Agent execution failed. | Inspect the run identity and the native error reported to `onError`. |

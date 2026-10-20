@@ -8,9 +8,9 @@ export const closeServiceCase = defineAction("close-service-case", {
   .params({ summary: optional(param("string")) })
   .validate(({ target }) => {
     if (target.properties.status !== "resolved") {
-      throw new Error(
-        `[Northline] Cannot close ${target.properties.number}: equipment recovery is not verified.`
-      )
+      return {
+        error: `Cannot close ${target.properties.number}: equipment recovery is not verified.`,
+      }
     }
   })
   .edits(({ objects, params, run, subject }) => {

@@ -8,9 +8,9 @@ export const acknowledgeServiceCase = defineAction("acknowledge-service-case", {
   .params({ operatorName: optional(param("string")) })
   .validate(({ target }) => {
     if (target.properties.status !== "new") {
-      throw new Error(
-        `[Northline] Cannot acknowledge ${target.properties.number}: the case is '${target.properties.status}'.`
-      )
+      return {
+        error: `Cannot acknowledge ${target.properties.number}: the case is '${target.properties.status}'.`,
+      }
     }
   })
   .edits(({ objects, params, run, subject }) => {

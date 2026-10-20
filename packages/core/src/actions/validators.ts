@@ -1,3 +1,4 @@
+import { withFailureMessage } from "../errors/failure-message"
 import { ActionValidationError } from "../objects/action/errors"
 import type { ActionDefinition, ActionSubject, ActionTargetObject } from "./types"
 import { isObjectActionDefinition } from "./validation"
@@ -19,10 +20,7 @@ export async function runActionValidators<TBaseContext extends object>(input: {
     for (const validator of validators) {
       const result = await validator(input.baseContext)
       if (isValidatorErrorResult(result)) {
-        throw new ActionValidationError(result.error, {
-          actionId: input.action.id,
-          subject: input.subject,
-        })
+        throw validatorRejection(input, result.error)
       }
     }
     return
@@ -38,12 +36,25 @@ export async function runActionValidators<TBaseContext extends object>(input: {
       target: input.target,
     })
     if (isValidatorErrorResult(result)) {
-      throw new ActionValidationError(result.error, {
-        actionId: input.action.id,
-        subject: input.subject,
-      })
+      throw validatorRejection(input, result.error)
     }
   }
+}
+
+/**
+ * The run fails with `action.rejected` and this message, which the author wrote for the caller. A
+ * thrown error's message stays private: it can come from anything the handler called.
+ */
+function validatorRejection(
+  input: { readonly action: ActionDefinition; readonly subject: ActionSubject },
+  message: string
+): ActionValidationError {
+  const rejection = new ActionValidationError(message, {
+    actionId: input.action.id,
+    subject: input.subject,
+  })
+
+  return withFailureMessage(rejection, message)
 }
 
 function isValidatorErrorResult(value: unknown): value is { readonly error: string } {

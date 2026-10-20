@@ -9374,6 +9374,7 @@ export type RequestActionErrors = {
     code:
       | "action.phase_failed"
       | "action.read_conflict"
+      | "action.rejected"
       | "action.run_in_progress"
       | "action.timeout"
       | "agent.execution_failed"
@@ -9456,6 +9457,7 @@ export type RequestActionResponses = {
         | "runtime.cancelled"
         | "action.phase_failed"
         | "action.read_conflict"
+        | "action.rejected"
         | "action.timeout"
       message: string
       retryable: boolean
@@ -9498,6 +9500,7 @@ export type RequestActionResponses = {
               | "runtime.cancelled"
               | "action.phase_failed"
               | "action.read_conflict"
+              | "action.rejected"
               | "action.timeout"
             message: string
             retryable: boolean
@@ -9526,6 +9529,7 @@ export type RequestActionResponses = {
               | "runtime.cancelled"
               | "action.phase_failed"
               | "action.read_conflict"
+              | "action.rejected"
               | "action.timeout"
             message: string
             retryable: boolean
@@ -9960,6 +9964,7 @@ export type ListActionRunsResponses = {
           | "runtime.cancelled"
           | "action.phase_failed"
           | "action.read_conflict"
+          | "action.rejected"
           | "action.timeout"
         message: string
         retryable: boolean
@@ -10040,6 +10045,7 @@ export type GetActionRunResponses = {
         | "runtime.cancelled"
         | "action.phase_failed"
         | "action.read_conflict"
+        | "action.rejected"
         | "action.timeout"
       message: string
       retryable: boolean
@@ -10082,6 +10088,7 @@ export type GetActionRunResponses = {
               | "runtime.cancelled"
               | "action.phase_failed"
               | "action.read_conflict"
+              | "action.rejected"
               | "action.timeout"
             message: string
             retryable: boolean
@@ -10110,6 +10117,7 @@ export type GetActionRunResponses = {
               | "runtime.cancelled"
               | "action.phase_failed"
               | "action.read_conflict"
+              | "action.rejected"
               | "action.timeout"
             message: string
             retryable: boolean

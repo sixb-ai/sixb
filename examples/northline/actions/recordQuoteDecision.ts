@@ -14,9 +14,9 @@ export const recordQuoteDecision = defineAction("record-quote-decision", {
   })
   .validate(({ target }) => {
     if (target.properties.status !== "sent" && target.properties.status !== "internal_review") {
-      throw new Error(
-        `[Northline] Cannot decide ${target.properties.number}: the quote is '${target.properties.status}'.`
-      )
+      return {
+        error: `Cannot decide ${target.properties.number}: the quote is '${target.properties.status}'.`,
+      }
     }
   })
   .writeback(async ({ params, run, sixb, target }) => {
