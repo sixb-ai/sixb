@@ -320,6 +320,61 @@ describe("canAccessAgentRunStream", () => {
   })
 })
 
+describe("a shared thread's live stream", () => {
+  // Guard proof: return null for "participant" in createAgentThreadAccessRule; the participant
+  // then cannot subscribe to the run or see its activity.
+  test("a participant follows its runs and activity until they leave", async () => {
+    const sixb = createSixbInstance({
+      id: projectId,
+      ontology: [],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      auth: { id: "test", kind: "dev" },
+    })
+    const owner: Principal = { type: "user", id: "usr_owner" }
+    const participant = { type: "user", id: "usr_participant" } as const
+    const agents = agentStorage(sixb)
+    await agents.threads.create({ id: threadId, projectId, ownerPrincipal: owner })
+    await agents.threads.addParticipants({
+      projectId,
+      threadId,
+      principals: [participant],
+      addedBy: owner,
+      maxParticipants: 50,
+    })
+    await advanceDurableRun(sixb, { type: "agent.run.started", runId })
+    const event = {
+      schemaVersion: 1 as const,
+      type: "agent.run.activity" as const,
+      projectId,
+      runId,
+      threadId,
+      status: "running" as const,
+      attempt: 1,
+      occurredAt: "2026-01-01T00:00:00.000Z",
+    }
+    const asParticipant = () => requestSdk(sixb, authz(participant, true))
+    const asOther = () => requestSdk(sixb, authz({ type: "user", id: "usr_other" }, true))
+
+    await expect(canAccessAgentRunStream(asParticipant(), runId)).resolves.toEqual({ ok: true })
+    await expect(canAccessAgentThreadActivity(asParticipant(), event)).resolves.toBe(true)
+    await expect(canAccessAgentRunStream(asOther(), runId)).resolves.toEqual({
+      ok: false,
+      message: "Agent run not found.",
+    })
+    await expect(canAccessAgentThreadActivity(asOther(), event)).resolves.toBe(false)
+
+    await agents.threads.removeParticipant({ projectId, threadId, principal: participant })
+    await expect(canAccessAgentRunStream(asParticipant(), runId)).resolves.toMatchObject({
+      ok: false,
+    })
+    await expect(canAccessAgentThreadActivity(asParticipant(), event)).resolves.toBe(false)
+  })
+})
+
 describe("canAccessAgentThreadActivity", () => {
   test("filters project activity by durable run, thread, project, and owner", async () => {
     const sixb = createSixbInstance({

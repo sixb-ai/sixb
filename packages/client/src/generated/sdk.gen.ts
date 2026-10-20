@@ -11,6 +11,9 @@ import type {
   AbortFileUploadData,
   AbortFileUploadErrors,
   AbortFileUploadResponses,
+  AddAgentThreadParticipantsData,
+  AddAgentThreadParticipantsErrors,
+  AddAgentThreadParticipantsResponses,
   AddConnectorConnectionData,
   AddConnectorConnectionErrors,
   AddConnectorConnectionResponses,
@@ -406,6 +409,9 @@ import type {
   RefreshAuthSessionData,
   RefreshAuthSessionErrors,
   RefreshAuthSessionResponses,
+  RemoveAgentThreadParticipantData,
+  RemoveAgentThreadParticipantErrors,
+  RemoveAgentThreadParticipantResponses,
   RemoveObjectLinkData,
   RemoveObjectLinkErrors,
   RemoveObjectLinkResponses,
@@ -2568,6 +2574,52 @@ export const getAgentThread = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<GetAgentThreadResponses, GetAgentThreadErrors, ThrowOnError>({
     security: [{ scheme: "bearer", type: "http" }],
     url: "/api/agent-threads/{threadId}",
+    ...options,
+  })
+
+/**
+ * Add participants to an agent thread
+ *
+ * Only the thread's owner adds participants: active users of the project, by id or by email. They read the whole conversation, its files and its live stream, and send messages that run with their own rights. Nothing checks what they may see: the conversation holds what the Agent read with the rights of whoever asked.
+ */
+export const addAgentThreadParticipants = <ThrowOnError extends boolean = false>(
+  options: Options<AddAgentThreadParticipantsData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    AddAgentThreadParticipantsResponses,
+    AddAgentThreadParticipantsErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/participants",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Remove a participant from an agent thread
+ *
+ * The thread's owner removes anyone; a participant removes only themself, to leave. Removing someone who does not take part changes nothing.
+ */
+export const removeAgentThreadParticipant = <ThrowOnError extends boolean = false>(
+  options: Options<RemoveAgentThreadParticipantData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<
+    RemoveAgentThreadParticipantResponses,
+    RemoveAgentThreadParticipantErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/participants/{userId}",
     ...options,
   })
 

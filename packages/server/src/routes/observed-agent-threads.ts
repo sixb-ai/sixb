@@ -1,22 +1,16 @@
-import type { SixbHostView } from "@sixb/core"
-import type {
-  AgentMessageRecord,
-  AgentThreadRecord,
-  AuthStorage,
-  Principal,
-} from "@sixb/core/storage"
+import type { AgentThreadView, SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { requireRequestSixb } from "../auth/scope"
 import { fileContentGetResponses } from "../files/content"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   AgentMessageFileContentParamsSchema,
+  AgentMessageListResponseSchema,
   AgentMessagesQuerySchema,
   AgentRunListQuerySchema,
   AgentRunListResponseSchema,
   AgentThreadParamsSchema,
   AgentThreadSchema,
-  ObservedAgentMessageListResponseSchema,
 } from "../schemas/agents"
 import { ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
@@ -58,7 +52,7 @@ export function registerObservedAgentThreadRoutes(app: Elysia, host: SixbHostVie
             return threadNotFound(context.set)
           }
 
-          return serializeThread(thread)
+          return await serializeThread(host, thread)
         } catch (error) {
           return handleAgentRouteError(error, context.set)
         }
@@ -88,10 +82,9 @@ export function registerObservedAgentThreadRoutes(app: Elysia, host: SixbHostVie
           }
 
           const query = AgentMessagesQuerySchema.parse(context.query)
-          const page = await readThreadMessages(host.id, storage, thread, query)
-          const authors = await readAuthors(host.id, host.storage.auth, page.messages)
-
-          return ObservedAgentMessageListResponseSchema.parse({ ...page, authors })
+          return AgentMessageListResponseSchema.parse(
+            await readThreadMessages(host, storage, thread, query)
+          )
         } catch (error) {
           return handleAgentRouteError(error, context.set)
         }
@@ -99,7 +92,7 @@ export function registerObservedAgentThreadRoutes(app: Elysia, host: SixbHostVie
       {
         params: AgentThreadParamsSchema,
         query: AgentMessagesQuerySchema,
-        response: { 200: ObservedAgentMessageListResponseSchema, ...errors },
+        response: { 200: AgentMessageListResponseSchema, ...errors },
         detail: {
           summary: "List another user's agent thread messages",
           description: `${OBSERVED} \`authors\` names who wrote the page's messages.`,
@@ -184,40 +177,11 @@ export function registerObservedAgentThreadRoutes(app: Elysia, host: SixbHostVie
 /** The thread, read as an observer: this authorizes, so a refusal comes before anything else. */
 function readObservedThread(context: {
   readonly params: { readonly threadId: string }
-}): Promise<AgentThreadRecord | null> {
+}): Promise<AgentThreadView | null> {
   return requireRequestSixb(context).agent.observed.getById(context.params.threadId)
 }
 
 function threadNotFound(set: { status?: number | string }) {
   set.status = 404
   return { error: "Agent thread not found" }
-}
-
-/** The page's distinct authors; an account adds its display name and nothing else of its profile. */
-async function readAuthors(
-  projectId: string,
-  auth: AuthStorage | undefined,
-  messages: readonly Pick<AgentMessageRecord, "authorPrincipal">[]
-) {
-  const authors = new Map<string, Principal>()
-  for (const { authorPrincipal } of messages) {
-    if (authorPrincipal) {
-      authors.set(`${authorPrincipal.type}:${authorPrincipal.id}`, authorPrincipal)
-    }
-  }
-
-  return Promise.all(
-    [...authors.values()].map(async (principal) => {
-      const user =
-        principal.type === "user"
-          ? await auth?.users.getById({ projectId, id: principal.id })
-          : null
-
-      return {
-        type: principal.type,
-        id: principal.id,
-        ...(user?.displayName ? { displayName: user.displayName } : {}),
-      }
-    })
-  )
 }

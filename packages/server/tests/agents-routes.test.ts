@@ -1473,3 +1473,173 @@ describe("agent routes", () => {
     expect(await ownerFileContent.text()).toBe("owner attachment")
   })
 })
+
+describe("a thread's participants over HTTP", () => {
+  // Guard proof: return null for "participant" in createAgentThreadAccessRule; Bob then gets 404
+  // on every read below.
+  test("a participant reads and talks in the thread; anyone else gets 404", async () => {
+    const { app, storage, sixb } = createApp({ auth: true })
+    const alice = await seedSession(storage, "usr_alice")
+    const bob = await seedSession(storage, "usr_bob")
+    const cleo = await seedSession(storage, "usr_cleo")
+    await storage.auth.users.updateProfile({
+      projectId: sixb.id,
+      id: "usr_alice",
+      displayName: "Alice Martin",
+    })
+
+    const get = (path: string, as: { headers: Record<string, string> }) =>
+      app.fetch(new Request(`http://localhost${path}`, { headers: as.headers }))
+    const post = (path: string, body: unknown, as: { csrfHeaders: Record<string, string> }) =>
+      app.fetch(jsonRequest(path, "POST", body, as.csrfHeaders))
+    const remove = (path: string, as: { csrfHeaders: Record<string, string> }) =>
+      app.fetch(
+        new Request(`http://localhost${path}`, { method: "DELETE", headers: as.csrfHeaders })
+      )
+
+    const created = await post("/api/agent-threads", { title: "Late deals" }, alice)
+    const { thread } = (await created.json()) as { thread: { id: string } }
+    const path = `/api/agent-threads/${thread.id}`
+
+    const attachment = await sixb.blobStorage.put({
+      body: new TextEncoder().encode("deals.csv"),
+      fileName: "deals.csv",
+      mediaType: "text/plain",
+    })
+    const asked = await post(
+      `${path}/messages`,
+      { text: "Which slipped?", attachments: [attachment] },
+      alice
+    )
+    const { run: alicesRun } = (await asked.json()) as {
+      run: { id: string; triggerMessageId: string }
+    }
+
+    // Only the owner shares, and only with an active user.
+    expect(
+      (await post(`${path}/participants`, { users: [{ type: "user", id: "usr_bob" }] }, cleo))
+        .status
+    ).toBe(404)
+    expect(
+      (await post(`${path}/participants`, { users: [{ type: "user", id: "usr_nobody" }] }, alice))
+        .status
+    ).toBe(400)
+    const unknownEmail = await post(
+      `${path}/participants`,
+      { users: [{ email: "nobody@acme.com" }] },
+      alice
+    )
+    expect(unknownEmail.status).toBe(400)
+    expect(await unknownEmail.json()).toMatchObject({
+      code: "invalid_participant",
+      error:
+        "[Sixb] Agent thread participant references user 'nobody@acme.com', which does not exist.",
+    })
+
+    // By email, as someone who cannot browse the members directory would; each comes back named.
+    // Guard proof: serialize `participant.principal` unnamed in serializeThreads; Bob then has
+    // no display name.
+    await storage.auth.users.updateProfile({
+      projectId: sixb.id,
+      id: "usr_bob",
+      displayName: "Bob Stone",
+    })
+    const shared = await post(
+      `${path}/participants`,
+      { users: [{ email: "USR_BOB@acme.com" }] },
+      alice
+    )
+    expect(shared.status).toBe(200)
+    const sharedBody = await shared.json()
+    expect(sharedBody).toMatchObject({
+      id: thread.id,
+      owner: { type: "user", id: "usr_alice", displayName: "Alice Martin" },
+      participants: [
+        {
+          principal: { type: "user", id: "usr_bob", displayName: "Bob Stone" },
+          addedBy: { type: "user", id: "usr_alice" },
+        },
+      ],
+    })
+    expect(JSON.stringify(sharedBody)).not.toContain("@acme.com")
+    expect(
+      (await post(`${path}/participants`, { users: [{ type: "user", id: "usr_cleo" }] }, bob))
+        .status
+    ).toBe(403)
+
+    // Bob reads it all, and finds it among the threads shared with him.
+    expect((await get(path, bob)).status).toBe(200)
+    expect(await (await get("/api/agent-threads?sharedWithMe=true", bob)).json()).toMatchObject({
+      threads: [{ id: thread.id }],
+      total: 1,
+    })
+    expect(await (await get("/api/agent-threads", bob)).json()).toMatchObject({ total: 0 })
+
+    const messages = await get(`${path}/messages`, bob)
+    expect(messages.status).toBe(200)
+    expect(await messages.json()).toMatchObject({
+      messages: [{ authorPrincipal: { type: "user", id: "usr_alice" } }],
+      authors: [{ type: "user", id: "usr_alice", displayName: "Alice Martin" }],
+    })
+    const file = `${path}/messages/${alicesRun.triggerMessageId}/files/content?path=${encodeURIComponent("/parts/1/fileRef")}`
+    expect(await (await get(file, bob)).text()).toBe("deals.csv")
+    expect((await get(`${path}/runs`, bob)).status).toBe(200)
+    expect((await get(`/api/agent-runs/${alicesRun.id}`, bob)).status).toBe(200)
+
+    // One turn at a time; Bob stops only his own turns, Alice any.
+    expect((await post(`${path}/messages`, { text: "Why?" }, bob)).status).toBe(409)
+    const notBobs = await post(`${path}/cancel`, { runId: alicesRun.id }, bob)
+    expect(notBobs.status).toBe(403)
+    expect(await notBobs.json()).toMatchObject({ code: "not_run_requester" })
+    expect((await post(`${path}/cancel`, { runId: alicesRun.id }, alice)).status).toBe(202)
+
+    const bobAsked = await post(`${path}/messages`, { text: "Why did Acme slip?" }, bob)
+    expect(bobAsked.status).toBe(202)
+    const { run: bobsRun } = (await bobAsked.json()) as { run: { id: string } }
+    expect((await post(`${path}/cancel`, { runId: bobsRun.id }, bob)).status).toBe(202)
+
+    // Only Bob retries his failed turn: it runs again with his rights, never the owner's.
+    const failedAsk = await post(`${path}/messages`, { text: "And Globex?" }, bob)
+    const { run: failed } = (await failedAsk.json()) as { run: { id: string } }
+    await storage.agents.runs.finishQueued({ projectId: sixb.id, id: failed.id, status: "failed" })
+    const ownerRetry = await post(`${path}/runs/${failed.id}/retry`, {}, alice)
+    expect(ownerRetry.status).toBe(403)
+    expect(await ownerRetry.json()).toMatchObject({ code: "not_run_requester" })
+    const retried = await post(`${path}/runs/${failed.id}/retry`, {}, bob)
+    expect(retried.status).toBe(202)
+    const { run: retry } = (await retried.json()) as { run: { id: string } }
+    expect((await post(`${path}/cancel`, { runId: retry.id }, alice)).status).toBe(202)
+
+    // The sandbox is the owner's to recreate.
+    const recreate = `${path}/sandbox/recreate`
+    const bobRecreates = await post(recreate, { expectedSandboxName: "any" }, bob)
+    expect(bobRecreates.status).toBe(403)
+    expect(await bobRecreates.json()).toMatchObject({ code: "not_thread_owner" })
+    expect((await post(recreate, { expectedSandboxName: "any" }, cleo)).status).toBe(404)
+
+    // Cleo sees nothing of it.
+    for (const hidden of [
+      path,
+      `${path}/messages`,
+      `${path}/runs`,
+      file,
+      `/api/agent-runs/${bobsRun.id}`,
+    ]) {
+      expect((await get(hidden, cleo)).status).toBe(404)
+    }
+    expect((await post(`${path}/messages`, { text: "Me too" }, cleo)).status).toBe(404)
+    expect((await post(`${path}/cancel`, { runId: bobsRun.id }, cleo)).status).toBe(404)
+    expect(await (await get("/api/agent-threads?sharedWithMe=true", cleo)).json()).toMatchObject({
+      total: 0,
+    })
+
+    // Bob removes only himself; once he left, the thread is gone for him.
+    expect((await remove(`${path}/participants/usr_alice`, bob)).status).toBe(400)
+    expect((await remove(`${path}/participants/usr_cleo`, bob)).status).toBe(403)
+    expect((await remove(`${path}/participants/usr_bob`, cleo)).status).toBe(404)
+    const left = await remove(`${path}/participants/usr_bob`, bob)
+    expect(left.status).toBe(204)
+    expect(await left.text()).toBe("")
+    expect((await get(path, bob)).status).toBe(404)
+  })
+})
