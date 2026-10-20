@@ -111,11 +111,18 @@ export class PgAuthUserStore implements AuthUserStore {
       )
     }
 
+    // One statement, so an omitted field keeps whatever a concurrent update wrote to it.
     const updatedAt = dateOrNow(input.updatedAt)
     const [row] = await this.sql<PgAuthUserRow[]>`
       UPDATE auth_users
-      SET display_name = ${input.displayName ?? null},
-          avatar_url = ${input.avatarUrl ?? null},
+      SET display_name = CASE
+            WHEN ${input.displayName !== undefined}::boolean THEN ${input.displayName ?? null}::text
+            ELSE display_name
+          END,
+          avatar_url = CASE
+            WHEN ${input.avatarUrl !== undefined}::boolean THEN ${input.avatarUrl ?? null}::text
+            ELSE avatar_url
+          END,
           updated_at = ${updatedAt}
       WHERE project_id = ${input.projectId}
         AND id = ${input.id}

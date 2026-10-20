@@ -226,6 +226,47 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
+    // To see this fail, write both columns from the input as given.
+    test("updates only the profile fields given, and clears one set to null", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await storage.users.updateProfile({
+          projectId,
+          id: "usr_1",
+          displayName: "Ava Lovelace",
+          avatarUrl: "https://images.acme.com/ava.png",
+          updatedAt: at("2026-05-14T10:01:00.000Z"),
+        })
+
+        const renamed = await storage.users.updateProfile({
+          projectId,
+          id: "usr_1",
+          displayName: "Ava King",
+          updatedAt: at("2026-05-14T10:02:00.000Z"),
+        })
+        expect(renamed).toMatchObject({
+          displayName: "Ava King",
+          avatarUrl: "https://images.acme.com/ava.png",
+          updatedAt: at("2026-05-14T10:02:00.000Z"),
+        })
+
+        const cleared = await storage.users.updateProfile({
+          projectId,
+          id: "usr_1",
+          avatarUrl: null,
+          updatedAt: at("2026-05-14T10:03:00.000Z"),
+        })
+        expect(cleared.displayName).toBe("Ava King")
+        expect(cleared.avatarUrl).toBeUndefined()
+        await expect(storage.users.getById({ projectId, id: "usr_1" })).resolves.toEqual(cleared)
+
+        await expectAuthError(
+          storage.users.updateProfile({ projectId, id: "usr_missing", displayName: "Nobody" }),
+          "missing_user"
+        )
+      })
+    })
+
     test("keeps multiple concurrent sessions per user and never extends expiry on touch", async () => {
       await withStorage(async (storage) => {
         await createUser(storage)

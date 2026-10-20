@@ -89,8 +89,8 @@ export class InMemoryAuthUserStore implements AuthUserStore {
 
     const next: UserRecord = {
       ...existing,
-      displayName: input.displayName,
-      avatarUrl: input.avatarUrl,
+      displayName: profileValue(input.displayName, existing.displayName),
+      avatarUrl: profileValue(input.avatarUrl, existing.avatarUrl),
       updatedAt: dateOrNow(input.updatedAt),
     }
     this.state.users.set(key, cloneRecord(next))
@@ -136,4 +136,12 @@ export class InMemoryAuthUserStore implements AuthUserStore {
       total: page.total,
     }
   }
+}
+
+// Omitted keeps the current value, and `null` clears it.
+function profileValue(
+  value: string | null | undefined,
+  current: string | undefined
+): string | undefined {
+  return value === undefined ? current : (value ?? undefined)
 }
