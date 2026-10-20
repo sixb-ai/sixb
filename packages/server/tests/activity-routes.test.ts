@@ -309,9 +309,11 @@ describe("activity routes", () => {
     const trusted = createTestSixb(fixture.host)
     expect(Object.keys(trusted.activity).sort()).toEqual([
       "calendar",
+      "connections",
       "list",
       "read",
       "summarize",
+      "timeline",
       "users",
     ])
     await expect(

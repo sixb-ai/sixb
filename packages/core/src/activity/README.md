@@ -83,3 +83,40 @@ new one with its next event.
   (`COLLATE "C"` in PostgreSQL); generated visit ids are ASCII, so every provider orders them alike.
   Timelines use sequence. Live activity can move a visit between pages, so clients deduplicate
   ids and offer a refresh.
+
+## Timeline and connections
+
+A visit's timeline joins it with what its session did, by the session id alone: never by user and
+time range, so the same user's other browser, active at the same time, stays out.
+
+- **Join:** roots are the executions without a parent whose verified session is the visit's,
+  `authority_session_id` for a user and `authority_delegation_session_id` for a share. Read-only
+  requests write none. Their descendants are found through `parent_execution_id`, not
+  `correlation_id`, which a client can set. An Agent execution copies its parent's session; requiring
+  no parent keeps it from counting as a root.
+- **Window:** roots created in `[start - 30 s, last activity + 30 s)`, capped 30 s before the
+  visit's day-long limit. A click right after a return reaches the server before the activity
+  that opens the visit, and an action just before leaving may follow the last activity sent. Half
+  the shortest idle timeout keeps two visits of a session from sharing an execution. Descendants
+  are not time-filtered: a queued workflow or an Agent's tools may run long after the visit.
+- **Entries:** page views, action runs, workflow runs and conversation Agent runs, by time. An
+  action execution without a recorded run is `incomplete`: in flight, or interrupted. An Agent
+  run's cost includes everything below it, subagents and tools included; a Workflow's Agent steps
+  are not conversations and have no entry.
+- **Content:** a run shows its thread's message count, never its title or messages. An action
+  names its object only when the viewer's own object reader returns it, so object type grants,
+  markings and deletion all hide it. `runVisible` says whether the viewer may read the run
+  itself, decided as the runs reads decide it (`canViewActionRun` and the subject type's
+  markings, `canViewWorkflowRun`); the app links a run only then.
+- **Bounds:** 200 page views and 200 recorded executions, roots first and the earliest first.
+  Past either limit `truncated` is set and the timeline stops at the last page view, or the last
+  root, it kept: the cut leaves no gap where one source is missing. One read per source: the
+  visit, the ledger, the session, action runs, workflow runs, Agent runs, costs, threads, and one
+  object batch per object type.
+- **Connections:** a user's sessions, revoked and expired ones too, newest first, with the device
+  their user agent names (browser and system only), a native client's label, and each session's
+  visit count and latest five visits. No address, user agent or session id is returned: the
+  cursor holds a creation time and how many sessions created then were returned. A share's
+  session has no device: its connection is the link's grant, and it reads as revoked or expired
+  once either the session or the grant is.
+
