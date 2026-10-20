@@ -1633,6 +1633,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           // owns the validity rules (including token verification, so a bare
           // magicLinkId cannot disclose the account email).
           let email: string | undefined
+          let firstSignIn = false
           if (strategy.peekMagicLink) {
             try {
               const peeked = await strategy.peekMagicLink({
@@ -1645,6 +1646,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
                 return await invalidMagicLinkResponse(options, authRedirectHint)
               }
               email = peeked.email
+              firstSignIn = peeked.firstSignIn === true
             } catch (error) {
               logAuthCallbackError("Magic-link", error)
               return await authExperienceErrorResponse(options, authRedirectHint)
@@ -1677,6 +1679,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
             magicLinkId,
             token,
             email,
+            firstSignIn,
             authRedirect: authRedirectHint,
           })
         }
@@ -1763,6 +1766,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           request,
           magicLinkId,
           token,
+          displayName: body.displayName,
           authRedirectHint,
         })
       },
@@ -1770,6 +1774,8 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         body: t.Object({
           magicLinkId: t.Optional(t.String()),
           token: t.Optional(t.String()),
+          // Asked on the confirmation page when the link creates an account.
+          displayName: t.Optional(t.String()),
         }),
         parse: "urlencoded",
         detail: { hide: true },
@@ -1940,6 +1946,7 @@ async function completeMagicLinkCallback(input: {
   readonly request: Request
   readonly magicLinkId: string
   readonly token: string
+  readonly displayName?: string
   readonly clearPendingCookie?: boolean
   readonly authRedirectHint?: AuthRedirectContext
 }): Promise<Response> {
@@ -1951,6 +1958,7 @@ async function completeMagicLinkCallback(input: {
     const result = await input.host.auth.completeMagicLinkSignIn({
       magicLinkId: input.magicLinkId,
       token: input.token,
+      displayName: input.displayName,
       session: {
         id: sessionCredential.sessionId,
         tokenHash: sessionCredential.tokenHash,
@@ -2317,7 +2325,8 @@ a {
   text-underline-offset: 0.2em;
 }
 form { margin: 1.75rem 0 0; }
-input[type="email"] {
+input[type="email"],
+input[type="text"] {
   width: 100%;
   height: 2.5rem;
   padding: 0 0.875rem;
@@ -2328,8 +2337,10 @@ input[type="email"] {
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) - 2px);
 }
-input[type="email"]::placeholder { color: var(--muted-foreground); }
-input[type="email"]:focus {
+input[type="email"]::placeholder,
+input[type="text"]::placeholder { color: var(--muted-foreground); }
+input[type="email"]:focus,
+input[type="text"]:focus {
   outline: none;
   border-color: var(--ring);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 18%, transparent);
@@ -2508,12 +2519,18 @@ async function magicLinkConfirmResponse(
     readonly token: string
     // Absent when the strategy doesn't support the read-only peek.
     readonly email?: string
+    // The link creates an account, so the page asks for the person's name.
+    readonly firstSignIn: boolean
     readonly authRedirect?: AuthRedirectContext
   }
 ): Promise<Response> {
   if (input.authRedirect) {
     const custom = await customAuthExperienceResponse(options.authExperience, {
-      state: { kind: "confirm", ...(input.email ? { email: input.email } : {}) },
+      state: {
+        kind: "confirm",
+        ...(input.email ? { email: input.email } : {}),
+        ...(input.firstSignIn ? { firstSignIn: true } : {}),
+      },
       signInUrl: authExperienceSignInUrl(input.authRedirect),
       submission: {
         kind: "confirmSignIn",
@@ -2541,6 +2558,11 @@ async function magicLinkConfirmResponse(
       '<form method="post" action="/auth/callback" id="confirm">',
       `<input type="hidden" name="magicLinkId" value="${escapeHtml(input.magicLinkId)}">`,
       `<input type="hidden" name="token" value="${escapeHtml(input.token)}">`,
+      // The server drops a name it refuses here without a word, so the field stops at the limit.
+      // Settings › Personal shows the server's error instead, so its field has no cap.
+      input.firstSignIn
+        ? '<input name="displayName" type="text" autocomplete="name" maxlength="100" placeholder="Your name (optional)" aria-label="Your name (optional)" autofocus>'
+        : "",
       '<button type="submit" id="confirm-button">Continue</button>',
       "</form>",
       "<script>",

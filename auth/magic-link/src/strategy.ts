@@ -229,7 +229,14 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       return null
     }
 
-    return { email: magicLink.email }
+    const firstSignIn = await this.wouldCreateUser({
+      email: magicLink.email,
+      now,
+      projectId: input.projectId,
+      storage: input.authStorage,
+    })
+
+    return firstSignIn ? { email: magicLink.email, firstSignIn: true } : { email: magicLink.email }
   }
 
   async completeMagicLinkSignIn(input: MagicLinkCallbackInput): Promise<MagicLinkCallbackResult> {
@@ -257,6 +264,7 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       tokenHash: hashMagicLinkToken(input.token),
       completedAt: now,
       newUserId: `usr_${randomUUID()}`,
+      newUserDisplayName: input.displayName,
       allowUserCreationWithoutInvitation: canBootstrap,
       manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
       session: input.session,
@@ -293,6 +301,34 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
     }
 
     return this.bootstrapUsers.has(input.email)
+  }
+
+  // Completing the link creates an account only for an address with no user yet that holds an
+  // invitation or a bootstrap entry, the same rule storage applies at completion.
+  private async wouldCreateUser(input: {
+    readonly email: string
+    readonly now: Date
+    readonly projectId: string
+    readonly storage: AuthStorage
+  }): Promise<boolean> {
+    const user = await input.storage.users.getByEmail({
+      projectId: input.projectId,
+      email: input.email,
+    })
+    if (user) {
+      return false
+    }
+
+    if (this.bootstrapUsers.has(input.email)) {
+      return true
+    }
+
+    const invitation = await input.storage.invitations.getActiveByEmail({
+      projectId: input.projectId,
+      email: input.email,
+      now: input.now,
+    })
+    return invitation !== null
   }
 
   private createCallbackUrl(input: {

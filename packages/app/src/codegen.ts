@@ -364,8 +364,10 @@ const actions: AuthExperienceActions = {
   requestMagicLink(email) {
     submit("requestMagicLink", { email })
   },
-  confirmSignIn() {
-    submit("confirmSignIn")
+  confirmSignIn(input) {
+    // Pages often pass this straight to onClick, which hands over the click event, not a name.
+    const displayName = typeof input?.displayName === "string" ? input.displayName : undefined
+    submit("confirmSignIn", displayName === undefined ? {} : { displayName })
   },
   restartSignIn() {
     window.location.assign(bootstrap.signInUrl)

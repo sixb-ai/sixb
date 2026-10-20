@@ -32,7 +32,7 @@ import {
 import { getRequestClientAddress } from "./client-address"
 import { getCookie, type ResolvedAuthCookieOptions } from "./cookies"
 import { AuthRuntimeError } from "./errors"
-import { normalizeProfileChanges } from "./profile"
+import { normalizeProfileChanges, signInDisplayName } from "./profile"
 import { SessionCache } from "./session-cache"
 import {
   type BearerSessionTokens,
@@ -620,9 +620,10 @@ export class AuthRuntime {
   /**
    * Finish a magic-link sign-in: consume the link and start the session the server minted. Every
    * sign-in goes through the runtime, so what follows one is decided here and not in each route.
+   * A name that breaks the profile rules is dropped: it never makes the sign-in fail.
    */
   async completeMagicLinkSignIn(
-    input: Pick<MagicLinkCallbackInput, "magicLinkId" | "token" | "session">
+    input: Pick<MagicLinkCallbackInput, "magicLinkId" | "token" | "session" | "displayName">
   ): Promise<MagicLinkCallbackResult> {
     const strategy = this.getStrategy()
     if (!isMagicLinkAuthStrategy(strategy)) {
@@ -638,6 +639,7 @@ export class AuthRuntime {
       magicLinkId: input.magicLinkId,
       token: input.token,
       session: input.session,
+      displayName: signInDisplayName(input.displayName),
     })
   }
 

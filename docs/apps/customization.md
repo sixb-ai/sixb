@@ -112,11 +112,31 @@ import { useState } from "react"
 
 export default function SignIn({ state, actions }: AuthExperienceProps) {
   const [email, setEmail] = useState("")
+  const [name, setName] = useState("")
 
   if (state.kind === "checkEmail") return <p>Check your email for a sign-in link.</p>
 
   if (state.kind === "confirm") {
-    return <button type="button" onClick={actions.confirmSignIn}>Confirm sign-in</button>
+    return (
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          actions.confirmSignIn({ displayName: name })
+        }}
+      >
+        {state.firstSignIn ? (
+          <label>
+            Your name
+            <input
+              autoComplete="name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </label>
+        ) : null}
+        <button type="submit">Confirm sign-in</button>
+      </form>
+    )
   }
 
   if (state.kind === "invalidLink" || state.kind === "error") {
@@ -150,6 +170,10 @@ export default function SignIn({ state, actions }: AuthExperienceProps) {
   )
 }
 ```
+
+When the link creates the person's account, the confirm state has `firstSignIn: true`, so the
+page asks for their name and passes it to `actions.confirmSignIn({ displayName })`. Sixb ignores a
+name that is not valid, or one given for an account that already exists.
 
 The sign-in screen uses `app/globals.css` and your app metadata, but is not wrapped in
 `app/layout.tsx`. Sixb handles the credentials and session. See
