@@ -3,8 +3,8 @@ import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { Bot, FileText, type LucideIcon, MousePointerClick, Workflow, Zap } from "lucide-react"
 import { Fragment, useMemo, useState } from "react"
-import { Link } from "react-router-dom"
-import { actionRunHref, objectHref, workflowRunHref } from "../../routes"
+import { Link, useLocation } from "react-router-dom"
+import { actionRunHref, objectHref, observedThreadHref, workflowRunHref } from "../../routes"
 import {
   formatDuration,
   humanize,
@@ -256,10 +256,20 @@ function EntryContent({
       return (
         <>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="text-[0.8125rem] font-medium">{messages.agentRun}</span>
+            {entry.thread ? (
+              <ConversationLink threadId={entry.threadId} title={entry.thread.title} />
+            ) : (
+              <span className="text-[0.8125rem] font-medium">{messages.agentRun}</span>
+            )}
             <EntryStatus status={entry.status} />
           </div>
           <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+            {entry.thread ? (
+              <>
+                <span>{messages.agentRun}</span>
+                <MetaDot />
+              </>
+            ) : null}
             <span>{messages.messages(entry.messages, count(entry.messages))}</span>
             {entry.cost && entry.cost.amounts.length > 0 ? (
               <>
@@ -305,6 +315,33 @@ function RoutePattern({
         </Fragment>
       ))}
     </span>
+  )
+}
+
+/**
+ * A conversation by its title, opening it read-only. Only a reader who may read it gets one: the
+ * entry names its thread for them alone.
+ */
+function ConversationLink({
+  threadId,
+  title,
+}: {
+  readonly threadId: string
+  readonly title: string | undefined
+}) {
+  const messages = useActivityMessages()
+  const location = useLocation()
+  const name = title?.trim() || messages.thread.untitled
+
+  return (
+    <Link
+      to={observedThreadHref(threadId)}
+      state={{ from: `${location.pathname}${location.search}` }}
+      title={messages.visit.openConversation}
+      className="min-w-0 truncate text-[0.8125rem] font-medium underline-offset-2 hover:underline"
+    >
+      {name}
+    </Link>
   )
 }
 

@@ -324,6 +324,16 @@ describe("Activity", () => {
                   unvaluedCallCount: 0,
                 },
               },
+              // Named for a reader with can.observe(agent.threads), and only then.
+              {
+                kind: "agent",
+                at: "2026-10-02T09:04:00.000Z",
+                runId: "run_2",
+                threadId: "thr_2",
+                thread: { title: "Overdue invoices" },
+                status: "succeeded",
+                messages: 2,
+              },
               { kind: "page", at: visit.lastSeenAt, sequence: 3, route: "/invoices/:id" },
             ],
             truncated: true,
@@ -461,6 +471,10 @@ describe("Activity", () => {
     expect(view.getByText("Not finished")).toBeDefined()
     expect(view.getByText("3 messages")).toBeDefined()
     expect(view.getByText("$0.04")).toBeDefined()
+    // A conversation opens only from an entry that names it.
+    const conversation = view.getByRole("link", { name: "Overdue invoices" })
+    expect(conversation.getAttribute("href")).toBe("/observability/activity/threads/thr_2")
+    expect(view.getAllByRole("link").filter((link) => link.textContent === "Agent run")).toEqual([])
     expect(view.getAllByText("Chrome · macOS").length).toBeGreaterThan(0)
 
     // Two steps: /invoices holds the interaction and the runs, /invoices/:id nothing.

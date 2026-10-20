@@ -495,6 +495,14 @@ export const en = {
     cancel: "Cancel",
     create: "Create fresh sandbox",
   },
+  /** Someone else's conversation, read with can.observe(agent.threads). */
+  observed: {
+    readOnly:
+      "Read-only. You see everything the agent showed in this conversation, whatever your own permissions.",
+    empty: "This conversation has no messages.",
+    loadFailed: "Could not load this conversation.",
+    responding: "The agent is answering. New messages appear when they are saved.",
+  },
 } satisfies MessageTree
 
 export type AgentMessages = typeof en

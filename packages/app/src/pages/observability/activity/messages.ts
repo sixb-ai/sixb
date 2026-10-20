@@ -79,6 +79,14 @@ export const en = {
       count: (count: number, formatted: string) =>
         plural("en", count, { one: "1 step", other: `${formatted} steps` }),
     },
+    openConversation: "Open the conversation, read-only",
+  },
+  thread: {
+    untitled: "Untitled conversation",
+    denied:
+      "Reading other users' conversations takes can.observe(agent.threads) in one of your roles.",
+    by: (name: string) => `${name}'s conversation`,
+    readOnly: "Read-only",
   },
   connection: {
     label: "Connection",
@@ -208,6 +216,14 @@ export const fr: Translation<ActivityMessages> = {
       count: (count: number, formatted: string) =>
         plural("fr", count, { one: `${formatted} étape`, other: `${formatted} étapes` }),
     },
+    openConversation: "Ouvrir la conversation, en lecture seule",
+  },
+  thread: {
+    untitled: "Conversation sans titre",
+    denied:
+      "Lire les conversations des autres utilisateurs demande can.observe(agent.threads) dans l’un de vos rôles.",
+    by: (name: string) => `Conversation de ${name}`,
+    readOnly: "Lecture seule",
   },
   connection: {
     label: "Connexion",

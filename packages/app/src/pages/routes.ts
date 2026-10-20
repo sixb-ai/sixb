@@ -61,3 +61,8 @@ export function workflowRunHref(runId: string): string {
 export function actionRunHref(runId: string): string {
   return `/observability/runs/actions/${encodeURIComponent(runId)}`
 }
+
+/** Someone else's Agent conversation, read-only, in Observability › Activity. */
+export function observedThreadHref(threadId: string): string {
+  return `/observability/activity/threads/${encodeURIComponent(threadId)}`
+}
