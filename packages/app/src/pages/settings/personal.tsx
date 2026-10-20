@@ -1,12 +1,18 @@
-import { getAuthAccessManagementOptionsOptions } from "@sixb/client/hooks"
-import { Button, ThemePicker } from "@sixb/ui/components"
+import {
+  getAuthAccessManagementOptionsOptions,
+  getAuthProfileOptions,
+  getAuthProfileQueryKey,
+  getAuthSessionQueryKey,
+  updateAuthProfileMutation,
+} from "@sixb/client/hooks"
+import { Button, Input, ThemePicker } from "@sixb/ui/components"
 import { useOptionalTheme } from "@sixb/ui/hooks"
-import { useQuery } from "@tanstack/react-query"
-import { Loader2, LogOut } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Loader2, LogOut, Pencil } from "lucide-react"
+import { type SubmitEvent, useEffect, useMemo, useRef, useState } from "react"
 import { useCurrentUser, useSignOut } from "../../session"
 import { notify, SectionPage } from "../section-page"
-import { PageSection, Panel } from "../section-ui"
+import { apiErrorMessage, PageSection, Panel } from "../section-ui"
 import { type AuthGroupOption, GroupChips, PersonAvatar } from "./controls"
 import { useSettingsMessages } from "./messages"
 import { SessionsSection } from "./sessions"
@@ -22,12 +28,32 @@ export function SettingsPersonalPage() {
   // A shell without the theme provider has no theme to choose.
   const themed = useOptionalTheme() !== null
   const [signingOut, setSigningOut] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const editNameButton = useRef<HTMLButtonElement>(null)
+  const refocusEditName = useRef(false)
   // The groups this person holds, with their labels.
   const options = useQuery({ ...getAuthAccessManagementOptionsOptions(), retry: false })
   const groupsById = useMemo(
     () => new Map<string, AuthGroupOption>((options.data?.groups ?? []).map((g) => [g.id, g])),
     [options.data]
   )
+  // Your name stays read-only until the profile says the identity provider does not set it.
+  const profile = useQuery({ ...getAuthProfileOptions(), enabled: user !== null, retry: false })
+  const nameManaged = profile.data?.managedFields.includes("displayName") ?? false
+  const nameEditable = profile.data !== undefined && !nameManaged
+
+  // Leaving the form gives focus back to the button that opened it.
+  useEffect(() => {
+    if (!editingName && refocusEditName.current) {
+      refocusEditName.current = false
+      editNameButton.current?.focus()
+    }
+  }, [editingName])
+
+  const stopEditingName = () => {
+    refocusEditName.current = true
+    setEditingName(false)
+  }
 
   const handleSignOut = () => {
     setSigningOut(true)
@@ -46,7 +72,7 @@ export function SettingsPersonalPage() {
     >
       {user ? (
         <PageSection>
-          <Panel footer={messages.note}>
+          <Panel footer={nameManaged ? messages.noteManagedName : messages.note}>
             <div className="flex items-center gap-4 px-5 py-5">
               <PersonAvatar
                 name={user.displayName}
@@ -54,24 +80,47 @@ export function SettingsPersonalPage() {
                 avatarUrl={user.avatarUrl}
                 size="lg"
               />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[0.9375rem] font-semibold tracking-[-0.01em]">
-                  {user.displayName ?? user.email}
-                </p>
-                {user.displayName ? (
-                  <p className="truncate text-[0.8125rem] text-muted-foreground">{user.email}</p>
-                ) : null}
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={signingOut}
-                onClick={handleSignOut}
-              >
-                {signingOut ? <Loader2 className="animate-spin" /> : <LogOut />}
-                {signingOut ? messages.signingOut : messages.signOut}
-              </Button>
+              {editingName ? (
+                <NameForm displayName={user.displayName} onDone={stopEditingName} />
+              ) : (
+                <>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-center gap-1">
+                      <p className="truncate text-[0.9375rem] font-semibold tracking-[-0.01em]">
+                        {user.displayName ?? user.email}
+                      </p>
+                      {nameEditable ? (
+                        <Button
+                          ref={editNameButton}
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="shrink-0 text-muted-foreground"
+                          aria-label={messages.editName}
+                          onClick={() => setEditingName(true)}
+                        >
+                          <Pencil />
+                        </Button>
+                      ) : null}
+                    </div>
+                    {user.displayName ? (
+                      <p className="truncate text-[0.8125rem] text-muted-foreground">
+                        {user.email}
+                      </p>
+                    ) : null}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={signingOut}
+                    onClick={handleSignOut}
+                  >
+                    {signingOut ? <Loader2 className="animate-spin" /> : <LogOut />}
+                    {signingOut ? messages.signingOut : messages.signOut}
+                  </Button>
+                </>
+              )}
             </div>
             <div className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-center sm:gap-6">
               <span className="w-28 shrink-0 text-[0.8125rem] text-muted-foreground">
@@ -93,5 +142,73 @@ export function SettingsPersonalPage() {
       ) : null}
       <SessionsSection />
     </SectionPage>
+  )
+}
+
+/** Edits your name in place of it. An empty name clears it, and the email shows instead. */
+function NameForm({
+  displayName,
+  onDone,
+}: {
+  readonly displayName?: string
+  readonly onDone: () => void
+}) {
+  const messages = useSettingsMessages()
+  const queryClient = useQueryClient()
+
+  const save = useMutation({
+    ...updateAuthProfileMutation(),
+    onSuccess: async (updated) => {
+      queryClient.setQueryData(getAuthProfileQueryKey(), updated)
+      // The header reads the session, which carries the name.
+      await queryClient.invalidateQueries({ queryKey: getAuthSessionQueryKey() })
+      onDone()
+      notify.success(messages.personal.nameSaved)
+    },
+    onError: (error) => notify.error(apiErrorMessage(error, messages.personal.nameSaveFailed)),
+  })
+
+  const submit = (event: SubmitEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const typed = String(new FormData(event.currentTarget).get("displayName") ?? "")
+    save.mutate({ body: { displayName: typed } })
+  }
+
+  return (
+    <form
+      onSubmit={submit}
+      className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center"
+    >
+      <Input
+        name="displayName"
+        defaultValue={displayName}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation()
+            onDone()
+          }
+        }}
+        autoComplete="name"
+        autoFocus
+        placeholder={messages.personal.namePlaceholder}
+        aria-label={messages.personal.name}
+        className="h-8 text-sm sm:flex-1"
+      />
+      <div className="flex gap-2">
+        <Button type="submit" size="sm" disabled={save.isPending}>
+          {save.isPending ? <Loader2 className="animate-spin" /> : null}
+          {messages.personal.saveName}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={save.isPending}
+          onClick={onDone}
+        >
+          {messages.common.cancel}
+        </Button>
+      </div>
+    </form>
   )
 }

@@ -1,0 +1,194 @@
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test"
+import { client, type GetAuthProfileResponse, type GetAuthSessionResponse } from "@sixb/client"
+import {
+  getAuthAccessManagementOptionsQueryKey,
+  getAuthProfileQueryKey,
+  getAuthSessionQueryKey,
+  listAuthSessionsQueryKey,
+} from "@sixb/client/hooks"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { fireEvent, render, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
+import { SectionsProvider, SettingsPersonalPage } from "../src/pages"
+import { notify } from "../src/pages/section-page"
+import { PersonAvatar } from "../src/pages/settings/controls"
+import { installDom } from "./helpers/dom"
+import { stubWebSockets } from "./helpers/offline-sockets"
+
+installDom([
+  "document",
+  "navigator",
+  "Node",
+  "Element",
+  "HTMLElement",
+  "HTMLInputElement",
+  "FormData",
+  "Event",
+  "EventTarget",
+  "MouseEvent",
+  "KeyboardEvent",
+  "MutationObserver",
+  "getComputedStyle",
+  "matchMedia",
+  "requestAnimationFrame",
+  "cancelAnimationFrame",
+])
+const apiUrl = "https://api.sixb.test"
+const originalConfig = client.getConfig()
+let sockets: ReturnType<typeof stubWebSockets> | undefined
+// Generated query keys carry the client's base URL, so it is set before any key is built.
+client.setConfig({ baseUrl: apiUrl })
+
+beforeAll(() => {
+  sockets = stubWebSockets()
+})
+
+afterEach(() => {
+  client.setConfig({ fetch: originalConfig.fetch })
+})
+
+afterAll(() => {
+  client.setConfig({ baseUrl: originalConfig.baseUrl })
+  sockets?.restore()
+})
+
+function sessionNamed(displayName: string): GetAuthSessionResponse {
+  return {
+    authenticated: true,
+    user: { id: "user-1", email: "morgan@example.com", displayName, groupIds: [] },
+    session: { id: "session-1", expiresAt: "2026-10-15T00:00:00.000Z" },
+  }
+}
+
+function profileOf(
+  displayName: string,
+  managedFields: GetAuthProfileResponse["managedFields"] = []
+): GetAuthProfileResponse {
+  return {
+    profile: { id: "user-1", email: "morgan@example.com", displayName, status: "active" },
+    managedFields,
+  }
+}
+
+function renderPersonal(profile?: GetAuthProfileResponse) {
+  // Cached answers never go stale, so the page only fetches what a test changes.
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { staleTime: Number.POSITIVE_INFINITY, retry: false } },
+  })
+  queryClient.setQueryData(getAuthSessionQueryKey(), sessionNamed("Morgan Reyes"))
+  if (profile) queryClient.setQueryData(getAuthProfileQueryKey(), profile)
+  queryClient.setQueryData(getAuthAccessManagementOptionsQueryKey(), { groups: [] })
+  queryClient.setQueryData(listAuthSessionsQueryKey(), { sessions: [] })
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <SectionsProvider visibility={undefined}>
+        <MemoryRouter initialEntries={["/settings/personal"]}>
+          <SettingsPersonalPage />
+        </MemoryRouter>
+      </SectionsProvider>
+    </QueryClientProvider>
+  )
+}
+
+function answerWith(answer: (request: Request) => Response | Promise<Response>) {
+  const api = async (input: RequestInfo | URL, init?: RequestInit) =>
+    answer(new Request(input, init))
+  client.setConfig({ fetch: Object.assign(api, { preconnect: fetch.preconnect }) })
+}
+
+describe("your name on Settings › Personal", () => {
+  test("you rename yourself in place", async () => {
+    const sent: unknown[] = []
+    answerWith(async (request) => {
+      if (request.method === "PATCH") {
+        sent.push(await request.json())
+        return Response.json(profileOf("Morgan R."))
+      }
+      return Response.json(sessionNamed("Morgan R."))
+    })
+    const view = renderPersonal(profileOf("Morgan Reyes"))
+
+    fireEvent.click(view.getByRole("button", { name: "Edit your name" }))
+    const input = view.getByRole("textbox", { name: "Name" }) as HTMLInputElement
+    expect(input.value).toBe("Morgan Reyes")
+    fireEvent.input(input, { target: { value: "Morgan R." } })
+    fireEvent.click(view.getByRole("button", { name: "Save" }))
+
+    expect(await view.findByText("Morgan R.")).toBeDefined()
+    expect(sent).toEqual([{ displayName: "Morgan R." }])
+    expect(view.queryByRole("textbox", { name: "Name" })).toBeNull()
+  })
+
+  // Regression proof: drop the effect that refocuses the edit button and both checks fail.
+  test("cancelling keeps the name you had, and gives focus back to the edit button", () => {
+    const view = renderPersonal(profileOf("Morgan Reyes"))
+
+    fireEvent.click(view.getByRole("button", { name: "Edit your name" }))
+    fireEvent.input(view.getByRole("textbox", { name: "Name" }), { target: { value: "M" } })
+    fireEvent.click(view.getByRole("button", { name: "Cancel" }))
+
+    expect(view.getByText("Morgan Reyes")).toBeDefined()
+    expect(view.queryByRole("textbox", { name: "Name" })).toBeNull()
+    expect(document.activeElement).toBe(view.getByRole("button", { name: "Edit your name" }))
+
+    fireEvent.click(view.getByRole("button", { name: "Edit your name" }))
+    fireEvent.keyDown(view.getByRole("textbox", { name: "Name" }), { key: "Escape" })
+    expect(view.queryByRole("textbox", { name: "Name" })).toBeNull()
+    expect(document.activeElement).toBe(view.getByRole("button", { name: "Edit your name" }))
+  })
+
+  test("a refused name keeps the form open and says why", async () => {
+    const refused = "[Sixb] A display name can be at most 100 characters."
+    answerWith(() => Response.json({ error: refused }, { status: 400 }))
+    const errors = spyOn(notify, "error")
+    const view = renderPersonal(profileOf("Morgan Reyes"))
+
+    try {
+      fireEvent.click(view.getByRole("button", { name: "Edit your name" }))
+      fireEvent.click(view.getByRole("button", { name: "Save" }))
+
+      await waitFor(() => expect(errors).toHaveBeenCalledWith(refused))
+      expect(view.getByRole("textbox", { name: "Name" })).toBeDefined()
+    } finally {
+      errors.mockRestore()
+    }
+  })
+
+  // Regression proof: drop `!nameManaged` from nameEditable and the edit button shows.
+  test("a name your identity provider sets stays read-only, and says where it comes from", () => {
+    const view = renderPersonal(profileOf("Morgan Reyes", ["displayName"]))
+
+    expect(view.getByText("Morgan Reyes")).toBeDefined()
+    expect(view.queryByRole("button", { name: "Edit your name" })).toBeNull()
+    expect(view.getByText(/Your name comes from your identity provider/)).toBeDefined()
+  })
+
+  test("waits for the profile before offering to edit", () => {
+    answerWith(() => new Promise<Response>(() => {}))
+    const view = renderPersonal()
+
+    expect(view.getByText("Morgan Reyes")).toBeDefined()
+    expect(view.queryByRole("button", { name: "Edit your name" })).toBeNull()
+  })
+})
+
+// Regression proof: drop the img's onError and the initials never show.
+test("an avatar that does not load shows the initials", () => {
+  const view = render(
+    <PersonAvatar
+      name="Morgan Reyes"
+      email="morgan@example.com"
+      avatarUrl="https://images.example.com/missing.png"
+    />
+  )
+
+  const image = view.container.querySelector("img")
+  expect(image).not.toBeNull()
+  if (image) {
+    fireEvent.error(image)
+  }
+
+  expect(view.container.querySelector("img")).toBeNull()
+  expect(view.getByText("MR")).toBeDefined()
+})
