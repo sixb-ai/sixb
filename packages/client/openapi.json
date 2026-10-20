@@ -25568,6 +25568,9 @@
                             "primary": {
                               "type": "boolean"
                             },
+                            "unique": {
+                              "type": "boolean"
+                            },
                             "semanticType": {
                               "type": "string"
                             },
@@ -25768,6 +25771,9 @@
                                   "primary": {
                                     "type": "boolean"
                                   },
+                                  "unique": {
+                                    "type": "boolean"
+                                  },
                                   "semanticType": {
                                     "type": "string"
                                   },
@@ -25946,6 +25952,9 @@
                             "type": "boolean"
                           },
                           "primary": {
+                            "type": "boolean"
+                          },
+                          "unique": {
                             "type": "boolean"
                           },
                           "semanticType": {
@@ -26146,6 +26155,9 @@
                                   "type": "boolean"
                                 },
                                 "primary": {
+                                  "type": "boolean"
+                                },
+                                "unique": {
                                   "type": "boolean"
                                 },
                                 "semanticType": {

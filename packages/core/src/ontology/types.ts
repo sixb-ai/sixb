@@ -263,6 +263,14 @@ export interface Property {
    */
   primary?: true
   /**
+   * Declares that each value of this property belongs to at most one object of the type, like an
+   * email or an external key.
+   *
+   * Values compare exactly (case-sensitive), and `null` or absent values never count. Only strings,
+   * uuids, integers, dates, enums and user references can be unique, and only `true` is accepted.
+   */
+  unique?: true
+  /**
    * Runtime behavior of this property's value.
    *
    * - `"static"` (default) — a fact that rarely changes, stored as part of the object record.

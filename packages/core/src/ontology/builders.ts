@@ -352,6 +352,8 @@ type PropertyOptions = {
   required?: boolean
   nullable?: boolean
   primary?: true
+  /** At most one object of the type holds each value. */
+  unique?: true
   mode?: PropertyMode
   semanticType?: QuantitativeTypeId
   query?: PropertyQueryMetadata
@@ -378,6 +380,7 @@ type PropertyResult<
   FieldFromOptions<TOptions, "required", boolean> &
   FieldFromOptions<TOptions, "nullable", boolean> &
   FieldFromOptions<TOptions, "primary", true> &
+  FieldFromOptions<TOptions, "unique", true> &
   FieldFromOptions<TOptions, "mode", PropertyMode> &
   FieldFromOptions<TOptions, "semanticType", QuantitativeTypeId> &
   FieldFromOptions<TOptions, "query", PropertyQueryMetadata> &
