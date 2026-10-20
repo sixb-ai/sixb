@@ -91,6 +91,11 @@ export const assistantUser = defineRole("assistant.user", {
 
 Grant access to actions and workflows through [roles](../auth/authorization.md) as needed.
 
+Each person sees only their own conversations. To read other people's, for example to see how the
+agent answers them, grant `can.observe(agent.threads)`. The app opens them from a visit under
+[Activity](../apps/activity.md#read-a-conversation), which takes `can.observe(project.activity)`
+too. It shows everything the agent showed those people, whatever the reader's own permissions.
+
 ## Use in your app
 
 [Sixb apps](../apps/overview.md) include a chat interface. In your app, open `/agents`
