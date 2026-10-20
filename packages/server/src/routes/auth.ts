@@ -18,6 +18,7 @@ import {
   type MagicLinkAuthStrategy,
   type MemberSummary,
   type OidcStartSignInResult,
+  type OwnProfile,
   SignInRefusedError,
   shouldUseSecureCookies,
   verifyCsrfToken,
@@ -58,6 +59,7 @@ import {
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   AuthMemberParamsSchema,
+  AuthProfileResponseSchema,
   AuthServiceAccountParamsSchema,
   AuthSessionResponseSchema,
   AuthSignOutResponseSchema,
@@ -101,6 +103,7 @@ import {
   SuspendAuthMemberResponseSchema,
   UpdateAuthMemberGroupsBodySchema,
   UpdateAuthMemberGroupsResponseSchema,
+  UpdateAuthProfileBodySchema,
 } from "../schemas/auth"
 import { ErrorResponseSchema } from "../schemas/common"
 import { parseDate, parseOptionalInt, toIsoString } from "../utils/http"
@@ -731,6 +734,70 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Sign out the current user everywhere (all devices and apps)",
           tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "signOutAll",
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .get(
+      "/api/auth/profile",
+      async (context) => {
+        const session = requireSessionCaller(context)
+        if (session instanceof Response) {
+          return session
+        }
+
+        try {
+          return jsonResponse(serializeOwnProfile(await host.auth.getProfile(session)), 200)
+        } catch (error) {
+          return authRouteErrorResponse(error)
+        }
+      },
+      {
+        response: {
+          200: AuthProfileResponseSchema,
+          401: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Get the current user's profile",
+          tags: [OPENAPI_TAGS.authProfile.name],
+          operationId: "getAuthProfile",
+        },
+      }
+    )
+    .patch(
+      "/api/auth/profile",
+      async ({ body, ...context }) => {
+        const session = requireSessionCaller(context)
+        if (session instanceof Response) {
+          return session
+        }
+
+        try {
+          const changes = UpdateAuthProfileBodySchema.parse(body)
+          return jsonResponse(
+            serializeOwnProfile(await host.auth.updateProfile(session, changes)),
+            200
+          )
+        } catch (error) {
+          return authRouteErrorResponse(error)
+        }
+      },
+      {
+        body: UpdateAuthProfileBodySchema,
+        response: {
+          200: AuthProfileResponseSchema,
+          400: ErrorResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Update the current user's name or picture",
+          description:
+            "Fields the identity provider manages, listed in `managedFields`, are refused with 403.",
+          tags: [OPENAPI_TAGS.authProfile.name],
+          operationId: "updateAuthProfile",
           security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
@@ -2666,6 +2733,19 @@ function serializeManagedMember(member: Omit<MemberSummary, "capabilities">) {
     user: serializeMemberUser(member.user),
     groupIds: [...member.groupIds],
     managedGroupIds: [...member.managedGroupIds],
+  }
+}
+
+function serializeOwnProfile(profile: OwnProfile) {
+  return {
+    profile: {
+      id: profile.user.id,
+      email: profile.user.email,
+      displayName: profile.user.displayName,
+      avatarUrl: profile.user.avatarUrl,
+      status: profile.user.status,
+    },
+    managedFields: [...profile.managedFields],
   }
 }
 

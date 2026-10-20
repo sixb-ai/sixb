@@ -93,6 +93,14 @@ The group name does not grant access by itself. Add a [role](authorization.md) f
 
 Bootstrap groups are applied on every sign-in. Use invitations for subsequent users rather than expanding the bootstrap list. `allowedDomains` restricts sign-in and invitations; it does not assign permissions.
 
+## Names and pictures
+
+Each person has a name and a picture that the app shows wherever it shows them. People change their own with `PATCH /api/auth/profile`, which takes `displayName` and `avatarUrl`; `null` clears one.
+
+With OIDC, the identity provider owns the ones it sends: every sign-in updates them from the `name` and `picture` claims, and people cannot change them in Sixb. A field the provider does not send stays editable, such as the picture with Microsoft Entra. `GET /api/auth/profile` lists the fields the provider owns in `managedFields`.
+
+Changing the profile needs a signed-in session: a browser session sending its CSRF token, or a CLI session. Access tokens are refused. A name has at most 100 characters, and a picture is an `https` URL of at most 2048 characters. A provider value that breaks these rules is ignored and the stored one is kept.
+
 ## Sessions
 
 Use persistent [storage](../infrastructure/overview.md) so accounts and sessions survive restarts. Browser sessions expire after 30 days without foreground activity by default. Active sessions renew automatically.

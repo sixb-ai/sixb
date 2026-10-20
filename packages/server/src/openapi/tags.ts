@@ -151,6 +151,10 @@ export const OPENAPI_TAGS = {
     name: "Auth Sessions",
     description: "Authentication sessions and sign-out",
   },
+  authProfile: {
+    name: "Auth Profile",
+    description: "The signed-in user's own profile",
+  },
   authMembers: {
     name: "Auth Members",
     description: "User membership administration",

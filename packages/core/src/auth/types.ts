@@ -9,6 +9,7 @@ import type {
   ServiceAccountGroupMembershipRecord,
   ServiceAccountRecord,
   SessionRecord,
+  UserIdentityRecord,
   UserRecord,
 } from "../storage/auth"
 
@@ -34,12 +35,20 @@ export function principalsEqual(left: Principal, right: Principal): boolean {
 
 export type AuthStrategyKind = "magicLink" | "oidc" | "dev" | "disabled"
 
+/** A profile field an identity provider can own. */
+export type ProfileField = "displayName" | "avatarUrl"
+
 export interface AuthStrategy {
   readonly id: string
   readonly kind: AuthStrategyKind
   readonly developmentOnly?: boolean
   readonly disabled?: boolean
   readonly allowDisabledInProduction?: boolean
+  /**
+   * The profile fields this strategy's provider sets at every sign-in of the person behind
+   * `identity`, so people cannot edit them in Sixb. Omitted, the strategy manages none.
+   */
+  providerProfileFields?(identity: UserIdentityRecord): readonly ProfileField[]
 }
 
 export interface InvitationRecipientInput {
@@ -214,6 +223,8 @@ export interface OidcAuthStrategy extends InvitationDeliveryAuthStrategy {
   readonly bootstrapGroupIds?: readonly string[]
   startOidcSignIn(input: OidcStartSignInInput): Promise<OidcStartSignInResult>
   completeOidcSignIn(input: OidcCallbackInput): Promise<OidcCallbackResult>
+  /** Every OIDC sign-in sets the name and picture the provider sends, so the strategy says which. */
+  providerProfileFields(identity: UserIdentityRecord): readonly ProfileField[]
 }
 
 export interface InviteUserInput {
@@ -372,6 +383,19 @@ export interface ReactivateMemberResult {
   readonly user: UserRecord
   readonly groupIds: readonly string[]
   readonly managedGroupIds: readonly string[]
+}
+
+/** The signed-in person's own profile. */
+export interface OwnProfile {
+  readonly user: UserRecord
+  /** The fields their identity provider sets at sign-in, which they cannot edit here. */
+  readonly managedFields: readonly ProfileField[]
+}
+
+/** Omitted fields stay unchanged, and `null` clears one. */
+export interface UpdateOwnProfileInput {
+  readonly displayName?: string | null
+  readonly avatarUrl?: string | null
 }
 
 /** `"session"` reads only the cookie; `"any"` reads a bearer access token, else the cookie. */

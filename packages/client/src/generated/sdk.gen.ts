@@ -163,6 +163,9 @@ import type {
   GetAuthMembershipOptionsData,
   GetAuthMembershipOptionsErrors,
   GetAuthMembershipOptionsResponses,
+  GetAuthProfileData,
+  GetAuthProfileErrors,
+  GetAuthProfileResponses,
   GetAuthSessionData,
   GetAuthSessionResponses,
   GetBulkTelemetryHistoryData,
@@ -487,6 +490,9 @@ import type {
   UpdateAuthMemberGroupsData,
   UpdateAuthMemberGroupsErrors,
   UpdateAuthMemberGroupsResponses,
+  UpdateAuthProfileData,
+  UpdateAuthProfileErrors,
+  UpdateAuthProfileResponses,
   UploadFileContentData,
   UploadFileContentErrors,
   UploadFileContentResponses,
@@ -642,6 +648,43 @@ export const signOutAll = <ThrowOnError extends boolean = false>(
     ],
     url: "/api/auth/sign-out-all",
     ...options,
+  })
+
+/**
+ * Get the current user's profile
+ */
+export const getAuthProfile = <ThrowOnError extends boolean = false>(
+  options?: Options<GetAuthProfileData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<GetAuthProfileResponses, GetAuthProfileErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/auth/profile",
+    ...options,
+  })
+
+/**
+ * Update the current user's name or picture
+ *
+ * Fields the identity provider manages, listed in `managedFields`, are refused with 403.
+ */
+export const updateAuthProfile = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateAuthProfileData, ThrowOnError>
+) =>
+  (options.client ?? client).patch<
+    UpdateAuthProfileResponses,
+    UpdateAuthProfileErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/auth/profile",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**

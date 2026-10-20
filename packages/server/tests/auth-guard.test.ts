@@ -234,6 +234,7 @@ describe("server auth guard", () => {
       "/api/auth/sessions",
       "/api/auth/members",
       "/api/auth/invitation-options",
+      "/api/auth/profile",
     ]) {
       const response = await app.fetch(new Request(`http://localhost${path}`))
 
@@ -255,6 +256,7 @@ describe("server auth guard", () => {
       ["POST", "/api/auth/members/usr_2/suspend", undefined],
       ["POST", "/api/auth/sessions/ses_1/revoke", undefined],
       ["POST", "/api/auth/sign-out-all", undefined],
+      ["PATCH", "/api/auth/profile", { displayName: "Ava Lovelace" }],
     ] as const
 
     const send = (
