@@ -1423,6 +1423,7 @@ describe("bound Sixb surface", () => {
     expect(Object.keys(scoped).sort()).toEqual(
       [
         "actions",
+        "activity",
         "agent",
         "aiUsage",
         "artifacts",

@@ -1,5 +1,6 @@
 import { resolve } from "node:path"
 import type { ActionDefinition } from "../actions"
+import type { ActivityOptions } from "../activity/service"
 import type { AgentToolDefinition } from "../agents"
 import { assertNoAgentDefinitions } from "../agents/retired-config"
 import type { SixbAuthConfig } from "../auth"
@@ -59,6 +60,8 @@ export interface CreateSixbOptions<in out TParams extends ParamsConfig = ParamsC
   logger?: LoggerProvider
   /** Broker capture controls, independent from the output provider. */
   observability?: ObservabilityOptions
+  /** Records visits and page views in the project's app. Off by default. */
+  activity?: ActivityOptions
   /** Observes runtime failures without changing their outcome. */
   onError?: SixbErrorHandler
   /** Recovery and retention settings. The runtime constructor never starts maintenance timers. */
@@ -135,6 +138,7 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
     sandboxes: options.sandboxes,
     logger: options.logger,
     observability: options.observability,
+    activity: options.activity,
     onError: options.onError,
     ontologyMaintenance: options.ontologyMaintenance,
     projectRoot,

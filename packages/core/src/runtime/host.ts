@@ -8,6 +8,7 @@
 import { resolve } from "node:path"
 import { ActionRunExecutor, registerActionRunExecutor } from "../actions/run/executor"
 import type { ActionDefinition } from "../actions/types"
+import { type ActivityOptions, ActivityService } from "../activity/service"
 import type { AgentDefinitionsInput, AgentToolDefinition } from "../agents"
 import {
   AuthRuntime,
@@ -131,6 +132,8 @@ export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsCon
   logger?: LoggerProvider
   /** Broker capture controls, independent from the output provider. */
   observability?: ObservabilityOptions
+  /** Records visits and page views in the project's app. Off by default. */
+  activity?: ActivityOptions
   /** Observes runtime failures without changing their outcome. */
   onError?: SixbErrorHandler
   /** Recovery and retention settings. The runtime constructor never starts maintenance timers. */
@@ -186,6 +189,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   readonly broker: Broker
   readonly events: DomainEventLog
   readonly logging: LoggingService
+  readonly activity: ActivityService
   readonly storage: Storage
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage
@@ -214,6 +218,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       observability: options.observability?.logs,
     })
     this.storage = options.storage
+    this.activity = new ActivityService(this.projectId, this.storage.activity, options.activity)
     this.storageReadiness = new StorageReadiness(this.storage)
     this.lakeStorage = options.lakeStorage
     this.blobStorage = options.blobStorage
@@ -451,6 +456,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
         supportsPersistence: typeof this.sandboxes?.resume === "function",
       },
       logging: this.logging,
+      activity: this.activity,
       connectorService: this.connectorService,
       ...(this.connectorService.connectionProcess === undefined
         ? {}
