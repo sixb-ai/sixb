@@ -610,14 +610,14 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     method: "GET",
     path: "/api/users",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
   },
   {
     operationId: "getUser",
     method: "GET",
     path: "/api/users/:userId",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
   },
   {
     operationId: "getAiAccountingOverview",
