@@ -18,27 +18,6 @@ export const productActivity = defineRole("product.activity", {
 
 Sixb records signed-in users and shared-link visitors. An app without sign-in records nothing.
 
-## What a visit shows
-
-A visit's timeline lists, by time, the pages viewed and what the visitor did in the meantime:
-
-- **Actions** they applied, with their outcome. An action links to its run under
-  **Observability › Runs** only when you may read that run, and names the object it applied to only
-  when you can read that object yourself.
-- **Workflows** they started, and everything those ran, even after the visit ended, linking to
-  their run likewise.
-- **Agent runs** from the chat: their status, how many messages the conversation holds and what
-  the run cost, subagents and tools included.
-
-Filter the timeline by kind. Above it, the visit's connection names the browser and system it
-signed in with, or the shared link a visitor opened. A visit belongs to one browser session, so the
-same person's other browser, used at the same time, shows its own visits.
-
-A timeline never shows a conversation's title or messages, page contents, form values, IP addresses
-or the raw user agent. Requests that only read data leave no run, so they show only as the pages
-that made them. A visit shows at most 200 page views and 200 recorded executions: past either, its
-timeline stops at the last one it could show complete, and says so.
-
 ## Visits
 
 - A visit groups the tabs of one sign-in. It ends after 30 minutes without activity
@@ -50,7 +29,21 @@ timeline stops at the last one it could show complete, and says so.
 - A visit keeps how it arrived: the `utm_source`, `utm_medium` and `utm_campaign` of your links,
   otherwise the referring site, otherwise **Direct**.
 
-Select a visit to see the pages viewed in it, as route patterns such as `/invoices/:invoiceId`.
+## What a visit shows
+
+A visit's timeline lists, by time and filterable by kind:
+
+| Entry | What it shows |
+| --- | --- |
+| Pages | Route patterns, such as `/invoices/:invoiceId` |
+| Actions and workflows | The runs the visit's session started, with their outcome |
+| Agent runs | Status, messages and cost |
+
+Above it, the connection names the browser and system, or the shared link. A user's view also
+lists their sign-ins with the visits each opened.
+
+An action names its object, and links to its run, only if you may read them. A visit shows at most
+200 page views and 200 runs, and says when it stops short.
 
 ## Privacy and limits
 
