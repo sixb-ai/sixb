@@ -254,8 +254,11 @@ Request a new run; if the action has a `.writeback()`, its external call already
 | The target object and `get()`, even for a missing object | Objects that start matching a query later |
 | `list()`, `query()`, and expanded objects | `count()`, `exists()`, and `facets()` |
 | `listLinks()` | Telemetry history and file content |
+| `getBy()`, even when no object holds the value | |
 
-To depend on an object not existing yet, give it a deterministic ID and read it with `get()`.
+To depend on an object not existing yet, give it a deterministic ID and read it with `get()`, or
+look it up by a [unique property](../ontology/properties.md#unique-values) with `getBy()`: when two
+runs create the same customer by email, the second runs again and finds the first one's object.
 A condition on an unchecked read, such as a limit on `count()`, does not hold across runs that
 execute at the same time: both can pass it and commit.
 

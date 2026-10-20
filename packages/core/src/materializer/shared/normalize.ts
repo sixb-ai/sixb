@@ -26,6 +26,7 @@ import {
   telemetryPointKey,
 } from "../../materialization/refs"
 import { parseDatasetTimestamp } from "../../projections/timestamp"
+import type { UniqueValueRef } from "../../storage/ontology"
 
 export function normalizeJsonProperties(
   properties: Readonly<Record<string, unknown>>,
@@ -155,6 +156,24 @@ function normalizeOperation(operation: OntologyEditOperation): OntologyEditOpera
     })
   }
   throw new MaterializationValidationError("Unknown ontology edit operation kind.")
+}
+
+function normalizeUnclaimedValues(values: readonly UniqueValueRef[]): readonly UniqueValueRef[] {
+  const normalized = values.map((value) => {
+    if (typeof value.valueKey !== "string") {
+      throw new MaterializationValidationError("Expected unclaimed value key must be a string.")
+    }
+    return Object.freeze({
+      objectTypeId: normalizeNonblank(value.objectTypeId, "Expected unclaimed value type id"),
+      propertyId: normalizeNonblank(value.propertyId, "Expected unclaimed value property id"),
+      valueKey: value.valueKey,
+    })
+  })
+  return deduplicateExpectations(
+    normalized,
+    (value) => JSON.stringify([value.objectTypeId, value.propertyId, value.valueKey]),
+    "Expected unclaimed values"
+  )
 }
 
 function deduplicateExpectations<T>(
@@ -315,6 +334,10 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
       (value) => linkScopeKey(value.source, value.linkId),
       "Expected link scopes"
     ),
+    // Only when present, so commits without them keep the intent they hashed to.
+    ...(input.expectedUnclaimedValues?.length
+      ? { expectedUnclaimedValues: normalizeUnclaimedValues(input.expectedUnclaimedValues) }
+      : {}),
   }
 
   if (input.source.kind === "action") {

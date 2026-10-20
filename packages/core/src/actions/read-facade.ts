@@ -25,6 +25,7 @@ import type {
   ObjectRow,
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,
+  UniqueValueRef,
 } from "../storage"
 import type { ActionReadDependencies } from "./commit-edits"
 import type {
@@ -55,6 +56,7 @@ export class ActionReadRecorder {
   private readonly objects = new Map<string, ExpectedObjectRevision>()
   private readonly links = new Map<string, ExpectedLinkRevision>()
   private readonly linkScopes = new Map<string, ExpectedLinkScopeRevision>()
+  private readonly unclaimedValues = new Map<string, UniqueValueRef>()
 
   /** Records a concrete object read, including exact absence. */
   observeObject(ref: OntologyObjectRef, row: ObjectRow | null): void {
@@ -143,11 +145,27 @@ export class ActionReadRecorder {
     )
   }
 
+  /**
+   * Records a unique value no object held. A holder that appears before the commit, such as one a
+   * concurrent run created, replays the Action instead of failing its own create on the duplicate.
+   */
+  observeUnclaimedValue(value: UniqueValueRef): void {
+    this.unclaimedValues.set(
+      JSON.stringify([value.objectTypeId, value.propertyId, value.valueKey]),
+      {
+        objectTypeId: value.objectTypeId,
+        propertyId: value.propertyId,
+        valueKey: value.valueKey,
+      }
+    )
+  }
+
   dependencies(): ActionReadDependencies {
     return {
       objects: [...this.objects.values()],
       links: [...this.links.values()],
       linkScopes: [...this.linkScopes.values()],
+      unclaimedValues: [...this.unclaimedValues.values()],
     }
   }
 }
@@ -163,6 +181,8 @@ export interface ActionReadFacadeOptions {
    * recorded scopes.
    */
   readonly resolveLinkIds: (objectTypeId: string) => readonly string[]
+  /** The key a unique value is stored under, as `getBy` computes it. */
+  readonly uniqueValueKey: (objectTypeId: string, propertyId: string, value: unknown) => string
   /** Canonical authorized telemetry history leaf. Omitted only by isolated facade consumers. */
   readonly telemetry?: ActionTelemetryReadSource
 }
@@ -294,7 +314,15 @@ function recordObjectReads<TObjectType extends ObjectTypeWithPropertyTokens>(
     },
     async getBy(property, value) {
       const row = await objectSet.getBy(property, value)
-      if (row) recorder.observeObject(ref(row.primaryId), storageRow(row))
+      if (row) {
+        recorder.observeObject(ref(row.primaryId), storageRow(row))
+      } else {
+        recorder.observeUnclaimedValue({
+          objectTypeId: objectType.id,
+          propertyId: property.id,
+          valueKey: options.uniqueValueKey(objectType.id, property.id, value),
+        })
+      }
       return row
     },
     query() {

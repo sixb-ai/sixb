@@ -1,4 +1,5 @@
 import { createSixbError } from "../../errors/internal"
+import { uniqueLookupKeyOf } from "../../execution/unique-lookup"
 import type { Logger } from "../../logging"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import { ObjectNotFoundError } from "../../storage"
@@ -57,6 +58,13 @@ export function toActionReadFacade(
     recorder,
     resolveLinkIds: (objectTypeId) =>
       runtime.sixb.objects.resolveType(objectTypeId).links.map((definition) => definition.id),
+    uniqueValueKey: (objectTypeId, propertyId, value) =>
+      uniqueLookupKeyOf(
+        runtime.sixb.objects.resolveType(objectTypeId),
+        propertyId,
+        value,
+        runtime.sixb.objects.getValueTypesById()
+      ),
     telemetry: {
       resolveObjectType: (objectTypeId) => runtime.sixb.objects.resolveType(objectTypeId),
       getHistoryBatch: (input) => runtime.sixb.objects.getTelemetryHistoryBatch(input),

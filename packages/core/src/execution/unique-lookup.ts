@@ -1,6 +1,7 @@
 import type { OntologyRegistry } from "../ontology"
 import { OntologyValidationError } from "../ontology/errors"
-import { uniqueValueKey } from "../ontology/unique-values"
+import type { ObjectType, ValueType } from "../ontology/types"
+import { uniqueValueKey, uniqueValueKind } from "../ontology/unique-values"
 import { normalizeSchemaValue, validateSchemaValue } from "../ontology/validation"
 
 /**
@@ -11,16 +12,26 @@ export function uniqueLookupKey(
   ontology: OntologyRegistry,
   input: { readonly objectTypeId: string; readonly propertyId: string; readonly value: unknown }
 ): string {
-  const { objectTypeId, propertyId, value } = input
-  const path = `${objectTypeId}.${propertyId}`
+  return uniqueLookupKeyOf(
+    ontology.resolveObjectType(input.objectTypeId),
+    input.propertyId,
+    input.value,
+    ontology.getValueTypesById()
+  )
+}
 
-  const unique = ontology
-    .listUniqueProperties(objectTypeId)
-    .find((candidate) => candidate.propertyId === propertyId)
-  const property = ontology
-    .resolveObjectType(objectTypeId)
-    .properties.find((candidate) => candidate.id === propertyId)
-  if (!unique || !property) {
+/** {@link uniqueLookupKey} against an already resolved object type. */
+export function uniqueLookupKeyOf(
+  objectType: ObjectType,
+  propertyId: string,
+  value: unknown,
+  valueTypesById: ReadonlyMap<string, ValueType>
+): string {
+  const path = `${objectType.id}.${propertyId}`
+
+  const property = objectType.properties.find((candidate) => candidate.id === propertyId)
+  const kind = property?.unique ? uniqueValueKind(property.schema, valueTypesById) : undefined
+  if (!property || !kind) {
     throw new OntologyValidationError(
       `[Sixb] Cannot look up '${path}' by value: getBy needs a property declared with unique: true.`
     )
@@ -32,10 +43,9 @@ export function uniqueLookupKey(
     )
   }
 
-  const valueTypesById = ontology.getValueTypesById()
   validateSchemaValue(property.schema, value, path, valueTypesById)
   const key = uniqueValueKey(
-    unique.kind,
+    kind,
     normalizeSchemaValue(property.schema, value, path, valueTypesById)
   )
   if (key === null) {

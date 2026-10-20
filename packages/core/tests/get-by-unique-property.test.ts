@@ -60,6 +60,21 @@ const whoHasEmail = defineAction("whoHasEmail")
     return { holder: holder?.primaryId ?? null }
   })
 
+let afterLookup: (() => Promise<void>) | null = null
+let ensureAttempts = 0
+
+/** Find or create: replayed when a concurrent write creates the holder it found missing. */
+const ensurePerson = defineAction("ensurePerson")
+  .params({ id: { schema: "string", required: true }, email: { schema: "string", required: true } })
+  .edits(async ({ objects, read, params }) => {
+    ensureAttempts += 1
+    const existing = await read.objects(Person).getBy(Person.p.email, params.email)
+    const concurrent = afterLookup
+    afterLookup = null
+    await concurrent?.()
+    if (!existing) objects(Person).create({ id: params.id, email: params.email })
+  })
+
 function createHost() {
   return new SixbHost({
     id: "get-by",
@@ -67,7 +82,7 @@ function createHost() {
     markings: [pii],
     groups: [staff],
     roles: [reader],
-    actions: [whoHasEmail],
+    actions: [whoHasEmail, ensurePerson],
     ...createTestRuntimeDeps(),
   })
 }
@@ -174,5 +189,28 @@ describe("getBy", () => {
     })
 
     expect(run).toMatchObject({ status: "succeeded", writeback: { result: { holder: "ada" } } })
+  })
+
+  // Removal proof: drop `assertValuesUnclaimed` from `executeEditTransaction`
+  // (`materializer/edits/commit.ts`); the run then fails with `object.unique_violation`.
+  test("replays an Action whose lookup found nothing when the holder appears before its commit", async () => {
+    const sixb = await seed(createHost())
+    ensureAttempts = 0
+    afterLookup = async () => {
+      await sixb.objects(Person).upsert({ properties: { id: "bob", email: "bob@example.com" } })
+    }
+
+    const run = await sixb.actions.request({
+      actionId: "ensurePerson",
+      subject: { kind: "none" },
+      params: { id: "bob-again", email: "bob@example.com" },
+    })
+
+    expect(run.status).toBe("succeeded")
+    expect(ensureAttempts).toBe(2)
+    expect(await sixb.objects(Person).get("bob-again")).toBeNull()
+    expect((await sixb.objects(Person).getBy(Person.p.email, "bob@example.com"))?.primaryId).toBe(
+      "bob"
+    )
   })
 })
