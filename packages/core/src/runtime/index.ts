@@ -61,4 +61,5 @@ export type {
   TelemetryHistoryInput,
   TelemetryPropertyToken,
   TwinObject,
+  UniquePropertyToken,
 } from "./types"

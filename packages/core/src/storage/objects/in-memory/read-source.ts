@@ -1,3 +1,4 @@
+import type { UniqueValueRef } from "../../ontology/materializations"
 import type { StoredObjectVector } from "../../ontology/vectors"
 import type { ObjectLinkRow, ObjectRow } from "../types"
 
@@ -12,4 +13,6 @@ export interface InMemoryReadSource {
   getObject(objectTypeId: string, primaryId: string): ObjectRow | undefined
   outgoingLinks(objectTypeId: string, primaryId: string): Iterable<ObjectLinkRow>
   allLinks(): Iterable<ObjectLinkRow>
+  /** The primary id of the object holding a unique value. */
+  uniqueHolder(value: UniqueValueRef): string | undefined
 }

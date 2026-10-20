@@ -24,6 +24,7 @@ import {
   type ProjectionSourceEntry,
 } from "../materializer"
 import { migrateStorage } from "../storage/migrations"
+import { compileSelectedObjectReadScope } from "../storage/objects"
 import { startTestProjectionRun } from "./projection-execution"
 
 export interface UniqueValuesContractProvider<TStorage extends Storage> {
@@ -135,6 +136,58 @@ export function runUniqueValuesContractSuite<TStorage extends Storage>(
 
       expect(await person(storage, "a")).toMatchObject({ properties: { email: "ada@example.com" } })
       expect(await person(storage, "c")).toBeNull()
+    })
+  })
+
+  test(`${name} finds the object holding a value`, async () => {
+    await withStorage(async (storage) => {
+      await editor(storage).commit([
+        create("a", { email: "ada@example.com" }),
+        create("b", { email: "bob@example.com" }),
+      ])
+
+      expect(await holderOf(storage, "email", "ada@example.com")).toMatchObject({
+        objectTypeId: Person.id,
+        primaryId: "a",
+        properties: { email: "ada@example.com" },
+      })
+      expect(await holderOf(storage, "email", "nobody@example.com")).toBeNull()
+      expect(await holderOf(storage, "email", "ADA@example.com")).toBeNull()
+    })
+  })
+
+  test(`${name} finds a holder only within a selected read scope that selects its value`, async () => {
+    await withStorage(async (storage) => {
+      await editor(storage).commit([
+        create("a", { email: "ada@example.com", name: "Ada" }),
+        create("b", { email: "bob@example.com", name: "Bob" }),
+      ])
+      const scoped = (propertyIds: readonly string[]) =>
+        storage.objects.createSelectedReadScope({
+          projectId: PROJECT,
+          scope: compileSelectedObjectReadScope({
+            kind: "selected",
+            roots: [
+              {
+                anchor: personRef("a"),
+                node: { objects: [{ objectTypeId: Person.id, propertyIds }], links: [] },
+              },
+            ],
+          }),
+          limits: { maxTraversalFacts: 100, maxOutputJsonBytes: 1_000_000 },
+        })
+      const lookup = (reader: ReturnType<typeof scoped>, valueKey: string) =>
+        reader.getByUniqueValue({
+          projectId: PROJECT,
+          objectTypeId: Person.id,
+          propertyId: "email",
+          valueKey,
+        })
+
+      const selected = scoped(["id", "email"])
+      expect(await lookup(selected, "ada@example.com")).toMatchObject({ primaryId: "a" })
+      expect(await lookup(selected, "bob@example.com")).toBeNull()
+      expect(await lookup(scoped(["id", "name"]), "ada@example.com")).toBeNull()
     })
   })
 
@@ -328,6 +381,10 @@ export function runUniqueValuesContractSuite<TStorage extends Storage>(
           },
         ])
       ).rejects.toMatchObject({ objectTypeId: Employee.id, holderPrimaryId: "a" })
+
+      expect(await holderOf(storage, "email", "same@example.com")).toMatchObject({
+        objectTypeId: Person.id,
+      })
     })
   })
 
@@ -573,6 +630,15 @@ function setEmail(primaryId: string, email: string): OntologyEditOperation {
 
 function person(storage: Storage, primaryId: string) {
   return storage.objects.getByPrimaryId({ projectId: PROJECT, ...personRef(primaryId) })
+}
+
+function holderOf(storage: Storage, propertyId: string, valueKey: string) {
+  return storage.objects.getByUniqueValue({
+    projectId: PROJECT,
+    objectTypeId: Person.id,
+    propertyId,
+    valueKey,
+  })
 }
 
 async function emails(storage: Storage, primaryIds: readonly string[]) {

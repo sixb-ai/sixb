@@ -119,6 +119,13 @@ export function createInMemorySelectedReader(
       const row = universe.objects.get(rowIdentityKeyParts(input.objectTypeId, input.primaryId))
       return visible(row ? structuredClone(row) : null)
     },
+    getByUniqueValue: async (input) => {
+      assertProject(input.projectId)
+      const universe = resolveSelectedReadUniverse(source, plan, limits)
+      const holder = universe.uniqueHolder(input)
+      const row = holder === undefined ? undefined : universe.getObject(input.objectTypeId, holder)
+      return visible(row ? structuredClone(row) : null)
+    },
     selectsObjectProperties,
     listLinks: async (input) => {
       assertProject(input.projectId)

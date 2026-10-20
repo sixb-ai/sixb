@@ -396,6 +396,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
       outgoingLinks: (objectTypeId, primaryId) =>
         this.links.get(sourceLinkBucketKey(projectId, objectTypeId, primaryId))?.values() ?? [],
       allLinks: () => allLinkRows(this.links),
+      uniqueHolder: (value) => this.uniqueHolder(projectId, value),
     }
   }
 
@@ -458,6 +459,14 @@ export class InMemoryObjectStorage implements ObjectStorage {
     const bucket = this.rows.get(objectRowKey(params.projectId, params.objectTypeId))
     if (!bucket) return null
     return bucket.get(params.primaryId) ?? null
+  }
+
+  async getByUniqueValue(
+    params: Parameters<ObjectReadStorage["getByUniqueValue"]>[0]
+  ): Promise<ObjectRow | null> {
+    const holder = this.uniqueHolder(params.projectId, params)
+    if (holder === undefined) return null
+    return this.getByPrimaryId({ ...params, primaryId: holder })
   }
 
   async selectsObjectProperties(

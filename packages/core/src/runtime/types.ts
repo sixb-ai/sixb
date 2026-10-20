@@ -869,12 +869,33 @@ export interface ObjectReadByIdHandle<out TObjectType extends ObjectTypeWithProp
 }
 
 /**
+ * The token of a property declared `unique: true`. A type whose id is only `string` accepts any of
+ * its tokens: the property is then checked when the lookup runs.
+ */
+export type UniquePropertyToken<TObjectType extends ObjectTypeWithPropertyTokens> =
+  string extends TObjectType["id"]
+    ? TObjectType["p"][keyof TObjectType["p"]]
+    : Extract<
+        TObjectType["p"][keyof TObjectType["p"]],
+        { readonly property: { readonly unique: true } }
+      >
+
+/**
  * The reads of an object set, declared once: `sixb.objects(Type)`, a Workflow step's
  * `sixb.objects(Type)` and an Action's `read.objects(Type)` add only their own writes on top.
  */
 export interface ObjectReadSet<in out TObjectType extends ObjectTypeWithPropertyTokens> {
   /** Get an object by id, or null if it doesn't exist. */
   get(id: string): Promise<TwinObject<TObjectType> | null>
+
+  /**
+   * Get the object of exactly this type holding a value of a unique property, or null. Values
+   * compare as writes store them, exactly; `null` belongs to no object.
+   */
+  getBy<TToken extends UniquePropertyToken<TObjectType>>(
+    property: TToken,
+    value: NonNullable<ObjectTypeProperties<TObjectType>[TToken["id"]]>
+  ): Promise<TwinObject<TObjectType> | null>
 
   /** Build an executable provider-neutral object query rooted at this object type. */
   query(): ObjectQueryBuilder<TObjectType>

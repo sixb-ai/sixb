@@ -76,7 +76,12 @@ prop("account", ref.user(), { nullable: true, unique: true })
 ```
 
 A write that would give a value to a second object is refused, whichever way it arrives: your
-code, an action, or a projection.
+code, an action, or a projection. To find the object that holds a value, use
+[`getBy()`](../objects/overview.md#read-an-object):
+
+```ts
+const ada = await sixb.objects(Person).getBy(Person.p.email, "ada@example.com")
+```
 
 - Strings, UUIDs, integers, dates, enums, user references, and value types of those can be unique.
 - Values compare exactly: `Ada@example.com` and `ada@example.com` are different values. Normalize
