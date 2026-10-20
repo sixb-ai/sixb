@@ -280,3 +280,104 @@ describe("single project Agent", () => {
     expect((await storage.agents.runs.list({ projectId: host.id })).total).toBe(2)
   })
 })
+
+describe("forking a conversation", () => {
+  async function conversationWithRunningTurn(host: ReturnType<typeof setup>["host"]) {
+    const { storage } = host
+    const agents = storage.agents!
+    const thread = await agents.threads.create({
+      projectId: host.id,
+      id: "deals-thread",
+      ownerPrincipal: { type: "user", id: "owner" },
+      title: "Slipped deals",
+    })
+    await agents.messages.append({
+      projectId: host.id,
+      id: "question",
+      threadId: thread.id,
+      runId: null,
+      role: "user",
+      authorPrincipal: { type: "user", id: "owner" },
+      parts: [{ type: "text", text: "Which deals slipped?" }],
+    })
+
+    const executionId = await createTestAgentExecution(storage, {
+      projectId: host.id,
+      runId: "answered-run",
+      authority: "inherited",
+    })
+    await agents.runs.create({
+      id: "answered-run",
+      projectId: host.id,
+      threadId: thread.id,
+      executionId,
+      triggerMessageId: "question",
+      spec: { model: { provider: "test", modelId: "test-model" } },
+    })
+    await agents.runs.finishQueued({ projectId: host.id, id: "answered-run", status: "failed" })
+    await agents.messages.append({
+      projectId: host.id,
+      id: "answer",
+      threadId: thread.id,
+      runId: "answered-run",
+      role: "assistant",
+      parts: [{ type: "text", text: "Three deals slipped." }],
+    })
+
+    return thread
+  }
+
+  test("copies the finished history into a thread the caller owns", async () => {
+    // Removal proof: copy every message while a turn is running in planAgentThreadFork; the
+    // queued question lands in the fork, which then holds three messages.
+    const { host, storage } = setup()
+    const owner = await userScope(host, "owner")
+    const thread = await conversationWithRunningTurn(host)
+    const running = await owner.agent.runs.request({ threadId: thread.id, text: "Draft emails" })
+
+    const fork = await owner.agent.threads.fork(thread.id)
+
+    expect(fork).toMatchObject({
+      ownerPrincipal: { type: "user", id: "owner" },
+      title: "Slipped deals",
+      activeRunId: null,
+      messageCount: 2,
+    })
+    expect(fork.id).not.toBe(thread.id)
+
+    const copied = await storage.agents.messages.list({ projectId: host.id, threadId: fork.id })
+    expect(copied.messages.map((message) => message.parts)).toEqual([
+      [{ type: "text", text: "Which deals slipped?" }],
+      [{ type: "text", text: "Three deals slipped." }],
+    ])
+    expect(copied.messages.map((message) => message.runId)).toEqual([null, "answered-run"])
+
+    // The fork is idle at once; the source keeps its running turn.
+    const next = await owner.agent.runs.request({ threadId: fork.id, text: "Draft emails" })
+    expect(next.run.threadId).toBe(fork.id)
+    expect(await owner.agent.threads.getById(thread.id)).toMatchObject({
+      activeRunId: running.run.id,
+      messageCount: 3,
+    })
+    expect((await owner.agent.threads.list()).total).toBe(2)
+  })
+
+  test("forks only a thread the caller can read", async () => {
+    // Removal proof: read the source from storage instead of getVisibleThreadRecord; another
+    // user forks the owner's conversation.
+    const { host, storage } = setup()
+    const thread = await conversationWithRunningTurn(host)
+    const other = await userScope(host, "other")
+    const denied = await userScope(host, "denied", false)
+
+    for (const scope of [other, denied]) {
+      await expect(scope.agent.threads.fork(thread.id)).rejects.toMatchObject({
+        code: "thread_not_found",
+      })
+    }
+    await expect(other.agent.threads.fork("missing")).rejects.toMatchObject({
+      code: "thread_not_found",
+    })
+    expect((await storage.agents.threads.list({ projectId: host.id })).total).toBe(1)
+  })
+})

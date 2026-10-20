@@ -97,6 +97,9 @@ import type {
   FacetObjectsData,
   FacetObjectsErrors,
   FacetObjectsResponses,
+  ForkAgentThreadData,
+  ForkAgentThreadErrors,
+  ForkAgentThreadResponses,
   GetActionData,
   GetActionErrors,
   GetActionResponses,
@@ -2620,6 +2623,21 @@ export const removeAgentThreadParticipant = <ThrowOnError extends boolean = fals
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/agent-threads/{threadId}/participants/{userId}",
+    ...options,
+  })
+
+/**
+ * Continue an agent thread in a new one the caller owns
+ */
+export const forkAgentThread = <ThrowOnError extends boolean = false>(
+  options: Options<ForkAgentThreadData, ThrowOnError>
+) =>
+  (options.client ?? client).post<ForkAgentThreadResponses, ForkAgentThreadErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-threads/{threadId}/fork",
     ...options,
   })
 

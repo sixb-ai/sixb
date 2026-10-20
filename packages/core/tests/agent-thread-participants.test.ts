@@ -32,7 +32,11 @@ function setup() {
 type Host = ReturnType<typeof setup>["host"]
 
 /** A signed-in user's request, as the server binds one. */
-async function signedIn(host: Host, id: string, grants = { "run:agent": true }) {
+async function signedIn(
+  host: Host,
+  id: string,
+  grants: Partial<ReturnType<typeof emptyGrantIndex>> = { "run:agent": true }
+) {
   await host.storage.auth?.users.create({
     projectId,
     id,
@@ -302,6 +306,50 @@ describe("adding and removing participants", () => {
     await owner.agent.threads.participants.remove(thread.id, dan)
     await owner.agent.threads.participants.remove(thread.id, dan)
     expect((await owner.agent.threads.getById(thread.id))?.participants).toEqual([])
+  })
+})
+
+describe("forking a shared conversation", () => {
+  // Guard proof: fork only when the caller owns the source; Bob's fork is then refused.
+  test("a participant forks it into a thread they own alone", async () => {
+    const { host } = setup()
+    const { owner, participant, thread } = await sharedThread(host)
+
+    const fork = await participant.agent.threads.fork(thread.id)
+
+    expect(fork).toMatchObject({
+      ownerPrincipal: bob,
+      title: "Late deals",
+      participants: [],
+      messageCount: 1,
+    })
+    expect(
+      await host.storage.agents?.threads.listParticipants({ projectId, threadIds: [fork.id] })
+    ).toEqual([])
+    expect((await participant.agent.threads.list()).threads.map((each) => each.id)).toEqual([
+      fork.id,
+    ])
+    expect(await owner.agent.threads.getById(fork.id)).toBeNull()
+    expect((await owner.agent.threads.getById(thread.id))?.participants).toHaveLength(1)
+  })
+
+  test("anyone else, an observer, or a removed participant cannot fork it", async () => {
+    const { host } = setup()
+    const { owner, participant, other, thread } = await sharedThread(host)
+    const observer = await signedIn(host, "usr_olivia", {
+      "run:agent": true,
+      "observe:agentThreads": true,
+    })
+    expect(await observer.agent.observed.getById(thread.id)).toMatchObject({ id: thread.id })
+
+    await owner.agent.threads.participants.remove(thread.id, bob)
+
+    for (const caller of [other, observer, participant]) {
+      await expect(caller.agent.threads.fork(thread.id)).rejects.toMatchObject({
+        code: "thread_not_found",
+      })
+    }
+    expect((await host.storage.agents?.threads.list({ projectId }))?.total).toBe(1)
   })
 })
 

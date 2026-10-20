@@ -2937,7 +2937,7 @@ describe("AgentWorker", () => {
           if (i === 1) resetAt = state?.resetAt
           expect(state?.resetAt).toBe(resetAt)
           expect(prompts[i]).toContain("<sandbox_state>")
-          expect(prompts[i]).toContain("were not recovered")
+          expect(prompts[i]).toContain("from before that time are not in it")
         }
       } finally {
         await worker.stop()

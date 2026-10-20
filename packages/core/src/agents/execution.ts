@@ -23,6 +23,7 @@ import type { AiCostSummary } from "../storage/ai-cost"
 import type { AiModelCallUsage } from "../storage/ai-usage"
 import { cancelAgentRun } from "./cancel"
 import { AgentRequestError } from "./errors"
+import { forkAgentThread } from "./fork"
 import { createAgentThreadId, createAgentThreadSandboxName } from "./ids"
 import {
   type AgentThreadParticipantInput,
@@ -74,6 +75,11 @@ export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record
       input: { readonly expectedSandboxName: string }
     ): Promise<AgentThreadView>
     create(input: CreateExecutionAgentThreadInput<TParams>): Promise<AgentThreadView>
+    /**
+     * Copy a thread of the caller's, or one shared with them, into a new one the caller owns alone,
+     * with a new sandbox. A turn still running is not copied.
+     */
+    fork(threadId: string): Promise<AgentThreadView>
     /** A thread the caller owns or takes part in. */
     getById(threadId: string): Promise<AgentThreadView | null>
     /** The caller's own threads, or with `sharedWithMe` the ones other users added it to. */
@@ -300,6 +306,28 @@ export function createAgentRuntime<
           ...(input.title === undefined ? {} : { title: input.title }),
         })
         return { ...created, participants: [] }
+      },
+      fork: async (threadId) => {
+        // Checked before the copy's transaction: an access removed in between can still fork once.
+        const readable = await rule.read(threadId)
+        if (!readable) {
+          throw new AgentRequestError(
+            "thread_not_found",
+            `[Sixb] Agent thread '${threadId}' not found.`
+          )
+        }
+
+        if (!getAgent()) {
+          throw new AgentRequestError("agent_not_found", "[Sixb] The project Agent is unavailable.")
+        }
+
+        const fork = await forkAgentThread(runtime, {
+          source: readable.thread,
+          ownerPrincipal: principal,
+          sandbox,
+        })
+        const [view] = await agentThreadViews(runtime, [fork])
+        return view ?? { ...fork, participants: [] }
       },
       getById: getVisibleThreadRecord,
       list: async ({ sharedWithMe, ...input } = {}) => {

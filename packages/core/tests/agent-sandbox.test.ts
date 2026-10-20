@@ -436,4 +436,55 @@ describe("Agent sandbox binding", () => {
     })
     expect(recreated.sandboxState?.status).toBe("new")
   })
+
+  test("forks a workspace with its binding and a sandbox of its own, reset at the fork", async () => {
+    // Regression proof: drop `resetAt` from forkedSandboxState; the fork's Agent is never told
+    // that the files of the copied history are not in its sandbox.
+    const { host, sixb, storage } = setup(recipe())
+    const thread = await sixb.agent.threads.create({ sandbox: { clientId: "acme" } })
+    const admitted = await sixb.agent.runs.request({ threadId: thread.id, text: "Do some work" })
+    await storage.agents.runs.start({
+      projectId: host.id,
+      id: admitted.run.id,
+      execution: { token: "owner", queueLeaseExpiresAt: new Date("2099-01-01") },
+    })
+    await storage.agents.threads.transitionSandbox({
+      projectId: host.id,
+      id: thread.id,
+      action: "acquire",
+      runId: admitted.run.id,
+      executionToken: "owner",
+      name: "test-name",
+      sourceFingerprint: "a".repeat(64),
+    })
+
+    const fork = await sixb.agent.threads.fork(thread.id)
+
+    expect(fork.sandboxParams).toEqual({ clientId: "acme" })
+    expect(fork.sandboxState).toMatchObject({ status: "new", initialized: false })
+    expect(fork.sandboxState?.name).not.toBe("test-name")
+
+    const stored = await storage.agents.threads.getById({ projectId: host.id, id: fork.id })
+    expect(stored?.sandboxState?.resetAt).toBe(stored?.createdAt.toISOString())
+  })
+
+  test("checks a forked binding against the current sandbox configuration", async () => {
+    const stale = {
+      projectId: "workspaces",
+      ownerPrincipal: { type: "system" as const, id: "system" },
+    }
+
+    const disabled = setup()
+    await disabled.storage.agents.threads.create({ ...stale, id: "bound", sandboxParams: {} })
+    await expect(disabled.sixb.agent.threads.fork("bound")).rejects.toMatchObject({
+      code: "sandbox_not_configured",
+    })
+
+    const { sixb, storage } = setup(recipe())
+    await storage.agents.threads.create({ ...stale, id: "bound", sandboxParams: { clientId: 42 } })
+    await expect(sixb.agent.threads.fork("bound")).rejects.toMatchObject({
+      code: "invalid_sandbox_params",
+    })
+    expect((await sixb.agent.threads.list()).total).toBe(1)
+  })
 })

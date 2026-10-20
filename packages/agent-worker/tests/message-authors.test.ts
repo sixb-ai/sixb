@@ -81,6 +81,55 @@ describe("who writes in a conversation, as the model reads it", () => {
     expect(authors.section).not.toContain("shared")
   })
 
+  // A fork has no participants, but its copies keep their authors: the owner's colleague still
+  // reads as the one who asked. Guard proof: copy messages without `authorPrincipal` in the fork.
+  test("names the authors of a shared conversation's messages in a fork of it", async () => {
+    const storage = new InMemoryStorage()
+    await storage.agents.threads.create({ projectId, id: "thr_shared", ownerPrincipal: alice })
+    await storage.agents.threads.addParticipants({
+      projectId,
+      threadId: "thr_shared",
+      principals: [bob],
+      addedBy: alice,
+      maxParticipants: 50,
+    })
+    for (const [id, author] of [
+      ["msg_alice", alice],
+      ["msg_bob", bob],
+    ] as const) {
+      await storage.agents.messages.append({
+        projectId,
+        id,
+        threadId: "thr_shared",
+        runId: null,
+        role: "user",
+        authorPrincipal: author,
+        parts: [{ type: "text", text: id }],
+      })
+    }
+
+    const fork = await storage.agents.threads.fork({
+      projectId,
+      sourceThreadId: "thr_shared",
+      id: "thr_fork",
+      ownerPrincipal: bob,
+    })
+    const { messages } = await storage.agents.messages.list({ projectId, threadId: fork.id })
+    const authors = await loadConversationAuthors({
+      auth: storage.auth,
+      conversation: { thread: fork, participants: [] },
+      messages,
+    })
+
+    expect(messages.map((message) => authors.byMessageId.get(message.id))).toEqual([
+      '<sixb_author id="usr_alice">usr_alice</sixb_author>',
+      '<sixb_author id="usr_bob">usr_bob</sixb_author>',
+    ])
+    expect(authors.section).toContain(
+      "Several people wrote in this conversation. Its owner: usr_bob.\nNobody else takes part in it now."
+    )
+  })
+
   // Guard proof: drop the length bound in promptName; the 300-character name then reaches the
   // model whole.
   test("bounds a display name", async () => {

@@ -10592,6 +10592,97 @@ export type RemoveAgentThreadParticipantResponses = {
   204: unknown
 }
 
+export type ForkAgentThreadData = {
+  body?: never
+  path: {
+    threadId: string
+  }
+  query?: never
+  url: "/api/agent-threads/{threadId}/fork"
+}
+
+export type ForkAgentThreadErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    code?: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ForkAgentThreadError = ForkAgentThreadErrors[keyof ForkAgentThreadErrors]
+
+export type ForkAgentThreadResponses = {
+  /**
+   * Response for status 201
+   */
+  201: {
+    thread: {
+      sandboxState?: {
+        name: string
+        status: "new" | "busy" | "ready" | "blocked" | "unavailable"
+        initialized: boolean
+      }
+      id: string
+      projectId: string
+      ownerPrincipal: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      owner: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+        displayName?: string
+      }
+      participants: Array<{
+        principal: {
+          type: "user"
+          id: string
+          displayName?: string
+        }
+        addedAt: string
+        addedBy: {
+          type: "user" | "serviceAccount" | "system"
+          id: string
+        }
+      }>
+      title?: string
+      sandboxParams?: {
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+      }
+      status: "active" | "archived"
+      activeRunId: string | null
+      lastMessageAt?: string
+      messageCount: number
+      createdAt: string
+      updatedAt: string
+    }
+  }
+}
+
+export type ForkAgentThreadResponse = ForkAgentThreadResponses[keyof ForkAgentThreadResponses]
+
 export type RecreateAgentThreadSandboxData = {
   body: {
     expectedSandboxName: string
