@@ -319,6 +319,8 @@ Objects:
   sixb objects inspect <type> <id>    Inspect an object and its related graph in one command
   sixb objects list [options]         Browse materialized objects
   sixb objects get <type> <id>...     Exact lookup through opaque object references
+  sixb objects get-by <type> <property> <value>
+                                      The object holding a value of a unique property
   sixb objects search <text>          Search visible objects by id prefix and full text
   sixb objects search <text> --type <type>
                                       Semantic search through the type's vector profile
@@ -373,10 +375,18 @@ var SEARCH_HELP = `Usage:
 profiles.
 
 ${SEARCH_DETAILS}`;
+var GET_BY_HELP = `Usage:
+  sixb objects get-by <object-type> <property> <value> [--json]
+
+Prints the object of exactly <object-type> holding <value> for a property marked unique in its
+ontology doc, or null when no visible object holds it. Values match exactly, case included.
+The value is a string; with --json it is parsed as JSON, for an integer (42) or a user
+reference ({"type":"user","id":"usr_1"}).`;
 var OBJECTS_HELP = `Usage:
   sixb objects inspect <object-type> <primary-id> [options]
   sixb objects list [options]
   sixb objects get <object-type> <primary-id>...
+  sixb objects get-by <object-type> <property> <value> [--json]
   sixb objects search <text> [--type <object-type> [--vector-profile <name>]] [--limit <n>]
   sixb objects query --file <path|-> [--include-total|--no-total]
   sixb objects query --example <name>
@@ -997,6 +1007,8 @@ async function objects(api, args) {
       return objectsList(api, rest);
     case "get":
       return objectsGet(api, rest);
+    case "get-by":
+      return objectsGetBy(api, rest);
     case "search":
       return objectsSearch(api, rest);
     case "query":
@@ -1086,6 +1098,31 @@ async function objectsGet(api, args) {
     },
     includeTotal: false
   }));
+}
+async function objectsGetBy(api, args) {
+  if (requestsHelp(args))
+    return writeText(GET_BY_HELP);
+  const { positionals, options } = parseCommandArgs(args, { "--json": "boolean" }, "objects get-by", 3);
+  const [objectTypeId = "", propertyId = "", text = ""] = positionals;
+  const value = options["--json"] ? parseJsonValue(text) : text;
+  const path = `/api/objects/${encodeURIComponent(objectTypeId)}/by/${encodeURIComponent(propertyId)}`;
+  try {
+    writeJson(await api.post(path, { value }));
+  } catch (error) {
+    if (!isObjectNotFound(error))
+      throw error;
+    writeJson(null);
+  }
+}
+function parseJsonValue(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    fail(`--json needs the value as JSON, such as 42 or '{"type":"user","id":"usr_1"}'.`);
+  }
+}
+function isObjectNotFound(error) {
+  return error instanceof CliError && error.body.status === 404 && error.body.message === "Object not found";
 }
 async function objectsSearch(api, args) {
   if (requestsHelp(args))

@@ -9,9 +9,16 @@ import {
   rfc3339Value,
 } from "../arguments"
 import { inspectGraph } from "../graph"
-import { fail, writeJson, writeText } from "../output"
+import { CliError, fail, writeJson, writeText } from "../output"
 import { CLI_LIMITS, DEFAULT_LIST_ORDER, DEFAULT_OBJECT_ORDER_BY } from "../policies"
-import { FACETS_EXAMPLE, OBJECTS_HELP, QUERY_EXAMPLES, QUERY_HELP, SEARCH_HELP } from "./metadata"
+import {
+  FACETS_EXAMPLE,
+  GET_BY_HELP,
+  OBJECTS_HELP,
+  QUERY_EXAMPLES,
+  QUERY_HELP,
+  SEARCH_HELP,
+} from "./metadata"
 import {
   asRecord,
   normalizeWindowOptions,
@@ -31,6 +38,8 @@ export async function objects(api: ApiClient, args: readonly string[]): Promise<
       return objectsList(api, rest)
     case "get":
       return objectsGet(api, rest)
+    case "get-by":
+      return objectsGetBy(api, rest)
     case "search":
       return objectsSearch(api, rest)
     case "query":
@@ -152,6 +161,44 @@ async function objectsGet(api: ApiClient, args: readonly string[]): Promise<void
       },
       includeTotal: false,
     })
+  )
+}
+
+/** Prints the object holding the value, or `null` when none does or its type is not visible. */
+async function objectsGetBy(api: ApiClient, args: readonly string[]): Promise<void> {
+  if (requestsHelp(args)) return writeText(GET_BY_HELP)
+  const { positionals, options } = parseCommandArgs(
+    args,
+    { "--json": "boolean" },
+    "objects get-by",
+    3
+  )
+  const [objectTypeId = "", propertyId = "", text = ""] = positionals
+  const value = options["--json"] ? parseJsonValue(text) : text
+
+  const path = `/api/objects/${encodeURIComponent(objectTypeId)}/by/${encodeURIComponent(propertyId)}`
+  try {
+    writeJson(await api.post(path, { value }))
+  } catch (error) {
+    if (!isObjectNotFound(error)) throw error
+    writeJson(null)
+  }
+}
+
+function parseJsonValue(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    fail('--json needs the value as JSON, such as 42 or \'{"type":"user","id":"usr_1"}\'.')
+  }
+}
+
+/** The route's own answer when no visible object holds the value. */
+function isObjectNotFound(error: unknown): boolean {
+  return (
+    error instanceof CliError &&
+    error.body.status === 404 &&
+    error.body.message === "Object not found"
   )
 }
 

@@ -128,11 +128,12 @@ Remote commands use the selected API and its permissions:
 sixb project show
 sixb ontology list
 sixb objects inspect Invoice inv-1
+sixb objects get-by Customer email ada@example.com
 ```
 
 | Command group | Purpose |
 | --- | --- |
-| `objects` | Read, search, and query objects. |
+| `objects` | Read, search, and query objects, or find one by a [unique property](../ontology/properties.md#unique-values). |
 | `telemetry` | Read current and historical values. |
 | `actions`, `action-runs` | Request actions and inspect runs. |
 | `workflows`, `workflow-runs` | Start workflows and inspect runs. |

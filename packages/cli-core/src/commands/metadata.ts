@@ -28,6 +28,8 @@ Objects:
   sixb objects inspect <type> <id>    Inspect an object and its related graph in one command
   sixb objects list [options]         Browse materialized objects
   sixb objects get <type> <id>...     Exact lookup through opaque object references
+  sixb objects get-by <type> <property> <value>
+                                      The object holding a value of a unique property
   sixb objects search <text>          Search visible objects by id prefix and full text
   sixb objects search <text> --type <type>
                                       Semantic search through the type's vector profile
@@ -94,10 +96,19 @@ profiles.
 
 ${SEARCH_DETAILS}`
 
+export const GET_BY_HELP = `Usage:
+  sixb objects get-by <object-type> <property> <value> [--json]
+
+Prints the object of exactly <object-type> holding <value> for a property marked unique in its
+ontology doc, or null when no visible object holds it. Values match exactly, case included.
+The value is a string; with --json it is parsed as JSON, for an integer (42) or a user
+reference ({"type":"user","id":"usr_1"}).`
+
 export const OBJECTS_HELP = `Usage:
   sixb objects inspect <object-type> <primary-id> [options]
   sixb objects list [options]
   sixb objects get <object-type> <primary-id>...
+  sixb objects get-by <object-type> <property> <value> [--json]
   sixb objects search <text> [--type <object-type> [--vector-profile <name>]] [--limit <n>]
   sixb objects query --file <path|-> [--include-total|--no-total]
   sixb objects query --example <name>
