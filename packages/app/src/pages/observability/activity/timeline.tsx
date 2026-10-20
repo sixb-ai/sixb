@@ -1,6 +1,7 @@
 import type { GetActivityVisitTimelineResponse } from "@sixb/client"
 import { useLocale } from "@sixb/ui/lib/i18n"
-import { Bot, FileText, type LucideIcon, Workflow, Zap } from "lucide-react"
+import { cn } from "@sixb/ui/lib/utils"
+import { Bot, FileText, type LucideIcon, MousePointerClick, Workflow, Zap } from "lucide-react"
 import { Fragment, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { actionRunHref, objectHref, workflowRunHref } from "../../routes"
@@ -15,10 +16,11 @@ type Entry = Timeline["entries"][number]
 type Connection = NonNullable<Timeline["connection"]>
 type Filter = "all" | Entry["kind"]
 
-const filters: readonly Filter[] = ["all", "page", "action", "workflow", "agent"]
+const filters: readonly Filter[] = ["all", "page", "interaction", "action", "workflow", "agent"]
 
 const icons: Readonly<Record<Entry["kind"], LucideIcon>> = {
   page: FileText,
+  interaction: MousePointerClick,
   action: Zap,
   workflow: Workflow,
   agent: Bot,
@@ -105,6 +107,14 @@ function EntryContent({ entry }: { readonly entry: Entry }) {
     case "page":
       return <RoutePattern route={entry.route} />
 
+    case "interaction":
+      return (
+        <>
+          <span className="font-mono text-[0.8125rem] font-medium break-all">{entry.name}</span>
+          <RoutePattern route={entry.route} className="text-xs text-muted-foreground" />
+        </>
+      )
+
     case "action": {
       const name = humanize(entry.actionId)
       return (
@@ -166,10 +176,16 @@ function EntryContent({ entry }: { readonly entry: Entry }) {
  * A route pattern that wraps after a slash when it must, not inside a segment; a segment wider
  * than the row still breaks anywhere.
  */
-function RoutePattern({ route }: { readonly route: string }) {
+function RoutePattern({
+  route,
+  className,
+}: {
+  readonly route: string
+  readonly className?: string
+}) {
   const segments = route.split("/")
   return (
-    <span className="font-mono text-[0.8125rem] [overflow-wrap:anywhere]">
+    <span className={cn("font-mono text-[0.8125rem] [overflow-wrap:anywhere]", className)}>
       {segments.map((segment, index) => (
         // Each prefix of the route is distinct, so it keys the segment that ends it.
         <Fragment key={segments.slice(0, index + 1).join("/")}>
@@ -206,7 +222,7 @@ function RunName({ name, href }: { readonly name: string; readonly href: string 
 function EntryStatus({
   status,
 }: {
-  readonly status: Exclude<Entry, { readonly kind: "page" }>["status"]
+  readonly status: Extract<Entry, { readonly status: unknown }>["status"]
 }) {
   const messages = useActivityMessages().visit
   return status === "incomplete" ? (
@@ -282,5 +298,7 @@ export function connectionDevice(
 }
 
 function entryKey(entry: Entry): string {
-  return entry.kind === "page" ? `page:${entry.sequence}` : `execution:${entry.executionId}`
+  return entry.kind === "page" || entry.kind === "interaction"
+    ? `${entry.kind}:${entry.sequence}`
+    : `execution:${entry.executionId}`
 }

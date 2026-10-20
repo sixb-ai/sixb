@@ -59,6 +59,7 @@ export const en = {
     filters: {
       all: "All",
       page: "Pages",
+      interaction: "Interactions",
       action: "Actions",
       workflow: "Workflows",
       agent: "Agent",
@@ -170,6 +171,7 @@ export const fr: Translation<ActivityMessages> = {
     filters: {
       all: "Tout",
       page: "Pages",
+      interaction: "Interactions",
       action: "Actions",
       workflow: "Workflows",
       agent: "Agent",

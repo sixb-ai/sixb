@@ -43,8 +43,8 @@ export interface ActivityRuntime {
   summarize(query: ActivityPeriodQuery): Promise<ActivitySummary>
   calendar(query: ActivityCalendarQuery): Promise<ActivityCalendar>
   /**
-   * The visit's page views with the actions, workflows and Agent runs its session started, and
-   * the connection it came through. Bounded: see `truncated`.
+   * The visit's page views and interactions with the actions, workflows and Agent runs its session
+   * started, and the connection it came through. Bounded: see `truncated`.
    */
   timeline(visitId: string): Promise<ActivityVisitTimeline | null>
   /** A user's sign-ins, newest first, with the visits each opened. */

@@ -1,12 +1,14 @@
 /** Implementation exports for Sixb packages only. */
 
 export { normalizeRecordActionRunInput, resolveActionRunEffects } from "./action-runs/record"
-export type { ActivitySourceState, StoredActivityPageView } from "./activity/policy"
+export type { ActivitySourceState, StoredActivityEvent } from "./activity/policy"
 export {
   ACTIVITY_BATCH_LIMIT,
   ACTIVITY_EVENT_ID_PATTERN,
   ACTIVITY_HOSTNAME_PATTERN,
   ACTIVITY_ID_MAX_LENGTH,
+  ACTIVITY_INTERACTION_NAME_MAX_LENGTH,
+  ACTIVITY_INTERACTION_NAME_PATTERN,
   ACTIVITY_LABEL_MAX_LENGTH,
   ACTIVITY_LABEL_PATTERN,
   ACTIVITY_MAX_PAGE_SIZE,

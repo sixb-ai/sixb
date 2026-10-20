@@ -13,6 +13,8 @@ import type {
   ActivityCalendarInput,
   ActivityCursor,
   ActivityDay,
+  ActivityInteraction,
+  ActivityPageView,
   ActivityPeriodInput,
   ActivitySessionVisits,
   ActivityStorage,
@@ -38,9 +40,14 @@ interface StoredVisit {
   readonly startedAt: Date
   lastSeenAt: Date
   pageViews: number
+  interactions: number
 }
 
 interface StoredPageView extends PlannedActivityPageView {
+  readonly projectId: string
+}
+
+interface StoredInteraction extends ActivityInteraction {
   readonly projectId: string
 }
 
@@ -51,6 +58,7 @@ interface InMemoryActivitySnapshot {
   readonly sources: Map<string, StoredSource>
   readonly visits: Map<string, StoredVisit>
   readonly pageViews: StoredPageView[]
+  readonly interactions: StoredInteraction[]
 }
 
 /** Activity for tests and local development. Each append runs without yielding, so it is atomic. */
@@ -58,16 +66,17 @@ export class InMemoryActivityStorage implements ActivityStorage {
   private sources = new Map<string, StoredSource>()
   private visits = new Map<string, StoredVisit>()
   private pageViews: StoredPageView[] = []
+  private interactions: StoredInteraction[] = []
 
   async append(input: AppendActivityInput): Promise<AppendActivityResult> {
     validateActivityAppend(input)
 
     const sourceKey = JSON.stringify([input.projectId, input.actor.type, input.sessionId])
-    const stored = this.pageViews.filter(
-      (pageView) =>
-        pageView.projectId === input.projectId &&
-        this.isFromSession(pageView, input) &&
-        input.events.some((event) => event.id === pageView.id)
+    const stored = [...this.pageViews, ...this.interactions].filter(
+      (event) =>
+        event.projectId === input.projectId &&
+        this.isFromSession(event, input) &&
+        input.events.some((candidate) => candidate.id === event.id)
     )
 
     const plan = planActivityAppend(input, this.source(sourceKey, input.projectId), stored)
@@ -92,17 +101,22 @@ export class InMemoryActivityStorage implements ActivityStorage {
         startedAt: lastSeenAt,
         lastSeenAt,
         pageViews: plan.pageViews.length,
+        interactions: plan.interactions.length,
       })
     } else {
       const visit = this.requireVisit(input.projectId, plan.state.visitId)
       visit.lastSeenAt = lastSeenAt
       visit.pageViews += plan.pageViews.length
+      visit.interactions += plan.interactions.length
     }
 
     const { visitStartedAt: _startedAt, ...source } = plan.state
     this.sources.set(sourceKey, source)
     for (const pageView of plan.pageViews) {
       this.pageViews.push({ ...pageView, projectId: input.projectId })
+    }
+    for (const interaction of plan.interactions) {
+      this.interactions.push({ ...interaction, projectId: input.projectId })
     }
 
     return { status: "accepted", accepted: plan.accepted }
@@ -188,19 +202,32 @@ export class InMemoryActivityStorage implements ActivityStorage {
       return null
     }
 
-    const pageViews = this.pageViewsOf(visit).sort((left, right) => left.sequence - right.sequence)
+    const ofVisit = (event: StoredPageView | StoredInteraction) =>
+      event.projectId === visit.projectId && event.visitId === visit.id
+
+    const events = [...this.pageViews.filter(ofVisit), ...this.interactions.filter(ofVisit)].sort(
+      (left, right) => left.sequence - right.sequence
+    )
+
+    const pageViews: ActivityPageView[] = []
+    const interactions: ActivityInteraction[] = []
+    for (const event of events.slice(0, input.limit)) {
+      const { id, visitId, sequence, route } = event
+      const pageView = { id, visitId, sequence, route, receivedAt: new Date(event.receivedAt) }
+
+      if ("name" in event) {
+        interactions.push({ ...pageView, name: event.name })
+      } else {
+        pageViews.push(pageView)
+      }
+    }
 
     return {
       visit: toVisit(visit),
       sessionId: visit.sessionId,
-      pageViews: pageViews.slice(0, input.limit).map((pageView) => ({
-        id: pageView.id,
-        visitId: pageView.visitId,
-        sequence: pageView.sequence,
-        route: pageView.route,
-        receivedAt: new Date(pageView.receivedAt),
-      })),
-      hasMore: pageViews.length > input.limit,
+      pageViews,
+      interactions,
+      hasMore: events.length > input.limit,
     }
   }
 
@@ -237,6 +264,7 @@ export class InMemoryActivityStorage implements ActivityStorage {
       sources: this.sources,
       visits: this.visits,
       pageViews: this.pageViews,
+      interactions: this.interactions,
     })
   }
 
@@ -245,6 +273,7 @@ export class InMemoryActivityStorage implements ActivityStorage {
     this.sources = restored.sources
     this.visits = restored.visits
     this.pageViews = restored.pageViews
+    this.interactions = restored.interactions
   }
 
   private source(key: string, projectId: string): ActivitySourceState | undefined {
@@ -289,8 +318,11 @@ export class InMemoryActivityStorage implements ActivityStorage {
     )
   }
 
-  private isFromSession(pageView: StoredPageView, input: AppendActivityInput): boolean {
-    const visit = this.visits.get(JSON.stringify([pageView.projectId, pageView.visitId]))
+  private isFromSession(
+    event: StoredPageView | StoredInteraction,
+    input: AppendActivityInput
+  ): boolean {
+    const visit = this.visits.get(JSON.stringify([event.projectId, event.visitId]))
     return visit?.actor.type === input.actor.type && visit.sessionId === input.sessionId
   }
 
@@ -311,6 +343,7 @@ function toVisit(visit: StoredVisit): ActivityVisit {
     startedAt: new Date(visit.startedAt),
     lastSeenAt: new Date(visit.lastSeenAt),
     pageViews: visit.pageViews,
+    interactions: visit.interactions,
   }
 }
 

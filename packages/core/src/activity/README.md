@@ -8,8 +8,9 @@ Internal invariants for app usage history. For setup, see the
 | Record | Purpose |
 | --- | --- |
 | Source | Capture state of one verified session, shared by its tabs: current visit, last activity, sequence and quota window. Unrelated to `utm_source`. |
-| Visit | Actor, session id, first and last activity, page-view count and arrival attribution. A new visit starts after inactivity, or once the current one is a day old. |
+| Visit | Actor, session id, first and last activity, page-view and interaction counts and arrival attribution. A new visit starts after inactivity, or once the current one is a day old. |
 | Page view | Normalized route, server receipt time and sequence within the visit. |
+| Interaction | Name the app chose, normalized route, server receipt time and sequence, shared with page views. |
 
 A source is keyed by the actor type and the session id: the `SessionRecord` id for a user, the
 shared session's id for a share. Neither is a secret (a user session's token is stored as
@@ -21,6 +22,14 @@ moves the visit's last activity and the source's state, counts toward the quota,
 nothing, except when it opens a visit (someone back on a page after inactivity): it is then stored
 as the visit's first page view, of that route. Hidden navigation is reported once visible. This is
 not audit evidence.
+
+`ui.interaction` is something the app marked, by name: it is stored, and is activity as well. Page
+views and interactions take the visit's sequence in the order a batch sends them, so the timeline
+reads both in one ordered, bounded pass. An interaction carries no attribution. One that opens a
+visit (after the day-long cap, inactivity the browser had not seen, or a deleted visit) opens it as
+activity does, on a page view of its route: that row's id is the interaction's with `.page`
+appended, outside the event-id alphabet, and the visit's arrival is direct (`{}`). A retry of the
+interaction is recognized by its own id, so neither row repeats.
 
 A visit continues while its session is active and it is younger than a day
 (`ACTIVITY_MAX_VISIT_MS`): the next event after either limit starts another. The cap is what lets a
@@ -36,18 +45,35 @@ new one with its next event.
   part in the storage transaction they run in. The [shared policy](../storage/activity/policy.ts)
   owns deduplication, the quota, visit assignment, sequence and monotonic receipt time.
 - **Retries:** an event whose id the session already stored is a retry, whether it was sent as a
-  page view or as the activity that opened a visit: it neither extends the visit nor uses quota,
-  and the same id with another route or attribution fails. Other activity is not stored, so a
-  retried `visit.activity` counts again: it moves last activity to the retry's receipt and uses
-  quota. The browser gives up within about a minute, so that drift is bounded.
+  page view or as the activity that opened a visit, or is an interaction: it neither extends the
+  visit nor uses quota, and the same id with another type, name, route or attribution fails. Other
+  activity is not stored, so a retried `visit.activity` counts again: it moves last activity to the
+  retry's receipt and uses quota. The browser gives up within about a minute, so that drift is
+  bounded.
 - **Browser:** capture-config supplies enabled and the idle timeout once per authority; the server
   stays authoritative. The in-memory queue is discarded on disposal, with at most three attempts,
   one-minute expiry and ten seconds per request. A refusal (4xx) drops the batch; a 429 waits for
   its `Retry-After`. Delivery and exact duration are not guaranteed.
 - **Clock:** receipt time never moves back within a session, so a server clock stepping back
   cannot reorder a visit.
+- **Interactions:** explicit marking only, by `data-sixb-track` or `trackSixbEvent`; no
+  autocapture, element text, selector or value. Names are lowercase dotted segments, each starting
+  with a letter, at most 40 characters and without a run of four digits, 100 in all
+  (`ACTIVITY_INTERACTION_NAME_PATTERN`): what fails is usually a value. No pattern catches every
+  value; names are meant to be constants. The browser drops an invalid name and warns, for the
+  first 20 distinct ones; the API refuses the batch.
+- **Browser interactions:** one capture-phase click listener on the document, trusted events only,
+  finds the marked element on the event's composed path. A click inside a disabled or
+  `aria-disabled` part of it is ignored, and so is a click on a label whose control is inside the
+  same marked element: the click the browser forwards to the control records it once. The same
+  name within a second is recorded once. A marked click is input, so it keeps the visit going; a
+  `trackSixbEvent` call is not, and is dropped once the person has been idle for the idle timeout,
+  so background code cannot keep a visit alive. Before the capture settings load, in a hidden tab
+  or on an unrecorded page, an interaction is dropped, not queued: it would otherwise reach the
+  server before its page view.
 - **Retention:** no automatic expiration. Deleting one user's history is deleting their visits
-  (`user_id`), whose page views cascade, and the sources whose current visit was one of them.
+  (`user_id`), whose page views and interactions cascade, and the sources whose current visit was
+  one of them.
 
 ## Attribution
 
@@ -84,9 +110,9 @@ new one with its next event.
   reuses that grant for the share connection's status.
 - Visit and user cursors use last activity plus id, newest first. Ids compare byte by byte
   (`COLLATE "C"` in PostgreSQL); generated visit ids are ASCII, so every provider orders them alike.
-  A visit's page views read by sequence, the first 200 of them in its timeline, which is the only
-  read of one visit. Live activity can move a visit between pages, so clients deduplicate ids and
-  offer a refresh.
+  A visit's page views and interactions read by their shared sequence, the first 200 of them in
+  its timeline, which is the only read of one visit. Live activity can move a visit between pages,
+  so clients deduplicate ids and offer a refresh.
 
 ## Timeline and connections
 
@@ -103,20 +129,20 @@ time range, so the same user's other browser, active at the same time, stays out
   that opens the visit, and an action just before leaving may follow the last activity sent. Half
   the shortest idle timeout keeps two visits of a session from sharing an execution. Descendants
   are not time-filtered: a queued workflow or an Agent's tools may run long after the visit.
-- **Entries:** page views, action runs, workflow runs and conversation Agent runs, by time. An
-  action execution without a recorded run is `incomplete`: in flight, or interrupted. An Agent
-  run's cost includes everything below it, subagents and tools included; a Workflow's Agent steps
-  are not conversations and have no entry.
+- **Entries:** page views, interactions, action runs, workflow runs and conversation Agent runs, by
+  time; page views and interactions in their sequence. An action execution without a recorded run
+  is `incomplete`: in flight, or interrupted. An Agent run's cost includes everything below it,
+  subagents and tools included; a Workflow's Agent steps are not conversations and have no entry.
 - **Content:** a run shows its thread's message count, never its title or messages. An action
   names its object only when the viewer's own object reader returns it, so object type grants,
   markings and deletion all hide it. `runVisible` says whether the viewer may read the run
   itself, decided as the runs reads decide it (`canViewActionRun` and the subject type's
   markings, `canViewWorkflowRun`); the app links a run only then.
-- **Bounds:** 200 page views and 200 recorded executions, roots first and the earliest first.
-  Past either limit `truncated` is set and the timeline stops at the last page view, or the last
-  root, it kept: the cut leaves no gap where one source is missing. One read per source: the
-  visit, the ledger, the session, action runs, workflow runs, Agent runs, costs, threads, and one
-  object batch per object type.
+- **Bounds:** 200 page views and interactions together, and 200 recorded executions, roots first
+  and the earliest first. Past either limit `truncated` is set and the timeline stops at the last
+  page view or interaction, or the last root, it kept: the cut leaves no gap where one source is
+  missing. One read per source: the visit, the ledger, the session, action runs, workflow runs,
+  Agent runs, costs, threads, and one object batch per object type.
 - **Connections:** a user's sessions, revoked and expired ones too, newest first, with the device
   their user agent names (browser and system only), a native client's label, and each session's
   visit count and latest five visits. No address, user agent or session id is returned: the

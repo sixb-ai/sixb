@@ -26,7 +26,10 @@ describe("SqliteStorage activity integration", () => {
         projectId: "p",
         actor: { type: "user", userId: "user-a" },
         sessionId: "ses_1",
-        events: [{ id: "view", type: "page.view", route: "/" }],
+        events: [
+          { id: "view", type: "page.view", route: "/" },
+          { id: "click", type: "ui.interaction", name: "home.open", route: "/" },
+        ],
         now: new Date("2026-10-01T12:00:00.000Z"),
         idleTimeoutMs: 30 * 60_000,
         newVisitId: "visit-1",
@@ -40,9 +43,12 @@ describe("SqliteStorage activity integration", () => {
         { actor_type: "user", session_id: "ses_1" },
       ])
 
-      // One user's history is removable: their page views go with their visits.
+      // One user's history is removable: their page views and interactions go with their visits.
       db.run("DELETE FROM activity_visits WHERE project_id = 'p' AND user_id = 'user-a'")
       expect(db.query("SELECT COUNT(*) AS count FROM activity_page_views").get()).toEqual({
+        count: 0,
+      })
+      expect(db.query("SELECT COUNT(*) AS count FROM activity_interactions").get()).toEqual({
         count: 0,
       })
     } finally {

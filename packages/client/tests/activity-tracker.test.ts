@@ -91,6 +91,10 @@ async function setup(overrides: Partial<ActivityTrackerOptions> = {}) {
   return { tracker, document, sent, warnings, advance }
 }
 
+function attributionOf(event: Batch[number] | undefined) {
+  return event && "attribution" in event ? event.attribution : undefined
+}
+
 function ofType(sent: readonly Batch[], type: "page.view" | "visit.activity") {
   return sent.flat().filter((event) => event.type === type)
 }
@@ -303,16 +307,16 @@ test("the arrival travels once, a retry keeps it, and later inactivity starts di
   await tracker.flush()
   await tracker.flush()
   expect(attempts[1]).toEqual(attempts[0])
-  expect(attempts[0]?.[0]?.attribution).toEqual({ source: "newsletter", medium: "email" })
+  expect(attributionOf(attempts[0]?.[0])).toEqual({ source: "newsletter", medium: "email" })
 
   tracker.page("/next")
   await tracker.flush()
-  expect(attempts.at(-1)?.[0]?.attribution).toEqual({})
+  expect(attributionOf(attempts.at(-1)?.[0])).toEqual({})
 
   advance(60_000)
   document.input(true)
   await tracker.flush()
-  expect(attempts.at(-1)?.[0]?.attribution).toEqual({})
+  expect(attributionOf(attempts.at(-1)?.[0])).toEqual({})
 })
 
 // Guard proof: drop the 4xx branch in sendBatch; the refused batch is sent three times.

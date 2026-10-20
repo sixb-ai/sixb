@@ -376,6 +376,42 @@ describe("activity routes", () => {
     expect((await fixture.get("calendar?userId=user-a&year=2026.5", viewer)).status).toBe(422)
   })
 
+  test("interactions are recorded by name, shown in sequence, and refused unnamed", async () => {
+    const fixture = await createFixture()
+    const reader = await fixture.browser("reader")
+    const viewer = await fixture.browser("viewer", { observer: true })
+    const click = { id: "c1", type: "ui.interaction", name: "items.export", route: "/items/:id" }
+
+    for (const invalid of [
+      { ...click, name: "Items.Export" },
+      { ...click, name: "items.42" },
+      { ...click, name: "items.row1234" },
+      { ...click, name: "x".repeat(101) },
+      { ...click, attribution: {} },
+      { ...click, text: "Export" },
+      { id: "c1", type: "ui.interaction", route: "/items/:id" },
+    ]) {
+      // The whole batch is refused, so the valid page view beside it is not recorded either.
+      expect((await fixture.post(reader, { events: [pageView, invalid] })).status).toBe(422)
+    }
+
+    expect(await (await fixture.post(reader, { events: [pageView, click] })).json()).toEqual({
+      status: "accepted",
+      accepted: 2,
+    })
+
+    const visits = await (await fixture.get(`visits${fixture.range}`, viewer)).json()
+    expect(visits.visits).toHaveLength(1)
+    expect(visits.visits[0]).toMatchObject({ pageViews: 1, interactions: 1 })
+
+    const path = `visits/${visits.visits[0].id}/timeline`
+    const timeline = await (await fixture.get(path, viewer)).json()
+    expect(timeline.entries.map(({ at: _at, ...entry }: { at: string }) => entry)).toEqual([
+      { kind: "page", sequence: 1, route: "/items/:id" },
+      { kind: "interaction", sequence: 2, name: "items.export", route: "/items/:id" },
+    ])
+  })
+
   test("capture refuses a missing CSRF token, unknown fields and concrete URLs", async () => {
     const fixture = await createFixture()
     const reader = await fixture.browser("reader")

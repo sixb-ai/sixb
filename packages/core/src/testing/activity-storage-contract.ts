@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import type { ActivityStorage, AppendActivityInput } from "../storage/activity/types"
+import type {
+  ActivityEventInput,
+  ActivityStorage,
+  AppendActivityInput,
+} from "../storage/activity/types"
 import type { Storage } from "../storage/types"
 
 export interface ActivityStorageContractSuiteOptions<TStorage extends Storage = Storage> {
@@ -555,6 +559,194 @@ export function runActivityStorageContractSuite<TStorage extends Storage>(
       })
     })
 
+    // Guard proof: number planActivityAppend's interactions apart from its page views; they then
+    // repeat page view sequences.
+    test("interactions share the visit's sequence with page views and keep it alive", async () => {
+      await withActivity(async (activity) => {
+        await activity.append(
+          batch("view", {
+            events: [pageView("view"), interaction("export"), pageView("next", "/reports")],
+          })
+        )
+        await expect(
+          activity.append(batch("filter", { now: later(20), events: [interaction("filter")] }))
+        ).resolves.toEqual({ status: "accepted", accepted: 1 })
+        await activity.append(batch("last", { now: later(45) }))
+
+        const visits = await activity.list({ ...period, limit: 10 })
+        expect(
+          visits.visits.map((visit) => [
+            visit.id,
+            visit.lastSeenAt,
+            visit.pageViews,
+            visit.interactions,
+          ])
+        ).toEqual([["visit-view", later(45), 3, 2]])
+        expect(await activity.summarize(period)).toMatchObject({ visits: 1, pageViews: 3 })
+
+        const visit = await read(activity, "visit-view")
+        expect(visit?.pageViews.map((view) => [view.id, view.sequence, view.route])).toEqual([
+          ["view", 1, "/invoices/:id"],
+          ["next", 3, "/reports"],
+          ["last", 5, "/invoices/:id"],
+        ])
+        expect(
+          visit?.interactions.map((event) => [event.id, event.sequence, event.name, event.route])
+        ).toEqual([
+          ["export", 2, "invoices.export", "/invoices/:id"],
+          ["filter", 4, "invoices.export", "/invoices/:id"],
+        ])
+        expect(visit?.interactions[1]?.receivedAt).toEqual(later(20))
+
+        // One bound covers both, in sequence.
+        const first = await read(activity, "visit-view", 4)
+        expect(first?.pageViews.map((view) => view.id)).toEqual(["view", "next"])
+        expect(first?.interactions.map((event) => event.id)).toEqual(["export", "filter"])
+        expect(first?.hasMore).toBe(true)
+      })
+    })
+
+    // Guard proof: leave interactions out of the provider's stored-event read; the retry is
+    // stored twice.
+    test("a retried interaction is recognized, and its id cannot say anything else", async () => {
+      await withActivity(async (activity) => {
+        await activity.append(batch("view", { events: [pageView("view"), interaction("export")] }))
+
+        await expect(
+          activity.append(batch("retry", { now: later(1), events: [interaction("export")] }))
+        ).resolves.toEqual({ status: "accepted", accepted: 0 })
+
+        for (const events of [
+          [interaction("export", "invoices.print")],
+          [interaction("export", "invoices.export", "/reports")],
+          [pageView("export")],
+          [{ id: "export", type: "visit.activity" as const, route: "/invoices/:id" }],
+          [interaction("view")],
+        ]) {
+          await expect(
+            activity.append(batch("conflict", { now: later(2), events }))
+          ).rejects.toThrow("different content")
+        }
+
+        const visit = await read(activity, "visit-view")
+        expect(visit?.visit).toMatchObject({ lastSeenAt: at, pageViews: 1, interactions: 1 })
+        expect(visit?.interactions.map((event) => [event.id, event.sequence])).toEqual([
+          ["export", 2],
+        ])
+      })
+    })
+
+    test("interactions count toward the quota", async () => {
+      await withActivity(async (activity) => {
+        for (let round = 0; round < 6; round++) {
+          await activity.append(
+            batch(`round-${round}`, {
+              events: Array.from({ length: 20 }, (_, index) => interaction(`i${round}-${index}`)),
+            })
+          )
+        }
+
+        await expect(activity.append(batch("over"))).resolves.toEqual({
+          status: "throttled",
+          accepted: 0,
+        })
+        await expect(
+          activity.append(batch("retry", { events: [interaction("i0-0")] }))
+        ).resolves.toEqual({ status: "accepted", accepted: 0 })
+      })
+    })
+
+    // Guard proof: drop the page view planActivityAppend adds for an interaction that opens a
+    // visit; the visit then starts on no page and claims no arrival.
+    test("an interaction that opens a visit starts it on its page, retry-safe", async () => {
+      await withActivity(async (activity, storage) => {
+        await activity.append(batch("view", { events: [pageView("view"), interaction("export")] }))
+        const back = batch("back", {
+          now: later(45),
+          events: [interaction("back", "invoices.filter.applied", "/reports"), pageView("then")],
+        })
+        await activity.append(back)
+        await expect(
+          activity.append({ ...back, now: later(46), newVisitId: "visit-retry" })
+        ).resolves.toEqual({ status: "accepted", accepted: 0 })
+
+        const visits = await activity.list({ ...period, limit: 10 })
+        expect(
+          visits.visits.map((visit) => [visit.id, visit.pageViews, visit.interactions])
+        ).toEqual([
+          ["visit-back", 2, 1],
+          ["visit-view", 1, 1],
+        ])
+
+        // The entry page view's id is derived outside the event-id alphabet.
+        const opened = await read(activity, "visit-back")
+        expect(opened?.visit).toMatchObject({ startedAt: later(45), attribution: {} })
+        expect(opened?.pageViews.map((view) => [view.id, view.sequence, view.route])).toEqual([
+          ["back.page", 1, "/reports"],
+          ["then", 3, "/invoices/:id"],
+        ])
+        expect(opened?.interactions.map((event) => [event.id, event.sequence])).toEqual([
+          ["back", 2],
+        ])
+        await expect(read(activity, "visit-retry")).resolves.toBeNull()
+
+        // A deleted visit takes its interactions with it.
+        await options.deleteVisit(storage, { projectId, id: "visit-view" })
+        await activity.append(batch("again", { now: later(47), events: [interaction("export")] }))
+        expect((await read(activity, "visit-back"))?.interactions.map((event) => event.id)).toEqual(
+          ["back", "export"]
+        )
+      })
+    })
+
+    test("invalid interactions cannot partially mutate activity", async () => {
+      await withActivity(async (activity) => {
+        for (const name of [
+          "",
+          "Invoices.export",
+          "invoices.123",
+          "invoices..export",
+          ".invoices",
+          "invoices export",
+          "invoices/export",
+          "invoices.row1234",
+          `invoices.${"a".repeat(41)}`,
+          `a${"b".repeat(100)}`,
+        ]) {
+          await expect(
+            activity.append(batch("bad", { events: [pageView("view"), interaction("i", name)] }))
+          ).rejects.toThrow("[Sixb]")
+        }
+
+        await expect(
+          activity.append(
+            batch("bad", {
+              events: [
+                pageView("view"),
+                { ...interaction("i"), attribution: {} } as unknown as ActivityEventInput,
+              ],
+            })
+          )
+        ).rejects.toThrow("no attribution")
+        await expect(
+          activity.append(
+            batch("bad", { events: [interaction("i", "invoices.export", "/invoices?id=1")] })
+          )
+        ).rejects.toThrow("[Sixb]")
+
+        expect((await activity.summarize(period)).visits).toBe(0)
+
+        const valid = ["v2.export", "invoices.page-123", `invoices.${"a".repeat(40)}`]
+        await expect(
+          activity.append(
+            batch("good", {
+              events: valid.map((name, index) => interaction(`ok-${index}`, name)),
+            })
+          )
+        ).resolves.toEqual({ status: "accepted", accepted: 3 })
+      })
+    })
+
     test("activity follows the storage transaction rollback contract", async () => {
       await withActivity(async (activity, storage) => {
         await expect(
@@ -629,6 +821,10 @@ function batch(event: string, overrides: Partial<AppendActivityInput> = {}): App
 
 function pageView(id: string, route = "/invoices/:id") {
   return { id, type: "page.view" as const, route }
+}
+
+function interaction(id: string, name = "invoices.export", route = "/invoices/:id") {
+  return { id, type: "ui.interaction" as const, name, route }
 }
 
 function heartbeat(id: string, now: Date, route = "/invoices/:id"): AppendActivityInput {

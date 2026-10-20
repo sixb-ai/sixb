@@ -28,7 +28,10 @@ import {
 } from "./connection"
 
 export interface ActivityOptions {
-  /** Record visits and page views in the project's app and its shared links. Off by default. */
+  /**
+   * Record visits, page views and marked interactions in the project's app and its shared links.
+   * Off by default.
+   */
   readonly enabled?: boolean
   /** A new visit begins after this long without foreground activity. Default: 30 minutes. */
   readonly idleTimeoutMs?: number
