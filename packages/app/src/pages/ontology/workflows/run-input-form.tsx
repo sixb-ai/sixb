@@ -18,6 +18,7 @@ import {
   parseFileRefFormValue,
   stringifyFileRefFormValue,
 } from "../components/file-ref-upload-field"
+import { UserPicker } from "../components/user-picker"
 import { SchemaChip } from "./schema-shape"
 
 export type WorkflowInputFormValues = Record<string, string>
@@ -247,6 +248,17 @@ function WorkflowInputControl({
         errorId={errorId}
         logicalPathPrefix={`workflow-input/${path.join("/")}`}
         onPendingChange={(pending) => onFileUploadPendingChange?.(pathKey(path), pending)}
+      />
+    )
+  }
+
+  if (schema === "userRef") {
+    return (
+      <UserPicker
+        id={id}
+        value={value}
+        onChange={(userId) => onChange(path, userId)}
+        aria-describedby={errorId}
       />
     )
   }
@@ -784,7 +796,6 @@ function inputTypeForPrimitive(schema: PrimitiveSchema): string {
 
 function placeholderForPrimitive(schema: PrimitiveSchema): string {
   if (schema === "uuid") return "00000000-0000-0000-0000-000000000000"
-  if (schema === "userRef") return "User ID"
   if (schema === "date") return "YYYY-MM-DD"
   if (schema === "timestamp") return "YYYY-MM-DDTHH:mm"
   if (schema === "integer" || schema === "double" || schema === "decimal") return "0"

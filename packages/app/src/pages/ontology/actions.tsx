@@ -52,6 +52,7 @@ import {
   parseFileRefFormValue,
   stringifyFileRefFormValue,
 } from "./components/file-ref-upload-field"
+import { UserPicker } from "./components/user-picker"
 import {
   type ActionParamFormValue,
   type ActionParamFormValues,
@@ -638,8 +639,16 @@ function ActionParamFields({
                 placeholder='{"objectTypeId":"Customer","primaryId":"cus_1"}'
                 className="min-h-24 font-mono text-xs"
               />
+            ) : input.kind === "userRef" ? (
+              <UserPicker
+                id={fieldId}
+                value={value}
+                onChange={(userId) => onChange(param.id, userId)}
+                required={fieldRequired}
+                disabled={fieldDisabled}
+                aria-describedby={errors[param.id] ? `${fieldId}-error` : undefined}
+              />
             ) : (
-              // A user reference is entered as a user id until the member picker exists.
               <Input
                 id={fieldId}
                 type={input.kind === "number" ? "number" : "text"}
@@ -647,7 +656,6 @@ function ActionParamFields({
                 onChange={(event) => onChange(param.id, event.target.value)}
                 required={fieldRequired}
                 disabled={fieldDisabled}
-                placeholder={input.kind === "userRef" ? "User ID" : undefined}
               />
             )}
 

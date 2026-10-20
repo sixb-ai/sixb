@@ -36,6 +36,7 @@ import {
   parseFileRefFormValue,
   stringifyFileRefFormValue,
 } from "./file-ref-upload-field"
+import { UserPicker } from "./user-picker"
 
 type ActionParams = Record<string, unknown>
 
@@ -201,8 +202,16 @@ function ActionParamsDialog({
                     disabled={fieldDisabled}
                     onPendingChange={(pending) => handleFileUploadPendingChange(key, pending)}
                   />
+                ) : def.type === "userRef" ? (
+                  <UserPicker
+                    id={`action-param-${key}`}
+                    value={value}
+                    onChange={(userId) => setParamValue(key, userId)}
+                    required={fieldRequired}
+                    disabled={fieldDisabled}
+                    aria-describedby={errors[key] ? `action-param-${key}-error` : undefined}
+                  />
                 ) : (
-                  // A user reference is entered as a user id until the member picker exists.
                   <Input
                     id={`action-param-${key}`}
                     type={def.type === "number" ? "number" : "text"}
@@ -210,7 +219,7 @@ function ActionParamsDialog({
                     onChange={(event) => setParamValue(key, event.target.value)}
                     required={fieldRequired}
                     disabled={fieldDisabled}
-                    placeholder={def.type === "userRef" ? "User ID" : `Enter ${key}...`}
+                    placeholder={`Enter ${key}...`}
                   />
                 )}
                 {errors[key] ? (

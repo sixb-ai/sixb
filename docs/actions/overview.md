@@ -67,7 +67,9 @@ Use `ref.user()` for an input that names a project member:
 
 Callers pass `{ type: "user", id: "usr_1" }`. Sixb rejects the request when the user does not exist
 or is suspended. Store the value in a [user reference property](../ontology/properties.md#reference-a-user)
-or compare it with one.
+or compare it with one. In the app, the action form lets you pick the member by name when you can
+read the [member directory](../auth/members.md#read-the-member-directory), and asks for the user ID
+otherwise.
 
 Other input types use the [property schemas](../ontology/properties.md#choose-a-schema), including
 enums and structured values. Date and timestamp inputs arrive in handlers as `Date` values.
