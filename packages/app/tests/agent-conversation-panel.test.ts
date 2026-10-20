@@ -14,6 +14,8 @@ function thread(id: string, title: string): AgentThread {
     id,
     projectId: "project",
     ownerPrincipal: { type: "user", id: "user" },
+    owner: { type: "user", id: "user" },
+    participants: [],
     title,
     status: "active",
     activeRunId: null,

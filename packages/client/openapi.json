@@ -30154,6 +30154,15 @@
             }
           },
           {
+            "name": "sharedWithMe",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -30230,6 +30239,70 @@
                             "required": ["type", "id"],
                             "additionalProperties": false
                           },
+                          "owner": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "displayName": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "participants": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "principal": {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["user"]
+                                    },
+                                    "id": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "displayName": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["type", "id"],
+                                  "additionalProperties": false
+                                },
+                                "addedAt": {
+                                  "type": "string"
+                                },
+                                "addedBy": {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["user", "serviceAccount", "system"]
+                                    },
+                                    "id": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": ["type", "id"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": ["principal", "addedAt", "addedBy"],
+                              "additionalProperties": false
+                            }
+                          },
                           "title": {
                             "type": "string"
                           },
@@ -30284,6 +30357,8 @@
                           "id",
                           "projectId",
                           "ownerPrincipal",
+                          "owner",
+                          "participants",
                           "status",
                           "activeRunId",
                           "messageCount",
@@ -30534,6 +30609,70 @@
                           "required": ["type", "id"],
                           "additionalProperties": false
                         },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "displayName": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "participants": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "principal": {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user"]
+                                  },
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "displayName": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false
+                              },
+                              "addedAt": {
+                                "type": "string"
+                              },
+                              "addedBy": {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["user", "serviceAccount", "system"]
+                                  },
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": ["type", "id"],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": ["principal", "addedAt", "addedBy"],
+                            "additionalProperties": false
+                          }
+                        },
                         "title": {
                           "type": "string"
                         },
@@ -30588,6 +30727,8 @@
                         "id",
                         "projectId",
                         "ownerPrincipal",
+                        "owner",
+                        "participants",
                         "status",
                         "activeRunId",
                         "messageCount",
@@ -30736,6 +30877,70 @@
                       "required": ["type", "id"],
                       "additionalProperties": false
                     },
+                    "owner": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "displayName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false
+                    },
+                    "participants": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "principal": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "displayName": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "addedAt": {
+                            "type": "string"
+                          },
+                          "addedBy": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["principal", "addedAt", "addedBy"],
+                        "additionalProperties": false
+                      }
+                    },
                     "title": {
                       "type": "string"
                     },
@@ -30790,6 +30995,8 @@
                     "id",
                     "projectId",
                     "ownerPrincipal",
+                    "owner",
+                    "participants",
                     "status",
                     "activeRunId",
                     "messageCount",
@@ -30809,6 +31016,542 @@
                   "type": "object",
                   "properties": {
                     "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-threads/{threadId}/participants": {
+      "post": {
+        "summary": "Add participants to an agent thread",
+        "description": "Only the thread's owner adds participants: active users of the project, by id or by email. They read the whole conversation, its files and its live stream, and send messages that run with their own rights. Nothing checks what they may see: the conversation holds what the Agent read with the rights of whoever asked.",
+        "tags": ["Agent Threads"],
+        "operationId": "addAgentThreadParticipants",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "users": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "email": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["email"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 50
+                  }
+                },
+                "required": ["users"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "users": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "email": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["email"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 50
+                  }
+                },
+                "required": ["users"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "users": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "email": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["email"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 50
+                  }
+                },
+                "required": ["users"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sandboxState": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["new", "busy", "ready", "blocked", "unavailable"]
+                        },
+                        "initialized": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["name", "status", "initialized"],
+                      "additionalProperties": false
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "type": "string"
+                    },
+                    "ownerPrincipal": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false
+                    },
+                    "owner": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "displayName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false
+                    },
+                    "participants": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "principal": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "displayName": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "addedAt": {
+                            "type": "string"
+                          },
+                          "addedBy": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["principal", "addedAt", "addedBy"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "sandboxParams": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "description": "Any JSON-compatible value.",
+                        "nullable": true,
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "array",
+                            "items": {}
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        ]
+                      }
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["active", "archived"]
+                    },
+                    "activeRunId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "lastMessageAt": {
+                      "type": "string"
+                    },
+                    "messageCount": {
+                      "type": "number"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "projectId",
+                    "ownerPrincipal",
+                    "owner",
+                    "participants",
+                    "status",
+                    "activeRunId",
+                    "messageCount",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-threads/{threadId}/participants/{userId}": {
+      "delete": {
+        "summary": "Remove a participant from an agent thread",
+        "description": "The thread's owner removes anyone; a participant removes only themself, to leave. Removing someone who does not take part changes nothing.",
+        "tags": ["Agent Threads"],
+        "operationId": "removeAgentThreadParticipant",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Response for status 204",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
                       "type": "string"
                     }
                   },
@@ -30969,6 +31712,70 @@
                       "required": ["type", "id"],
                       "additionalProperties": false
                     },
+                    "owner": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "displayName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false
+                    },
+                    "participants": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "principal": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "displayName": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "addedAt": {
+                            "type": "string"
+                          },
+                          "addedBy": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["principal", "addedAt", "addedBy"],
+                        "additionalProperties": false
+                      }
+                    },
                     "title": {
                       "type": "string"
                     },
@@ -31023,6 +31830,8 @@
                     "id",
                     "projectId",
                     "ownerPrincipal",
+                    "owner",
+                    "participants",
                     "status",
                     "activeRunId",
                     "messageCount",
@@ -31788,6 +32597,27 @@
                         "additionalProperties": false
                       }
                     },
+                    "authors": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": ["user", "serviceAccount", "system"]
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "displayName": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["type", "id"],
+                        "additionalProperties": false
+                      }
+                    },
                     "hasMore": {
                       "type": "boolean"
                     },
@@ -31795,7 +32625,7 @@
                       "type": "number"
                     }
                   },
-                  "required": ["messages", "hasMore", "total"],
+                  "required": ["messages", "authors", "hasMore", "total"],
                   "additionalProperties": false
                 }
               }
@@ -35005,6 +35835,70 @@
                       "required": ["type", "id"],
                       "additionalProperties": false
                     },
+                    "owner": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "displayName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false
+                    },
+                    "participants": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "principal": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "displayName": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "addedAt": {
+                            "type": "string"
+                          },
+                          "addedBy": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["principal", "addedAt", "addedBy"],
+                        "additionalProperties": false
+                      }
+                    },
                     "title": {
                       "type": "string"
                     },
@@ -35059,6 +35953,8 @@
                     "id",
                     "projectId",
                     "ownerPrincipal",
+                    "owner",
+                    "participants",
                     "status",
                     "activeRunId",
                     "messageCount",
@@ -35819,12 +36715,6 @@
                         "additionalProperties": false
                       }
                     },
-                    "hasMore": {
-                      "type": "boolean"
-                    },
-                    "total": {
-                      "type": "number"
-                    },
                     "authors": {
                       "type": "array",
                       "items": {
@@ -35845,9 +36735,15 @@
                         "required": ["type", "id"],
                         "additionalProperties": false
                       }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "total": {
+                      "type": "number"
                     }
                   },
-                  "required": ["messages", "hasMore", "total", "authors"],
+                  "required": ["messages", "authors", "hasMore", "total"],
                   "additionalProperties": false
                 }
               }

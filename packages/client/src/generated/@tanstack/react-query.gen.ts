@@ -11,6 +11,7 @@ import {
 import { client } from "../client.gen"
 import {
   abortFileUpload,
+  addAgentThreadParticipants,
   addConnectorConnection,
   appendTelemetry,
   cancelAgentRun,
@@ -142,6 +143,7 @@ import {
   reauthorizeConnectorConnection,
   recreateAgentThreadSandbox,
   refreshAuthSession,
+  removeAgentThreadParticipant,
   removeObjectLink,
   requestAction,
   requestPipelineRun,
@@ -175,6 +177,9 @@ import type {
   AbortFileUploadData,
   AbortFileUploadError,
   AbortFileUploadResponse,
+  AddAgentThreadParticipantsData,
+  AddAgentThreadParticipantsError,
+  AddAgentThreadParticipantsResponse,
   AddConnectorConnectionData,
   AddConnectorConnectionError,
   AddConnectorConnectionResponse,
@@ -552,6 +557,8 @@ import type {
   RefreshAuthSessionData,
   RefreshAuthSessionError,
   RefreshAuthSessionResponse,
+  RemoveAgentThreadParticipantData,
+  RemoveAgentThreadParticipantError,
   RemoveObjectLinkData,
   RemoveObjectLinkError,
   RemoveObjectLinkResponse,
@@ -4220,6 +4227,64 @@ export const getAgentThreadOptions = (options: Options<GetAgentThreadData>) =>
     },
     queryKey: getAgentThreadQueryKey(options),
   })
+
+/**
+ * Add participants to an agent thread
+ *
+ * Only the thread's owner adds participants: active users of the project, by id or by email. They read the whole conversation, its files and its live stream, and send messages that run with their own rights. Nothing checks what they may see: the conversation holds what the Agent read with the rights of whoever asked.
+ */
+export const addAgentThreadParticipantsMutation = (
+  options?: Partial<Options<AddAgentThreadParticipantsData>>
+): UseMutationOptions<
+  AddAgentThreadParticipantsResponse,
+  AddAgentThreadParticipantsError,
+  Options<AddAgentThreadParticipantsData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    AddAgentThreadParticipantsResponse,
+    AddAgentThreadParticipantsError,
+    Options<AddAgentThreadParticipantsData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await addAgentThreadParticipants({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Remove a participant from an agent thread
+ *
+ * The thread's owner removes anyone; a participant removes only themself, to leave. Removing someone who does not take part changes nothing.
+ */
+export const removeAgentThreadParticipantMutation = (
+  options?: Partial<Options<RemoveAgentThreadParticipantData>>
+): UseMutationOptions<
+  unknown,
+  RemoveAgentThreadParticipantError,
+  Options<RemoveAgentThreadParticipantData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    unknown,
+    RemoveAgentThreadParticipantError,
+    Options<RemoveAgentThreadParticipantData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await removeAgentThreadParticipant({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 /**
  * Explicitly recreate an unavailable or uncertain workspace without deleting its previous state

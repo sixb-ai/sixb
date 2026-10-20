@@ -2,6 +2,7 @@ import {
   AgentRequestError,
   type AgentRequestErrorCode,
   type AgentRunView,
+  type AgentThreadView,
   type FileRef,
   type SixbHostView,
 } from "@sixb/core"
@@ -15,6 +16,7 @@ import {
   type AgentStorage,
   AgentStorageError,
   type AgentThreadRecord,
+  type Principal,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { ZodError, z } from "zod"
@@ -28,6 +30,7 @@ import {
 import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
+  AddAgentThreadParticipantsBodySchema,
   AgentDescriptorSchema,
   AgentMessageFileContentParamsSchema,
   AgentMessageListResponseSchema,
@@ -41,6 +44,7 @@ import {
   AgentThreadListQuerySchema,
   AgentThreadListResponseSchema,
   AgentThreadParamsSchema,
+  AgentThreadParticipantParamsSchema,
   AgentThreadSchema,
   CancelAgentRunBodySchema,
   CancelAgentRunResponseSchema,
@@ -66,27 +70,58 @@ const AgentMessageFileContentQuerySchema = FileContentQuerySchema.extend({
     .regex(/^\/parts(?:\/|$)/, "Agent message file content paths must start with /parts/"),
 })
 
-export function serializeThread(
-  thread: AgentThreadRecord
-): ReturnType<typeof AgentThreadSchema.parse> {
-  return AgentThreadSchema.parse({
-    id: thread.id,
-    projectId: thread.projectId,
-    ownerPrincipal: thread.ownerPrincipal,
-    title: thread.title,
-    sandboxParams: thread.sandboxParams,
-    sandboxState: thread.sandboxState && {
-      name: thread.sandboxState.name,
-      status: thread.sandboxState.status,
-      initialized: thread.sandboxState.initialized,
-    },
-    status: thread.status,
-    activeRunId: thread.activeRunId,
-    lastMessageAt: thread.lastMessageAt ? toIsoString(thread.lastMessageAt) : undefined,
-    messageCount: thread.messageCount,
-    createdAt: toIsoString(thread.createdAt),
-    updatedAt: toIsoString(thread.updatedAt),
-  })
+const SHARING =
+  "Only the thread's owner adds participants: active users of the project, by id or by email. They read the whole conversation, its files and its live stream, and send messages that run with their own rights. Nothing checks what they may see: the conversation holds what the Agent read with the rights of whoever asked."
+
+/** Threads as the API returns them, their owner and participants named by their accounts. */
+export async function serializeThreads(
+  host: SixbHostView,
+  threads: readonly AgentThreadView[]
+): Promise<ReturnType<typeof AgentThreadSchema.parse>[]> {
+  const people = await namePrincipals(
+    host,
+    threads.flatMap((thread) => [
+      thread.ownerPrincipal,
+      ...thread.participants.map((participant) => participant.principal),
+    ])
+  )
+  const named = (principal: Principal) => people.get(principalKey(principal)) ?? principal
+
+  return threads.map((thread) =>
+    AgentThreadSchema.parse({
+      id: thread.id,
+      projectId: thread.projectId,
+      ownerPrincipal: thread.ownerPrincipal,
+      owner: named(thread.ownerPrincipal),
+      participants: thread.participants.map((participant) => ({
+        principal: named(participant.principal),
+        addedAt: toIsoString(participant.addedAt),
+        addedBy: participant.addedBy,
+      })),
+      title: thread.title,
+      sandboxParams: thread.sandboxParams,
+      sandboxState: thread.sandboxState && {
+        name: thread.sandboxState.name,
+        status: thread.sandboxState.status,
+        initialized: thread.sandboxState.initialized,
+      },
+      status: thread.status,
+      activeRunId: thread.activeRunId,
+      lastMessageAt: thread.lastMessageAt ? toIsoString(thread.lastMessageAt) : undefined,
+      messageCount: thread.messageCount,
+      createdAt: toIsoString(thread.createdAt),
+      updatedAt: toIsoString(thread.updatedAt),
+    })
+  )
+}
+
+export async function serializeThread(
+  host: SixbHostView,
+  thread: AgentThreadView
+): Promise<ReturnType<typeof AgentThreadSchema.parse>> {
+  const [serialized] = await serializeThreads(host, [thread])
+  if (!serialized) throw new Error(`[SixbServer] Could not serialize Agent thread '${thread.id}'.`)
+  return serialized
 }
 
 function serializeMessage(
@@ -297,13 +332,14 @@ export async function agentMessageFileContentResponse(
   }
 }
 
-/** A page of a thread's messages, with their runs' diagnostics and compactions. */
+/** A page of a thread's messages, with their runs' diagnostics and compactions, and authors. */
 export async function readThreadMessages(
-  projectId: string,
+  host: SixbHostView,
   storage: AgentStorage,
   thread: AgentThreadRecord,
   query: z.infer<typeof AgentMessagesQuerySchema>
 ) {
+  const projectId = host.id
   const result = await storage.messages.list({
     projectId,
     threadId: thread.id,
@@ -338,9 +374,53 @@ export async function readThreadMessages(
         message.runId === null ? undefined : checkpointsByRunId.get(message.runId)
       )
     ),
+    authors: await readAuthors(host, result.messages),
     hasMore: result.hasMore,
     total: result.total,
   }
+}
+
+/** The page's distinct authors, in the order they first wrote. */
+async function readAuthors(
+  host: SixbHostView,
+  messages: readonly Pick<AgentMessageRecord, "authorPrincipal">[]
+) {
+  const authors = messages.flatMap(({ authorPrincipal }) =>
+    authorPrincipal ? [authorPrincipal] : []
+  )
+  const people = await namePrincipals(host, authors)
+  return [...people.values()]
+}
+
+/**
+ * Distinct principals with their account's display name, in first-occurrence order. An account
+ * adds its display name and nothing else of its profile: never an email.
+ */
+async function namePrincipals(
+  host: SixbHostView,
+  principals: readonly Principal[]
+): Promise<ReadonlyMap<string, Principal & { readonly displayName?: string }>> {
+  const unique = new Map(principals.map((principal) => [principalKey(principal), principal]))
+
+  const named = await Promise.all(
+    [...unique.entries()].map(async ([key, principal]) => {
+      const user =
+        principal.type === "user"
+          ? await host.storage.auth?.users.getById({ projectId: host.id, id: principal.id })
+          : null
+
+      const person = {
+        ...principal,
+        ...(user?.displayName ? { displayName: user.displayName } : {}),
+      }
+      return [key, person] as const
+    })
+  )
+  return new Map(named)
+}
+
+function principalKey(principal: Principal): string {
+  return `${principal.type}:${principal.id}`
 }
 
 export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
@@ -377,6 +457,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
 
           const parsed = AgentThreadListQuerySchema.parse(query)
           const listInput = {
+            sharedWithMe: parsed.sharedWithMe === "true",
             statuses: parsed.status ? [parsed.status] : undefined,
             limit: parseOptionalInt(parsed.limit),
             offset: parseOptionalInt(parsed.offset),
@@ -385,7 +466,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           const result = await sixb.agent.threads.list(listInput)
 
           return AgentThreadListResponseSchema.parse({
-            threads: result.threads.map(serializeThread),
+            threads: await serializeThreads(host, result.threads),
             hasMore: result.hasMore,
             total: result.total,
           })
@@ -426,7 +507,9 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           })
 
           set.status = 201
-          return CreateAgentThreadResponseSchema.parse({ thread: serializeThread(thread) })
+          return CreateAgentThreadResponseSchema.parse({
+            thread: await serializeThread(host, thread),
+          })
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -466,7 +549,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return { error: "Agent thread not found" }
           }
 
-          return serializeThread(thread)
+          return serializeThread(host, thread)
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -487,6 +570,83 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
       }
     )
     .post(
+      "/api/agent-threads/:threadId/participants",
+      async (context) => {
+        const { params, body, set } = context
+        const sixb = requireRequestSixb(context)
+        try {
+          if (!host.storage.agents) {
+            return missingAgentStorageResponse(set)
+          }
+
+          const parsed = AddAgentThreadParticipantsBodySchema.parse(body)
+          const thread = await sixb.agent.threads.participants.add(params.threadId, parsed.users)
+
+          return serializeThread(host, thread)
+        } catch (error) {
+          return handleAgentRouteError(error, set)
+        }
+      },
+      {
+        params: AgentThreadParamsSchema,
+        body: AddAgentThreadParticipantsBodySchema,
+        response: {
+          200: AgentThreadSchema,
+          400: AgentRequestErrorResponseSchema,
+          403: AgentRequestErrorResponseSchema,
+          404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Add participants to an agent thread",
+          description: SHARING,
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          operationId: "addAgentThreadParticipants",
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .delete(
+      "/api/agent-threads/:threadId/participants/:userId",
+      async (context) => {
+        const { params, set } = context
+        const sixb = requireRequestSixb(context)
+        try {
+          if (!host.storage.agents) {
+            return missingAgentStorageResponse(set)
+          }
+
+          await sixb.agent.threads.participants.remove(params.threadId, {
+            type: "user",
+            id: params.userId,
+          })
+
+          set.status = 204
+          return
+        } catch (error) {
+          return handleAgentRouteError(error, set)
+        }
+      },
+      {
+        params: AgentThreadParticipantParamsSchema,
+        response: {
+          204: z.void(),
+          400: AgentRequestErrorResponseSchema,
+          403: AgentRequestErrorResponseSchema,
+          404: ErrorResponseSchema,
+          501: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Remove a participant from an agent thread",
+          description:
+            "The thread's owner removes anyone; a participant removes only themself, to leave. Removing someone who does not take part changes nothing.",
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          operationId: "removeAgentThreadParticipant",
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .post(
       "/api/agent-threads/:threadId/sandbox/recreate",
       async (context) => {
         try {
@@ -495,7 +655,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             context.params.threadId,
             context.body
           )
-          return serializeThread(thread)
+          return serializeThread(host, thread)
         } catch (error) {
           if (error instanceof AgentStorageError && error.code === "invalid_state") {
             context.set.status = 409
@@ -542,7 +702,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
 
           const parsed = AgentMessagesQuerySchema.parse(query)
           return AgentMessageListResponseSchema.parse(
-            await readThreadMessages(host.id, storage, thread, parsed)
+            await readThreadMessages(host, storage, thread, parsed)
           )
         } catch (error) {
           return handleAgentRouteError(error, set)

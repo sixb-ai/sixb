@@ -87,6 +87,8 @@ export const AgentThreadStatusSchema = z.enum(["active", "archived"])
 export const AgentThreadListQuerySchema = z
   .object({
     status: AgentThreadStatusSchema.optional(),
+    /** `true` lists the threads other users added the caller to, instead of the caller's own. */
+    sharedWithMe: z.enum(["true", "false"]).optional(),
     limit: z.string().optional(),
     offset: z.string().optional(),
     order: z.enum(["asc", "desc"]).optional(),
@@ -101,6 +103,18 @@ export const CreateAgentThreadBodySchema = z
   })
   .strict()
 
+/** A user the thread's owner added: they read the whole conversation and talk in it. */
+/** A principal with its account's display name, as message authors and thread people are named. */
+export const AgentMessageAuthorSchema = AgentPrincipalSchema.extend({
+  displayName: z.string().optional(),
+})
+
+export const AgentThreadParticipantSchema = z.object({
+  principal: AgentMessageAuthorSchema.extend({ type: z.literal("user") }),
+  addedAt: z.string(),
+  addedBy: AgentPrincipalSchema,
+})
+
 export const AgentThreadSchema = z.object({
   sandboxState: z
     .object({
@@ -112,6 +126,9 @@ export const AgentThreadSchema = z.object({
   id: z.string(),
   projectId: z.string(),
   ownerPrincipal: AgentPrincipalSchema,
+  /** The owner, named by their account. */
+  owner: AgentMessageAuthorSchema,
+  participants: z.array(AgentThreadParticipantSchema),
   title: z.string().optional(),
   sandboxParams: z.record(z.string(), JsonValueSchema).optional(),
   status: AgentThreadStatusSchema,
@@ -130,6 +147,28 @@ export const AgentThreadListResponseSchema = z.object({
 
 export const CreateAgentThreadResponseSchema = z.object({
   thread: AgentThreadSchema,
+})
+
+export const AddAgentThreadParticipantsBodySchema = z
+  .object({
+    /**
+     * Active users of the project, by id or by their account's email; someone already taking part
+     * is left as they are.
+     */
+    users: z
+      .array(
+        z.union([
+          z.object({ type: z.literal("user"), id: z.string().trim().min(1) }).strict(),
+          z.object({ email: z.string().trim().min(1) }).strict(),
+        ])
+      )
+      .min(1)
+      .max(50),
+  })
+  .strict()
+
+export const AgentThreadParticipantParamsSchema = AgentThreadParamsSchema.extend({
+  userId: z.string().min(1),
 })
 
 export const AgentMessageRoleSchema = z.enum(["system", "user", "assistant"])
@@ -240,17 +279,10 @@ export const AgentMessagesQuerySchema = z.object({
 
 export const AgentMessageListResponseSchema = z.object({
   messages: z.array(AgentMessageSchema),
+  /** The page's distinct authors, to name each message's `authorPrincipal`. */
+  authors: z.array(AgentMessageAuthorSchema),
   hasMore: z.boolean(),
   total: z.number(),
-})
-
-/** Who wrote messages of a page, by their `authorPrincipal`, with an account's display name. */
-export const ObservedAgentMessageAuthorSchema = AgentPrincipalSchema.extend({
-  displayName: z.string().optional(),
-})
-
-export const ObservedAgentMessageListResponseSchema = AgentMessageListResponseSchema.extend({
-  authors: z.array(ObservedAgentMessageAuthorSchema),
 })
 
 export const PostAgentMessageBodySchema = z
