@@ -27,6 +27,22 @@ const result = await objects(Invoice)
 
 Rows include `primaryId`, `objectTypeId`, typed `properties`, and `Date` timestamps. Use [relationship expansion](../objects/querying.md#include-related-objects) to include linked objects.
 
+### Match the signed-in user
+
+`@sixb/client/query` also exports `currentUser()`. The server replaces it with the user who sends
+the request, so one query serves every member:
+
+```ts
+import { currentUser, objects } from "@sixb/client/query"
+import { Task } from "../ontology/task"
+
+const myTasks = objects(Task)
+  .query()
+  .where((task) => task.p.assignee.eq(currentUser()))
+```
+
+See [Match the reading user](../objects/querying.md#match-the-reading-user) for where it applies.
+
 ### Browser-safe ontology imports
 
 Define ontology types imported by frontend code through `@sixb/core/ontology`. This avoids bundling the server runtime.
@@ -34,6 +50,8 @@ Define ontology types imported by frontend code through `@sixb/core/ontology`. T
 ```ts
 import { defineObjectType, prop } from "@sixb/core/ontology"
 ```
+
+Build query values there too: `userRef(id)` and `currentUser()` come from `@sixb/core/ontology`.
 
 Queries are typed exactly as they are on the server. For precise linked-object types, run `bun sixb typegen` before a standalone TypeScript check. `dev`, `build`, and `check` generate these types automatically.
 

@@ -28,6 +28,8 @@ import type {
 } from "./generated/types.gen"
 
 export type { ObjectQueryIssue }
+export type { CurrentUserRef } from "@sixb/core/ontology"
+export { currentUser } from "@sixb/core/ontology"
 
 export class SixbQueryError extends Error {
   readonly issues: readonly ObjectQueryIssue[]
