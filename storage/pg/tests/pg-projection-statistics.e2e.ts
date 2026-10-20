@@ -1,6 +1,23 @@
 import { expect, test } from "bun:test"
-import { defineObjectType, link, OntologyRegistry, prop } from "@sixb/core"
+import {
+  col,
+  defineDataset,
+  defineObjectType,
+  defineProjection,
+  InMemoryBlobStorage,
+  InMemoryBroker,
+  InMemoryLakeStorage,
+  InMemoryQueues,
+  link,
+  OntologyRegistry,
+  prop,
+  SixbHost,
+} from "@sixb/core"
+import { objectRefKey } from "@sixb/core/internal/materialization"
+import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
+import { createProjectionRunId, getProjectionRegistry } from "@sixb/core/internal/projections"
 import { createMaterializerTestFixture, startTestProjectionRun } from "@sixb/core/testing"
+import type { PostgresStorage } from "../src"
 import { PgMaterializationStateReader } from "../src/ontology-storage/materialization-state"
 import { replacementAssertionRows } from "../src/ontology-storage/source-roots"
 import { createPgClient, type SQLClient } from "../src/pg-client"
@@ -173,3 +190,120 @@ test("a published bulk load leaves selective statistics for the next sparse proj
     await storage.close()
   }
 }, 60_000)
+
+// Red proof: count the identities a stream planned instead of the work it staged, or restore
+// ANALYZE_ROWS = 10_000. The plan tables keep the statistics of the first plan, which expect none
+// of the second plan's rows, and each key lookup reads all of its work.
+test("a streamed plan seeks its staged work by key before its links are planned", async () => {
+  const { storage, schemaName } = await createTestStorage()
+  const sql = createPgClient({ connectionString: process.env.DATABASE_URL!, schemaName, max: 1 })
+  try {
+    await sql.unsafe(
+      "ALTER TABLE ontology_replacement_plan_identities SET (autovacuum_enabled=false); " +
+        "ALTER TABLE ontology_replacement_plan_work SET (autovacuum_enabled=false)"
+    )
+    const publish = await devicePublisher(storage)
+
+    // 600 objects: fewer identities than ANALYZE_ROWS, but four times as many rows of work.
+    await publish(1, 600)
+    // Autovacuum analyzes the plan tables while they hold the first plan.
+    await sql`ANALYZE ontology_replacement_plan_identities, ontology_replacement_plan_work`
+    await publish(2, 600)
+
+    // The lookups of a link page: the planned existence of each endpoint, by its unique key.
+    const [plan] = await sql<{ readonly version_id: string }[]>`
+      SELECT MAX(version_id) AS version_id FROM ontology_replacement_plans
+    `
+    const keys = Array.from({ length: 100 }, (_, i) =>
+      objectRefKey({ objectTypeId: "Device", primaryId: String(i) })
+    )
+    const lookups = sql`
+      SELECT (
+        SELECT payload FROM ontology_replacement_plan_work
+        WHERE work_id = ${plan!.version_id} AND unique_key = 'object-existence:' || requested.key
+      )
+      FROM unnest(${sql.array(keys)}::text[]) AS requested(key)
+    `
+
+    expect(await visitedRows(sql, lookups, "ontology_replacement_plan_work")).toBeLessThan(1_000)
+  } finally {
+    await sql.end()
+    await storage.dropSchema()
+    await storage.close()
+  }
+}, 60_000)
+
+/** Publishes `count` devices as a projection worker does once it has read its dataset. */
+async function devicePublisher(storage: PostgresStorage) {
+  const Device = defineObjectType({
+    id: "Device",
+    name: "Device",
+    properties: [prop("id", "string", { primary: true, required: true }), prop("name", "string")],
+  })
+  const devices = defineDataset("statistics.devices", {
+    primaryKey: "id",
+    schema: [col("id", "string"), col("name", "string")],
+  })
+  const projection = defineProjection("statistics-devices", Device)
+    .fromDataset(devices)
+    .properties({ id: "id", name: "name" })
+  const host = new SixbHost({
+    id: "statistics",
+    ontology: [Device],
+    datasets: [devices],
+    projections: [projection],
+    storage,
+    lakeStorage: new InMemoryLakeStorage(),
+    broker: new InMemoryBroker(),
+    queues: new InMemoryQueues(),
+    blobStorage: new InMemoryBlobStorage(),
+  })
+  await host.closeBroker()
+
+  return async (version: number, count: number) => {
+    const dispatch = getProjectionRegistry(host).resolveDispatch(projection.id)
+    const identity = {
+      projectionId: projection.id,
+      projectionKind: "object" as const,
+      protocol: "replacement" as const,
+      datasetVersion: {
+        datasetId: dispatch.datasetId,
+        versionId: `v${version}`,
+        createdAt: `2026-01-0${version}T00:00:00.000Z`,
+      },
+      ontologyRevision: dispatch.ontologyRevision,
+      projectionRevision: dispatch.projectionRevision,
+      ownershipHash: dispatch.ownershipHash,
+    }
+    const id = createProjectionRunId(host.id, identity)
+    const claim = await startTestProjectionRun(storage, {
+      projectId: host.id,
+      id,
+      identity,
+      target: { objectTypeId: Device.id },
+    })
+    const run = await storage.projectionRuns.getById({ projectId: host.id, id })
+    const execution = await storage.executions.getById({ projectId: host.id, id: run!.executionId })
+    const { ontologyMutations } = bindDurablePrimitiveExecution(host, {
+      execution: execution!,
+      primitive: { kind: "projection", id: projection.id, runId: id },
+    })
+
+    await ontologyMutations.replaceProjection({
+      source: { projectionId: projection.id },
+      datasetVersion: identity.datasetVersion,
+      execution: claim.execution,
+      entries: (async function* () {
+        for (let i = 0; i < count; i++) {
+          const ref = { objectTypeId: Device.id, primaryId: String(i) }
+          yield {
+            root: { kind: "object" as const, ref },
+            assertions: [
+              { kind: "object" as const, ref, properties: { name: `v${version}-${i}` } },
+            ],
+          }
+        }
+      })(),
+    })
+  }
+}
