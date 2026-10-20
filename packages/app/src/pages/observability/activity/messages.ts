@@ -38,6 +38,8 @@ export const en = {
     sharedLinkId: (suffix: string) => `Link ending ${suffix}`,
     pageViews: (count: number, formatted: string) =>
       plural("en", count, { one: "1 page view", other: `${formatted} page views` }),
+    interactions: (count: number, formatted: string) =>
+      plural("en", count, { one: "1 interaction", other: `${formatted} interactions` }),
   },
   source: {
     label: "Source",
@@ -49,13 +51,13 @@ export const en = {
   },
   visit: {
     title: "Timeline",
-    select: "Select a visit to see its pages, actions, workflows and Agent runs.",
+    select: "Select a visit to see its pages, interactions, actions, workflows and Agent runs.",
     noPages: "No page was viewed: this visit only shows activity on a page opened earlier.",
     nothingOfKind: "Nothing of this kind in this visit.",
     unavailable: "This visit could not be loaded.",
-    note: "Times are in UTC. Routes are patterns: their values and the page contents are not recorded. Actions, workflows and Agent runs are those the visit's session started.",
+    note: "Times are in UTC. Routes are patterns: their values and the page contents are not recorded. Interactions are the elements the app marks, by name. Actions, workflows and Agent runs are those the visit's session started.",
     truncated:
-      "This visit did more than the timeline shows: it stops after 200 page views or 200 recorded executions.",
+      "This visit did more than the timeline shows: it stops after 200 page views and interactions, or 200 recorded executions.",
     filters: {
       all: "All",
       page: "Pages",
@@ -148,6 +150,8 @@ export const fr: Translation<ActivityMessages> = {
     sharedLinkId: (suffix: string) => `Lien finissant par ${suffix}`,
     pageViews: (count: number, formatted: string) =>
       plural("fr", count, { one: `${formatted} page vue`, other: `${formatted} pages vues` }),
+    interactions: (count: number, formatted: string) =>
+      plural("fr", count, { one: `${formatted} interaction`, other: `${formatted} interactions` }),
   },
   source: {
     label: "Source",
@@ -160,14 +164,14 @@ export const fr: Translation<ActivityMessages> = {
   visit: {
     title: "Chronologie",
     select:
-      "Sélectionnez une visite pour voir ses pages, actions, workflows et exécutions de l’agent.",
+      "Sélectionnez une visite pour voir ses pages, interactions, actions, workflows et exécutions de l’agent.",
     noPages:
       "Aucune page consultée : cette visite ne montre que de l’activité sur une page ouverte plus tôt.",
     nothingOfKind: "Rien de ce type dans cette visite.",
     unavailable: "Cette visite n’a pas pu être chargée.",
-    note: "Les heures sont en UTC. Les routes sont des modèles : leurs valeurs et le contenu des pages ne sont pas enregistrés. Les actions, workflows et exécutions de l’agent sont ceux lancés par la session de la visite.",
+    note: "Les heures sont en UTC. Les routes sont des modèles : leurs valeurs et le contenu des pages ne sont pas enregistrés. Les interactions sont les éléments que l’app marque, par leur nom. Les actions, workflows et exécutions de l’agent sont ceux lancés par la session de la visite.",
     truncated:
-      "Cette visite en a fait plus que ce que montre la chronologie : elle s’arrête après 200 pages vues ou 200 exécutions enregistrées.",
+      "Cette visite en a fait plus que ce que montre la chronologie : elle s’arrête après 200 pages vues et interactions, ou 200 exécutions enregistrées.",
     filters: {
       all: "Tout",
       page: "Pages",
