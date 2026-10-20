@@ -698,7 +698,7 @@ async function publish(
     identity: {
       projectionId: peopleProjection.id,
       datasetVersion,
-      ontologyRevision: projections.ontologyRevision,
+      ontologyRevision: resolved.ontologyRevision,
       projectionRevision: resolved.projectionRevision,
       ownershipHash: resolved.ownershipHash,
       projectionKind: "object",

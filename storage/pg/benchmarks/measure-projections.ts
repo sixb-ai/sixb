@@ -119,7 +119,7 @@ for (const mode of ["baseline", "prepared"] as const) {
           projectionKind: "object",
           protocol: "replacement",
           datasetVersion,
-          ontologyRevision: registry.ontologyRevision,
+          ontologyRevision: resolved.ontologyRevision,
           projectionRevision: resolved.projectionRevision,
           ownershipHash: resolved.ownershipHash,
         },

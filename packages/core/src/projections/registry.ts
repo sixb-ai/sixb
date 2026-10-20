@@ -4,6 +4,7 @@ import { isProjectionDefinition } from "./builders"
 import { ProjectionValidationError } from "./errors"
 import {
   computeOntologyRevision,
+  computeProjectionOntologyRevision,
   computeProjectionOwnershipHash,
   computeProjectionRevision,
 } from "./revision"
@@ -35,6 +36,10 @@ export interface ProjectionRegistryOptions {
 }
 
 export class ProjectionRegistry implements ProjectionDefinitionCatalog {
+  /**
+   * The whole ontology, for commits no projection owns. A projection pins its own revision
+   * (`ResolvedProjection.ontologyRevision`), so a change elsewhere in the ontology leaves it alone.
+   */
   readonly ontologyRevision: string
   private readonly objectProjections: readonly ObjectProjectionDefinition[]
   private readonly linkProjections: readonly LinkProjectionDefinition[]
@@ -91,22 +96,22 @@ export class ProjectionRegistry implements ProjectionDefinitionCatalog {
 
     const dispatchDescriptors: ProjectionDispatchDescriptor[] = []
     for (const record of validated.objectProjections) {
-      const resolved = createResolvedProjection(record)
+      const resolved = createResolvedProjection(record, input.ontology)
       this.sourceById.set(resolved.projectionId, resolved)
       this.projectionsById.set(resolved.projectionId, resolved.definition)
-      dispatchDescriptors.push(createDispatchDescriptor(resolved, this.ontologyRevision))
+      dispatchDescriptors.push(createDispatchDescriptor(resolved))
     }
     for (const record of validated.linkProjections) {
-      const resolved = createResolvedProjection(record)
+      const resolved = createResolvedProjection(record, input.ontology)
       this.sourceById.set(resolved.projectionId, resolved)
       this.projectionsById.set(resolved.projectionId, resolved.definition)
-      dispatchDescriptors.push(createDispatchDescriptor(resolved, this.ontologyRevision))
+      dispatchDescriptors.push(createDispatchDescriptor(resolved))
     }
     for (const record of validated.telemetryProjections) {
-      const resolved = createResolvedProjection(record)
+      const resolved = createResolvedProjection(record, input.ontology)
       this.telemetryById.set(resolved.projectionId, resolved)
       this.projectionsById.set(resolved.projectionId, resolved.definition)
-      dispatchDescriptors.push(createDispatchDescriptor(resolved, this.ontologyRevision))
+      dispatchDescriptors.push(createDispatchDescriptor(resolved))
     }
     this.dispatchDescriptors = Object.freeze(dispatchDescriptors)
     for (const descriptor of this.dispatchDescriptors) {
@@ -172,13 +177,12 @@ export class ProjectionRegistry implements ProjectionDefinitionCatalog {
 }
 
 function createDispatchDescriptor(
-  resolved: ResolvedProjection<ProjectionDefinition>,
-  ontologyRevision: string
+  resolved: ResolvedProjection<ProjectionDefinition>
 ): ProjectionDispatchDescriptor {
   const common = {
     projectionId: resolved.projectionId,
     datasetId: resolved.datasetId,
-    ontologyRevision,
+    ontologyRevision: resolved.ontologyRevision,
     projectionRevision: resolved.projectionRevision,
     ownershipHash: resolved.ownershipHash,
   }
@@ -204,12 +208,14 @@ function assertUniqueProjectionIds(projections: readonly ProjectionDefinition[])
 }
 
 function createResolvedProjection<TDefinition extends ProjectionDefinition>(
-  validated: ValidatedProjectionRecord<TDefinition>
+  validated: ValidatedProjectionRecord<TDefinition>,
+  ontology: OntologyDefinitionCatalog
 ): ResolvedProjection<TDefinition> {
   const { definition, dataset, ownership } = validated
   return deepFreeze({
     projectionId: definition.id,
     datasetId: definition.datasetId,
+    ontologyRevision: computeProjectionOntologyRevision(definition, ontology),
     projectionRevision: computeProjectionRevision(definition, dataset),
     ownershipHash: computeProjectionOwnershipHash(ownership),
     ownership,

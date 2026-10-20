@@ -2,22 +2,103 @@ import type { DatasetDefinition } from "../datasets"
 import { compareStrings, type JsonValue } from "../json"
 import { sha256Canonical } from "../materialization/identity"
 import type { OntologyDefinitionCatalog } from "../ontology"
-import type { ObjectFieldSchema, Property, Schema } from "../ontology/types"
+import type { ObjectFieldSchema, ObjectType, Property, Schema } from "../ontology/types"
 import type { ProjectionDefinition, ProjectionOwnership } from "./types"
 
+/** The whole ontology a project runs: every object type and the value types they reference. */
 export function computeOntologyRevision(ontology: OntologyDefinitionCatalog): string {
-  const referencedValueTypeIds = collectOntologyValueTypeDependencies(ontology)
+  const objectTypes = [...ontology.getObjectTypesById().values()].sort((left, right) =>
+    compareStrings(left.id, right.id)
+  )
   return sha256Canonical({
-    objectTypes: normalizeOntologyObjectTypes(ontology),
-    valueTypes: normalizeOntologyValueTypes(ontology, referencedValueTypeIds),
+    objectTypes: objectTypes.map(normalizeObjectType),
+    valueTypes: normalizeReferencedValueTypes(ontology, objectTypes),
   })
 }
 
-function collectOntologyValueTypeDependencies(
+/**
+ * The part of the ontology one projection's output depends on, so that a deployment reruns only
+ * the projections whose part changed.
+ *
+ * - The type the projection writes, which inheritance has already flattened. Committing validates
+ *   the whole effective object or link scope against it, not only the mapped properties.
+ * - The supertypes of each type it links to: a link accepts a target that is its declared target
+ *   type or a subtype of it.
+ * - The value types the written type references, transitively.
+ *
+ * Other types are not read. Links of other scopes that a commit re-resolves because it changed an
+ * object's existence follow from that data change, under their own projections' revisions.
+ */
+export function computeProjectionOntologyRevision(
+  projection: ProjectionDefinition,
   ontology: OntologyDefinitionCatalog
+): string {
+  const writtenType = ontology.resolveObjectType(writtenObjectTypeId(projection))
+  return sha256Canonical({
+    objectType: normalizeObjectType(writtenType),
+    linkTargets: [...new Set(linkTargetObjectTypeIds(projection))]
+      .sort(compareStrings)
+      .map((objectTypeId) => ({
+        id: objectTypeId,
+        supertypes: listSupertypeIds(ontology, objectTypeId),
+      })),
+    valueTypes: normalizeReferencedValueTypes(ontology, [writtenType]),
+  })
+}
+
+function writtenObjectTypeId(projection: ProjectionDefinition): string {
+  return projection._tag === "LinkProjectionDefinition"
+    ? projection.sourceObjectTypeId
+    : projection.objectTypeId
+}
+
+function linkTargetObjectTypeIds(projection: ProjectionDefinition): readonly string[] {
+  if (projection._tag === "ObjectProjectionDefinition") {
+    return Object.values(projection.links).map((link) => link.targetObjectTypeId)
+  }
+  if (projection._tag === "LinkProjectionDefinition") return [projection.targetObjectTypeId]
+  return []
+}
+
+/** Transitive `extends` and `parents`, sorted: what `isValidLinkTarget` matches a target against. */
+function listSupertypeIds(ontology: OntologyDefinitionCatalog, objectTypeId: string): string[] {
+  const supertypes = new Set<string>()
+  const pending = [objectTypeId]
+  for (let index = 0; index < pending.length; index += 1) {
+    const objectType = ontology.resolveObjectType(pending[index])
+    for (const supertypeId of [
+      ...(objectType.extends ? [objectType.extends] : []),
+      ...(objectType.parents ?? []),
+    ]) {
+      if (supertypes.has(supertypeId)) continue
+      supertypes.add(supertypeId)
+      pending.push(supertypeId)
+    }
+  }
+  return [...supertypes].sort(compareStrings)
+}
+
+function normalizeReferencedValueTypes(
+  ontology: OntologyDefinitionCatalog,
+  objectTypes: readonly ObjectType[]
+): JsonValue[] {
+  return [...collectReferencedValueTypes(ontology, objectTypes)]
+    .sort(compareStrings)
+    .map((valueTypeId) => ontology.getValueTypesById().get(valueTypeId))
+    .filter((valueType) => valueType !== undefined)
+    .map((valueType) => ({
+      id: valueType.id,
+      schema: normalizeSchema(valueType.schema),
+      semanticType: valueType.semanticType ?? null,
+    }))
+}
+
+function collectReferencedValueTypes(
+  ontology: OntologyDefinitionCatalog,
+  objectTypes: readonly ObjectType[]
 ): ReadonlySet<string> {
   const referencedValueTypeIds = new Set<string>()
-  for (const objectType of ontology.getObjectTypesById().values()) {
+  for (const objectType of objectTypes) {
     for (const property of objectType.properties) {
       collectReferencedValueTypeIds(property.schema, referencedValueTypeIds)
     }
@@ -42,45 +123,28 @@ function collectOntologyValueTypeDependencies(
   return referencedValueTypeIds
 }
 
-function normalizeOntologyValueTypes(
-  ontology: OntologyDefinitionCatalog,
-  referencedValueTypeIds: ReadonlySet<string>
-): JsonValue[] {
-  return [...referencedValueTypeIds]
-    .sort(compareStrings)
-    .map((valueTypeId) => ontology.getValueTypesById().get(valueTypeId))
-    .filter((valueType) => valueType !== undefined)
-    .map((valueType) => ({
-      id: valueType.id,
-      schema: normalizeSchema(valueType.schema),
-      semanticType: valueType.semanticType ?? null,
-    }))
-}
-
-function normalizeOntologyObjectTypes(ontology: OntologyDefinitionCatalog): JsonValue[] {
-  return [...ontology.getObjectTypesById().values()]
-    .sort((left, right) => compareStrings(left.id, right.id))
-    .map((objectType) => ({
-      id: objectType.id,
-      extends: objectType.extends ?? null,
-      parents: [...(objectType.parents ?? [])].sort(),
-      implements: [...(objectType.implements ?? [])].sort(),
-      properties: [...objectType.properties]
-        .sort((left, right) => compareStrings(left.id, right.id))
-        .map(normalizeProperty),
-      links: [...objectType.links]
-        .sort((left, right) => compareStrings(left.id, right.id))
-        .map((link) => ({
-          id: link.id,
-          targetObjectTypeIds: Array.isArray(link.targetObjectTypeId)
-            ? [...link.targetObjectTypeId].sort()
-            : [link.targetObjectTypeId],
-          cardinality: link.cardinality ?? "many",
-          properties: [...(link.properties ?? [])]
-            .sort((left, right) => compareStrings(left.id, right.id))
-            .map(normalizeProperty),
-        })),
-    }))
+function normalizeObjectType(objectType: ObjectType): JsonValue {
+  return {
+    id: objectType.id,
+    extends: objectType.extends ?? null,
+    parents: [...(objectType.parents ?? [])].sort(),
+    implements: [...(objectType.implements ?? [])].sort(),
+    properties: [...objectType.properties]
+      .sort((left, right) => compareStrings(left.id, right.id))
+      .map(normalizeProperty),
+    links: [...objectType.links]
+      .sort((left, right) => compareStrings(left.id, right.id))
+      .map((link) => ({
+        id: link.id,
+        targetObjectTypeIds: Array.isArray(link.targetObjectTypeId)
+          ? [...link.targetObjectTypeId].sort()
+          : [link.targetObjectTypeId],
+        cardinality: link.cardinality ?? "many",
+        properties: [...(link.properties ?? [])]
+          .sort((left, right) => compareStrings(left.id, right.id))
+          .map(normalizeProperty),
+      })),
+  }
 }
 
 function collectReferencedValueTypeIds(schema: Schema, valueTypeIds: Set<string>): void {
