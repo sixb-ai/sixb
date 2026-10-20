@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   parseCommitMetadata,
-  parseInlineDataChange,
+  parseTableDataChange,
   parseVersionId,
   toVersionId,
 } from "../src/internal/versions"
@@ -119,12 +119,16 @@ describe("DuckLake version metadata", () => {
     })
   })
 
-  test("detects table-specific inline data changes", () => {
-    expect(parseInlineDataChange("insert:41,delete:42", 42n)).toEqual({
+  test("detects table-specific data changes", () => {
+    expect(parseTableDataChange("insert:41,delete:42", 42n)).toEqual({
       hasDataChange: true,
       hasDeleteChange: true,
     })
-    expect(parseInlineDataChange("metadata:42,insert:43", 42n)).toEqual({
+    expect(parseTableDataChange("inserted_into_table:42,altered_table:43", 42n)).toEqual({
+      hasDataChange: true,
+      hasDeleteChange: false,
+    })
+    expect(parseTableDataChange("metadata:42,insert:43", 42n)).toEqual({
       hasDataChange: false,
       hasDeleteChange: false,
     })

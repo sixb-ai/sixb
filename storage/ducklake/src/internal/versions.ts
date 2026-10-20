@@ -89,7 +89,12 @@ export function changesTouchTables(changesMade: string, tableIds: readonly bigin
   return changesMade.split(",").some((change) => ids.has(change.split(":")[1] ?? ""))
 }
 
-export function parseInlineDataChange(
+/**
+ * Whether a DuckLake snapshot changed a table's rows, and whether it removed any. DuckLake records
+ * every row change in `changes_made`, for inlined rows (`inlined_insert:<id>`) as for files
+ * (`inserted_into_table:<id>`, `deleted_from_table:<id>`); altering a table changes none.
+ */
+export function parseTableDataChange(
   changesMade: string,
   tableId: bigint
 ): { readonly hasDataChange: boolean; readonly hasDeleteChange: boolean } {
