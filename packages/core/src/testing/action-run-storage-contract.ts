@@ -310,6 +310,31 @@ export function runActionRunStorageContractSuite<TStorage extends ActionRunStora
       })
     })
 
+    test("reads the runs of several executions at once", async () => {
+      await withStorage(async (storage) => {
+        const first = await recordTestActionRun(storage, run("act_1"))
+        const second = await recordTestActionRun(storage, run("act_2"))
+        // An execution whose run is still in flight has no record.
+        const inFlight = await createTestActionRunRecord(storage.executions, run("act_in_flight"))
+
+        const runs = await storage.actionRuns.getByExecutionIds({
+          projectId,
+          executionIds: [second.executionId, inFlight.executionId, first.executionId, "missing"],
+        })
+        expect(runs).toEqual([second, first])
+
+        await expect(
+          storage.actionRuns.getByExecutionIds({
+            projectId: "other-project",
+            executionIds: [first.executionId],
+          })
+        ).resolves.toEqual([])
+        await expect(
+          storage.actionRuns.getByExecutionIds({ projectId, executionIds: [] })
+        ).resolves.toEqual([])
+      })
+    })
+
     test("drops a record written in a transaction that rolls back", async () => {
       await withStorage(async (storage) => {
         const input = await createTestActionRunRecord(storage.executions, run("act_rolled_back"))

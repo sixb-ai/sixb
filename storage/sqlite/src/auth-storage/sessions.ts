@@ -2,6 +2,8 @@ import type { Database } from "bun:sqlite"
 import type {
   AuthSessionStore,
   CreateAuthSessionInput,
+  ListAuthSessionsInput,
+  ListAuthSessionsResult,
   RotateSessionRefreshTokenResult,
   SessionRecord,
 } from "@sixb/core/storage"
@@ -58,6 +60,31 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
       ) as SqliteAuthSessionRow[]
 
     return rows.map(rowToSessionRecord)
+  }
+
+  async listByUserId(params: ListAuthSessionsInput): Promise<ListAuthSessionsResult> {
+    const rows = this.db
+      .query(
+        `
+        SELECT *
+        FROM auth_sessions
+        WHERE project_id = ? AND user_id = ? AND created_at <= ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT ? OFFSET ?
+      `
+      )
+      .all(
+        params.projectId,
+        params.userId,
+        params.before ? toIso(params.before.createdAt) : "9999-12-31T23:59:59.999Z",
+        params.limit + 1,
+        params.before?.skip ?? 0
+      ) as SqliteAuthSessionRow[]
+
+    return {
+      sessions: rows.slice(0, params.limit).map(rowToSessionRecord),
+      hasMore: rows.length > params.limit,
+    }
   }
 
   async findValidByTokenHash(params: {

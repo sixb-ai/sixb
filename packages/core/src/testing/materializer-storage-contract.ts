@@ -2128,6 +2128,7 @@ function observeActionRunRecords(storage: ContractStorage) {
             },
             recordEffects: (input) => actionRuns.recordEffects(input),
             getById: (input) => actionRuns.getById(input),
+            getByExecutionIds: (input) => actionRuns.getByExecutionIds(input),
             list: (input) => actionRuns.list(input),
           }
           return run(

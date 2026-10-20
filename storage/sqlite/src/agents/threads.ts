@@ -108,6 +108,33 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
     return row ? rowToThreadRecord(row) : null
   }
 
+  async getByIds(params: {
+    readonly projectId: string
+    readonly ids: readonly string[]
+  }): Promise<readonly AgentThreadRecord[]> {
+    const ids = [...new Set(params.ids)]
+    if (ids.length === 0) {
+      return []
+    }
+
+    const rows = this.db
+      .query(
+        `
+        SELECT *
+        FROM agent_threads
+        WHERE project_id = ?
+          AND id IN (SELECT value FROM json_each(?))
+      `
+      )
+      .all(params.projectId, JSON.stringify(ids)) as AgentThreadRow[]
+
+    const byId = new Map(rows.map((row) => [row.id, row]))
+    return ids.flatMap((id) => {
+      const row = byId.get(id)
+      return row ? [rowToThreadRecord(row)] : []
+    })
+  }
+
   async list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult> {
     if (input.statuses !== undefined && input.statuses.length === 0) {
       return { threads: [], hasMore: false, total: 0 }

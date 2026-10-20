@@ -16,17 +16,19 @@ import type {
   ActivityDay,
   ActivityPageView,
   ActivityPeriodInput,
+  ActivitySessionVisits,
   ActivityStorage,
   ActivitySummary,
   ActivityUsersPage,
   ActivityVisit,
-  ActivityVisitPage,
   ActivityVisitsPage,
   AppendActivityInput,
   AppendActivityResult,
+  ListActivitySessionVisitsInput,
   ListActivityUsersInput,
   ListActivityVisitsInput,
   ReadActivityVisitInput,
+  StoredActivityVisitPage,
 } from "@sixb/core/storage"
 import { runImmediateTransaction, type SqliteStoreConnection } from "./transactions"
 
@@ -269,10 +271,10 @@ export class SqliteActivityStorage implements ActivityStorage {
     )
   }
 
-  async read(input: ReadActivityVisitInput): Promise<ActivityVisitPage | null> {
-    const [visit] = this.all<VisitRow>(
+  async read(input: ReadActivityVisitInput): Promise<StoredActivityVisitPage | null> {
+    const [visit] = this.all<VisitRow & { readonly session_id: string }>(
       `
-        SELECT ${VISIT_COLUMNS}
+        SELECT ${VISIT_COLUMNS}, v.session_id
         FROM activity_visits v
         WHERE v.project_id = ? AND v.id = ?
       `,
@@ -299,9 +301,54 @@ export class SqliteActivityStorage implements ActivityStorage {
 
     return {
       visit: visitFromRow(visit),
+      sessionId: visit.session_id,
       pageViews: rows.slice(0, input.limit).map(pageViewFromRow),
       hasMore: rows.length > input.limit,
     }
+  }
+
+  async sessionVisits(
+    input: ListActivitySessionVisitsInput
+  ): Promise<readonly ActivitySessionVisits[]> {
+    if (input.sessionIds.length === 0) {
+      return []
+    }
+
+    // A session opens a visit per return after inactivity, so each has a few to rank.
+    const rows = this.all<SessionVisitRow>(
+      `
+        SELECT *
+        FROM (
+          SELECT
+            ${VISIT_COLUMNS},
+            v.session_id,
+            ROW_NUMBER() OVER (
+              PARTITION BY v.session_id ORDER BY v.started_at DESC, v.id DESC
+            ) AS position,
+            COUNT(*) OVER (PARTITION BY v.session_id) AS total
+          FROM activity_visits v
+          WHERE v.project_id = ?
+            AND v.actor_type = 'user'
+            AND v.session_id IN (SELECT value FROM json_each(?))
+            AND v.user_id = ?
+        )
+        WHERE position <= ?
+        ORDER BY session_id, position
+      `,
+      input.projectId,
+      JSON.stringify(input.sessionIds),
+      input.userId,
+      input.limit
+    )
+
+    const bySession = new Map<string, { visits: number; latest: ActivityVisit[] }>()
+    for (const row of rows) {
+      const session = bySession.get(row.session_id) ?? { visits: Number(row.total), latest: [] }
+      session.latest.push(visitFromRow(row))
+      bySession.set(row.session_id, session)
+    }
+
+    return [...bySession].map(([sessionId, session]) => ({ sessionId, ...session }))
   }
 
   private source(input: AppendActivityInput): ActivitySourceState | undefined {
@@ -384,6 +431,11 @@ interface VisitRow {
   readonly last_seen_at: string
   readonly page_views: number
   readonly attribution: string | null
+}
+
+interface SessionVisitRow extends VisitRow {
+  readonly session_id: string
+  readonly total: number
 }
 
 interface UserRow {

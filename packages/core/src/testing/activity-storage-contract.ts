@@ -299,6 +299,53 @@ export function runActivityStorageContractSuite<TStorage extends Storage>(
           []
         )
         await expect(read(activity, "visit-a", 10, "other")).resolves.toBeNull()
+
+        // Core joins a visit with its session's executions and device through this id.
+        expect((await read(activity, "visit-a"))?.sessionId).toBe("session-a")
+        expect((await read(activity, "visit-d"))?.sessionId).toBe("session-a")
+      })
+    })
+
+    test("a session's visits count whole, the latest first, for one account only", async () => {
+      await withActivity(async (activity) => {
+        await activity.append(batch("first"))
+        await activity.append(batch("second", { now: later(31) }))
+        await activity.append(batch("third", { now: later(62) }))
+        await activity.append(batch("other-session", { sessionId: "session-b" }))
+        await activity.append(
+          batch("share", { sessionId: "session-c", actor: { type: "share", grantId: "grant" } })
+        )
+        await activity.append(
+          batch("other-user", { sessionId: "session-d", actor: { type: "user", userId: "user-b" } })
+        )
+
+        const sessions = await activity.sessionVisits({
+          projectId,
+          userId: "user-a",
+          sessionIds: ["session-a", "session-b", "session-c", "session-d", "missing"],
+          limit: 2,
+        })
+
+        expect(
+          [...sessions]
+            .sort((left, right) => left.sessionId.localeCompare(right.sessionId))
+            .map((session) => ({
+              sessionId: session.sessionId,
+              visits: session.visits,
+              latest: session.latest.map((visit) => visit.id),
+            }))
+        ).toEqual([
+          { sessionId: "session-a", visits: 3, latest: ["visit-third", "visit-second"] },
+          { sessionId: "session-b", visits: 1, latest: ["visit-other-session"] },
+        ])
+        await expect(
+          activity.sessionVisits({
+            projectId: "other",
+            userId: "user-a",
+            sessionIds: ["session-a"],
+            limit: 2,
+          })
+        ).resolves.toEqual([])
       })
     })
 

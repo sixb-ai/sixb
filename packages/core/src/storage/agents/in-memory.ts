@@ -173,6 +173,16 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
     return record ? clone(record) : null
   }
 
+  async getByIds(params: {
+    readonly projectId: string
+    readonly ids: readonly string[]
+  }): Promise<readonly AgentThreadRecord[]> {
+    return [...new Set(params.ids)].flatMap((id) => {
+      const record = this.state.threads.get(key(params.projectId, id))
+      return record ? [clone(record)] : []
+    })
+  }
+
   async list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult> {
     const order = input.order ?? "desc"
     const statuses = input.statuses ? new Set(input.statuses) : null

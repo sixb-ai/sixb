@@ -576,6 +576,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 64,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "065-activity-timeline",
+    status: "applied",
+    version: 65,
+  },
 ]
 
 afterEach(async () => {

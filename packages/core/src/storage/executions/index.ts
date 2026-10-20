@@ -12,5 +12,8 @@ export type {
   DurableExecutionExecutor,
   DurableExecutionSource,
   ExecutionRecord,
+  ExecutionSessionRef,
   ExecutionStorage,
+  ListSessionExecutionsInput,
+  SessionExecutions,
 } from "./types"

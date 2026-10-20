@@ -1,7 +1,14 @@
 import type { AuthStorage } from "../auth"
 import type { ShareSessionStorage } from "../share-sessions"
 import { ExecutionStorageError } from "./errors"
-import type { CreateExecutionInput, ExecutionRecord, ExecutionStorage } from "./types"
+import { compareExecutionCreation } from "./provider"
+import type {
+  CreateExecutionInput,
+  ExecutionRecord,
+  ExecutionStorage,
+  ListSessionExecutionsInput,
+  SessionExecutions,
+} from "./types"
 import { cloneExecutionRecord, prepareExecutionRecord } from "./validation"
 
 type RunRootOperation = <T>(run: () => Promise<T> | T) => Promise<T>
@@ -73,6 +80,59 @@ export class InMemoryExecutionStorage implements ExecutionStorage {
       return record ? cloneExecutionRecord(record) : null
     })
   }
+
+  async listBySession(input: ListSessionExecutionsInput): Promise<SessionExecutions> {
+    return this.runRootOperation(() => {
+      const rows = [...this.rows.values()].filter((row) => row.projectId === input.projectId)
+
+      const roots = rows
+        .filter(
+          (row) =>
+            row.source.type !== "execution" &&
+            row.createdAt >= input.from &&
+            row.createdAt < input.to &&
+            isFromSession(row, input.session)
+        )
+        .sort(compareExecutionCreation)
+        .slice(0, input.limit + 1)
+
+      // Level by level, as the SQL providers walk the tree, so truncation keeps roots first.
+      const found = [...roots]
+      let level = roots
+      while (level.length > 0 && found.length <= input.limit) {
+        const parents = new Set(level.map((row) => row.id))
+        level = rows
+          .filter((row) => row.source.type === "execution" && parents.has(row.source.executionId))
+          .sort(compareExecutionCreation)
+        found.push(...level)
+      }
+
+      return {
+        executions: found
+          .slice(0, input.limit)
+          .sort(compareExecutionCreation)
+          .map(cloneExecutionRecord),
+        truncated: found.length > input.limit,
+      }
+    })
+  }
+}
+
+function isFromSession(
+  row: ExecutionRecord,
+  session: ListSessionExecutionsInput["session"]
+): boolean {
+  const ref = row.authorizationRef
+
+  if (session.type === "user") {
+    return (
+      ref.type === "principal" &&
+      ref.credential?.type === "session" &&
+      ref.credential.id === session.id
+    )
+  }
+
+  return ref.type === "delegated" && ref.delegation.sessionId === session.id
 }
 
 export type InMemoryExecutionStorageSnapshot = Map<string, ExecutionRecord>

@@ -42,6 +42,8 @@ export type {
   ListAuthInvitationsResult,
   ListAuthServiceAccountsInput,
   ListAuthServiceAccountsResult,
+  ListAuthSessionsInput,
+  ListAuthSessionsResult,
   ListAuthUsersInput,
   ListAuthUsersResult,
   MagicLinkRecord,

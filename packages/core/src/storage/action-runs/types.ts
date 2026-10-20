@@ -144,6 +144,14 @@ export interface ActionRunStorage {
    */
   recordEffects(input: RecordActionEffectsInput): Promise<ActionRunRecord>
   getById(params: { projectId: string; id: string }): Promise<ActionRunRecord | null>
+  /**
+   * The runs these executions recorded, in first-occurrence input order. An execution whose run
+   * is in flight, or was interrupted, has none.
+   */
+  getByExecutionIds(params: {
+    readonly projectId: string
+    readonly executionIds: readonly string[]
+  }): Promise<readonly ActionRunRecord[]>
   /** Runs ordered by `startedAt`, then id. */
   list(input: ListActionRunsInput): Promise<ListActionRunsResult>
 }

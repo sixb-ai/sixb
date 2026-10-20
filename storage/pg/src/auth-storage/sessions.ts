@@ -1,6 +1,8 @@
 import type {
   AuthSessionStore,
   CreateAuthSessionInput,
+  ListAuthSessionsInput,
+  ListAuthSessionsResult,
   RotateSessionRefreshTokenResult,
   SessionRecord,
 } from "@sixb/core/storage"
@@ -54,6 +56,24 @@ export class PgAuthSessionStore implements AuthSessionStore {
     `) as PgAuthSessionRow[]
 
     return rows.map(rowToSessionRecord)
+  }
+
+  async listByUserId(params: ListAuthSessionsInput): Promise<ListAuthSessionsResult> {
+    const rows = (await this.sql`
+      SELECT *
+      FROM auth_sessions
+      WHERE project_id = ${params.projectId}
+        AND user_id = ${params.userId}
+        ${params.before ? this.sql`AND created_at <= ${params.before.createdAt}` : this.sql``}
+      ORDER BY created_at DESC, id DESC
+      LIMIT ${params.limit + 1}
+      OFFSET ${params.before?.skip ?? 0}
+    `) as PgAuthSessionRow[]
+
+    return {
+      sessions: rows.slice(0, params.limit).map(rowToSessionRecord),
+      hasMore: rows.length > params.limit,
+    }
   }
 
   async findValidByTokenHash(params: {

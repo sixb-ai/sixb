@@ -328,6 +328,11 @@ export interface WorkflowRunStorage {
   resume(input: ResumeWorkflowRunInput): Promise<WorkflowRunRecord>
   finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord>
   getById(params: { projectId: string; id: string }): Promise<WorkflowRunRecord | null>
+  /** The runs of these executions, in first-occurrence input order; a missing one is omitted. */
+  getByExecutionIds(params: {
+    readonly projectId: string
+    readonly executionIds: readonly string[]
+  }): Promise<readonly WorkflowRunRecord[]>
   list(input: ListWorkflowRunsInput): Promise<ListWorkflowRunsResult>
   listLatestByWorkflowIds(input: ListLatestWorkflowRunsInput): Promise<ListLatestWorkflowRunsResult>
 }

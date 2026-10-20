@@ -2,6 +2,8 @@ import { AuthStorageError } from "../errors"
 import type {
   AuthSessionStore,
   CreateAuthSessionInput,
+  ListAuthSessionsInput,
+  ListAuthSessionsResult,
   RotateSessionRefreshTokenResult,
   SessionRecord,
 } from "../types"
@@ -48,6 +50,25 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
         return created !== 0 ? created : b.id.localeCompare(a.id)
       })
       .map(cloneRecord)
+  }
+
+  async listByUserId(params: ListAuthSessionsInput): Promise<ListAuthSessionsResult> {
+    const before = params.before
+    const offset = before?.skip ?? 0
+    const sessions = [...this.state.sessions.values()]
+      .filter((session) => session.projectId === params.projectId)
+      .filter((session) => session.userId === params.userId)
+      .filter((session) => !before || session.createdAt <= before.createdAt)
+      .sort((a, b) => {
+        const created = b.createdAt.getTime() - a.createdAt.getTime()
+        if (created !== 0) return created
+        return a.id < b.id ? 1 : a.id > b.id ? -1 : 0
+      })
+
+    return {
+      sessions: sessions.slice(offset, offset + params.limit).map(cloneRecord),
+      hasMore: sessions.length > offset + params.limit,
+    }
   }
 
   async findValidByTokenHash(params: {

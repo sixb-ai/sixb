@@ -324,6 +324,22 @@ export interface ListAuthAccessTokensResult {
   readonly total: number
 }
 
+export interface ListAuthSessionsInput {
+  readonly projectId: string
+  readonly userId: string
+  readonly limit: number
+  /**
+   * Continue a list: sessions created at or before `createdAt`, past the first `skip` of those
+   * created exactly then, which the previous pages returned.
+   */
+  readonly before?: { readonly createdAt: Date; readonly skip: number }
+}
+
+export interface ListAuthSessionsResult {
+  readonly sessions: readonly SessionRecord[]
+  readonly hasMore: boolean
+}
+
 export interface CompleteAuthSessionInput {
   readonly id: string
   readonly tokenHash: string
@@ -536,6 +552,8 @@ export interface AuthSessionStore {
     readonly userId: string
     readonly now: Date
   }): Promise<readonly SessionRecord[]>
+  /** Every session of a user, revoked and expired ones too, newest first: a sign-in history. */
+  listByUserId(params: ListAuthSessionsInput): Promise<ListAuthSessionsResult>
   /** A live browser (cookie) session whose secret hashes to `tokenHash`. */
   findValidByTokenHash(params: {
     readonly projectId: string

@@ -14,17 +14,19 @@ import type {
   ActivityCursor,
   ActivityDay,
   ActivityPeriodInput,
+  ActivitySessionVisits,
   ActivityStorage,
   ActivitySummary,
   ActivityUsersPage,
   ActivityVisit,
-  ActivityVisitPage,
   ActivityVisitsPage,
   AppendActivityInput,
   AppendActivityResult,
+  ListActivitySessionVisitsInput,
   ListActivityUsersInput,
   ListActivityVisitsInput,
   ReadActivityVisitInput,
+  StoredActivityVisitPage,
 } from "./types"
 
 interface StoredVisit {
@@ -180,7 +182,7 @@ export class InMemoryActivityStorage implements ActivityStorage {
     return activityCalendarDays(input, visits, pageViewsByDay)
   }
 
-  async read(input: ReadActivityVisitInput): Promise<ActivityVisitPage | null> {
+  async read(input: ReadActivityVisitInput): Promise<StoredActivityVisitPage | null> {
     const visit = this.visits.get(JSON.stringify([input.projectId, input.id]))
     if (!visit) {
       return null
@@ -192,6 +194,7 @@ export class InMemoryActivityStorage implements ActivityStorage {
 
     return {
       visit: toVisit(visit),
+      sessionId: visit.sessionId,
       pageViews: pageViews.slice(0, input.limit).map((pageView) => ({
         id: pageView.id,
         visitId: pageView.visitId,
@@ -201,6 +204,34 @@ export class InMemoryActivityStorage implements ActivityStorage {
       })),
       hasMore: pageViews.length > input.limit,
     }
+  }
+
+  async sessionVisits(
+    input: ListActivitySessionVisitsInput
+  ): Promise<readonly ActivitySessionVisits[]> {
+    const sessionIds = new Set(input.sessionIds)
+    const bySession = new Map<string, StoredVisit[]>()
+
+    for (const visit of this.visits.values()) {
+      if (
+        visit.projectId !== input.projectId ||
+        visit.actor.type !== "user" ||
+        visit.actor.userId !== input.userId ||
+        !sessionIds.has(visit.sessionId)
+      ) {
+        continue
+      }
+
+      const visits = bySession.get(visit.sessionId) ?? []
+      visits.push(visit)
+      bySession.set(visit.sessionId, visits)
+    }
+
+    return [...bySession].map(([sessionId, visits]) => ({
+      sessionId,
+      visits: visits.length,
+      latest: visits.sort(byStartDescending).slice(0, input.limit).map(toVisit),
+    }))
   }
 
   snapshot(): InMemoryActivitySnapshot {
@@ -290,6 +321,14 @@ function isBefore(at: Date, id: string, cursor: ActivityCursor | undefined): boo
     return true
   }
   return at < cursor.at || (at.getTime() === cursor.at.getTime() && id < cursor.id)
+}
+
+function byStartDescending(left: StoredVisit, right: StoredVisit): number {
+  const byTime = right.startedAt.getTime() - left.startedAt.getTime()
+  if (byTime !== 0) {
+    return byTime
+  }
+  return left.id < right.id ? 1 : left.id > right.id ? -1 : 0
 }
 
 /** Newest first, then by descending id compared byte by byte, as the SQL providers sort. */

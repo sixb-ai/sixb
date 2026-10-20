@@ -108,6 +108,29 @@ export class PgAgentThreadStore implements AgentThreadStore {
     return row ? rowToThreadRecord(row) : null
   }
 
+  async getByIds(params: {
+    readonly projectId: string
+    readonly ids: readonly string[]
+  }): Promise<readonly AgentThreadRecord[]> {
+    const ids = [...new Set(params.ids)]
+    if (ids.length === 0) {
+      return []
+    }
+
+    const rows = await this.sql<AgentThreadRow[]>`
+      SELECT *
+      FROM agent_threads
+      WHERE project_id = ${params.projectId}
+        AND id = ANY(${this.sql.array(ids)}::text[])
+    `
+
+    const byId = new Map(rows.map((row) => [row.id, row]))
+    return ids.flatMap((id) => {
+      const row = byId.get(id)
+      return row ? [rowToThreadRecord(row)] : []
+    })
+  }
+
   async list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult> {
     if (input.statuses !== undefined && input.statuses.length === 0) {
       return { threads: [], hasMore: false, total: 0 }

@@ -450,6 +450,31 @@ describe("InMemoryWorkflowRunStorage", () => {
     expect(latest.runs.map((run) => run.id)).toEqual(["run-review", "run-reconcile-z"])
   })
 
+  test("reads the runs of several executions at once", async () => {
+    const storage = createWorkflowRunStorage()
+
+    const run = (id: string) =>
+      storage.start({
+        id,
+        projectId: "my-app",
+        workflowId: "reconcile-transaction",
+        input: { transactionId: id },
+        startedAt: new Date("2026-05-08T11:00:00.000Z"),
+      })
+    const first = await run("run-first")
+    const second = await run("run-second")
+
+    const runs = await storage.getByExecutionIds({
+      projectId: "my-app",
+      executionIds: [second.executionId, "missing", first.executionId, second.executionId],
+    })
+    expect(runs).toEqual([second, first])
+
+    await expect(
+      storage.getByExecutionIds({ projectId: "other-app", executionIds: [first.executionId] })
+    ).resolves.toEqual([])
+  })
+
   test("starts and finishes node runs with pinned input and output", async () => {
     const storage = createWorkflowRunStorage()
 

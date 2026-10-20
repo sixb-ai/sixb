@@ -468,6 +468,11 @@ export interface AgentThreadStore {
   transitionSandbox(input: TransitionAgentThreadSandboxInput): Promise<AgentThreadSandboxState>
   create(input: CreateAgentThreadInput): Promise<AgentThreadRecord>
   getById(params: { projectId: string; id: string }): Promise<AgentThreadRecord | null>
+  /** The threads found, in first-occurrence input order; a missing one is omitted. */
+  getByIds(params: {
+    readonly projectId: string
+    readonly ids: readonly string[]
+  }): Promise<readonly AgentThreadRecord[]>
   list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult>
 }
 

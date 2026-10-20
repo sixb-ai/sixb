@@ -1011,6 +1011,7 @@ describe("requestAction", () => {
       },
       recordEffects: (input) => actionRuns.recordEffects(input),
       getById: (params) => actionRuns.getById(params),
+      getByExecutionIds: (params) => actionRuns.getByExecutionIds(params),
       list: (input) => actionRuns.list(input),
     }
     Object.defineProperty(runtimeDeps.storage, "actionRuns", { value: holdingActionRuns })

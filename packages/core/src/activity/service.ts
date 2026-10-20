@@ -169,7 +169,7 @@ export class ActivityService {
     return { userId: query.userId, year: query.year, days }
   }
 
-  read(id: string, query: ActivityTimelineQuery = {}): Promise<ActivityVisitPage | null> {
+  async read(id: string, query: ActivityTimelineQuery = {}): Promise<ActivityVisitPage | null> {
     const afterSequence = query.afterSequence ?? 0
     if (
       typeof id !== "string" ||
@@ -180,12 +180,19 @@ export class ActivityService {
       throw new Error("[Sixb] Invalid activity visit id or sequence.")
     }
 
-    return this.requireStorage().read({
+    const page = await this.requireStorage().read({
       projectId: this.projectId,
       id,
       afterSequence,
       limit: pageLimit(query.limit),
     })
+    if (!page) {
+      return null
+    }
+
+    // The session id joins a visit with what its session did; reads never return it.
+    const { sessionId: _sessionId, ...visit } = page
+    return visit
   }
 
   private period(query: ActivityPeriodQuery): ActivityPeriodInput {
