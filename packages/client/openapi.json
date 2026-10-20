@@ -43180,7 +43180,8 @@
                 "pipelines",
                 "workflows",
                 "datasets",
-                "rules"
+                "rules",
+                "users"
               ]
             }
           },
@@ -43218,7 +43219,12 @@
                 "workflow.intervention.expired",
                 "dataset.version.committed",
                 "rule.triggered",
-                "rule.resolved"
+                "rule.resolved",
+                "user.joined",
+                "user.suspended",
+                "user.reactivated",
+                "user.invited",
+                "user.profile.updated"
               ]
             }
           },
@@ -46713,7 +46719,12 @@
                                   "workflow.intervention.expired",
                                   "dataset.version.committed",
                                   "rule.triggered",
-                                  "rule.resolved"
+                                  "rule.resolved",
+                                  "user.joined",
+                                  "user.suspended",
+                                  "user.reactivated",
+                                  "user.invited",
+                                  "user.profile.updated"
                                 ]
                               },
                               "topic": {
@@ -46727,7 +46738,8 @@
                                   "pipelines",
                                   "workflows",
                                   "datasets",
-                                  "rules"
+                                  "rules",
+                                  "users"
                                 ]
                               },
                               "payload": {

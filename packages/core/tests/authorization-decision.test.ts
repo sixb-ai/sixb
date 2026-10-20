@@ -10,6 +10,7 @@ import {
 } from "../src/authorization"
 import type {
   StoredDatasetVersionCommittedEvent,
+  StoredDomainEvent,
   StoredLinkMutationEvent,
   StoredObjectMutationEvent,
   StoredPipelineRunStartedEvent,
@@ -358,6 +359,19 @@ const ruleEvent: StoredRuleTriggeredEvent = {
   },
 }
 
+const memberEvent: Extract<StoredDomainEvent, { type: "user.invited" }> = {
+  ...envelope,
+  type: "user.invited",
+  topic: "users",
+  partitionKey: "invitation:ava@acme.com",
+  payload: {
+    invitationId: "inv_1",
+    email: "ava@acme.com",
+    expiresAt: envelope.occurredAt,
+    requestedBy: { type: "user", id: "u2" },
+  },
+}
+
 const scheduleEvent: StoredScheduleTriggeredEvent = {
   ...envelope,
   type: "schedule.triggered",
@@ -382,6 +396,7 @@ describe("canViewEvent", () => {
     ["sync", syncEvent, { syncs: ["sync-orders"] }],
     ["pipeline", pipelineEvent, { pipelines: ["pipeline-orders"] }],
     ["dataset", datasetEvent, { datasets: ["raw.orders"] }],
+    ["member", memberEvent, { users: true }],
   ] as const)("%s events require the grant that governs their subject", (_kind, event, grants) => {
     expect(canViewEvent(context(grants), event)).toBe(true)
     expect(canViewEvent(context({}), event)).toBe(false)
@@ -404,6 +419,10 @@ describe("canViewEvent", () => {
     expect(isAllowed(datasetViewerOnly, { kind: "sync.run", syncId: "erp-orders" })).toBe(false)
   })
 
+  test("viewing every object type does not reveal members or invitees", () => {
+    expect(canViewEvent(context({ view: ["note", "user"] }), memberEvent)).toBe(false)
+  })
+
   test("subject-free infra events stay visible to any scoped principal (no grant governs them)", () => {
     expect(canViewEvent(context({}), scheduleEvent)).toBe(true)
   })
@@ -411,5 +430,6 @@ describe("canViewEvent", () => {
   test("a privileged caller (no context) sees every event", () => {
     expect(canViewEvent(null, linkEvent)).toBe(true)
     expect(canViewEvent(null, scheduleEvent)).toBe(true)
+    expect(canViewEvent(null, memberEvent)).toBe(true)
   })
 })

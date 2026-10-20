@@ -14570,6 +14570,7 @@ export type ListEventsData = {
       | "workflows"
       | "datasets"
       | "rules"
+      | "users"
     type?:
       | "object.created"
       | "object.updated"
@@ -14599,6 +14600,11 @@ export type ListEventsData = {
       | "dataset.version.committed"
       | "rule.triggered"
       | "rule.resolved"
+      | "user.joined"
+      | "user.suspended"
+      | "user.reactivated"
+      | "user.invited"
+      | "user.profile.updated"
     afterCursor?: string
     limit?: string
   }
@@ -15784,6 +15790,11 @@ export type ListEventsResponses = {
             | "dataset.version.committed"
             | "rule.triggered"
             | "rule.resolved"
+            | "user.joined"
+            | "user.suspended"
+            | "user.reactivated"
+            | "user.invited"
+            | "user.profile.updated"
           topic:
             | "objects"
             | "telemetry"
@@ -15794,6 +15805,7 @@ export type ListEventsResponses = {
             | "workflows"
             | "datasets"
             | "rules"
+            | "users"
           payload: {
             [key: string]: unknown
           }

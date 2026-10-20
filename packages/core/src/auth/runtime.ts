@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { type AuthorizationContext, resolveAuthorizationContext } from "../authorization"
+import type { DomainEventLog } from "../events/service"
+import type { EventDraft } from "../events/types"
 import {
   canPerformMembershipOperation,
   type GroupReference,
@@ -33,6 +35,12 @@ import {
 import { getRequestClientAddress } from "./client-address"
 import { getCookie, type ResolvedAuthCookieOptions } from "./cookies"
 import { AuthRuntimeError } from "./errors"
+import {
+  invitedEvents,
+  profileUpdatedEvents,
+  signInEvents,
+  statusChangedEvents,
+} from "./member-events"
 import { normalizeProfileChanges, signInDisplayName } from "./profile"
 import { SessionCache } from "./session-cache"
 import {
@@ -140,6 +148,8 @@ export interface AuthRuntimeOptions {
   readonly storage: Storage
   readonly security: SecurityDefinitionCatalog
   readonly config?: SixbAuthConfig
+  /** Where member events go: joined, suspended, reactivated, invited, profile updated. */
+  readonly events: DomainEventLog
 }
 
 export class AuthRuntime {
@@ -148,11 +158,13 @@ export class AuthRuntime {
   private readonly security: SecurityDefinitionCatalog
   private readonly config: ResolvedAuthConfig
   private readonly sessionCache: SessionCache | null
+  private readonly events: DomainEventLog
 
   constructor(options: AuthRuntimeOptions) {
     this.projectId = options.projectId
     this.storage = options.storage
     this.security = options.security
+    this.events = options.events
     this.config = resolveAuthConfig(options.config)
     this.sessionCache =
       this.config.session.cacheTtlMs > 0 ? new SessionCache(this.config.session.cacheTtlMs) : null
@@ -634,7 +646,7 @@ export class AuthRuntime {
       )
     }
 
-    return strategy.completeMagicLinkSignIn({
+    const result = await strategy.completeMagicLinkSignIn({
       projectId: this.projectId,
       authStorage: this.requireAuthStorage(),
       magicLinkId: input.magicLinkId,
@@ -642,6 +654,10 @@ export class AuthRuntime {
       session: input.session,
       displayName: signInDisplayName(input.displayName),
     })
+
+    await this.emitMemberEvents(signInEvents(result))
+
+    return result
   }
 
   /** Finish an OIDC sign-in from the provider's callback and start the session the server minted. */
@@ -667,6 +683,8 @@ export class AuthRuntime {
     // The provider may have changed the person's name, picture or directory groups, which their
     // other sessions hold in the cache.
     this.sessionCache?.invalidateUser(result.user.id)
+
+    await this.emitMemberEvents(signInEvents(result))
 
     return result
   }
@@ -1182,7 +1200,7 @@ export class AuthRuntime {
       )
     }
 
-    const { user: suspended } = await storage.suspendUserAndRevokeSessions({
+    const { user: suspended, previousUser } = await storage.suspendUserAndRevokeSessions({
       projectId: this.projectId,
       userId: user.id,
       suspendedAt: new Date(),
@@ -1190,6 +1208,8 @@ export class AuthRuntime {
     // Storage revoked the user's sessions; drop cached copies so the suspended
     // user stops authenticating immediately.
     this.sessionCache?.invalidateUser(user.id)
+
+    await this.emitMemberEvents(statusChangedEvents(caller, previousUser, suspended))
 
     return { user: suspended, groupIds, managedGroupIds }
   }
@@ -1209,12 +1229,14 @@ export class AuthRuntime {
     )
 
     // Reactivation restores access but not sessions; the user signs in again.
-    const { user: reactivated } = await storage.users.updateStatus({
+    const { user: reactivated, previousUser } = await storage.users.updateStatus({
       projectId: this.projectId,
       id: user.id,
       status: "active",
       updatedAt: new Date(),
     })
+
+    await this.emitMemberEvents(statusChangedEvents(caller, previousUser, reactivated))
 
     return { user: reactivated, groupIds, managedGroupIds }
   }
@@ -1270,6 +1292,8 @@ export class AuthRuntime {
     if (changed) {
       this.sessionCache?.invalidateUser(user.id)
     }
+
+    await this.emitMemberEvents(profileUpdatedEvents(caller, previousUser, user))
 
     return { profile: toUserProfile(user), managedFields }
   }
@@ -1456,14 +1480,12 @@ export class AuthRuntime {
       ...(input.revealLink && delivery.link ? { link: delivery.link } : {}),
     }
 
-    if (delivery.status === "not_supported") {
-      return { invitation, delivery }
-    }
-
-    if (delivery.status !== "sent") {
+    if (delivery.status !== "sent" && delivery.status !== "not_supported") {
       await this.revokeInvitationAfterDeliveryFailure(authStorage, invitation, now)
       throw this.createInvitationDeliveryError(delivery.status)
     }
+
+    await this.emitMemberEvents(invitedEvents(caller, invitation))
 
     return { invitation, delivery }
   }
@@ -1527,6 +1549,17 @@ export class AuthRuntime {
         revokedAt: new Date(),
       }),
     }
+  }
+
+  /**
+   * Member events follow the auth write that caused them, which has already committed. Auth
+   * storage keeps no outbox, so an event the broker refuses is reported through `onError` and lost:
+   * delivery is at most once.
+   */
+  private async emitMemberEvents(events: readonly EventDraft[]): Promise<void> {
+    if (events.length === 0) return
+
+    await this.events.emit({ events }, { source: "Sixb" })
   }
 
   private requireAuthStorage() {

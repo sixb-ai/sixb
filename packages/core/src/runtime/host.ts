@@ -259,6 +259,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       storage: this.storage,
       security: definitions.security,
       config: options.auth,
+      events: this.eventService,
     })
     validateAuthStrategySecurityReferences(this.auth.getStrategy(), definitions.security)
     const connectors = definitions.connectors.list()
