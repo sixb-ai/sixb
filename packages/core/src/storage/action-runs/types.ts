@@ -21,6 +21,7 @@ export const ACTION_RUN_FAILURE_CODES = [
   "runtime.cancelled",
   "action.phase_failed",
   "action.read_conflict",
+  "action.rejected",
   "action.timeout",
 ] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
 

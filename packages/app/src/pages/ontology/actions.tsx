@@ -1,4 +1,8 @@
-import type { ListActionRunsResponse, ListActionsResponse } from "@sixb/client"
+import {
+  ActionRunFailedError,
+  type ListActionRunsResponse,
+  type ListActionsResponse,
+} from "@sixb/client"
 import {
   listActionRunsOptions,
   listActionsOptions,
@@ -490,7 +494,11 @@ function ActionRequestDialog({
           {apiErrorMessage ? (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
-              <AlertTitle>Action request failed</AlertTitle>
+              <AlertTitle>
+                {isActionRejection(requestAction.error)
+                  ? "Action rejected"
+                  : "Action request failed"}
+              </AlertTitle>
               <AlertDescription>{apiErrorMessage}</AlertDescription>
             </Alert>
           ) : null}
@@ -742,6 +750,11 @@ function ObjectRefField({
       }}
     />
   )
+}
+
+/** A validator declined the request, with a message written for the requester. */
+function isActionRejection(error: unknown): boolean {
+  return error instanceof ActionRunFailedError && error.error?.code === "action.rejected"
 }
 
 function errorToMessage(error: unknown): string | null {

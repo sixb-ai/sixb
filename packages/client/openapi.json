@@ -28015,6 +28015,7 @@
                             "runtime.cancelled",
                             "action.phase_failed",
                             "action.read_conflict",
+                            "action.rejected",
                             "action.timeout"
                           ]
                         },
@@ -28126,6 +28127,7 @@
                                     "runtime.cancelled",
                                     "action.phase_failed",
                                     "action.read_conflict",
+                                    "action.rejected",
                                     "action.timeout"
                                   ]
                                 },
@@ -28216,6 +28218,7 @@
                                     "runtime.cancelled",
                                     "action.phase_failed",
                                     "action.read_conflict",
+                                    "action.rejected",
                                     "action.timeout"
                                   ]
                                 },
@@ -28375,6 +28378,7 @@
                       "enum": [
                         "action.phase_failed",
                         "action.read_conflict",
+                        "action.rejected",
                         "action.run_in_progress",
                         "action.timeout",
                         "agent.execution_failed",
@@ -29657,6 +29661,7 @@
                                   "runtime.cancelled",
                                   "action.phase_failed",
                                   "action.read_conflict",
+                                  "action.rejected",
                                   "action.timeout"
                                 ]
                               },
@@ -29877,6 +29882,7 @@
                             "runtime.cancelled",
                             "action.phase_failed",
                             "action.read_conflict",
+                            "action.rejected",
                             "action.timeout"
                           ]
                         },
@@ -29988,6 +29994,7 @@
                                     "runtime.cancelled",
                                     "action.phase_failed",
                                     "action.read_conflict",
+                                    "action.rejected",
                                     "action.timeout"
                                   ]
                                 },
@@ -30078,6 +30085,7 @@
                                     "runtime.cancelled",
                                     "action.phase_failed",
                                     "action.read_conflict",
+                                    "action.rejected",
                                     "action.timeout"
                                   ]
                                 },

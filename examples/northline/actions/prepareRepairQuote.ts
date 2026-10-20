@@ -21,11 +21,11 @@ export const prepareRepairQuote = defineAction("prepare-repair-quote", {
   })
   .validate(({ params, target }) => {
     if (target.properties.status !== "awaiting_authorization") {
-      throw new Error(
-        `[Northline] Cannot prepare a quote for ${target.properties.number}: authorization is not required.`
-      )
+      return {
+        error: `Cannot prepare a quote for ${target.properties.number}: authorization is not required.`,
+      }
     }
-    if (params.amount <= 0) throw new Error("[Northline] Quote amount must be greater than zero.")
+    if (params.amount <= 0) return { error: "Quote amount must be greater than zero." }
   })
   .writeback(async ({ params, run, sixb, target }) => {
     const business = await sixb.connector(businessSystemConnector)

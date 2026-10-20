@@ -77,15 +77,21 @@ enums and structured values. Date and timestamp inputs arrive in handlers as `Da
 ## Validate a request
 
 Add `.validate()` after `.params()` to check the request before any external call or edit. For an
-object action, `target` contains the current object. Throw an error to reject the request:
+object action, `target` contains the current object. Return an error to reject the request:
 
 ```ts
 .validate(({ target }) => {
   if (target.properties.status === "paid") {
-    throw new Error("This invoice is already paid.")
+    return { error: "This invoice is already paid." }
   }
 })
 ```
+
+The run fails with `run.error.code` set to `"action.rejected"`, and the caller reads
+`"This invoice is already paid."` in `run.error.message`. A rejection is a business outcome, so it is
+not reported to [`onError`](../logging/overview.md#report-failures). An error thrown by a handler
+fails the run as `action.phase_failed`, without its message: the caller gets
+`"Action execution failed."`, and the error goes to `onError`.
 
 Validation checks are read-only. You can attach more than one validator.
 
