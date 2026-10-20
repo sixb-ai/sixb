@@ -34,6 +34,7 @@ import { compileEditExecutionUnits, type EditExecutionUnit } from "./execution-u
 import { loadEditWorkingState } from "./load-state"
 import { applyEditOperation, type EditUndoJournal, undoEditJournal } from "./operations"
 import { stageEditPlan } from "./plan"
+import { assertValuesUnclaimed } from "./unique-values"
 import { loadReferencedUsers, type ReferencedUsers } from "./user-refs"
 import { authorizeVectorIndexingCommit } from "./vector-authority"
 import { commitVectorWrites } from "./vectors"
@@ -185,6 +186,14 @@ async function executeEditTransaction(
   await recordActionRun(storage, command.input)
 
   const session = await beginEditMaterialization(context, storage, command)
+  if (command.input.mode === "atomic") {
+    await assertValuesUnclaimed(
+      context,
+      storage.ontology.materializations,
+      session,
+      command.input.expectedUnclaimedValues ?? []
+    )
+  }
   const workingState = await loadEditWorkingState(
     context,
     storage.ontology.materializations,

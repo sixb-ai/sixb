@@ -13,7 +13,10 @@
  * refused when this commit applies.
  */
 import type { JsonValue } from "../../json"
-import { UniqueValueViolationError } from "../../materialization/errors"
+import {
+  MaterializationConflictError,
+  UniqueValueViolationError,
+} from "../../materialization/errors"
 import type { OntologyEditOperation, OntologyObjectRef } from "../../materialization/model"
 import { objectRefKey } from "../../materialization/refs"
 import type { OntologyRegistry } from "../../ontology"
@@ -139,6 +142,41 @@ export class WorkingUniqueValues {
       this.holders.set(key, holders)
     }
     return holders
+  }
+}
+
+/**
+ * Rejects a commit whose author read a unique value as unclaimed when an object now holds it: an
+ * Action that found nothing and creates the holder is then replayed against the current state,
+ * instead of failing on the duplicate.
+ */
+export async function assertValuesUnclaimed(
+  context: Pick<MaterializerContext, "batching">,
+  storage: OntologyMaterializationStorage,
+  session: MaterializationSession,
+  values: readonly UniqueValueRef[]
+): Promise<void> {
+  if (values.length === 0) return
+
+  const request = {
+    objects: [],
+    links: [],
+    linkScopes: [],
+    incidentObjects: [],
+    points: [],
+    uniqueValues: values,
+  }
+  for await (const page of storage.streamState({
+    session,
+    requests: oneStateRequest(request),
+    pageRows: context.batching.statePageRows,
+  })) {
+    const [held] = page.uniqueHolders ?? []
+    if (!held) continue
+    throw new MaterializationConflictError(
+      "expectation",
+      `Expected no '${held.objectTypeId}' object to hold this '${held.propertyId}'.`
+    )
   }
 }
 

@@ -25,6 +25,7 @@ import {
 } from "../materializer"
 import { migrateStorage } from "../storage/migrations"
 import { compileSelectedObjectReadScope } from "../storage/objects"
+import type { UniqueValueRef } from "../storage/ontology"
 import { startTestProjectionRun } from "./projection-execution"
 
 export interface UniqueValuesContractProvider<TStorage extends Storage> {
@@ -188,6 +189,21 @@ export function runUniqueValuesContractSuite<TStorage extends Storage>(
       expect(await lookup(selected, "ada@example.com")).toMatchObject({ primaryId: "a" })
       expect(await lookup(selected, "bob@example.com")).toBeNull()
       expect(await lookup(scoped(["id", "name"]), "ada@example.com")).toBeNull()
+    })
+  })
+
+  test(`${name} fails a commit that expected a value no object holds once one does`, async () => {
+    await withStorage(async (storage) => {
+      const edits = editor(storage)
+      const unclaimed = [
+        { objectTypeId: Person.id, propertyId: "email", valueKey: "x@example.com" },
+      ]
+      await edits.commit([create("a", { email: "x@example.com" })], unclaimed)
+
+      await expect(
+        edits.commit([create("b", { email: "y@example.com" })], unclaimed)
+      ).rejects.toMatchObject({ kind: "expectation" })
+      expect(await person(storage, "b")).toBeNull()
     })
   })
 
@@ -562,7 +578,10 @@ function editor(storage: Storage, registry: OntologyRegistry = ontology) {
   )
   const requestId = () => `unique-edit-${crypto.randomUUID()}`
   return {
-    commit(operations: readonly OntologyEditOperation[]) {
+    commit(
+      operations: readonly OntologyEditOperation[],
+      expectedUnclaimedValues?: readonly UniqueValueRef[]
+    ) {
       return materializer.edits.commit({
         mode: "atomic",
         source: { kind: "runtime", requestId: requestId() },
@@ -570,6 +589,7 @@ function editor(storage: Storage, registry: OntologyRegistry = ontology) {
         expectedObjects: [],
         expectedLinks: [],
         expectedLinkScopes: [],
+        ...(expectedUnclaimedValues ? { expectedUnclaimedValues } : {}),
       })
     },
     /** Applies each operation alone, keeping those that succeed. */

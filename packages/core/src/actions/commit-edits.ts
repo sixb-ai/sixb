@@ -10,13 +10,15 @@ import type {
   OntologyOperationOutcome,
 } from "../materializer"
 import type { OntologyMutationRuntime } from "../runtime/ontology-mutations"
-import type { RecordActionRunInput } from "../storage"
+import type { RecordActionRunInput, UniqueValueRef } from "../storage"
 
 /** Exact reads an Action handler depended on, protected by row-level CAS at commit time. */
 export interface ActionReadDependencies {
   readonly objects: readonly ExpectedObjectRevision[]
   readonly links: readonly ExpectedLinkRevision[]
   readonly linkScopes: readonly ExpectedLinkScopeRevision[]
+  /** Unique values a lookup found no object holding. */
+  readonly unclaimedValues?: readonly UniqueValueRef[]
 }
 
 const NO_READ_DEPENDENCIES: ActionReadDependencies = { objects: [], links: [], linkScopes: [] }
@@ -63,6 +65,9 @@ export async function commitActionEdits(
     expectedObjects: dependencies.objects,
     expectedLinks: dependencies.links,
     expectedLinkScopes: dependencies.linkScopes,
+    ...(dependencies.unclaimedValues?.length
+      ? { expectedUnclaimedValues: dependencies.unclaimedValues }
+      : {}),
   })
   return toActionEditCommitResult(commit)
 }
