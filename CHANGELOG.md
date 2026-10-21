@@ -2,6 +2,74 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-10-21 — Framework 0.1.21
+
+### Highlights
+
+- Let the Agent deliver its work as artifacts: documents, sheets with their grid and charts, slide
+  decks and files, each versioned. `publish_artifact` and `publish_artifact_version` publish them
+  from the sandbox, and the thread's latest versions are installed before each turn so the Agent
+  revises what it published. `sixb.artifacts` and `/api/artifacts` create, publish, list, read and
+  delete them; a user or service account reaches only its own.
+- Show artifacts in the app: a viewer beside the conversation, a page at `/artifacts/:artifactId`,
+  and a gallery at `/artifacts` filtered by kind. `@sixb/core/artifacts` is the public,
+  browser-safe subpath, and the viewer-to-deck frame protocol is versioned as `sixb-frame/1`.
+- Record app activity with `createSixb({ activity: { enabled: true } })`: visits, page views and
+  the interactions an app marks by name, with a click marker and `trackSixbEvent(name)` from
+  `@sixb/client/browser`. Observability › Activity lists a period's users, visits and page views,
+  each visit's timeline, and a user's active days and connections. Grant it with
+  `can.observe(project.activity)`.
+- Let an Agent step declare its own sandbox with `defineAgentStep({ sandbox })`: its runs get a
+  fresh sandbox from that factory's recipe, with the repository checked out and credentials issued
+  host-side, destroyed when the run ends.
+- Let a GitHub App sandbox open pull requests: write access also covers the GitHub API for the
+  repository, with the token injected outside the sandbox and commits attributed to the App's bot.
+  Request credentials can match a path prefix and a list of methods; the Vercel provider injects
+  them into ephemeral sandboxes too.
+- Let pipeline steps read marked columns. Each dataset version records the source columns its
+  values come from, its markings follow that lineage through SQL and `.run()` steps, and
+  `dataset.pick(...)` narrows a step input to some columns. Objects keep the markings of the
+  version their projection applied, so removing a marking from a step does not reveal old values.
+- Keep each dataset's latest version, and each projection's applied version, when DuckLake
+  maintenance expires snapshots. Bound DuckLake version lookups to the snapshots above them, so a
+  lookup reads a few rows whatever the catalog history length.
+- Redact marked properties once per object type instead of rebuilding every row, and stop
+  collecting PostgreSQL statistics on plan work payloads.
+- Apply only a theme chosen in the app before first paint, so apps without a `ThemeProvider` no
+  longer load dark on a dark OS.
+
+### Upgrade notes
+
+- Upgrade core, its exact worker/storage consumers, server, client, and CLI together to `0.1.21`.
+  Upgrade the app to `0.1.13`, the UI to `0.1.5`, DuckLake to `0.1.9`, the local lake to `0.1.7`,
+  the GitHub connector to `0.1.5`, and Vercel sandboxes to `0.1.7`; rebuild application assets.
+- Run the migrations: PostgreSQL `063-artifacts` to `068-activity-interactions`, SQLite
+  `062-artifacts` to `066-activity-interactions`. PostgreSQL `064` and SQLite `063` strip the
+  `output_*` diagnostics from stored agent runs.
+- `can.observe("logs")` becomes `can.observe(project.logs)`. The string form fails with a message
+  naming its replacement.
+- Agent project tools store the files they produce through `context.files` instead of
+  `context.artifacts`. The Agent's output directory is removed: no `$SIXB_OUTPUT_DIR` and no
+  collection after a run.
+- Import `githubApp` from `@sixb/connector-github/sandbox` instead of `@sixb/connector-github/auth`.
+  A GitHub App with write access needs the Contents and Pull requests write permissions.
+- `@sixb/core/internal/artifacts` is replaced by the public `@sixb/core/artifacts`. The document
+  preview's renderer registry and `AgentWorkspaceProvider` are removed.
+- `createSixb` now rejects at startup a sandbox factory whose recipe asks for write access without
+  `auth`, or sets `auth` on a provider that cannot inject request credentials. Wildcard hosts are
+  rejected in sandbox networks, source URLs and credentials, and a sandbox network of `none` is
+  rejected for agents.
+
+### Package versions
+
+- `0.1.21`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`,
+  `@sixb/pg`, `@sixb/sqlite`, `@sixb/agent-worker`, `@sixb/pipeline-worker`,
+  `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`.
+- `0.1.13`: `@sixb/app`.
+- `0.1.9`: `@sixb/ducklake`.
+- `0.1.7`: `@sixb/lake-local`, `@sixb/sandboxes-vercel`.
+- `0.1.5`: `@sixb/ui`, `@sixb/connector-github`.
+
 ## 2026-10-17 — Framework 0.1.20
 
 ### Highlights

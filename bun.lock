@@ -152,7 +152,7 @@
     },
     "connectors/github": {
       "name": "@sixb/connector-github",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "dependencies": {
         "@octokit/webhooks-types": "^7.6.1",
         "@sixb/connector-rest": "workspace:^",
@@ -655,7 +655,7 @@
     },
     "packages/agent-worker": {
       "name": "@sixb/agent-worker",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "dependencies": {
         "@sixb/cli-core": "workspace:^",
       },
@@ -672,7 +672,7 @@
     },
     "packages/app": {
       "name": "@sixb/app",
-      "version": "0.1.12",
+      "version": "0.1.13",
       "dependencies": {
         "@sixb/client": "workspace:^",
         "@sixb/core": "workspace:^",
@@ -702,7 +702,7 @@
     },
     "packages/cli": {
       "name": "@sixb/cli",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "bin": {
         "sixb": "./src/index.tsx",
       },
@@ -742,7 +742,7 @@
     },
     "packages/client": {
       "name": "@sixb/client",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "dependencies": {
         "@sixb/core": "workspace:^",
       },
@@ -769,7 +769,7 @@
     },
     "packages/core": {
       "name": "@sixb/core",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.7.0",
@@ -794,7 +794,7 @@
     },
     "packages/orchestrator": {
       "name": "@sixb/orchestrator",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -806,7 +806,7 @@
     },
     "packages/pipeline-worker": {
       "name": "@sixb/pipeline-worker",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -818,7 +818,7 @@
     },
     "packages/projection-worker": {
       "name": "@sixb/projection-worker",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -830,7 +830,7 @@
     },
     "packages/rules-worker": {
       "name": "@sixb/rules-worker",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -842,7 +842,7 @@
     },
     "packages/server": {
       "name": "@sixb/server",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "dependencies": {
         "@elysiajs/cors": "^1.2.0",
         "@elysiajs/openapi": "^1.4.16",
@@ -865,7 +865,7 @@
     },
     "packages/sync-worker": {
       "name": "@sixb/sync-worker",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@sixb/lake-local": "workspace:*",
@@ -878,7 +878,7 @@
     },
     "packages/ui": {
       "name": "@sixb/ui",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "dependencies": {
         "@shadcn/react": "^0.3.0",
         "@tanstack/react-table": "^8.21.3",
@@ -923,7 +923,7 @@
     },
     "packages/workflow-worker": {
       "name": "@sixb/workflow-worker",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -1003,7 +1003,7 @@
     },
     "sandboxes/vercel": {
       "name": "@sixb/sandboxes-vercel",
-      "version": "0.1.6",
+      "version": "0.1.7",
       "dependencies": {
         "@vercel/sandbox": "^2.3.0",
       },
@@ -1065,7 +1065,7 @@
     },
     "storage/ducklake": {
       "name": "@sixb/ducklake",
-      "version": "0.1.8",
+      "version": "0.1.9",
       "dependencies": {
         "@duckdb/node-api": "1.5.2-r.2",
       },
@@ -1080,7 +1080,7 @@
     },
     "storage/lake-local": {
       "name": "@sixb/lake-local",
-      "version": "0.1.6",
+      "version": "0.1.7",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -1092,7 +1092,7 @@
     },
     "storage/pg": {
       "name": "@sixb/pg",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "dependencies": {
         "postgres": "^3.4.5",
       },
@@ -1107,7 +1107,7 @@
     },
     "storage/sqlite": {
       "name": "@sixb/sqlite",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "dependencies": {
         "sqlite-vec": "0.1.9",
       },
