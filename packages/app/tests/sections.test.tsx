@@ -67,7 +67,7 @@ afterAll(() => {
 })
 
 const admins = defineGroup("admins", { label: "Admins" })
-const allSettingsPages = ["personal", "developers", "members", "service-accounts"]
+const allSettingsPages = ["personal", "developers", "memory", "members", "service-accounts"]
 const allDataPages = ["connectors", "syncs", "datasets", "pipelines", "projections"]
 
 function sessionFor(groupIds: readonly string[]): GetAuthSessionResponse {
@@ -140,7 +140,7 @@ describe("who sees each section", () => {
       .filter((open) => open.definition.id === section)
       .flatMap((open) => open.pages.map((page) => page.id))
 
-  const yours = ["personal", "developers"]
+  const yours = ["personal", "developers", "memory"]
   const staff = { groupIds: ["staff"] }
   const adminUser = { groupIds: ["admins"] }
   const cases: {
@@ -276,7 +276,11 @@ describe("section navigation", () => {
         ...(view.getByText(label).closest('[data-slot="sidebar-group"]')?.querySelectorAll("a") ??
           []),
       ].map((link) => link.getAttribute("href"))
-    expect(hrefsIn("Your account")).toEqual(["/settings/personal", "/settings/developers"])
+    expect(hrefsIn("Your account")).toEqual([
+      "/settings/personal",
+      "/settings/developers",
+      "/settings/memory",
+    ])
     expect(hrefsIn("Project")).toEqual(["/settings/members", "/settings/service-accounts"])
     // The sidebar holds the section's pages instead of the app's nav.
     expect(view.queryByText("Quotes")).toBeNull()

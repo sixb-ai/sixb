@@ -4,6 +4,7 @@ import {
   Bolt,
   Box,
   Braces,
+  Brain,
   Cable,
   ChartNoAxesCombined,
   Database,
@@ -139,6 +140,7 @@ const sectionIcons: Record<AppSectionId, ComponentType<{ readonly className?: st
 const pageIcons: Record<string, ComponentType<{ readonly className?: string }>> = {
   personal: UserRound,
   developers: Braces,
+  memory: Brain,
   members: UsersRound,
   "service-accounts": ShieldCheck,
   connectors: Cable,

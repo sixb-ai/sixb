@@ -174,6 +174,13 @@ export const sectionCatalog: readonly SectionDefinition[] = [
         always: true,
       },
       {
+        id: "memory",
+        path: "/settings/memory",
+        exportName: "SettingsMemoryPage",
+        group: "account",
+        always: true,
+      },
+      {
         id: "members",
         path: "/settings/members",
         exportName: "SettingsMembersPage",
