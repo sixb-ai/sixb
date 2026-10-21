@@ -135,7 +135,7 @@ export function runAgentMemoryStorageContractSuite<
       })
     })
 
-    test("reads a repo as of a time: its files at the latest revision saved by then", async () => {
+    test("reads a repo as of a time or a revision: its files at the latest revision by then", async () => {
       await withMemory(async (memory) => {
         const at = (seconds: number) => new Date(t0.getTime() + seconds * 1000)
         await memory.save(save({ changes: [file("MEMORY.md", "v1"), file("a.md")] }))
@@ -163,6 +163,15 @@ export function runAgentMemoryStorageContractSuite<
           revision: 2,
           files: [file("MEMORY.md", "v2"), file("b.md")],
         })
+        // A revision reads the same as the time it was saved, and one past the last is the latest.
+        expect(await memory.get({ projectId, repoId, revision: 1 })).toEqual(
+          await memory.get({ projectId, repoId, asOf: t0 })
+        )
+        expect(await memory.get({ projectId, repoId, revision: 0 })).toEqual({
+          revision: 0,
+          files: [],
+        })
+        expect((await memory.get({ projectId, repoId, revision: 9 })).revision).toBe(2)
       })
     })
 

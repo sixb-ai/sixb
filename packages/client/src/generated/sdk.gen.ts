@@ -3153,7 +3153,7 @@ export const deleteAgentMemory = <ThrowOnError extends boolean = false>(
 /**
  * Get an Agent memory repo
  *
- * Every file of the repo as of its latest revision.
+ * Every file of the repo as of its latest revision, or as an earlier revision left it.
  */
 export const getAgentMemory = <ThrowOnError extends boolean = false>(
   options: Options<GetAgentMemoryData, ThrowOnError>
