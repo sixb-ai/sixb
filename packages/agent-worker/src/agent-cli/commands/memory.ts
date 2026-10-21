@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto"
 import { lstat, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import {
@@ -13,6 +12,15 @@ import {
   writeJson,
   writeText,
 } from "@sixb/cli-core"
+import {
+  AGENT_MEMORY_ENTRY,
+  AGENT_MEMORY_MANIFEST,
+  AGENT_MEMORY_STARTER,
+  type AgentMemoryManifest,
+  type AgentMemoryManifestRepo,
+  type AgentMemoryRepo,
+  agentMemoryFileHash,
+} from "../../agent-runtime/memory"
 
 const HELP = `Usage:
   sixb memory save <repo> -m <message>   Save local edits as one revision
@@ -23,18 +31,6 @@ const HELP = `Usage:
 A save is rejected for files another conversation changed since they were loaded. Their
 current contents are written next to yours as <file>.theirs: merge each into its file, delete
 it, then save again. Changes others made to other files are brought in by save and pull.`
-
-type MemoryRepo = "user" | "project"
-
-/** What the local copy was loaded from: the revision and each file's SHA-256, by path. */
-interface MemoryManifest {
-  readonly repos: Partial<Record<MemoryRepo, MemoryManifestRepo>>
-}
-
-interface MemoryManifestRepo {
-  readonly revision: number
-  readonly files: Readonly<Record<string, string>>
-}
 
 interface RemoteRepo {
   readonly revision: number
@@ -47,9 +43,6 @@ interface MemoryConflict {
   readonly theirs: string | null
 }
 
-/** What a repo starts from before its first save; it is saved with the first save. */
-const STARTER = "# Memory\n\n"
-const ENTRY = "MEMORY.md"
 const THEIRS = ".theirs"
 const CONFLICT_HINT = "Merge each .theirs file into its file, delete it, then save again."
 
@@ -85,7 +78,8 @@ async function save(
     .sort()
     .flatMap((path) => {
       const contents = files.get(path)
-      const changed = (contents === undefined ? undefined : hash(contents)) !== loaded.files[path]
+      const changed =
+        (contents === undefined ? undefined : agentMemoryFileHash(contents)) !== loaded.files[path]
       return changed ? [{ path, contents: contents ?? null }] : []
     })
   if (changes.length === 0) {
@@ -118,9 +112,9 @@ async function save(
   const savedFiles = { ...loaded.files }
   for (const change of changes) {
     if (change.contents === null) delete savedFiles[change.path]
-    else savedFiles[change.path] = hash(change.contents)
+    else savedFiles[change.path] = agentMemoryFileHash(change.contents)
   }
-  const after: MemoryManifest = {
+  const after: AgentMemoryManifest = {
     repos: { ...manifest.repos, [repo]: { ...loaded, files: savedFiles } },
   }
   const { revision, conflicts } = await update(local, repo, after, await fetchRepo(api, repo))
@@ -170,11 +164,11 @@ async function pull(
  */
 async function update(
   local: LocalMemory,
-  repo: MemoryRepo,
-  manifest: MemoryManifest,
+  repo: AgentMemoryRepo,
+  manifest: AgentMemoryManifest,
   remote: RemoteRepo
 ): Promise<{
-  readonly manifest: MemoryManifest
+  readonly manifest: AgentMemoryManifest
   readonly revision: number
   readonly updated: readonly string[]
   readonly conflicts: readonly MemoryConflict[]
@@ -190,8 +184,8 @@ async function update(
     if (path.endsWith(THEIRS)) continue
     const mine = files.get(path)
     const theirs = remote.files.get(path)
-    const mineHash = mine === undefined ? undefined : hash(mine)
-    const theirsHash = theirs === undefined ? undefined : hash(theirs)
+    const mineHash = mine === undefined ? undefined : agentMemoryFileHash(mine)
+    const theirsHash = theirs === undefined ? undefined : agentMemoryFileHash(theirs)
     if (theirsHash === base[path] || theirsHash === mineHash) continue
     if (mineHash === base[path]) {
       await local.write(repo, path, theirs)
@@ -203,17 +197,20 @@ async function update(
       conflicts.push({ path, theirs: `${path}${THEIRS}` })
     }
   }
-  if (!remote.files.has(ENTRY) && !(await local.readRepo(repo)).has(ENTRY)) {
-    await local.write(repo, ENTRY, STARTER)
+  if (
+    !remote.files.has(AGENT_MEMORY_ENTRY) &&
+    !(await local.readRepo(repo)).has(AGENT_MEMORY_ENTRY)
+  ) {
+    await local.write(repo, AGENT_MEMORY_ENTRY, AGENT_MEMORY_STARTER)
   }
 
-  const next: MemoryManifest = {
+  const next: AgentMemoryManifest = {
     repos: {
       ...manifest.repos,
       [repo]: {
         revision: remote.revision,
         files: Object.fromEntries(
-          [...remote.files].map(([path, contents]) => [path, hash(contents)])
+          [...remote.files].map(([path, contents]) => [path, agentMemoryFileHash(contents)])
         ),
       },
     },
@@ -224,7 +221,7 @@ async function update(
 
 async function fetchRepo(
   api: ReturnType<typeof createInstanceApiClient>,
-  repo: MemoryRepo
+  repo: AgentMemoryRepo
 ): Promise<RemoteRepo> {
   const body = asRecord(await api.get(`/api/agent-memory/${repo}`))
   const files = Array.isArray(body.files) ? body.files.map(asRecord) : null
@@ -244,12 +241,12 @@ async function fetchRepo(
 }
 
 interface LocalMemory {
-  readManifest(): Promise<MemoryManifest>
-  writeManifest(manifest: MemoryManifest): Promise<void>
+  readManifest(): Promise<AgentMemoryManifest>
+  writeManifest(manifest: AgentMemoryManifest): Promise<void>
   /** Every file of the local copy, by path from the repo root. */
-  readRepo(repo: MemoryRepo): Promise<Map<string, string>>
+  readRepo(repo: AgentMemoryRepo): Promise<Map<string, string>>
   /** `undefined` deletes the file. */
-  write(repo: MemoryRepo, path: string, contents: string | undefined): Promise<void>
+  write(repo: AgentMemoryRepo, path: string, contents: string | undefined): Promise<void>
 }
 
 function localMemory(): LocalMemory {
@@ -258,8 +255,8 @@ function localMemory(): LocalMemory {
   if (!root || !contextDir) {
     fail("Agent memory is not available in this run.", "runtime_unavailable")
   }
-  const manifestPath = join(contextDir, "context", "memory.json")
-  const fileOf = (repo: MemoryRepo, path: string) => join(root, repo, ...path.split("/"))
+  const manifestPath = join(contextDir, ...AGENT_MEMORY_MANIFEST.split("/"))
+  const fileOf = (repo: AgentMemoryRepo, path: string) => join(root, repo, ...path.split("/"))
 
   return {
     async readManifest() {
@@ -316,7 +313,7 @@ function localMemory(): LocalMemory {
   }
 }
 
-function parseSaveArgs(args: readonly string[]): { repo: MemoryRepo; message: string } {
+function parseSaveArgs(args: readonly string[]): { repo: AgentMemoryRepo; message: string } {
   const positionals: string[] = []
   let message: string | undefined
   for (let index = 0; index < args.length; index++) {
@@ -338,18 +335,18 @@ function parseSaveArgs(args: readonly string[]): { repo: MemoryRepo; message: st
   return { repo: parseRepo(positionals[0] ?? ""), message }
 }
 
-function parseRepo(value: string): MemoryRepo {
+function parseRepo(value: string): AgentMemoryRepo {
   if (value === "user" || value === "project") return value
   fail(`Unknown memory repo '${value}'. Use 'user' or 'project'.`)
 }
 
-function installedRepos(manifest: MemoryManifest): MemoryRepo[] {
+function installedRepos(manifest: AgentMemoryManifest): AgentMemoryRepo[] {
   return (["user", "project"] as const).filter((repo) => manifest.repos[repo] !== undefined)
 }
 
-function parseManifest(value: unknown): MemoryManifest {
+function parseManifest(value: unknown): AgentMemoryManifest {
   const repos = asRecord(asRecord(value).repos)
-  const parsed: Partial<Record<MemoryRepo, MemoryManifestRepo>> = {}
+  const parsed: Partial<Record<AgentMemoryRepo, AgentMemoryManifestRepo>> = {}
   for (const repo of ["user", "project"] as const) {
     if (repos[repo] === undefined) continue
     const entry = asRecord(repos[repo])
@@ -366,8 +363,4 @@ function parseManifest(value: unknown): MemoryManifest {
     }
   }
   return { repos: parsed }
-}
-
-function hash(contents: string): string {
-  return createHash("sha256").update(contents).digest("hex")
 }

@@ -1917,9 +1917,21 @@ function createInstanceApiClient(mode) {
   });
 }
 // src/agent-cli/commands/memory.ts
-import { createHash } from "node:crypto";
 import { lstat, mkdir as mkdir2, readdir, readFile as readFile3, rm as rm2, writeFile } from "node:fs/promises";
 import { dirname as dirname3, join as join3 } from "node:path";
+
+// src/agent-runtime/memory.ts
+import { createHash } from "node:crypto";
+var AGENT_MEMORY_MANIFEST = "context/memory.json";
+var AGENT_MEMORY_ENTRY = "MEMORY.md";
+var AGENT_MEMORY_STARTER = `# Memory
+
+`;
+function agentMemoryFileHash(contents) {
+  return createHash("sha256").update(contents).digest("hex");
+}
+
+// src/agent-cli/commands/memory.ts
 var HELP = `Usage:
   sixb memory save <repo> -m <message>   Save local edits as one revision
   sixb memory pull [repo]                Bring the local copy up to the latest revision
@@ -1929,10 +1941,6 @@ var HELP = `Usage:
 A save is rejected for files another conversation changed since they were loaded. Their
 current contents are written next to yours as <file>.theirs: merge each into its file, delete
 it, then save again. Changes others made to other files are brought in by save and pull.`;
-var STARTER = `# Memory
-
-`;
-var ENTRY = "MEMORY.md";
 var THEIRS = ".theirs";
 var CONFLICT_HINT = "Merge each .theirs file into its file, delete it, then save again.";
 async function memory(args, mode) {
@@ -1959,7 +1967,7 @@ async function save(local, args, mode) {
   }
   const changes = [...new Set([...files.keys(), ...Object.keys(loaded.files)])].sort().flatMap((path) => {
     const contents = files.get(path);
-    const changed = (contents === undefined ? undefined : hash(contents)) !== loaded.files[path];
+    const changed = (contents === undefined ? undefined : agentMemoryFileHash(contents)) !== loaded.files[path];
     return changed ? [{ path, contents: contents ?? null }] : [];
   });
   if (changes.length === 0) {
@@ -1990,7 +1998,7 @@ async function save(local, args, mode) {
     if (change.contents === null)
       delete savedFiles[change.path];
     else
-      savedFiles[change.path] = hash(change.contents);
+      savedFiles[change.path] = agentMemoryFileHash(change.contents);
   }
   const after = {
     repos: { ...manifest.repos, [repo]: { ...loaded, files: savedFiles } }
@@ -2040,8 +2048,8 @@ async function update(local, repo, manifest, remote) {
       continue;
     const mine = files.get(path);
     const theirs = remote.files.get(path);
-    const mineHash = mine === undefined ? undefined : hash(mine);
-    const theirsHash = theirs === undefined ? undefined : hash(theirs);
+    const mineHash = mine === undefined ? undefined : agentMemoryFileHash(mine);
+    const theirsHash = theirs === undefined ? undefined : agentMemoryFileHash(theirs);
     if (theirsHash === base[path] || theirsHash === mineHash)
       continue;
     if (mineHash === base[path]) {
@@ -2054,15 +2062,15 @@ async function update(local, repo, manifest, remote) {
       conflicts.push({ path, theirs: `${path}${THEIRS}` });
     }
   }
-  if (!remote.files.has(ENTRY) && !(await local.readRepo(repo)).has(ENTRY)) {
-    await local.write(repo, ENTRY, STARTER);
+  if (!remote.files.has(AGENT_MEMORY_ENTRY) && !(await local.readRepo(repo)).has(AGENT_MEMORY_ENTRY)) {
+    await local.write(repo, AGENT_MEMORY_ENTRY, AGENT_MEMORY_STARTER);
   }
   const next = {
     repos: {
       ...manifest.repos,
       [repo]: {
         revision: remote.revision,
-        files: Object.fromEntries([...remote.files].map(([path, contents]) => [path, hash(contents)]))
+        files: Object.fromEntries([...remote.files].map(([path, contents]) => [path, agentMemoryFileHash(contents)]))
       }
     }
   };
@@ -2086,7 +2094,7 @@ function localMemory() {
   if (!root || !contextDir) {
     fail("Agent memory is not available in this run.", "runtime_unavailable");
   }
-  const manifestPath = join3(contextDir, "context", "memory.json");
+  const manifestPath = join3(contextDir, ...AGENT_MEMORY_MANIFEST.split("/"));
   const fileOf = (repo, path) => join3(root, repo, ...path.split("/"));
   return {
     async readManifest() {
@@ -2194,9 +2202,6 @@ function parseManifest(value) {
     };
   }
   return { repos: parsed };
-}
-function hash(contents) {
-  return createHash("sha256").update(contents).digest("hex");
 }
 
 // src/agent-cli/commands/system.ts
