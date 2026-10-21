@@ -6,6 +6,10 @@ import { en as dataEn, fr as dataFr } from "../src/pages/data/messages"
 import { en as activityEn, fr as activityFr } from "../src/pages/observability/activity/messages"
 import { en as aiUsageEn, fr as aiUsageFr } from "../src/pages/observability/ai-usage/messages"
 import { en as observabilityEn, fr as observabilityFr } from "../src/pages/observability/messages"
+import {
+  en as actionButtonEn,
+  fr as actionButtonFr,
+} from "../src/pages/ontology/components/action-button"
 import { en as sectionUiEn, fr as sectionUiFr } from "../src/pages/section-ui"
 import { en as settingsEn, fr as settingsFr } from "../src/pages/settings/messages"
 import { en as valuesEn, fr as valuesFr } from "../src/pages/values"
@@ -19,6 +23,7 @@ test("translates every generated screen into French", () => {
   expect(untranslatedMessages(aiUsageEn, aiUsageFr)).toEqual([])
   expect(untranslatedMessages(activityEn, activityFr)).toEqual([])
   expect(untranslatedMessages(valuesEn, valuesFr)).toEqual([])
+  expect(untranslatedMessages(actionButtonEn, actionButtonFr)).toEqual([])
 })
 
 test("screens drawn before React follow the browser's languages", () => {
