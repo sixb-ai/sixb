@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import {
   type AuthorizablePrincipal,
   can,
@@ -400,6 +400,59 @@ describe("agent API gateway", () => {
     expect(discover.status).toBe(200)
   })
 
+  test("saves the requester's memory with the run's own conversation as its source", async () => {
+    const { app, gatewayBaseUrl, storage } = await createGatewayRuntime()
+
+    const saved = await app.fetch(
+      new Request(`${gatewayBaseUrl}/api/agent-memory/user/revisions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          baseRevision: 0,
+          message: "Remember invoices are reported excluding VAT",
+          changes: [{ path: "MEMORY.md", contents: "# Memory\n" }],
+        }),
+      })
+    )
+    expect(saved.status).toBe(201)
+
+    const history = await storage.agents.memory.listRevisions({
+      projectId: PROJECT_ID,
+      repoId: "user:usr_requester",
+    })
+    expect(history.revisions).toEqual([
+      expect.objectContaining({
+        author: { type: "user", id: "usr_requester" },
+        source: "/agents/thread-1",
+      }),
+    ])
+    const repo = await app.fetch(new Request(`${gatewayBaseUrl}/api/agent-memory/user`))
+    await expect(repo.json()).resolves.toMatchObject({ revision: 1 })
+
+    // Deleting a repo is for people.
+    const deleted = await app.fetch(
+      new Request(`${gatewayBaseUrl}/api/agent-memory/user`, { method: "DELETE" })
+    )
+    expect(deleted.status).toBeGreaterThanOrEqual(400)
+    expect(
+      (await storage.agents.memory.get({ projectId: PROJECT_ID, repoId: "user:usr_requester" }))
+        .revision
+    ).toBe(1)
+  })
+
+  test("gives workflow agent nodes no memory", async () => {
+    // Reproduce by dropping the Agent memory check in handleAgentApiGatewayRequest: the node's
+    // service account then reaches the project's memory through can.run(agent).
+    const { app, gatewayBaseUrl } = await createGatewayRuntime({ executionKind: "workflow" })
+
+    const response = await app.fetch(new Request(`${gatewayBaseUrl}/api/agent-memory/project`))
+
+    expect(response.status).toBe(403)
+    await expect(response.json()).resolves.toEqual({
+      error: "Workflow agent nodes have no Agent memory.",
+    })
+  })
+
   test("can fetch file attachments from the active run thread", async () => {
     const { app, gatewayBaseUrl, sixb, storage } = await createGatewayRuntime()
     const fileRef = await sixb.blobStorage.put({
@@ -537,6 +590,110 @@ describe("agent API gateway", () => {
     })
     const finishedRun = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
     expect(finishedRun.status).toBe(403)
+  })
+
+  test("saves and pulls memory from two sandboxes, merging a conflicting save", async () => {
+    const { app, gatewayBaseUrl } = await createGatewayRuntime()
+    const directory = await mkdtemp(join(tmpdir(), "sixb-agent-cli-memory-"))
+    const listener = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request) => app.fetch(request),
+    })
+    const baseUrl = new URL(gatewayBaseUrl)
+    baseUrl.hostname = "127.0.0.1"
+    baseUrl.port = String(listener.port)
+    // Two conversations of the same user, each with its own copy of the repo.
+    const sandbox = (name: string) => {
+      const env = {
+        SIXB_MEMORY_DIR: join(directory, name, "memory"),
+        SIXB_CONTEXT_DIR: join(directory, name),
+      }
+      const file = (path: string) => join(env.SIXB_MEMORY_DIR, "user", path)
+      return {
+        run: async (...args: string[]) => {
+          const result = await runAgentCli(baseUrl.href, ["memory", ...args], env)
+          return { ...result, json: result.stdout ? JSON.parse(result.stdout) : null }
+        },
+        read: (path: string) => readFile(file(path), "utf8"),
+        write: async (path: string, contents: string) => {
+          await mkdir(dirname(file(path)), { recursive: true })
+          await writeFile(file(path), contents)
+        },
+        remove: (path: string) => rm(file(path)),
+      }
+    }
+
+    try {
+      const a = sandbox("a")
+      expect((await a.run("pull", "user")).json).toEqual({
+        repo: "user",
+        revision: 0,
+        updated: [],
+        conflicts: [],
+      })
+      expect(await a.read("MEMORY.md")).toBe("# Memory\n\n")
+
+      await a.write("MEMORY.md", "# Memory\n\n- Billing projects: [[projects/payments]]\n")
+      await a.write("projects/payments.md", "- Invoices exclude VAT\n")
+      const first = await a.run("save", "user", "-m", "Remember invoices exclude VAT")
+      expect(first.exitCode).toBe(0)
+      expect(first.json).toEqual({
+        repo: "user",
+        saved: true,
+        revision: 1,
+        changed: ["MEMORY.md", "projects/payments.md"],
+      })
+      expect((await a.run("save", "user", "-m", "Again")).json).toMatchObject({ saved: false })
+
+      const b = sandbox("b")
+      expect((await b.run("pull", "user")).json).toMatchObject({
+        revision: 1,
+        updated: ["MEMORY.md", "projects/payments.md"],
+      })
+
+      await a.write("projects/payments.md", "- Invoices exclude VAT\n- Paid net 30\n")
+      expect((await a.run("save", "user", "-m", "Add terms")).json).toMatchObject({ revision: 2 })
+
+      await b.write("projects/payments.md", "- Invoices exclude VAT\n- In EUR\n")
+      await b.write("team.md", "- Priya leads payments\n")
+      const rejected = await b.run("save", "user", "-m", "Add currency")
+      expect(rejected.exitCode).toBe(1)
+      expect(rejected.json).toEqual({
+        repo: "user",
+        saved: false,
+        revision: 2,
+        conflicts: [{ path: "projects/payments.md", theirs: "projects/payments.md.theirs" }],
+        hint: "Merge each .theirs file into its file, delete it, then save again.",
+      })
+      expect(await b.read("projects/payments.md.theirs")).toBe(
+        "- Invoices exclude VAT\n- Paid net 30\n"
+      )
+      const unresolved = await b.run("save", "user", "-m", "Add currency")
+      expect(unresolved.exitCode).not.toBe(0)
+      expect(unresolved.stderr).toContain("projects/payments.md.theirs")
+
+      await b.write("projects/payments.md", "- Invoices exclude VAT\n- Paid net 30\n- In EUR\n")
+      await b.remove("projects/payments.md.theirs")
+      expect((await b.run("save", "user", "-m", "Add currency")).json).toEqual({
+        repo: "user",
+        saved: true,
+        revision: 3,
+        changed: ["projects/payments.md", "team.md"],
+      })
+
+      expect((await a.run("pull", "user")).json).toMatchObject({
+        revision: 3,
+        updated: ["projects/payments.md", "team.md"],
+        conflicts: [],
+      })
+      expect(await a.read("projects/payments.md")).toBe(
+        "- Invoices exclude VAT\n- Paid net 30\n- In EUR\n"
+      )
+    } finally {
+      listener.stop(true)
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   test("keeps the generated agent CLI compatible with the real gateway", async () => {
@@ -1027,12 +1184,13 @@ describe("agent CLI models", () => {
 
 async function runAgentCli(
   baseUrl: string,
-  args: readonly string[]
+  args: readonly string[],
+  env: Readonly<Record<string, string>> = {}
 ): Promise<{ readonly exitCode: number; readonly stdout: string; readonly stderr: string }> {
   // This path-level dependency is intentional: it verifies the exact artifact copied into agent
   // sandboxes without making @sixb/agent-worker a runtime dependency of @sixb/server.
   const child = Bun.spawn([process.execPath, AGENT_CLI_ARTIFACT, ...args], {
-    env: { ...Bun.env, SIXB_API_BASE_URL: baseUrl },
+    env: { ...Bun.env, ...env, SIXB_API_BASE_URL: baseUrl },
     stdout: "pipe",
     stderr: "pipe",
   })
