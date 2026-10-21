@@ -9,7 +9,6 @@ import { SandboxRecovery } from "./components/sandbox-recovery"
 import { ThreadArtifactsMenu } from "./components/thread-artifacts-menu"
 import { useAgentConversation } from "./hooks/use-agent-conversation"
 import { useAgentMessages } from "./i18n"
-import { offersContinue } from "./run-presentation"
 import type { AgentContextInput } from "./types"
 
 export interface AgentChatProps {
@@ -54,15 +53,6 @@ export function AgentChat({
     threadId,
     onThreadCreated: onNavigateThread,
   })
-  const pendingUser = conversation.pendingUser
-  const presentation = conversation.presentation
-  const runningThreadCount =
-    conversation.threads.filter((entry) => entry.activeRunId !== null).length +
-    (threadId &&
-    conversation.isRunning &&
-    !conversation.threads.some((entry) => entry.id === threadId && entry.activeRunId !== null)
-      ? 1
-      : 0)
 
   const conversationHeaderActions =
     threadId || hostHeaderActions ? (
@@ -109,96 +99,26 @@ export function AgentChat({
     content = (
       <ConversationPanel
         agent={conversation.currentAgent}
-        threadId={threadId}
-        messages={conversation.messages}
-        live={conversation.live}
+        transcript={conversation.transcriptProps}
+        composer={conversation.composerProps}
         messagesLoading={conversation.messagesLoading}
         messagesError={conversation.messagesError}
-        pendingUserText={pendingUser?.text ?? null}
-        pendingUserAttachments={pendingUser?.attachments ?? []}
-        pendingUserContext={pendingUser?.context ?? []}
-        anchorCurrentTurn={conversation.anchorCurrentTurn}
-        awaitingResponse={conversation.isRunning}
-        waitingLonger={conversation.waitingLonger}
-        failedBeforeResponse={presentation.kind === "failed"}
-        cancelledBeforeResponse={presentation.kind === "cancelled"}
-        timeout={
-          presentation.kind === "timeout"
-            ? {
-                hasProgress: presentation.hasProgress,
-                ...(presentation.timeoutMs === undefined
-                  ? {}
-                  : { timeoutMs: presentation.timeoutMs }),
-              }
-            : undefined
-        }
-        interrupted={
-          presentation.kind === "interrupted"
-            ? { hasProgress: presentation.hasProgress }
-            : undefined
-        }
-        onRetry={
-          !conversation.sandboxRecovery &&
-          (presentation.kind === "failed" ||
-            ((presentation.kind === "timeout" || presentation.kind === "interrupted") &&
-              !presentation.hasProgress))
-            ? () => conversation.retry(presentation.run)
-            : undefined
-        }
-        onContinue={
-          offersContinue({
-            presentation,
-            isRunning: conversation.isRunning,
-            sandboxRecovery: Boolean(conversation.sandboxRecovery),
-            messages: conversation.messages,
-          })
-            ? conversation.continueAfterTimeout
-            : undefined
-        }
-        retrying={conversation.retrying}
-        continuing={conversation.composerPending}
-        reconnecting={conversation.reconnecting}
-        sendError={conversation.sendError}
         currentThread={conversation.currentThread}
-        runningThreadCount={runningThreadCount}
+        runningThreadCount={conversation.runningThreadCount}
         threadsError={conversation.threadsError ? messages.chat.threadsLoadFailed : null}
         hasMoreThreads={conversation.threadsHasMore}
         loadingMoreThreads={conversation.threadsLoadingMore}
         loadMoreThreadsError={conversation.threadsLoadMoreError}
         onLoadMoreThreads={() => void conversation.loadMoreThreads()}
         agentThreads={conversation.agentThreads}
-        onSend={conversation.send}
         onNewChat={onNavigateHome}
         onSelectThread={onNavigateThread}
         sandboxRecovery={
-          conversation.sandboxRecovery ? (
-            <SandboxRecovery
-              pending={conversation.recreatingSandbox}
-              error={conversation.sandboxRecoveryError}
-              onRecreate={conversation.recreateSandbox}
-            />
+          conversation.sandboxRecoveryProps ? (
+            <SandboxRecovery {...conversation.sandboxRecoveryProps} />
           ) : undefined
         }
-        composerDisabled={conversation.isRunning || Boolean(conversation.sandboxRecovery)}
-        composerPending={conversation.composerPending}
-        composerRunning={conversation.isRunning}
-        composerStopping={conversation.stopping}
-        onStop={conversation.stop}
-        models={conversation.models}
-        selectedModel={conversation.selectedModel}
-        selectedReasoning={conversation.selectedReasoning}
-        modelsLoading={conversation.modelsLoading}
-        modelsError={conversation.modelsError}
-        onSelectModel={conversation.selectModel}
-        onSelectReasoning={conversation.selectReasoning}
-        onResetReasoning={conversation.resetReasoning}
-        usingDefaultModel={conversation.usingDefaultModel}
-        onResetModelSelection={conversation.resetModelSelection}
         composerPlaceholder={composerPlaceholder ?? messages.chat.placeholder}
-        composerDraft={conversation.draftReseed.text}
-        composerDraftAttachments={conversation.draftReseed.attachments}
-        composerDraftContext={conversation.draftReseed.context}
-        composerDraftNonce={conversation.draftReseed.nonce}
         ambientContext={ambientContext}
         compact={compact}
         welcomeContent={welcomeContent}

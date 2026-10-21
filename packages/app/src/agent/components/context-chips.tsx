@@ -8,15 +8,14 @@ import { Box, PanelsTopLeft, X } from "lucide-react"
 import { useAgentMessages } from "../i18n"
 import { useAgentContextLabel } from "../object-context-title"
 
-export function ContextChips({
-  entries,
-  onRemove,
-  className,
-}: {
+export interface ContextChipsProps {
   readonly entries: readonly AgentContextEntryInput[]
+  /** Shows a remove button on each chip. */
   readonly onRemove?: (index: number) => void
   readonly className?: string
-}) {
+}
+
+export function ContextChips({ entries, onRemove, className }: ContextChipsProps) {
   if (entries.length === 0) return null
   return (
     <div className={cn("flex flex-wrap gap-1.5", className)}>

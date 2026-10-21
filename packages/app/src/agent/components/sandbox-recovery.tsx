@@ -12,15 +12,14 @@ import {
 } from "@sixb/ui/components"
 import { useAgentMessages } from "../i18n"
 
-export function SandboxRecovery({
-  pending,
-  error,
-  onRecreate,
-}: {
+export interface SandboxRecoveryProps {
   readonly pending: boolean
   readonly error: boolean
   readonly onRecreate: () => void
-}) {
+}
+
+/** Offers a fresh sandbox when the thread's one stops responding; the composer waits for it. */
+export function SandboxRecovery({ pending, error, onRecreate }: SandboxRecoveryProps) {
   const messages = useAgentMessages().sandbox
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-3 text-sm" role="status">

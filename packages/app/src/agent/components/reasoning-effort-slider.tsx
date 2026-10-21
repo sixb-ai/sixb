@@ -6,20 +6,22 @@ import { useAgentMessages } from "../i18n"
 import { defaultReasoningLevel } from "../model-selection"
 import type { LanguageModel } from "../types"
 
+export interface ReasoningEffortSliderProps {
+  readonly model: LanguageModel
+  readonly value: ModelReasoningLevel
+  readonly disabled?: boolean
+  readonly onChange: (level: ModelReasoningLevel) => void
+  /** Return to the model's default reasoning. Defaults to selecting that level. */
+  readonly onReset?: () => void
+}
+
 export function ReasoningEffortSlider({
   model,
   value,
   disabled,
   onChange,
   onReset,
-}: {
-  model: LanguageModel
-  value: ModelReasoningLevel
-  disabled?: boolean
-  onChange: (level: ModelReasoningLevel) => void
-  /** Return to the model's default reasoning. Defaults to selecting that level. */
-  onReset?: () => void
-}) {
+}: ReasoningEffortSliderProps) {
   const messages = useAgentMessages().reasoning
   const levels: readonly ModelReasoningLevel[] = model.reasoningLevels.filter(
     (level) => level !== "provider-default" && level !== "none" && level !== "minimal"

@@ -11,13 +11,51 @@
 
 export { agentContext } from "@sixb/core/agents/context"
 export type { ModelReasoningLevel } from "@sixb/core/models"
-export { AgentContextProvider, useAgentContext } from "./agent/agent-context-provider"
+export {
+  AgentContextProvider,
+  useAgentContext,
+  useRegisteredAgentContext,
+} from "./agent/agent-context-provider"
 export { AgentPanel, type AgentPanelProps } from "./agent/agent-panel"
 export { AgentSurface, type AgentSurfaceMode, type AgentSurfaceProps } from "./agent/agent-surface"
 export { setAgentSurfaceMode } from "./agent/agent-surface-state"
+export { ArtifactPanelRoot, type ArtifactPanelRootProps } from "./agent/artifact-panel"
+export {
+  AgentThreadSwitcher,
+  type AgentThreadSwitcherProps,
+} from "./agent/components/agent-thread-switcher"
 export { Composer, type ComposerProps } from "./agent/components/composer"
+export { ContextChips, type ContextChipsProps } from "./agent/components/context-chips"
+export {
+  ContextPicker,
+  type ContextPickerProps,
+  type ContextPickerResult,
+} from "./agent/components/context-picker"
+export { ModelControls, type ModelControlsProps } from "./agent/components/model-controls"
+export { ProviderLogo, type ProviderLogoProps } from "./agent/components/provider-logo"
+export {
+  ReasoningEffortSlider,
+  type ReasoningEffortSliderProps,
+} from "./agent/components/reasoning-effort-slider"
+export { SandboxRecovery, type SandboxRecoveryProps } from "./agent/components/sandbox-recovery"
+export { ThreadArtifactsMenu } from "./agent/components/thread-artifacts-menu"
+export { Transcript, type TranscriptProps } from "./agent/components/transcript"
+export {
+  type AgentConversation,
+  type ConversationComposerProps,
+  type UseAgentConversationInput,
+  useAgentConversation,
+} from "./agent/hooks/use-agent-conversation"
+export type { LiveRunState } from "./agent/live-run"
 export { AgentChatPage, type AgentChatPageProps } from "./agent/react-router"
-export type { LanguageModel } from "./agent/types"
+export type {
+  AgentFileRef,
+  AgentMessage,
+  AgentRun,
+  AgentThread,
+  LanguageModel,
+} from "./agent/types"
+export type { ArtifactTarget } from "./artifacts/target"
 export type { AuthExperienceActions, AuthExperienceProps, AuthExperienceState } from "./auth"
 export type { AppMetadata } from "./metadata"
 export { SyncButton, type SyncButtonProps } from "./pages/data/sync-button"

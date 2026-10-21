@@ -1,51 +1,21 @@
-import type { ModelReasoningLevel } from "@sixb/core/models"
 import { Button, Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { Plus } from "lucide-react"
 import type { ReactNode } from "react"
+import type { ConversationComposerProps } from "../hooks/use-agent-conversation"
 import { useAgentMessages } from "../i18n"
-import type { LiveRunState } from "../live-run"
-import type {
-  Agent,
-  AgentContextEntryInput,
-  AgentContextInput,
-  AgentFileRef,
-  AgentMessage,
-  AgentThread,
-  LanguageModel,
-} from "../types"
+import type { Agent, AgentContextInput, AgentThread } from "../types"
 import { AgentThreadSwitcher } from "./agent-thread-switcher"
 import { Composer } from "./composer"
-import { Transcript } from "./transcript"
+import { Transcript, type TranscriptProps } from "./transcript"
 
 export interface ConversationPanelProps {
   readonly sandboxRecovery?: ReactNode
   readonly agent: Agent | undefined
-  readonly threadId: string | null
-  readonly messages: readonly AgentMessage[]
-  readonly live: LiveRunState
+  readonly transcript: TranscriptProps
+  readonly composer: ConversationComposerProps
   readonly messagesLoading: boolean
   readonly messagesError: string | null
-  readonly pendingUserText?: string | null
-  readonly pendingUserAttachments?: readonly AgentFileRef[]
-  readonly pendingUserContext?: readonly AgentContextEntryInput[]
-  /** This client initiated the current turn, so keep the user prompt anchored while it streams. */
-  readonly anchorCurrentTurn?: boolean
-  /** A run has been requested and we're waiting on it — show the thinking shimmer immediately. */
-  readonly awaitingResponse: boolean
-  readonly waitingLonger?: boolean
-  readonly failedBeforeResponse?: boolean
-  readonly cancelledBeforeResponse?: boolean
-  readonly timeout?: { readonly hasProgress: boolean; readonly timeoutMs?: number }
-  readonly interrupted?: { readonly hasProgress: boolean }
-  readonly onRetry?: () => void
-  readonly onContinue?: () => void
-  readonly retrying?: boolean
-  readonly continuing?: boolean
-  /** The active run's stream dropped and is re-subscribing. */
-  readonly reconnecting: boolean
-  /** A failed send to surface above the composer, or null. English, user-facing. */
-  readonly sendError?: string | null
   /** The selected durable thread, or null while composing a new one. */
   readonly currentThread: AgentThread | null
   /** Other chats with this agent, for the header history menu. */
@@ -57,36 +27,9 @@ export interface ConversationPanelProps {
   readonly loadingMoreThreads?: boolean
   readonly loadMoreThreadsError?: boolean
   readonly onLoadMoreThreads?: () => void
-  readonly onSend: (
-    text: string,
-    attachments: readonly AgentFileRef[],
-    context: readonly AgentContextEntryInput[]
-  ) => void
   readonly onNewChat: () => void
   readonly onSelectThread: (threadId: string) => void
-  readonly composerDisabled: boolean
-  readonly composerPending: boolean
-  /** A run is in flight: the composer shows a stop button wired to {@link onStop}. */
-  readonly composerRunning: boolean
-  /** A stop has been requested and we're waiting for the run to end. */
-  readonly composerStopping: boolean
-  readonly onStop: () => void
-  readonly models: readonly LanguageModel[]
-  readonly selectedModel?: LanguageModel
-  readonly selectedReasoning?: ModelReasoningLevel
-  readonly modelsLoading?: boolean
-  readonly modelsError?: boolean
-  readonly onSelectModel: (model: LanguageModel) => void
-  readonly onSelectReasoning: (reasoning: ModelReasoningLevel) => void
-  readonly onResetReasoning?: () => void
-  readonly usingDefaultModel?: boolean
-  readonly onResetModelSelection?: () => void
   readonly composerPlaceholder?: string
-  /** Text to restore into the composer (e.g. after a failed send), applied when the nonce changes. */
-  readonly composerDraft?: string
-  readonly composerDraftAttachments?: readonly AgentFileRef[]
-  readonly composerDraftContext?: readonly AgentContextEntryInput[]
-  readonly composerDraftNonce?: number
   readonly ambientContext?: readonly AgentContextInput[]
   readonly compact?: boolean
   /** Centered content for an empty conversation. Omit for the agent identity; null hides it. */
@@ -96,27 +39,10 @@ export interface ConversationPanelProps {
 
 export function ConversationPanel({
   agent,
-  threadId,
-  messages,
-  live,
+  transcript,
+  composer,
   messagesLoading,
   messagesError,
-  pendingUserText,
-  pendingUserAttachments = [],
-  pendingUserContext = [],
-  anchorCurrentTurn,
-  awaitingResponse,
-  waitingLonger,
-  failedBeforeResponse,
-  cancelledBeforeResponse,
-  timeout,
-  interrupted,
-  onRetry,
-  onContinue,
-  retrying,
-  continuing,
-  reconnecting,
-  sendError,
   currentThread,
   agentThreads,
   runningThreadCount,
@@ -125,29 +51,9 @@ export function ConversationPanel({
   loadingMoreThreads,
   loadMoreThreadsError,
   onLoadMoreThreads,
-  onSend,
   onNewChat,
   onSelectThread,
-  composerDisabled,
-  composerPending,
-  composerRunning,
-  composerStopping,
-  onStop,
-  models,
-  selectedModel,
-  selectedReasoning,
-  modelsLoading,
-  modelsError,
-  onSelectModel,
-  onSelectReasoning,
-  onResetReasoning,
-  usingDefaultModel,
-  onResetModelSelection,
   composerPlaceholder,
-  composerDraft,
-  composerDraftAttachments,
-  composerDraftContext,
-  composerDraftNonce,
   ambientContext = [],
   compact = false,
   welcomeContent,
@@ -159,37 +65,18 @@ export function ConversationPanel({
   // Optimistic activity (a just-sent message or a live run) takes over the pane immediately, so the
   // brief durable-message load never flashes a centered "Loading…".
   const hasActivity =
-    Boolean(pendingUserText) ||
-    pendingUserAttachments.length > 0 ||
-    pendingUserContext.length > 0 ||
-    live.parts.length > 0 ||
-    awaitingResponse
-  const showWelcome = !messagesLoading && !messagesError && !hasActivity && messages.length === 0
+    Boolean(transcript.pendingUserText) ||
+    (transcript.pendingUserAttachments?.length ?? 0) > 0 ||
+    (transcript.pendingUserContext?.length ?? 0) > 0 ||
+    transcript.live.parts.length > 0 ||
+    Boolean(transcript.awaitingResponse)
+  const showWelcome =
+    !messagesLoading && !messagesError && !hasActivity && transcript.messages.length === 0
   const renderComposer = (wideClassName?: string) => (
     <Composer
-      onSend={onSend}
-      error={sendError ?? undefined}
-      disabled={composerDisabled}
-      pending={composerPending}
-      running={composerRunning}
-      stopping={composerStopping}
-      onStop={onStop}
-      models={models}
-      selectedModel={selectedModel}
-      selectedReasoning={selectedReasoning}
-      modelsLoading={modelsLoading}
-      modelsError={modelsError}
-      onSelectModel={onSelectModel}
-      onSelectReasoning={onSelectReasoning}
-      onResetReasoning={onResetReasoning}
-      usingDefaultModel={usingDefaultModel}
-      onResetModelSelection={onResetModelSelection}
+      {...composer}
       placeholder={composerPlaceholder}
       className={compact ? "px-4 pt-2 pb-4" : wideClassName}
-      draft={composerDraft}
-      draftAttachments={composerDraftAttachments}
-      draftContext={composerDraftContext}
-      draftNonce={composerDraftNonce}
       ambientContext={ambientContext}
       compact={compact}
     />
@@ -257,26 +144,7 @@ export function ConversationPanel({
                 <p className="max-w-md text-sm text-destructive">{messagesError}</p>
               </div>
             ) : (
-              <Transcript
-                threadId={threadId}
-                messages={messages}
-                live={live}
-                pendingUserText={pendingUserText}
-                pendingUserAttachments={pendingUserAttachments}
-                pendingUserContext={pendingUserContext}
-                anchorCurrentTurn={anchorCurrentTurn}
-                awaitingResponse={awaitingResponse}
-                waitingLonger={waitingLonger}
-                failedBeforeResponse={failedBeforeResponse}
-                cancelledBeforeResponse={cancelledBeforeResponse}
-                timeout={timeout}
-                interrupted={interrupted}
-                onRetry={onRetry}
-                onContinue={onContinue}
-                retrying={retrying}
-                continuing={continuing}
-                reconnecting={reconnecting}
-              />
+              <Transcript {...transcript} />
             )}
           </div>
 

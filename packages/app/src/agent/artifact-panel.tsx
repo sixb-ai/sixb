@@ -66,6 +66,22 @@ export function useArtifactPanel(): ArtifactPanelValue | null {
   return useContext(ArtifactPanelContext)
 }
 
+export interface ArtifactPanelRootProps {
+  readonly children: ReactNode
+  /** The conversation is narrow: open artifacts in a dialog, or over `overlayHost` when given. */
+  readonly compact?: boolean
+  /** Use the resizable panel beside the conversation even when compact. */
+  readonly split?: boolean
+  /** Where the dock's canvas goes, beside it over the app. */
+  readonly overlayHost?: HTMLElement | null
+  /** The conversation; a different one starts with nothing open. */
+  readonly scopeKey: string
+  readonly routeTarget?: ArtifactTarget | null
+  readonly onRouteTargetChange?: (target: ArtifactTarget | null) => void
+  /** Offer each artifact's own page, to open or to copy a link to. Off for an observer. */
+  readonly pageLinks?: boolean
+}
+
 /**
  * Shows one artifact or file beside the conversation. With `onRouteTargetChange`, an open artifact
  * lives in the page's URL so reloads and shared links land on it; a file stays local, since a
@@ -80,20 +96,7 @@ export function ArtifactPanelRoot({
   routeTarget = null,
   onRouteTargetChange,
   pageLinks = true,
-}: {
-  readonly children: ReactNode
-  readonly compact?: boolean
-  /** Use the resizable panel beside the conversation even when compact. */
-  readonly split?: boolean
-  /** Where the dock's canvas goes, beside it over the app. */
-  readonly overlayHost?: HTMLElement | null
-  /** The conversation; a different one starts with nothing open. */
-  readonly scopeKey: string
-  readonly routeTarget?: ArtifactTarget | null
-  readonly onRouteTargetChange?: (target: ArtifactTarget | null) => void
-  /** Offer each artifact's own page, to open or to copy a link to. Off for an observer. */
-  readonly pageLinks?: boolean
-}) {
+}: ArtifactPanelRootProps) {
   const messages = useAgentMessages().artifacts
   const idPrefix = useId()
   const [localTarget, setLocalTarget] = useState<ViewerTarget | null>(null)

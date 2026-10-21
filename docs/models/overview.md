@@ -130,6 +130,70 @@ reads the object itself.
 agentContext.object(Project, project.id, { label: project.name })
 ```
 
+### Build your own chat
+
+`AgentPanel` is assembled from parts that `@sixb/app` exports, so a chat with its own layout keeps
+the built-in behavior: streaming, retries, attachments, `@` context and the model picker.
+`useAgentConversation` runs one conversation and returns the props for its transcript and its
+composer:
+
+File: `app/_components/assistant.tsx`
+
+```tsx
+import {
+  ArtifactPanelRoot,
+  Composer,
+  SandboxRecovery,
+  Transcript,
+  useAgentConversation,
+  useRegisteredAgentContext,
+} from "@sixb/app"
+import { useState } from "react"
+
+export function Assistant() {
+  const [threadId, setThreadId] = useState<string | null>(null)
+  const conversation = useAgentConversation({ threadId, onThreadCreated: setThreadId })
+  const pageContext = useRegisteredAgentContext()
+
+  return (
+    <ArtifactPanelRoot scopeKey={threadId ?? "new"}>
+      <div className="flex h-full flex-col">
+        <Transcript {...conversation.transcriptProps} />
+        {conversation.sandboxRecoveryProps && (
+          <SandboxRecovery {...conversation.sandboxRecoveryProps} />
+        )}
+        <Composer
+          {...conversation.composerProps}
+          ambientContext={pageContext}
+          placeholder="Ask about invoices"
+        />
+      </div>
+    </ArtifactPanelRoot>
+  )
+}
+```
+
+`ArtifactPanelRoot` opens the files and artifacts a reply shows. Without it, they cannot be opened.
+Pass `compact` when the chat is narrow so they open in a dialog. `SandboxRecovery` appears when a
+thread's sandbox stops responding; the composer stays disabled until the person starts over.
+
+Before showing the conversation, handle `conversation.agentLoading`, `conversation.agentError`, no
+`conversation.currentAgent` once loaded (the project has no agent), and
+`conversation.threadUnavailable` (the thread was deleted or is not theirs).
+
+| Part | Use it for |
+| --- | --- |
+| `useAgentConversation` | One conversation: messages, the live run, threads, models, and `send`, `stop` and `retry` |
+| `Transcript` | The messages, the streaming reply, and retry or continue after a run stops early |
+| `Composer` | Text, attachments, `@` context and the model picker |
+| `AgentThreadSwitcher` | Search and switch between the person's threads |
+| `ThreadArtifactsMenu` | The artifacts a thread produced |
+| `ModelControls` | The model picker on its own; `ProviderLogo` and `ReasoningEffortSlider` to build another |
+| `ContextChips`, `ContextPicker` | Show selected context, and list matches for it |
+| `useRegisteredAgentContext` | The context open pages set with `useAgentContext` |
+
+Types such as `AgentThread`, `AgentMessage` and `AgentFileRef` are exported alongside them.
+
 ## Share a conversation
 
 A conversation's owner can add other users of the project to it. They read the whole
