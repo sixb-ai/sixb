@@ -75,6 +75,7 @@ export const en = {
       pages: {
         personal: "Personal",
         developers: "Developers",
+        memory: "Memory",
         members: "Members",
         "service-accounts": "Service accounts",
       },
@@ -171,6 +172,7 @@ export const fr: Translation<AppMessages> = {
       pages: {
         personal: "Personnel",
         developers: "Développeurs",
+        memory: "Mémoire",
         members: "Membres",
         "service-accounts": "Comptes de service",
       },
