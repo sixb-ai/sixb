@@ -60,6 +60,8 @@ describe("classifyCommand", () => {
       "sixb models calls files call_1": "models.calls",
       "sixb api get /api/project": "api.get",
       "sixb api post /api/custom --file body.json": "api.post",
+      'sixb memory save user -m "Prefers bullets"': "memory.save",
+      "sixb memory pull": "memory.pull",
     } as const
 
     for (const [command, expected] of Object.entries(cases)) {
@@ -239,6 +241,99 @@ describe("describeBash", () => {
     ["(bun test || true)", "Running a command"],
   ])("describes `%s` as %s", (command, runningTitle) => {
     expect(describeBash(classifyCommand(command), null).runningTitle).toBe(runningTitle)
+  })
+
+  test("says what a memory save remembered, and when it saved nothing", () => {
+    const intent = classifyCommand('sixb memory save user -m "Prefers short bullet summaries"')
+    const saved = describeBash(
+      intent,
+      output('{"repo":"user","saved":true,"revision":4,"changed":["MEMORY.md"]}')
+    )
+    expect(saved).toEqual({
+      icon: "memory",
+      title: "Saved to memory",
+      runningTitle: "Saving to memory",
+      detail: "Prefers short bullet summaries",
+    })
+    expect(describeBash(intent, output('{"repo":"user","saved":false,"changed":[]}')).title).toBe(
+      "Checked memory"
+    )
+    expect(
+      describeBash(intent, output('{"error":"Agent memory is not available."}', 1)).title
+    ).toBe("Couldn't save to memory")
+  })
+
+  test("says a save another conversation got ahead of has newer memory to merge", () => {
+    const conflict = JSON.stringify({
+      repo: "user",
+      saved: false,
+      conflicts: [
+        { path: "MEMORY.md", theirs: "MEMORY.md.theirs" },
+        { path: "team_structure.md", theirs: "team_structure.md.theirs" },
+      ],
+    })
+    expect(
+      describeBash(classifyCommand('sixb memory save user -m "VAT"'), output(conflict, 1))
+    ).toMatchObject({
+      icon: "memory",
+      title: "Found newer memory to merge",
+      detail: "team structure",
+    })
+  })
+
+  test("describes reading and editing memory files by the file, not the shell command", () => {
+    const describe = (command: string, stdout = "") => {
+      const { icon, title, detail } = describeBash(classifyCommand(command), output(stdout))
+      return { icon, title, detail }
+    }
+    // Notes are named in words; the index, MEMORY.md, is the memory itself.
+    const read = (detail?: string) => ({ icon: "memory" as const, title: "Read memory", detail })
+    const updated = (detail?: string) => ({
+      icon: "memory" as const,
+      title: "Updated memory",
+      detail,
+    })
+
+    expect(describe('cat "$SIXB_MEMORY_DIR/user/MEMORY.md"')).toEqual(read())
+    expect(describe('cat "$SIXB_MEMORY_DIR/user/MEMORY.md.theirs"')).toEqual(read())
+    expect(describe('cat "$SIXB_MEMORY_DIR/user/team_structure.md"')).toEqual(
+      read("team structure")
+    )
+    expect(describe('cat "$SIXB_MEMORY_DIR/user/metrics/keep_rate.sql"')).toEqual(
+      read("keep_rate.sql")
+    )
+    expect(describe("grep -rn VAT .sixb/agent/memory/user/projects/")).toEqual(read("projects"))
+    expect(
+      describe(`printf '%s\\n' '- Excluding VAT' >> "$SIXB_MEMORY_DIR/user/projects/payments.md"`)
+    ).toEqual(updated("payments"))
+    expect(describe(`sed -i 's/gross/net/' "\${SIXB_MEMORY_DIR}/user/MEMORY.md"`)).toEqual(
+      updated()
+    )
+    expect(describe('rm "$SIXB_MEMORY_DIR/user/MEMORY.md.theirs"')).toEqual(updated())
+    expect(describe("cat > \"$SIXB_MEMORY_DIR/user/team.md\" <<'EOF'\n# Team\nEOF")).toEqual(
+      updated("team")
+    )
+    expect(
+      describe("apply_patch <<'PATCH'\n*** Update File: .sixb/agent/memory/user/MEMORY.md\nPATCH")
+    ).toEqual(updated())
+    // An edit followed by its save reads as the save.
+    expect(
+      describe(
+        `printf '%s\\n' '- VAT' >> "$SIXB_MEMORY_DIR/user/MEMORY.md" && sixb memory save user -m "VAT"`,
+        '{"repo":"user","saved":true,"revision":2,"changed":["MEMORY.md"]}'
+      ).title
+    ).toBe("Saved to memory")
+    // So does a save on the line after a heredoc edit. Reproduce by dropping
+    // sixbStepsAroundHeredocs from classifyCommand: the save reads as "Updated memory".
+    expect(
+      describe(
+        `cat >> "$SIXB_MEMORY_DIR/user/MEMORY.md" <<'EOF'\n- VAT (added 2026-10-21)\nEOF\nsixb memory save user -m "VAT"`,
+        '{"repo":"user","saved":true,"revision":2,"changed":["MEMORY.md"]}'
+      ).title
+    ).toBe("Saved to memory")
+    expect(
+      describe("cat > \"$SIXB_MEMORY_DIR/user/team.md\" <<'EOF'\n# Team\nsixb x\nEOF")
+    ).toEqual(updated("team"))
   })
 
   test("summarizes the ontology with a count", () => {
