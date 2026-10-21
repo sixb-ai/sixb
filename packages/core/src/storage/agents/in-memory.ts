@@ -980,15 +980,29 @@ function compareLatestCheckpoints(
 class InMemoryAgentMemoryStore implements AgentMemoryStore {
   constructor(private readonly state: AgentStoreState) {}
 
-  async get(input: { projectId: string; repoId: string }): Promise<AgentMemoryRepoRecord> {
+  async get(input: {
+    projectId: string
+    repoId: string
+    asOf?: Date
+  }): Promise<AgentMemoryRepoRecord> {
     const repo = this.state.memory.get(key(input.projectId, input.repoId))
-    if (!repo) return { revision: 0, files: [] }
-    const files = [...latestMemoryFiles(repo).values()]
+    const { asOf } = input
+    const saved = asOf
+      ? repo?.revisions.filter((entry) => entry.createdAt.getTime() <= asOf.getTime())
+      : repo?.revisions
+    const revision = saved?.reduce((highest, entry) => Math.max(highest, entry.revision), 0) ?? 0
+    if (!repo || revision === 0) return { revision: 0, files: [] }
+    const files = [
+      ...latestMemoryFiles({
+        revisions: repo.revisions,
+        files: repo.files.filter((file) => file.revision <= revision),
+      }).values(),
+    ]
       .flatMap((file) =>
         file.contents === null ? [] : [{ path: file.path, contents: file.contents }]
       )
       .sort((left, right) => compareAgentMemoryPaths(left.path, right.path))
-    return { revision: repo.revisions.at(-1)?.revision ?? 0, files }
+    return { revision, files }
   }
 
   async save(input: SaveAgentMemoryInput): Promise<SaveAgentMemoryResult> {

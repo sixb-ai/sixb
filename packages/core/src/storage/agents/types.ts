@@ -682,9 +682,14 @@ export interface ListAgentMemoryRevisionsResult {
  * storage.
  */
 export interface AgentMemoryStore {
+  /**
+   * The repo at its latest revision, or with `asOf` at the latest revision saved by then: revision
+   * 0 and no files when none was. File versions pruned from the history are missing from it.
+   */
   get(input: {
     readonly projectId: string
     readonly repoId: string
+    readonly asOf?: Date
   }): Promise<AgentMemoryRepoRecord>
   /**
    * In one transaction: reports a conflict when a path in `changes` was written after
