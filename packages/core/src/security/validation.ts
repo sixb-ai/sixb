@@ -269,13 +269,20 @@ export function assertGrantDefinition(
     )
   }
 
-  if (value.capability === "manage" && value.target !== "connector" && value.target !== "aiUsage") {
-    throw createError(`[Sixb] ${field} manage grant target must be 'connector' or 'aiUsage'.`)
+  if (
+    value.capability === "manage" &&
+    value.target !== "connector" &&
+    value.target !== "aiUsage" &&
+    value.target !== "agentMemory"
+  ) {
+    throw createError(
+      `[Sixb] ${field} manage grant target must be 'connector', 'aiUsage', or 'agentMemory'.`
+    )
   }
 
-  // The member directory, the agent, logs, AI usage, activity and Agent conversations are one
-  // surface each, so their grants select nothing. The checks above settled the capability and
-  // target, so the kind is known.
+  // The member directory, the agent, logs, AI usage, activity, Agent conversations and Agent
+  // memory are one surface each, so their grants select nothing. The checks above settled the
+  // capability and target, so the kind is known.
   if (isSingletonGrantKind(grantKindOf(value as unknown as GrantDefinition))) {
     if (value.selection !== undefined) {
       throw createError(

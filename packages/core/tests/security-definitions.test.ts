@@ -523,6 +523,11 @@ describe("role definitions", () => {
       { capability: "manage", target: "aiUsage" },
     ],
     [
+      "can.manage takes the Agent's shared memory",
+      can.manage(agent.memory),
+      { capability: "manage", target: "agentMemory" },
+    ],
+    [
       "can.edit takes an object type",
       can.edit(Account),
       { capability: "edit", selection: { all: false, ids: ["account"] } },
@@ -573,6 +578,7 @@ describe("role definitions", () => {
     expect(Object.isFrozen(agent)).toBe(true)
     expect(Object.isFrozen(agent.usage)).toBe(true)
     expect(Object.isFrozen(agent.threads)).toBe(true)
+    expect(Object.isFrozen(agent.memory)).toBe(true)
     expect(() => manage(agent.threads)).toThrow(SecurityValidationError)
   })
 
@@ -758,10 +764,10 @@ describe("role definitions", () => {
     expect(() => createRuntime({ groups: [commercial], roles: [role] })).not.toThrow()
   })
 
-  // Logs, AI usage, the project Agent, and the member directory are one surface each. Reproduce:
-  // drop `observe`, the AI-usage `manage`, or `view:users` from the singleton check in
-  // assertGrantDefinition and these grants are accepted.
-  test("runtime registration rejects selections on logs, AI usage, Agent, and directory grants", () => {
+  // Logs, AI usage, Agent memory, the project Agent, and the member directory are one surface
+  // each. Reproduce: drop `observe`, the singleton `manage` targets, or `view:users` from the
+  // singleton check in assertGrantDefinition and these grants are accepted.
+  test("runtime registration rejects selections on logs, AI usage, memory, Agent, and directory grants", () => {
     for (const grant of [
       {
         kind: "grant",
@@ -791,6 +797,12 @@ describe("role definitions", () => {
         kind: "grant",
         capability: "manage",
         target: "aiUsage",
+        selection: { all: true, except: [] },
+      },
+      {
+        kind: "grant",
+        capability: "manage",
+        target: "agentMemory",
         selection: { all: true, except: [] },
       },
       {

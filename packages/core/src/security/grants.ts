@@ -9,7 +9,12 @@
 
 import type { ActionDefinition, ObjectActionDefinition } from "../actions/types"
 import { isObjectActionDefinition } from "../actions/validation"
-import type { AgentReference, AgentThreadsReference, AgentUsageReference } from "../agents/types"
+import type {
+  AgentMemoryReference,
+  AgentReference,
+  AgentThreadsReference,
+  AgentUsageReference,
+} from "../agents/types"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { ObjectType } from "../ontology"
@@ -362,13 +367,28 @@ function observe(input: ObservableReference): ObserveGrant {
   return { kind: "grant", capability: "observe", target: value.kind }
 }
 
+function isAgentMemoryReference(input: unknown): input is AgentMemoryReference {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    !Array.isArray(input) &&
+    !isBreadthSelector(input) &&
+    "kind" in input &&
+    input.kind === "agentMemory"
+  )
+}
+
 function manage(input: GrantInput<ConnectorDefinition, "connector">): ManageGrant<"connector">
 function manage(input: AgentUsageReference): ManageGrant<"aiUsage">
+function manage(input: AgentMemoryReference): ManageGrant<"agentMemory">
 function manage(
-  input: GrantInput<ConnectorDefinition, "connector"> | AgentUsageReference
+  input: GrantInput<ConnectorDefinition, "connector"> | AgentUsageReference | AgentMemoryReference
 ): ManageGrant {
   if (isAgentUsageReference(input)) {
     return { kind: "grant", capability: "manage", target: "aiUsage" }
+  }
+  if (isAgentMemoryReference(input)) {
+    return { kind: "grant", capability: "manage", target: "agentMemory" }
   }
   return {
     kind: "grant",
