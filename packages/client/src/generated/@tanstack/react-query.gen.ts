@@ -5162,7 +5162,7 @@ export const getAgentMemoryQueryKey = (options: Options<GetAgentMemoryData>) =>
 /**
  * Get an Agent memory repo
  *
- * Every file of the repo as of its latest revision.
+ * Every file of the repo as of its latest revision, or as an earlier revision left it.
  */
 export const getAgentMemoryOptions = (options: Options<GetAgentMemoryData>) =>
   queryOptions<

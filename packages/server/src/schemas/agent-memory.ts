@@ -23,6 +23,16 @@ export const AgentMemoryRepoResponseSchema = z.object({
   files: z.array(AgentMemoryFileSchema).describe("Ordered by path"),
 })
 
+export const AgentMemoryRepoQuerySchema = z
+  .object({
+    revision: z
+      .string()
+      .regex(/^\d+$/)
+      .optional()
+      .describe("Read the repo as this revision left it, such as one listed in its history"),
+  })
+  .strict()
+
 export const AgentMemoryRevisionListQuerySchema = z
   .object({ limit: z.string().optional(), offset: z.string().optional() })
   .strict()

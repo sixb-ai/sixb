@@ -13910,7 +13910,12 @@ export type GetAgentMemoryData = {
      */
     repo: "user" | "project"
   }
-  query?: never
+  query?: {
+    /**
+     * Read the repo as this revision left it, such as one listed in its history
+     */
+    revision?: string
+  }
   url: "/api/agent-memory/{repo}"
 }
 

@@ -42,9 +42,10 @@ export class SqliteAgentMemoryStore implements AgentMemoryStore {
     projectId: string
     repoId: string
     asOf?: Date
+    revision?: number
   }): Promise<AgentMemoryRepoRecord> {
     return this.db.transaction(() => {
-      const revision = this.head(input.projectId, input.repoId, input.asOf)
+      const revision = this.head(input.projectId, input.repoId, input.asOf, input.revision)
       const files = this.db
         .query(
           `SELECT f.path, f.contents FROM agent_memory_files f
@@ -177,14 +178,16 @@ export class SqliteAgentMemoryStore implements AgentMemoryStore {
       .run(input.projectId, input.repoId)
   }
 
-  /** The highest revision, or the highest saved by `asOf`. */
-  private head(projectId: string, repoId: string, asOf?: Date): number {
+  /** The highest revision, or the highest saved by `asOf` and up to `upTo`. */
+  private head(projectId: string, repoId: string, asOf?: Date, upTo?: number): number {
+    const at = asOf?.toISOString() ?? null
     const row = this.db
       .query(
         `SELECT COALESCE(MAX(revision), 0) AS revision FROM agent_memory_revisions
-         WHERE project_id = ? AND repo_id = ? AND (? IS NULL OR created_at <= ?)`
+         WHERE project_id = ? AND repo_id = ? AND (? IS NULL OR created_at <= ?)
+           AND (? IS NULL OR revision <= ?)`
       )
-      .get(projectId, repoId, asOf?.toISOString() ?? null, asOf?.toISOString() ?? null) as {
+      .get(projectId, repoId, at, at, upTo ?? null, upTo ?? null) as {
       revision: number
     }
     return row.revision

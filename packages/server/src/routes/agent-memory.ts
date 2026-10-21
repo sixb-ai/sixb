@@ -8,6 +8,7 @@ import {
   AgentMemoryConflictResponseSchema,
   AgentMemoryErrorResponseSchema,
   AgentMemoryParamsSchema,
+  AgentMemoryRepoQuerySchema,
   AgentMemoryRepoResponseSchema,
   AgentMemoryRevisionListQuerySchema,
   AgentMemoryRevisionListResponseSchema,
@@ -53,7 +54,13 @@ export function registerAgentMemoryRoutes(app: Elysia) {
       "/api/agent-memory/:repo",
       async (context) => {
         try {
-          const repo = await requireRequestSixb(context).agent.memory.get(repoParam(context.params))
+          const revision = parseOptionalInt(
+            AgentMemoryRepoQuerySchema.parse(context.query).revision
+          )
+          const repo = await requireRequestSixb(context).agent.memory.get(
+            repoParam(context.params),
+            revision === undefined ? {} : { revision }
+          )
           return AgentMemoryRepoResponseSchema.parse(repo)
         } catch (error) {
           return handleAgentMemoryRouteError(error, context.set)
@@ -61,6 +68,7 @@ export function registerAgentMemoryRoutes(app: Elysia) {
       },
       {
         params: AgentMemoryParamsSchema,
+        query: AgentMemoryRepoQuerySchema,
         response: {
           200: AgentMemoryRepoResponseSchema,
           400: AgentMemoryErrorResponseSchema,
@@ -69,7 +77,8 @@ export function registerAgentMemoryRoutes(app: Elysia) {
         },
         detail: {
           summary: "Get an Agent memory repo",
-          description: "Every file of the repo as of its latest revision.",
+          description:
+            "Every file of the repo as of its latest revision, or as an earlier revision left it.",
           tags: [OPENAPI_TAGS.agentMemory.name],
           operationId: "getAgentMemory",
           security: accessTokenSecurityRequirement("getAgentMemory"),

@@ -163,6 +163,17 @@ describe("agent memory routes", () => {
     })
   })
 
+  test("reads the repo as an earlier revision left it, for its history", async () => {
+    const { app, storage } = createApp()
+    const priya = await seedSession(storage, "usr_priya")
+    await app.fetch(priya.save("user", { baseRevision: 0, message: "One", changes: [entry("a")] }))
+    await app.fetch(priya.save("user", { baseRevision: 1, message: "Two", changes: [entry("b")] }))
+
+    const first = await app.fetch(priya.get("/api/agent-memory/user?revision=1"))
+    expect(await first.json()).toEqual({ repo: "user", revision: 1, files: [entry("a")] })
+    expect((await app.fetch(priya.get("/api/agent-memory/user?revision=latest"))).status).toBe(422)
+  })
+
   test("returns a conflict with the other save's contents and saves nothing", async () => {
     const { app, storage } = createApp()
     const priya = await seedSession(storage, "usr_priya")

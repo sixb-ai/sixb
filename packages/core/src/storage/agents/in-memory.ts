@@ -984,12 +984,15 @@ class InMemoryAgentMemoryStore implements AgentMemoryStore {
     projectId: string
     repoId: string
     asOf?: Date
+    revision?: number
   }): Promise<AgentMemoryRepoRecord> {
     const repo = this.state.memory.get(key(input.projectId, input.repoId))
-    const { asOf } = input
-    const saved = asOf
-      ? repo?.revisions.filter((entry) => entry.createdAt.getTime() <= asOf.getTime())
-      : repo?.revisions
+    const { asOf, revision: upTo } = input
+    const saved = repo?.revisions.filter(
+      (entry) =>
+        (!asOf || entry.createdAt.getTime() <= asOf.getTime()) &&
+        (upTo === undefined || entry.revision <= upTo)
+    )
     const revision = saved?.reduce((highest, entry) => Math.max(highest, entry.revision), 0) ?? 0
     if (!repo || revision === 0) return { revision: 0, files: [] }
     const files = [

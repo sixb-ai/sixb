@@ -31,14 +31,17 @@ export class PgAgentMemoryStore implements AgentMemoryStore {
     projectId: string
     repoId: string
     asOf?: Date
+    revision?: number
   }): Promise<AgentMemoryRepoRecord> {
     const asOf = input.asOf ?? null
+    const upTo = input.revision ?? null
     // One statement, so the head and the files come from one snapshot.
     const rows = await this.sql<{ head: number; path: string | null; contents: string | null }[]>`
       WITH head AS (
         SELECT COALESCE(MAX(revision), 0)::int AS revision FROM agent_memory_revisions
         WHERE project_id = ${input.projectId} AND repo_id = ${input.repoId}
           AND (${asOf}::timestamptz IS NULL OR created_at <= ${asOf}::timestamptz)
+          AND (${upTo}::int IS NULL OR revision <= ${upTo}::int)
       ), latest AS (
         SELECT DISTINCT ON (f.path) f.path, f.contents FROM agent_memory_files f, head
         WHERE f.project_id = ${input.projectId} AND f.repo_id = ${input.repoId}
