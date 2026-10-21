@@ -21,6 +21,7 @@ import type {
 import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
 import { agentRuntimeFacts, renderAgentSystemPrompt } from "./agent-prompt"
 import type { AgentContextBudget } from "./context-budget"
+import type { ConversationMemory } from "./conversation-memory"
 import { AgentContextCompactionError, AgentExecutionLostError } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import {
@@ -54,7 +55,14 @@ const SUMMARY_SYSTEM_PROMPT = [
 
 export interface PreparedAgentConversationContext {
   readonly threadContext: LoadedAgentThreadModelContext
+  /** The memory the run's prompt shows, as of the active checkpoint. */
+  readonly memory?: ConversationMemory
 }
+
+/** Memory as of a checkpoint's creation, or of the thread's start when there is none. */
+export type LoadConversationMemory = (
+  checkpoint: { readonly createdAt: Date } | null
+) => Promise<ConversationMemory | undefined>
 
 /** Load, estimate, and—when required—compact one admitted conversational run before setup. */
 export async function prepareAgentConversationContext(input: {
@@ -68,6 +76,7 @@ export async function prepareAgentConversationContext(input: {
   readonly conversation?: ConversationReaders
   readonly runtime: AgentTurnRuntime
   readonly frameworkTools?: readonly ModelTool[]
+  readonly loadMemory?: LoadConversationMemory
 }): Promise<PreparedAgentConversationContext> {
   const { context, plan, budget, run, runtime } = input
   const initialContext = await loadAgentThreadModelContext({
@@ -75,6 +84,8 @@ export async function prepareAgentConversationContext(input: {
     projectId: context.id,
     threadId: run.threadId,
   })
+  runtime.assertCanContinue()
+  const memory = await input.loadMemory?.(initialContext.checkpoint)
   runtime.assertCanContinue()
 
   // The authors ride on user messages, not the system prompt; an estimate only needs their size.
@@ -86,7 +97,14 @@ export async function prepareAgentConversationContext(input: {
       })
     : undefined
 
-  const estimateShape = {
+  const tools = contextEstimateTools([
+    ...agentModelToolSpecs({
+      definitions: plan.tools,
+      valueTypesById: context.valueTypesById,
+    }),
+    ...(input.frameworkTools ?? []),
+  ])
+  const estimateShapeWith = (memory: ConversationMemory | undefined) => ({
     systemPrompt: [
       renderAgentSystemPrompt({
         mode: "conversation",
@@ -99,17 +117,13 @@ export async function prepareAgentConversationContext(input: {
           requester: context.requester,
         }),
         ...(plan.sandboxModels ? { sandboxModels: plan.sandboxModels } : {}),
+        ...(memory ? { memory: memory.prompt } : {}),
       }),
       authors ? conversationAuthorsText(authors) : "",
     ].join("\n"),
-    tools: contextEstimateTools([
-      ...agentModelToolSpecs({
-        definitions: plan.tools,
-        valueTypesById: context.valueTypesById,
-      }),
-      ...(input.frameworkTools ?? []),
-    ]),
-  }
+    tools,
+  })
+  const estimateShape = estimateShapeWith(memory)
   const estimatedInputTokensBefore = await estimateAgentConversationInputTokens({
     context,
     plan,
@@ -124,7 +138,7 @@ export async function prepareAgentConversationContext(input: {
       inputBudgetTokens: budget.inputBudgetTokens,
     })
   ) {
-    return { threadContext: initialContext }
+    return { threadContext: initialContext, ...(memory ? { memory } : {}) }
   }
 
   const reason = "threshold" satisfies AgentContextCheckpointReason
@@ -173,8 +187,12 @@ export async function prepareAgentConversationContext(input: {
       summaryModelId: plan.model.modelId,
       createdAt: new Date(),
     }
+    // The continuation's prompt shows memory as of the new checkpoint.
+    const compactedMemory = await input.loadMemory?.(candidateBase)
+    runtime.assertCanContinue()
+    const compactedShape = estimateShapeWith(compactedMemory)
     const minimumContinuationTokens = estimateAgentContextRequestTokens({
-      ...estimateShape,
+      ...compactedShape,
       messages: projectAgentThreadModelContext({
         checkpoint: candidateBase,
         messages: boundary.retainedMessages,
@@ -199,7 +217,7 @@ export async function prepareAgentConversationContext(input: {
     runtime.assertCanContinue()
     const candidate = { ...candidateBase, summary }
     const estimatedInputTokensAfter = estimateAgentContextRequestTokens({
-      ...estimateShape,
+      ...compactedShape,
       messages: projectAgentThreadModelContext({
         checkpoint: candidate,
         messages: boundary.retainedMessages,
@@ -243,7 +261,7 @@ export async function prepareAgentConversationContext(input: {
       estimatedInputTokensBefore,
       estimatedInputTokensAfter,
     })
-    return { threadContext }
+    return { threadContext, ...(compactedMemory ? { memory: compactedMemory } : {}) }
   } catch (error) {
     // Preserve queue ownership, accounting, deadline, and cancellation failures as their original
     // run-level outcome instead of relabeling them as a compaction implementation failure.
