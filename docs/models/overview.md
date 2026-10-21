@@ -65,6 +65,29 @@ The chat agent receives the file as written in every conversation, so keep it sh
 instructions for a particular task in a [skill](./tools-and-authorization.md#add-a-skill), which
 the agent reads only when relevant. AI workflow steps use their own `instructions` instead.
 
+## It remembers each user
+
+The chat agent keeps a memory for each user: what it learned in earlier conversations, such as their
+preferences, vocabulary, and how they measure things. Memory is a folder of Markdown files with a
+`MEMORY.md` entry point. The agent reads `MEMORY.md` at the start of every conversation, opens the
+other files when it needs them, and saves what it learns as it goes. Below its reply, the chat shows
+each thing it saved.
+
+Memory needs no configuration and no grant. A user's memory is theirs alone, and AI workflow steps
+have none. A conversation keeps the `MEMORY.md` it started with, so what it saves shapes the next
+conversation, or the same one once its history is summarized.
+
+Read or delete the signed-in user's memory from your code:
+
+```ts
+const { revision, files } = await sixb.agent.memory.get("user")
+await sixb.agent.memory.delete("user")
+```
+
+Each save is a revision with the agent's own description of what it learned. `MEMORY.md` holds at
+most 16 KB, any other file 256 KB, and a user's memory 4 MB in all. Earlier versions of a file are
+kept for 90 days.
+
 ## Control access
 
 The agent's access depends on where it runs:
