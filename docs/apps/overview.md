@@ -205,6 +205,7 @@ replaces the built-in one: `app/settings/members/page.tsx` replaces Members.
 | --- | --- | --- | --- |
 | Your account | Personal | `/settings/personal` | Their name (editable unless their identity provider sets it), email and groups, the theme, and where they are signed in |
 | Your account | Developers | `/settings/developers` | Their [personal access tokens](../auth/members.md#service-accounts-and-tokens) |
+| Your account | Memory | `/settings/memory` | What [the agent remembers](../models/overview.md#it-remembers) of them and of the project, with its history, to correct or delete |
 | Project | Members | `/settings/members` | Members and invitations their [membership policy](../auth/members.md) covers |
 | Project | Service accounts | `/settings/service-accounts` | Service accounts and their tokens, with the `serviceAccounts` policy operation |
 
@@ -336,7 +337,7 @@ export const visibility = {
 | `[admins, staff]` | Members of those groups |
 | `[]` | Nobody |
 
-Personal and Developers stay open to everyone signed in. With authentication off nobody is signed
+Personal, Developers and Memory stay open to everyone signed in. With authentication off nobody is signed
 in, so `visibility` does not apply and Data, Observability and Ontology are open. A hidden page
 leaves the navigation, and its URL leads to `/`. Visibility only hides screens: the API still checks each
 person's permissions.
