@@ -91,8 +91,9 @@ export const assistantUser = defineRole("assistant.user", {
 
 Grant access to actions and workflows through [roles](../auth/authorization.md) as needed.
 
-Each person sees only their own conversations. `can.observe(agent.threads)` lets others
-[read them](../apps/activity.md#read-a-conversation), read-only.
+Each person sees their own conversations and the ones [shared with them](#share-a-conversation).
+`can.observe(agent.threads)` lets others [read them](../apps/activity.md#read-a-conversation),
+read-only.
 
 ## Use in your app
 
@@ -124,6 +125,42 @@ reads the object itself.
 ```tsx
 agentContext.object(Project, project.id, { label: project.name })
 ```
+
+## Share a conversation
+
+A conversation's owner can add other users of the project to it. They read the whole
+conversation, its files and the answer as it streams, and they can write in it too:
+
+```ts
+await sixb.agent.threads.participants.add(thread.id, [{ type: "user", id: "usr_bob" }])
+
+const { threads } = await sixb.agent.threads.list({ sharedWithMe: true })
+threads[0].participants // [{ principal: { type: "user", id: "usr_bob" }, addedAt, addedBy }]
+
+await sixb.agent.runs.request({ threadId: thread.id, text: "Why did Acme slip?" })
+```
+
+- **Each message runs with its sender's permissions**, as every conversation does. The agent
+  knows who wrote each message.
+- **Everyone sees everything.** Participants see the messages already there and the ones that
+  follow, including data the agent read with someone else's access that they could not open
+  themselves. Nothing checks it when you share: warn the person sharing.
+- **One answer at a time.** A message sent while the agent answers is refused with a 409.
+- **Only the owner adds or removes participants**, and recreates the conversation's sandbox. A
+  participant can remove themself to leave.
+- **Whoever sent a message can retry it; the owner can stop any answer.**
+- **Removing someone applies to what comes next.** They no longer read the conversation, and a
+  message of theirs still waiting for an answer is cancelled. An answer already being written
+  finishes, and a live stream they had open keeps running until that answer ends.
+
+Add a user by id or by their account's email: `{ email: "bob@acme.com" }`. Only active users
+who can use the agent can be added, at most 50 per conversation. Sharing a conversation is unrelated to
+[shared access](../auth/shared-access.md), which gives someone outside your team a link to one
+object.
+
+Over HTTP: `POST /api/agent-threads/:threadId/participants` with `{ "users": [...] }`,
+`DELETE /api/agent-threads/:threadId/participants/:userId`, and
+`GET /api/agent-threads?sharedWithMe=true`.
 
 ## Use in a workflow
 
