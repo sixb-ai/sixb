@@ -6,8 +6,8 @@ import {
   type AgentMemoryRepo,
 } from "./agent-runtime/memory"
 
-/** The repos a conversation installs and shows. */
-const CONVERSATION_MEMORY_REPOS: readonly AgentMemoryRepo[] = ["user"]
+/** The repos a conversation installs and shows, in the order the prompt lists them. */
+const CONVERSATION_MEMORY_REPOS: readonly AgentMemoryRepo[] = ["user", "project"]
 
 /** The Agent's memory for one conversational run. */
 export interface ConversationMemory {
@@ -21,30 +21,35 @@ export interface ConversationMemory {
  * Load the repos the run's requester can read. The prompt shows each `MEMORY.md` as it was at
  * `asOf`, the start of the thread or its latest compaction, so a save leaves the prompt and its
  * cache as they are until the context is next compacted; the installed files are the latest.
- * A requester with no memory of its own, such as a service account, gets none.
+ * A requester without a repo of its own, such as a service account, gets the project's alone.
  */
 export async function loadConversationMemory(input: {
   readonly sixb: Sixb
   readonly asOf: Date
 }): Promise<ConversationMemory | undefined> {
   const { sixb, asOf } = input
-  let loaded: (readonly [AgentMemoryRepoView, AgentMemoryRepoView])[]
-  try {
-    loaded = await Promise.all(
-      CONVERSATION_MEMORY_REPOS.map(
-        async (repo) =>
-          [await sixb.agent.memory.get(repo), await sixb.agent.memory.get(repo, { asOf })] as const
-      )
+  const loaded = (
+    await Promise.all(
+      CONVERSATION_MEMORY_REPOS.map(async (repo) => {
+        try {
+          const [latest, then] = await Promise.all([
+            sixb.agent.memory.get(repo),
+            sixb.agent.memory.get(repo, { asOf }),
+          ])
+          return [{ latest, then }]
+        } catch (error) {
+          if (error instanceof AgentMemoryError && error.code === "not_allowed") return []
+          throw error
+        }
+      })
     )
-  } catch (error) {
-    if (error instanceof AgentMemoryError && error.code === "not_allowed") return undefined
-    throw error
-  }
+  ).flat()
+  if (loaded.length === 0) return undefined
 
   return {
-    repos: loaded.map(([latest]) => latest),
+    repos: loaded.map(({ latest }) => latest),
     prompt: {
-      repos: loaded.map(([latest, then]) => ({
+      repos: loaded.map(({ latest, then }) => ({
         repo: latest.repo,
         // A version pruned from the history since is shown as it is now.
         entry:

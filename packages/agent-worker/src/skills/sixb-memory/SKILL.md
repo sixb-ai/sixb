@@ -8,6 +8,13 @@ description: Organize the memory into topic files, and merge a save that conflic
 The memory is a folder of Markdown files under `$SIXB_MEMORY_DIR/<repo>/`. Later conversations
 start from its `MEMORY.md` and open the other files when a topic comes up.
 
+- `user/` is this user's own memory: only their conversations read it.
+- `project/` is built up from every user's conversations, and everyone who uses the agent in this
+  project reads it, including people who cannot see the data this user sees. Put in it what holds
+  for everyone, such as the team's vocabulary, a convention, or how something is measured, and
+  only what users told you: nothing about a particular person, and nothing learned from records or
+  data.
+
 ## Topic files
 
 `MEMORY.md` is a list of one-line entries that every conversation reads. When a subject outgrows a
