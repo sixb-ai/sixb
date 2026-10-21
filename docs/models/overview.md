@@ -65,7 +65,7 @@ The chat agent receives the file as written in every conversation, so keep it sh
 instructions for a particular task in a [skill](./tools-and-authorization.md#add-a-skill), which
 the agent reads only when relevant. AI workflow steps use their own `instructions` instead.
 
-## It remembers each user
+## It remembers
 
 The chat agent keeps a memory for each user: what it learned in earlier conversations, such as their
 preferences, vocabulary, and how they measure things. Memory is a folder of Markdown files with a
@@ -77,15 +77,37 @@ Memory needs no configuration and no grant. A user's memory is theirs alone, and
 have none. A conversation keeps the `MEMORY.md` it started with, so what it saves shapes the next
 conversation, or the same one once its history is summarized.
 
-Read or delete the signed-in user's memory from your code:
+The project also has a memory, built up from everyone's conversations, for what every user's agent
+should know: your team's vocabulary, conventions, and how things are measured. The agent decides
+what goes there and what stays in the user's own memory, and the chat says which it saved to.
+Everyone who can use the agent reads and adds to it. Because people who cannot see the same data
+read it, the agent only puts there what users told it, never records, data, or anything about a
+particular person. Each save is recorded with who made it and in which conversation.
+
+Deleting the project's memory requires `can.manage(agent.memory)`:
+
+File: `security/roles/knowledge-keeper.ts`
+
+```ts
+import { agent, can, defineRole } from "@sixb/core"
+import { teamLeads } from "../groups/team-leads"
+
+export const knowledgeKeeper = defineRole("assistant.knowledge-keeper", {
+  grantedTo: [teamLeads],
+  grants: [can.manage(agent.memory)],
+})
+```
+
+Read or delete the signed-in user's memory, or the project's, from your code:
 
 ```ts
 const { revision, files } = await sixb.agent.memory.get("user")
 await sixb.agent.memory.delete("user")
+const shared = await sixb.agent.memory.get("project")
 ```
 
 Each save is a revision with the agent's own description of what it learned. `MEMORY.md` holds at
-most 16 KB, any other file 256 KB, and a user's memory 4 MB in all. Earlier versions of a file are
+most 16 KB, any other file 256 KB, and each memory 4 MB in all. Earlier versions of a file are
 kept for 90 days.
 
 ## Control access
