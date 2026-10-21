@@ -13844,6 +13844,332 @@ export type ListObservedAgentThreadRunsResponses = {
 export type ListObservedAgentThreadRunsResponse =
   ListObservedAgentThreadRunsResponses[keyof ListObservedAgentThreadRunsResponses]
 
+export type DeleteAgentMemoryData = {
+  body?: never
+  path: {
+    /**
+     * user: the caller's own memory. project: the memory the whole project shares.
+     */
+    repo: "user" | "project"
+  }
+  query?: never
+  url: "/api/agent-memory/{repo}"
+}
+
+export type DeleteAgentMemoryErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable.
+     */
+    code?: string
+  }
+}
+
+export type DeleteAgentMemoryError = DeleteAgentMemoryErrors[keyof DeleteAgentMemoryErrors]
+
+export type DeleteAgentMemoryResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    deleted: true
+  }
+}
+
+export type DeleteAgentMemoryResponse = DeleteAgentMemoryResponses[keyof DeleteAgentMemoryResponses]
+
+export type GetAgentMemoryData = {
+  body?: never
+  path: {
+    /**
+     * user: the caller's own memory. project: the memory the whole project shares.
+     */
+    repo: "user" | "project"
+  }
+  query?: never
+  url: "/api/agent-memory/{repo}"
+}
+
+export type GetAgentMemoryErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable.
+     */
+    code?: string
+  }
+}
+
+export type GetAgentMemoryError = GetAgentMemoryErrors[keyof GetAgentMemoryErrors]
+
+export type GetAgentMemoryResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    repo: "user" | "project"
+    /**
+     * 0 before the first save
+     */
+    revision: number
+    /**
+     * Ordered by path
+     */
+    files: Array<{
+      /**
+       * The file's path from the repo root, such as projects/payments.md
+       */
+      path: string
+      contents: string
+    }>
+  }
+}
+
+export type GetAgentMemoryResponse = GetAgentMemoryResponses[keyof GetAgentMemoryResponses]
+
+export type ListAgentMemoryRevisionsData = {
+  body?: never
+  path: {
+    /**
+     * user: the caller's own memory. project: the memory the whole project shares.
+     */
+    repo: "user" | "project"
+  }
+  query?: {
+    limit?: string
+    offset?: string
+  }
+  url: "/api/agent-memory/{repo}/revisions"
+}
+
+export type ListAgentMemoryRevisionsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable.
+     */
+    code?: string
+  }
+}
+
+export type ListAgentMemoryRevisionsError =
+  ListAgentMemoryRevisionsErrors[keyof ListAgentMemoryRevisionsErrors]
+
+export type ListAgentMemoryRevisionsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    /**
+     * Newest first
+     */
+    revisions: Array<{
+      revision: number
+      message: string
+      author: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      /**
+       * The conversation the save came from
+       */
+      source?: string
+      /**
+       * The paths the revision wrote, ordered by path
+       */
+      changes: Array<{
+        path: string
+        deleted: boolean
+      }>
+      createdAt: string
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListAgentMemoryRevisionsResponse =
+  ListAgentMemoryRevisionsResponses[keyof ListAgentMemoryRevisionsResponses]
+
+export type SaveAgentMemoryData = {
+  body: {
+    /**
+     * The revision the changes were made against
+     */
+    baseRevision: number
+    /**
+     * What was learned, as the revision's entry in the history
+     */
+    message: string
+    changes: Array<{
+      /**
+       * The file's path from the repo root
+       */
+      path: string
+      /**
+       * The file's new contents, or null to delete it
+       */
+      contents: string | null
+    }>
+  }
+  path: {
+    /**
+     * user: the caller's own memory. project: the memory the whole project shares.
+     */
+    repo: "user" | "project"
+  }
+  query?: never
+  url: "/api/agent-memory/{repo}/revisions"
+}
+
+export type SaveAgentMemoryErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+    /**
+     * Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable.
+     */
+    code?: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    code: "conflict"
+    /**
+     * The repo's latest revision
+     */
+    revision: number
+    /**
+     * Files another save changed after the base revision, as they are now
+     */
+    conflicts: Array<{
+      /**
+       * The file's path from the repo root
+       */
+      path: string
+      /**
+       * The file's new contents, or null to delete it
+       */
+      contents: string | null
+    }>
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+    /**
+     * Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable.
+     */
+    code?: string
+  }
+}
+
+export type SaveAgentMemoryError = SaveAgentMemoryErrors[keyof SaveAgentMemoryErrors]
+
+export type SaveAgentMemoryResponses = {
+  /**
+   * Response for status 201
+   */
+  201: {
+    repo: "user" | "project"
+    revision: number
+    /**
+     * Links in the saved repo that point at no file
+     */
+    warnings: Array<{
+      path: string
+      link: string
+    }>
+  }
+}
+
+export type SaveAgentMemoryResponse = SaveAgentMemoryResponses[keyof SaveAgentMemoryResponses]
+
 export type ListArtifactsData = {
   body?: never
   path?: never

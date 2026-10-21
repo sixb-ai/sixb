@@ -71,6 +71,9 @@ import type {
   CreateFileUploadData,
   CreateFileUploadErrors,
   CreateFileUploadResponses,
+  DeleteAgentMemoryData,
+  DeleteAgentMemoryErrors,
+  DeleteAgentMemoryResponses,
   DeleteAiLimitPolicyData,
   DeleteAiLimitPolicyErrors,
   DeleteAiLimitPolicyResponses,
@@ -132,6 +135,9 @@ import type {
   GetActivityVisitTimelineResponses,
   GetAgentData,
   GetAgentErrors,
+  GetAgentMemoryData,
+  GetAgentMemoryErrors,
+  GetAgentMemoryResponses,
   GetAgentMessageFileContentData,
   GetAgentMessageFileContentErrors,
   GetAgentMessageFileContentResponses,
@@ -306,6 +312,9 @@ import type {
   ListActivityVisitsData,
   ListActivityVisitsErrors,
   ListActivityVisitsResponses,
+  ListAgentMemoryRevisionsData,
+  ListAgentMemoryRevisionsErrors,
+  ListAgentMemoryRevisionsResponses,
   ListAgentThreadMessagesData,
   ListAgentThreadMessagesErrors,
   ListAgentThreadMessagesResponses,
@@ -481,6 +490,9 @@ import type {
   RevokeSharedAccessGrantData,
   RevokeSharedAccessGrantErrors,
   RevokeSharedAccessGrantResponses,
+  SaveAgentMemoryData,
+  SaveAgentMemoryErrors,
+  SaveAgentMemoryResponses,
   SearchObjectsData,
   SearchObjectsErrors,
   SearchObjectsResponses,
@@ -3114,6 +3126,88 @@ export const listObservedAgentThreadRuns = <ThrowOnError extends boolean = false
     security: [{ scheme: "bearer", type: "http" }],
     url: "/api/observed-agent-threads/{threadId}/runs",
     ...options,
+  })
+
+/**
+ * Delete an Agent memory repo
+ *
+ * Deletes the repo with its history.
+ */
+export const deleteAgentMemory = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteAgentMemoryData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<
+    DeleteAgentMemoryResponses,
+    DeleteAgentMemoryErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-memory/{repo}",
+    ...options,
+  })
+
+/**
+ * Get an Agent memory repo
+ *
+ * Every file of the repo as of its latest revision.
+ */
+export const getAgentMemory = <ThrowOnError extends boolean = false>(
+  options: Options<GetAgentMemoryData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetAgentMemoryResponses, GetAgentMemoryErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-memory/{repo}",
+    ...options,
+  })
+
+/**
+ * List an Agent memory repo's revisions
+ *
+ * Each save is one revision, newest first.
+ */
+export const listAgentMemoryRevisions = <ThrowOnError extends boolean = false>(
+  options: Options<ListAgentMemoryRevisionsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListAgentMemoryRevisionsResponses,
+    ListAgentMemoryRevisionsErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-memory/{repo}/revisions",
+    ...options,
+  })
+
+/**
+ * Save changes to an Agent memory repo
+ *
+ * Stores the changes as the repo's next revision. When another save changed one of the files after baseRevision, nothing is saved and the response holds those files as they are now.
+ */
+export const saveAgentMemory = <ThrowOnError extends boolean = false>(
+  options: Options<SaveAgentMemoryData, ThrowOnError>
+) =>
+  (options.client ?? client).post<SaveAgentMemoryResponses, SaveAgentMemoryErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/agent-memory/{repo}/revisions",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**

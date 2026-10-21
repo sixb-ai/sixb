@@ -1143,6 +1143,10 @@
       "description": "Agent run state and cancellation"
     },
     {
+      "name": "Agent Memory",
+      "description": "What the Agent remembers across conversations"
+    },
+    {
       "name": "Files",
       "description": "File uploads and file references"
     },
@@ -41032,6 +41036,742 @@
                   "properties": {
                     "error": {
                       "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-memory/{repo}": {
+      "get": {
+        "summary": "Get an Agent memory repo",
+        "description": "Every file of the repo as of its latest revision.",
+        "tags": ["Agent Memory"],
+        "operationId": "getAgentMemory",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["user", "project"],
+              "description": "user: the caller's own memory. project: the memory the whole project shares."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "repo": {
+                      "type": "string",
+                      "enum": ["user", "project"]
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "0 before the first save"
+                    },
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "description": "The file's path from the repo root, such as projects/payments.md"
+                          },
+                          "contents": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["path", "contents"],
+                        "additionalProperties": false
+                      },
+                      "description": "Ordered by path"
+                    }
+                  },
+                  "required": ["repo", "revision", "files"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete an Agent memory repo",
+        "description": "Deletes the repo with its history.",
+        "tags": ["Agent Memory"],
+        "operationId": "deleteAgentMemory",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["user", "project"],
+              "description": "user: the caller's own memory. project: the memory the whole project shares."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["deleted"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-memory/{repo}/revisions": {
+      "get": {
+        "summary": "List an Agent memory repo's revisions",
+        "description": "Each save is one revision, newest first.",
+        "tags": ["Agent Memory"],
+        "operationId": "listAgentMemoryRevisions",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["user", "project"],
+              "description": "user: the caller's own memory. project: the memory the whole project shares."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revisions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "revision": {
+                            "type": "integer",
+                            "exclusiveMinimum": true,
+                            "minimum": 0
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "author": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "source": {
+                            "type": "string",
+                            "description": "The conversation the save came from"
+                          },
+                          "changes": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string"
+                                },
+                                "deleted": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": ["path", "deleted"],
+                              "additionalProperties": false
+                            },
+                            "description": "The paths the revision wrote, ordered by path"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["revision", "message", "author", "changes", "createdAt"],
+                        "additionalProperties": false
+                      },
+                      "description": "Newest first"
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": ["revisions", "hasMore", "total"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Save changes to an Agent memory repo",
+        "description": "Stores the changes as the repo's next revision. When another save changed one of the files after baseRevision, nothing is saved and the response holds those files as they are now.",
+        "tags": ["Agent Memory"],
+        "operationId": "saveAgentMemory",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["user", "project"],
+              "description": "user: the caller's own memory. project: the memory the whole project shares."
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "baseRevision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "The revision the changes were made against"
+                  },
+                  "message": {
+                    "type": "string",
+                    "description": "What was learned, as the revision's entry in the history"
+                  },
+                  "changes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The file's path from the repo root"
+                        },
+                        "contents": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "The file's new contents, or null to delete it"
+                        }
+                      },
+                      "required": ["path", "contents"],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": ["baseRevision", "message", "changes"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "baseRevision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "The revision the changes were made against"
+                  },
+                  "message": {
+                    "type": "string",
+                    "description": "What was learned, as the revision's entry in the history"
+                  },
+                  "changes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The file's path from the repo root"
+                        },
+                        "contents": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "The file's new contents, or null to delete it"
+                        }
+                      },
+                      "required": ["path", "contents"],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": ["baseRevision", "message", "changes"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "baseRevision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "The revision the changes were made against"
+                  },
+                  "message": {
+                    "type": "string",
+                    "description": "What was learned, as the revision's entry in the history"
+                  },
+                  "changes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "The file's path from the repo root"
+                        },
+                        "contents": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "The file's new contents, or null to delete it"
+                        }
+                      },
+                      "required": ["path", "contents"],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": ["baseRevision", "message", "changes"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response for status 201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "repo": {
+                      "type": "string",
+                      "enum": ["user", "project"]
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "exclusiveMinimum": true,
+                      "minimum": 0
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "link": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["path", "link"],
+                        "additionalProperties": false
+                      },
+                      "description": "Links in the saved repo that point at no file"
+                    }
+                  },
+                  "required": ["repo", "revision", "warnings"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["conflict"]
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "The repo's latest revision"
+                    },
+                    "conflicts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "The file's path from the repo root"
+                          },
+                          "contents": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "The file's new contents, or null to delete it"
+                          }
+                        },
+                        "required": ["path", "contents"],
+                        "additionalProperties": false
+                      },
+                      "description": "Files another save changed after the base revision, as they are now"
+                    }
+                  },
+                  "required": ["error", "code", "revision", "conflicts"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "Stable machine-readable failure code: invalid_save, not_allowed, conflict, or storage_unavailable."
                     }
                   },
                   "required": ["error"],
