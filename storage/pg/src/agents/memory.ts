@@ -27,19 +27,26 @@ interface RevisionRow {
 export class PgAgentMemoryStore implements AgentMemoryStore {
   constructor(private readonly sql: PgStoreClient) {}
 
-  async get(input: { projectId: string; repoId: string }): Promise<AgentMemoryRepoRecord> {
+  async get(input: {
+    projectId: string
+    repoId: string
+    asOf?: Date
+  }): Promise<AgentMemoryRepoRecord> {
+    const asOf = input.asOf ?? null
     // One statement, so the head and the files come from one snapshot.
     const rows = await this.sql<{ head: number; path: string | null; contents: string | null }[]>`
-      WITH latest AS (
-        SELECT DISTINCT ON (path) path, contents FROM agent_memory_files
+      WITH head AS (
+        SELECT COALESCE(MAX(revision), 0)::int AS revision FROM agent_memory_revisions
         WHERE project_id = ${input.projectId} AND repo_id = ${input.repoId}
-        ORDER BY path, revision DESC
+          AND (${asOf}::timestamptz IS NULL OR created_at <= ${asOf}::timestamptz)
+      ), latest AS (
+        SELECT DISTINCT ON (f.path) f.path, f.contents FROM agent_memory_files f, head
+        WHERE f.project_id = ${input.projectId} AND f.repo_id = ${input.repoId}
+          AND f.revision <= head.revision
+        ORDER BY f.path, f.revision DESC
       )
-      SELECT
-        (SELECT COALESCE(MAX(revision), 0)::int FROM agent_memory_revisions
-         WHERE project_id = ${input.projectId} AND repo_id = ${input.repoId}) AS head,
-        latest.path, latest.contents
-      FROM (SELECT 1) AS one
+      SELECT head.revision AS head, latest.path, latest.contents
+      FROM head
       LEFT JOIN latest ON latest.contents IS NOT NULL
       ORDER BY latest.path
     `

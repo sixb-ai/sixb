@@ -38,15 +38,25 @@ const LATEST_FILES = `
 export class SqliteAgentMemoryStore implements AgentMemoryStore {
   constructor(private readonly db: Database) {}
 
-  async get(input: { projectId: string; repoId: string }): Promise<AgentMemoryRepoRecord> {
+  async get(input: {
+    projectId: string
+    repoId: string
+    asOf?: Date
+  }): Promise<AgentMemoryRepoRecord> {
     return this.db.transaction(() => {
+      const revision = this.head(input.projectId, input.repoId, input.asOf)
       const files = this.db
-        .query(`${LATEST_FILES} AND f.contents IS NOT NULL ORDER BY f.path`)
-        .all(input.projectId, input.repoId) as { path: string; contents: string }[]
-      return {
-        revision: this.head(input.projectId, input.repoId),
-        files: files.map(({ path, contents }) => ({ path, contents })),
-      }
+        .query(
+          `SELECT f.path, f.contents FROM agent_memory_files f
+           WHERE f.project_id = ? AND f.repo_id = ? AND f.contents IS NOT NULL AND f.revision = (
+             SELECT MAX(l.revision) FROM agent_memory_files l
+             WHERE l.project_id = f.project_id AND l.repo_id = f.repo_id AND l.path = f.path
+               AND l.revision <= ?
+           )
+           ORDER BY f.path`
+        )
+        .all(input.projectId, input.repoId, revision) as { path: string; contents: string }[]
+      return { revision, files: files.map(({ path, contents }) => ({ path, contents })) }
     })()
   }
 
@@ -167,13 +177,16 @@ export class SqliteAgentMemoryStore implements AgentMemoryStore {
       .run(input.projectId, input.repoId)
   }
 
-  private head(projectId: string, repoId: string): number {
+  /** The highest revision, or the highest saved by `asOf`. */
+  private head(projectId: string, repoId: string, asOf?: Date): number {
     const row = this.db
       .query(
         `SELECT COALESCE(MAX(revision), 0) AS revision FROM agent_memory_revisions
-         WHERE project_id = ? AND repo_id = ?`
+         WHERE project_id = ? AND repo_id = ? AND (? IS NULL OR created_at <= ?)`
       )
-      .get(projectId, repoId) as { revision: number }
+      .get(projectId, repoId, asOf?.toISOString() ?? null, asOf?.toISOString() ?? null) as {
+      revision: number
+    }
     return row.revision
   }
 }

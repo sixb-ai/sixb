@@ -109,6 +109,19 @@ describe("a user's memory", () => {
     })
   })
 
+  test("is read as it was at a time", async () => {
+    const { user } = setup()
+    const priya = user("usr_priya")
+    await priya.save("user", { baseRevision: 0, message: "Start", changes: [entry()] })
+
+    expect(await priya.get("user", { asOf: new Date() })).toMatchObject({ revision: 1 })
+    expect(await priya.get("user", { asOf: new Date(0) })).toEqual({
+      repo: "user",
+      revision: 0,
+      files: [],
+    })
+  })
+
   test("is deleted with its history", async () => {
     const { user } = setup()
     const priya = user("usr_priya")

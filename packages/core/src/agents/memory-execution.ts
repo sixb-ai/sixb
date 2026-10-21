@@ -57,7 +57,8 @@ export type SaveAgentMemoryRuntimeResult =
  * Agent, who all read and save it, and deleted only with `can.manage(agent.memory)`.
  */
 export interface AgentMemoryRuntime {
-  get(repo: AgentMemoryRepoName): Promise<AgentMemoryRepoView>
+  /** With `asOf`, the repo at the latest revision saved by then. */
+  get(repo: AgentMemoryRepoName, options?: { readonly asOf?: Date }): Promise<AgentMemoryRepoView>
   save(
     repo: AgentMemoryRepoName,
     input: SaveAgentMemoryRuntimeInput
@@ -124,11 +125,12 @@ export function createAgentMemoryRuntime(runtime: SixbRuntimeContext): AgentMemo
   }
 
   return {
-    async get(repo) {
+    async get(repo, options = {}) {
       const repoId = usable(repo)
       const { revision, files } = await requireStorage().get({
         projectId: runtime.projectId,
         repoId,
+        ...(options.asOf === undefined ? {} : { asOf: options.asOf }),
       })
       return { repo, revision, files }
     },

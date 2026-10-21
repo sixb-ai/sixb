@@ -135,6 +135,37 @@ export function runAgentMemoryStorageContractSuite<
       })
     })
 
+    test("reads a repo as of a time: its files at the latest revision saved by then", async () => {
+      await withMemory(async (memory) => {
+        const at = (seconds: number) => new Date(t0.getTime() + seconds * 1000)
+        await memory.save(save({ changes: [file("MEMORY.md", "v1"), file("a.md")] }))
+        await memory.save(
+          save({
+            baseRevision: 1,
+            changes: [file("MEMORY.md", "v2"), { path: "a.md", contents: null }, file("b.md")],
+            createdAt: at(10),
+          })
+        )
+
+        expect(await memory.get({ projectId, repoId, asOf: at(-1) })).toEqual({
+          revision: 0,
+          files: [],
+        })
+        expect(await memory.get({ projectId, repoId, asOf: t0 })).toEqual({
+          revision: 1,
+          files: [file("MEMORY.md", "v1"), file("a.md")],
+        })
+        expect(await memory.get({ projectId, repoId, asOf: at(9) })).toEqual({
+          revision: 1,
+          files: [file("MEMORY.md", "v1"), file("a.md")],
+        })
+        expect(await memory.get({ projectId, repoId, asOf: at(10) })).toEqual({
+          revision: 2,
+          files: [file("MEMORY.md", "v2"), file("b.md")],
+        })
+      })
+    })
+
     test("rejects a save of a file another save changed since its base revision", async () => {
       await withMemory(async (memory) => {
         await memory.save(save({ changes: [file("MEMORY.md"), file("findings.md")] }))
