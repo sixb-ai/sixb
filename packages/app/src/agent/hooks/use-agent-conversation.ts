@@ -19,6 +19,9 @@ import {
 import { MODEL_REASONING_LEVELS, type ModelReasoningLevel } from "@sixb/core/models"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
+import type { ComposerProps } from "../components/composer"
+import type { SandboxRecoveryProps } from "../components/sandbox-recovery"
+import type { TranscriptProps } from "../components/transcript"
 import { useAgentMessages } from "../i18n"
 import {
   type ModelPreference,
@@ -30,6 +33,7 @@ import { type RequesterSettings, sendWithRequesterSettings } from "../requester-
 import {
   EXTENDED_WAITING_STATUS_MS,
   isActiveAgentRunStatus,
+  offersContinue,
   presentActiveTurn,
   selectActiveRunId,
   shouldShowExtendedWaitingStatus,
@@ -59,19 +63,46 @@ const MODEL_PREFERENCE_KEY = "sixb.agent-ui.model-preference"
 const REASONING_LEVELS = new Set<string>(MODEL_REASONING_LEVELS)
 
 export interface UseAgentConversationInput {
+  /** The open thread, or null to start a new one with the next message. */
   readonly threadId: string | null
-  readonly embedded?: boolean
+  /** The first message created a thread; show it from now on. */
   readonly onThreadCreated: (threadId: string) => void
 }
 
+/** The parts of {@link ComposerProps} a conversation decides; the page adds the rest. */
+export type ConversationComposerProps = Pick<
+  ComposerProps,
+  | "onSend"
+  | "error"
+  | "disabled"
+  | "pending"
+  | "running"
+  | "stopping"
+  | "onStop"
+  | "models"
+  | "selectedModel"
+  | "selectedReasoning"
+  | "modelsLoading"
+  | "modelsError"
+  | "onSelectModel"
+  | "onSelectReasoning"
+  | "onResetReasoning"
+  | "usingDefaultModel"
+  | "onResetModelSelection"
+  | "draft"
+  | "draftAttachments"
+  | "draftContext"
+  | "draftNonce"
+>
+
 export type AgentConversation = ReturnType<typeof useAgentConversation>
 
-/** Shared route-independent controller for full-page and embedded agent conversations. */
-export function useAgentConversation({
-  threadId,
-  embedded = false,
-  onThreadCreated,
-}: UseAgentConversationInput) {
+/**
+ * Everything one conversation with the project's agent needs: its threads, messages, live run and
+ * model choice, and the actions on them. Route-independent; the built-in chat and custom chats
+ * both render it, typically by spreading `transcriptProps` and `composerProps`.
+ */
+export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConversationInput) {
   const labels = useAgentMessages().chat
   const queryClient = useQueryClient()
   const agentQuery = useQuery(getAgentOptions())
@@ -79,7 +110,6 @@ export function useAgentConversation({
   const refreshThreads = () =>
     queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
   const activityStream = useAgentActivityStream({
-    enabled: !embedded,
     onActivity: refreshThreads,
     onSubscribed: refreshThreads,
   })
@@ -98,8 +128,7 @@ export function useAgentConversation({
     },
     // The project activity feed is primary. Poll only as a focus-aware recovery path while the
     // socket is unavailable, rather than opening one connection per background thread.
-    refetchInterval:
-      !embedded && (!activityStream.connected || activityStream.error) ? 10_000 : false,
+    refetchInterval: !activityStream.connected || activityStream.error ? 10_000 : false,
   })
   const currentAgent = agentQuery.data
   const models = useMemo(() => modelsQuery.data?.language ?? [], [modelsQuery.data])
@@ -407,12 +436,96 @@ export function useAgentConversation({
       ? thread.sandboxState
       : null
 
+  const runningThreadCount =
+    threads.filter((entry) => entry.activeRunId !== null).length +
+    (threadId &&
+    isRunning &&
+    !threads.some((entry) => entry.id === threadId && entry.activeRunId !== null)
+      ? 1
+      : 0)
+  const anchorCurrentTurn = Boolean(
+    (pendingUser && pendingUser.threadId === threadId) || pendingRun
+  )
+  const composerPending = postMessage.isPending || createThread.isPending
+  const currentSendError = sendError && sendError.threadId === threadId ? sendError.message : null
+  const stopping = stoppingRunId !== null && stoppingRunId === activeRunId
+
+  const transcriptProps: TranscriptProps = {
+    threadId,
+    messages,
+    live,
+    pendingUserText: pendingUserForThread?.text ?? null,
+    pendingUserAttachments: pendingUserForThread?.attachments ?? [],
+    pendingUserContext: pendingUserForThread?.context ?? [],
+    anchorCurrentTurn,
+    awaitingResponse: isRunning,
+    waitingLonger,
+    failedBeforeResponse: presentation.kind === "failed",
+    cancelledBeforeResponse: presentation.kind === "cancelled",
+    timeout:
+      presentation.kind === "timeout"
+        ? {
+            hasProgress: presentation.hasProgress,
+            ...(presentation.timeoutMs === undefined ? {} : { timeoutMs: presentation.timeoutMs }),
+          }
+        : undefined,
+    interrupted:
+      presentation.kind === "interrupted" ? { hasProgress: presentation.hasProgress } : undefined,
+    onRetry:
+      !sandboxRecovery &&
+      (presentation.kind === "failed" ||
+        ((presentation.kind === "timeout" || presentation.kind === "interrupted") &&
+          !presentation.hasProgress))
+        ? () => retry(presentation.run)
+        : undefined,
+    onContinue: offersContinue({
+      presentation,
+      isRunning,
+      sandboxRecovery: Boolean(sandboxRecovery),
+      messages,
+    })
+      ? continueAfterTimeout
+      : undefined,
+    retrying: retryRun.isPending,
+    continuing: composerPending,
+    reconnecting,
+  }
+
+  const composerProps: ConversationComposerProps = {
+    onSend: send,
+    error: currentSendError ?? undefined,
+    disabled: isRunning || Boolean(sandboxRecovery),
+    pending: composerPending,
+    running: isRunning,
+    stopping,
+    onStop: stop,
+    models,
+    selectedModel,
+    selectedReasoning,
+    modelsLoading: modelsQuery.isLoading,
+    modelsError: modelsQuery.isError,
+    onSelectModel: selectModel,
+    onSelectReasoning: selectReasoning,
+    onResetReasoning: resetReasoning,
+    usingDefaultModel: modelSelection.request === undefined,
+    onResetModelSelection: resetModelSelection,
+    draft: draftReseed.text,
+    draftAttachments: draftReseed.attachments,
+    draftContext: draftReseed.context,
+    draftNonce: draftReseed.nonce,
+  }
+
+  const sandboxRecoveryProps: SandboxRecoveryProps | null = sandboxRecovery
+    ? {
+        pending: recreateSandbox.isPending,
+        error: recreateSandbox.isError,
+        onRecreate: handleRecreateSandbox,
+      }
+    : null
+
   return {
     agentLoading: agentQuery.isLoading,
     sandboxRecovery,
-    recreatingSandbox: recreateSandbox.isPending,
-    sandboxRecoveryError: recreateSandbox.isError,
-    recreateSandbox: handleRecreateSandbox,
     agentError: agentQuery.isError,
     models,
     modelsLoading: modelsQuery.isLoading,
@@ -425,6 +538,8 @@ export function useAgentConversation({
     resetReasoning,
     resetModelSelection,
     threads,
+    /** Threads with a run in progress, counting this one while its run starts. */
+    runningThreadCount,
     threadsError: threadsQuery.isError,
     threadsHasMore: threadsQuery.hasNextPage,
     threadsLoadingMore: threadsQuery.isFetchingNextPage,
@@ -440,19 +555,25 @@ export function useAgentConversation({
     live,
     reconnecting,
     pendingUser: pendingUserForThread,
-    anchorCurrentTurn: Boolean((pendingUser && pendingUser.threadId === threadId) || pendingRun),
+    anchorCurrentTurn,
     isRunning,
     waitingLonger,
     presentation,
-    sendError: sendError && sendError.threadId === threadId ? sendError.message : null,
+    sendError: currentSendError,
     draftReseed,
-    composerPending: postMessage.isPending || createThread.isPending,
-    stopping: stoppingRunId !== null && stoppingRunId === activeRunId,
+    composerPending,
+    stopping,
     retrying: retryRun.isPending,
     send,
     stop,
     retry,
     continueAfterTimeout,
+    /** Spread into `<Transcript>`. */
+    transcriptProps,
+    /** Spread into `<Composer>`, then add the page's own props such as `placeholder`. */
+    composerProps,
+    /** Spread into `<SandboxRecovery>` while set: the composer stays disabled until it is resolved. */
+    sandboxRecoveryProps,
   }
 }
 
