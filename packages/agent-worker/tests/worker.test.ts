@@ -4061,6 +4061,7 @@ describe("AgentWorker", () => {
   test("installs the requester's memory and shows MEMORY.md as of the thread's start", async () => {
     const answerPrompts: LanguageModelRequest["messages"][] = []
     const sandboxes = new RecordingSandboxFactory()
+    const assistants = defineGroup("assistants")
     const sixb = buildSixb(
       compactingAnswerModel({
         captureSummaryPrompt: () => {},
@@ -4069,10 +4070,39 @@ describe("AgentWorker", () => {
         },
       }),
       new InMemoryBroker(),
-      sandboxes
+      sandboxes,
+      {
+        security: {
+          ontology: [],
+          groups: [AGENT_RUNTIME_GROUP, assistants],
+          roles: [
+            defineRole("assistant.user", { grantedTo: [assistants], grants: [can.run(agent)] }),
+          ],
+        },
+      }
     )
+    await authStorageOf(sixb).users.create({
+      id: REQUESTER.id,
+      projectId: PROJECT_ID,
+      email: `${REQUESTER.id}@example.com`,
+    })
+    await authStorageOf(sixb).groupMemberships.upsert({
+      projectId: PROJECT_ID,
+      userId: REQUESTER.id,
+      groupId: assistants.id,
+      source: "manual",
+    })
     const threadId = "memory_thread"
     await seedMemoryAroundThreadStart(sixb, threadId)
+    await agentStorageOf(sixb).memory.save({
+      projectId: PROJECT_ID,
+      repoId: "project",
+      baseRevision: 0,
+      message: "Share",
+      author: { type: "user", id: "usr_keeper" },
+      changes: [{ path: "MEMORY.md", contents: "# Shared\n" }],
+      createdAt: new Date(Date.now() - 600_000),
+    })
 
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
@@ -4086,7 +4116,11 @@ describe("AgentWorker", () => {
       // A save after the thread started reaches the files but not the prompt, so it stays cached.
       // Regression proof: drop `asOf` in loadConversationMemory and the prompt shows "# After".
       const system = systemPromptOf(answerPrompts[0])
-      expect(system).toContain('<memory repo="user">\n# Before\n</memory>\n</sixb_memory>')
+      expect(system).toContain(
+        '<memory repo="user">\n# Before\n</memory>\n\n<memory repo="project">\n# Shared\n</memory>\n</sixb_memory>'
+      )
+      // Everyone who can run the agent reads and adds to the project's memory.
+      expect(system).toContain("- project/: what everyone in this project should know")
       expect(system).not.toContain("# After")
       expect(system).toContain(
         "To organize entries into topic files or merge a conflict, read .sixb/agent/skills/sixb-memory/SKILL.md."
@@ -4113,8 +4147,13 @@ describe("AgentWorker", () => {
               "topics/payments.md": agentMemoryFileHash("- Excluding VAT\n"),
             },
           },
+          project: {
+            revision: 1,
+            files: { "MEMORY.md": agentMemoryFileHash("# Shared\n") },
+          },
         },
       })
+      expect(sandbox.readFileContents(`${agentDir}/memory/project/MEMORY.md`)).toBe("# Shared\n")
       expect(
         sandbox.commands.find((command) => command.options.env?.SIXB_MEMORY_DIR)?.options.env
       ).toMatchObject({
@@ -9327,12 +9366,15 @@ describe("AgentWorker", () => {
         id: bob.id,
         email: "usr_bob@example.com",
       })
-      await authStorageOf(sixb).groupMemberships.upsert({
-        projectId: PROJECT_ID,
-        userId: bob.id,
-        groupId: chatters.id,
-        source: "manual",
-      })
+      // Both run the agent through the role, so each turn reads the project's memory alike.
+      for (const member of [alice, bob]) {
+        await authStorageOf(sixb).groupMemberships.upsert({
+          projectId: PROJECT_ID,
+          userId: member.id,
+          groupId: chatters.id,
+          source: "manual",
+        })
+      }
       await storage.threads.addParticipants({
         projectId: PROJECT_ID,
         threadId,

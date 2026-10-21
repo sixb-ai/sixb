@@ -511,6 +511,58 @@ describe("agent system prompt", () => {
     )
   })
 
+  test("lists the project's memory after the user's, and guards what goes into it", () => {
+    const prompt = renderAgentSystemPrompt({
+      mode: "conversation",
+      skills: [],
+      memory: {
+        repos: [
+          { repo: "user", entry: "# Mine\n" },
+          { repo: "project", entry: "# Shared\n" },
+        ],
+      },
+    })
+
+    expect(prompt).toContain(
+      [
+        "- user/: what you have learned about this user.",
+        "- project/: what everyone in this project should know, built up from every user's conversations.",
+      ].join("\n")
+    )
+    expect(prompt).toContain("Where the user's memory and the project's disagree, the user's wins.")
+    // The agent decides which repo; the project's holds only what users said, about no one.
+    expect(prompt).toContain(
+      "Save to project/ what holds for everyone in the project, such as the team's vocabulary, conventions, or how they measure something, and to user/ what is about this user."
+    )
+    expect(prompt).toContain(
+      "so never put in it anything about a particular person, such as what the user says about a colleague: save that to user/."
+    )
+    expect(prompt).toContain(
+      "change it only if they say it has changed for everyone; otherwise save their exception to user/."
+    )
+    // One example in each repo: with both in user/, models saved the team's vocabulary there.
+    expect(prompt).toContain(
+      `>> "$SIXB_MEMORY_DIR/project/MEMORY.md" && sixb memory save project -m`
+    )
+    expect(prompt).toContain(`"$SIXB_MEMORY_DIR/user/MEMORY.md" && sixb memory save user -m`)
+    expect(prompt).toEndWith(
+      '<memory repo="user">\n# Mine\n</memory>\n\n<memory repo="project">\n# Shared\n</memory>\n</sixb_memory>'
+    )
+  })
+
+  test("gives a requester with no memory of its own the project's rules alone", () => {
+    const prompt = renderAgentSystemPrompt({
+      mode: "conversation",
+      skills: [],
+      memory: { repos: [{ repo: "project", entry: "# Shared\n" }] },
+    })
+
+    expect(prompt).not.toContain("user/")
+    expect(prompt).toContain("Save to project/ what holds for everyone in the project")
+    expect(prompt).toContain(`"$SIXB_MEMORY_DIR/project/MEMORY.md" && sixb memory save project -m`)
+    expect(prompt).toContain("so never put in it anything about a particular person.")
+  })
+
   test("keeps a memory file from closing its section or opening another", () => {
     const prompt = renderAgentSystemPrompt({
       mode: "conversation",

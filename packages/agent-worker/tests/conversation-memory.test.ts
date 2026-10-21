@@ -27,24 +27,28 @@ function setup() {
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
   })
-  const sixbAs = (principal: AuthorizablePrincipal) =>
+  const sixbAs = (principal: AuthorizablePrincipal, options: { agent?: boolean } = {}) =>
     createTestSixb(host, {
       authorization: {
         principal,
         groupIds: [],
         roleIds: [],
-        grants: { ...emptyGrantIndex(), "run:agent": true },
+        grants: {
+          ...emptyGrantIndex(),
+          "run:agent": options.agent ?? true,
+        },
       },
     })
   // Saved straight to storage, so each revision has a fixed time.
   const save = (input: {
+    repoId?: string
     baseRevision: number
     at: Date
     changes: { path: string; contents: string | null }[]
   }) =>
     storage.agents.memory.save({
       projectId: PROJECT_ID,
-      repoId: "user:usr_priya",
+      repoId: input.repoId ?? "user:usr_priya",
       baseRevision: input.baseRevision,
       message: "Remember",
       author: { type: "user", id: "usr_priya" },
@@ -88,9 +92,13 @@ describe("a conversation's memory", () => {
             { path: "topics/payments.md", contents: "- Excluding VAT\n" },
           ],
         },
+        { repo: "project", revision: 0, files: [] },
       ],
       prompt: {
-        repos: [{ repo: "user", entry: "# Before\n" }],
+        repos: [
+          { repo: "user", entry: "# Before\n" },
+          { repo: "project", entry: "# Memory\n\n" },
+        ],
       },
     })
   })
@@ -108,15 +116,61 @@ describe("a conversation's memory", () => {
       asOf: threadStart,
     })
 
-    expect(memory?.prompt.repos).toEqual([{ repo: "user", entry: "# Memory\n\n" }])
+    expect(memory?.prompt.repos[0]).toEqual({ repo: "user", entry: "# Memory\n\n" })
   })
 
-  test("is absent for a requester with no memory of its own", async () => {
+  test("shows the project's memory after the user's, to everyone who can run the agent", async () => {
+    const { sixbAs, save } = setup()
+    await save({
+      repoId: "project",
+      baseRevision: 0,
+      at: minutes(-5),
+      changes: [{ path: "MEMORY.md", contents: "# Project\n" }],
+    })
+
+    const memory = await loadConversationMemory({ sixb: sixbAs(priya), asOf: threadStart })
+    expect(memory?.prompt.repos).toEqual([
+      { repo: "user", entry: "# Memory\n\n" },
+      { repo: "project", entry: "# Project\n" },
+    ])
+    expect(memory?.repos.map((repo) => repo.repo)).toEqual(["user", "project"])
+  })
+
+  test("shows an empty project memory as a starter, so every conversation can add to it", async () => {
+    const { sixbAs } = setup()
+
+    const memory = await loadConversationMemory({ sixb: sixbAs(priya), asOf: threadStart })
+    expect(memory?.prompt.repos).toEqual([
+      { repo: "user", entry: "# Memory\n\n" },
+      { repo: "project", entry: "# Memory\n\n" },
+    ])
+  })
+
+  test("gives a requester with no memory of its own the project's alone", async () => {
+    const { sixbAs, save } = setup()
+    await save({
+      repoId: "project",
+      baseRevision: 0,
+      at: minutes(-5),
+      changes: [{ path: "MEMORY.md", contents: "# Project\n" }],
+    })
+
+    expect(
+      (
+        await loadConversationMemory({
+          sixb: sixbAs({ type: "serviceAccount", id: "svc_reports" }),
+          asOf: threadStart,
+        })
+      )?.prompt.repos
+    ).toEqual([{ repo: "project", entry: "# Project\n" }])
+  })
+
+  test("is absent for a requester who cannot run the agent", async () => {
     const { sixbAs } = setup()
 
     expect(
       await loadConversationMemory({
-        sixb: sixbAs({ type: "serviceAccount", id: "svc_reports" }),
+        sixb: sixbAs({ type: "serviceAccount", id: "svc_reports" }, { agent: false }),
         asOf: threadStart,
       })
     ).toBeUndefined()
