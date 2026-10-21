@@ -278,9 +278,11 @@ export const fr: Translation<AgentMessages> = {
       failed: (name) => `Impossible de lire le guide ${quoted(name)}`,
     },
     memory: {
-      title: "Mémoire consultée",
-      running: "Consultation de la mémoire",
-      failed: "Impossible de lire la mémoire",
+      title: (project) => (project ? "Mémoire du projet consultée" : "Mémoire consultée"),
+      running: (project) =>
+        project ? "Consultation de la mémoire du projet" : "Consultation de la mémoire",
+      failed: (project) =>
+        project ? "Impossible de lire la mémoire du projet" : "Impossible de lire la mémoire",
     },
     error: "Le fichier n’a pas pu être lu.",
     emptyFile: "Ce fichier est vide.",
@@ -475,18 +477,37 @@ export const fr: Translation<AgentMessages> = {
     },
     api: { title: "API Sixb appelée", running: "Appel de l’API Sixb" },
     sixbCommand: { title: "Commande Sixb exécutée", running: "Exécution d’une commande Sixb" },
-    memorySave: { title: "Enregistré en mémoire", running: "Enregistrement en mémoire" },
+    memorySave: {
+      title: (project) =>
+        project ? "Enregistré dans la mémoire du projet" : "Enregistré en mémoire",
+      running: (project) =>
+        project ? "Enregistrement dans la mémoire du projet" : "Enregistrement en mémoire",
+    },
     memorySaveFailed: {
-      title: "Impossible d’enregistrer en mémoire",
-      running: "Enregistrement en mémoire",
+      title: (project) =>
+        project
+          ? "Impossible d’enregistrer dans la mémoire du projet"
+          : "Impossible d’enregistrer en mémoire",
+      running: (project) =>
+        project ? "Enregistrement dans la mémoire du projet" : "Enregistrement en mémoire",
     },
     memoryPull: { title: "Mémoire vérifiée", running: "Vérification de la mémoire" },
     memoryConflict: {
-      title: "Mémoire plus récente à fusionner",
-      running: "Enregistrement en mémoire",
+      title: (project) =>
+        project ? "Mémoire du projet plus récente à fusionner" : "Mémoire plus récente à fusionner",
+      running: (project) =>
+        project ? "Enregistrement dans la mémoire du projet" : "Enregistrement en mémoire",
     },
-    memoryRead: { title: "Mémoire consultée", running: "Consultation de la mémoire" },
-    memoryEdit: { title: "Mémoire mise à jour", running: "Mise à jour de la mémoire" },
+    memoryRead: {
+      title: (project) => (project ? "Mémoire du projet consultée" : "Mémoire consultée"),
+      running: (project) =>
+        project ? "Consultation de la mémoire du projet" : "Consultation de la mémoire",
+    },
+    memoryEdit: {
+      title: (project) => (project ? "Mémoire du projet mise à jour" : "Mémoire mise à jour"),
+      running: (project) =>
+        project ? "Mise à jour de la mémoire du projet" : "Mise à jour de la mémoire",
+    },
     counts: {
       objectTypes: (types) => count(types, "type d’objet", "types d’objets"),
       objects: (objects) => count(objects, "objet"),
@@ -563,7 +584,8 @@ export const fr: Translation<AgentMessages> = {
     cards: "Publié dans cette réponse",
   },
   memory: {
-    saved: "Enregistré en mémoire",
+    saved: (project) =>
+      project ? "Enregistré dans la mémoire du projet" : "Enregistré en mémoire",
   },
   sandbox: {
     title: "Récupération de l’environnement requise",

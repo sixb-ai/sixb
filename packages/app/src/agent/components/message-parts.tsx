@@ -84,8 +84,8 @@ export function AssistantBody({
   const artifacts = turnArtifacts(parts)
   if (artifacts.length > 0) blocks.push(<ArtifactCards key="artifacts" artifacts={artifacts} />)
   // Saving is work the reply keeps quiet about; what was remembered is the user's to see.
-  savedMemories(parts).forEach((message, index) => {
-    blocks.push(<SavedToMemory key={`memory:${index}`} message={message} />)
+  savedMemories(parts).forEach((save, index) => {
+    blocks.push(<SavedToMemory key={`memory:${index}`} {...save} />)
   })
   // Said where the card would be, whatever the answer claims. A live turn may still retry.
   if (!live) {
@@ -97,7 +97,7 @@ export function AssistantBody({
   return <div className="flex flex-col gap-3">{blocks}</div>
 }
 
-function SavedToMemory({ message }: { message: string }) {
+function SavedToMemory({ repo, message }: { repo: "user" | "project"; message: string }) {
   const messages = useAgentMessages().memory
   return (
     <p
@@ -105,7 +105,7 @@ function SavedToMemory({ message }: { message: string }) {
       role="status"
     >
       <BookmarkCheck className="size-3.5 shrink-0" aria-hidden="true" />
-      <span className="shrink-0">{messages.saved}</span>
+      <span className="shrink-0">{messages.saved(repo === "project")}</span>
       <span className="min-w-0 truncate text-muted-foreground/70" title={message}>
         · {message}
       </span>

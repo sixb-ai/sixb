@@ -1,6 +1,6 @@
 import { humanize } from "../bash/interpret"
 import { type AgentMessages, en } from "../i18n/en"
-import { memoryFileLabel, memoryFilePath } from "../memory-paths"
+import { memoryFile, memoryFileLabel } from "../memory-paths"
 
 export interface ReadInput {
   readonly path: string
@@ -62,14 +62,15 @@ export function describeRead(
 ): ReadDescription {
   const m = messages.read
   const path = output?.path ?? input?.path ?? ""
-  const memoryPath = memoryFilePath(path)
-  if (memoryPath !== null) {
-    const name = memoryFileLabel(memoryPath)
+  const memory = memoryFile(path)
+  if (memory !== null) {
+    const name = memoryFileLabel(memory.path)
+    const project = memory.repo === "project"
     return {
       path,
-      title: m.memory.title,
-      runningTitle: m.memory.running,
-      failedTitle: m.memory.failed,
+      title: m.memory.title(project),
+      runningTitle: m.memory.running(project),
+      failedTitle: m.memory.failed(project),
       ...(name ? { detail: name } : {}),
       skill: false,
       memory: true,

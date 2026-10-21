@@ -51,7 +51,11 @@ describe("what a turn saved to memory", () => {
         // Saved again, under the same words: one line is enough.
         merged,
       ])
-    ).toEqual(["Invoices exclude VAT", "Prefers bullets", "Billing projects"])
+    ).toEqual([
+      { repo: "user", message: "Invoices exclude VAT" },
+      { repo: "user", message: "Prefers bullets" },
+      { repo: "user", message: "Billing projects" },
+    ])
   })
 
   test("is said below the reply, where the collapsed work would hide it", () => {
@@ -63,5 +67,19 @@ describe("what a turn saved to memory", () => {
     expect(html).toContain("Saved to memory")
     expect(html).toContain("· Invoices exclude VAT")
     expect(html.match(/Saved to memory/g)).toHaveLength(1)
+  })
+
+  test("says when a save went to the memory the whole project shares", () => {
+    const shared = bash(
+      'sixb memory save project -m "A dossier is a Case"',
+      '{"repo":"project","saved":true,"revision":3,"changed":["vocabulary.md"]}'
+    )
+    expect(savedMemories([merged, shared])).toEqual([
+      { repo: "user", message: "Invoices exclude VAT" },
+      { repo: "project", message: "A dossier is a Case" },
+    ])
+    expect(renderToStaticMarkup(<AssistantBody parts={[shared]} />)).toContain(
+      "Saved to project memory"
+    )
   })
 })

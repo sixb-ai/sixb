@@ -3,7 +3,13 @@
  * (`.sixb/agent/memory/<repo>/`), as the agent names it in a command or a tool call.
  */
 const MEMORY_FILE =
-  /(?:\$\{?SIXB_MEMORY_DIR\}?|\.sixb\/agent\/memory)\/(?:user|project)(?:\/([^\s"'`;|&<>()]*))?/
+  /(?:\$\{?SIXB_MEMORY_DIR\}?|\.sixb\/agent\/memory)\/(user|project)(?:\/([^\s"'`;|&<>()]*))?/
+
+/** A memory file: its repo, and its path inside the repo. */
+export interface MemoryFile {
+  readonly repo: "user" | "project"
+  readonly path: string
+}
 
 /** Whether `text` names a memory file or folder. */
 export function mentionsMemory(text: string): boolean {
@@ -11,13 +17,16 @@ export function mentionsMemory(text: string): boolean {
 }
 
 /**
- * The first memory file `text` names, as its path inside the repo; the conflict copy names the
- * file it is for. `""` for a repo itself, `null` when `text` names no memory file.
+ * The first memory file `text` names; the conflict copy names the file it is for. Its path is `""`
+ * for a repo itself. `null` when `text` names no memory file.
  */
-export function memoryFilePath(text: string): string | null {
+export function memoryFile(text: string): MemoryFile | null {
   const match = text.match(MEMORY_FILE)
   if (!match) return null
-  return (match[1] ?? "").replace(/\/$/, "").replace(/\.theirs$/, "")
+  return {
+    repo: match[1] === "project" ? "project" : "user",
+    path: (match[2] ?? "").replace(/\/$/, "").replace(/\.theirs$/, ""),
+  }
 }
 
 /**
