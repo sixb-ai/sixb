@@ -439,13 +439,14 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: false,
   },
-  // Agent memory: what the Agent remembers across conversations.
+  // The Agent reads and saves its memory with `sixb memory` in its sandbox. Its history and deleting
+  // a repo are for people, so they stay off the gateway.
   {
     operationId: "getAgentMemory",
     method: "GET",
     path: "/api/agent-memory/:repo",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
   },
   {
     operationId: "listAgentMemoryRevisions",
@@ -459,7 +460,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     method: "POST",
     path: "/api/agent-memory/:repo/revisions",
     accessToken: true,
-    agentApi: false,
+    agentApi: true,
   },
   {
     operationId: "deleteAgentMemory",
