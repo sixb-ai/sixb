@@ -161,11 +161,11 @@ export interface ObserveGrant {
   readonly target: ObserveGrantTarget
 }
 
-export type ManageGrantTarget = "connector" | "aiUsage"
+export type ManageGrantTarget = "connector" | "aiUsage" | "agentMemory"
 
 /**
- * Manage the selected connectors, or the project's AI usage-limit policies. AI usage is one
- * surface, so its grant selects nothing.
+ * Manage the selected connectors, the project's AI usage-limit policies, or the project's shared
+ * Agent memory. AI usage and memory are one surface each, so their grants select nothing.
  */
 export type ManageGrant<TTarget extends ManageGrantTarget = ManageGrantTarget> =
   TTarget extends "connector"

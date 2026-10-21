@@ -18,6 +18,7 @@ can.observe("logs")
 // @ts-expect-error observe takes one of project's surfaces, not the project itself.
 can.observe(project)
 can.manage(agent.usage)
+can.manage(agent.memory)
 can.view(project.users)
 // @ts-expect-error the member directory is read with can.view, not observed.
 can.observe(project.users)
