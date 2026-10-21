@@ -316,6 +316,18 @@ describe("describeBash", () => {
     expect(
       describe("apply_patch <<'PATCH'\n*** Update File: .sixb/agent/memory/user/MEMORY.md\nPATCH")
     ).toEqual(updated())
+    // The project's memory says so.
+    expect(describe('cat "$SIXB_MEMORY_DIR/project/vocabulary.md"')).toEqual({
+      icon: "memory",
+      title: "Read project memory",
+      detail: "vocabulary",
+    })
+    expect(
+      describe(
+        'sixb memory save project -m "A dossier is a Case"',
+        '{"repo":"project","saved":true,"revision":3,"changed":["vocabulary.md"]}'
+      )
+    ).toEqual({ icon: "memory", title: "Saved to project memory", detail: "A dossier is a Case" })
     // An edit followed by its save reads as the save.
     expect(
       describe(

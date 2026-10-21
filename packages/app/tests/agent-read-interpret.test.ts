@@ -60,5 +60,9 @@ describe("read tool presentation", () => {
       "detail"
     )
     expect(describeRead({ path }, null, fr)).toMatchObject({ title: "Mémoire consultée" })
+    expect(describeRead({ path: ".sixb/agent/memory/project/vocabulary.md" }, null)).toMatchObject({
+      title: "Read project memory",
+      detail: "vocabulary",
+    })
   })
 })

@@ -3,7 +3,7 @@
 // operation. Plain shell commands and the initial skill read keep neutral fallbacks.
 
 import { type AgentMessages, en } from "../i18n/en"
-import { memoryFileLabel, memoryFilePath, mentionsMemory } from "../memory-paths"
+import { type MemoryFile, memoryFile, memoryFileLabel, mentionsMemory } from "../memory-paths"
 import type { NormalizedPart } from "../parts"
 import { commandInvocation, executableName, lexShellCommand, type ShellSegment } from "./shell"
 
@@ -51,8 +51,8 @@ type AtomicBashIntent =
       readonly args: readonly string[]
     }
   | { readonly kind: "read-skill"; readonly skillName?: string; readonly reference?: string }
-  /** Reading or editing the files of the Agent's memory, `path` inside its repo. */
-  | { readonly kind: "memory"; readonly access: "read" | "write"; readonly path: string }
+  /** Reading or editing the files of the Agent's memory. */
+  | ({ readonly kind: "memory"; readonly access: "read" | "write" } & MemoryFile)
   | { readonly kind: "generic"; readonly command: string }
 
 /** What the agent was trying to do, derived from the command string. */
@@ -266,9 +266,13 @@ function classifyMemoryCommand(
     FILE_WRITING_COMMANDS.has(executable ?? "") ||
     ((executable === "sed" || executable === "perl") &&
       (invocation.some((token) => token.startsWith("-i")) || /\s-i/.test(firstLine)))
-  const path =
-    memoryFilePath(writes && redirect && mentionsMemory(redirect) ? redirect : command) ?? ""
-  return { kind: "memory", access: writes ? "write" : "read", path }
+  const file = memoryFile(writes && redirect && mentionsMemory(redirect) ? redirect : command)
+  return {
+    kind: "memory",
+    access: writes ? "write" : "read",
+    repo: file?.repo ?? "user",
+    path: file?.path ?? "",
+  }
 }
 
 const SKILL_READ_COMMANDS = new Set(["cat", "less", "bat", "head", "tail", "sed", "nl"])
@@ -347,7 +351,11 @@ export function describeBash(
   }
   if (intent.kind === "memory") {
     return withDetail(
-      icon("memory", intent.access === "write" ? m.memoryEdit : m.memoryRead),
+      icon(
+        "memory",
+        intent.access === "write" ? m.memoryEdit : m.memoryRead,
+        intent.repo === "project"
+      ),
       memoryFileLabel(intent.path)
     )
   }
@@ -634,20 +642,18 @@ function describeSixb(
       return withDetail(icon("terminal", m.api), intent.args[0])
     case "memory.save": {
       // A save another conversation got ahead of leaves their version to merge, then saves again.
+      const project = memorySaveRepo(intent.args) === "project"
       const conflicts = parsed && !parsed.ok ? memoryConflictPaths(parsed.stdout) : []
       if (conflicts.length > 0) {
         const names = conflicts.flatMap((path) => memoryFileLabel(path) ?? [])
-        return withDetail(icon("memory", m.memoryConflict), names.join(", ") || undefined)
+        return withDetail(icon("memory", m.memoryConflict, project), names.join(", ") || undefined)
       }
-      // Saving nothing new, or pulling, only brings the Agent's copy up to date.
-      const headline = !parsed
-        ? m.memorySave
-        : !parsed.ok
-          ? m.memorySaveFailed
-          : boolField(parsed.json, "saved")
-            ? m.memorySave
-            : m.memoryPull
-      return withDetail(icon("memory", headline), memorySaveMessage(intent.args))
+      // Saving nothing new only brings the Agent's copy up to date, as a pull does.
+      if (parsed?.ok && !boolField(parsed.json, "saved")) return icon("memory", m.memoryPull)
+      return withDetail(
+        icon("memory", parsed && !parsed.ok ? m.memorySaveFailed : m.memorySave, project),
+        memorySaveMessage(intent.args)
+      )
     }
     case "memory.pull":
       return icon("memory", m.memoryPull)
@@ -665,9 +671,15 @@ function memoryConflictPaths(stdout: string): string[] {
   )
 }
 
-/** What each memory save of a turn says it remembered, once each, in order. */
-export function savedMemories(parts: readonly NormalizedPart[]): string[] {
-  const messages = parts.flatMap((part) => {
+/** One save of a turn: the repo, and what the save says the agent remembered. */
+export interface SavedMemory {
+  readonly repo: "user" | "project"
+  readonly message: string
+}
+
+/** What each memory save of a turn remembered, once each, in order. */
+export function savedMemories(parts: readonly NormalizedPart[]): SavedMemory[] {
+  const saves = parts.flatMap((part): SavedMemory[] => {
     if (part.kind !== "tool" || part.tool.toolName !== "bash") return []
     if (part.tool.state !== "output-available") return []
     const intent = classifyCommand(coerceBashInput(part.tool.input)?.command ?? "")
@@ -675,9 +687,23 @@ export function savedMemories(parts: readonly NormalizedPart[]): string[] {
     if (save.kind !== "sixb" || save.command !== "memory.save") return []
     const output = coerceBashOutput(part.tool.output)
     const message = memorySaveMessage(save.args)
-    return output?.ok && boolField(output.json, "saved") && message ? [message] : []
+    if (!output?.ok || !boolField(output.json, "saved") || !message) return []
+    return [{ repo: memorySaveRepo(save.args), message }]
   })
-  return [...new Set(messages)]
+  return saves.filter(
+    (save, index) =>
+      saves.findIndex((other) => other.repo === save.repo && other.message === save.message) ===
+      index
+  )
+}
+
+/** The repo `sixb memory save <repo> -m <message>` names. */
+function memorySaveRepo(args: readonly string[]): "user" | "project" {
+  const repo = args.find(
+    (arg, index) =>
+      !arg.startsWith("-") && args[index - 1] !== "-m" && args[index - 1] !== "--message"
+  )
+  return repo === "project" ? "project" : "user"
 }
 
 function memorySaveMessage(args: readonly string[]): string | undefined {
