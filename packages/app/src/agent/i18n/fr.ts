@@ -277,6 +277,11 @@ export const fr: Translation<AgentMessages> = {
       running: (name) => `Consultation du guide ${quoted(name)}`,
       failed: (name) => `Impossible de lire le guide ${quoted(name)}`,
     },
+    memory: {
+      title: "Mémoire consultée",
+      running: "Consultation de la mémoire",
+      failed: "Impossible de lire la mémoire",
+    },
     error: "Le fichier n’a pas pu être lu.",
     emptyFile: "Ce fichier est vide.",
     noContent: "Aucun contenu n’a été renvoyé.",
@@ -470,6 +475,18 @@ export const fr: Translation<AgentMessages> = {
     },
     api: { title: "API Sixb appelée", running: "Appel de l’API Sixb" },
     sixbCommand: { title: "Commande Sixb exécutée", running: "Exécution d’une commande Sixb" },
+    memorySave: { title: "Enregistré en mémoire", running: "Enregistrement en mémoire" },
+    memorySaveFailed: {
+      title: "Impossible d’enregistrer en mémoire",
+      running: "Enregistrement en mémoire",
+    },
+    memoryPull: { title: "Mémoire vérifiée", running: "Vérification de la mémoire" },
+    memoryConflict: {
+      title: "Mémoire plus récente à fusionner",
+      running: "Enregistrement en mémoire",
+    },
+    memoryRead: { title: "Mémoire consultée", running: "Consultation de la mémoire" },
+    memoryEdit: { title: "Mémoire mise à jour", running: "Mise à jour de la mémoire" },
     counts: {
       objectTypes: (types) => count(types, "type d’objet", "types d’objets"),
       objects: (objects) => count(objects, "objet"),
@@ -544,6 +561,9 @@ export const fr: Translation<AgentMessages> = {
       title ? `Impossible de publier ${title}` : "Impossible de publier l’artefact",
     open: (title) => `Ouvrir ${title}`,
     cards: "Publié dans cette réponse",
+  },
+  memory: {
+    saved: "Enregistré en mémoire",
   },
   sandbox: {
     title: "Récupération de l’environnement requise",

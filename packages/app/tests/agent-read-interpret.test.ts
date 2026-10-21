@@ -28,6 +28,7 @@ describe("read tool presentation", () => {
       failedTitle: "Couldn't read runtime.ts",
       detail: "lines 4–5 · more available",
       skill: false,
+      memory: false,
     })
     expect(describeRead({ path: output.path }, output, fr)).toMatchObject({
       runningTitle: "Lecture de runtime.ts",
@@ -45,5 +46,19 @@ describe("read tool presentation", () => {
     expect(
       describeRead({ path: ".sixb/agent/skills/sixb-query/references/query-api.md" }, null)
     ).toMatchObject({ title: "Read the query api reference", skill: true })
+  })
+
+  test("names a memory file by its path in the memory, not the lines read", () => {
+    const path = "/workspace/.sixb/agent/memory/user/projects/payments.md"
+    expect(describeRead({ path }, { ...output, path })).toMatchObject({
+      title: "Read memory",
+      runningTitle: "Reading memory",
+      detail: "payments",
+      memory: true,
+    })
+    expect(describeRead({ path: ".sixb/agent/memory/user/MEMORY.md" }, null)).not.toHaveProperty(
+      "detail"
+    )
+    expect(describeRead({ path }, null, fr)).toMatchObject({ title: "Mémoire consultée" })
   })
 })

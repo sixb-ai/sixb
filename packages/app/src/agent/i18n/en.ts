@@ -287,6 +287,7 @@ export const en = {
       running: (name: string) => `Reading the ${name} guide`,
       failed: (name: string) => `Couldn't read the ${name} guide`,
     },
+    memory: { title: "Read memory", running: "Reading memory", failed: "Couldn't read memory" },
     error: "The file could not be read.",
     emptyFile: "This file is empty.",
     noContent: "No file content was returned.",
@@ -433,6 +434,12 @@ export const en = {
     project: { title: "Read project info", running: "Reading project info" },
     api: { title: "Called the Sixb API", running: "Calling the Sixb API" },
     sixbCommand: { title: "Ran a Sixb command", running: "Running a Sixb command" },
+    memorySave: { title: "Saved to memory", running: "Saving to memory" },
+    memorySaveFailed: { title: "Couldn't save to memory", running: "Saving to memory" },
+    memoryConflict: { title: "Found newer memory to merge", running: "Saving to memory" },
+    memoryRead: { title: "Read memory", running: "Reading memory" },
+    memoryEdit: { title: "Updated memory", running: "Updating memory" },
+    memoryPull: { title: "Checked memory", running: "Checking memory" },
     counts: {
       objectTypes: (types: number) => count(types, "object type"),
       objects: (objects: number) => count(objects, "object"),
@@ -508,6 +515,10 @@ export const en = {
     open: (title: string) => `Open ${title}`,
     /** Labels the cards of what one response published. */
     cards: "Published in this response",
+  },
+  memory: {
+    /** Closes a turn once per save, before what the save says the agent remembered. */
+    saved: "Saved to memory",
   },
   sandbox: {
     title: "Sandbox recovery required",

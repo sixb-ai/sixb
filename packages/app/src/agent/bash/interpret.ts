@@ -3,6 +3,8 @@
 // operation. Plain shell commands and the initial skill read keep neutral fallbacks.
 
 import { type AgentMessages, en } from "../i18n/en"
+import { memoryFileLabel, memoryFilePath, mentionsMemory } from "../memory-paths"
+import type { NormalizedPart } from "../parts"
 import { commandInvocation, executableName, lexShellCommand, type ShellSegment } from "./shell"
 
 /** The bash tool input as authored by the agent. */
@@ -24,6 +26,7 @@ const CLI_COMMANDS = {
   "workflow-runs": ["list", "get"],
   models: ["list", "get", "text", "image", "speech", "transcribe", "calls"],
   api: ["get", "post"],
+  memory: ["save", "pull"],
 } as const
 
 type CliGroup = keyof typeof CLI_COMMANDS
@@ -48,6 +51,8 @@ type AtomicBashIntent =
       readonly args: readonly string[]
     }
   | { readonly kind: "read-skill"; readonly skillName?: string; readonly reference?: string }
+  /** Reading or editing the files of the Agent's memory, `path` inside its repo. */
+  | { readonly kind: "memory"; readonly access: "read" | "write"; readonly path: string }
   | { readonly kind: "generic"; readonly command: string }
 
 /** What the agent was trying to do, derived from the command string. */
@@ -102,8 +107,9 @@ export function coerceBashOutput(output: unknown): ParsedBashOutput | null {
 // --- Command classification ------------------------------------------------
 
 export function classifyCommand(command: string): BashIntent {
-  const segments = lexShellCommand(command)
-  if (!segments) return { kind: "generic", command: command.trim() }
+  const segments = lexShellCommand(command) ?? sixbStepsAroundHeredocs(command)
+  if (!segments)
+    return classifyMemoryCommand(command) ?? { kind: "generic", command: command.trim() }
   if (segments.length > 1) {
     return {
       kind: "compound",
@@ -114,6 +120,27 @@ export function classifyCommand(command: string): BashIntent {
   return classifyAtomicCommand(segments[0])
 }
 
+/**
+ * The steps of a script that writes a file with a heredoc and then runs `sixb`, such as an edit to
+ * memory followed by its save; any other heredoc stays opaque.
+ */
+function sixbStepsAroundHeredocs(command: string): readonly ShellSegment[] | null {
+  const kept: string[] = []
+  let delimiter: string | null = null
+  for (const line of command.split(/\r?\n/)) {
+    if (delimiter !== null) {
+      if (line.trim() === delimiter) delimiter = null
+      continue
+    }
+    const heredoc = line.match(/<<-?\s*(['"]?)([A-Za-z_][\w-]*)\1/)
+    delimiter = heredoc?.[2] ?? null
+    kept.push(heredoc ? line.replace(heredoc[0], "") : line)
+  }
+  const segments = lexShellCommand(kept.join("\n"))
+  const runsSixb = segments?.some((segment) => classifyAtomicCommand(segment).kind === "sixb")
+  return segments && segments.length > 1 && runsSixb ? segments : null
+}
+
 function classifyAtomicCommand(segment: ShellSegment | undefined): AtomicBashIntent {
   if (!segment) return { kind: "generic", command: "" }
   const invocation = commandInvocation(segment.tokens)
@@ -121,6 +148,8 @@ function classifyAtomicCommand(segment: ShellSegment | undefined): AtomicBashInt
   if (sixb) return sixb
   const skill = classifySkillRead(segment, invocation)
   if (skill) return skill
+  const memory = classifyMemoryCommand(segment.command, segment)
+  if (memory) return memory
   return { kind: "generic", command: segment.command }
 }
 
@@ -143,7 +172,7 @@ function selectCompoundPrimary(segments: readonly ShellSegment[]): AtomicBashInt
 }
 
 function compoundIntentPriority(intent: AtomicBashIntent): number {
-  if (intent.kind === "sixb" || intent.kind === "read-skill") return 3
+  if (intent.kind === "sixb" || intent.kind === "read-skill" || intent.kind === "memory") return 3
   const category = genericCommandCategory(intent.command)
   if (category.kind === "unknown") return isShellPlumbing(intent.command) ? -1 : 0
   if (
@@ -214,6 +243,34 @@ function isCliOperation<Group extends CliGroup>(
   return (CLI_COMMANDS[group] as readonly string[]).includes(value)
 }
 
+/** Commands that change the files they name. */
+const FILE_WRITING_COMMANDS = new Set(["apply_patch", "rm", "mv", "cp", "tee", "touch", "mkdir"])
+
+/**
+ * A command that works on the memory files: an edit when it writes to one or runs a command that
+ * changes files, a read otherwise. An opaque command, such as a heredoc, has no `segment`.
+ */
+function classifyMemoryCommand(
+  command: string,
+  segment?: ShellSegment
+): Extract<AtomicBashIntent, { kind: "memory" }> | null {
+  if (!mentionsMemory(command)) return null
+  const firstLine = command.trim().split(/\r?\n/, 1)[0] ?? ""
+  const invocation = commandInvocation(segment?.tokens ?? [])
+  const executable = executableName(invocation[0]) ?? leadingExecutable(firstLine)
+  const redirect = segment
+    ? segment.outputRedirects?.find(mentionsMemory)
+    : firstLine.match(/>{1,2}\s*(\S+)/)?.[1]
+  const writes =
+    (redirect !== undefined && mentionsMemory(redirect)) ||
+    FILE_WRITING_COMMANDS.has(executable ?? "") ||
+    ((executable === "sed" || executable === "perl") &&
+      (invocation.some((token) => token.startsWith("-i")) || /\s-i/.test(firstLine)))
+  const path =
+    memoryFilePath(writes && redirect && mentionsMemory(redirect) ? redirect : command) ?? ""
+  return { kind: "memory", access: writes ? "write" : "read", path }
+}
+
 const SKILL_READ_COMMANDS = new Set(["cat", "less", "bat", "head", "tail", "sed", "nl"])
 
 function classifySkillRead(
@@ -250,6 +307,7 @@ export type BashIcon =
   | "audio"
   | "transcript"
   | "model"
+  | "memory"
   | "terminal"
 
 interface BashDescription {
@@ -286,6 +344,12 @@ export function describeBash(
       return icon("skill", m.skillGuide, humanize(intent.skillName.replace(/^sixb-/, "")))
     }
     return icon("skill", m.skill)
+  }
+  if (intent.kind === "memory") {
+    return withDetail(
+      icon("memory", intent.access === "write" ? m.memoryEdit : m.memoryRead),
+      memoryFileLabel(intent.path)
+    )
   }
   return describeGenericCommand(intent.command, m)
 }
@@ -568,9 +632,56 @@ function describeSixb(
     case "api.get":
     case "api.post":
       return withDetail(icon("terminal", m.api), intent.args[0])
+    case "memory.save": {
+      // A save another conversation got ahead of leaves their version to merge, then saves again.
+      const conflicts = parsed && !parsed.ok ? memoryConflictPaths(parsed.stdout) : []
+      if (conflicts.length > 0) {
+        const names = conflicts.flatMap((path) => memoryFileLabel(path) ?? [])
+        return withDetail(icon("memory", m.memoryConflict), names.join(", ") || undefined)
+      }
+      // Saving nothing new, or pulling, only brings the Agent's copy up to date.
+      const headline = !parsed
+        ? m.memorySave
+        : !parsed.ok
+          ? m.memorySaveFailed
+          : boolField(parsed.json, "saved")
+            ? m.memorySave
+            : m.memoryPull
+      return withDetail(icon("memory", headline), memorySaveMessage(intent.args))
+    }
+    case "memory.pull":
+      return icon("memory", m.memoryPull)
     default:
       return withDetail(icon("terminal", m.sixbCommand), truncateMiddle(intent.args.join(" "), 64))
   }
+}
+
+/** The files a rejected memory save reports another conversation changed first. */
+function memoryConflictPaths(stdout: string): string[] {
+  const result = tryParseJson(stdout)
+  if (!isRecord(result) || !Array.isArray(result.conflicts)) return []
+  return result.conflicts.flatMap((conflict) =>
+    isRecord(conflict) && typeof conflict.path === "string" ? [conflict.path] : []
+  )
+}
+
+/** What each memory save of a turn says it remembered, once each, in order. */
+export function savedMemories(parts: readonly NormalizedPart[]): string[] {
+  const messages = parts.flatMap((part) => {
+    if (part.kind !== "tool" || part.tool.toolName !== "bash") return []
+    if (part.tool.state !== "output-available") return []
+    const intent = classifyCommand(coerceBashInput(part.tool.input)?.command ?? "")
+    const save = intent.kind === "compound" ? intent.primary : intent
+    if (save.kind !== "sixb" || save.command !== "memory.save") return []
+    const output = coerceBashOutput(part.tool.output)
+    const message = memorySaveMessage(save.args)
+    return output?.ok && boolField(output.json, "saved") && message ? [message] : []
+  })
+  return [...new Set(messages)]
+}
+
+function memorySaveMessage(args: readonly string[]): string | undefined {
+  return (optionValue(args, "-m") ?? optionValue(args, "--message"))?.trim() || undefined
 }
 
 function helpSubject(args: readonly string[]): keyof AgentMessages["bash"]["helpSubjects"] {
