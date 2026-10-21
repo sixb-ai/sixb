@@ -98,12 +98,17 @@ export const knowledgeKeeper = defineRole("assistant.knowledge-keeper", {
 })
 ```
 
+Settings › Memory shows both memories, as the agent reads them. A person can correct any entry,
+see every change with who made it, restore a file as an earlier change left it, or delete their
+memory. Their edits are saves like the agent's, and the next conversation reads them.
+
 Read or delete the signed-in user's memory, or the project's, from your code:
 
 ```ts
 const { revision, files } = await sixb.agent.memory.get("user")
 await sixb.agent.memory.delete("user")
 const shared = await sixb.agent.memory.get("project")
+const before = await sixb.agent.memory.get("user", { revision: 3 })
 ```
 
 Each save is a revision with the agent's own description of what it learned. `MEMORY.md` holds at
