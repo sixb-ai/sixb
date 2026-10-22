@@ -16,7 +16,13 @@ import {
 import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ChartNoAxesCombined, Loader2, RefreshCw, TriangleAlert } from "lucide-react"
+import {
+  ChartNoAxesCombined,
+  Loader2,
+  type LucideIcon,
+  RefreshCw,
+  TriangleAlert,
+} from "lucide-react"
 import { lazy, type ReactNode, Suspense, useMemo, useState } from "react"
 import { SectionPage } from "../../section-page"
 import { PageSection, Panel, PanelEmpty, PanelSkeleton, useLoadFailure } from "../../section-ui"
@@ -35,9 +41,11 @@ import {
   type RangePreset,
   rangePresets,
   reportingCoverage,
+  tokenBilledCalls,
   type UsageField,
   usageShare,
 } from "./format"
+import { useKindBreakdown } from "./kinds"
 import { AiLimits, limitStatusQuery } from "./limits"
 import { useAiUsageMessages } from "./messages"
 
@@ -273,7 +281,10 @@ function Usage({
   const messages = useAiUsageMessages()
   const totals = overview.totals
   const count = (value: number) => value.toLocaleString(locale)
-  const reporting = useReporting()
+  const tokenBilled = tokenBilledCalls(overview)
+  const reporting = useReporting(tokenBilled)
+  const periodReporting = usePeriodReporting()
+  const tokensComplete = reportingCoverage(totals, undefined, tokenBilled).status === "complete"
   const rated = totals.costs.ratedCallCount
   const coverage = totals.modelCallCount === 0 ? 0 : (rated / totals.modelCallCount) * 100
   const money = (value: number) => formatChartMoney(value, currency, locale)
@@ -341,16 +352,13 @@ function Usage({
     reviewStatus === "unpriceable"
       ? totals.costs.unpriceableCallCount
       : totals.costs.unvaluedCallCount
-  const audio = totals.usage.audioDurationMs
+  // One kind of plain generation needs no breakdown.
+  const kinds =
+    overview.kinds.length > 1 || overview.kinds.some((kind) => kind.modelKind !== "language")
 
   return (
     <div className="flex flex-col gap-4">
-      <div
-        className={cn(
-          "grid gap-3 sm:grid-cols-2",
-          audio === undefined ? "xl:grid-cols-4" : "xl:grid-cols-5"
-        )}
-      >
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric
           label={messages.metrics.cost}
           value={
@@ -390,21 +398,9 @@ function Usage({
           value={formatPercent(coverage, locale)}
           detail={messages.metrics.coverageDetail(count(rated), count(totals.modelCallCount))}
         />
-        {audio === undefined ? null : (
-          <Metric
-            label={messages.metrics.audio}
-            value={messages.metrics.seconds(
-              (audio / 1000).toLocaleString(locale, { maximumFractionDigits: 3 })
-            )}
-            detail={messages.metrics.audioDetail(
-              totals.usageCoverage.fieldCallCounts.audioDurationMs,
-              count(totals.usageCoverage.fieldCallCounts.audioDurationMs)
-            )}
-          />
-        )}
       </div>
 
-      {totals.usage.reportingStatus !== "complete" || coverage < 100 ? (
+      {!tokensComplete || coverage < 100 ? (
         <div className="flex flex-col gap-3 rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-3 text-[0.8125rem] sm:flex-row sm:items-center">
           <div className="flex min-w-0 flex-1 items-start gap-3">
             <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -412,9 +408,7 @@ function Usage({
               <p className="font-medium">{messages.partialTitle}</p>
               <p className="mt-0.5 text-muted-foreground">
                 {[
-                  totals.usage.reportingStatus !== "complete"
-                    ? messages.partialTokens(reporting(totals))
-                    : null,
+                  tokensComplete ? null : messages.partialTokens(reporting(totals)),
                   coverage < 100 ? messages.partialCost(withoutCost, count(withoutCost)) : null,
                 ]
                   .filter(Boolean)
@@ -457,12 +451,13 @@ function Usage({
             ariaLabel={messages.charts.costOverTime}
           />
         </Card>
-        <Card
-          title={messages.charts.costByModel}
-          description={messages.charts.costByModelDescription}
-        >
-          <Breakdown data={byModel} format={money} empty={messages.charts.noCost} />
-        </Card>
+        <CostBreakdown
+          byModel={byModel}
+          overview={overview}
+          currency={currency}
+          kinds={kinds}
+          format={money}
+        />
         <Card
           className="xl:col-span-2"
           title={messages.charts.tokens}
@@ -492,7 +487,7 @@ function Usage({
               return (
                 <span className="block max-w-56 whitespace-normal">
                   {xLabel(value)}
-                  {period ? <span className="mt-1 block">{reporting(period)}</span> : null}
+                  {period ? <span className="mt-1 block">{periodReporting(period)}</span> : null}
                 </span>
               )
             }}
@@ -500,7 +495,12 @@ function Usage({
             ariaLabel={messages.charts.tokens}
           />
         </Card>
-        <Insights overview={overview} coverage={coverage} locale={locale} />
+        <Insights
+          overview={overview}
+          coverage={coverage}
+          tokenBilled={tokenBilled}
+          locale={locale}
+        />
       </div>
 
       {byAgent.length > 1 || byWorkflow.length > 1 ? (
@@ -521,32 +521,52 @@ function Usage({
   )
 }
 
-/** "Partial — complete usage reported for 84 of 87 calls", for a whole range or one meter. */
-function useReporting() {
+/**
+ * "Partial — complete usage reported for 84 of 87 calls", for a whole range or one meter. Images,
+ * speech, transcription and reranking report no tokens, so when they ran, only the calls that owe
+ * tokens count.
+ */
+function useReporting(tokenBilled?: number) {
   const messages = useAiUsageMessages().reporting
   const locale = useLocale()
   return (aggregate: Overview["totals"], field?: UsageField): string => {
     if (aggregate.modelCallCount === 0) return messages.none
-    const { status, count } = reportingCoverage(aggregate, field)
-    const counts = [
-      count.toLocaleString(locale),
-      aggregate.modelCallCount.toLocaleString(locale),
-    ] as const
-    return field ? messages.field(...counts) : messages[status](...counts)
+    const owed = tokenBilled ?? aggregate.modelCallCount
+    const { status, count } = reportingCoverage(aggregate, field, owed)
+    const tokenBilledOnly = owed < aggregate.modelCallCount
+    const strings = tokenBilledOnly ? messages.tokenBilled : messages
+    const counts = [count.toLocaleString(locale), owed.toLocaleString(locale)] as const
+    if (field && tokenBilledOnly && count >= owed) return messages.tokenBilled.fieldAll
+    return field ? strings.field(...counts) : strings[status](...counts)
   }
+}
+
+/** A chart period's token reporting, said plainly: periods carry no breakdown by kind. */
+function usePeriodReporting() {
+  const messages = useAiUsageMessages().reporting
+  const locale = useLocale()
+  return (period: Overview["series"][number]): string =>
+    period.modelCallCount === 0
+      ? messages.none
+      : messages.period(
+          period.usageCoverage.completeCallCount.toLocaleString(locale),
+          period.modelCallCount.toLocaleString(locale)
+        )
 }
 
 function Insights({
   overview,
   coverage,
+  tokenBilled,
   locale,
 }: {
   readonly overview: Overview
   readonly coverage: number
+  readonly tokenBilled: number
   readonly locale: string
 }) {
   const messages = useAiUsageMessages().insights
-  const reporting = useReporting()
+  const reporting = useReporting(tokenBilled)
   const totals = overview.totals
   const breakdown = (
     [
@@ -576,7 +596,10 @@ function Insights({
         <div className="grid grid-cols-2 gap-x-6 gap-y-4">
           <Insight
             label={messages.cacheHitRate}
-            value={formatPercent(usageShare(totals, "cacheReadInputTokens", "inputTokens"), locale)}
+            value={formatPercent(
+              usageShare(totals, "cacheReadInputTokens", "inputTokens", tokenBilled),
+              locale
+            )}
           />
           <Insight
             label={messages.cachedInput}
@@ -586,7 +609,7 @@ function Insights({
           <Insight
             label={messages.reasoningShare}
             value={formatPercent(
-              usageShare(totals, "reasoningOutputTokens", "outputTokens"),
+              usageShare(totals, "reasoningOutputTokens", "outputTokens", tokenBilled),
               locale
             )}
           />
@@ -682,11 +705,13 @@ function Metric({
 function Card({
   title,
   description,
+  action,
   className,
   children,
 }: {
   readonly title: string
   readonly description: string
+  readonly action?: ReactNode
   readonly className?: string
   readonly children: ReactNode
 }) {
@@ -697,8 +722,13 @@ function Card({
         className
       )}
     >
-      <h3 className="text-sm font-semibold">{title}</h3>
-      <p className="mt-0.5 mb-4 text-xs text-muted-foreground">{description}</p>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold">{title}</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+        </div>
+        {action}
+      </div>
       {/* A chart grows into the height its row gives the card. */}
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>
     </section>
@@ -724,12 +754,81 @@ function Chart(props: Parameters<typeof TimeSeries>[0]) {
   )
 }
 
+interface BreakdownEntry {
+  readonly key: string
+  readonly label: string
+  readonly value: number
+  readonly icon?: LucideIcon
+  /** A quieter note after the label, such as what a kind produced. */
+  readonly detail?: string
+}
+
+/** Where cost went, by model or by kind: the costliest entries, each with a bar. */
+function CostBreakdown({
+  byModel,
+  overview,
+  currency,
+  kinds,
+  format,
+}: {
+  readonly byModel: readonly BreakdownEntry[]
+  readonly overview: Overview
+  readonly currency: string | undefined
+  /** Whether more than one kind ran; one kind needs no choice. */
+  readonly kinds: boolean
+  readonly format: (value: number) => string
+}) {
+  const messages = useAiUsageMessages().charts
+  const [by, setBy] = useState<"model" | "kind">("model")
+  const byKind = useKindBreakdown(overview, currency)
+  const view = kinds ? by : "model"
+  return (
+    <Card
+      title={view === "kind" ? messages.costByKind : messages.costByModel}
+      description={messages.costByModelDescription}
+      action={
+        kinds ? (
+          <div
+            role="group"
+            aria-label={messages.breakdownBy}
+            className="inline-flex shrink-0 rounded-md bg-muted p-0.5"
+          >
+            {(["model", "kind"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={view === option}
+                onClick={() => setBy(option)}
+                className={cn(
+                  "h-6 rounded-[5px] px-2 text-xs font-medium transition-colors",
+                  // The card is lighter than the page, so the chosen segment takes the card's colour.
+                  view === option
+                    ? "bg-card text-foreground shadow-[0_1px_2px_0_rgb(0_0_0/0.06)] ring-1 ring-border dark:bg-white/10"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {option === "kind" ? messages.byKind : messages.byModel}
+              </button>
+            ))}
+          </div>
+        ) : null
+      }
+    >
+      <Breakdown
+        data={view === "kind" ? byKind : byModel}
+        format={format}
+        empty={messages.noCost}
+      />
+    </Card>
+  )
+}
+
 function Breakdown({
   data,
   format,
   empty,
 }: {
-  readonly data: readonly { readonly key: string; readonly label: string; readonly value: number }[]
+  readonly data: readonly BreakdownEntry[]
   readonly format: (value: number) => string
   readonly empty: string
 }) {
@@ -746,7 +845,17 @@ function Breakdown({
       {data.map((entry) => (
         <div key={entry.key}>
           <div className="mb-1.5 flex items-start justify-between gap-4 text-[0.8125rem]">
-            <span className="min-w-0 break-words text-muted-foreground">{entry.label}</span>
+            <span className="flex min-w-0 items-baseline gap-1.5 text-muted-foreground">
+              {entry.icon ? (
+                <entry.icon className="size-3.5 shrink-0 translate-y-0.5" aria-hidden />
+              ) : null}
+              <span className="min-w-0 break-words">
+                {entry.label}
+                {entry.detail ? (
+                  <span className="text-muted-foreground/60"> · {entry.detail}</span>
+                ) : null}
+              </span>
+            </span>
             <span className="shrink-0 font-mono font-medium tabular-nums">
               {format(entry.value)}
             </span>
