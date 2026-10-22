@@ -1,7 +1,6 @@
 import {
   assertJsonObject,
   type JsonObject,
-  ModelProviderError,
   type TranscriptionCostEstimator,
   type TranscriptionModel,
   type TranscriptionModelDefinition,
@@ -9,6 +8,7 @@ import {
   TranscriptionModelResponseError,
   type TranscriptionModelResponseMetadata,
 } from "@sixb/core/models"
+import { readGatewayJson } from "./json-response"
 
 const PROVIDER_ID = "vercel-ai-gateway"
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -122,7 +122,12 @@ export function createGatewayTranscription(
       })
 
       const requestId = response.headers.get("x-request-id") ?? undefined
-      const payload = await readTranscriptionResponse(response, modelId, signal)
+      const payload = await readGatewayJson(response, {
+        modelId,
+        operation: "Transcription",
+        maxBytes: MAX_RESPONSE_BYTES,
+        signal,
+      })
       const metadata = transport.metadata(payload, requestId)
       const audioDurationMs = durationInMilliseconds(payload.durationInSeconds)
       const responseMetadata = {
@@ -176,72 +181,4 @@ function durationInMilliseconds(seconds: unknown): number | undefined {
 
   const milliseconds = Math.round(seconds * 1000)
   return Number.isSafeInteger(milliseconds) ? milliseconds : undefined
-}
-
-async function readTranscriptionResponse(
-  response: Response,
-  modelId: string,
-  signal: AbortSignal
-): Promise<JsonObject> {
-  const requestId = response.headers.get("x-request-id") ?? undefined
-
-  if (!response.ok) {
-    void response.body?.cancel().catch(() => undefined)
-    // A retry could repeat a billed inference; only the application can decide to try again.
-    throw new ModelProviderError(
-      `[SixbVercelGateway] Transcription returned HTTP ${response.status}.`,
-      PROVIDER_ID,
-      modelId,
-      { status: response.status, requestId, retryable: false, code: "provider_rejection" }
-    )
-  }
-
-  try {
-    const payload: unknown = JSON.parse(await readResponseBody(response, signal))
-    assertJsonObject(payload, "transcription response")
-    return payload
-  } catch {
-    signal.throwIfAborted()
-    throw new ModelProviderError(
-      "[SixbVercelGateway] Transcription returned an invalid or oversized response.",
-      PROVIDER_ID,
-      modelId,
-      { requestId, retryable: false, code: "invalid_response" }
-    )
-  }
-}
-
-async function readResponseBody(response: Response, signal: AbortSignal): Promise<string> {
-  if (Number(response.headers.get("content-length")) > MAX_RESPONSE_BYTES) {
-    void response.body?.cancel().catch(() => undefined)
-    throw new Error("Oversized response")
-  }
-  if (!response.body) throw new Error("Empty response")
-
-  const reader = response.body.getReader()
-  const cancel = () => {
-    void reader.cancel(signal.reason).catch(() => undefined)
-  }
-  signal.addEventListener("abort", cancel, { once: true })
-  if (signal.aborted) cancel()
-
-  const chunks: Uint8Array[] = []
-  let sizeBytes = 0
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      // Do not discard a complete billable body if cancellation raced with its last chunk.
-      if (done) break
-      sizeBytes += value.byteLength
-      if (sizeBytes > MAX_RESPONSE_BYTES) throw new Error("Oversized response")
-      chunks.push(value)
-    }
-
-    return Buffer.concat(chunks, sizeBytes).toString("utf8")
-  } finally {
-    signal.removeEventListener("abort", cancel)
-    void reader.cancel().catch(() => undefined)
-    reader.releaseLock()
-  }
 }

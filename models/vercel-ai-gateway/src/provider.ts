@@ -6,6 +6,8 @@ import {
   defineModelRateCard,
   type EmbeddingModel,
   estimateModelReservation,
+  type ImageCostEstimator,
+  type ImageModel,
   isJsonObject,
   isModelReasoning,
   type JsonObject,
@@ -29,6 +31,8 @@ import {
   modelReasoningSupportIssue,
   type RerankingModel,
   rateModelCall,
+  type SpeechCostEstimator,
+  type SpeechModel,
   type TranscriptionCostEstimator,
   type TranscriptionModel,
   UnsupportedModelFeatureError,
@@ -42,8 +46,19 @@ import {
   type VercelGatewayDecisionOptions,
 } from "./decision"
 import { createGatewayEmbedding, type VercelGatewayEmbeddingOptions } from "./embedding"
+import {
+  createGatewayImage,
+  type GatewayImageResolution,
+  type VercelGatewayImageOptions,
+} from "./image"
+import { gatewayImagePrice } from "./media-pricing"
 import { withAutomaticPromptCaching } from "./provider-caching"
 import { createGatewayReranking } from "./reranking"
+import {
+  createGatewaySpeech,
+  type GatewaySpeechResolution,
+  type VercelGatewaySpeechOptions,
+} from "./speech"
 import { isStrictGatewaySchema } from "./structured-output"
 import { createGatewayTranscription, type VercelGatewayTranscriptionOptions } from "./transcription"
 import { transcriptionDurationEstimator } from "./transcription-pricing"
@@ -56,11 +71,17 @@ const CATALOG_TIMEOUT_MS = 5_000
 const DEFAULT_CATALOG_TTL_MS = 60 * 60 * 1_000
 const DEFAULT_MAX_RETRIES = 2
 const DEFAULT_MAX_RETRY_DELAY_MS = 60_000
+// Text a Gemini image model may write beside its images; the images are reserved per image.
+const IMAGE_TEXT_OUTPUT_ALLOWANCE = 4_096
 
 export interface VercelGatewayOptions {
   readonly baseUrl?: string
   /** Full endpoint for proxies without the standard /v1 and /v4 URL layout. */
   readonly transcriptionUrl?: string
+  /** Full image endpoint for proxies without the standard /v1 and /v4 URL layout. */
+  readonly imageUrl?: string
+  /** Full speech endpoint for proxies without the standard /v1 and /v4 URL layout. */
+  readonly speechUrl?: string
   readonly apiKey?: ValueSource<string | undefined>
   readonly headers?: ValueSource<Readonly<Record<string, string>>>
   readonly fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>
@@ -96,6 +117,9 @@ export interface VercelGateway extends LanguageModelProvider {
   reranking(modelId: string): RerankingModel
   decision(modelId: string, options?: VercelGatewayDecisionOptions): DecisionModel
   transcription(modelId: string, options?: VercelGatewayTranscriptionOptions): TranscriptionModel
+  /** Image models, and language models that answer with images, such as Gemini image models. */
+  image(modelId: string, options?: VercelGatewayImageOptions): ImageModel
+  speech(modelId: string, options?: VercelGatewaySpeechOptions): SpeechModel
 }
 
 export function createVercelGateway(options: VercelGatewayOptions = {}): VercelGateway {
@@ -127,18 +151,37 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
   return Object.assign(model, {
     providerId: PROVIDER_ID as typeof PROVIDER_ID,
     catalog,
+    image: (modelId: string, imageOptions: VercelGatewayImageOptions = {}) => {
+      const snapshot = structuredClone(imageOptions)
+      return createGatewayImage(modelId, snapshot, {
+        imageUrl: v4Endpoint(baseUrl, options.imageUrl, "image-model", "imageUrl"),
+        chatUrl: `${baseUrl}/chat/completions`,
+        fetch: transport.fetch ?? fetch,
+        headers: () => gatewayHeaders(transport, "application/json"),
+        resolution: () => catalog.imageResolution(modelId, snapshot.providerOptions),
+        metadata: (payload, requestId) => mediaMetadata(payload, requestId),
+      })
+    },
+    speech: (modelId: string, speechOptions: VercelGatewaySpeechOptions = {}) => {
+      const snapshot = structuredClone(speechOptions)
+      return createGatewaySpeech(modelId, snapshot, {
+        url: v4Endpoint(baseUrl, options.speechUrl, "speech-model", "speechUrl"),
+        fetch: transport.fetch ?? fetch,
+        headers: () => gatewayHeaders(transport, "application/json"),
+        resolution: () => catalog.speechResolution(modelId, snapshot.providerOptions),
+        metadata: (payload, requestId) => mediaMetadata(payload, requestId),
+      })
+    },
     transcription: (
       modelId: string,
       transcriptionOptions: VercelGatewayTranscriptionOptions = {}
     ) => {
-      const url =
-        options.transcriptionUrl ??
-        (baseUrl.endsWith("/v1") ? `${baseUrl.slice(0, -3)}/v4/ai/transcription-model` : undefined)
-      if (!url || !URL.canParse(url) || !["http:", "https:"].includes(new URL(url).protocol)) {
-        throw new TypeError(
-          "[SixbVercelGateway] Set transcriptionUrl when baseUrl does not end in /v1."
-        )
-      }
+      const url = v4Endpoint(
+        baseUrl,
+        options.transcriptionUrl,
+        "transcription-model",
+        "transcriptionUrl"
+      )
 
       const snapshot = structuredClone(transcriptionOptions)
       return createGatewayTranscription(modelId, snapshot, {
@@ -346,6 +389,37 @@ interface GatewayTransport extends VercelGatewayOptions {
   readonly baseUrl: string
 }
 
+/** The SDK protocol's endpoint beside the configured /v1 API, unless a proxy names its own. */
+function v4Endpoint(
+  baseUrl: string,
+  override: string | undefined,
+  path: string,
+  option: string
+): string {
+  const url = override ?? (baseUrl.endsWith("/v1") ? `${baseUrl.slice(0, -3)}/v4/ai/${path}` : "")
+  if (!url || !URL.canParse(url) || !["http:", "https:"].includes(new URL(url).protocol)) {
+    throw new TypeError(`[SixbVercelGateway] Set ${option} when baseUrl does not end in /v1.`)
+  }
+  return url
+}
+
+/** Billing metadata for image and speech replies, whose usage the binding fills in. */
+function mediaMetadata(payload: JsonObject, requestId: string | undefined) {
+  const gateway = gatewayMetadata(payload)
+  return {
+    usage: {},
+    providerIds: gatewayProviderIds(payload, requestId),
+    reportedCost: gatewayReportedCost(gateway),
+    route: gatewayRoute(gateway),
+  }
+}
+
+interface MediaCatalogEntry {
+  readonly name?: string
+  readonly description?: string
+  readonly rateCard?: ModelRateCard
+}
+
 function configuredModelDefinitions(
   definitions: readonly LanguageModelDefinition[]
 ): ReadonlyMap<string, LanguageModelDefinition> {
@@ -369,6 +443,95 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
   private readonly rateCards = new Map<string, ModelRateCard>()
   private readonly decisionDefinitions = new Map<string, DecisionModelDefinition>()
   private readonly transcriptionRates = new Map<string, string>()
+  private readonly imageModels = new Map<
+    string,
+    MediaCatalogEntry & { readonly protocol: GatewayImageResolution["protocol"] }
+  >()
+  private readonly speechModels = new Map<string, MediaCatalogEntry>()
+
+  async imageResolution(
+    modelId: string,
+    providerOptions: JsonObject | undefined
+  ): Promise<GatewayImageResolution> {
+    let entry: (MediaCatalogEntry & { readonly protocol: "image" | "chat" }) | undefined
+    try {
+      await this.load()
+      entry = this.imageModels.get(modelId)
+    } catch {
+      console.warn(
+        "[SixbVercelGateway] Image catalog unavailable; using the image endpoint without local pricing."
+      )
+    }
+    // Routing overrides may change the model or tariff; price only a known fixed route.
+    const card = hasFixedTokenPricing({ providerOptions }) ? entry?.rateCard : undefined
+    const fixed = (responseModelId?: string, routedModelId?: string) =>
+      (!responseModelId || responseModelId === modelId) &&
+      (!routedModelId || routedModelId === modelId)
+    const estimator: ImageCostEstimator = {
+      estimateReservation: ({ n, promptTokens, inputImages, dimensions }) => {
+        if (!card) return undefined
+        const tokens = card.input !== undefined
+        // Token-priced images and reference images have no token bound before the call.
+        if (tokens && (card.images === undefined || inputImages > 0)) return undefined
+        return estimateModelReservation({
+          ...(tokens
+            ? { inputTokens: promptTokens, outputTokens: IMAGE_TEXT_OUTPUT_ALLOWANCE }
+            : {}),
+          outputImages: n,
+          dimensions,
+          rateCard: card,
+        })
+      },
+      estimate: ({ usage, responseModelId, route, dimensions }) =>
+        rateModelCall({
+          usage,
+          rateCard: fixed(responseModelId, route?.modelId) ? card : undefined,
+          ...(dimensions === undefined ? {} : { dimensions }),
+        }),
+    }
+    return {
+      protocol: entry?.protocol ?? "image",
+      ...(entry?.name ? { name: entry.name } : {}),
+      ...(entry?.description ? { description: entry.description } : {}),
+      estimator,
+    }
+  }
+
+  async speechResolution(
+    modelId: string,
+    providerOptions: JsonObject | undefined
+  ): Promise<GatewaySpeechResolution> {
+    let entry: MediaCatalogEntry | undefined
+    try {
+      await this.load()
+      entry = this.speechModels.get(modelId)
+    } catch {
+      console.warn("[SixbVercelGateway] Speech pricing unavailable; cost limits will fail closed.")
+    }
+    const card = hasFixedTokenPricing({ providerOptions }) ? entry?.rateCard : undefined
+    const estimator: SpeechCostEstimator = {
+      // Token-priced speech has no output bound before the call, so only characters reserve.
+      estimateReservation: ({ text }) =>
+        card?.characters === undefined
+          ? undefined
+          : estimateModelReservation({ inputCharacters: text.length, rateCard: card }),
+      estimate: ({ usage, responseModelId, route, dimensions }) =>
+        rateModelCall({
+          usage,
+          rateCard:
+            (!responseModelId || responseModelId === modelId) &&
+            (!route?.modelId || route.modelId === modelId)
+              ? card
+              : undefined,
+          ...(dimensions === undefined ? {} : { dimensions }),
+        }),
+    }
+    return {
+      ...(entry?.name ? { name: entry.name } : {}),
+      ...(entry?.description ? { description: entry.description } : {}),
+      estimator,
+    }
+  }
 
   async transcriptionEstimator(
     modelId: string,
@@ -541,10 +704,38 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
     const rateCards = new Map<string, ModelRateCard>()
     const decisions = new Map<string, DecisionModelDefinition>()
     const transcriptionRates = new Map<string, string>()
+    const imageModels = new Map<
+      string,
+      MediaCatalogEntry & { readonly protocol: "image" | "chat" }
+    >()
+    const speechModels = new Map<string, MediaCatalogEntry>()
     for (const entry of body.data) {
       const model = object(entry)
       const id = string(model?.id)
       const pricing = object(model?.pricing)
+      const media = {
+        ...(string(model?.name) ? { name: string(model?.name) } : {}),
+        ...(string(model?.description) ? { description: string(model?.description) } : {}),
+      }
+      if (id && model?.type === "image") {
+        imageModels.set(id, { ...media, protocol: "image", ...imageRateCard(pricing) })
+      }
+      if (
+        id &&
+        model?.type === "language" &&
+        stringArray(model.tags).includes("image-generation")
+      ) {
+        // Their listed output price is the text rate: without a per-image price, stay unpriced.
+        const card = imageRateCard(pricing)
+        imageModels.set(id, {
+          ...media,
+          protocol: "chat",
+          ...(card.rateCard?.images === undefined ? {} : card),
+        })
+      }
+      if (id && model?.type === "speech") {
+        speechModels.set(id, { ...media, ...speechRateCard(pricing) })
+      }
       if (id && model?.type === "transcription" && pricing?.varies_by_provider !== true) {
         const rate = string(pricing?.transcription_duration_cost_per_second)
         if (rate.length <= 64 && decimal(rate)) transcriptionRates.set(id, rate)
@@ -572,6 +763,10 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
     for (const [id, card] of rateCards) this.rateCards.set(id, card)
     this.decisionDefinitions.clear()
     for (const [id, definition] of decisions) this.decisionDefinitions.set(id, definition)
+    this.imageModels.clear()
+    for (const [id, entry] of imageModels) this.imageModels.set(id, entry)
+    this.speechModels.clear()
+    for (const [id, entry] of speechModels) this.speechModels.set(id, entry)
     const merged = new Map(discovered.map((definition) => [definition.modelId, definition]))
     for (const definition of this.supplied.values()) merged.set(definition.modelId, definition)
     return Object.freeze([...merged.values()])
@@ -678,6 +873,37 @@ function modelRateCard(raw: JsonObject | undefined): ModelRateCard | undefined {
     output,
     ...(cacheReadInput === undefined ? {} : { cacheReadInput }),
     ...(cacheWriteInput === undefined ? {} : { cacheWriteInput }),
+  }
+}
+
+/** Token prices when the catalog lists both, and the per-image price beside them. */
+function imageRateCard(raw: JsonObject | undefined): { readonly rateCard?: ModelRateCard } {
+  if (!raw || raw.varies_by_provider === true) return {}
+  const images = gatewayImagePrice(raw)
+  return mediaRateCard({ ...modelRateCard(raw), ...(images === undefined ? {} : { images }) })
+}
+
+/** Character prices, or token prices with an audio output rate. */
+function speechRateCard(raw: JsonObject | undefined): { readonly rateCard?: ModelRateCard } {
+  if (!raw || raw.varies_by_provider === true) return {}
+  const characters = string(raw.speech_input_character_cost)
+  if (decimal(characters)) {
+    return mediaRateCard({ characters: perTokenToPerMillion(characters) })
+  }
+  const tokens = modelRateCard(raw)
+  const audioOutput = tokenPrice(raw.audio_output_token_cost, undefined)
+  return tokens && audioOutput ? mediaRateCard({ ...tokens, audioOutput }) : {}
+}
+
+function mediaRateCard(prices: Omit<ModelRateCard, "currency">): {
+  readonly rateCard?: ModelRateCard
+} {
+  if (Object.keys(prices).length === 0) return {}
+  try {
+    return { rateCard: defineModelRateCard({ currency: "USD", ...prices }) }
+  } catch {
+    // A table the rate card cannot represent stays unpriced; the reported cost still applies.
+    return {}
   }
 }
 
