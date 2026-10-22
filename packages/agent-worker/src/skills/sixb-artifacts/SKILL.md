@@ -64,9 +64,15 @@ publish_artifact_version({ id: "art_k3m9q2x7tp", path: "work/q3-review", title: 
 → Published "Q3 operations review" as artifact art_k3m9q2x7tp, version 2.
 ```
 
-An entry with `"edited": true` was changed by a person in the app after you last published it: a
-sheet's cells or columns, a canvas's notes and layout. Start from that version as it is, and keep
-their changes in yours unless they ask you to undo them; say what you built on when you reply.
+An entry with `"edited": true` has a latest version published outside this conversation after you
+last published it: most often a person's edit in the app, such as a sheet's cells or columns or a
+canvas's notes and layout, but also another conversation or the project's code. Start from that
+version as it is, and keep its changes in yours unless the user asks you to undo them; say what you
+built on when you reply.
+
+If the artifact moves on while you work, `publish_artifact_version` refuses rather than publish
+over the newer version, says who published it, and installs it in place of your copy. Start again
+from that copy, keep its changes, make yours again, and publish.
 
 An entry without a `directory` is not installed: the conversation's artifacts were too large to
 install together, or its files could not be read. Rebuild it in a working directory with the paths
