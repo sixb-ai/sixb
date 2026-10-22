@@ -22,7 +22,6 @@ async function setup() {
   const controller = new AbortController()
   const rateCard = defineModelRateCard({
     currency: "USD",
-    unit: "million-tokens",
     input: "1",
     output: "0",
   })

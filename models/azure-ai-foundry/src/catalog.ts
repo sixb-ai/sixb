@@ -1,9 +1,9 @@
 import {
   defineLanguageModel,
   defineModelRateCard,
-  type LanguageModelRateCard,
   MODEL_REASONING_EFFORTS,
   ModelCatalogUnavailableError,
+  type ModelRateCard,
   type ModelReasoningCapabilities,
 } from "@sixb/core/models"
 import { fireworksPublisher } from "./publisher"
@@ -23,14 +23,14 @@ export interface CatalogModel {
   readonly modelName: string
   readonly protocol?: FoundryProtocol
   readonly definition: ReturnType<typeof defineLanguageModel>
-  readonly rateCard?: LanguageModelRateCard
+  readonly rateCard?: ModelRateCard
 }
 
 export interface CatalogEmbeddingModel {
   readonly kind: "embedding"
   readonly catalogProvider: "azure" | "fireworks-ai"
   readonly modelName: string
-  readonly rateCard?: LanguageModelRateCard
+  readonly rateCard?: ModelRateCard
 }
 
 type CatalogEntry = CatalogModel | CatalogEmbeddingModel
@@ -262,7 +262,7 @@ function reasoning(
 function rates(
   raw: Record<string, unknown> | undefined,
   protocol: FoundryProtocol | undefined
-): LanguageModelRateCard | undefined {
+): ModelRateCard | undefined {
   const card = parseRates(raw)
   if (protocol !== "messages" || card?.cacheWriteInput === undefined) return card
   // models.dev's Messages cache_write is five-minute creation, including in context tiers.
@@ -271,12 +271,12 @@ function rates(
   return defineModelRateCard({ ...rest, cacheWriteInput5m: cacheWriteInput })
 }
 
-function parseRates(raw: Record<string, unknown> | undefined): LanguageModelRateCard | undefined {
+function parseRates(raw: Record<string, unknown> | undefined): ModelRateCard | undefined {
   if (!raw || raw.tiers === undefined) return flatRates(raw)
   const { tiers, context_over_200k: legacy, ...base } = raw
   const card = flatRates(base)
   if (!card || !Array.isArray(tiers)) return undefined
-  const parsed: { size: number; card: LanguageModelRateCard }[] = []
+  const parsed: { size: number; card: ModelRateCard }[] = []
   for (const value of tiers) {
     const entry = object(value)
     if (!entry) return undefined
@@ -328,7 +328,6 @@ function parseRates(raw: Record<string, unknown> | undefined): LanguageModelRate
   }
   return defineModelRateCard({
     currency: "USD",
-    unit: "million-tokens",
     input: price("input")!,
     output: price("output")!,
     ...(card.cacheReadInput === undefined ? {} : { cacheReadInput: price("cacheReadInput")! }),
@@ -336,7 +335,7 @@ function parseRates(raw: Record<string, unknown> | undefined): LanguageModelRate
   })
 }
 
-function flatRates(raw: Record<string, unknown> | undefined): LanguageModelRateCard | undefined {
+function flatRates(raw: Record<string, unknown> | undefined): ModelRateCard | undefined {
   if (!raw) return undefined
   // These are reference prices per million tokens. Unrepresented tiers/dimensions must not
   // silently become flat prices; callers can supply an estimator for those billing contracts.
@@ -358,7 +357,6 @@ function flatRates(raw: Record<string, unknown> | undefined): LanguageModelRateC
     return undefined
   return defineModelRateCard({
     currency: "USD",
-    unit: "million-tokens",
     input,
     output,
     ...(read === undefined ? {} : { cacheReadInput: read }),

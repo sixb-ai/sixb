@@ -66,7 +66,6 @@ test("keeps concurrent bindings isolated through completion and cancellation", a
   })
   const card = {
     currency: "USD",
-    unit: "million-tokens",
     input: "1",
     output: "2",
     cacheReadInput: "0.1",

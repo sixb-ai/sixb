@@ -5,7 +5,6 @@ import { foundryChatEstimator, foundryChatUsage } from "../src/chat-accounting"
 
 const card = {
   currency: "USD",
-  unit: "million-tokens",
   input: "2",
   cacheReadInput: "1",
   output: "10",

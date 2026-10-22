@@ -981,7 +981,7 @@ export type {
 export type {
   LanguageModel,
   LanguageModelDefinition,
-  LanguageModelRateCard,
+  ModelRateCard,
   ProviderData,
 } from "./models"
 export type {

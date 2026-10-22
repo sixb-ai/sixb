@@ -1,5 +1,5 @@
 import type { ModelRoute, ModelUsage } from "./events"
-import type { LanguageModelRateCard, ModelTokenPrice } from "./rate-card"
+import type { ModelRateCard, ModelTokenPrice } from "./rate-card"
 
 /** Optional local financial enrichment cannot discard a completed, billable call. */
 export function estimateModelCall(
@@ -79,7 +79,7 @@ export type ModelCallCost =
 export function estimateModelReservation(input: {
   readonly inputTokens: number
   readonly outputTokens: number
-  readonly rateCard?: LanguageModelRateCard
+  readonly rateCard?: ModelRateCard
 }): ModelMoney | undefined {
   if (!input.rateCard) return undefined
   if (![input.inputTokens, input.outputTokens].every((n) => Number.isSafeInteger(n) && n >= 0)) {
@@ -121,17 +121,17 @@ export function estimateModelReservation(input: {
 /** Prefer the provider's bill over rate-card estimates, then rate complete token meters locally. */
 export function rateModelCall(input: {
   readonly usage: ModelUsage
-  readonly rateCard?: LanguageModelRateCard
+  readonly rateCard?: ModelRateCard
   readonly reported?: undefined
 }): ModelCostEstimate
 export function rateModelCall(input: {
   readonly usage: ModelUsage
-  readonly rateCard?: LanguageModelRateCard
+  readonly rateCard?: ModelRateCard
   readonly reported?: ModelReportedCost
 }): ModelCallCost
 export function rateModelCall(input: {
   readonly usage: ModelUsage
-  readonly rateCard?: LanguageModelRateCard
+  readonly rateCard?: ModelRateCard
   readonly reported?: ModelReportedCost
 }): ModelCallCost {
   if (input.reported) {
@@ -235,7 +235,7 @@ type PartitionResult =
     }
   | Extract<ModelCallCost, { status: "unpriceable" }>
 
-function partitionInputUsage(usage: ModelUsage, rateCard: LanguageModelRateCard): PartitionResult {
+function partitionInputUsage(usage: ModelUsage, rateCard: ModelRateCard): PartitionResult {
   const hasSpecificWrites =
     usage.cacheWrite5mInputTokens !== undefined || usage.cacheWrite1hInputTokens !== undefined
   const cacheWriteSpecific =

@@ -40,7 +40,7 @@ function fakeModel(
       estimate: ({ usage }) =>
         rateModelCall({
           usage,
-          rateCard: { currency: "USD", unit: "million-tokens", input: "1", output: "2" },
+          rateCard: { currency: "USD", input: "1", output: "2" },
         }),
     },
     async stream(request) {

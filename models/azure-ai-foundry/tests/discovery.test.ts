@@ -221,7 +221,6 @@ test("pins online/offline snapshots and preserves explicit configuration through
     request: { temperature: 0.2 },
     rateCard: {
       currency: "USD" as const,
-      unit: "million-tokens" as const,
       input: "2",
       output: "10",
       cacheReadInput: "1",

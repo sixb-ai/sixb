@@ -2,8 +2,8 @@ import {
   defineModelRateCard,
   estimateModelReservation,
   type JsonObject,
-  type LanguageModelRateCard,
   type ModelCostEstimator,
+  type ModelRateCard,
   type ModelUsage,
   rateModelCall,
 } from "@sixb/core/models"
@@ -44,7 +44,7 @@ export function foundryUsage(
 }
 
 export function foundryEstimator(
-  card: LanguageModelRateCard | undefined,
+  card: ModelRateCard | undefined,
   request: JsonObject | undefined,
   modelName?: string,
   modelVersion?: string,
@@ -62,7 +62,7 @@ export function foundryEstimator(
 }
 
 export function tokenEstimator(
-  card: LanguageModelRateCard | undefined,
+  card: ModelRateCard | undefined,
   request: JsonObject | undefined,
   requestKeys: readonly string[],
   tokenMeters: (raw: JsonObject | undefined) => boolean,

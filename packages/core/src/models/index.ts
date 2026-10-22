@@ -147,8 +147,8 @@ export type {
 } from "./pricing"
 export { estimateModelReservation, rateModelCall } from "./pricing"
 export type {
-  LanguageModelRateCard,
   ModelPricingTier,
+  ModelRateCard,
   ModelTokenPrice,
   ModelUnitPrice,
 } from "./rate-card"

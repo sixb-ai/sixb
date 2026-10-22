@@ -153,7 +153,6 @@ test("cache-write tiers and reservations stay pinned across catalog refresh", as
 test("explicit zero cache writes are usable with catalog write rates; absent counts stay unknown", () => {
   const card = {
     currency: "USD",
-    unit: "million-tokens",
     input: "1",
     output: "2",
     cacheReadInput: "0.1",
