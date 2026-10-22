@@ -13,9 +13,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
 })
 
-async function startSupervisor(
-  holdStoppedState = false
-): Promise<{ manifestPath: string; root: string }> {
+async function startSupervisor(preload?: string): Promise<{ manifestPath: string; root: string }> {
   const root = await mkdtemp(join(tmpdir(), "sixb-supervisor-"))
   const manifest: ProcessManifest = {
     version: 1,
@@ -67,9 +65,7 @@ async function startSupervisor(
   const supervisor = Bun.spawn(
     [
       process.execPath,
-      ...(holdStoppedState
-        ? ["--preload", resolve(import.meta.dir, "fixtures/hold-stopped-state.ts")]
-        : []),
+      ...(preload ? ["--preload", resolve(import.meta.dir, "fixtures", preload)] : []),
       helper,
       "supervise",
       "--manifest",
@@ -168,7 +164,7 @@ describe("supervisor", () => {
   // Reproduce: remove the final awaited writeState() in stopManaged(). The stop response then
   // overtakes the held state write, leaving status at "stopping" after a successful command.
   test("publishes the stopped state before acknowledging stop", async () => {
-    const { manifestPath, root } = await startSupervisor(true)
+    const { manifestPath, root } = await startSupervisor("hold-stopped-state.ts")
     await until(
       () => status(manifestPath),
       (value) => value.processes[0]?.status === "running"
@@ -194,6 +190,29 @@ describe("supervisor", () => {
 
     expect((await stopped).exitCode).toBe(0)
     expect((await status(manifestPath)).processes[0]?.status).toBe("stopped")
+  }, 10_000)
+
+  // Reproduce: write the response with a plain writeFile in the supervisor's writeResponse(). The
+  // empty file then sits at its final path while held, and the polling client fails to parse it.
+  test("never shows a response before its content", async () => {
+    const { manifestPath, root } = await startSupervisor("hold-response-write.ts")
+    await until(
+      () => status(manifestPath),
+      (value) => value.running
+    )
+
+    const answered = ctl(manifestPath, "restart", "sentinel")
+    try {
+      await until(() => Bun.file(join(root, "run", "response-write-held")).exists(), Boolean)
+      const visible = await readdir(join(root, "run", "responses"))
+      expect(visible.filter((name) => name.endsWith(".json"))).toEqual([])
+    } finally {
+      await writeFile(join(root, "run", "release-response-write"), "")
+    }
+
+    const unknown = await answered
+    expect(unknown.exitCode).toBe(1)
+    expect(unknown.stderr).toContain("No service named 'sentinel'")
   }, 10_000)
 })
 

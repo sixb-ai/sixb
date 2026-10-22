@@ -47,10 +47,17 @@ export async function readProcessState(path: string): Promise<ProcessState | nul
   return parseProcessState(JSON.parse(raw), path)
 }
 
-/** Writes through a rename, so a reader never sees half a file. */
 export async function writeProcessState(path: string, state: ProcessState): Promise<void> {
+  await writeFileAtomically(path, `${JSON.stringify(state, null, 2)}\n`)
+}
+
+/**
+ * Writes through a rename, so a reader never sees half a file. The temporary name ends in
+ * `.tmp`, which keeps it out of the supervisor's `*.json` control scan.
+ */
+export async function writeFileAtomically(path: string, content: string): Promise<void> {
   const temporary = `${path}.${process.pid}.tmp`
-  await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, "utf8")
+  await writeFile(temporary, content, "utf8")
   await rename(temporary, path)
 }
 
