@@ -30,10 +30,6 @@ export const en = {
       `${plural("en", models, { one: "1 model", other: `${models} models` })} · ${plural("en", providers, { one: "1 provider", other: `${providers} providers` })}`,
     coverage: "Pricing coverage",
     coverageDetail: (rated: string, total: string) => `${rated} of ${total} calls valued`,
-    audio: "Audio duration",
-    audioDetail: (count: number, calls: string) =>
-      plural("en", count, { one: "Reported for 1 call", other: `Reported for ${calls} calls` }),
-    seconds: (value: string) => `${value} s`,
   },
   reporting: {
     none: "No model calls",
@@ -44,6 +40,47 @@ export const en = {
     unavailable: (count: string, total: string) =>
       `Unavailable — complete usage reported for ${count} of ${total} calls`,
     field: (count: string, total: string) => `Usage reported for ${count} of ${total} calls`,
+    // When images, speech, transcription or reranking ran too: those report no tokens.
+    tokenBilled: {
+      complete: (_count: string, total: string) =>
+        `Complete — reported by all ${total} token-billed calls`,
+      partial: (count: string, total: string) =>
+        `Partial — reported by ${count} of ${total} token-billed calls`,
+      unavailable: (count: string, total: string) =>
+        `Unavailable — reported by ${count} of ${total} token-billed calls`,
+      field: (count: string, total: string) =>
+        `Usage reported for ${count} of ${total} token-billed calls`,
+      fieldAll: "Reported by all token-billed calls",
+    },
+    period: (count: string, total: string) => `Tokens reported for ${count} of ${total} calls`,
+  },
+  units: {
+    tokens: (count: string) => `${count} tokens`,
+    images: (count: number, formatted: string) =>
+      plural("en", count, { one: "1 image", other: `${formatted} images` }),
+    characters: (count: number, formatted: string) =>
+      plural("en", count, { one: "1 character", other: `${formatted} characters` }),
+    searches: (count: number, formatted: string) =>
+      plural("en", count, { one: "1 search", other: `${formatted} searches` }),
+    audio: (duration: string) => `${duration} of audio`,
+    seconds: (value: string) => `${value} s`,
+    minutes: (minutes: string, seconds: string) => `${minutes} min ${seconds} s`,
+    hours: (hours: string, minutes: string) => `${hours} h ${minutes} min`,
+  },
+  kinds: {
+    names: {
+      language: "Language",
+      embedding: "Embeddings",
+      decision: "Decisions",
+      reranking: "Reranking",
+      image: "Images",
+      speech: "Speech",
+      transcription: "Transcription",
+      video: "Video",
+      unclassified: "Unclassified",
+    },
+    calls: (count: number, formatted: string) =>
+      plural("en", count, { one: "1 call", other: `${formatted} calls` }),
   },
   partialTitle: "Accounting coverage is partial",
   partialTokens: (reporting: string) => `${reporting}; token totals include only known counts`,
@@ -60,6 +97,10 @@ export const en = {
     noCostRange: "No valued calls in this range",
     costByModel: "Cost by model",
     costByModelDescription: "The highest recorded cost",
+    costByKind: "Cost by kind",
+    breakdownBy: "Break the cost down by",
+    byModel: "Model",
+    byKind: "Kind",
     tokens: "Token usage",
     tokensDescription: (reporting: string) => `Known input and output tokens. ${reporting}`,
     input: "Input",
@@ -114,10 +155,8 @@ export const en = {
     workflow: (id: string) => `Workflow · ${id}`,
     action: (id: string) => `Action · ${id}`,
     request: (id: string) => `Request · ${id}`,
-    tokens: (count: string) => `${count} tokens`,
-    audio: (seconds: string) => `${seconds} s audio`,
-    transcription: "Transcription",
     reasoning: (level: string) => `${level} reasoning`,
+    unitPrice: (quantity: string, price: string) => `${quantity} × ${price}`,
     reasoningBudget: (count: string) => `${count}-token reasoning budget`,
     withoutCost: (count: string) => `${count} without cost`,
     costAvailable: "Cost available",
@@ -250,10 +289,6 @@ export const fr: Translation<AiUsageMessages> = {
       `${plural("fr", models, { one: "1 modèle", other: `${models} modèles` })} · ${plural("fr", providers, { one: "1 fournisseur", other: `${providers} fournisseurs` })}`,
     coverage: "Couverture tarifaire",
     coverageDetail: (rated: string, total: string) => `${rated} appels valorisés sur ${total}`,
-    audio: "Durée audio",
-    audioDetail: (count: number, calls: string) =>
-      plural("fr", count, { one: "Déclarée pour 1 appel", other: `Déclarée pour ${calls} appels` }),
-    seconds: (value: string) => `${value} s`,
   },
   reporting: {
     none: "Aucun appel de modèle",
@@ -264,6 +299,46 @@ export const fr: Translation<AiUsageMessages> = {
     unavailable: (count: string, total: string) =>
       `Indisponible — usage complet déclaré pour ${count} appels sur ${total}`,
     field: (count: string, total: string) => `Usage déclaré pour ${count} appels sur ${total}`,
+    tokenBilled: {
+      complete: (_count: string, total: string) =>
+        `Complet — déclaré par les ${total} appels facturés en jetons`,
+      partial: (count: string, total: string) =>
+        `Partiel — déclaré par ${count} des ${total} appels facturés en jetons`,
+      unavailable: (count: string, total: string) =>
+        `Indisponible — déclaré par ${count} des ${total} appels facturés en jetons`,
+      field: (count: string, total: string) =>
+        `Usage déclaré pour ${count} des ${total} appels facturés en jetons`,
+      fieldAll: "Déclaré par tous les appels facturés en jetons",
+    },
+    period: (count: string, total: string) => `Jetons déclarés pour ${count} appels sur ${total}`,
+  },
+  units: {
+    tokens: (count: string) => `${count} jetons`,
+    images: (count: number, formatted: string) =>
+      plural("fr", count, { one: "1 image", other: `${formatted} images` }),
+    characters: (count: number, formatted: string) =>
+      plural("fr", count, { one: "1 caractère", other: `${formatted} caractères` }),
+    searches: (count: number, formatted: string) =>
+      plural("fr", count, { one: "1 recherche", other: `${formatted} recherches` }),
+    audio: (duration: string) => `${duration} d’audio`,
+    seconds: (value: string) => `${value} s`,
+    minutes: (minutes: string, seconds: string) => `${minutes} min ${seconds} s`,
+    hours: (hours: string, minutes: string) => `${hours} h ${minutes} min`,
+  },
+  kinds: {
+    names: {
+      language: "Langage",
+      embedding: "Embeddings",
+      decision: "Décisions",
+      reranking: "Reclassement",
+      image: "Images",
+      speech: "Synthèse vocale",
+      transcription: "Transcription",
+      video: "Vidéo",
+      unclassified: "Non classés",
+    },
+    calls: (count: number, formatted: string) =>
+      plural("fr", count, { one: "1 appel", other: `${formatted} appels` }),
   },
   partialTitle: "La comptabilité est partielle",
   partialTokens: (reporting: string) =>
@@ -281,6 +356,10 @@ export const fr: Translation<AiUsageMessages> = {
     noCostRange: "Aucun appel valorisé sur cette période",
     costByModel: "Coût par modèle",
     costByModelDescription: "Les coûts enregistrés les plus élevés",
+    costByKind: "Coût par type",
+    breakdownBy: "Répartir le coût par",
+    byModel: "Modèle",
+    byKind: "Type",
     tokens: "Jetons utilisés",
     tokensDescription: (reporting: string) => `Jetons d’entrée et de sortie connus. ${reporting}`,
     input: "Entrée",
@@ -336,10 +415,8 @@ export const fr: Translation<AiUsageMessages> = {
     workflow: (id: string) => `Workflow · ${id}`,
     action: (id: string) => `Action · ${id}`,
     request: (id: string) => `Requête · ${id}`,
-    tokens: (count: string) => `${count} jetons`,
-    audio: (seconds: string) => `${seconds} s d’audio`,
-    transcription: "Transcription",
     reasoning: (level: string) => `raisonnement ${level}`,
+    unitPrice: (quantity: string, price: string) => `${quantity} × ${price}`,
     reasoningBudget: (count: string) => `budget de raisonnement de ${count} jetons`,
     withoutCost: (count: string) => `${count} sans coût`,
     costAvailable: "Coût disponible",

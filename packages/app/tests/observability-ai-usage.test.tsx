@@ -17,12 +17,14 @@ import { MemoryRouter } from "react-router-dom"
 import { SectionsProvider } from "../src/pages"
 import { ModelCallRow, ModelCalls } from "../src/pages/observability/ai-usage/calls"
 import {
+  formatDuration,
   formatLimitQuantity,
   limitAmountInput,
   limitSubjectChoices,
   limitUsedPercent,
   parseLimitAmount,
 } from "../src/pages/observability/ai-usage/format"
+import { useKindBreakdown } from "../src/pages/observability/ai-usage/kinds"
 import { ObservabilityAiUsagePage } from "../src/pages/observability/ai-usage/page"
 
 type Totals = GetAiAccountingOverviewResponse["totals"]
@@ -298,6 +300,121 @@ describe("AI usage", () => {
   })
 })
 
+describe("usage by kind", () => {
+  type Aggregate = Totals
+  const aggregate = (
+    calls: number,
+    complete: number,
+    extra: Partial<Aggregate["usage"]> = {}
+  ): Aggregate => ({
+    modelCallCount: calls,
+    usage: {
+      ...(complete ? { inputTokens: 900, outputTokens: 100, totalTokens: 1_000 } : {}),
+      ...extra,
+      reportingStatus: complete === calls ? "complete" : complete ? "partial" : "unavailable",
+    },
+    usageCoverage: {
+      completeCallCount: complete,
+      fieldCallCounts: fieldCounts({ inputTokens: complete, outputTokens: complete }),
+    },
+    costs: {
+      amounts: [{ currency: "USD", amountNanos: String(calls * 1_000_000) }],
+      ratedCallCount: calls,
+      unpriceableCallCount: 0,
+      unvaluedCallCount: 0,
+    },
+  })
+  const page = (kinds: GetAiAccountingOverviewResponse["kinds"], totals: Aggregate) =>
+    usagePage("2026-09-21T00:00:00.000Z", {
+      totals,
+      series: [{ ...totals, start: "2026-09-14T00:00:00.000Z", end: "2026-09-21T00:00:00.000Z" }],
+      models: [],
+      kinds,
+      agents: [],
+      workflows: [],
+    })
+
+  // Removal proof: measure token coverage against every call instead of tokenBilledCalls; the
+  // image and speech calls then read as missing tokens and the partial banner returns.
+  test("counts no missing tokens for calls billed per image, character or second", () => {
+    const html = page(
+      [
+        { modelKind: "language", ...aggregate(10, 10) },
+        { modelKind: "image", ...aggregate(4, 0, { outputImages: 6 }) },
+        { modelKind: "speech", ...aggregate(2, 0, { inputCharacters: 18_420 }) },
+        { modelKind: "transcription", ...aggregate(1, 0, { audioDurationMs: 1_284_600 }) },
+      ],
+      aggregate(17, 10, { outputImages: 6, inputCharacters: 18_420, audioDurationMs: 1_284_600 })
+    )
+
+    expect(html).toContain("Complete — reported by all 10 token-billed calls")
+    expect(html).not.toContain("Accounting coverage is partial")
+    expect(html).toContain('aria-label="Break the cost down by"')
+    expect(html).not.toContain("Audio duration")
+  })
+
+  // Removal proof: sort kinds by cost alone; the costly unclassified calls then lead the list.
+  test("break cost down by kind, each in what it produced, unclassified last", () => {
+    const overview: GetAiAccountingOverviewResponse = {
+      range: { from: "2026-09-14T00:00:00.000Z", to: "2026-09-21T00:00:00.000Z" },
+      bucket: "day",
+      totals: aggregate(1, 1),
+      series: [],
+      models: [],
+      kinds: [
+        { modelKind: "image", ...aggregate(4, 0, { outputImages: 6 }) },
+        { ...aggregate(40, 40) },
+        { modelKind: "speech", ...aggregate(2, 0, { inputCharacters: 18_420 }) },
+        { modelKind: "language", ...aggregate(10, 10) },
+        { modelKind: "transcription", ...aggregate(1, 0, { audioDurationMs: 1_284_600 }) },
+      ],
+      agents: [],
+      workflows: [],
+    }
+    function Rows() {
+      return useKindBreakdown(overview, "USD")
+        .map((row) => `${row.label} · ${row.detail} · ${row.value}`)
+        .join("\n")
+    }
+    expect(markup(<Rows />).split("\n")).toEqual([
+      "Language · 1K tokens · 0.01",
+      "Images · 6 images · 0.004",
+      "Speech · 18.4K characters · 0.002",
+      "Transcription · 21 min 25 s · 0.001",
+      "Unclassified · 1K tokens · 0.04",
+    ])
+  })
+
+  test("still flags token-billed calls that reported nothing", () => {
+    const html = page(
+      [
+        { modelKind: "language", ...aggregate(10, 8) },
+        { modelKind: "image", ...aggregate(4, 0, { outputImages: 6 }) },
+      ],
+      aggregate(14, 8, { outputImages: 6 })
+    )
+    expect(html).toContain("Partial — reported by 8 of 10 token-billed calls")
+    expect(html).toContain("Accounting coverage is partial")
+  })
+
+  test("needs no breakdown when every call generated language", () => {
+    const html = page([{ modelKind: "language", ...aggregate(10, 10) }], aggregate(10, 10))
+    expect(html).not.toContain("Break the cost down by")
+    expect(html).toContain("Complete — complete usage reported for 10 of 10 calls")
+  })
+
+  test("says durations the way people do", () => {
+    const units = {
+      seconds: (value: string) => `${value} s`,
+      minutes: (minutes: string, seconds: string) => `${minutes} min ${seconds} s`,
+      hours: (hours: string, minutes: string) => `${hours} h ${minutes} min`,
+    }
+    expect(formatDuration(1_250, units)).toBe("1.25 s")
+    expect(formatDuration(1_284_600, units)).toBe("21 min 25 s")
+    expect(formatDuration(3_840_000, units)).toBe("1 h 4 min")
+  })
+})
+
 function call(
   id: string,
   cost?: ListAiModelCallsResponse["items"][number]["cost"],
@@ -418,6 +535,59 @@ describe("model calls", () => {
     )
   })
 
+  // Removal proof: drop pricedAs from ModelCallRow; neither the matched size nor the price shows.
+  test("show an image call's count, matched size and unit price", () => {
+    const flux = call(
+      "flux",
+      {
+        status: "rated",
+        source: "estimate",
+        billingIdentity: { providerId: "gateway", modelId: "bfl/flux-3-image" },
+        pricingContext: {},
+        priceSource: {
+          sourceId: "model-rate-card",
+          sourceEntryId: "flux",
+          sourceVersion: "1",
+          observedAt: time,
+        },
+        money: { currency: "USD", amountNanos: "96000000" },
+        components: [
+          {
+            meter: "images.output",
+            quantity: "2",
+            rateAmountNanosPerMillion: "48000000000000",
+            chargeAmountNanos: "96000000",
+            variant: "1024x1024",
+          },
+        ],
+        ratedAt: time,
+      },
+      { outputImages: 2, reportingStatus: "partial" }
+    )
+    const html = markup(
+      <ModelCallRow call={{ ...flux, usage: { ...flux.usage, modelKind: "image" } }} />
+    )
+    expect(html).toContain("Images · 1024x1024")
+    expect(html).toContain("2 images")
+    expect(html).toContain("2 × USD 0.048")
+  })
+
+  test("sum each run's images and audio beside its tokens", () => {
+    const html = table({
+      data: {
+        ...data,
+        items: data.items.map((group) => ({
+          ...group,
+          outputImages: 4,
+          audioDurationMs: 184_200,
+        })),
+      },
+    })
+    expect(html).toContain("81,668 tokens")
+    expect(html).toContain("4 images")
+    expect(html).toContain("3 min 4 s of audio")
+  })
+
   // Removal proof: drop the audio duration from ModelCallRow; the duration disappears.
   test("show a transcription's duration without inventing tokens", () => {
     const transcription = call("audio", undefined, {
@@ -430,7 +600,7 @@ describe("model calls", () => {
       />
     )
     expect(html).toContain("Transcription")
-    expect(html).toContain("1.25 s audio")
+    expect(html).toContain("1.25 s of audio")
     expect(html).not.toContain("0 tokens")
   })
 })
