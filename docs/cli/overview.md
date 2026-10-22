@@ -139,7 +139,7 @@ sixb objects get-by Customer email ada@example.com
 | `workflows`, `workflow-runs` | Start workflows and inspect runs. |
 | `files` | Upload and download files. |
 | `users` | List and search the [member directory](../auth/members.md#read-the-member-directory), for example `sixb users search ava`. |
-| `models` | List the project's models of every kind, with their options and prices. |
+| `models` | List the project's models with their prices, and call them: text, images, speech, transcription. |
 
 These commands return JSON. Use scoped help for the operation you need, such as `sixb objects --help`.
 

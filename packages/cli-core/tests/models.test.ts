@@ -1,13 +1,23 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { createInstanceApiClient } from "../src"
-import { describePrice, findModel, models } from "../src/commands/models"
+import { describeCost, describePrice, findModel, models } from "../src/commands/models"
 import type { CliError } from "../src/output"
 
 let server: ReturnType<typeof Bun.serve> | undefined
+/** What the stub API received, and the routes a test adds beside the catalog. */
+let received: { method: string; path: string; body?: unknown; type?: string }[] = []
+let routes: Record<string, (request: Request) => Response | Promise<Response>> = {}
+const directories: string[] = []
 
-afterEach(() => {
+afterEach(async () => {
   server?.stop(true)
   server = undefined
+  received = []
+  routes = {}
+  for (const directory of directories.splice(0)) await rm(directory, { recursive: true })
 })
 
 const entry = (modelId: string, extra: Record<string, unknown> = {}) => ({
@@ -61,7 +71,26 @@ async function run(args: readonly string[]): Promise<unknown> {
   server ??= Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch: () => Response.json(catalog),
+    fetch: async (request) => {
+      const url = new URL(request.url)
+      const key = `${request.method} ${url.pathname}`
+      if (request.method === "POST" && url.pathname === "/api/files") {
+        // The part's own header, not a type Bun would infer from the file name: a Node client
+        // that labels nothing sends application/octet-stream, and the upload has no media type.
+        const raw = await request.text()
+        const type = /content-type: *([^\r\n]+)/i.exec(raw.split('name="file"')[1] ?? "")?.[1]
+        received.push({ method: request.method, path: url.pathname, type })
+        return Response.json({ blobId: "blob_upload", sizeBytes: 4, mediaType: type })
+      }
+      received.push({
+        method: request.method,
+        path: `${url.pathname}${url.search}`,
+        ...(request.method === "POST" ? { body: await request.json() } : {}),
+      })
+      const route = routes[key]
+      if (route) return route(request)
+      return Response.json(catalog)
+    },
   })
   const api = createInstanceApiClient({
     kind: "local",
@@ -188,5 +217,171 @@ describe("models", () => {
     expect((error as CliError).body.message).toBe(
       "Unknown model kind 'video'. Use one of: language, image, speech, transcription."
     )
+  })
+})
+
+const PNG = new Uint8Array([137, 80, 78, 71])
+const JPEG = new Uint8Array([255, 216, 255])
+const AUDIO = new TextEncoder().encode("ID3")
+const call = (extra: Record<string, unknown>) => ({
+  callId: "call_1",
+  model: { provider: "vercel-ai-gateway", modelId: "bfl/flux-3-image-klein" },
+  cost: { status: "reported", money: { currency: "USD", amountNanos: "8000000" } },
+  usage: {},
+  warnings: [],
+  ...extra,
+})
+
+/** Serve call_1's files: the file at /files/<index> is `bodies[index]`. */
+function serveFiles(bodies: readonly Uint8Array<ArrayBuffer>[]) {
+  routes["GET /api/ai/model-calls/call_1/files/content"] = (request) => {
+    const index = Number(new URL(request.url).searchParams.get("path")?.split("/")[2])
+    return new Response(bodies[index])
+  }
+}
+
+async function temporary(): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), "sixb-models-cli-"))
+  directories.push(directory)
+  return directory
+}
+
+describe("models generation", () => {
+  test("image writes each file where --output says, with the extension its type has", async () => {
+    const directory = await temporary()
+    const reference = join(directory, "sketch.png")
+    await Bun.write(reference, PNG)
+    routes["POST /api/models/image/generations"] = () =>
+      Response.json(call({ files: [{ mediaType: "image/png" }, { mediaType: "image/jpeg" }] }))
+    serveFiles([PNG, JPEG])
+
+    const output = join(directory, "out", "hero.png")
+    const result = await run([
+      "image",
+      "a fox",
+      "--output",
+      output,
+      "--model",
+      "bfl/flux-3-image-klein",
+      "--size",
+      "768x768",
+      "--n",
+      "2",
+      "--image",
+      reference,
+      "--image",
+      reference,
+    ])
+
+    const hero = join(directory, "out", "hero")
+    expect(result).toEqual({
+      callId: "call_1",
+      model: "bfl/flux-3-image-klein",
+      files: [`${hero}-1.png`, `${hero}-2.jpg`],
+      cost: "$0.008",
+    })
+    expect(new Uint8Array(await readFile(`${hero}-1.png`))).toEqual(PNG)
+    expect(new Uint8Array(await readFile(`${hero}-2.jpg`))).toEqual(JPEG)
+    // Removal proof: drop the media type from uploadInput's upload; the parts go unlabeled.
+    // Both references were uploaded as images before the call, which names the resolved model.
+    expect(received.filter((request) => request.path === "/api/files")).toEqual([
+      { method: "POST", path: "/api/files", type: "image/png" },
+      { method: "POST", path: "/api/files", type: "image/png" },
+    ])
+    expect(
+      received.find((request) => request.path === "/api/models/image/generations")?.body
+    ).toEqual({
+      model: { provider: "vercel-ai-gateway", modelId: "bfl/flux-3-image-klein" },
+      prompt: "a fox",
+      n: 2,
+      size: "768x768",
+      images: [
+        { blobId: "blob_upload", sizeBytes: 4, mediaType: "image/png" },
+        { blobId: "blob_upload", sizeBytes: 4, mediaType: "image/png" },
+      ],
+    })
+  })
+
+  test("speech takes a format, and a directory output names the file by its call", async () => {
+    const directory = await temporary()
+    routes["POST /api/models/audio/speech"] = () =>
+      Response.json(call({ files: [{ mediaType: "audio/wav" }], cost: { status: "unpriceable" } }))
+    serveFiles([AUDIO])
+
+    const result = await run(["speech", "Hello.", "--output", `${directory}/`, "--format", "wav"])
+
+    expect(result).toEqual({
+      callId: "call_1",
+      model: "bfl/flux-3-image-klein",
+      files: [join(directory, "call_1.wav")],
+      cost: "unknown",
+    })
+    expect(received.find((request) => request.path === "/api/models/audio/speech")?.body).toEqual({
+      text: "Hello.",
+      mediaType: "audio/wav",
+    })
+  })
+
+  test("text and transcribe answer with the text", async () => {
+    const directory = await temporary()
+    const audio = join(directory, "note.mp3")
+    await Bun.write(audio, AUDIO)
+    routes["POST /api/models/language/generations"] = () =>
+      Response.json(call({ text: "Shipped.", finishReason: "stop" }))
+    routes["POST /api/models/audio/transcriptions"] = () =>
+      Response.json(call({ text: "Hello there." }))
+
+    expect(await run(["text", "Status?", "--max-output-tokens", "20"])).toMatchObject({
+      text: "Shipped.",
+      finishReason: "stop",
+      cost: "$0.008",
+    })
+    expect(
+      received.find((request) => request.path === "/api/models/language/generations")?.body
+    ).toEqual({ prompt: "Status?", maxOutputTokens: 20 })
+    expect(await run(["transcribe", audio])).toMatchObject({ text: "Hello there." })
+    expect(received.find((request) => request.path === "/api/files")?.type).toBe("audio/mpeg")
+  })
+
+  test("calls get shows a call's files, or downloads them again", async () => {
+    const directory = await temporary()
+    const files = [{ blobId: "blob_1", mediaType: "image/png", sizeBytes: 4 }]
+    routes["GET /api/ai/model-calls/call_1"] = () =>
+      Response.json({ callId: "call_1", files, recordedAt: "2026-10-22T12:00:00.000Z" })
+    serveFiles([PNG])
+
+    expect(await run(["calls", "get", "call_1"])).toMatchObject({ callId: "call_1", files })
+    expect(await run(["calls", "get", "call_1", "--output", join(directory, "again")])).toEqual({
+      callId: "call_1",
+      files: [join(directory, "again.png")],
+    })
+  })
+
+  test("refuses a request it can tell is wrong before calling", async () => {
+    const directory = await temporary()
+    const notes = join(directory, "notes.txt")
+    await Bun.write(notes, "x")
+    const failure = (args: readonly string[]) =>
+      run(args).then(
+        () => undefined,
+        (error: CliError) => error.body.message
+      )
+
+    expect(await failure(["image", "a fox"])).toBe(
+      "models image requires --output <path>: a file, or a directory ending in /."
+    )
+    expect(await failure(["image", "a fox", "--output", "x.png", "--image", notes])).toBe(
+      `'${notes}' is not an image file. Use .png, .jpg, .jpeg, .webp, .gif.`
+    )
+    expect(await failure(["speech", "Hi.", "--output", "x.mp3", "--format", "midi"])).toBe(
+      "--format must be mp3, wav, ogg, aac, flac, or opus."
+    )
+    expect(received.filter((request) => request.method === "POST")).toEqual([])
+  })
+
+  test("reads a cost in dollars without rounding", () => {
+    expect(describeCost({ status: "rated", money: { amountNanos: "96000" } })).toBe("$0.000096")
+    expect(describeCost({ status: "reported", money: { amountNanos: "1250000000" } })).toBe("$1.25")
+    expect(describeCost({ status: "unpriceable" })).toBe("unknown")
   })
 })

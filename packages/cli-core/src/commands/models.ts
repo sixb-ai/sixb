@@ -1,5 +1,7 @@
+import { access, mkdir, stat } from "node:fs/promises"
+import { dirname, extname, join, parse } from "node:path"
 import type { ApiClient } from "../api-client"
-import { isHelp, parseCommandArgs, requestsHelp } from "../arguments"
+import { enumValue, integerInRange, isHelp, parseCommandArgs, requestsHelp } from "../arguments"
 import { fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
 
@@ -82,7 +84,288 @@ export async function models(api: ApiClient, args: readonly string[]): Promise<v
       ...(rateCard ? { rateCard } : {}),
     })
   }
+  if (sub === "text") return generateText(api, rest)
+  if (sub === "image") return generateImages(api, rest)
+  if (sub === "speech") return generateSpeech(api, rest)
+  if (sub === "transcribe") return transcribe(api, rest)
+  if (sub === "calls") return calls(api, rest)
   fail(`Unknown models command '${sub}'.`)
+}
+
+interface FileRef {
+  readonly blobId: string
+  readonly mediaType?: string
+  readonly sizeBytes: number
+}
+
+interface CallResult {
+  readonly callId: string
+  readonly model: { readonly provider: string; readonly modelId: string }
+  readonly cost: { readonly status: string; readonly money?: { readonly amountNanos: string } }
+  readonly text?: string
+  readonly finishReason?: string
+  readonly files?: readonly FileRef[]
+  readonly warnings?: readonly string[]
+}
+
+const SPEECH_FORMATS = {
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  ogg: "audio/ogg",
+  aac: "audio/aac",
+  flac: "audio/flac",
+  opus: "audio/opus",
+} as const
+const SPEECH_FORMAT_NAMES = Object.keys(SPEECH_FORMATS) as (keyof typeof SPEECH_FORMATS)[]
+
+// Files the commands upload, and the extension a downloaded file takes from its media type.
+const MEDIA_TYPES: Readonly<Record<string, string>> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".aac": "audio/aac",
+  ".flac": "audio/flac",
+  ".opus": "audio/opus",
+  ".m4a": "audio/mp4",
+  ".webm": "audio/webm",
+}
+const EXTENSIONS: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(MEDIA_TYPES)
+    .filter(([extension]) => extension !== ".jpeg")
+    .map(([extension, mediaType]) => [mediaType, extension])
+)
+
+async function generateText(api: ApiClient, args: readonly string[]): Promise<void> {
+  const { positionals, options } = parseCommandArgs(
+    args,
+    {
+      "--model": "string",
+      "--instructions": "string",
+      "--max-output-tokens": "string",
+      "--reasoning": "string",
+    },
+    "models text",
+    1
+  )
+  const maxOutputTokens = options["--max-output-tokens"]
+  const result = (await api.post("/api/models/language/generations", {
+    ...(await modelRef(api, options["--model"], "language")),
+    prompt: positionals[0],
+    ...(options["--instructions"] === undefined ? {} : { instructions: options["--instructions"] }),
+    ...(maxOutputTokens === undefined
+      ? {}
+      : { maxOutputTokens: integerInRange("--max-output-tokens", maxOutputTokens, 1, 1_000_000) }),
+    ...(options["--reasoning"] === undefined ? {} : { reasoning: options["--reasoning"] }),
+  })) as CallResult
+  writeJson({
+    callId: result.callId,
+    model: result.model.modelId,
+    text: result.text,
+    finishReason: result.finishReason,
+    cost: describeCost(result.cost),
+  })
+}
+
+async function generateImages(api: ApiClient, args: readonly string[]): Promise<void> {
+  const { positionals, options } = parseCommandArgs(
+    args,
+    {
+      "--output": "string",
+      "--model": "string",
+      "--n": "string",
+      "--size": "string",
+      "--aspect-ratio": "string",
+      "--quality": "string",
+      "--style": "string",
+      "--seed": "string",
+      "--image": "strings",
+    },
+    "models image",
+    1
+  )
+  const output = requireOutput(options["--output"], "models image")
+  const seed = options["--seed"]
+  if (seed !== undefined && !/^-?[0-9]+$/.test(seed)) fail("--seed must be an integer.")
+  const model = await modelRef(api, options["--model"], "image")
+  const images = []
+  for (const path of options["--image"] ?? []) images.push(await uploadInput(api, path, "image"))
+  const result = (await api.post("/api/models/image/generations", {
+    ...model,
+    prompt: positionals[0],
+    ...(options["--n"] === undefined ? {} : { n: integerInRange("--n", options["--n"], 1, 100) }),
+    ...optional("size", options["--size"]),
+    ...optional("aspectRatio", options["--aspect-ratio"]),
+    ...optional("quality", options["--quality"]),
+    ...optional("style", options["--style"]),
+    ...(seed === undefined ? {} : { seed: Number(seed) }),
+    ...(images.length > 0 ? { images } : {}),
+  })) as CallResult
+  writeJson(await savedResult(api, result, output))
+}
+
+async function generateSpeech(api: ApiClient, args: readonly string[]): Promise<void> {
+  const { positionals, options } = parseCommandArgs(
+    args,
+    {
+      "--output": "string",
+      "--model": "string",
+      "--voice": "string",
+      "--format": "string",
+      "--instructions": "string",
+      "--speed": "string",
+      "--language": "string",
+    },
+    "models speech",
+    1
+  )
+  const output = requireOutput(options["--output"], "models speech")
+  const format = options["--format"]
+  const speed = options["--speed"]
+  if (speed !== undefined && !(Number(speed) > 0)) fail("--speed must be a positive number.")
+  const result = (await api.post("/api/models/audio/speech", {
+    ...(await modelRef(api, options["--model"], "speech")),
+    text: positionals[0],
+    ...optional("voice", options["--voice"]),
+    ...(format === undefined
+      ? {}
+      : { mediaType: SPEECH_FORMATS[enumValue("--format", format, SPEECH_FORMAT_NAMES)] }),
+    ...optional("instructions", options["--instructions"]),
+    ...(speed === undefined ? {} : { speed: Number(speed) }),
+    ...optional("language", options["--language"]),
+  })) as CallResult
+  writeJson(await savedResult(api, result, output))
+}
+
+async function transcribe(api: ApiClient, args: readonly string[]): Promise<void> {
+  const { positionals, options } = parseCommandArgs(
+    args,
+    { "--model": "string" },
+    "models transcribe",
+    1
+  )
+  const model = await modelRef(api, options["--model"], "transcription")
+  const audio = await uploadInput(api, positionals[0] ?? "", "audio")
+  const result = (await api.post("/api/models/audio/transcriptions", {
+    ...model,
+    audio,
+  })) as CallResult
+  writeJson({
+    callId: result.callId,
+    model: result.model.modelId,
+    text: result.text,
+    cost: describeCost(result.cost),
+  })
+}
+
+async function calls(api: ApiClient, args: readonly string[]): Promise<void> {
+  const [sub, ...rest] = args
+  if (sub !== "get") fail(`Unknown models calls command '${sub ?? ""}'. Use 'models calls get'.`)
+  const { positionals, options } = parseCommandArgs(
+    rest,
+    { "--output": "string" },
+    "models calls get",
+    1
+  )
+  const callId = positionals[0] ?? ""
+  const call = (await api.get(`/api/ai/model-calls/${encodeURIComponent(callId)}`)) as {
+    readonly callId: string
+    readonly files: readonly FileRef[]
+  }
+  const output = options["--output"]
+  if (output === undefined) return writeJson(call)
+  writeJson({ callId: call.callId, files: await saveFiles(api, call.callId, call.files, output) })
+}
+
+/** A --model reference as the request body names it; absent, the kind's default answers. */
+async function modelRef(
+  api: ApiClient,
+  reference: string | undefined,
+  kind: ModelKind
+): Promise<{ model?: { provider: string; modelId: string } }> {
+  if (reference === undefined) return {}
+  const { entry } = findModel(
+    catalogEntries((await api.get("/api/models")) as Catalog),
+    reference,
+    kind
+  )
+  return { model: { provider: entry.provider, modelId: entry.modelId } }
+}
+
+function requireOutput(output: string | undefined, command: string): string {
+  if (!output) fail(`${command} requires --output <path>: a file, or a directory ending in /.`)
+  return output
+}
+
+function optional(field: string, value: string | undefined): Record<string, string> {
+  return value === undefined ? {} : { [field]: value }
+}
+
+async function uploadInput(api: ApiClient, path: string, kind: "image" | "audio") {
+  try {
+    await access(path)
+  } catch {
+    fail(`Input file '${path}' does not exist.`)
+  }
+  const mediaType = MEDIA_TYPES[extname(path).toLowerCase()]
+  if (!mediaType?.startsWith(`${kind}/`)) {
+    const accepted = Object.entries(MEDIA_TYPES)
+      .filter(([, type]) => type.startsWith(`${kind}/`))
+      .map(([extension]) => extension)
+    fail(`'${path}' is not an ${kind} file. Use ${accepted.join(", ")}.`)
+  }
+  return api.upload("/api/files", path, undefined, mediaType)
+}
+
+async function savedResult(api: ApiClient, result: CallResult, output: string) {
+  return {
+    callId: result.callId,
+    model: result.model.modelId,
+    files: await saveFiles(api, result.callId, result.files ?? [], output),
+    ...(result.warnings?.length ? { warnings: result.warnings } : {}),
+    cost: describeCost(result.cost),
+  }
+}
+
+/**
+ * Download a call's files. A directory (an existing one, or a path ending in /) receives
+ * `<call-id>.<ext>`; a file path is used as given, numbered when there are several. Either way the
+ * extension follows the file's media type, so the paths written are the ones returned.
+ */
+async function saveFiles(
+  api: ApiClient,
+  callId: string,
+  files: readonly FileRef[],
+  output: string
+): Promise<string[]> {
+  const directory = output.endsWith("/") || (await stat(output).catch(() => null))?.isDirectory()
+  const paths = files.map((file, index) => {
+    const number = files.length > 1 ? `-${index + 1}` : ""
+    const extension = (file.mediaType && EXTENSIONS[file.mediaType]) ?? ""
+    if (directory) return join(output, `${callId}${number}${extension || ".bin"}`)
+    const { dir, name, ext } = parse(output)
+    return join(dir, `${name}${number}${extension || ext}`)
+  })
+  for (const [index, path] of paths.entries()) {
+    await mkdir(dirname(path), { recursive: true })
+    await api.download(`/api/ai/model-calls/${encodeURIComponent(callId)}/files/content`, path, {
+      path: `/files/${index}`,
+    })
+  }
+  return paths
+}
+
+/** What a call cost, in USD, as the provider reported it or the binding's card rated it. */
+export function describeCost(cost: CallResult["cost"]): string {
+  if (!cost.money) return "unknown"
+  const nanos = BigInt(cost.money.amountNanos)
+  const whole = nanos / 1_000_000_000n
+  const fraction = (nanos % 1_000_000_000n).toString().padStart(9, "0").replace(/0+$/, "")
+  return `$${whole}${fraction ? `.${fraction}` : ""}`
 }
 
 function modelKind(value: string): ModelKind {
