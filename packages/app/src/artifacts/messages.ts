@@ -43,6 +43,7 @@ export const en = {
     undo: "Undo",
     redo: "Redo",
     save: (version: number) => `Save as version ${number(version)}`,
+    saveShort: "Save",
     saving: "Saving…",
     saveFailed: "Your changes could not be saved. Try again.",
     saveRefused: "This version can't be published as it is. Undo the change it names, then save.",
@@ -433,6 +434,7 @@ export const fr: Translation<ArtifactMessages> = {
     undo: "Annuler",
     redo: "Rétablir",
     save: (version) => `Enregistrer la version ${numberFr(version)}`,
+    saveShort: "Enregistrer",
     saving: "Enregistrement…",
     saveFailed: "Impossible d’enregistrer vos modifications. Réessayez.",
     saveRefused:

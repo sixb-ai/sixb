@@ -39,6 +39,7 @@ import {
   Maximize2,
   PencilLine,
   Redo2,
+  Trash2,
   TriangleAlert,
   Undo2,
   X,
@@ -519,15 +520,27 @@ function ArtifactHeader({
   const messages = useArtifactMessages()
   const { artifact } = detail
   if (edit.editing) {
-    // The draft bar: what is being edited, Discard, and Save as the next version.
+    // The draft bar: what is being edited, Discard, and Save as the next version. As the header
+    // narrows, down to a phone's dialog, the state and Discard fold to icons, Save drops the
+    // version, and the kind and full page give way, so Save and Close stay in view.
     const saving = edit.saving.state === "saving"
+    const state = edit.changed ? messages.edit.unsaved : messages.edit.editing(version.version)
+    const saveLabel = saving ? messages.edit.saving : messages.edit.save(edit.next)
     return (
       <ViewerBar
         chrome={chrome}
-        leading={<ArtifactKindTile kind={artifact.kind} label={messages.kinds[artifact.kind]} />}
+        editing
+        leading={
+          <span className="hidden @md:contents">
+            <ArtifactKindTile kind={artifact.kind} label={messages.kinds[artifact.kind]} />
+          </span>
+        }
         title={version.title}
         accessory={
-          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] px-2.5 py-0.5 text-xs font-medium whitespace-nowrap text-primary">
+          <span
+            title={state}
+            className="hidden h-5 shrink-0 items-center gap-1.5 rounded-full bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] px-[7px] py-0.5 text-xs font-medium whitespace-nowrap text-primary @xs:flex @3xl:px-2.5"
+          >
             <span
               aria-hidden="true"
               className={cn(
@@ -536,7 +549,7 @@ function ArtifactHeader({
                   "shadow-[0_0_0_3px_color-mix(in_oklab,var(--primary)_22%,transparent)]"
               )}
             />
-            {edit.changed ? messages.edit.unsaved : messages.edit.editing(version.version)}
+            <span className="sr-only @3xl:not-sr-only">{state}</span>
           </span>
         }
       >
@@ -557,17 +570,31 @@ function ArtifactHeader({
               <Redo2 />
             </HeaderButton>
           </div>
-          <Button size="sm" variant="ghost" onClick={edit.discard} disabled={saving}>
-            {messages.edit.discard}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={edit.discard}
+            disabled={saving}
+            aria-label={messages.edit.discard}
+            title={messages.edit.discard}
+            className="size-8 px-0 @lg:w-auto @lg:px-3"
+          >
+            {/* Wrapped, so the button keeps its padding when the label shows. */}
+            <span className="contents @lg:hidden">
+              <Trash2 aria-hidden="true" />
+            </span>
+            <span className="hidden @lg:inline">{messages.edit.discard}</span>
           </Button>
           <Button
             size="sm"
             onClick={() => void edit.save()}
             disabled={!edit.changed || saving}
             aria-keyshortcuts="Meta+S Control+S"
+            aria-label={saveLabel}
           >
             {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : null}
-            {saving ? messages.edit.saving : messages.edit.save(edit.next)}
+            {saving ? null : <span className="@xl:hidden">{messages.edit.saveShort}</span>}
+            <span className="hidden @xl:inline">{saveLabel}</span>
           </Button>
         </div>
       </ViewerBar>
@@ -747,12 +774,15 @@ function FileHeader({
  */
 function ViewerBar({
   chrome,
+  editing = false,
   leading,
   title,
   accessory,
   children,
 }: {
   readonly chrome: ViewerChrome
+  /** The draft bar: full page gives way to the draft's actions on a narrow header. */
+  readonly editing?: boolean
   /** What leads the title: an artifact's kind, or a file's type. */
   readonly leading?: ReactNode
   readonly title?: string
@@ -784,7 +814,11 @@ function ViewerBar({
         <div className="flex shrink-0 items-center gap-0.5">
           {children}
           {chrome.fullPageHref ? (
-            <HeaderLink to={chrome.fullPageHref} label={messages.openFullPage}>
+            <HeaderLink
+              to={chrome.fullPageHref}
+              label={messages.openFullPage}
+              {...(editing ? { className: "hidden @md:inline-flex" } : {})}
+            >
               <Maximize2 />
             </HeaderLink>
           ) : null}
@@ -855,6 +889,7 @@ function HeaderLink({
   href,
   download,
   target,
+  className,
   children,
 }: {
   readonly label: string
@@ -862,12 +897,13 @@ function HeaderLink({
   readonly href?: string
   readonly download?: string
   readonly target?: "_blank"
+  readonly className?: string
   readonly children: ReactNode
 }) {
   return (
     <HeaderTooltip label={label}>
       {to ? (
-        <Link to={to} className={HEADER_ACTION} aria-label={label}>
+        <Link to={to} className={cn(HEADER_ACTION, className)} aria-label={label}>
           {children}
         </Link>
       ) : (
