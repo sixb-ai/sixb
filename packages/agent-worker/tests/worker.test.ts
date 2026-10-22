@@ -67,6 +67,7 @@ import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import { workflowAgentStepActorId } from "@sixb/core/internal/workflows"
 import type {
+  ImageModel,
   LanguageModel,
   LanguageModelRequest,
   LanguageModelStreamEvent,
@@ -4740,6 +4741,35 @@ describe("AgentWorker", () => {
   })
 
   const STEP_REPOSITORY = "https://example.com/repository.git"
+
+  // Removal proof: drop modelKinds from resolveWorkflowAgentStepExecutionPlan's call; the step's
+  // prompt no longer names the image command.
+  test("tells an agent step which of the project's media models it can call", async () => {
+    let system: string | undefined
+    const painter: ImageModel = {
+      providerId: "test",
+      modelId: "painter",
+      definition: { kind: "image", providerId: "test", modelId: "painter" },
+      generate: async () => ({ output: { images: [] } }),
+    }
+    const model = promptCapturingAnswerModel((prompt) => {
+      system = prompt
+    })
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model,
+      models: { language: [model], image: [painter] },
+      runId: "workflow-media-models",
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      expect((await terminalWorkflowAgentNode(runs, nodeRunId)).status).toBe("succeeded")
+      expect(system).toContain('`sixb models image "<prompt>" --output out/image.png`')
+      expect(system).not.toContain("sixb models speech")
+    } finally {
+      await worker.stop()
+    }
+  })
 
   test("gives a workflow step without its own sandbox the project's blank sandbox", async () => {
     // Regression proof: give every workflow node's ephemeralRunSandbox the project factory's

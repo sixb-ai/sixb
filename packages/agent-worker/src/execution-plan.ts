@@ -6,6 +6,7 @@ import type {
   AgentToolCatalog,
   AgentToolDefinition,
   LanguageModelCatalog,
+  ModelCatalog,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { LanguageModel } from "@sixb/core/models"
@@ -32,6 +33,19 @@ export interface ResolvedAgentExecutionPlan {
   /** The requester's time zone and locale, when the run captured them. */
   readonly timeZone?: string
   readonly locale?: string
+  /** The kinds of model the sandbox CLI can call beside the agent's own, listed in the prompt. */
+  readonly modelKinds?: readonly SandboxModelKind[]
+}
+
+export type SandboxModelKind = "image" | "speech" | "transcription"
+
+/** The media models the project configures, which the agent reaches through `sixb models`. */
+export function sandboxModelKinds(models: ModelCatalog | undefined): readonly SandboxModelKind[] {
+  return [
+    ...(models?.image ? (["image"] as const) : []),
+    ...(models?.audio?.speech ? (["speech"] as const) : []),
+    ...(models?.audio?.transcription ? (["transcription"] as const) : []),
+  ]
 }
 
 /**
@@ -45,6 +59,7 @@ export function resolveAgentExecutionPlan(input: {
   readonly skills: AgentSkillCatalog
   readonly projectInstructions?: string
   readonly defaultMaxSteps: number
+  readonly modelKinds?: readonly SandboxModelKind[]
 }): ResolvedAgentExecutionPlan {
   const modelRef = input.spec?.model ?? input.models?.default
   const entry = modelRef ? input.models?.getByRef(modelRef) : undefined
@@ -66,6 +81,7 @@ export function resolveAgentExecutionPlan(input: {
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(input.spec?.timeZone === undefined ? {} : { timeZone: input.spec.timeZone }),
     ...(input.spec?.locale === undefined ? {} : { locale: input.spec.locale }),
+    ...(input.modelKinds?.length ? { modelKinds: input.modelKinds } : {}),
   })
 }
 
@@ -77,6 +93,7 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
   readonly tools: AgentToolCatalog
   readonly skills: AgentSkillCatalog
   readonly defaultMaxSteps: number
+  readonly modelKinds?: readonly SandboxModelKind[]
 }): ResolvedAgentExecutionPlan {
   const { workflowId, step, models } = input
   const selected = resolveWorkflowAgentStepModel(step, models)
@@ -124,6 +141,7 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
     skills: Object.freeze(skills),
     maxSteps: input.defaultMaxSteps,
     ...(reasoning === undefined ? {} : { reasoning }),
+    ...(input.modelKinds?.length ? { modelKinds: input.modelKinds } : {}),
   })
 }
 
@@ -136,6 +154,7 @@ export function resolveSubagentExecutionPlan(input: {
   readonly models?: LanguageModelCatalog
   readonly tools: AgentToolCatalog
   readonly skills: AgentSkillCatalog
+  readonly modelKinds?: readonly SandboxModelKind[]
 }): ResolvedAgentExecutionPlan {
   const { run, models } = input
   const model = models?.getByRef(run.spec.model)?.model ?? null
@@ -166,6 +185,7 @@ export function resolveSubagentExecutionPlan(input: {
     skills: input.skills.list(),
     maxSteps: run.spec.maxSteps,
     ...(run.spec.reasoning === undefined ? {} : { reasoning: run.spec.reasoning }),
+    ...(input.modelKinds?.length ? { modelKinds: input.modelKinds } : {}),
   })
 }
 

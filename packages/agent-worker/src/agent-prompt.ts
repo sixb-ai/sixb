@@ -2,6 +2,7 @@ import { renderInstanceHelp } from "@sixb/cli-core"
 import type { AgentSkillDefinition } from "@sixb/core"
 import type { OntologyDocsIndexEntry } from "@sixb/core/internal/ontology"
 import type { ModelMessage } from "@sixb/core/models"
+import type { SandboxModelKind } from "./execution-plan"
 import type { AgentRequester } from "./requester"
 
 export type AgentExecutionMode = "conversation" | "subagent" | "workflow-task"
@@ -68,6 +69,8 @@ export interface RenderAgentSystemPromptInput {
   readonly sandboxResetAt?: string
   readonly workspace?: AgentWorkspacePromptContext
   readonly facts?: AgentRuntimeFacts
+  /** Media models the sandbox CLI can call; omitted, the prompt does not mention them. */
+  readonly modelKinds?: readonly SandboxModelKind[]
 }
 
 /**
@@ -108,7 +111,7 @@ export function renderAgentSystemPrompt(input: RenderAgentSystemPromptInput): st
   return [
     promptSection(
       "sixb_runtime_context",
-      renderRuntimeContext(input.mode, input.skills, input.ontologyIndex)
+      renderRuntimeContext(input.mode, input.skills, input.ontologyIndex, input.modelKinds)
     ),
     promptSection(
       "sandbox_state",
@@ -147,7 +150,8 @@ export function renderWorkflowOutputFinalizerPrompt(
 function renderRuntimeContext(
   mode: AgentExecutionMode,
   skills: readonly AgentSkillDefinition[],
-  ontologyIndex: readonly OntologyDocsIndexEntry[] = []
+  ontologyIndex: readonly OntologyDocsIndexEntry[] = [],
+  modelKinds: readonly SandboxModelKind[] = []
 ): string {
   const skillCatalog =
     skills.length === 0
@@ -204,12 +208,30 @@ function renderRuntimeContext(
     'When an Action id is provided, inspect it directly with `sixb actions get <action-id>`; its `inputSchema` is the exact JSON shape accepted by the Action. An object-reference parameter is an object such as `{"objectTypeId":"Type","primaryId":"opaque:id"}`, never a bare id.',
     "Send Action params as one JSON object through standard input with `sixb actions request <action-id> --file -`; it runs the Action and prints the finished run, with its status and any error. Never inspect the environment to infer identifiers.",
     "Do not use ontology or Action listings, broad object inspection, or environment inspection when exact references and commands are already known. Use `--run-id` only for a request-specific idempotency key.",
+    ...renderModelCommands(modelKinds),
     ...fileContext,
     "With read, use relative paths from this prompt or sandboxPath values.",
     ...skillCatalog,
     ...(skillCatalog.length > 0 && ontologyCatalog.length > 0 ? [""] : []),
     ...ontologyCatalog,
   ].join("\n")
+}
+
+const MODEL_COMMANDS: Readonly<Record<SandboxModelKind, string>> = {
+  image:
+    'Make an image: `sixb models image "<prompt>" --output out/image.png`; add `--image <file>` to edit or vary one. Look at it with view_file before you use it.',
+  speech: 'Make speech: `sixb models speech "<text>" --output out/speech.mp3`.',
+  transcription: "Transcribe audio: `sixb models transcribe <audio-file>`.",
+}
+
+/** One command per media model kind the project configures; each call is billed. */
+function renderModelCommands(kinds: readonly SandboxModelKind[]): string[] {
+  if (kinds.length === 0) return []
+  return [
+    "The project's models are yours to call through `sixb models`. `sixb models list` shows them with descriptions and prices; use each kind's default unless a model's description fits the task better.",
+    ...kinds.map((kind) => MODEL_COMMANDS[kind]),
+    "Each call is billed: make what the task needs, not drafts, unless the user asks for options.",
+  ]
 }
 
 const ONTOLOGY_ROOT = ".sixb/agent/ontology/"
