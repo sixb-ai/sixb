@@ -11,17 +11,8 @@ import { ansiToStyledText } from "./ansi"
  * scrolled past stays in the scrollback like any other command's output.
  */
 
-export interface LiveColors {
-  /** The terminal's own foreground, guessed from its background; OpenTUI needs a color. */
-  readonly text: string
-  readonly blue: string
-  readonly water: readonly string[]
-  readonly green: string
-  readonly amber: string
-  readonly red: string
-  readonly muted: string
-  readonly faint: string
-}
+/** Sixb's palette, plus the terminal's foreground: OpenTUI needs a color for plain text. */
+export type LiveColors = typeof palette & { readonly text: string }
 
 export interface Footer {
   readonly colors: LiveColors

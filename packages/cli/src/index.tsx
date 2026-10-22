@@ -408,7 +408,7 @@ main().catch(async (error) => {
   if (wantsManagementJson(args)) {
     process.stderr.write(`${JSON.stringify({ error: cliErrorBody(error) })}\n`)
   } else {
-    // Loaded on demand, and never through JSX here: see `renderHelp` in `./ui`.
+    // Loaded on demand: a command that succeeds never needs it.
     const { renderCliError, renderHelp } = await import("./ui")
     if (error instanceof CliUsageError) await renderHelp(error.help, error.message)
     // Backing out of a prompt is an answer, not a failure to explain.

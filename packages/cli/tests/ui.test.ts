@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { rows, wrap } from "../src/ui/layout"
-import { colorLevel, paint, palette, tiles } from "../src/ui/theme"
+import { colorLevel, paint, palette } from "../src/ui/theme"
 
 const saved = { NO_COLOR: process.env.NO_COLOR, FORCE_COLOR: process.env.FORCE_COLOR }
 
@@ -30,11 +30,6 @@ describe("terminal color", () => {
     expect(paint("ready", { color: palette.blue }, 3)).toBe("\x1b[38;2;10;132;255mready\x1b[0m")
     expect(paint("ready", { color: palette.blue }, 2)).toBe("\x1b[38;5;39mready\x1b[0m")
     expect(paint("ready", { color: palette.blue }, 1)).toBe("\x1b[34mready\x1b[0m")
-  })
-
-  test("fills the mosaic's tiles in order", () => {
-    process.env.NO_COLOR = "1"
-    expect(tiles(2, 5)).toBe("▰▰▱▱▱")
   })
 })
 

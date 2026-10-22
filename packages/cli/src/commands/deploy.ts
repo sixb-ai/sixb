@@ -107,8 +107,6 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
   await progress.finish(
     deployCompleteView({
       release,
-      commit: source.commit,
-      ref: source.ref,
       seconds: (Date.now() - deployStartedAt) / 1000,
     })
   )

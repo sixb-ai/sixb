@@ -89,8 +89,6 @@ function foreground(hex: string, level: ColorLevel): string {
 export interface Paint {
   readonly color?: string
   readonly bold?: boolean
-  readonly dim?: boolean
-  readonly underline?: boolean
 }
 
 /** Styles text for this terminal; the text comes back unchanged where color is off. */
@@ -98,8 +96,6 @@ export function paint(text: string, style: Paint, level: ColorLevel = colorLevel
   if (level === 0 || text === "") return text
   const codes: string[] = []
   if (style.bold) codes.push("1")
-  if (style.dim) codes.push("2")
-  if (style.underline) codes.push("4")
   if (style.color) codes.push(foreground(style.color, level))
   return codes.length === 0 ? text : `\x1b[${codes.join(";")}m${text}\x1b[0m`
 }
@@ -119,25 +115,8 @@ export const tone = {
  * Makes `text` open `url` on click (OSC 8). Terminals that know the sequence show only the text;
  * Terminal.app and the Linux console do not, and get the text alone.
  */
-export function link(url: string, text: string): string {
+function link(url: string, text: string): string {
   if (colorLevel() === 0) return text
   if (process.env.TERM_PROGRAM === "Apple_Terminal" || process.env.TERM === "linux") return text
   return `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`
-}
-
-/** The mark in its blue, or a row of tiles filled palest first: the mosaic, as a progress bar. */
-export function tiles(filled: number, total: number): string {
-  let row = ""
-  for (let index = 0; index < total; index++) {
-    if (index < filled) {
-      const step = Math.min(
-        palette.water.length - 1,
-        Math.floor((index / Math.max(1, total - 1)) * (palette.water.length - 1))
-      )
-      row += paint(glyph.mark, { color: palette.water[step] })
-    } else {
-      row += paint(glyph.tile, { color: palette.faint })
-    }
-  }
-  return row
 }

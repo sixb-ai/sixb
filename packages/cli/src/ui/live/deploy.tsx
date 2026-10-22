@@ -76,7 +76,9 @@ export async function startLiveDeploy(release: DeployProgressHeader): Promise<Li
       " ",
     ].join("\n")
   )
-  footer.render(<DeployFooter store={store} colors={footer.colors} />)
+  // Raw mode turns ctrl+c into a key. It still ends the command, once the terminal is given back.
+  const interrupt = () => void footer.stop().then(() => process.exit(130))
+  footer.render(<DeployFooter store={store} colors={footer.colors} onInterrupt={interrupt} />)
 
   return {
     steps(labels) {
@@ -124,18 +126,19 @@ function stepLine(
 function DeployFooter({
   store,
   colors,
+  onInterrupt,
 }: {
   readonly store: { subscribe(listener: () => void): () => void; get(): ProgressState }
   readonly colors: LiveColors
+  readonly onInterrupt: () => void
 }) {
   const state = useSyncExternalStore(store.subscribe, store.get)
   const spinner = useSpinner()
   const now = useTick(100)
   const { width } = useTerminalDimensions()
 
-  // Raw mode turns ctrl+c into a key; it still ends the command, as it did before.
   useKeyboard((key: KeyEvent) => {
-    if (key.ctrl && key.name === "c") process.kill(process.pid, "SIGINT")
+    if (key.ctrl && key.name === "c") onInterrupt()
   })
 
   const label = state.current === null ? "Connecting" : (state.labels[state.current] ?? "")

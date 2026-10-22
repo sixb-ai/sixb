@@ -10,7 +10,6 @@ export async function runInit(dir?: string): Promise<void> {
   await renderStatic(
     initView({
       name: result.name,
-      targetDir: result.targetDir,
       files: result.files,
       commands: nextStepsFor(result.targetDir),
     })

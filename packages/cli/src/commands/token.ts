@@ -60,7 +60,6 @@ async function listTokens(options: TokenCommandOptions) {
 
   await renderStatic(
     tableResultView({
-      title: "Personal access tokens",
       subtitle: `${result.accessTokens.length} visible`,
       headers: ["Name", "ID", "Status", "Groups", "Last used", "Expires"],
       rows: result.accessTokens.map((token) => [

@@ -66,5 +66,5 @@ export async function runBuild(options: BuildOptions = {}) {
     await renderStatic(failure)
     process.exit(1)
   }
-  await renderStatic(buildView({ entry, outdir, seconds: (Date.now() - startedAt) / 1000 }))
+  await renderStatic(buildView({ outdir, seconds: (Date.now() - startedAt) / 1000 }))
 }

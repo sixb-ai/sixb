@@ -6,7 +6,6 @@ import type {
   DeployStatus,
 } from "@sixb/core/deploy"
 import {
-  type Block,
   commands,
   header,
   headline,
@@ -108,8 +107,6 @@ export function deployCompleteView({
   seconds,
 }: {
   release: DeployRelease
-  commit: string
-  ref: string
   seconds?: number
 }): string {
   const urls = release.services.flatMap((service) =>
@@ -211,7 +208,7 @@ export function deployChecksView({
           label: check.label,
           value: check.detail,
           status: CHECK_STATUS[check.status],
-          ...(check.remedy ? { notes: [check.remedy], noteStyle: remedy } : {}),
+          ...(check.remedy ? { remedy: check.remedy } : {}),
         })
       )
     ),
@@ -280,10 +277,7 @@ export function deployCiView({
             label: "Token",
             status: "idle" as const,
             value: `${token.submodules.map((submodule) => submodule.path).join(", ")} ${token.submodules.length === 1 ? "is" : "are"} private, and CI cannot read ${token.submodules.length === 1 ? "it" : "them"} with its own token.`,
-            notes: [
-              `Create a fine-grained token with Contents: read on ${token.submodules.map((submodule) => submodule.repo ?? submodule.url).join(", ")}, then run \`gh secret set ${token.name} --env ${environment} --repo ${repo}\`.`,
-            ],
-            noteStyle: remedy,
+            remedy: `Create a fine-grained token with Contents: read on ${token.submodules.map((submodule) => submodule.repo ?? submodule.url).join(", ")}, then run \`gh secret set ${token.name} --env ${environment} --repo ${repo}\`.`,
           },
         ]
       : []),
@@ -312,7 +306,7 @@ export function deployAccessView({
   keys: readonly DeployAccessKey[]
 }): string {
   // Two lines a key: a fingerprint and a long comment do not fit side by side in 80 columns.
-  const list: Block =
+  const list =
     keys.length === 0
       ? tone.muted("No keys.")
       : keys
@@ -331,7 +325,7 @@ function nextStep(next: string): string {
   return section("Next steps", next.startsWith("sixb ") ? commands([next]) : remedy(next))
 }
 
-export function formatAge(iso: string, suffix = " ago"): string {
+function formatAge(iso: string, suffix = " ago"): string {
   const seconds = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000))
   const age =
     seconds < 60
@@ -361,6 +355,6 @@ function describeDeployProcess(service: DeployRelease["services"][number]): stri
   return count
 }
 
-export function formatDeployCommand(command: DeployCommand): string {
+function formatDeployCommand(command: DeployCommand): string {
   return [command.program, ...command.args].join(" ")
 }

@@ -1,12 +1,10 @@
 /** @jsxImportSource @opentui/react */
 import { createTextAttributes } from "@opentui/core"
-import { useTerminalDimensions } from "@opentui/react"
 import { useEffect, useState } from "react"
 import { glyph, SPINNER_FRAMES } from "../theme"
 import type { LiveColors } from "./session"
 
 export const BOLD = createTextAttributes({ bold: true })
-export const UNDERLINE = createTextAttributes({ underline: true })
 
 export function useSpinner(active = true): string {
   const [frame, setFrame] = useState(0)
@@ -80,10 +78,4 @@ export function Hints({
       ))}
     </text>
   )
-}
-
-/** A hairline across the terminal, where the footer begins. */
-export function Rule({ colors }: { readonly colors: LiveColors }) {
-  const { width } = useTerminalDimensions()
-  return <text fg={colors.faint}>{"─".repeat(Math.max(0, width))}</text>
 }
