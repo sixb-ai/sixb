@@ -241,8 +241,15 @@ export function frameRuntime(): void {
       post({ call: id, method, params })
     })
   }
+  // Not `.` or `..`: the app puts the key in a URL's path, where those name another route.
   const checkKey = (key: unknown): string => {
-    if (typeof key !== "string" || key.length === 0 || key.length > MAX_KEY_LENGTH) {
+    if (
+      typeof key !== "string" ||
+      key.length === 0 ||
+      key.length > MAX_KEY_LENGTH ||
+      key === "." ||
+      key === ".."
+    ) {
       throw new TypeError(`sixb.state: a key is text of 1 to ${MAX_KEY_LENGTH} characters.`)
     }
     return key

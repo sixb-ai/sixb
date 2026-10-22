@@ -32,7 +32,7 @@ function setup() {
     }
     return sixb.artifacts.create({ kind, title: "Fleet planner", files })
   }
-  return { publish }
+  return { sixb, publish }
 }
 
 async function refusal(promise: Promise<unknown>): Promise<string> {
@@ -98,6 +98,23 @@ describe("publishing a page", () => {
         publish({ "index.html": '<sixb-embed src="artifact:art_0000000000#chart=x"></sixb-embed>' })
       )
     ).toContain("art_0000000000")
+  })
+})
+
+describe("what a page keeps", () => {
+  test("refuses a key the API could not take in its path", async () => {
+    // Reproduce by accepting "." and ".." in stateKey (execution.ts): both are kept.
+    const { sixb, publish } = setup()
+    const page = await publish({ "index.html": "<main></main>" })
+    const state = sixb.artifacts.state(page.artifact.id)
+
+    for (const key of ["..", "."]) {
+      expect(await refusal(state.set(key, 1))).toContain("A key is 1 to 128 characters")
+      expect(await refusal(state.delete(key))).toContain("A key is 1 to 128 characters")
+    }
+
+    await state.set("v1..2", 1)
+    expect((await state.entries()).map((entry) => entry.key)).toEqual(["v1..2"])
   })
 })
 

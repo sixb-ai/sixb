@@ -7,6 +7,7 @@ import {
   InMemoryStorage,
   SixbHost,
 } from "@sixb/core"
+import { FRAME_PROTOCOL, parseFrameCall } from "@sixb/core/artifacts"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -362,5 +363,33 @@ describe("what a page keeps", () => {
     expect(await control.json()).toMatchObject({ code: "invalid_state" })
     // The body is checked before the route runs, as every body is.
     expect((await call("/empty", { method: "PUT", body: {} })).status).toBe(422)
+  })
+
+  test("never sends a key that names another route", async () => {
+    // The client puts the key in the path with encodeURIComponent, which keeps dots, and the URL
+    // parser resolves them: `/state/..` is the artifact itself, `/state/.` every value the reader
+    // keeps. Reproduce by accepting "." and ".." in isStateKey (protocol.ts): the page's delete
+    // reaches the server, and the artifact is gone.
+    const { call } = await page()
+    await call("/inputs", { method: "PUT", body: { value: 1 } })
+
+    for (const key of ["..", "."]) {
+      const sent = parseFrameCall({
+        protocol: FRAME_PROTOCOL,
+        call: 1,
+        method: "state.delete",
+        params: { key },
+      })
+      expect(sent, key).toBeNull()
+
+      // What the app would send for it, as the generated client writes the path.
+      if (sent?.method === "state.delete") {
+        await call(`/${encodeURIComponent(sent.params.key)}`, { method: "DELETE" })
+      }
+    }
+
+    const kept = await call("")
+    expect(kept.status).toBe(200)
+    expect((await kept.json()).entries).toMatchObject([{ key: "inputs", value: 1 }])
   })
 })

@@ -181,6 +181,54 @@ describe("the frame runtime", () => {
     }
   })
 
+  test("refuses a key that would name another route", async () => {
+    // Reproduce by accepting "." and ".." in the runtime's checkKey: delete("..") resolves.
+    // Opened on its own, as the layout check opens a page, it keeps the values in memory.
+    const window: Record<string, unknown> = {
+      location: { hash: "" },
+      innerWidth: 1280,
+      innerHeight: 720,
+      addEventListener: () => {},
+      postMessage: () => {},
+    }
+    window.parent = window
+    const document = {
+      documentElement: { classList: { add: () => {} }, dataset: {}, style: {} },
+      currentScript: { getAttribute: () => "page" },
+      readyState: "complete",
+      body: null,
+      addEventListener: () => {},
+      querySelectorAll: () => [],
+    }
+    const ResizeObserver = class {
+      observe() {}
+    }
+    new Function(
+      "window",
+      "document",
+      "ResizeObserver",
+      "requestAnimationFrame",
+      `(${frameRuntime.toString()})()`
+    )(window, document, ResizeObserver, () => 0)
+    const { state } = window.sixb as {
+      state: {
+        set: (key: string, value: unknown) => Promise<void>
+        delete: (key: string) => Promise<unknown>
+        keys: () => Promise<unknown>
+      }
+    }
+
+    for (const key of ["..", "."]) {
+      expect(await state.delete(key).catch((error: unknown) => error), key).toBeInstanceOf(
+        TypeError
+      )
+    }
+
+    // A key with dots in it is still one.
+    await state.set("v1..2", 1)
+    expect(await state.keys()).toEqual(["v1..2"])
+  })
+
   test("reads its layout from the tag the frame injects it with", () => {
     // Reproduce by renaming the attribute on either side: every page lays out as a deck.
     expect(frameRuntime.toString()).toContain('"data-sixb-layout"')
@@ -299,6 +347,9 @@ describe("a frame's calls", () => {
       ["state.get", { key: "a".repeat(129) }, 1],
       ["state.get", { key: "line\nbreak" }, 1],
       ["state.get", { key: 42 }, 1],
+      // The client puts a key in the path, where these name another route.
+      ["state.delete", { key: ".." }, 1],
+      ["state.delete", { key: "." }, 1],
       ["state.set", { key: "inputs" }, 1],
       ["state.set", { key: "big", value }, 1],
       ["state.set", { key: "loop", value: 10n }, 1],
