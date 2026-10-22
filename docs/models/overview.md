@@ -149,14 +149,17 @@ await sixb.agent.runs.request({ threadId: thread.id, text: "Why did Acme slip?" 
 - **Only the owner adds or removes participants**, and recreates the conversation's sandbox. A
   participant can remove themself to leave.
 - **Whoever sent a message can retry it; the owner can stop any answer.**
+- **The agent's artifacts are shared with the conversation.** Participants read and revise them,
+  in the app or through the agent, as [artifacts](../artifacts/overview.md#shared-in-a-conversation)
+  describes.
 - **Removing someone applies to what comes next.** They no longer read the conversation, and a
   message of theirs still waiting for an answer is cancelled. An answer already being written
   finishes, and a live stream they had open keeps running until that answer ends.
 
 Add a user by id or by their account's email: `{ email: "bob@acme.com" }`. Only active users
-who can use the agent can be added, at most 50 per conversation. Sharing a conversation is unrelated to
-[shared access](../auth/shared-access.md), which gives someone outside your team a link to one
-object.
+who can use the agent can be added, at most 50 per conversation. Sharing a conversation is
+unrelated to [shared access](../auth/shared-access.md), which gives someone outside your team a
+link to one object.
 
 Over HTTP: `POST /api/agent-threads/:threadId/participants` with `{ "users": [...] }`,
 `DELETE /api/agent-threads/:threadId/participants/:userId`, and
@@ -173,7 +176,9 @@ const mine = await sixb.agent.threads.fork(thread.id)
 
 - The copy holds the finished messages and their files. A turn still running is not copied.
 - In the copy, the agent works with the permissions of its owner.
-- The artifacts the agent published in the original stay there.
+- The copy gets its own copies of the artifacts the original shares, at their latest version: they
+  are yours, and its messages show them. An artifact that embeds or links another still names the
+  original one inside its content.
 - The copy starts with a new [sandbox](../sandboxes/overview.md#keep-files-across-conversation-runs).
   Files from the original's sandbox are not in it, and the agent is told so.
 
