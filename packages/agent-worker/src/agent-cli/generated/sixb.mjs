@@ -809,17 +809,21 @@ function catalogEntries(catalog) {
   ];
 }
 function findModel(entries, reference, kind) {
+  const ofKind = entries.filter((candidate) => kind === undefined || candidate.kind === kind);
+  let matches = ofKind.filter((candidate) => candidate.entry.modelId === reference);
   const separator = reference.indexOf(":");
-  const provider = separator > 0 ? reference.slice(0, separator) : undefined;
-  const modelId = separator > 0 ? reference.slice(separator + 1) : reference;
-  const matches = entries.filter((candidate) => candidate.entry.modelId === modelId && (provider === undefined || candidate.entry.provider === provider) && (kind === undefined || candidate.kind === kind));
+  if (matches.length === 0 && separator > 0) {
+    const provider = reference.slice(0, separator);
+    const modelId = reference.slice(separator + 1);
+    matches = ofKind.filter((candidate) => candidate.entry.provider === provider && candidate.entry.modelId === modelId);
+  }
   const [match] = matches;
   if (!match) {
     fail(`No ${kind === undefined ? "" : `${kind} `}model '${reference}' is configured. Run 'sixb models list'.`);
   }
   if (matches.length > 1) {
     const kinds = new Set(matches.map((candidate) => candidate.kind));
-    fail(kinds.size > 1 ? `'${reference}' is configured as ${[...kinds].join(" and ")}. Add --kind <kind>.` : `'${reference}' is configured by ${matches.map((candidate) => candidate.entry.provider).join(" and ")}. Use provider:${modelId}.`);
+    fail(kinds.size > 1 ? `'${reference}' is configured as ${[...kinds].join(" and ")}. Add --kind <kind>.` : `'${reference}' is configured by ${matches.map((candidate) => candidate.entry.provider).join(" and ")}. Use provider:${reference}.`);
   }
   return match;
 }
@@ -840,8 +844,9 @@ function variantPrice(price, unit, joiner) {
     return;
   if (typeof price === "string")
     return `${dollars(price)} ${unit}`;
-  if (price.variants.every((variant) => variant.price === price.default)) {
-    return `${dollars(price.default ?? "")} ${unit}`;
+  const only = price.default;
+  if (only !== undefined && price.variants.every((variant) => variant.price === only)) {
+    return `${dollars(only)} ${unit}`;
   }
   const variants = price.variants.map(({ price: amount, ...dimensions }) => {
     const label = Object.values(dimensions).join(" ");

@@ -101,23 +101,25 @@ function catalogEntries(catalog: Catalog): { kind: ModelKind; entry: CatalogEntr
 }
 
 /**
- * A model by id, or provider:modelId when two providers share an id. An id that names models of
- * several kinds needs --kind.
+ * A model by id, or provider:modelId when two providers share an id. An id may itself hold a
+ * colon, so the whole reference is tried as an id first. An id that names models of several
+ * kinds needs --kind.
  */
 export function findModel(
   entries: readonly { readonly kind: ModelKind; readonly entry: CatalogEntry }[],
   reference: string,
   kind: ModelKind | undefined
 ): { kind: ModelKind; entry: CatalogEntry } {
+  const ofKind = entries.filter((candidate) => kind === undefined || candidate.kind === kind)
+  let matches = ofKind.filter((candidate) => candidate.entry.modelId === reference)
   const separator = reference.indexOf(":")
-  const provider = separator > 0 ? reference.slice(0, separator) : undefined
-  const modelId = separator > 0 ? reference.slice(separator + 1) : reference
-  const matches = entries.filter(
-    (candidate) =>
-      candidate.entry.modelId === modelId &&
-      (provider === undefined || candidate.entry.provider === provider) &&
-      (kind === undefined || candidate.kind === kind)
-  )
+  if (matches.length === 0 && separator > 0) {
+    const provider = reference.slice(0, separator)
+    const modelId = reference.slice(separator + 1)
+    matches = ofKind.filter(
+      (candidate) => candidate.entry.provider === provider && candidate.entry.modelId === modelId
+    )
+  }
   const [match] = matches
   if (!match) {
     fail(
@@ -129,7 +131,7 @@ export function findModel(
     fail(
       kinds.size > 1
         ? `'${reference}' is configured as ${[...kinds].join(" and ")}. Add --kind <kind>.`
-        : `'${reference}' is configured by ${matches.map((candidate) => candidate.entry.provider).join(" and ")}. Use provider:${modelId}.`
+        : `'${reference}' is configured by ${matches.map((candidate) => candidate.entry.provider).join(" and ")}. Use provider:${reference}.`
     )
   }
   return match
@@ -163,8 +165,9 @@ function variantPrice(
   if (price === undefined) return undefined
   if (typeof price === "string") return `${dollars(price)} ${unit}`
   // Variants that all cost the default say nothing a single price doesn't.
-  if (price.variants.every((variant) => variant.price === price.default)) {
-    return `${dollars(price.default ?? "")} ${unit}`
+  const only = price.default
+  if (only !== undefined && price.variants.every((variant) => variant.price === only)) {
+    return `${dollars(only)} ${unit}`
   }
   const variants = price.variants.map(({ price: amount, ...dimensions }) => {
     const label = Object.values(dimensions).join(" ")

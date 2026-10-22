@@ -37,7 +37,7 @@ function catalogEntry(
     name: definition.name ?? entry.modelId,
     ...(definition.description ? { description: definition.description } : {}),
     ...(definition.via ? { via: definition.via } : {}),
-    ...rateCardDisplay(model.rateCard),
+    ...rateCardDisplay(entry, model.rateCard),
   }
 }
 

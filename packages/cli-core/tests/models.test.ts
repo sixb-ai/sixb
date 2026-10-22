@@ -152,6 +152,14 @@ describe("models", () => {
     )
     expect(failure("twin")).toBe("'twin' is configured by a and b. Use provider:twin.")
     expect(findModel(entries, "b:twin", undefined).entry.provider).toBe("b")
+    // Removal proof: split the provider off before trying the whole reference; this id is lost.
+    expect(
+      findModel(
+        [{ kind: "language", entry: entry("meta/llama-3:free") }],
+        "meta/llama-3:free",
+        undefined
+      ).entry.modelId
+    ).toBe("meta/llama-3:free")
     expect(failure("missing", "image")).toBe(
       "No image model 'missing' is configured. Run 'sixb models list'."
     )
