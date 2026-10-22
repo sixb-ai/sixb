@@ -1,3 +1,4 @@
+import { isSixbApiError } from "@sixb/client"
 import {
   cancelAgentRunMutation,
   createAgentThreadMutation,
@@ -19,10 +20,12 @@ import {
 import { MODEL_REASONING_LEVELS, type ModelReasoningLevel } from "@sixb/core/models"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
+import { useCurrentUser } from "../../session"
 import type { ComposerProps } from "../components/composer"
 import type { SandboxRecoveryProps } from "../components/sandbox-recovery"
 import type { TranscriptProps } from "../components/transcript"
 import { useAgentMessages } from "../i18n"
+import { knownName } from "../message-authors"
 import {
   type ModelPreference,
   preferenceWithoutReasoning,
@@ -38,6 +41,15 @@ import {
   selectActiveRunId,
   shouldShowExtendedWaitingStatus,
 } from "../run-presentation"
+import {
+  canRetryRun,
+  canStopRun,
+  isShared,
+  personName,
+  requestedBySomeoneElse,
+  threadAccess,
+  threadOwner,
+} from "../sharing"
 import { THREAD_PAGE_SIZE } from "../thread-navigation"
 import type { AgentContextEntryInput, AgentFileRef, AgentRun, LanguageModel } from "../types"
 import { useThreadStream } from "./use-thread-stream"
@@ -55,6 +67,13 @@ interface PendingUser {
 }
 
 const THREAD_LIST_QUERY = {
+  limit: String(THREAD_PAGE_SIZE),
+  order: "desc" as const,
+}
+
+/** The conversations others shared with the reader: one page, newest first. */
+const SHARED_THREAD_LIST_QUERY = {
+  sharedWithMe: "true" as const,
   limit: String(THREAD_PAGE_SIZE),
   order: "desc" as const,
 }
@@ -79,6 +98,7 @@ export type ConversationComposerProps = Pick<
   | "running"
   | "stopping"
   | "onStop"
+  | "hint"
   | "models"
   | "selectedModel"
   | "selectedReasoning"
@@ -103,16 +123,32 @@ export type AgentConversation = ReturnType<typeof useAgentConversation>
  * both render it, typically by spreading `transcriptProps` and `composerProps`.
  */
 export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConversationInput) {
-  const labels = useAgentMessages().chat
+  const agentMessages = useAgentMessages()
+  const labels = agentMessages.chat
   const queryClient = useQueryClient()
+  const user = useCurrentUser()
   const agentQuery = useQuery(getAgentOptions())
   const modelsQuery = useQuery(listModelsOptions())
   const refreshThreads = () =>
     queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
   const activityStream = useAgentActivityStream({
-    onActivity: refreshThreads,
-    onSubscribed: refreshThreads,
+    onActivity: (event) => {
+      // Someone else's turn in a shared conversation shows only through this feed: read the open
+      // thread again so its run is followed live. A run the view already follows streams itself.
+      if (event.threadId === threadId && event.runId !== activeRunId) {
+        void refreshThread(event.threadId)
+        return
+      }
+
+      void refreshThreads()
+    },
+    // On every (re)subscription: catch up with what changed while the socket was away.
+    onSubscribed: () => void (threadId === null ? refreshThreads() : refreshThread(threadId)),
   })
+
+  // The project activity feed is primary. Poll only as a focus-aware recovery path while the
+  // socket is unavailable, rather than opening one connection per background thread.
+  const recoveryPollMs = !activityStream.connected || activityStream.error ? 10_000 : false
   const threadsQuery = useInfiniteQuery({
     ...listAgentThreadsInfiniteOptions({ query: THREAD_LIST_QUERY }),
     initialPageParam: { query: THREAD_LIST_QUERY },
@@ -126,9 +162,24 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         },
       }
     },
-    // The project activity feed is primary. Poll only as a focus-aware recovery path while the
-    // socket is unavailable, rather than opening one connection per background thread.
-    refetchInterval: !activityStream.connected || activityStream.error ? 10_000 : false,
+    refetchInterval: recoveryPollMs,
+  })
+  // Nothing announces a new share or a removal: read the list again when the reader comes back.
+  const sharedThreadsQuery = useInfiniteQuery({
+    ...listAgentThreadsInfiniteOptions({ query: SHARED_THREAD_LIST_QUERY }),
+    initialPageParam: { query: SHARED_THREAD_LIST_QUERY },
+    getNextPageParam: (lastPage, pages) => {
+      if (!lastPage.hasMore) return undefined
+
+      return {
+        query: {
+          ...SHARED_THREAD_LIST_QUERY,
+          offset: String(pages.length * THREAD_PAGE_SIZE),
+        },
+      }
+    },
+    refetchInterval: recoveryPollMs,
+    refetchOnWindowFocus: true,
   })
   const currentAgent = agentQuery.data
   const models = useMemo(() => modelsQuery.data?.language ?? [], [modelsQuery.data])
@@ -141,15 +192,32 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     [threadsQuery.data]
   )
 
+  const sharedThreads = useMemo(
+    () => sharedThreadsQuery.data?.pages.flatMap((page) => page.threads) ?? [],
+    [sharedThreadsQuery.data]
+  )
+
   const threadQuery = useQuery({
     ...getAgentThreadOptions({ path: { threadId: threadId ?? "" } }),
     enabled: threadId !== null,
+    refetchInterval: recoveryPollMs,
+    // A shared thread can lose its reader without an event: read it again when they come back.
+    refetchOnWindowFocus: (query) => isShared(query.state.data ?? null),
   })
+  // A 404 after a read means the reader no longer reads it, such as a participant someone removed:
+  // the last copy the query keeps must not stand in for it.
+  const threadGone = isSixbApiError(threadQuery.error) && threadQuery.error.status === 404
   const thread =
-    threadId !== null
-      ? (threadQuery.data ?? threads.find((candidate) => candidate.id === threadId) ?? null)
+    threadId !== null && !threadGone
+      ? (threadQuery.data ??
+        threads.find((candidate) => candidate.id === threadId) ??
+        sharedThreads.find((candidate) => candidate.id === threadId) ??
+        null)
       : null
   const threadUnavailable = threadId !== null && !threadQuery.isLoading && thread === null
+  const removedFromThread =
+    threadGone && threadQuery.data !== undefined && threadAccess(threadQuery.data, user) !== "owner"
+  const access = thread ? threadAccess(thread, user) : "owner"
 
   const messagesQuery = useQuery({
     ...listAgentThreadMessagesOptions({
@@ -157,23 +225,27 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       query: { order: "asc" },
     }),
     enabled: threadId !== null,
+    refetchInterval: recoveryPollMs,
   })
   const messages = useMemo(() => messagesQuery.data?.messages ?? [], [messagesQuery.data])
+  const authors = messagesQuery.data?.authors
   const runsQuery = useQuery({
     ...listAgentThreadRunsOptions({
       path: { threadId: threadId ?? "" },
       query: { limit: "50", order: "desc" },
     }),
     enabled: threadId !== null,
+    refetchInterval: recoveryPollMs,
   })
   const runs = useMemo(() => runsQuery.data?.runs ?? [], [runsQuery.data])
   const latestRun = runs[0] ?? null
 
   const [pendingSend, setPendingSend] = useState<PendingSend | null>(null)
   const [pendingUser, setPendingUser] = useState<PendingUser | null>(null)
-  const [sendError, setSendError] = useState<{ threadId: string | null; message: string } | null>(
-    null
-  )
+  const [sendError, setSendError] = useState<{
+    threadId: string | null
+    failure: TurnFailure
+  } | null>(null)
   const [draftReseed, setDraftReseed] = useState<{
     text: string
     attachments: readonly AgentFileRef[]
@@ -254,12 +326,22 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     setStoppingRunId((current) => (current === activeRunId ? current : null))
   }, [activeRunId])
 
+  // Who asked for the answer in flight decides whether a participant may stop it.
+  const activeRun =
+    [pendingRun, streamRun, ...runs].find((run) => run !== null && run.id === activeRunId) ?? null
+
   const stop = () => {
     if (threadId === null || activeRunId === null) return
     setStoppingRunId(activeRunId)
     cancelRun.mutate(
       { path: { threadId }, body: { runId: activeRunId } },
-      { onError: () => setStoppingRunId(null) }
+      {
+        onError: () => {
+          setStoppingRunId(null)
+          setSendError({ threadId, failure: "stop" })
+          void refreshThread(threadId)
+        },
+      }
     )
   }
 
@@ -307,7 +389,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       recordAcceptedSend(response.run)
       await queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
       onThreadCreated(createdThreadId)
-    } catch {
+    } catch (error) {
       // Restore the exact submitted snapshot. In particular, do not re-read ambient page context:
       // navigation may have changed it while the request was in flight.
       setPendingUser(null)
@@ -319,15 +401,13 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       }))
       setSendError({
         threadId: createdThreadId ?? targetThreadId,
-        message: labels.sendFailed,
+        failure: sendFailure(error),
       })
       if (createdThreadId) onThreadCreated(createdThreadId)
-      if (targetThreadId !== null) {
-        void queryClient.invalidateQueries({
-          queryKey: getAgentThreadQueryKey({ path: { threadId: targetThreadId } }),
-        })
-      }
-      void queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
+
+      // A refusal can mean another turn holds the thread: read who asked for it, too.
+      if (targetThreadId !== null) void refreshThread(targetThreadId)
+      else void queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
     }
   }
 
@@ -347,6 +427,10 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       {
         onSuccess: (response) => {
           setPendingSend({ run: response.run })
+          void refreshThread(threadId)
+        },
+        onError: () => {
+          setSendError({ threadId, failure: "retry" })
           void refreshThread(threadId)
         },
       }
@@ -378,13 +462,14 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       )
       setPendingSend({ run: response.run })
       await refreshThread(threadId)
-    } catch {
-      setSendError({ threadId, message: labels.sendFailed })
+    } catch (error) {
+      setSendError({ threadId, failure: sendFailure(error) })
+      void refreshThread(threadId)
     }
   }
 
   const handleRecreateSandbox = () => {
-    if (!thread?.sandboxState || isRunning) return
+    if (!thread?.sandboxState || isRunning || access !== "owner") return
     recreateSandbox.mutate(
       {
         path: { threadId: thread.id },
@@ -436,19 +521,41 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
       ? thread.sandboxState
       : null
 
+  const listedThreads = [...threads, ...sharedThreads]
   const runningThreadCount =
-    threads.filter((entry) => entry.activeRunId !== null).length +
+    listedThreads.filter((entry) => entry.activeRunId !== null).length +
     (threadId &&
     isRunning &&
-    !threads.some((entry) => entry.id === threadId && entry.activeRunId !== null)
+    !listedThreads.some((entry) => entry.id === threadId && entry.activeRunId !== null)
       ? 1
       : 0)
   const anchorCurrentTurn = Boolean(
     (pendingUser && pendingUser.threadId === threadId) || pendingRun
   )
   const composerPending = postMessage.isPending || createThread.isPending
-  const currentSendError = sendError && sendError.threadId === threadId ? sendError.message : null
+  const currentSendError =
+    sendError && sendError.threadId === threadId
+      ? failureMessage(sendError.failure, requestedBySomeoneElse(activeRun, user), labels)
+      : null
   const stopping = stoppingRunId !== null && stoppingRunId === activeRunId
+  const canStop = canStopRun(activeRun, access, user)
+
+  // Someone else's answer holds a shared thread: the reader keeps typing, and sends once it ends.
+  const answeringFor =
+    isRunning && activeRun && requestedBySomeoneElse(activeRun, user)
+      ? (activeRun.requestedBy ?? null)
+      : null
+  const answeringName = answeringFor
+    ? (knownName(answeringFor, thread, authors) ?? answeringFor.id)
+    : null
+
+  // A turn that never answered can run again, by whoever asked for it, once the sandbox works.
+  const canRetry =
+    !sandboxRecovery &&
+    (presentation.kind === "failed" ||
+      ((presentation.kind === "timeout" || presentation.kind === "interrupted") &&
+        !presentation.hasProgress)) &&
+    canRetryRun(presentation.run, user)
 
   const transcriptProps: TranscriptProps = {
     threadId,
@@ -471,13 +578,7 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         : undefined,
     interrupted:
       presentation.kind === "interrupted" ? { hasProgress: presentation.hasProgress } : undefined,
-    onRetry:
-      !sandboxRecovery &&
-      (presentation.kind === "failed" ||
-        ((presentation.kind === "timeout" || presentation.kind === "interrupted") &&
-          !presentation.hasProgress))
-        ? () => retry(presentation.run)
-        : undefined,
+    onRetry: canRetry ? () => retry(presentation.run) : undefined,
     onContinue: offersContinue({
       presentation,
       isRunning,
@@ -494,11 +595,12 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
   const composerProps: ConversationComposerProps = {
     onSend: send,
     error: currentSendError ?? undefined,
-    disabled: isRunning || Boolean(sandboxRecovery),
+    disabled: (isRunning && answeringName === null) || Boolean(sandboxRecovery),
+    hint: answeringName ? agentMessages.sharing.answering(answeringName) : undefined,
     pending: composerPending,
     running: isRunning,
     stopping,
-    onStop: stop,
+    onStop: canStop ? stop : undefined,
     models,
     selectedModel,
     selectedReasoning,
@@ -520,6 +622,8 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
         pending: recreateSandbox.isPending,
         error: recreateSandbox.isError,
         onRecreate: handleRecreateSandbox,
+        canRecreate: access === "owner",
+        owner: thread ? personName(threadOwner(thread)) : "",
       }
     : null
 
@@ -549,7 +653,18 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     currentAgent,
     currentThread: thread,
     agentThreads,
+    sharedThreads,
+    sharedThreadsTotal: sharedThreadsQuery.data?.pages[0]?.total ?? 0,
+    sharedThreadsError: sharedThreadsQuery.isError,
+    sharedThreadsHasMore: sharedThreadsQuery.hasNextPage,
+    sharedThreadsLoadingMore: sharedThreadsQuery.isFetchingNextPage,
+    sharedThreadsLoadMoreError: sharedThreadsQuery.isFetchNextPageError,
+    loadMoreSharedThreads: () => sharedThreadsQuery.fetchNextPage(),
+    access,
+    user,
+    removedFromThread,
     messages,
+    authors,
     messagesLoading: threadId !== null && messagesQuery.isLoading,
     messagesError: threadId !== null && messagesQuery.isError ? labels.messagesLoadFailed : null,
     live,
@@ -564,6 +679,9 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     composerPending,
     stopping,
     retrying: retryRun.isPending,
+    canStop,
+    /** Who asked for the answer in flight, when it is someone other than the reader. */
+    answeringFor,
     send,
     stop,
     retry,
@@ -574,6 +692,41 @@ export function useAgentConversation({ threadId, onThreadCreated }: UseAgentConv
     composerProps,
     /** Spread into `<SandboxRecovery>` while set: the composer stays disabled until it is resolved. */
     sandboxRecoveryProps,
+  }
+}
+
+/** Why a turn did not start or stop, as the composer tells it. */
+type TurnFailure = "send" | "busy" | "sandbox" | "retry" | "stop"
+
+/** A message that did not go out: another answer holds the thread, the sandbox is away, or else. */
+function sendFailure(error: unknown): TurnFailure {
+  if (!isSixbApiError(error) || error.status !== 409) return "send"
+  if (error.code === "active_run_exists") return "busy"
+  if (error.code === "sandbox_execution_unavailable") return "sandbox"
+
+  return "send"
+}
+
+/**
+ * Said once the thread is read again, so a busy thread names whose answer holds it when the reader
+ * can tell.
+ */
+function failureMessage(
+  failure: TurnFailure,
+  someoneElseAnswers: boolean,
+  labels: ReturnType<typeof useAgentMessages>["chat"]
+): string {
+  switch (failure) {
+    case "busy":
+      return someoneElseAnswers ? labels.busyOther : labels.busy
+    case "sandbox":
+      return labels.sandboxUnavailable
+    case "retry":
+      return labels.retryFailed
+    case "stop":
+      return labels.stopFailed
+    default:
+      return labels.sendFailed
   }
 }
 
