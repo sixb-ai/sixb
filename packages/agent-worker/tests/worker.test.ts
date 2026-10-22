@@ -4742,7 +4742,7 @@ describe("AgentWorker", () => {
 
   const STEP_REPOSITORY = "https://example.com/repository.git"
 
-  // Removal proof: drop modelKinds from resolveWorkflowAgentStepExecutionPlan's call; the step's
+  // Removal proof: drop sandboxModels from resolveWorkflowAgentStepExecutionPlan's call; the step's
   // prompt no longer names the image command.
   test("tells an agent step which of the project's media models it can call", async () => {
     let system: string | undefined
@@ -4764,7 +4764,8 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       expect((await terminalWorkflowAgentNode(runs, nodeRunId)).status).toBe("succeeded")
-      expect(system).toContain('`sixb models image "<prompt>" --output out/image.png`')
+      expect(system).toContain("`sixb models image")
+      expect(system).toContain("- painter\n")
       expect(system).not.toContain("sixb models speech")
     } finally {
       await worker.stop()
