@@ -249,10 +249,11 @@ export function assertGrantDefinition(
     value.target !== "workflow" &&
     value.target !== "sync" &&
     value.target !== "pipeline" &&
-    value.target !== "agent"
+    value.target !== "agent" &&
+    value.target !== "models"
   ) {
     throw createError(
-      `[Sixb] ${field} run grant target must be 'workflow', 'sync', 'pipeline', or 'agent'.`
+      `[Sixb] ${field} run grant target must be 'workflow', 'sync', 'pipeline', 'agent', or 'models'.`
     )
   }
 

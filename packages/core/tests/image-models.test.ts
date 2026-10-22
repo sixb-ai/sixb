@@ -71,7 +71,7 @@ async function bytes(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
 }
 
 describe("image generation", () => {
-  // Removal proof: remove assertProviderAccess from the image runtime; the protected call succeeds.
+  // Removal proof: remove assertModelAccess from the image runtime; the protected call succeeds.
   test("denies principal-scoped calls before reading files or invoking a provider", async () => {
     let calls = 0
     const { host, reference, blobStorage } = await setup(
@@ -101,8 +101,30 @@ describe("image generation", () => {
 
     await expect(
       scoped.models.image.generate({ prompt: "a fox", images: [reference] })
-    ).rejects.toThrow("not covered by scoped authorization")
+    ).rejects.toThrow("not allowed to call the project's models")
     expect({ reads, calls }).toEqual({ reads: 0, calls: 0 })
+  })
+
+  // Removal proof: drop the run:models branch from assertModelAccess; the granted call is refused.
+  test("a principal with can.run(project.models) generates as itself", async () => {
+    const { host, storage } = await setup()
+    await storage.auth.users.create({ projectId: host.id, id: "user", email: "user@example.test" })
+    const scoped = bindRequestExecution(host, {
+      request: new Request("http://localhost/images"),
+      authorization: {
+        type: "principal",
+        context: {
+          principal: { type: "user", id: "user" },
+          groupIds: [],
+          roleIds: [],
+          grants: { ...emptyGrantIndex(), "run:models": true },
+        },
+      },
+    })
+
+    const result = await scoped.models.image.generate({ prompt: "a fox" })
+    expect(result.files).toHaveLength(2)
+    expect(await scoped.models.calls.get(result.callId)).toMatchObject({ files: result.files })
   })
 
   // Removal proof: omit onModelCallEnd in image/runtime.ts; the durable-usage assertion fails.

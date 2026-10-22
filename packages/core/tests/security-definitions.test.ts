@@ -503,6 +503,11 @@ describe("role definitions", () => {
     ],
     ["can.run takes the project Agent", can.run(agent), { capability: "run", target: "agent" }],
     [
+      "can.run takes the project's models",
+      can.run(project.models),
+      { capability: "run", target: "models" },
+    ],
+    [
       "can.manage takes a connector definition",
       can.manage(sourceConnector),
       { capability: "manage", target: "connector", selection: { all: false, ids: ["source"] } },

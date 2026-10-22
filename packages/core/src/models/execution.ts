@@ -1,5 +1,5 @@
 import { runModelLoop } from "../agents/model-loop"
-import { assertProviderAccess } from "../authorization"
+import { assertModelAccess } from "../authorization"
 import type { BlobStorage } from "../blob-storage/types"
 import type { ExecutionContext } from "../execution"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -44,7 +44,7 @@ export function createModelsRuntime(
   async function generate(
     input: LanguageModelGenerateInput<LanguageModelOutputShape | undefined>
   ): Promise<LanguageModelGenerateResult<unknown>> {
-    assertProviderAccess(runtime, execution, "models.language.generate")
+    assertModelAccess(runtime, execution, "models.language.generate")
     const messages = generationMessages(input)
     const signal = session.signal(input.signal)
     signal.throwIfAborted()
