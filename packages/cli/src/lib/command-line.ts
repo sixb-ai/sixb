@@ -239,6 +239,7 @@ const INSTANCE_SUMMARIES = {
   workflows: "Discover and start workflows",
   "workflow-runs": "Inspect workflow execution history",
   users: "List and search project members",
+  models: "List the project's models and their prices",
 } as const satisfies Record<InstanceCommand, string>
 
 const instanceNodes: readonly CommandNode[] = INSTANCE_COMMANDS.map((name) => ({

@@ -358,7 +358,15 @@ var LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instance
 `, "").replace(`
 When you do not know a type's properties or links, read its file under $SIXB_ONTOLOGY_DIR. Use
 \`sixb ontology get\` for a type that has no file there.
-`, "");
+`, "").replace(`Files:
+  sixb files upload|download ...
+`, `Files:
+  sixb files upload|download ...
+
+Models:
+  sixb models list [--kind <kind>]    Configured models of every kind, with prices
+  sixb models get <model>             One model's options and rate card
+`);
 function renderInstanceHelp(mode) {
   return mode === "sandbox" ? SANDBOX_MAIN_HELP : LOCAL_MAIN_HELP;
 }
@@ -545,6 +553,13 @@ Options:
 \`users search\` matches part of a display name or email, ignoring case. Each member is
 {"id","email","displayName","avatarUrl","status"}; a user parameter takes
 {"type":"user","id":"<id>"}. Reading members requires can.view(project.users).`,
+  models: `Usage:
+  sixb models list [--kind language|image|speech|transcription]
+  sixb models get <model> [--kind <kind>]
+
+<model> is a model id, or provider:model-id when two providers share one. \`list\` shows each
+model's kind, whether it is the default, its description and its price; \`get\` adds the options
+a request can use and the full rate card. Prices are in USD.`,
   "workflow-runs": `Usage:
   sixb workflow-runs list [options]
   sixb workflow-runs get <run-id>
@@ -740,6 +755,106 @@ async function files(api, args) {
     return writeJson({ downloaded: true, output });
   }
   fail(`Unknown files command '${sub}'.`);
+}
+
+// ../cli-core/src/commands/models.ts
+var MODEL_KINDS = ["language", "image", "speech", "transcription"];
+async function models(api, args) {
+  const [sub, ...rest] = args;
+  if (!sub || isHelp(sub) || requestsHelp(rest))
+    return writeText(GROUP_HELP.models);
+  if (sub === "list") {
+    const { options } = parseCommandArgs(rest, { "--kind": "string" }, "models list", 0);
+    const kind = options["--kind"] === undefined ? undefined : modelKind(options["--kind"]);
+    const entries = catalogEntries(await api.get("/api/models"));
+    return writeJson(entries.filter((entry) => kind === undefined || entry.kind === kind).map(({ kind, entry }) => ({
+      kind,
+      model: entry.modelId,
+      provider: entry.provider,
+      ...entry.isDefault ? { default: true } : {},
+      ...entry.description ? { description: entry.description } : {},
+      price: describePrice(entry.rateCard)
+    })));
+  }
+  if (sub === "get") {
+    const { positionals, options } = parseCommandArgs(rest, { "--kind": "string" }, "models get", 1);
+    const kind = options["--kind"] === undefined ? undefined : modelKind(options["--kind"]);
+    const entries = catalogEntries(await api.get("/api/models"));
+    const { kind: found, entry } = findModel(entries, positionals[0] ?? "", kind);
+    const { provider, modelId, isDefault, rateCard, ...details } = entry;
+    return writeJson({
+      kind: found,
+      model: modelId,
+      provider,
+      default: isDefault,
+      ...details,
+      price: describePrice(rateCard),
+      ...rateCard ? { rateCard } : {}
+    });
+  }
+  fail(`Unknown models command '${sub}'.`);
+}
+function modelKind(value) {
+  const kind = MODEL_KINDS.find((candidate) => candidate === value);
+  if (!kind)
+    fail(`Unknown model kind '${value}'. Use one of: ${MODEL_KINDS.join(", ")}.`);
+  return kind;
+}
+function catalogEntries(catalog) {
+  return [
+    ...catalog.language.map((entry) => ({ kind: "language", entry })),
+    ...catalog.image.map((entry) => ({ kind: "image", entry })),
+    ...catalog.audio.speech.map((entry) => ({ kind: "speech", entry })),
+    ...catalog.audio.transcription.map((entry) => ({ kind: "transcription", entry }))
+  ];
+}
+function findModel(entries, reference, kind) {
+  const separator = reference.indexOf(":");
+  const provider = separator > 0 ? reference.slice(0, separator) : undefined;
+  const modelId = separator > 0 ? reference.slice(separator + 1) : reference;
+  const matches = entries.filter((candidate) => candidate.entry.modelId === modelId && (provider === undefined || candidate.entry.provider === provider) && (kind === undefined || candidate.kind === kind));
+  const [match] = matches;
+  if (!match) {
+    fail(`No ${kind === undefined ? "" : `${kind} `}model '${reference}' is configured. Run 'sixb models list'.`);
+  }
+  if (matches.length > 1) {
+    const kinds = new Set(matches.map((candidate) => candidate.kind));
+    fail(kinds.size > 1 ? `'${reference}' is configured as ${[...kinds].join(" and ")}. Add --kind <kind>.` : `'${reference}' is configured by ${matches.map((candidate) => candidate.entry.provider).join(" and ")}. Use provider:${modelId}.`);
+  }
+  return match;
+}
+function describePrice(card) {
+  if (!card)
+    return "price unknown";
+  const parts = [
+    variantPrice(card.images, "per image", "at"),
+    variantPrice(card.characters, "per 1M characters", "for"),
+    variantPrice(card.audioInputSeconds, "per second of audio", "for"),
+    card.input !== undefined && card.output !== undefined ? `${dollars(tokenPrice(card.input))} input · ${dollars(tokenPrice(card.output))} output per 1M tokens` : undefined,
+    card.audioOutput === undefined ? undefined : `${dollars(tokenPrice(card.audioOutput))} per 1M audio tokens`
+  ].filter((part) => part !== undefined);
+  return parts.length === 0 ? "price unknown" : parts.join(" · ");
+}
+function variantPrice(price, unit, joiner) {
+  if (price === undefined)
+    return;
+  if (typeof price === "string")
+    return `${dollars(price)} ${unit}`;
+  if (price.variants.every((variant) => variant.price === price.default)) {
+    return `${dollars(price.default ?? "")} ${unit}`;
+  }
+  const variants = price.variants.map(({ price: amount, ...dimensions }) => {
+    const label = Object.values(dimensions).join(" ");
+    return `${dollars(amount)} ${joiner} ${label}`;
+  });
+  const otherwise = price.default === undefined ? [] : [`otherwise ${dollars(price.default)}`];
+  return `${unit}: ${[...variants, ...otherwise].join(", ")}`;
+}
+function tokenPrice(price) {
+  return typeof price === "string" ? price : price.default;
+}
+function dollars(amount) {
+  return `$${amount}`;
 }
 
 // ../cli-core/src/graph.ts
@@ -1522,7 +1637,8 @@ var INSTANCE_COMMANDS = [
   "files",
   "workflows",
   "workflow-runs",
-  "users"
+  "users",
+  "models"
 ];
 function isInstanceCommand(command) {
   return INSTANCE_COMMANDS.includes(command);
@@ -1549,6 +1665,8 @@ async function dispatch(api, command, args) {
       return runs(api, "workflow", args);
     case "users":
       return users(api, args);
+    case "models":
+      return models(api, args);
     default:
       fail(`Unknown command '${command}'. Run 'sixb --help'.`);
   }
