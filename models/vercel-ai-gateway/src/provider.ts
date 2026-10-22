@@ -491,12 +491,14 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
           ...(dimensions === undefined ? {} : { dimensions }),
         }),
     }
+    const sizes = pricedSizes(entry?.rateCard)
     return {
       protocol: entry?.protocol ?? "image",
       ...(entry?.name ? { name: entry.name } : {}),
       ...(entry?.description ? { description: entry.description } : {}),
       estimator,
       ...(card ? { rateCard: card } : {}),
+      ...(sizes ? { sizes } : {}),
     }
   }
 
@@ -902,6 +904,17 @@ function modelRateCard(raw: JsonObject | undefined): ModelRateCard | undefined {
     ...(cacheReadInput === undefined ? {} : { cacheReadInput }),
     ...(cacheWriteInput === undefined ? {} : { cacheWriteInput }),
   }
+}
+
+/**
+ * The sizes a model's price varies by. The catalog prices every size the Gateway serves for it;
+ * a model priced the same at any size, or by tokens, publishes none.
+ */
+function pricedSizes(card: ModelRateCard | undefined): readonly string[] | undefined {
+  const images = card?.images
+  if (images === undefined || typeof images === "string") return undefined
+  const sizes = images.variants.flatMap((variant) => (variant.size ? [variant.size] : []))
+  return sizes.length === images.variants.length && sizes.length > 0 ? sizes : undefined
 }
 
 /** Token prices when the catalog lists both, and the per-image price beside them. */

@@ -44,6 +44,8 @@ export interface GatewayImageResolution {
   readonly description?: string
   readonly estimator?: ImageCostEstimator
   readonly rateCard?: ModelRateCard
+  /** The sizes the catalog prices, and so the sizes a request may name. */
+  readonly sizes?: readonly string[]
 }
 
 interface ImageTransport {
@@ -89,6 +91,7 @@ export function createGatewayImage(
     via: "Vercel AI Gateway",
     ...(resolution?.name ? { name: resolution.name } : {}),
     ...(description ? { description } : {}),
+    ...(resolution?.sizes ? { sizes: Object.freeze([...resolution.sizes]) } : {}),
     // Chat completions return one image per reply.
     ...(resolution?.protocol === "chat" ? { maxImagesPerCall: 1 } : {}),
     inputImages: options.inputImages ?? DEFAULT_INPUT_IMAGES,
