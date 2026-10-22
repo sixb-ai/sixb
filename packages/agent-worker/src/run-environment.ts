@@ -89,6 +89,8 @@ interface CreateAgentEnvironmentInput {
 
 export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvironmentInput {
   readonly thread?: AgentThreadRecord | null
+  /** Who asked for the turn: what it publishes is theirs, in an artifact the thread's owner owns. */
+  readonly requestedBy?: Principal
   /** Who can read the thread now: in a shared one, who wrote what counts toward the estimate. */
   readonly conversation?: ConversationReaders
   readonly sandboxDefinition?: SandboxDefinition
@@ -195,6 +197,7 @@ export async function createConversationAgentEnvironment(
         ? {
             publishing: {
               owner: input.thread.ownerPrincipal,
+              author: input.requestedBy ?? input.thread.ownerPrincipal,
               executionToken: run.execution.token,
             },
           }
@@ -377,7 +380,11 @@ interface AgentEnvironmentSetup extends Omit<CreateAgentEnvironmentInput, "signa
    * A conversation publishes artifacts as the thread's owner and edits them from storage; other
    * runs return text.
    */
-  readonly publishing?: { readonly owner: Principal; readonly executionToken: string }
+  readonly publishing?: {
+    readonly owner: Principal
+    readonly author: Principal
+    readonly executionToken: string
+  }
 }
 
 /**
@@ -453,10 +460,9 @@ async function startAgentEnvironment(
   if (input.publishing && threadId && artifactStorage) {
     // Read concurrently with sandbox creation; both run while the model starts.
     installedArtifacts = materializeThreadArtifacts({
-      projectId: context.id,
       threadId,
-      owner: input.publishing.owner,
-      storage: artifactStorage,
+      // As the requester: the turn installs nothing they could not read themselves.
+      artifacts: context.sixb.artifacts,
       blobStorage: context.blobStorage,
       directory: AGENT_ARTIFACTS_DIRECTORY,
       manifestPath: AGENT_ARTIFACTS_MANIFEST,
@@ -468,9 +474,11 @@ async function startAgentEnvironment(
       projectId: context.id,
       storage: context.storage,
       artifacts: artifactStorage,
+      reader: context.sixb.artifacts,
       blobStorage: context.blobStorage,
       run: { id: runId, threadId, executionToken: input.publishing.executionToken },
       owner: input.publishing.owner,
+      author: input.publishing.author,
       budget: fileBudget,
       resolveSandbox,
       installed: installedArtifacts,

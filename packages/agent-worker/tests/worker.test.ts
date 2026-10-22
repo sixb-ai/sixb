@@ -8278,6 +8278,151 @@ describe("AgentWorker", () => {
     }
   })
 
+  // Guard proofs: pass the thread's owner as `author` in createConversationAgentEnvironment's
+  // publishing, and Bob's versions name Alice; give the publish tools the owner's view as
+  // `reader` (or read storage in updatableArtifact), and Bob's turn revises Alice's private notes.
+  test("a participant's turn publishes as them and reaches only what the thread shares", async () => {
+    const sandboxes = new RecordingSandboxFactory()
+    const alice = { type: "user", id: "usr_alice" } as const
+    const bob = { type: "user", id: "usr_bob" } as const
+    const ids: { shared?: string; notes?: string } = {}
+    const outputs: unknown[] = []
+    let call = 0
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (request) => {
+        const last = request.messages.at(-1)
+        if (last?.role === "tool") outputs.push(last.content)
+        call += 1
+        if (call === 1) return toolCallStream("bob-1", "bash", { command: "write-q3-review" })
+        if (call === 2) {
+          return toolCallStream("bob-2", "publish_artifact_version", {
+            id: ids.notes,
+            path: "work/q3-review",
+            title: "Taken over",
+          })
+        }
+        if (call === 3) {
+          return toolCallStream("bob-3", "publish_artifact_version", {
+            id: ids.shared,
+            path: "work/q3-review",
+            title: "Q3 review, Bob's",
+          })
+        }
+        if (call === 4) {
+          return toolCallStream("bob-4", "publish_artifact", {
+            path: "work/q3-review",
+            kind: "document",
+            title: "Bob's own",
+          })
+        }
+        return answerStream("Done.")
+      },
+    })
+    const chatters = defineGroup("chatters")
+    const sixb = buildSixb(model, new InMemoryBroker(), sandboxes, {
+      security: {
+        ontology: [],
+        groups: [AGENT_RUNTIME_GROUP, chatters],
+        roles: [defineRole("chat.users", { grantedTo: [chatters], grants: [can.run(agent)] })],
+      },
+    })
+    const storage = agentStorageOf(sixb)
+    const artifacts = artifactStorageOf(sixb)
+    const auth = authStorageOf(sixb)
+    for (const user of [alice, bob]) {
+      await auth.users.create({ projectId: PROJECT_ID, id: user.id, email: `${user.id}@acme.com` })
+      await auth.groupMemberships.upsert({
+        projectId: PROJECT_ID,
+        userId: user.id,
+        groupId: chatters.id,
+        source: "manual",
+      })
+    }
+
+    // Alice's thread shares one artifact; her notes stay hers.
+    const thread = await storage.threads.create({
+      projectId: PROJECT_ID,
+      id: "thr_shared",
+      ownerPrincipal: alice,
+    })
+    const file = await sixb.blobStorage.put({
+      body: new TextEncoder().encode("# Shared\n"),
+      fileName: "document.md",
+      mediaType: "text/markdown",
+    })
+    const version = {
+      title: "Shared",
+      entry: "document.md",
+      files: [{ path: "document.md", file }],
+      outline: { kind: "document" as const, headings: [] },
+      references: [],
+      author: alice,
+      createdAt: new Date(),
+    }
+    ids.shared = (
+      await artifacts.create({
+        projectId: PROJECT_ID,
+        id: "art_0000000001",
+        kind: "document",
+        owner: alice,
+        version: { ...version, origin: { threadId: thread.id, runId: "run_earlier" } },
+      })
+    ).artifact.id
+    ids.notes = (
+      await artifacts.create({
+        projectId: PROJECT_ID,
+        id: "art_0000000002",
+        kind: "document",
+        owner: alice,
+        version: { ...version, title: "Notes" },
+      })
+    ).artifact.id
+    await storage.threads.addParticipants({
+      projectId: PROJECT_ID,
+      threadId: thread.id,
+      principals: [bob],
+      addedBy: alice,
+      maxParticipants: 50,
+    })
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const turn = await requestAgentAs(sixb, bob, { text: "Revise it", threadId: thread.id })
+      expect((await waitForTerminalRun(storage, turn.run.id)).status).toBe("succeeded")
+
+      const manifest = sandboxes.sandboxes[0]?.writtenFiles.find((written) =>
+        written.path.endsWith("/.sixb/agent/context/artifacts.json")
+      )
+      expect(String(manifest?.contents)).toContain(ids.shared)
+      expect(String(manifest?.contents)).not.toContain(ids.notes)
+
+      expect(JSON.stringify(outputs[1])).toContain(`there is no artifact '${ids.notes}'`)
+      expect((await artifacts.get({ projectId: PROJECT_ID, id: ids.notes }))?.latestVersion).toBe(1)
+
+      const revised = await artifacts.getVersion({
+        projectId: PROJECT_ID,
+        artifactId: ids.shared,
+        version: 2,
+      })
+      expect(revised).toMatchObject({ author: bob, title: "Q3 review, Bob's" })
+
+      const { artifacts: created } = await artifacts.list({
+        projectId: PROJECT_ID,
+        threadId: thread.id,
+      })
+      const own = created.find((artifact) => artifact.title === "Bob's own")
+      expect(own?.owner).toEqual(alice)
+      const first =
+        own &&
+        (await artifacts.getVersion({ projectId: PROJECT_ID, artifactId: own.id, version: 1 }))
+      expect(first?.author).toEqual(bob)
+    } finally {
+      await worker.stop()
+    }
+  })
+
   // Regression check: restore assistant fileText projection in core/src/agents/adapters.ts.
   // The second turn's assistant-history assertion must fail even though retrieval still works.
   test("publishes an artifact mid-turn and edits it from storage the next turn", async () => {

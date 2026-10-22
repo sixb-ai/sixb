@@ -12,6 +12,7 @@ import type { PreparedAgentAttachmentContext } from "./attachments"
  */
 export const AGENT_ARTIFACTS_DIRECTORY = ".sixb/agent/artifacts"
 export const AGENT_ARTIFACTS_MANIFEST = ".sixb/agent/context/artifacts.json"
+const ARTIFACTS_RESET_TIMEOUT_MS = 30_000
 
 export interface AgentSandboxApiContext {
   readonly env: Readonly<Record<string, string>>
@@ -66,6 +67,24 @@ export async function prepareAgentSandboxApiContext(
     null,
     2
   )
+
+  // A persistent workspace keeps what earlier runs installed: each artifact's copy must hold exactly
+  // the version installed now, never a file only an older version had.
+  if (input.artifacts) {
+    const cleared = await input.sandbox.runCommand(
+      "bash",
+      ["-c", 'rm -rf -- "$SIXB_ARTIFACTS_RESET"'],
+      {
+        env: { SIXB_ARTIFACTS_RESET: artifactsDir },
+        timeout: ARTIFACTS_RESET_TIMEOUT_MS,
+      }
+    )
+    if (cleared.exitCode !== 0 || cleared.timedOut) {
+      throw new Error(
+        `[SixbAgentWorker] Could not clear ${AGENT_ARTIFACTS_DIRECTORY}: ${cleared.stderr.trim() || `exit ${cleared.exitCode}`}`
+      )
+    }
+  }
 
   // Materialize skills, ontology docs + run context through the sandbox capability rather than the host
   // filesystem, so any provider (including non-host-path ones like smolvm) places the bytes in the
