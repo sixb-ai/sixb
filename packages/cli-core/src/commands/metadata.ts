@@ -77,6 +77,12 @@ const LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instan
     ""
   )
 
+  // The agent reaches models through its run's gateway once the model routes allow it.
+  .replace(
+    "Files:\n  sixb files upload|download ...\n",
+    "Files:\n  sixb files upload|download ...\n\nModels:\n  sixb models list [--kind <kind>]    Configured models of every kind, with prices\n  sixb models get <model>             One model's options and rate card\n"
+  )
+
 export function renderInstanceHelp(mode: "local" | "sandbox"): string {
   return mode === "sandbox" ? SANDBOX_MAIN_HELP : LOCAL_MAIN_HELP
 }
@@ -269,6 +275,13 @@ Options:
 \`users search\` matches part of a display name or email, ignoring case. Each member is
 {"id","email","displayName","avatarUrl","status"}; a user parameter takes
 {"type":"user","id":"<id>"}. Reading members requires can.view(project.users).`,
+  models: `Usage:
+  sixb models list [--kind language|image|speech|transcription]
+  sixb models get <model> [--kind <kind>]
+
+<model> is a model id, or provider:model-id when two providers share one. \`list\` shows each
+model's kind, whether it is the default, its description and its price; \`get\` adds the options
+a request can use and the full rate card. Prices are in USD.`,
   "workflow-runs": `Usage:
   sixb workflow-runs list [options]
   sixb workflow-runs get <run-id>

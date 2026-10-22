@@ -359,6 +359,21 @@ the binding sets, so you can switch models without changing calls. You can also 
 `instructions` for style, `speed`, and `language`. Voices and formats depend on the model; Sixb
 never converts formats, so a model that cannot produce the requested `mediaType` fails the call.
 
+## List the catalog
+
+`GET /api/models` and `sixb models list` show every configured model by kind, with its default,
+description, the options a request can use, and its price:
+
+```bash
+sixb models list --kind image
+sixb models get bfl/flux-3-image
+```
+
+A price comes from the provider binding, as it bills: per token, image, character or second of
+audio, by size or voice tier where it varies. A model with no known price says "price unknown"; it
+can still be called, except while a [cost limit](./usage-and-limits.md#set-a-monthly-limit)
+applies.
+
 ## Embedding models
 
 Embedding models turn text into vectors for [semantic search](../objects/querying.md#search-by-meaning).

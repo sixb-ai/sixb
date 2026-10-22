@@ -2,6 +2,7 @@ import type { ApiClient } from "../api-client"
 import { fail } from "../output"
 import { actions } from "./actions"
 import { files } from "./files"
+import { models } from "./models"
 import { objects } from "./objects"
 import { ontology } from "./ontology"
 import { project } from "./project"
@@ -21,6 +22,7 @@ export const INSTANCE_COMMANDS = [
   "workflows",
   "workflow-runs",
   "users",
+  "models",
 ] as const
 
 export type InstanceCommand = (typeof INSTANCE_COMMANDS)[number]
@@ -55,6 +57,8 @@ export async function dispatch(
       return runs(api, "workflow", args)
     case "users":
       return users(api, args)
+    case "models":
+      return models(api, args)
     default:
       fail(`Unknown command '${command}'. Run 'sixb --help'.`)
   }
