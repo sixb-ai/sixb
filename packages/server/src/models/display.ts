@@ -50,7 +50,7 @@ export async function languageModelDisplay(entry: LanguageModelEntry) {
         : { contextWindowTokens: definition.contextWindow }),
     },
     reasoningLevels: reasoningLevels(definition),
-    ...rateCardDisplay(model.rateCard),
+    ...rateCardDisplay(entry, model.rateCard),
   }
 }
 
@@ -87,13 +87,25 @@ export async function resolvedForDisplay<
   }
 }
 
+// The catalog is read often (the model picker), so each invalid card is reported once.
+const reportedInvalidCards = new Set<string>()
+
 /** A binding's prices, shown only when they form a valid card. */
-export function rateCardDisplay(card: ModelRateCard | undefined): { rateCard?: ModelRateCard } {
+export function rateCardDisplay(
+  entry: { readonly provider: string; readonly modelId: string },
+  card: ModelRateCard | undefined
+): { rateCard?: ModelRateCard } {
   if (!card) return {}
   try {
     return { rateCard: defineModelRateCard(card) }
   } catch {
-    console.warn("[SixbServer] A model binding's rate card is invalid; its price is not shown.")
+    const key = JSON.stringify([entry.provider, entry.modelId])
+    if (!reportedInvalidCards.has(key)) {
+      reportedInvalidCards.add(key)
+      console.warn(
+        `[SixbServer] The rate card of '${entry.provider}/${entry.modelId}' is invalid; its price is not shown.`
+      )
+    }
     return {}
   }
 }
