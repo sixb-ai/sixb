@@ -67,4 +67,58 @@ describe("PgArtifactStorage under concurrent writes", () => {
       await disposeTestStorage(storage)
     }
   })
+
+  test("of two publishes from one base, the one that waited finds the artifact moved", async () => {
+    // Reproduce by checking the base against a `latest_version` read with `this.sql` before
+    // `runPgTransaction` in `publish`: the second publish reads version 1 while the first is
+    // uncommitted and is stored as version 3. Dropping the `FOR UPDATE` instead fails it with a
+    // duplicate `artifact_versions` key rather than `artifact_moved`.
+    const { storage, schemaName, connectionString } = await createTestStorage()
+    // Another process on the same database, as a save from a second tab can reach.
+    const other = new PostgresStorage({ connectionString, schemaName, max: 2 })
+    try {
+      const artifacts = storage.artifacts
+      await artifacts.create({
+        projectId,
+        id: "art_raced",
+        kind: "document",
+        owner,
+        version: version("run_created", 0),
+      })
+
+      let second: Promise<unknown> | undefined
+      await storage.transaction(async (tx) => {
+        // The first publish holds the artifact's lock until this transaction commits.
+        await tx.artifacts?.publish({
+          projectId,
+          artifactId: "art_raced",
+          kind: "document",
+          baseVersion: 1,
+          version: version("run_first", 1),
+        })
+
+        second = other.artifacts
+          .publish({
+            projectId,
+            artifactId: "art_raced",
+            kind: "document",
+            baseVersion: 1,
+            version: version("run_second", 2),
+          })
+          .catch((error: unknown) => error)
+        await waitForLockWait(connectionString, second)
+      })
+
+      expect(await second).toMatchObject({
+        code: "artifact_moved",
+        latest: { version: 2, author: owner },
+      })
+      expect(await artifacts.get({ projectId, id: "art_raced" })).toMatchObject({
+        latestVersion: 2,
+      })
+    } finally {
+      await other.close()
+      await disposeTestStorage(storage)
+    }
+  })
 })
