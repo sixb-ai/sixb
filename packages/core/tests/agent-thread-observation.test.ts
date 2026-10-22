@@ -115,10 +115,11 @@ describe("observing other users' conversations", () => {
 })
 
 describe("an observer and artifacts", () => {
-  // Guard proof: return every version from conversationVersions, unfiltered; the observer then
-  // reads version 1, which no conversation published, and counts it.
-  test("reads only what the Agent published in a conversation, counted alone", async () => {
+  // Guard proof: return "update" for an observer in createArtifactsRuntime's conversation rule;
+  // the observer then publishes a version and keeps page data.
+  test("reads every version of what a conversation shares, read-only", async () => {
     const { deps, owner, observer, activityOnly } = setup()
+    await seedConversation(deps.storage)
     const file = await deps.blobStorage.put({
       body: new TextEncoder().encode("# Late invoices"),
       fileName: "document.md",
@@ -130,77 +131,60 @@ describe("an observer and artifacts", () => {
       files: [{ path: "document.md", file }],
     }
 
-    // Version 1 comes from code; 2 and 3 from a conversation, as the Agent's tool stores them.
-    const { artifact, version: first } = await owner.artifacts.create(content)
-    const { projectId: _projectId, artifactId: _artifactId, version: _number, ...input } = first
-    for (const title of ["Late invoices, v2", "Late invoices, v3"]) {
-      await deps.storage.artifacts.publish({
-        projectId,
-        artifactId: artifact.id,
-        kind: "document",
-        version: { ...input, title, origin: { threadId: "thr_marie", runId: "run_marie" } },
-      })
-    }
-
-    const observed = observer.agent.observed.artifacts
-    expect(await observed.get(artifact.id)).toMatchObject({
-      latestVersion: 3,
-      title: "Late invoices, v3",
-    })
-    expect(await observed.getVersion(artifact.id, "latest")).toMatchObject({ version: 3 })
-    expect(await observed.getVersion(artifact.id, 1)).toBeNull()
-    expect(await observed.listVersions(artifact.id, { limit: 1 })).toMatchObject({
-      versions: [{ version: 3 }],
-      hasMore: true,
-      total: 2,
-    })
-    expect(await observed.listVersions(artifact.id, { limit: 1, offset: 1 })).toMatchObject({
-      versions: [{ version: 2 }],
-      hasMore: false,
-      total: 2,
-    })
-
-    // sixb.artifacts stays the caller's own.
-    expect(await observer.artifacts.get(artifact.id)).toBeNull()
-    expect(await observer.artifacts.getVersion(artifact.id, 2)).toBeNull()
-    await expect(activityOnly.agent.observed.artifacts.get(artifact.id)).rejects.toThrow(
-      AuthorizationError
-    )
-    await expect(activityOnly.agent.observed.artifacts.getVersion(artifact.id, 2)).rejects.toThrow(
-      AuthorizationError
-    )
-  })
-
-  // Guard proof: return the stored record (`read.artifact`) unchanged from `get`; it then names
-  // version 3, which the observer cannot read, under a title no conversation showed.
-  test("a version published from code later leaves the conversation's artifact readable", async () => {
-    const { deps, owner, observer } = setup()
-    const file = await deps.blobStorage.put({
-      body: new TextEncoder().encode("# Late invoices"),
-      fileName: "document.md",
-    })
-    const content = {
-      kind: "document" as const,
-      title: "Late invoices",
-      files: [{ path: "document.md", file }],
-    }
+    // Version 1 comes from code, 2 from the conversation, 3 from code again.
     const { artifact, version: first } = await owner.artifacts.create(content)
     const { projectId: _projectId, artifactId: _artifactId, version: _number, ...input } = first
     await deps.storage.artifacts.publish({
       projectId,
       artifactId: artifact.id,
       kind: "document",
-      version: { ...input, origin: { threadId: "thr_marie", runId: "run_marie" } },
+      version: {
+        ...input,
+        title: "Late invoices, v2",
+        origin: { threadId: "thr_marie", runId: "run_marie" },
+      },
     })
     await owner.artifacts.publish(artifact.id, { ...content, title: "Edited from code" })
 
-    const observed = observer.agent.observed.artifacts
-    const record = await observed.get(artifact.id)
-    expect(record).toMatchObject({ latestVersion: 2, title: "Late invoices" })
-    expect(await observed.getVersion(artifact.id, record?.latestVersion ?? 0)).not.toBeNull()
-    expect(await observed.getVersion(artifact.id, 3)).toBeNull()
-    expect(JSON.stringify(await observed.listVersions(artifact.id))).not.toContain(
-      "Edited from code"
-    )
+    expect(await observer.artifacts.access(artifact.id)).toBe("read")
+    expect(await observer.artifacts.get(artifact.id)).toMatchObject({
+      latestVersion: 3,
+      title: "Edited from code",
+    })
+    expect(await observer.artifacts.getVersion(artifact.id, 1)).toMatchObject({ version: 1 })
+    expect((await observer.artifacts.listVersions(artifact.id))?.total).toBe(3)
+
+    await expect(observer.artifacts.publish(artifact.id, content)).rejects.toMatchObject({
+      code: "read_only",
+    })
+    await expect(observer.artifacts.state(artifact.id).get("filters")).rejects.toMatchObject({
+      code: "read_only",
+    })
+    expect(await observer.artifacts.delete(artifact.id)).toBe(false)
+
+    // Without the grant, the conversation's artifacts stay its readers'.
+    expect(await activityOnly.artifacts.access(artifact.id)).toBe("none")
+    expect(await activityOnly.artifacts.get(artifact.id)).toBeNull()
+  })
+
+  test("reaches nothing a conversation does not share", async () => {
+    const { deps, owner, observer } = setup()
+    await seedConversation(deps.storage)
+    const file = await deps.blobStorage.put({
+      body: new TextEncoder().encode("# Private"),
+      fileName: "document.md",
+    })
+    const { artifact } = await owner.artifacts.create({
+      kind: "document",
+      title: "Private",
+      files: [{ path: "document.md", file }],
+    })
+
+    expect(await observer.artifacts.access(artifact.id)).toBe("none")
+    expect(await observer.artifacts.get(artifact.id)).toBeNull()
+    expect(await observer.artifacts.access("art_0000000000")).toBeNull()
+    expect(
+      (await observer.artifacts.list({ threadId: "thr_marie" })).artifacts.map((each) => each.id)
+    ).toEqual([])
   })
 })

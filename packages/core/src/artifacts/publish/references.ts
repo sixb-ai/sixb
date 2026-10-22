@@ -17,8 +17,8 @@ export type FoundReference = Omit<ArtifactReference, "resolvedVersion">
 interface ReferenceContext {
   readonly projectId: string
   readonly storage: ArtifactStorage
-  /** Who publishes: an address resolves only to artifacts they can read. */
-  readonly author: Principal
+  /** Whether an address may name this artifact: one whoever publishes can read. */
+  readonly readable: (artifact: ArtifactRecord) => Promise<boolean>
   /** The artifact being published, which an address may not name. */
   readonly artifactId?: string
 }
@@ -59,7 +59,7 @@ export async function resolveReferences(
     if (!artifact) {
       artifact = context.storage
         .get({ projectId: context.projectId, id: address.artifactId })
-        .then((record) => (record && readable(context.author, record) ? record : null))
+        .then(async (record) => (record && (await context.readable(record)) ? record : null))
       artifacts.set(address.artifactId, artifact)
     }
     const record = await artifact
@@ -108,7 +108,7 @@ export async function brokenDependents(
       projectId: context.projectId,
       id: dependent.artifactId,
     })
-    if (!owner || !readable(context.author, owner)) continue
+    if (!owner || !(await context.readable(owner))) continue
     for (const reference of dependent.references) {
       const address = parseArtifactAddress(reference.address)
       // A pinned address keeps showing the version it names.
@@ -124,7 +124,7 @@ export async function brokenDependents(
   return warnings
 }
 
-/** Owner-only, as reading is: system code reads every artifact in the project. */
-function readable(reader: Principal, artifact: ArtifactRecord): boolean {
-  return reader.type === "system" || principalsEqual(reader, artifact.owner)
+/** What its author reads when nothing else is said: their own artifacts, or all for system code. */
+export function ownArtifacts(author: Principal): (artifact: ArtifactRecord) => Promise<boolean> {
+  return async (artifact) => author.type === "system" || principalsEqual(author, artifact.owner)
 }

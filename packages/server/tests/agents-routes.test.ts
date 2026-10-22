@@ -1795,3 +1795,111 @@ describe("a thread's participants over HTTP", () => {
     expect((await post(`${path}/fork`, {}, bob)).status).toBe(404)
   })
 })
+
+describe("a shared conversation's artifacts over HTTP", () => {
+  // Guard proof: make createArtifactAccessRule return "none" past the owner check; Bob then gets
+  // 403 not_shared for the thread's artifact too.
+  test("a participant reads and updates them; anyone else is told they are not shared", async () => {
+    const { app, storage, sixb } = createApp({ auth: true })
+    const alice = { type: "user", id: "usr_alice" } as const
+    await seedSession(storage, "usr_alice")
+    const bob = await seedSession(storage, "usr_bob")
+    const cleo = await seedSession(storage, "usr_cleo")
+
+    await storage.agents.threads.create({
+      projectId: sixb.id,
+      id: "thr_shared",
+      ownerPrincipal: alice,
+    })
+    await storage.agents.threads.addParticipants({
+      projectId: sixb.id,
+      threadId: "thr_shared",
+      principals: [{ type: "user", id: "usr_bob" }],
+      addedBy: alice,
+      maxParticipants: 50,
+    })
+    const file = await sixb.blobStorage.put({
+      body: new TextEncoder().encode("# Late deals"),
+      fileName: "document.md",
+      mediaType: "text/markdown",
+    })
+    const version = {
+      title: "Late deals",
+      entry: "document.md",
+      files: [{ path: "document.md", file }],
+      outline: { kind: "document" as const, headings: [] },
+      references: [],
+      author: alice,
+      createdAt: new Date(),
+    }
+    await storage.artifacts.create({
+      projectId: sixb.id,
+      id: "art_0000000001",
+      kind: "document",
+      owner: alice,
+      version: { ...version, origin: { threadId: "thr_shared", runId: "run_shared" } },
+    })
+    await storage.artifacts.create({
+      projectId: sixb.id,
+      id: "art_0000000002",
+      kind: "document",
+      owner: alice,
+      version: { ...version, title: "Private notes" },
+    })
+
+    const call = (
+      path: string,
+      as: Awaited<ReturnType<typeof seedSession>>,
+      init: RequestInit = {}
+    ) =>
+      app.fetch(
+        new Request(`http://localhost${path}`, {
+          ...init,
+          headers: init.method ? as.csrfHeaders : as.headers,
+        })
+      )
+
+    const read = await call("/api/artifacts/art_0000000001", bob)
+    expect(read.status).toBe(200)
+    expect(await read.json()).toMatchObject({ artifact: { owner: alice }, access: "update" })
+
+    const saved = await call("/api/artifacts/art_0000000001/versions", bob, {
+      method: "POST",
+      body: JSON.stringify({
+        kind: "document",
+        title: "Bob's edit",
+        files: [{ path: "document.md", file }],
+      }),
+    })
+    expect(saved.status).toBe(201)
+    expect(await saved.json()).toMatchObject({
+      artifact: { owner: alice, latestVersion: 2 },
+      version: { author: { type: "user", id: "usr_bob" } },
+    })
+    const kept = await call("/api/artifacts/art_0000000001/state/filters", bob, {
+      method: "PUT",
+      body: JSON.stringify({ value: { region: "EMEA" } }),
+    })
+    expect(kept.status).toBe(200)
+
+    const removed = await call("/api/artifacts/art_0000000001", bob, { method: "DELETE" })
+    expect(removed.status).toBe(403)
+    expect(await removed.json()).toMatchObject({ code: "not_allowed" })
+
+    const listed = await call("/api/artifacts?thread=thr_shared", bob)
+    expect((await listed.json()).artifacts.map((each: { id: string }) => each.id)).toEqual([
+      "art_0000000001",
+    ])
+
+    for (const [path, as] of [
+      ["/api/artifacts/art_0000000002", bob],
+      ["/api/artifacts/art_0000000001", cleo],
+      ["/api/artifacts/art_0000000001/versions/latest", cleo],
+    ] as const) {
+      const refused = await call(path, as)
+      expect(refused.status, path).toBe(403)
+      expect(await refused.json()).toMatchObject({ code: "not_shared" })
+    }
+    expect((await call("/api/artifacts/art_0000000009", bob)).status).toBe(404)
+  })
+})

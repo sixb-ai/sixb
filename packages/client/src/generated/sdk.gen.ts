@@ -2882,7 +2882,7 @@ export const listObservedAgentThreadRuns = <ThrowOnError extends boolean = false
 /**
  * List artifacts
  *
- * The caller's artifacts, most recently updated first.
+ * The caller's artifacts, most recently updated first. With thread, every artifact the conversation shares, for whoever reads it.
  */
 export const listArtifacts = <ThrowOnError extends boolean = false>(
   options?: Options<ListArtifactsData, ThrowOnError>
@@ -2921,7 +2921,7 @@ export const createArtifact = <ThrowOnError extends boolean = false>(
 /**
  * Delete an artifact
  *
- * Deletes the artifact with every version.
+ * Deletes the artifact with every version, from every conversation that shares it. Only its owner can.
  */
 export const deleteArtifact = <ThrowOnError extends boolean = false>(
   options: Options<DeleteArtifactData, ThrowOnError>

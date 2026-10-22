@@ -3,9 +3,7 @@ import {
   type ArtifactRecord,
   ArtifactRequestError,
   type ArtifactVersionRecord,
-  AuthorizationError,
   isFileRef,
-  type ListArtifactVersionsResult,
   type PublishedArtifact,
   type SixbHostView,
 } from "@sixb/core"
@@ -13,7 +11,7 @@ import { createArtifactFrame } from "@sixb/core/internal/artifacts/frames"
 import type { Elysia } from "elysia"
 import { ZodError } from "zod"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
-import { requestCaller, requireRequestSixb } from "../auth/scope"
+import { requireRequestSixb } from "../auth/scope"
 import {
   createFileContentResponse,
   fileContentGetResponses,
@@ -103,49 +101,6 @@ function contentInput(body: {
   }
 }
 
-/** What the read routes need of an artifact, whoever's it is. */
-interface ArtifactReader {
-  get(artifactId: string): Promise<ArtifactRecord | null>
-  getVersion(artifactId: string, version: number | "latest"): Promise<ArtifactVersionRecord | null>
-  listVersions(artifactId: string): Promise<ListArtifactVersionsResult | null>
-}
-
-/**
- * The caller's own artifacts first. Failing that, a signed-in session with
- * `can.observe(agent.threads)` reads what the Agent published in a conversation, as the observed
- * thread routes let it; an access token never does. Writes never come here.
- */
-function artifactReader(context: unknown): ArtifactReader {
-  const sixb = requireRequestSixb(context)
-  const own = sixb.artifacts
-  const observed =
-    requestCaller(context)?.credentialSource === "session" ? sixb.agent.observed.artifacts : null
-
-  // Without the grant, an artifact that is not the caller's stays not found, as it always was.
-  const orObserved = async <T>(
-    read: (artifacts: NonNullable<typeof observed>) => Promise<T | null>
-  ): Promise<T | null> => {
-    if (!observed) return null
-    try {
-      return await read(observed)
-    } catch (error) {
-      if (error instanceof AuthorizationError) return null
-      throw error
-    }
-  }
-
-  return {
-    get: async (artifactId) =>
-      (await own.get(artifactId)) ?? orObserved((artifacts) => artifacts.get(artifactId)),
-    getVersion: async (artifactId, version) =>
-      (await own.getVersion(artifactId, version)) ??
-      orObserved((artifacts) => artifacts.getVersion(artifactId, version)),
-    listVersions: async (artifactId) =>
-      (await own.listVersions(artifactId)) ??
-      orObserved((artifacts) => artifacts.listVersions(artifactId)),
-  }
-}
-
 function versionParam(value: string): number | "latest" {
   return value === "latest" ? "latest" : Number(value)
 }
@@ -153,6 +108,22 @@ function versionParam(value: string): number | "latest" {
 function notFound(set: RouteSet) {
   set.status = 404
   return { error: "Artifact not found", code: "artifact_not_found" as const }
+}
+
+/**
+ * Why a read found nothing: 404 when there is no such artifact, 403 `not_shared` when there is one
+ * the caller cannot read, so a page can say it is not shared in this conversation.
+ */
+async function refusal(context: unknown, artifactId: string, set: RouteSet) {
+  if ((await requireRequestSixb(context).artifacts.access(artifactId)) !== "none") {
+    return notFound(set)
+  }
+
+  set.status = 403
+  return {
+    error: "Artifact not shared in a conversation you read",
+    code: "not_shared" as const,
+  }
 }
 
 function handleArtifactRouteError(error: unknown, set: RouteSet) {
@@ -173,6 +144,8 @@ function handleArtifactRouteError(error: unknown, set: RouteSet) {
         set.status = 413
         break
       case "not_allowed":
+      case "not_shared":
+      case "read_only":
         set.status = 403
         break
       case "storage_unavailable":
@@ -213,11 +186,13 @@ async function artifactFileContentResponse(
 ) {
   try {
     const query = FileContentQuerySchema.parse(context.query)
-    const version = await artifactReader(context).getVersion(
+    const version = await requireRequestSixb(context).artifacts.getVersion(
       context.params.artifactId,
       versionParam(context.params.version)
     )
-    const file = version?.files.find((candidate) => candidate.path === query.path)
+    if (!version) return await refusal(context, context.params.artifactId, context.set)
+
+    const file = version.files.find((candidate) => candidate.path === query.path)
     const response =
       file &&
       (await createFileContentResponse({
@@ -274,7 +249,8 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         },
         detail: {
           summary: "List artifacts",
-          description: "The caller's artifacts, most recently updated first.",
+          description:
+            "The caller's artifacts, most recently updated first. With thread, every artifact the conversation shares, for whoever reads it.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "listArtifacts",
           security: accessTokenSecurityRequirement("listArtifacts"),
@@ -310,13 +286,21 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       "/api/artifacts/:artifactId",
       async (context) => {
         try {
-          const artifacts = artifactReader(context)
-          const artifact = await artifacts.get(context.params.artifactId)
-          const versions = artifact && (await artifacts.listVersions(artifact.id))
-          if (!artifact || !versions) return notFound(context.set)
+          const artifacts = requireRequestSixb(context).artifacts
+          const { artifactId } = context.params
+          const [artifact, versions, access] = await Promise.all([
+            artifacts.get(artifactId),
+            artifacts.listVersions(artifactId),
+            artifacts.access(artifactId),
+          ])
+          if (!artifact || !versions || !access || access === "none") {
+            return await refusal(context, artifactId, context.set)
+          }
+
           return ArtifactResponseSchema.parse({
             artifact: artifactBody(artifact),
             versions: versions.versions.map(versionBody),
+            access,
           })
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
@@ -326,6 +310,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         params: ArtifactParamsSchema,
         response: {
           200: ArtifactResponseSchema,
+          403: ArtifactErrorResponseSchema,
           404: ArtifactErrorResponseSchema,
           501: ArtifactErrorResponseSchema,
         },
@@ -341,11 +326,22 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       "/api/artifacts/:artifactId",
       async (context) => {
         try {
-          const deleted = await requireRequestSixb(context).artifacts.delete(
-            context.params.artifactId
-          )
-          if (!deleted) return notFound(context.set)
-          return DeleteArtifactResponseSchema.parse({ deleted: true })
+          const artifacts = requireRequestSixb(context).artifacts
+          const { artifactId } = context.params
+          if (await artifacts.delete(artifactId)) {
+            return DeleteArtifactResponseSchema.parse({ deleted: true })
+          }
+
+          // Only its owner deletes it, from every conversation that shares it.
+          const access = await artifacts.access(artifactId)
+          if (access === "update" || access === "read") {
+            context.set.status = 403
+            return {
+              error: "Only the artifact's owner can delete it",
+              code: "not_allowed" as const,
+            }
+          }
+          return await refusal(context, artifactId, context.set)
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
         }
@@ -354,12 +350,14 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         params: ArtifactParamsSchema,
         response: {
           200: DeleteArtifactResponseSchema,
+          403: ArtifactErrorResponseSchema,
           404: ArtifactErrorResponseSchema,
           501: ArtifactErrorResponseSchema,
         },
         detail: {
           summary: "Delete an artifact",
-          description: "Deletes the artifact with every version.",
+          description:
+            "Deletes the artifact with every version, from every conversation that shares it. Only its owner can.",
           tags: [OPENAPI_TAGS.artifacts.name],
           operationId: "deleteArtifact",
           security: accessTokenSecurityRequirement("deleteArtifact"),
@@ -387,6 +385,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         params: ArtifactParamsSchema,
         response: {
           200: ArtifactStateResponseSchema,
+          403: ArtifactErrorResponseSchema,
           404: ArtifactErrorResponseSchema,
           501: ArtifactErrorResponseSchema,
         },
@@ -422,6 +421,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         response: {
           200: SetArtifactStateResponseSchema,
           400: ArtifactErrorResponseSchema,
+          403: ArtifactErrorResponseSchema,
           404: ArtifactErrorResponseSchema,
           413: ArtifactErrorResponseSchema,
           501: ArtifactErrorResponseSchema,
@@ -453,6 +453,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         response: {
           200: DeleteArtifactStateResponseSchema,
           400: ArtifactErrorResponseSchema,
+          403: ArtifactErrorResponseSchema,
           404: ArtifactErrorResponseSchema,
           501: ArtifactErrorResponseSchema,
         },
@@ -480,6 +481,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         params: ArtifactParamsSchema,
         response: {
           200: ClearArtifactStateResponseSchema,
+          403: ArtifactErrorResponseSchema,
           404: ArtifactErrorResponseSchema,
           501: ArtifactErrorResponseSchema,
         },
@@ -531,12 +533,13 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
           const storage = host.storage.artifacts
           // Reading the version as the caller is the check: whoever may read it may frame it, with
           // the files it embeds from artifacts the caller may read too.
-          const artifacts = artifactReader(context)
+          const artifacts = requireRequestSixb(context).artifacts
           const version = await artifacts.getVersion(
             context.params.artifactId,
             versionParam(context.params.version)
           )
-          if (!version || !storage) return notFound(context.set)
+          if (!storage) return notFound(context.set)
+          if (!version) return await refusal(context, context.params.artifactId, context.set)
           // Any kind but a deck is refused as `artifact_kind_mismatch`.
           const frame = await createArtifactFrame({
             projectId: host.id,
@@ -556,6 +559,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         params: ArtifactVersionParamsSchema,
         response: {
           200: ArtifactFrameResponseSchema,
+          403: ArtifactErrorResponseSchema,
           404: ArtifactErrorResponseSchema,
           409: ArtifactErrorResponseSchema,
           501: ArtifactErrorResponseSchema,
@@ -574,11 +578,11 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
       "/api/artifacts/:artifactId/versions/:version",
       async (context) => {
         try {
-          const version = await artifactReader(context).getVersion(
+          const version = await requireRequestSixb(context).artifacts.getVersion(
             context.params.artifactId,
             versionParam(context.params.version)
           )
-          if (!version) return notFound(context.set)
+          if (!version) return await refusal(context, context.params.artifactId, context.set)
           return ArtifactVersionSchema.parse(versionBody(version))
         } catch (error) {
           return handleArtifactRouteError(error, context.set)
@@ -588,6 +592,7 @@ export function registerArtifactRoutes(app: Elysia, host: SixbHostView) {
         params: ArtifactVersionParamsSchema,
         response: {
           200: ArtifactVersionSchema,
+          403: ArtifactErrorResponseSchema,
           404: ArtifactErrorResponseSchema,
           501: ArtifactErrorResponseSchema,
         },
