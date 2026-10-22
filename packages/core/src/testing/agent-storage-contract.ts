@@ -1749,14 +1749,19 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         await expect(
           storage.checkpoints.getByRunIds({
             projectId,
+            threadId: "thr_1",
             runIds: ["run_2", "missing", "run_2"],
           })
         ).resolves.toEqual([created])
         await expect(
           storage.checkpoints.getByRunIds({
             projectId: otherProjectId,
+            threadId: "thr_1",
             runIds: ["run_2"],
           })
+        ).resolves.toEqual([])
+        await expect(
+          storage.checkpoints.getByRunIds({ projectId, threadId: "thr_2", runIds: ["run_2"] })
         ).resolves.toEqual([])
 
         const retained = await storage.messages.list({

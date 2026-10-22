@@ -353,7 +353,7 @@ export async function readThreadMessages(
   )
   const [runs, checkpoints] = await Promise.all([
     storage.runs.getByIds({ projectId, ids: runIds }),
-    storage.checkpoints.getByRunIds({ projectId, runIds }),
+    storage.checkpoints.getByRunIds({ projectId, threadId: thread.id, runIds }),
   ])
   const diagnosticsByRunId = new Map(
     runs
@@ -361,9 +361,7 @@ export async function readThreadMessages(
       .map((run) => [run.id, run.diagnostics ?? []] as const)
   )
   const checkpointsByRunId = new Map(
-    checkpoints
-      .filter((checkpoint) => checkpoint.threadId === thread.id)
-      .map((checkpoint) => [checkpoint.createdByRunId, checkpoint] as const)
+    checkpoints.map((checkpoint) => [checkpoint.createdByRunId, checkpoint] as const)
   )
 
   return {

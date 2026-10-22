@@ -188,6 +188,7 @@ const shippedMigrationIds = [
   "067-artifact-kinds",
   "068-artifact-state",
   "069-agent-thread-participants",
+  "070-forked-context-checkpoints",
 ]
 
 afterEach(async () => {
@@ -2628,6 +2629,84 @@ describe("SQLite storage migrations", () => {
           )
           .get()
       ).toEqual({ node_run_id: "node-1", status: "succeeded", prompt: "Resolve it" })
+    } finally {
+      db.close()
+    }
+  })
+
+  test("scopes a run's context checkpoint to its thread and keeps existing checkpoints", () => {
+    // Regression guard: remove migration 070; the second thread's copy of `run-1`'s checkpoint
+    // violates the old project-wide uniqueness.
+    const db = new Database(":memory:")
+    try {
+      const forkIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "070-forked-context-checkpoints"
+      )
+      const fork = sqliteStorageMigrations.steps[forkIndex]
+      if (!fork) throw new Error("expected forked checkpoint migration")
+      for (const migration of sqliteStorageMigrations.steps.slice(0, forkIndex)) {
+        const applied = migration.up(db)
+        if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
+      }
+
+      const insertCheckpoint = (
+        id: string,
+        threadId: string,
+        previousId: string | null = null,
+        runId = "run-1"
+      ) =>
+        db.run(
+          `
+          INSERT INTO agent_context_checkpoints (
+            project_id, id, thread_id, created_by_run_id, previous_checkpoint_id, reason, summary,
+            summary_format_version, summarized_through_seq, observed_head_seq,
+            estimated_input_tokens_before, estimated_input_tokens_after, summary_model_id,
+            created_at
+          ) VALUES (
+            'project-a', ?, ?, ?, ?, 'threshold', 'Summary', 1, 2, 3, 100, 10, 'model',
+            '2026-07-01T12:00:00.000Z'
+          )
+        `,
+          [id, threadId, runId, previousId]
+        )
+      insertCheckpoint("checkpoint-1", "thread-1")
+      insertCheckpoint("checkpoint-2", "thread-1", "checkpoint-1", "run-2")
+
+      const applied = fork.up(db)
+      if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
+
+      expect(
+        db
+          .query(
+            "SELECT id, thread_id, previous_checkpoint_id FROM agent_context_checkpoints ORDER BY id"
+          )
+          .all()
+      ).toEqual([
+        { id: "checkpoint-1", thread_id: "thread-1", previous_checkpoint_id: null },
+        { id: "checkpoint-2", thread_id: "thread-1", previous_checkpoint_id: "checkpoint-1" },
+      ])
+
+      // The chain still references the rebuilt table, not the copy it was built in.
+      expect(db.query("PRAGMA foreign_key_list(agent_context_checkpoints)").all()).toContainEqual(
+        expect.objectContaining({
+          table: "agent_context_checkpoints",
+          from: "previous_checkpoint_id",
+        })
+      )
+      const violations = db.query("PRAGMA foreign_key_check(agent_context_checkpoints)").all() as {
+        parent: string
+      }[]
+      expect(
+        violations.filter((violation) => violation.parent === "agent_context_checkpoints")
+      ).toEqual([])
+
+      insertCheckpoint("checkpoint-copy", "thread-2")
+      expect(() => insertCheckpoint("checkpoint-again", "thread-1")).toThrow("UNIQUE")
+      expect(
+        db
+          .query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ?")
+          .all("agent_context_checkpoints")
+      ).toContainEqual({ name: "idx_agent_context_checkpoints_thread_latest" })
     } finally {
       db.close()
     }

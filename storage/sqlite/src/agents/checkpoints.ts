@@ -54,9 +54,13 @@ export class SqliteAgentContextCheckpointStore implements AgentContextCheckpoint
 
       const existingForRun = this.db
         .query(
-          "SELECT * FROM agent_context_checkpoints WHERE project_id = ? AND created_by_run_id = ?"
+          "SELECT * FROM agent_context_checkpoints WHERE project_id = ? AND thread_id = ? AND created_by_run_id = ?"
         )
-        .get(input.projectId, input.createdByRunId) as AgentContextCheckpointRow | null
+        .get(
+          input.projectId,
+          input.threadId,
+          input.createdByRunId
+        ) as AgentContextCheckpointRow | null
       if (existingForRun) {
         const record = rowToContextCheckpointRecord(existingForRun)
         if (agentContextCheckpointMatchesCreateInput(record, input)) {
@@ -150,6 +154,7 @@ export class SqliteAgentContextCheckpointStore implements AgentContextCheckpoint
 
   async getByRunIds(input: {
     readonly projectId: string
+    readonly threadId: string
     readonly runIds: readonly string[]
   }): Promise<readonly AgentContextCheckpointRecord[]> {
     const runIds = [...new Set(input.runIds)]
@@ -162,9 +167,9 @@ export class SqliteAgentContextCheckpointStore implements AgentContextCheckpoint
       rows.push(
         ...(this.db
           .query(
-            `SELECT * FROM agent_context_checkpoints WHERE project_id = ? AND created_by_run_id IN (${placeholders})`
+            `SELECT * FROM agent_context_checkpoints WHERE project_id = ? AND thread_id = ? AND created_by_run_id IN (${placeholders})`
           )
-          .all(input.projectId, ...batch) as AgentContextCheckpointRow[])
+          .all(input.projectId, input.threadId, ...batch) as AgentContextCheckpointRow[])
       )
     }
     const byRunId = new Map(
