@@ -2285,6 +2285,37 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    // Regression proof: drop the remap from a provider's fork; the copy then names the source's
+    // artifact, which the fork's readers may not reach.
+    test("names the fork's copies of the source's artifacts in the messages it copies", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput())
+        const text = "See ![Revenue](artifact:art_0000000001#chart=revenue) and art_0000000009."
+        await storage.messages.append({
+          id: "msg_shown",
+          projectId,
+          threadId: "thr_1",
+          runId: null,
+          role: "user",
+          parts: [{ type: "text", text }],
+        })
+
+        await storage.threads.fork(
+          forkInput({ artifactCopies: { art_0000000001: "art_000000copy1" } })
+        )
+
+        const [copy] = (await storage.messages.list({ projectId, threadId: "thr_fork" })).messages
+        expect(copy?.parts).toEqual([
+          {
+            type: "text",
+            text: "See ![Revenue](artifact:art_000000copy1#chart=revenue) and art_0000000009.",
+          },
+        ])
+        const [source] = (await storage.messages.list({ projectId, threadId: "thr_1" })).messages
+        expect(source?.parts).toEqual([{ type: "text", text }])
+      })
+    })
+
     test("starts a forked workspace with a new, reset sandbox", async () => {
       await withStorage(async (storage) => {
         await storage.threads.create(threadInput({ sandboxParams: { repo: "deals" } }))

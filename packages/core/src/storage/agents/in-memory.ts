@@ -21,6 +21,7 @@ import {
   compareAgentThreadParticipants,
   participantsToAdd,
   planAgentThreadFork,
+  remapArtifactIds,
   snapshotAgentThreadSandboxParams,
   subagentRunMatchesCreateInput,
   transitionAgentThreadSandbox,
@@ -249,9 +250,12 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
       const id = copyIds.get(message.id)
       if (id === undefined) continue
 
+      const parts = JSON.parse(
+        remapArtifactIds(JSON.stringify(message.parts), input.artifactCopies)
+      ) as AgentMessageRecord["parts"]
       this.state.messages.set(
         key(input.projectId, id),
-        clone({ ...message, id, threadId: input.id })
+        clone({ ...message, id, threadId: input.id, parts })
       )
     }
 
