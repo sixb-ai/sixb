@@ -41,7 +41,7 @@ import { prepareAgentModel } from "./context-budget"
 import { shouldRetryAgentPreparation } from "./delivery-policy"
 import { AgentTurnTimeoutError, isLostExecution, WorkflowResumeDispatchError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
-import { resolveWorkflowAgentStepExecutionPlan, sandboxModelKinds } from "./execution-plan"
+import { listSandboxModels, resolveWorkflowAgentStepExecutionPlan } from "./execution-plan"
 import { toAgentExecutionFailure } from "./failure"
 import {
   type AgentExecutionEnvironment,
@@ -160,7 +160,7 @@ export async function executeWorkflowAgentNode(
       tools: input.host.definitions.tools,
       skills: input.host.definitions.agent.skills,
       defaultMaxSteps: context.defaultMaxSteps,
-      modelKinds: sandboxModelKinds(input.host.definitions.models),
+      sandboxModels: listSandboxModels(input.host.definitions.models),
     })
     modelId = configuredPlan.model.modelId
     const resolved = await resolveAgentExecutionAuthorization({
