@@ -82,6 +82,19 @@ export function frameRuntime(): void {
    */
   let reported = ""
   let reporting = false
+
+  /** Each element's own id, for the app to keep what it draws there as others come and go. */
+  const ids = new WeakMap<Element, number>()
+  let lastId = 0
+  const idOf = (element: Element): number => {
+    const known = ids.get(element)
+    if (known !== undefined) return known
+
+    lastId += 1
+    ids.set(element, lastId)
+    return lastId
+  }
+
   const reportEmbeds = () => {
     if (reporting || root.dataset.mode === "fill") return
     reporting = true
@@ -97,10 +110,12 @@ export function frameRuntime(): void {
         deck || (rect.bottom > -window.innerHeight && rect.top < window.innerHeight * 2)
       const embeds = Array.from(scope?.querySelectorAll("sixb-embed[src]") ?? []).flatMap(
         (element) => {
+          const id = idOf(element)
           const rect = element.getBoundingClientRect()
           return near(rect)
             ? [
                 {
+                  id,
                   address: (element.getAttribute("src") ?? "").trim(),
                   rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
                   scale,

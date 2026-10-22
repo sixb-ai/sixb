@@ -56,12 +56,12 @@ export function FrameEmbeds({
     : {}
   return embeds
     .filter((embed) => recorded.has(embed.address))
-    .map((embed, index) => {
+    .map((embed) => {
       const scale = embed.scale * zoom
       return (
         <div
-          // A frame may embed one address twice.
-          key={`${index}:${embed.address}`}
+          // The element it is, so what it draws stays mounted as others scroll in and out.
+          key={embed.id}
           data-sixb-frame-embed={embed.address}
           className="pointer-events-auto absolute"
           style={{

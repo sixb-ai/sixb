@@ -229,6 +229,76 @@ describe("the frame runtime", () => {
     expect(await state.keys()).toEqual(["v1..2"])
   })
 
+  test("gives each embed of a page one id, the same as the page scrolls", () => {
+    // Reproduce by giving an embed its rank among those reported: once the first scrolls out of
+    // reach, the next takes its id, and the app mounts what it draws there again.
+    const listeners = new Map<string, () => void>()
+    const posted: Record<string, unknown>[] = []
+    const window: Record<string, unknown> = {
+      location: { hash: "" },
+      innerWidth: 1280,
+      innerHeight: 720,
+      addEventListener: (name: string, listener: () => void) => listeners.set(name, listener),
+      postMessage: (message: Record<string, unknown>) => posted.push(message),
+    }
+    window.parent = window
+
+    // Three embeds down a page, the last more than a screen below the view.
+    let scrolled = 0
+    const embed = (src: string, top: number) => ({
+      getAttribute: () => src,
+      getBoundingClientRect: () => ({
+        left: 0,
+        top: top - scrolled,
+        bottom: top - scrolled + 360,
+        width: 640,
+        height: 360,
+      }),
+    })
+    const embeds = [
+      embed("artifact:art_0123456789#chart=a", 0),
+      embed("artifact:art_0123456789#chart=b", 1000),
+      embed("artifact:art_0123456789#chart=c", 1800),
+    ]
+    const document = {
+      documentElement: { classList: { add: () => {} }, dataset: {}, style: {} },
+      currentScript: { getAttribute: () => "page" },
+      readyState: "complete",
+      body: null,
+      addEventListener: () => {},
+      querySelectorAll: (selector: string) => (selector === "sixb-embed[src]" ? embeds : []),
+    }
+    const ResizeObserver = class {
+      observe() {}
+    }
+    new Function(
+      "window",
+      "document",
+      "ResizeObserver",
+      "requestAnimationFrame",
+      `(${frameRuntime.toString()})()`
+    )(window, document, ResizeObserver, (callback: () => void) => callback())
+
+    // The reader scrolls past the first one, and the last comes within reach.
+    scrolled = 1200
+    listeners.get("scroll")?.()
+
+    const [before = {}, after = {}] = posted.flatMap((message) => {
+      const event = parseFrameEvent(message)
+      if (event?.event !== "embeds") return []
+
+      // Each report, as the app reads it: the chart's name, and the id it came with.
+      return [
+        Object.fromEntries(event.params.embeds.map((each) => [each.address.slice(-1), each.id])),
+      ]
+    })
+    expect(Object.keys(before)).toEqual(["a", "b"])
+    expect(Object.keys(after)).toEqual(["b", "c"])
+
+    expect(after.b).toBe(before.b as number)
+    expect(new Set([before.a, before.b, after.c]).size).toBe(3)
+  })
+
   test("reads its layout from the tag the frame injects it with", () => {
     // Reproduce by renaming the attribute on either side: every page lays out as a deck.
     expect(frameRuntime.toString()).toContain('"data-sixb-layout"')
@@ -273,9 +343,10 @@ describe("a frame's events", () => {
       address: "artifact:art_0123456789",
     })
     expect(
-      event("embeds", { embeds: [{ address: "artifact:art_0123456789#1", rect, scale: 0.5 }] })
-        ?.params
-    ).toEqual({ embeds: [{ address: "artifact:art_0123456789#1", rect, scale: 0.5 }] })
+      event("embeds", {
+        embeds: [{ id: 1, address: "artifact:art_0123456789#1", rect, scale: 0.5 }],
+      })?.params
+    ).toEqual({ embeds: [{ id: 1, address: "artifact:art_0123456789#1", rect, scale: 0.5 }] })
     expect(event("size", { height: 1240 })?.params).toEqual({ height: 1240 })
   })
 
@@ -297,9 +368,28 @@ describe("a frame's events", () => {
       ["open", { address: 42 }],
       ["open", { address: `artifact:${"a".repeat(3000)}` }],
       ["embeds", { embeds: "all" }],
-      ["embeds", { embeds: [{ address: "artifact:art_0123456789", rect, scale: 0 }] }],
-      ["embeds", { embeds: [{ address: "artifact:art_0123456789", rect: { ...rect, x: "1" } }] }],
-      ["embeds", { embeds: Array.from({ length: 201 }, () => ({ address: "a", rect, scale: 1 })) }],
+      ["embeds", { embeds: [{ id: 1, address: "artifact:art_0123456789", rect, scale: 0 }] }],
+      [
+        "embeds",
+        { embeds: [{ id: 1, address: "artifact:art_0123456789", rect: { ...rect, x: "1" } }] },
+      ],
+      [
+        "embeds",
+        {
+          embeds: Array.from({ length: 201 }, (_, id) => ({ id, address: "a", rect, scale: 1 })),
+        },
+      ],
+      ["embeds", { embeds: [{ address: "artifact:art_0123456789", rect, scale: 1 }] }],
+      ["embeds", { embeds: [{ id: -1, address: "artifact:art_0123456789", rect, scale: 1 }] }],
+      [
+        "embeds",
+        {
+          embeds: [
+            { id: 1, address: "artifact:art_0123456789#1", rect, scale: 1 },
+            { id: 1, address: "artifact:art_0123456789#2", rect, scale: 1 },
+          ],
+        },
+      ],
       ["size", { height: -1 }],
       ["size", { height: "tall" }],
       ["size", { height: Number.NaN }],
