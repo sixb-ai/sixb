@@ -95,7 +95,8 @@ export function addItem(
 
 /**
  * Items removed, with the arrows that join them: an arrow needs both its ends. A section is
- * removed alone; what it held stays where it was.
+ * removed alone; what it held stays where it was. A canvas keeps at least one item, as publishing
+ * requires: removing every one changes nothing.
  */
 export function removeItems(ids: ReadonlySet<string>): CanvasChange {
   return (canvas) => {
@@ -104,6 +105,8 @@ export function removeItems(ids: ReadonlySet<string>): CanvasChange {
         !ids.has(item.id) &&
         !(item.type === "arrow" && (joins(item.from, ids) || joins(item.to, ids)))
     )
+    if (items.length === 0) return canvas
+
     return items.length === canvas.items.length ? canvas : { ...canvas, items }
   }
 }
@@ -154,11 +157,18 @@ export function duplicateItems(ids: ReadonlySet<string>): {
 /**
  * An item's words, as typed in place: a note's, a text's, a shape's, a section's or a board's
  * title, an arrow's label. A note or a text left empty is removed, as a sticky note is thrown away.
+ * Words past what publishing takes for the item are cut there.
  */
-export function setItemText(id: string, text: string): CanvasChange {
+export function setItemText(id: string, typed: string): CanvasChange {
   return (canvas) => {
     const item = canvas.items.find((candidate) => candidate.id === id)
     if (!item) return canvas
+
+    const words = item.type === "note" || item.type === "text"
+    const text = typed.slice(
+      0,
+      words ? ARTIFACT_LIMITS.maxCanvasTextLength : ARTIFACT_LIMITS.maxCanvasLabelLength
+    )
     const trimmed = text.trim()
     if ((item.type === "note" || item.type === "text") && !trimmed) {
       return removeItems(new Set([id]))(canvas)

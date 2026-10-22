@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { type Canvas, parseCanvas } from "@sixb/core/artifacts"
+import { ARTIFACT_LIMITS, type Canvas, parseCanvas } from "@sixb/core/artifacts"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render } from "@testing-library/react"
 import { Suspense } from "react"
@@ -128,6 +128,25 @@ describe("arranging a canvas", () => {
     expect(saved(copied)).toEqual(copied)
   })
 
+  test("keeps what publishing requires: one item at least, and words within its limits", () => {
+    // Reproduce by removing and storing as asked: the canvas saves with no items, or a label of
+    // 150 characters, and publishing refuses both.
+    const all = new Set(ids(CANVAS))
+    expect(removeItems(all)(CANVAS)).toBe(CANVAS)
+    const lone = canvasOf({ items: [{ id: "ask", type: "note", x: 0, y: 0, w: 260, text: "Hi" }] })
+    expect(setItemText("ask", "")(lone)).toBe(lone)
+
+    const long = "x".repeat(ARTIFACT_LIMITS.maxCanvasTextLength + 50)
+    const typed = setItemText("ask", long)(CANVAS)
+    const titled = setItemText("flow", long)(typed)
+    const labelled = setItemText("next", long)(titled)
+    const item = (id: string) => labelled.items.find((entry) => entry.id === id)
+    expect(item("ask")).toMatchObject({ text: "x".repeat(ARTIFACT_LIMITS.maxCanvasTextLength) })
+    expect(item("flow")).toMatchObject({ title: "x".repeat(ARTIFACT_LIMITS.maxCanvasLabelLength) })
+    expect(item("next")).toMatchObject({ label: "x".repeat(ARTIFACT_LIMITS.maxCanvasLabelLength) })
+    expect(saved(labelled)).toEqual(labelled)
+  })
+
   test("styles what takes a style, and leaves the rest", () => {
     const styled = styleItems(new Set(["ask", "title", "next"]), {
       tone: "positive",
@@ -218,19 +237,29 @@ describe("a canvas in the viewer, edited", () => {
     const board = view.getByRole("region")
     expect(view.getByRole("toolbar").getAttribute("aria-label")).toBe("Canvas tools")
     expect((draft as ArtifactDraft | null)?.changed).toBe(false)
-    // Select everything, delete it, and the draft holds an empty canvas to save.
+    // Select everything, copy it, and the draft holds the copies to save.
+    await act(async () => {
+      fireEvent.keyDown(board, { key: "a", metaKey: true })
+    })
+    await act(async () => {
+      fireEvent.keyDown(board, { key: "d", metaKey: true })
+    })
+    const reported = draft as ArtifactDraft | null
+    expect(reported?.changed).toBe(true)
+    expect(reported?.files().get("canvas.json")).toBe(
+      formatCanvas(duplicateItems(new Set(ids(CANVAS))).change(CANVAS))
+    )
+    // ⌘Z takes the copies back: nothing left to save.
+    await act(async () => {
+      fireEvent.keyDown(board, { key: "z", metaKey: true })
+    })
+    expect((draft as ArtifactDraft | null)?.changed).toBe(false)
+    // Deleting everything is refused: a canvas publishes with one item at least.
     await act(async () => {
       fireEvent.keyDown(board, { key: "a", metaKey: true })
     })
     await act(async () => {
       fireEvent.keyDown(board, { key: "Delete" })
-    })
-    const reported = draft as ArtifactDraft | null
-    expect(reported?.changed).toBe(true)
-    expect(reported?.files().get("canvas.json")).toBe(`${JSON.stringify({ items: [] }, null, 2)}\n`)
-    // ⌘Z takes the delete back: nothing left to save.
-    await act(async () => {
-      fireEvent.keyDown(board, { key: "z", metaKey: true })
     })
     expect((draft as ArtifactDraft | null)?.changed).toBe(false)
     view.unmount()

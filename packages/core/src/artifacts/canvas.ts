@@ -133,8 +133,8 @@ export function parseCanvas(
 }
 
 const ITEM_ID = /^[a-z0-9][a-z0-9-]{0,39}$/
-const TEXT_MAX = 2000
-const LABEL_MAX = 120
+const TEXT_MAX = ARTIFACT_LIMITS.maxCanvasTextLength
+const LABEL_MAX = ARTIFACT_LIMITS.maxCanvasLabelLength
 
 function readCanvas(value: unknown): Canvas {
   const input = record(value, "the canvas", ["items"])
