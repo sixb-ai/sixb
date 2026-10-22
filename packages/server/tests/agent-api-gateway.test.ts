@@ -30,6 +30,7 @@ import {
   createAgentApiGatewayCapability,
   createAgentRunExecutionToken,
 } from "@sixb/core/internal/agents"
+import type { ImageModel, ModelCatalogInput } from "@sixb/core/models"
 import {
   createTestAgentExecution,
   createTestSixb,
@@ -429,6 +430,58 @@ describe("agent API gateway", () => {
     expect(response.status).toBe(200)
     expect(response.headers.get("content-type")).toBe("text/plain")
     expect(await response.text()).toBe("agent attachment")
+  })
+
+  // Removal proof: bind gateway requests with `bindRequestExecution` again in server.ts; the
+  // inherited user holds no can.run(project.models), so the call is refused.
+  // Removal proof: drop the own-execution check from models/calls.ts; the workflow step's service
+  // account cannot view its workflow run, so it cannot download its own image.
+  test("lets each kind of run call models as itself and read back what it made", async () => {
+    const png = new Uint8Array([137, 80, 78, 71])
+    const painter: ImageModel = {
+      providerId: "test",
+      modelId: "painter",
+      definition: { kind: "image", providerId: "test", modelId: "painter" },
+      generate: async () => ({ output: { images: [{ data: png, mediaType: "image/png" }] } }),
+    }
+    for (const executionKind of ["conversation", "subagent", "workflow"] as const) {
+      const { app, gatewayBaseUrl, runId, storage } = await createGatewayRuntime({
+        executionKind,
+        models: { image: [painter] },
+      })
+
+      const generated = await app.fetch(
+        new Request(`${gatewayBaseUrl}/api/models/image/generations`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ prompt: "a fox" }),
+        })
+      )
+      expect(generated.status).toBe(200)
+      const { callId } = (await generated.json()) as { callId: string }
+
+      // The call is the run's: recorded under its execution, so usage and limits follow it.
+      const executionId =
+        (await storage.agents.runs.getById({ projectId: PROJECT_ID, id: runId }))?.executionId ??
+        (
+          await storage.workflowRuns.agentNodes.getByNodeRunId({
+            projectId: PROJECT_ID,
+            nodeRunId: runId,
+          })
+        )?.executionId
+      expect(
+        await storage.aiUsage.getLatestForExecution({
+          projectId: PROJECT_ID,
+          executionId: executionId!,
+        })
+      ).toMatchObject({ callId, modelKind: "image" })
+
+      const content = await app.fetch(
+        new Request(`${gatewayBaseUrl}/api/ai/model-calls/${callId}/files/content?path=/files/0`)
+      )
+      expect(content.status).toBe(200)
+      expect(new Uint8Array(await content.arrayBuffer())).toEqual(png)
+    }
   })
 
   test("rejects a capability after its projected queue ownership expires", async () => {
@@ -930,6 +983,48 @@ async function executionById(storage: InMemoryStorage, id: string) {
   return execution
 }
 
+describe("agent CLI models", () => {
+  test("the generated agent CLI lists models and writes an image through the gateway", async () => {
+    const png = new Uint8Array([137, 80, 78, 71])
+    const painter: ImageModel = {
+      providerId: "test",
+      modelId: "painter",
+      definition: { kind: "image", providerId: "test", modelId: "painter" },
+      generate: async () => ({ output: { images: [{ data: png, mediaType: "image/png" }] } }),
+    }
+    const { app, gatewayBaseUrl } = await createGatewayRuntime({ models: { image: [painter] } })
+    const directory = await mkdtemp(join(tmpdir(), "sixb-agent-cli-models-"))
+    const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (r) => app.fetch(r) })
+    const baseUrl = new URL(gatewayBaseUrl)
+    baseUrl.hostname = "127.0.0.1"
+    baseUrl.port = String(listener.port)
+
+    try {
+      const cli = (args: readonly string[]) => runAgentCli(baseUrl.href, args)
+      const listed = await cli(["models", "list", "--kind", "image"])
+      expect(listed.exitCode).toBe(0)
+      expect(JSON.parse(listed.stdout)).toEqual([
+        {
+          kind: "image",
+          model: "painter",
+          provider: "test",
+          default: true,
+          price: "price unknown",
+        },
+      ])
+
+      const output = join(directory, "fox.png")
+      const made = await cli(["models", "image", "a fox", "--output", output])
+      expect(made.exitCode).toBe(0)
+      expect(JSON.parse(made.stdout)).toMatchObject({ model: "painter", files: [output] })
+      expect(new Uint8Array(await readFile(output))).toEqual(png)
+    } finally {
+      listener.stop(true)
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+})
+
 async function runAgentCli(
   baseUrl: string,
   args: readonly string[]
@@ -964,6 +1059,7 @@ async function createGatewayRuntime(
     readonly attempt?: number
     /** Replaces how the device embedding model embeds, keeping its identity. */
     readonly embed?: EmbeddingModel["embed"]
+    readonly models?: ModelCatalogInput
   } = {}
 ): Promise<{
   readonly app: ReturnType<typeof createSixbApi>
@@ -984,6 +1080,7 @@ async function createGatewayRuntime(
     roles: [agentRole, noteReaderRole],
     models: {
       embedding: [options.embed ? { ...deviceEmbeddings, embed: options.embed } : deviceEmbeddings],
+      ...options.models,
     },
     broker: new InMemoryBroker(),
     storage,

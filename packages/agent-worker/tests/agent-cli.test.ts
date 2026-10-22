@@ -102,6 +102,13 @@ const CLI_API_ROUTES = [
   "GET /api/objects/search",
   "GET /api/users",
   "GET /api/users/:userId",
+  "GET /api/models",
+  "POST /api/models/language/generations",
+  "POST /api/models/image/generations",
+  "POST /api/models/audio/speech",
+  "POST /api/models/audio/transcriptions",
+  "GET /api/ai/model-calls/:callId",
+  "GET /api/ai/model-calls/:callId/files/content",
 ] as const
 
 const INTENTIONAL_CLI_ROUTE_ALTERNATIVES = new Map([

@@ -138,7 +138,7 @@ export function createModelsRuntime(
     decision: createDecisionRuntime(runtime, execution, catalog, session),
     audio: createAudioRuntime(runtime, execution, catalog, session, blobs),
     image: createImageRuntime(runtime, execution, catalog, session, blobs),
-    calls: createModelCallsRuntime(runtime, runs),
+    calls: createModelCallsRuntime(runtime, runs, execution.id),
   }
   registerModelExecutionBinding(models, (input) => {
     session.bind(input)
