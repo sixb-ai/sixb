@@ -391,6 +391,25 @@ The response carries the `callId`, the `model` that answered, `usage` and `cost`
 }
 ```
 
+From the CLI, the same calls write their files where you say:
+
+```bash
+sixb models image "Isometric warehouse floor plan" --size 1024x1024 --output out/plan.png
+sixb models image "Same plan, night lighting" --image out/plan.png --output out/night.png
+sixb models speech "Your order shipped." --format mp3 --output out/shipped.mp3
+sixb models transcribe call.wav
+sixb models text "Summarize this week's incidents in one line"
+```
+
+```json
+{ "callId": "call_…", "model": "bfl/flux-3-image-klein", "files": ["out/plan.jpg"], "cost": "$0.008" }
+```
+
+`--output` takes a file, numbered when a call returns several, or a directory ending in `/`. The
+extension follows the file's type, so `files` lists the paths actually written. `--image` uploads
+a reference image; repeat it for several. `sixb models calls get <call-id> --output <path>`
+downloads a call's files again.
+
 A call counts toward [AI usage and limits](./usage-and-limits.md) like any other: a limit that
 is reached answers `429`. An option the model does not accept answers `400` before any inference,
 and a provider failure answers `502`. Calls are synchronous; download a generated file through

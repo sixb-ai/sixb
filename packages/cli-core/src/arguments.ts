@@ -1,6 +1,13 @@
 import { fail } from "./output"
 
-type OptionKinds = Readonly<Record<string, "string" | "boolean">>
+/** `strings` may repeat, and collects every value in order. */
+type OptionKinds = Readonly<Record<string, "string" | "strings" | "boolean">>
+
+type OptionValue<TKind> = TKind extends "boolean"
+  ? boolean
+  : TKind extends "strings"
+    ? string[]
+    : string
 
 /** Parse a command's options once, before reading files or calling the API. */
 export function parseCommandArgs<const T extends OptionKinds>(
@@ -10,10 +17,10 @@ export function parseCommandArgs<const T extends OptionKinds>(
   positionalCount: number | readonly [number, number] = 0
 ): {
   positionals: string[]
-  options: { [K in keyof T]?: T[K] extends "boolean" ? boolean : string }
+  options: { [K in keyof T]?: OptionValue<T[K]> }
 } {
   const positionals: string[] = []
-  const options: Record<string, string | boolean> = {}
+  const options: Record<string, string | string[] | boolean> = {}
   let positionalOnly = false
   for (let index = 0; index < args.length; index++) {
     const argument = args[index] ?? ""
@@ -28,7 +35,9 @@ export function parseCommandArgs<const T extends OptionKinds>(
     const equals = argument.indexOf("=")
     const flag = equals < 0 ? argument : argument.slice(0, equals)
     if (!Object.hasOwn(kinds, flag)) fail(`Unknown ${command} option '${flag}'.`)
-    if (Object.hasOwn(options, flag)) fail(`${flag} may only be provided once.`)
+    if (Object.hasOwn(options, flag) && kinds[flag] !== "strings") {
+      fail(`${flag} may only be provided once.`)
+    }
     if (kinds[flag] === "boolean") {
       if (equals >= 0) fail(`${flag} does not accept a value.`)
       options[flag] = true
@@ -37,7 +46,9 @@ export function parseCommandArgs<const T extends OptionKinds>(
       if (!value || (equals < 0 && value.startsWith("--"))) {
         fail(`${flag} requires a value.`)
       }
-      options[flag] = value
+      const previous = options[flag]
+      options[flag] =
+        kinds[flag] === "strings" ? [...(Array.isArray(previous) ? previous : []), value] : value
     }
   }
   const [minimum, maximum] =
@@ -48,7 +59,7 @@ export function parseCommandArgs<const T extends OptionKinds>(
   return {
     positionals,
     // Every assigned option was checked against its declared kind above.
-    options: options as { [K in keyof T]?: T[K] extends "boolean" ? boolean : string },
+    options: options as { [K in keyof T]?: OptionValue<T[K]> },
   }
 }
 
