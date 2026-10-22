@@ -43,6 +43,8 @@ function pageVersion(): GetArtifactVersionResponse {
 /** What the page's calls asked of the API, and the values it keeps there. */
 const requests: string[] = []
 let kept = new Map<string, unknown>()
+/** Answers as the API does an observer, who reads the page but keeps nothing in it. */
+let observing = false
 const original = client.getConfig()
 
 beforeAll(() => {
@@ -53,6 +55,12 @@ beforeAll(() => {
         const url = new URL(input.url)
         const key = decodeURIComponent(url.pathname.split("/state/")[1] ?? "")
         requests.push(`${input.method} ${url.pathname}`)
+        if (observing) {
+          return Response.json(
+            { error: "Observers keep no page data", code: "read_only" },
+            { status: 403 }
+          )
+        }
         if (input.method === "GET") {
           return Response.json({
             entries: [...kept].map(([entry, value]) => ({
@@ -80,12 +88,13 @@ afterAll(() => {
   client.setConfig(original)
 })
 beforeEach(() => {
+  observing = false
   requests.length = 0
   kept = new Map([["inputs", { rate: 412, occupancy: 88 }]])
 })
 
-function mount() {
-  const version = pageVersion()
+function mount(artifactId = PAGE) {
+  const version = { ...pageVersion(), artifactId }
   const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   cache.setQueryData(["artifact-frame", version.artifactId, version.version], {
     path: "/api/artifact-frames/token/",
@@ -214,5 +223,24 @@ describe("a page's data", () => {
 
     expect(source()).toContain("/api/artifact-frames/renewed/")
     expect(posted.some((message) => message.method === "reload")).toBe(false)
+  })
+
+  // Guard proof: drop the read_only catch from keptValues in page-state.ts; the page's first read
+  // then rejects with the API's refusal.
+  test("runs on this tab's values for an observer, without asking the API again", async () => {
+    observing = true
+    const { call, results } = mount("art_0bserved01")
+    await call({ call: 1, method: "state.get", params: { key: "inputs" } })
+    await call({ call: 2, method: "state.set", params: { key: "inputs", value: { rate: 450 } } })
+    await call({ call: 3, method: "state.get", params: { key: "inputs" } })
+    await call({ call: 4, method: "state.keys", params: {} })
+
+    expect(results()).toEqual([
+      { protocol: FRAME_PROTOCOL, result: 1 },
+      { protocol: FRAME_PROTOCOL, result: 2 },
+      { protocol: FRAME_PROTOCOL, result: 3, value: { rate: 450 } },
+      { protocol: FRAME_PROTOCOL, result: 4, value: ["inputs"] },
+    ])
+    expect(requests).toEqual([`GET /api/artifacts/art_0bserved01/state`])
   })
 })
