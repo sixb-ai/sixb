@@ -53,6 +53,7 @@ import {
   type ResolvedAgentExecutionPlan,
   resolveAgentExecutionPlan,
   resolveSubagentExecutionPlan,
+  sandboxModelKinds,
 } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure, toAgentRunFailure } from "./failure"
 import { finishRunOrThrow } from "./finalize"
@@ -440,6 +441,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         ? {}
         : { projectInstructions: this.host.definitions.agent.instructions }),
       defaultMaxSteps: context.defaultMaxSteps,
+      modelKinds: sandboxModelKinds(this.host.definitions.models),
     })
     const execution = await context.storage.executions.getById({
       projectId: context.id,
@@ -594,6 +596,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         models: this.host.definitions.models?.language,
         tools: this.host.definitions.tools,
         skills: this.host.definitions.agent.skills,
+        modelKinds: sandboxModelKinds(this.host.definitions.models),
       })
       const durableExecution = await context.storage.executions.getById({
         projectId: context.id,

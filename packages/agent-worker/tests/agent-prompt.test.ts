@@ -347,6 +347,19 @@ describe("agent system prompt", () => {
     expect(prompt).not.toContain("Available Agent Skills")
   })
 
+  // Removal proof: return [] from renderModelCommands; the image command is missing.
+  test("names one command per media model kind the project configures, and none otherwise", () => {
+    const base = { mode: "conversation", skills: [] } as const
+    const prompt = renderAgentSystemPrompt({ ...base, modelKinds: ["image", "transcription"] })
+
+    expect(prompt).toContain("`sixb models list` shows them with descriptions and prices")
+    expect(prompt).toContain('`sixb models image "<prompt>" --output out/image.png`')
+    expect(prompt).toContain("`sixb models transcribe <audio-file>`")
+    expect(prompt).not.toContain("sixb models speech")
+    expect(prompt).toContain("Each call is billed")
+    expect(renderAgentSystemPrompt(base)).not.toContain("sixb models")
+  })
+
   test("lists the ontology files it is given and tells the agent to read them first", () => {
     const prompt = renderAgentSystemPrompt({
       mode: "conversation",

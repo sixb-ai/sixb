@@ -98,6 +98,7 @@ export async function prepareAgentConversationContext(input: {
           project: context,
           requester: context.requester,
         }),
+        ...(plan.modelKinds ? { modelKinds: plan.modelKinds } : {}),
       }),
       authors ? conversationAuthorsText(authors) : "",
     ].join("\n"),
