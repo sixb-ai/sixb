@@ -129,7 +129,12 @@ function ArtifactView({
     retry: false,
   })
   const detail = artifactQuery.data
-  const versionNumber = target.version ?? detail?.artifact.latestVersion
+
+  // While the reader edits, the view stays on the version edited: one published meanwhile is
+  // announced over the draft, never opened under it.
+  const editedVersion = useState<number | null>(null)
+  const versionNumber = editedVersion[0] ?? target.version ?? detail?.artifact.latestVersion
+
   const versionQuery = useQuery({
     ...getArtifactVersionOptions({
       path: { artifactId: target.artifactId, version: String(versionNumber ?? "latest") },
@@ -140,7 +145,7 @@ function ArtifactView({
     retry: false,
   })
   const error = artifactQuery.error ?? versionQuery.error
-  const edit = useArtifactEdit(target, detail, versionQuery.data, onTargetChange)
+  const edit = useArtifactEdit(target, detail, versionQuery.data, onTargetChange, editedVersion)
   const guarded = edit.guard(chrome)
 
   if (error || (artifactQuery.isSuccess && !detail)) {
@@ -245,13 +250,15 @@ function useArtifactEdit(
   target: ArtifactTarget,
   detail: ArtifactDetail | undefined,
   version: ArtifactVersion | undefined,
-  onTargetChange: (target: ViewerTarget) => void
+  onTargetChange: (target: ViewerTarget) => void,
+  /** The version being edited, which the view holds to; null while not editing. */
+  [edited, setEdited]: readonly [number | null, (version: number | null) => void]
 ): ArtifactEdit {
   const queries = useQueryClient()
   const user = useCurrentUser()
-  const [editing, setEditing] = useState(false)
+  const editing = edited !== null
   const [draft, setDraft] = useState<ArtifactDraft | null>(null)
-  const [saving, setSaving] = useState<SaveState>({ state: "idle" })
+  const [state, setSaving] = useState<SaveState>({ state: "idle" })
   const [confirming, setConfirming] = useState<(() => void) | null>(null)
   const artifact = detail?.artifact
   // The owner publishes; with sign-in off, everyone does.
@@ -264,11 +271,25 @@ function useArtifactEdit(
     owns
   const changed = editing && !!draft?.changed
 
+  // A version published while the reader edits is announced at once, as a save would meet it: with
+  // the same choices, and the header's Save publishing over it.
+  const arrived =
+    editing && artifact && artifact.latestVersion > edited
+      ? detail?.versions.find((entry) => entry.version === artifact.latestVersion)
+      : undefined
+  const saving: SaveState =
+    arrived &&
+    (state.state === "idle" ||
+      state.state === "failed" ||
+      (state.state === "moved" && state.latest.version < arrived.version))
+      ? { state: "moved", latest: { version: arrived.version, author: arrived.author } }
+      : state
+
   const stop = useCallback(() => {
-    setEditing(false)
+    setEdited(null)
     setDraft(null)
     setSaving({ state: "idle" })
-  }, [])
+  }, [setEdited])
 
   const save = useCallback(
     async (over?: number) => {
@@ -329,8 +350,9 @@ function useArtifactEdit(
     ...(editing && draft?.redo ? { redo: draft.redo } : {}),
     next: (saving.state === "moved" ? saving.latest.version : (artifact?.latestVersion ?? 0)) + 1,
     start: () => {
+      if (!version) return
       setSaving({ state: "idle" })
-      setEditing(true)
+      setEdited(version.version)
     },
     report: setDraft,
     save,
