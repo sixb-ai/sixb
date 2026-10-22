@@ -255,7 +255,12 @@ export type ListAiModelCallGroupsInput = Omit<ListAiModelCallAccountingInput, "e
 /** Filtered usage; an absent token total means at least one call did not report it. */
 export interface AiModelCallGroupSummary {
   readonly modelCallCount: number
+  /** Present when every call that reports tokens did; tokenless kinds such as images don't. */
   readonly totalTokens?: number
+  /** Sums over the calls that reported them. */
+  readonly outputImages?: number
+  readonly inputCharacters?: number
+  readonly audioDurationMs?: number
   readonly costs: AiCostSummary
 }
 

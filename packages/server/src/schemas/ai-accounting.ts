@@ -284,7 +284,15 @@ const AiModelCallExecutionSummarySchema = z.object({
   executionId: z.string(),
   attribution: AiModelCallAccountingItemSchema.shape.attribution,
   modelCallCount: z.number().int().nonnegative(),
-  totalTokens: z.number().int().nonnegative().optional(),
+  totalTokens: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe("Present when every call that reports tokens did; images and speech don't."),
+  outputImages: z.number().int().nonnegative().optional(),
+  inputCharacters: z.number().int().nonnegative().optional(),
+  audioDurationMs: z.number().int().nonnegative().optional(),
   costs: AiCostSummarySchema,
   firstCallAt: IsoDateSchema,
   lastCallAt: IsoDateSchema,

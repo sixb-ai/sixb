@@ -1,5 +1,6 @@
 /** @internal Storage-provider helpers; not part of the app-author API. */
 
+export { TOKENLESS_MODEL_KINDS } from "../../models/definitions"
 export type {
   AiAccountingAggregateFragment,
   AiAccountingRecordSetItem,

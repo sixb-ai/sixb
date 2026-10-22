@@ -1,4 +1,4 @@
-import type { ModelKind } from "../../models/definitions"
+import { type ModelKind, TOKENLESS_MODEL_KINDS } from "../../models/definitions"
 import type { AiMoney } from "../ai-cost"
 import { AiLimitStorageError } from "./errors"
 import { aiLimitCalendarMonth } from "./period"
@@ -18,23 +18,15 @@ import type {
 
 const SIGNED_INT64_MAX = 9_223_372_036_854_775_807n
 
-// These calls are billed per audio second, search, image or character, and most of their providers
-// report no tokens. Token limits neither admit nor count them; cost limits still do.
-const TOKENLESS_MODEL_KINDS: ReadonlySet<ModelKind> = new Set([
-  "transcription",
-  "reranking",
-  "image",
-  "speech",
-])
+// Token limits neither admit nor count tokenless calls; cost limits still do.
+const TOKENLESS_KINDS: ReadonlySet<ModelKind> = new Set(TOKENLESS_MODEL_KINDS)
 
 /** @internal Whether a limit meter governs calls of this kind. Unclassified calls are metered. */
 export function aiLimitMeterApplies(
   meter: AiLimitMeter,
   modelKind: ModelKind | undefined
 ): boolean {
-  return (
-    meter !== "tokens.total" || modelKind === undefined || !TOKENLESS_MODEL_KINDS.has(modelKind)
-  )
+  return meter !== "tokens.total" || modelKind === undefined || !TOKENLESS_KINDS.has(modelKind)
 }
 
 /** @internal Serialize compound limit operations, including within an existing transaction. */
