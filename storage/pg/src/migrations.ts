@@ -442,6 +442,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("069-artifact-kinds", artifactKindsSql),
     pgSql("070-artifact-state", artifactStateSql),
     pgSql("071-agent-thread-participants", agentThreadParticipantsSql),
+    pgSql("072-forked-context-checkpoints", forkedContextCheckpointsSql),
   ],
 })
 
@@ -487,5 +488,8 @@ import activityInteractionsSql from "./migrations/068-activity-interactions.sql"
 import artifactKindsSql from "./migrations/069-artifact-kinds.sql" with { type: "text" }
 import artifactStateSql from "./migrations/070-artifact-state.sql" with { type: "text" }
 import agentThreadParticipantsSql from "./migrations/071-agent-thread-participants.sql" with {
+  type: "text",
+}
+import forkedContextCheckpointsSql from "./migrations/072-forked-context-checkpoints.sql" with {
   type: "text",
 }

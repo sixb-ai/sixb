@@ -67,7 +67,10 @@ export class PgAgentContextCheckpointStore implements AgentContextCheckpointStor
 
         const [existingForRunRow] = await tx<AgentContextCheckpointRow[]>`
           SELECT * FROM agent_context_checkpoints
-          WHERE project_id = ${input.projectId} AND created_by_run_id = ${input.createdByRunId}
+          WHERE
+            project_id = ${input.projectId}
+            AND thread_id = ${input.threadId}
+            AND created_by_run_id = ${input.createdByRunId}
         `
         if (existingForRunRow) {
           const record = rowToContextCheckpointRecord(existingForRunRow)
@@ -177,6 +180,7 @@ export class PgAgentContextCheckpointStore implements AgentContextCheckpointStor
 
   async getByRunIds(input: {
     readonly projectId: string
+    readonly threadId: string
     readonly runIds: readonly string[]
   }): Promise<readonly AgentContextCheckpointRecord[]> {
     const runIds = [...new Set(input.runIds)]
@@ -185,11 +189,11 @@ export class PgAgentContextCheckpointStore implements AgentContextCheckpointStor
     const rows: AgentContextCheckpointRow[] = []
     for (let offset = 0; offset < runIds.length; offset += PG_CHECKPOINT_RUN_ID_BATCH_SIZE) {
       const batch = runIds.slice(offset, offset + PG_CHECKPOINT_RUN_ID_BATCH_SIZE)
-      const placeholders = batch.map((_, index) => `$${index + 2}`).join(", ")
+      const placeholders = batch.map((_, index) => `$${index + 3}`).join(", ")
       rows.push(
         ...(await this.sql.unsafe<AgentContextCheckpointRow[]>(
-          `SELECT * FROM agent_context_checkpoints WHERE project_id = $1 AND created_by_run_id IN (${placeholders})`,
-          [input.projectId, ...batch]
+          `SELECT * FROM agent_context_checkpoints WHERE project_id = $1 AND thread_id = $2 AND created_by_run_id IN (${placeholders})`,
+          [input.projectId, input.threadId, ...batch]
         ))
       )
     }

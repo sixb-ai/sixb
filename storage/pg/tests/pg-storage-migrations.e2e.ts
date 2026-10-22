@@ -16,6 +16,7 @@ import {
 } from "@sixb/core/storage"
 import {
   createMaterializerTestFixture,
+  createTestAgentExecution,
   createTestWorkflowExecution,
   startTestProjectionRun,
   startTestSyncRun,
@@ -108,6 +109,7 @@ const SHIPPED_MIGRATIONS = [
   "069-artifact-kinds",
   "070-artifact-state",
   "071-agent-thread-participants",
+  "072-forked-context-checkpoints",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -629,6 +631,54 @@ describe("Postgres storage migrations", () => {
         insertRun("superseded-with-error", "superseded", "version-4", failure)
       ).rejects.toThrow("projection_runs_superseded_check")
     })
+  })
+
+  test("scopes a run's context checkpoint to its thread and keeps existing ones", async () => {
+    // Removal proof: drop 072's DO block; the project-wide constraint stays, and the copy of
+    // `run-2`'s checkpoint into another thread violates it.
+    const index = indexOf("072-forked-context-checkpoints")
+    await withDatabase(
+      { migrateThrough: index },
+      async ({ storage, sql, schemaName, migrateThrough }) => {
+        const uniqueConstraints = async () => {
+          const rows = await sql.unsafe<{ definition: string }[]>(
+            `SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+            WHERE conrelid = $1::regclass AND contype = 'u' ORDER BY 1`,
+            [`${quoteIdent(schemaName)}.agent_context_checkpoints`]
+          )
+          return rows.map((row) => row.definition)
+        }
+
+        await seedCompactedThread(storage)
+        expect(await uniqueConstraints()).toEqual(["UNIQUE (project_id, created_by_run_id)"])
+
+        await migrateThrough(index + 1)
+        expect(await uniqueConstraints()).toEqual([
+          "UNIQUE (project_id, thread_id, created_by_run_id)",
+        ])
+        await expect(
+          storage.agents.checkpoints.getLatest({ projectId: "project-a", threadId: "thread-1" })
+        ).resolves.toMatchObject({ id: "checkpoint-1", createdByRunId: "run-2" })
+
+        // What a fork writes: the same run's checkpoint, in another thread.
+        await storage.agents.threads.create({
+          projectId: "project-a",
+          id: "thread-fork",
+          ownerPrincipal: { type: "user", id: "usr-2" },
+        })
+        await sql.unsafe(
+          `INSERT INTO ${quoteIdent(schemaName)}.agent_context_checkpoints
+          SELECT project_id, 'checkpoint-copy', 'thread-fork', created_by_run_id,
+            previous_checkpoint_id, reason, summary, summary_format_version,
+            summarized_through_seq, observed_head_seq, estimated_input_tokens_before,
+            estimated_input_tokens_after, summary_model_id, created_at
+          FROM ${quoteIdent(schemaName)}.agent_context_checkpoints WHERE id = 'checkpoint-1'`
+        )
+        await expect(
+          storage.agents.checkpoints.getLatest({ projectId: "project-a", threadId: "thread-fork" })
+        ).resolves.toMatchObject({ id: "checkpoint-copy", createdByRunId: "run-2" })
+      }
+    )
   })
 
   test("keeps every Action run readable as a terminal record", async () => {
@@ -1822,6 +1872,73 @@ function indexOf(id: string): number {
   const index = steps.findIndex((step) => step.id === id)
   if (index < 0) throw new Error(`[SixbPg] Migration ${id} is missing.`)
   return index
+}
+
+/** A thread whose second turn compacted the first, both finished. */
+async function seedCompactedThread(storage: PostgresStorage): Promise<void> {
+  const agents = storage.agents
+  const projectId = "project-a"
+  const threadId = "thread-1"
+  const spec = { model: { provider: "test", modelId: "test-model" } }
+  const execution = (token: string) => ({ token, queueLeaseExpiresAt: new Date("2099-01-01") })
+
+  await agents.threads.create({
+    projectId,
+    id: threadId,
+    ownerPrincipal: { type: "user", id: "usr-1" },
+  })
+  const turn = async (runId: string, question: string, answer: string) => {
+    await agents.messages.append({
+      projectId,
+      id: question,
+      threadId,
+      runId: null,
+      role: "user",
+      parts: [{ type: "text", text: question }],
+    })
+    const executionId = await createTestAgentExecution(storage, { projectId, runId })
+    await agents.runs.create({
+      projectId,
+      id: runId,
+      executionId,
+      threadId,
+      triggerMessageId: question,
+      spec,
+    })
+    await agents.runs.start({ projectId, id: runId, execution: execution(runId) })
+    return async () => {
+      await agents.messages.append({
+        projectId,
+        id: answer,
+        threadId,
+        runId,
+        role: "assistant",
+        parts: [{ type: "text", text: answer }],
+      })
+      await agents.runs.finish({ projectId, id: runId, executionToken: runId, status: "succeeded" })
+    }
+  }
+
+  await (await turn("run-1", "question-1", "answer-1"))()
+  const finishSecond = await turn("run-2", "question-2", "answer-2")
+  await agents.checkpoints.create({
+    projectId,
+    id: "checkpoint-1",
+    threadId,
+    createdByRunId: "run-2",
+    expectedPreviousCheckpointId: null,
+    expectedHeadSeq: 3,
+    executionToken: "run-2",
+    reason: "threshold",
+    summary: "The first question was answered.",
+    summaryFormatVersion: 1,
+    summarizedThroughSeq: 2,
+    observedHeadSeq: 3,
+    estimatedInputTokensBefore: 1_000,
+    estimatedInputTokensAfter: 300,
+    summaryModelId: "test-model",
+  })
+  await finishSecond()
 }
 
 async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {

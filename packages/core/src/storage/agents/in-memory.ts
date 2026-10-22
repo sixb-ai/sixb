@@ -783,6 +783,7 @@ class InMemoryAgentContextCheckpointStore implements AgentContextCheckpointStore
     const existingForRun = [...this.state.checkpoints.values()].find(
       (checkpoint) =>
         checkpoint.projectId === input.projectId &&
+        checkpoint.threadId === input.threadId &&
         checkpoint.createdByRunId === input.createdByRunId
     )
     if (existingForRun) {
@@ -851,11 +852,13 @@ class InMemoryAgentContextCheckpointStore implements AgentContextCheckpointStore
 
   async getByRunIds(input: {
     readonly projectId: string
+    readonly threadId: string
     readonly runIds: readonly string[]
   }): Promise<readonly AgentContextCheckpointRecord[]> {
     const byRunId = new Map(
       [...this.state.checkpoints.values()]
         .filter((checkpoint) => checkpoint.projectId === input.projectId)
+        .filter((checkpoint) => checkpoint.threadId === input.threadId)
         .map((checkpoint) => [checkpoint.createdByRunId, checkpoint] as const)
     )
     return [...new Set(input.runIds)].flatMap((runId) => {
