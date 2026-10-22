@@ -46,7 +46,6 @@ const MAX_WARNINGS = 2
  */
 export async function startDevFooter(options: {
   readonly root: string
-  readonly entry?: string
   readonly controls: DevControls
 }): Promise<DevReporter> {
   let state: DevState = {
@@ -360,13 +359,7 @@ function Summary({
   const phase = state.phase
   if (phase.kind === "failed") return <text fg={colors.red}>{fit(phase.error.message, width)}</text>
   if (phase.kind === "starting" && !state.view) {
-    const step = Math.max(0, phase.step)
-    return (
-      <text>
-        <Tiles colors={colors} filled={step + 1} total={DEV_STARTUP_STEPS.length + 1} />
-        <span fg={colors.text}>{`  ${DEV_STARTUP_STEPS[step] ?? "Starting"}…`}</span>
-      </text>
-    )
+    return <StartupProgress step={phase.step} colors={colors} />
   }
   return (
     <text>
@@ -418,16 +411,23 @@ function Body({
     return <Serving view={state.view} colors={colors} width={width} dim={phase.kind !== "ready"} />
   }
 
-  const step = phase.kind === "starting" ? Math.max(0, phase.step) : 0
   return (
     <>
-      <text>
-        <Tiles colors={colors} filled={step + 1} total={DEV_STARTUP_STEPS.length + 1} />
-        <span fg={colors.text}>{`  ${DEV_STARTUP_STEPS[step] ?? "Starting"}…`}</span>
-      </text>
+      <StartupProgress step={phase.kind === "starting" ? phase.step : 0} colors={colors} />
       <text> </text>
       <text> </text>
     </>
+  )
+}
+
+/** The first start's progress: tiles filling as the steps pass, then the step running now. */
+function StartupProgress({ step, colors }: { readonly step: number; readonly colors: LiveColors }) {
+  const current = Math.max(0, step)
+  return (
+    <text>
+      <Tiles colors={colors} filled={current + 1} total={DEV_STARTUP_STEPS.length + 1} />
+      <span fg={colors.text}>{`  ${DEV_STARTUP_STEPS[current] ?? "Starting"}…`}</span>
+    </text>
   )
 }
 
@@ -443,7 +443,6 @@ function Serving({
   readonly dim: boolean
 }) {
   const value = dim ? colors.muted : colors.blue
-  const api = `${view.apiUrl}`
   const extras = `   docs ${pathOf(view.apiDocsUrl)}   events ${pathOf(view.wsUrl)}`
   const workers = view.workers.map((worker) => `${worker.type} ${worker.concurrency}`).join(" · ")
   return (
@@ -458,8 +457,8 @@ function Serving({
       </text>
       <text>
         <span fg={colors.muted}>{"api      "}</span>
-        <span fg={value}>{api}</span>
-        <span fg={colors.faint}>{fit(extras, Math.max(0, width - 9 - api.length))}</span>
+        <span fg={value}>{view.apiUrl}</span>
+        <span fg={colors.faint}>{fit(extras, Math.max(0, width - 9 - view.apiUrl.length))}</span>
       </text>
       <text>
         <span fg={colors.muted}>{"workers  "}</span>

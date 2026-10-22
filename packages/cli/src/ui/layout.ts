@@ -4,7 +4,7 @@ import { glyph, paint, palette, tone } from "./theme"
  * Printed screens are strings: built here, written once, kept in the scrollback, and plain text
  * when piped. Every screen sits two columns in and between blank lines.
  */
-export const GUTTER = "  "
+const GUTTER = "  "
 
 export type Block = string | null | undefined | false
 
@@ -21,7 +21,7 @@ export function stack(...blocks: Block[]): string {
   return blocks.filter((block): block is string => typeof block === "string").join("\n")
 }
 
-export function indent(text: string, prefix = GUTTER): string {
+function indent(text: string, prefix = GUTTER): string {
   return text
     .split("\n")
     .map((line) => (line.length > 0 ? `${prefix}${line}` : line))
@@ -73,12 +73,8 @@ export function wrap(text: string, width: number): string[] {
 }
 
 /** Wraps plain text and styles each line, so color never spans a line break. */
-export function paragraph(
-  text: string,
-  style: (line: string) => string = (line) => line,
-  width = contentWidth()
-): string {
-  return wrap(text, width).map(style).join("\n")
+export function paragraph(text: string, style: (line: string) => string = (line) => line): string {
+  return wrap(text, contentWidth()).map(style).join("\n")
 }
 
 let commandPath = ""
@@ -101,9 +97,9 @@ export function header(command?: string, context?: string, state?: string): stri
   return `${tone.blue(glyph.mark)} ${title}${context ? `  ${tone.muted(context)}` : ""}${state ? `  ${state}` : ""}`
 }
 
-export type Status = "ok" | "warn" | "fail" | "live" | "idle" | "pending"
+export type Status = "ok" | "warn" | "fail" | "live" | "idle"
 
-export function statusGlyph(status: Status): string {
+function statusGlyph(status: Status): string {
   switch (status) {
     case "ok":
       return tone.ok(glyph.ok)
@@ -115,8 +111,6 @@ export function statusGlyph(status: Status): string {
       return tone.blue(glyph.live)
     case "idle":
       return tone.faint(glyph.idle)
-    case "pending":
-      return tone.faint(glyph.dot)
   }
 }
 
@@ -136,9 +130,10 @@ export interface Row {
   readonly label: string
   readonly value: string
   readonly status?: Status
-  /** Dimmer lines under the value, such as a remedy or a path. */
-  readonly notes?: readonly string[]
-  readonly noteStyle?: (text: string) => string
+  /** A dimmer line under the value, such as a path. */
+  readonly note?: string
+  /** What to do about it, under the value, led by an arrow. */
+  readonly remedy?: string
 }
 
 /**
@@ -147,19 +142,9 @@ export interface Row {
  *   ✓ Storage     SqliteStorage · schema current
  *     Project     11 object types
  */
-export function rows(
-  items: readonly Row[],
-  options: {
-    readonly labelWidth?: number
-    readonly labelStyle?: (text: string) => string
-    readonly valueStyle?: (text: string) => string
-  } = {}
-): string {
-  const labelStyle = options.labelStyle ?? tone.muted
-  const valueStyle = options.valueStyle ?? ((text: string) => text)
+export function rows(items: readonly Row[]): string {
   const hasStatus = items.some((item) => item.status)
-  const labelWidth =
-    Math.max(options.labelWidth ?? 0, ...items.map((item) => visibleWidth(item.label))) + 2
+  const labelWidth = Math.max(...items.map((item) => visibleWidth(item.label))) + 2
   const lead = hasStatus ? 2 : 0
   const valueWidth = Math.max(20, contentWidth() - lead - labelWidth)
   const hanging = " ".repeat(lead + labelWidth)
@@ -167,19 +152,19 @@ export function rows(
   return items
     .map((item) => {
       const mark = hasStatus ? `${item.status ? statusGlyph(item.status) : " "} ` : ""
-      const label = labelStyle(pad(item.label, labelWidth))
+      const label = tone.muted(pad(item.label, labelWidth))
       const valueLines = isUrl(item.value)
         ? [tone.url(item.value)]
         : wrap(item.value, valueWidth).map((line) =>
-            item.status === "fail" ? tone.fail(line) : valueStyle(line)
+            item.status === "fail" ? tone.fail(line) : line
           )
-      const noteStyle = item.noteStyle ?? tone.muted
-      const noteLines = (item.notes ?? []).flatMap((note) =>
-        wrap(note, valueWidth - 2).map((line, index) =>
-          item.noteStyle === remedy ? (index === 0 ? remedy(line) : `  ${line}`) : noteStyle(line)
-        )
-      )
-      const [first = "", ...rest] = [...valueLines, ...noteLines]
+      const noteLines = item.note ? wrap(item.note, valueWidth).map(tone.muted) : []
+      const remedyLines = item.remedy
+        ? wrap(item.remedy, valueWidth - 2).map((line, index) =>
+            index === 0 ? remedy(line) : `  ${line}`
+          )
+        : []
+      const [first = "", ...rest] = [...valueLines, ...noteLines, ...remedyLines]
       return [`${mark}${label}${first}`, ...rest.map((line) => `${hanging}${line}`)].join("\n")
     })
     .join("\n")
@@ -231,9 +216,9 @@ export function commands(lines: readonly string[]): string {
   return lines.map((line) => `${tone.faint("$")} ${tone.blue(line)}`).join("\n")
 }
 
-/** Verbatim output, such as a build log, set off by a rule. */
-export function quoted(lines: readonly string[], limit = 40): string {
-  const shown = lines.length > limit ? lines.slice(-limit) : lines
+/** Verbatim output, such as a build log, set off by a rule. The last 40 lines are enough. */
+export function quoted(lines: readonly string[]): string {
+  const shown = lines.slice(-40)
   const width = contentWidth() - 2
   const body = shown.flatMap((line) =>
     wrap(Bun.stripANSI(line), width).map((part) => `${tone.faint(glyph.rule)} ${tone.muted(part)}`)
@@ -251,7 +236,7 @@ export function hints(items: readonly (readonly [string, string])[]): string {
     .join(tone.faint(`  ${glyph.dot}  `))
 }
 
-export function isUrl(value: string): boolean {
+function isUrl(value: string): boolean {
   return /^(https?|wss?):\/\/\S+$/.test(value)
 }
 

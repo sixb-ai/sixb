@@ -43,11 +43,8 @@ const HELP_LABEL_COLUMN = 26
 
 /**
  * Help reads by name: the command or option stands out, what it does stays quiet, and a default
- * sits apart from the description so the eye can skip it.
- */
-/**
- * `column` lines several groups up on one column; without it, the column fits these items, up to
- * `HELP_LABEL_COLUMN`.
+ * sits apart from the description so the eye can skip it. `column` lines several groups up on
+ * one column; without it, the column fits these items, up to `HELP_LABEL_COLUMN`.
  */
 function helpRows(items: readonly CliHelpItem[], column?: number): string {
   const width =
@@ -92,10 +89,7 @@ export function helpView({ errorMessage }: { errorMessage?: string } = {}): stri
         group.title,
         group.compact
           ? // A family of commands that each have their own help: their names are enough here.
-            paragraph(
-              group.items.map((item) => item.label.split(" ")[0]).join(`  `),
-              (line) => line
-            )
+            paragraph(group.items.map((item) => item.label.split(" ")[0]).join("  "))
           : helpRows(group.items, column)
       )
     ),
@@ -147,22 +141,14 @@ export function errorView({
             paint(line, { color: palette.red, bold: true })
           )
         : marked(tone.fail(glyph.fail), shown, tone.strong),
-      ...(titled
-        ? paragraph(shown, (line) => line, width)
-            .split("\n")
-            .map((line) => `  ${line}`)
-        : [])
+      ...(titled ? wrap(shown, width).map((line) => `  ${line}`) : [])
     ),
     details.length > 0 ? quoted(details) : null,
     remediation ? rows([{ label: "Try this", value: remediation }]) : null
   )
 }
 
-const TITLE_STATUS: Record<string, Status> = {
-  green: "ok",
-  yellow: "warn",
-  red: "fail",
-}
+const TITLE_STATUS = { green: "ok", yellow: "warn", red: "fail" } as const
 
 export function keyValueResultView({
   title,
@@ -180,19 +166,18 @@ export function keyValueResultView({
   return screen(
     header(undefined, subtitle),
     rows(items),
-    headline(TITLE_STATUS[titleColor] ?? "ok", title),
+    headline(TITLE_STATUS[titleColor], title),
     message ? paragraph(message, tone.muted) : null
   )
 }
 
+/** A list. The header names the command, which already says what the list is. */
 export function tableResultView({
   subtitle,
   headers,
   rows: cells,
   emptyMessage,
 }: {
-  /** What the list is. The header names the command, which already says it. */
-  title?: string
   subtitle?: string
   headers: readonly string[]
   rows: readonly (readonly string[])[]
@@ -369,7 +354,7 @@ export function checkView({
               label: "Ontology",
               status: (ontologyOk ? "ok" : "fail") as Status,
               value: `${plural(ontology.errors, "error")} · ${plural(ontology.warnings, "warning")}`,
-              notes: [relativePath(ontology.source)],
+              note: relativePath(ontology.source),
             },
           ]
         : []),
@@ -385,14 +370,7 @@ export function checkView({
   )
 }
 
-export function buildView({
-  outdir,
-  seconds,
-}: {
-  entry: string
-  outdir: string
-  seconds?: number
-}): string {
+export function buildView({ outdir, seconds }: { outdir: string; seconds?: number }): string {
   return screen(
     headline(
       "ok",
@@ -447,7 +425,6 @@ export function lakeCheckView({
   warnings = [],
 }: {
   projectId: string
-  status: "ok"
   warnings?: readonly string[]
 }): string {
   return screen(headline("ok", "Lake definitions compatible", projectId), warningLines(warnings))
@@ -496,7 +473,6 @@ export function initView({
   commands: next,
 }: {
   name: string
-  targetDir: string
   files: readonly string[]
   commands: readonly string[]
 }): string {
@@ -507,7 +483,7 @@ export function initView({
 }
 
 /** A path under the working directory reads shorter relative to it. */
-export function relativePath(path: string): string {
+function relativePath(path: string): string {
   const cwd = process.cwd()
   if (path === cwd) return "."
   return path.startsWith(`${cwd}/`) ? path.slice(cwd.length + 1) : path

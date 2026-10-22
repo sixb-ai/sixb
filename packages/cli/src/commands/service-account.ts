@@ -71,7 +71,6 @@ async function listServiceAccounts(options: ServiceAccountCommandOptions) {
 
   await renderStatic(
     tableResultView({
-      title: "Service accounts",
       subtitle: `${result.serviceAccounts.length} visible`,
       headers: ["Name", "ID", "Status", "Groups", "Updated"],
       rows: result.serviceAccounts.map(serviceAccountRow),
@@ -191,7 +190,6 @@ async function listServiceAccountTokens(options: ServiceAccountCommandOptions) {
 
   await renderStatic(
     tableResultView({
-      title: "Service-account tokens",
       subtitle: serviceAccountId,
       headers: ["Name", "ID", "Status", "Groups", "Last used", "Expires"],
       rows: result.accessTokens.map((token) => [
