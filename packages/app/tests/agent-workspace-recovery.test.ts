@@ -9,6 +9,8 @@ test("offers explicit workspace recreation without performing it during render",
     createElement(SandboxRecovery, {
       pending: false,
       error: false,
+      canRecreate: true,
+      owner: "Alice Martin",
       onRecreate: () => {
         calls++
       },
@@ -25,6 +27,8 @@ test("disables duplicate recovery requests and exposes failures", () => {
     createElement(SandboxRecovery, {
       pending: true,
       error: true,
+      canRecreate: true,
+      owner: "Alice Martin",
       onRecreate: () => {},
     })
   )

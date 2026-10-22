@@ -37,7 +37,16 @@ export const fr: Translation<AgentMessages> = {
     loadingConversation: "Chargement de la conversation…",
     messagesLoadFailed: "Impossible de charger cette conversation.",
     threadsLoadFailed: "Impossible de charger les conversations.",
+    sharedThreadsLoadFailed: "Impossible de charger les conversations partagées avec vous.",
     sendFailed: "Le message n’a pas pu être envoyé. Réessayez.",
+    busy: "Une réponse est déjà en cours. Envoyez votre message quand elle sera terminée.",
+    busyOther:
+      "L’agent répond au message de quelqu’un d’autre. Envoyez le vôtre quand il aura fini.",
+    sandboxUnavailable:
+      "L’environnement de cette conversation doit être récupéré avant une nouvelle réponse.",
+    retryFailed: "Impossible de relancer cette réponse. Réessayez.",
+    stopFailed: "Impossible d’arrêter cette réponse. Réessayez.",
+    removed: "Vous ne participez plus à cette conversation.",
   },
   composer: {
     message: "Message",
@@ -150,6 +159,10 @@ export const fr: Translation<AgentMessages> = {
     all: "Toutes",
     archivedFilter: (archived) => `Archivées ${number(archived)}`,
     archived: "Archivée",
+    sharedFilter: (shared) =>
+      shared > 0 ? `Partagées avec moi ${number(shared)}` : "Partagées avec moi",
+    sharedEmpty: "Les conversations que d’autres partagent avec vous apparaissent ici.",
+    sharedBy: (owner, messages) => `${owner} · ${count(messages, "message")}`,
     current: "Actuelle",
     currentState: "actuelle",
     today: "Aujourd’hui",
@@ -599,6 +612,58 @@ export const fr: Translation<AgentMessages> = {
       "La prochaine exécution initialisera un nouvel environnement. Les fichiers locaux de l’espace de travail précédent ne seront pas copiés. L’historique de la conversation et les pièces jointes publiées restent disponibles. L’environnement précédent n’est pas supprimé et reste soumis à la politique de conservation du fournisseur.",
     cancel: "Annuler",
     create: "Créer un nouvel environnement",
+    ownerOnly: (owner) =>
+      `${owner} est la seule personne à pouvoir faire repartir cette conversation d’un nouvel environnement.`,
+  },
+  sharing: {
+    share: "Partager la conversation",
+    shareShort: "Partager",
+    names: (names) => names.join(", "),
+    emailPlaceholderEmpty: "Ajouter des personnes par e-mail",
+    addHint: "Appuyez sur Entrée pour ajouter chaque adresse.",
+    people: (people) => `${count(people, "personne")} dans cette conversation`,
+    shareTitle: "Partager la conversation",
+    peopleTitle: "Personnes dans cette conversation",
+    description:
+      "Chaque personne ici lit toute la conversation et parle à l’agent avec ses propres accès.",
+    owner: "Propriétaire",
+    you: "Vous",
+    remove: (name) => `Retirer ${name}`,
+    removeFailed: "Impossible de retirer cette personne. Réessayez.",
+    email: "E-mail",
+    emailPlaceholder: "collegue@example.com",
+    invalidEmail: "Saisissez une adresse e-mail, par exemple collegue@example.com.",
+    unstage: (email) => `Ne pas ajouter ${email}`,
+    warning:
+      "Les participants verront toute la conversation, y compris les données que l’agent a lues avec vos accès, maintenant et dans les prochains messages. Certaines peuvent être des données qu’ils ne peuvent normalement pas voir.",
+    confirm: (people) => `Partager avec ${count(people, "personne")}`,
+    sharing: "Partage…",
+    shareRefused:
+      "Impossible de les ajouter : chaque adresse doit appartenir à un membre actif autre que vous, dans la limite de 50 personnes.",
+    shareFailed: "Impossible de partager cette conversation.",
+    staged: "Personnes à ajouter",
+    leave: "Quitter la conversation",
+    leaveTitle: "Quitter cette conversation ?",
+    leaveDescription: (owner) =>
+      `Vous ne la verrez plus, ni ses nouveaux messages. ${owner} peut vous ajouter à nouveau.`,
+    leaveFailed: "Impossible de quitter cette conversation. Réessayez.",
+    cancel: "Annuler",
+    close: "Fermer",
+    sharedBy: (owner) => `Conversation de ${owner}`,
+    answering: (name) => `L’agent répond à ${name}…`,
+    continueMine: "Continuer dans ma conversation",
+    continuing: "Copie…",
+    continueHint: "Une copie des messages terminés, dans une conversation rien qu’à vous.",
+    forkFailed: "Impossible de copier cette conversation. Réessayez.",
+    sharedWith: (names) =>
+      names.length === 1
+        ? `Partagée avec ${names[0]}`
+        : names.length === 2
+          ? `Partagée avec ${names[0]} et ${names[1]}`
+          : `Partagée avec ${number(names.length)} personnes`,
+    removed: (name) => `${name} ne fait plus partie de la conversation`,
+    left: "Vous avez quitté la conversation",
+    copied: "Copiée dans vos conversations",
   },
   observed: {
     readOnly:

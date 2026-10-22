@@ -15,7 +15,7 @@ import { type FileSource, messageFileSource } from "../../artifacts/file-source"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
 import { isAwaitingFirstToken, type LiveRunState } from "../live-run"
-import { useMessageAuthors } from "../message-authors"
+import { type AuthorLabel, useMessageAuthors } from "../message-authors"
 import { useObservedThread } from "../observed-thread"
 import { normalizeDurableParts } from "../parts"
 import { useLivePublishes } from "../publish-artifact/use-live-publishes"
@@ -30,28 +30,38 @@ import { ACTIVITY_STATUS_ROW_CLASS_NAME, ActivityStatusText } from "./activity-s
 import { ContextChips } from "./context-chips"
 import { FileAttachmentCard } from "./file-attachment-card"
 import { AssistantBody } from "./message-parts"
+import { PersonAvatar } from "./person-avatar"
 
 /**
  * Render a single durable message. System messages are not shown in the reading transcript.
+ * `continued`: the previous user message has the same author, so this one does not name them.
  * `onContinue` offers to finish an answer whose diagnostic says it stopped short.
  */
 export const MessageView = memo(function MessageView({
   message,
+  continued = false,
   onContinue,
   continuing = false,
 }: {
-  message: AgentMessage
-  onContinue?: () => void
-  continuing?: boolean
+  readonly message: AgentMessage
+  readonly continued?: boolean
+  readonly onContinue?: () => void
+  readonly continuing?: boolean
 }) {
-  if (message.role === "user") return <UserMessage message={message} />
+  if (message.role === "user") return <UserMessage message={message} continued={continued} />
   if (message.role === "assistant") {
     return <AssistantMessage message={message} onContinue={onContinue} continuing={continuing} />
   }
   return null
 })
 
-function UserMessage({ message }: { message: AgentMessage }) {
+function UserMessage({
+  message,
+  continued,
+}: {
+  readonly message: AgentMessage
+  readonly continued: boolean
+}) {
   const observed = useObservedThread()
   const authors = useMessageAuthors()
   const text = textOf(message)
@@ -61,7 +71,7 @@ function UserMessage({ message }: { message: AgentMessage }) {
 
   return (
     <div className="flex flex-col items-end gap-1.5">
-      <AuthorLine name={authors?.authorOf(message)} />
+      {continued ? null : <AuthorLine author={authors?.authorOf(message)} />}
       <ContextChips entries={context} className="max-w-[min(90%,40rem)] justify-end" />
       {files.length > 0 ? (
         <div className="flex max-w-[min(80%,32rem)] flex-col items-end gap-1.5">
@@ -147,10 +157,15 @@ function AssistantMessage({
 }
 
 /** Who wrote a user message, where messages name their author. */
-export function AuthorLine({ name }: { readonly name: string | undefined }) {
-  if (!name) return null
+export function AuthorLine({ author }: { readonly author: AuthorLabel | undefined }) {
+  if (!author) return null
 
-  return <p className="px-1 text-xs text-muted-foreground">{name}</p>
+  return (
+    <p className="mt-2 flex items-center gap-1.5 px-1 text-xs text-muted-foreground">
+      <PersonAvatar name={author.name} size="xs" />
+      <span>{author.label}</span>
+    </p>
+  )
 }
 
 function CompactionResult({ summary }: { summary: string }) {
