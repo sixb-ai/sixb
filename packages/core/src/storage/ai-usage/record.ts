@@ -1,5 +1,6 @@
 import { normalizeRequesterGroupIds } from "../../auth/attribution"
 import { assertJsonValue, isPlainRecord } from "../../json"
+import { MODEL_KINDS } from "../../models/definitions"
 import { normalizeModelProviderIds } from "../../models/events"
 import { isModelReasoning } from "../../models/language-model"
 import type { AiModelCallUsageRecord, RecordAiModelCallInput } from "./types"
@@ -19,19 +20,7 @@ export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiMod
   }
   assertNonBlank(input.responseId, "responseId")
 
-  if (
-    input.modelKind !== undefined &&
-    ![
-      "language",
-      "image",
-      "video",
-      "embedding",
-      "decision",
-      "transcription",
-      "speech",
-      "reranking",
-    ].includes(input.modelKind)
-  ) {
+  if (input.modelKind !== undefined && !MODEL_KINDS.includes(input.modelKind)) {
     throw new TypeError("[Sixb] AI model kind is invalid.")
   }
   const occurredAt = cloneValidDate(input.occurredAt, "occurredAt")

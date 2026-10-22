@@ -265,6 +265,22 @@ export function runAiCostStorageContractSuite<TStorage extends AiCostStorage>(
           },
         })
         expect(overview.series).toMatchObject([{ modelCallCount: 3 }])
+        // Removal proof: drop the kind dimension from a storage's overview; kinds come back empty.
+        expect(
+          overview.kinds.map((kind) => ({
+            modelKind: kind.modelKind,
+            modelCallCount: kind.modelCallCount,
+            amounts: kind.costs.amounts,
+          }))
+        ).toEqual([
+          { modelKind: "image", modelCallCount: 1, amounts: [] },
+          {
+            modelKind: "language",
+            modelCallCount: 1,
+            amounts: [{ currency: "USD", amountNanos: "95000" }],
+          },
+          { modelKind: undefined, modelCallCount: 1, amounts: [] },
+        ])
         expect(overview.models).toMatchObject([
           { providerId: "gateway", modelId: "openai/gpt-5", modelCallCount: 2 },
           { providerId: "gateway", modelId: "unpriced/model", modelCallCount: 1 },
@@ -451,14 +467,23 @@ export async function seedAiCostStorageContractUsage(
   }
 
   for (const fixture of [
-    { id: "usage_1", model: "openai/gpt-5", input: 12, output: 8, reasoning: "high" as const },
+    {
+      id: "usage_1",
+      model: "openai/gpt-5",
+      kind: "language" as const,
+      input: 12,
+      output: 8,
+      reasoning: "high" as const,
+    },
     {
       id: "usage_2",
       model: "unpriced/model",
+      kind: "image" as const,
       input: 1,
       output: 1,
       reasoning: { budgetTokens: 4_096 },
     },
+    // Recorded before calls captured their kind.
     { id: "usage_3", model: "openai/gpt-5", input: 2, output: 3, reasoning: undefined },
   ]) {
     await usage.recordModelCall({
@@ -470,6 +495,7 @@ export async function seedAiCostStorageContractUsage(
       requesterGroupIds: [],
       providerId: "gateway",
       requestedModelId: fixture.model,
+      ...("kind" in fixture ? { modelKind: fixture.kind } : {}),
       ...(fixture.reasoning === undefined ? {} : { requestedReasoning: fixture.reasoning }),
       responseId: `response_${projectId}_${fixture.id}`,
       usage: {

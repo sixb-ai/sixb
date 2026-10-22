@@ -1,9 +1,11 @@
+import { MODEL_KINDS, type ModelKind } from "../../models/definitions"
 import { type AiModelCallUsageRecord, normalizeAiModelCallUsage } from "../ai-usage"
 import type {
   AiAccountingAgentBreakdown,
   AiAccountingAggregate,
   AiAccountingAttribution,
   AiAccountingBucket,
+  AiAccountingKindBreakdown,
   AiAccountingModelBreakdown,
   AiAccountingOverview,
   AiAccountingTimeBucket,
@@ -50,10 +52,12 @@ interface AiAccountingUsageMeterFragment {
 
 /** One SQL-aggregated currency fragment; providers merge fragments without loading model calls. */
 export interface AiAccountingAggregateFragment {
-  readonly dimension: "totals" | "series" | "model" | "agent" | "workflow"
+  readonly dimension: "totals" | "series" | "model" | "kind" | "agent" | "workflow"
   readonly start?: Date
   readonly providerId?: string
   readonly modelId?: string
+  /** The `kind` dimension's key; absent for calls recorded before their kind was captured. */
+  readonly modelKind?: ModelKind
   readonly agentKind?: "agent" | "workflowAgent"
   readonly agentStepId?: string
   readonly workflowId?: string
@@ -145,6 +149,8 @@ export function buildAiAccountingOverview(
     periods.map((period) => [period.start.getTime(), []])
   )
   const modelItems = new Map<string, AiAccountingRecordSetItem[]>()
+  // An empty key collects calls recorded before their kind was captured.
+  const kindItems = new Map<ModelKind | "", AiAccountingRecordSetItem[]>()
   const agentItems = new Map<string, AiAccountingRecordSetItem[]>()
   const workflowItems = new Map<string, AiAccountingRecordSetItem[]>()
 
@@ -156,6 +162,7 @@ export function buildAiAccountingOverview(
       JSON.stringify([item.usage.providerId, item.usage.requestedModelId]),
       item
     )
+    appendGrouped(kindItems, item.usage.modelKind ?? "", item)
     if (item.attribution?.kind === "agent") {
       appendGrouped(agentItems, JSON.stringify(["agent"]), item)
     } else if (item.attribution?.kind === "workflowAgent") {
@@ -184,6 +191,9 @@ export function buildAiAccountingOverview(
       return { providerId, modelId, ...aggregateAccountingItems(grouped) }
     })
     .sort(compareModelBreakdowns)
+  const kinds: AiAccountingKindBreakdown[] = [...kindItems]
+    .map(([kind, grouped]) => kindBreakdown(kind, aggregateAccountingItems(grouped)))
+    .sort(compareKindBreakdowns)
   const agents: AiAccountingAgentBreakdown[] = [...agentItems]
     .map(([key, grouped]) => {
       const [kind, workflowId, agentStepId] = JSON.parse(key) as [
@@ -211,9 +221,18 @@ export function buildAiAccountingOverview(
     totals: aggregateAccountingItems(items),
     series,
     models,
+    kinds,
     agents,
     workflows,
   })
+}
+
+/** A stored `kind` dimension key; null for calls recorded before their kind was captured. */
+export function aiAccountingModelKind(value: string | null): ModelKind | undefined {
+  if (value === null) return undefined
+  const kind = MODEL_KINDS.find((candidate) => candidate === value)
+  if (!kind) throw new TypeError(`[Sixb] AI accounting returned an unknown model kind '${value}'.`)
+  return kind
 }
 
 export function buildAiAccountingOverviewFromFragments(
@@ -227,6 +246,7 @@ export function buildAiAccountingOverviewFromFragments(
     periods.map((period) => [period.start.getTime(), aggregateFragmentAccumulator()])
   )
   const models = new Map<string, AggregateFragmentAccumulator>()
+  const kinds = new Map<ModelKind | "", AggregateFragmentAccumulator>()
   const agents = new Map<string, AggregateFragmentAccumulator>()
   const workflows = new Map<string, AggregateFragmentAccumulator>()
 
@@ -253,6 +273,9 @@ export function buildAiAccountingOverviewFromFragments(
             requiredFragmentString(fragment.modelId, "modelId"),
           ])
         )
+        break
+      case "kind":
+        target = getFragmentAccumulator(kinds, fragment.modelKind ?? "")
         break
       case "agent":
         target = getFragmentAccumulator(
@@ -288,6 +311,9 @@ export function buildAiAccountingOverviewFromFragments(
         return { providerId, modelId, ...finishAggregateFragment(value) }
       })
       .sort(compareModelBreakdowns),
+    kinds: [...kinds]
+      .map(([kind, value]) => kindBreakdown(kind, finishAggregateFragment(value)))
+      .sort(compareKindBreakdowns),
     agents: [...agents]
       .map(([key, value]) => {
         const [kind, workflowId, agentStepId] = JSON.parse(key) as [
@@ -446,9 +472,9 @@ function aggregateFragmentAccumulator(): AggregateFragmentAccumulator {
   }
 }
 
-function getFragmentAccumulator(
-  values: Map<string, AggregateFragmentAccumulator>,
-  key: string
+function getFragmentAccumulator<TKey extends string>(
+  values: Map<TKey, AggregateFragmentAccumulator>,
+  key: TKey
 ): AggregateFragmentAccumulator {
   const existing = values.get(key)
   if (existing) return existing
@@ -611,9 +637,9 @@ function nextBucket(start: Date, bucket: AiAccountingBucket): Date {
   return next
 }
 
-function appendGrouped(
-  groups: Map<string, AiAccountingRecordSetItem[]>,
-  key: string,
+function appendGrouped<TKey extends string>(
+  groups: Map<TKey, AiAccountingRecordSetItem[]>,
+  key: TKey,
   item: AiAccountingRecordSetItem
 ): void {
   const existing = groups.get(key)
@@ -674,6 +700,25 @@ function compareWorkflowBreakdowns(
 ): number {
   return (
     right.modelCallCount - left.modelCallCount || left.workflowId.localeCompare(right.workflowId)
+  )
+}
+
+function kindBreakdown(
+  kind: ModelKind | "",
+  aggregate: AiAccountingAggregate
+): AiAccountingKindBreakdown {
+  return kind ? { modelKind: kind, ...aggregate } : aggregate
+}
+
+function compareKindBreakdowns(
+  left: AiAccountingKindBreakdown,
+  right: AiAccountingKindBreakdown
+): number {
+  // Calls recorded before their kind was captured sort after every kind.
+  return (
+    right.modelCallCount - left.modelCallCount ||
+    Number(left.modelKind === undefined) - Number(right.modelKind === undefined) ||
+    (left.modelKind ?? "").localeCompare(right.modelKind ?? "")
   )
 }
 

@@ -5,15 +5,19 @@ import {
   type ModelReasoningCapabilities,
 } from "./language-model"
 
-export type ModelKind =
-  | "language"
-  | "image"
-  | "video"
-  | "embedding"
-  | "decision"
-  | "transcription"
-  | "speech"
-  | "reranking"
+/** @internal Every model kind, for validating stored values. */
+export const MODEL_KINDS = [
+  "language",
+  "image",
+  "video",
+  "embedding",
+  "decision",
+  "transcription",
+  "speech",
+  "reranking",
+] as const
+
+export type ModelKind = (typeof MODEL_KINDS)[number]
 
 /** Common catalog identity shared by every present and future model runtime. */
 export interface ModelDefinition {

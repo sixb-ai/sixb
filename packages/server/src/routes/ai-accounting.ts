@@ -63,6 +63,10 @@ function serializeOverview(overview: AiAccountingOverview) {
       modelId: model.modelId,
       ...serializeAggregate(model),
     })),
+    kinds: overview.kinds.map((kind) => ({
+      ...(kind.modelKind === undefined ? {} : { modelKind: kind.modelKind }),
+      ...serializeAggregate(kind),
+    })),
     agents: overview.agents.map((agent) => ({
       kind: agent.kind,
       ...(agent.kind === "workflowAgent"

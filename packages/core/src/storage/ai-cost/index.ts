@@ -10,6 +10,7 @@ export type {
   AiAccountingAggregate,
   AiAccountingAttribution,
   AiAccountingBucket,
+  AiAccountingKindBreakdown,
   AiAccountingModelBreakdown,
   AiAccountingOverview,
   AiAccountingRange,

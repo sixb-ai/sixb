@@ -6317,6 +6317,225 @@
                         "additionalProperties": false
                       }
                     },
+                    "kinds": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "modelCallCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "usage": {
+                            "type": "object",
+                            "properties": {
+                              "inputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "outputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "totalTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "uncachedInputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "cacheReadInputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "cacheWriteInputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "textOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "reasoningOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "audioDurationMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Audio content duration in milliseconds; not billed duration."
+                              },
+                              "imageOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Output tokens that encode generated images, within outputTokens."
+                              },
+                              "audioOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Output tokens that encode generated audio, within outputTokens."
+                              },
+                              "outputImages": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Images the call returned."
+                              },
+                              "inputCharacters": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Input characters, counted by the provider's own billing rule."
+                              },
+                              "reportingStatus": {
+                                "type": "string",
+                                "enum": ["complete", "partial", "unavailable"]
+                              }
+                            },
+                            "required": ["reportingStatus"],
+                            "additionalProperties": false,
+                            "description": "Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete."
+                          },
+                          "usageCoverage": {
+                            "type": "object",
+                            "properties": {
+                              "completeCallCount": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Calls reporting both inputTokens and outputTokens."
+                              },
+                              "fieldCallCounts": {
+                                "type": "object",
+                                "properties": {
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "outputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "uncachedInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheReadInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheWriteInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "textOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reasoningOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "audioDurationMs": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "imageOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "audioOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "outputImages": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "inputCharacters": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": [
+                                  "inputTokens",
+                                  "outputTokens",
+                                  "uncachedInputTokens",
+                                  "cacheReadInputTokens",
+                                  "cacheWriteInputTokens",
+                                  "textOutputTokens",
+                                  "reasoningOutputTokens",
+                                  "audioDurationMs",
+                                  "imageOutputTokens",
+                                  "audioOutputTokens",
+                                  "outputImages",
+                                  "inputCharacters"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": ["completeCallCount", "fieldCallCounts"],
+                            "additionalProperties": false
+                          },
+                          "costs": {
+                            "type": "object",
+                            "properties": {
+                              "amounts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "currency": {
+                                      "type": "string",
+                                      "pattern": "^[A-Z]{3}$"
+                                    },
+                                    "amountNanos": {
+                                      "type": "string",
+                                      "pattern": "^\\d+$"
+                                    }
+                                  },
+                                  "required": ["currency", "amountNanos"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "ratedCallCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "unpriceableCallCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "unvaluedCallCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "amounts",
+                              "ratedCallCount",
+                              "unpriceableCallCount",
+                              "unvaluedCallCount"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "modelKind": {
+                            "type": "string",
+                            "enum": [
+                              "language",
+                              "image",
+                              "video",
+                              "embedding",
+                              "decision",
+                              "transcription",
+                              "speech",
+                              "reranking"
+                            ],
+                            "description": "Absent for calls recorded before their kind was captured."
+                          }
+                        },
+                        "required": ["modelCallCount", "usage", "usageCoverage", "costs"],
+                        "additionalProperties": false
+                      }
+                    },
                     "agents": {
                       "type": "array",
                       "items": {
@@ -6977,6 +7196,7 @@
                     "totals",
                     "series",
                     "models",
+                    "kinds",
                     "agents",
                     "workflows"
                   ],
