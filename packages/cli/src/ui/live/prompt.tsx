@@ -115,7 +115,7 @@ function TextPrompt({
   return (
     <box flexDirection="column" paddingLeft={2}>
       <text>
-        <span fg={colors.blue}>{"? "}</span>
+        <span fg={colors.blue}>{`${glyph.prompt} `}</span>
         <span fg={colors.text} attributes={BOLD}>
           {options.label}
         </span>
@@ -170,7 +170,7 @@ function SelectPrompt<T>({
   return (
     <box flexDirection="column" paddingLeft={2}>
       <text>
-        <span fg={colors.blue}>{"? "}</span>
+        <span fg={colors.blue}>{`${glyph.prompt} `}</span>
         <span fg={colors.text} attributes={BOLD}>
           {options.label}
         </span>

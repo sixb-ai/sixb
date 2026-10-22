@@ -34,8 +34,11 @@ export function indent(text: string, prefix = GUTTER): string {
  */
 export function contentWidth(): number {
   if (!process.stdout.isTTY) return Number.MAX_SAFE_INTEGER
-  return Math.max(40, Math.min(process.stdout.columns ?? 80, 120) - GUTTER.length * 2)
+  return Math.max(40, Math.min(process.stdout.columns ?? 80, MAX_COLUMNS) - GUTTER.length * 2)
 }
+
+/** Past this, a wide terminal only spreads a screen out: the eye loses the end of the line. */
+export const MAX_COLUMNS = 104
 
 export function visibleWidth(text: string): number {
   return Bun.stringWidth(text)
@@ -78,14 +81,24 @@ export function paragraph(
   return wrap(text, width).map(style).join("\n")
 }
 
+let commandPath = ""
+
+/** Names the command that is running, for screens that open with it. Set once, at startup. */
+export function setCommandPath(path: readonly string[]): void {
+  commandPath = path.join(" ")
+}
+
 /**
- * The line that opens a screen: the mark, then what ran, then where.
+ * The line that opens every screen: the mark, then what ran, then where, then how it stands.
+ * Without a command, the one that is running.
  *
  *   ▰ sixb check  northline
+ *   ▰ sixb worker-group  northline  ● running
  */
-export function header(command: string, context?: string): string {
-  const title = command ? `${tone.strong("sixb")} ${command}` : tone.strong("sixb")
-  return `${tone.blue(glyph.mark)} ${title}${context ? `  ${tone.muted(context)}` : ""}`
+export function header(command?: string, context?: string, state?: string): string {
+  const name = command ?? commandPath
+  const title = name ? `${tone.strong("sixb")} ${name}` : tone.strong("sixb")
+  return `${tone.blue(glyph.mark)} ${title}${context ? `  ${tone.muted(context)}` : ""}${state ? `  ${state}` : ""}`
 }
 
 export type Status = "ok" | "warn" | "fail" | "live" | "idle" | "pending"
@@ -107,11 +120,16 @@ export function statusGlyph(status: Status): string {
   }
 }
 
-/** A result's headline: a status mark, a sentence, and a quieter aside. */
-export function headline(status: Status, text: string, detail?: string): string {
+/** A result's headline: a status mark, a sentence, a quieter aside, and where it landed. */
+export function headline(status: Status, text: string, detail?: string, target?: string): string {
   const styled =
     status === "fail" ? paint(text, { color: palette.red, bold: true }) : tone.strong(text)
-  return `${statusGlyph(status)} ${styled}${detail ? tone.muted(` ${glyph.dot} ${detail}`) : ""}`
+  return `${statusGlyph(status)} ${styled}${detail ? tone.muted(` ${glyph.dot} ${detail}`) : ""}${target ? tone.faint(`  ${glyph.arrow} ${target}`) : ""}`
+}
+
+/** What to do about a problem, in prose: led by an arrow, never colored like a command. */
+export function remedy(text: string): string {
+  return `${tone.faint(glyph.arrow)} ${text}`
 }
 
 export interface Row {
@@ -157,7 +175,9 @@ export function rows(
           )
       const noteStyle = item.noteStyle ?? tone.muted
       const noteLines = (item.notes ?? []).flatMap((note) =>
-        wrap(note, valueWidth).map((line) => noteStyle(line))
+        wrap(note, valueWidth - 2).map((line, index) =>
+          item.noteStyle === remedy ? (index === 0 ? remedy(line) : `  ${line}`) : noteStyle(line)
+        )
       )
       const [first = "", ...rest] = [...valueLines, ...noteLines]
       return [`${mark}${label}${first}`, ...rest.map((line) => `${hanging}${line}`)].join("\n")
@@ -165,9 +185,9 @@ export function rows(
     .join("\n")
 }
 
-/** A small heading over a group of lines. */
+/** A quiet heading over a group of lines: the content carries the weight, not the label. */
 export function section(title: string, body: string): string {
-  return `${tone.strong(title)}\n${body}`
+  return `${tone.muted(title)}\n${body}`
 }
 
 /** Columns sized to their widest cell, the header in quiet type, no rules. */
@@ -184,14 +204,9 @@ export function table(headers: readonly string[], cells: readonly (readonly stri
       )
       .join("  ")
       .trimEnd()
-  // The first named column is what each row is; a leading unnamed one holds a mark.
-  const named = Math.max(
-    0,
-    headers.findIndex((header) => header !== "")
-  )
   return [
     line(headers, (text) => tone.faint(text)),
-    ...cells.map((row) => line(row, (text, index) => (index === named ? tone.strong(text) : text))),
+    ...cells.map((row) => line(row, (text) => text)),
   ].join("\n")
 }
 

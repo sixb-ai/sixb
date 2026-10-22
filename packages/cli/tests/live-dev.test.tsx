@@ -29,18 +29,17 @@ afterEach(() => {
   setup = null
 })
 
-async function renderFooter(state: DevState) {
+async function renderFooter(state: DevState, height = 40) {
   const calls: string[] = []
   const store = { subscribe: () => () => {}, get: () => state }
   setup = await testRender(
     <DevFooter
       store={store}
       colors={colors}
-      entry="sixb.config.ts"
       projectName="northline"
       controls={{ restart: () => calls.push("restart"), quit: () => calls.push("quit") }}
     />,
-    { width: 100, height: 10 }
+    { width: 100, height }
   )
   // The footer renders on its own clock, as it does in a terminal; React's act() checks do not
   // apply past the first mount.
@@ -58,9 +57,8 @@ describe("sixb dev footer", () => {
       readySince: Date.now(),
     })
 
-    expect(frame).toContain("sixb dev  northline")
-    expect(frame).toContain("● ready")
-    expect(frame).toContain("2 restarts")
+    expect(frame).toContain("▰ sixb dev · northline")
+    expect(frame).toContain("● ready · up 0s · 2 restarts ──")
     expect(frame).toContain("app      http://localhost:3000")
     expect(frame).toContain("docs /docs")
     expect(frame).toContain("agent 8 · sync 1")
@@ -86,6 +84,19 @@ describe("sixb dev footer", () => {
     expect(frame).toContain("Fix the link.")
     expect(frame).not.toContain("open app")
     expect(frame).toContain("r restart")
+  })
+
+  test("keeps to its title and one line in a short terminal", async () => {
+    const { frame } = await renderFooter(
+      { phase: { kind: "ready" }, view, restarts: 0, readySince: Date.now() },
+      20
+    )
+    const lines = frame.split("\n").filter((line) => line.trim() !== "")
+
+    expect(lines).toHaveLength(2)
+    expect(lines[1]).toContain("app http://localhost:3000")
+    expect(lines[1]).toContain("o open")
+    expect(frame).not.toContain("workers")
   })
 
   test("restarts on r and quits on q or ctrl+c", async () => {

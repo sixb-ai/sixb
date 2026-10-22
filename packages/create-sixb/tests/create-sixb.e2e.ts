@@ -119,7 +119,7 @@ describe("create-sixb packed artifacts", () => {
       expect(result.stdout).toContain(
         "Next steps\n  $ cd starter-cli\n  $ bun install\n  $ bun run dev"
       )
-      expect(result.stdout).toContain("Files")
+      expect(result.stdout).toMatch(/starter-cli · \d+ files/)
       expect(result.stderr).toBe("")
       await assertScaffold(join(cwd, "starter-cli"), "starter-cli")
     },

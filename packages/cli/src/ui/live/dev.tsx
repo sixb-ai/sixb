@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/react */
-import { basename, resolve } from "node:path"
+import { basename } from "node:path"
 import type { KeyEvent } from "@opentui/core"
-import { useKeyboard, useTerminalDimensions } from "@opentui/react"
+import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react"
 import { useSyncExternalStore } from "react"
 import {
   DEV_STARTUP_STEPS,
@@ -11,10 +11,10 @@ import {
 } from "../../lib/dev-messages"
 import type { DevControls, DevReporter } from "../../lib/dev-supervisor"
 import { openUrl } from "../../lib/open-url"
-import { wrap } from "../layout"
-import { errorView, relativePath } from "../screens"
+import { MAX_COLUMNS, wrap } from "../layout"
+import { errorView } from "../screens"
 import { glyph, tone } from "../theme"
-import { BOLD, Hints, Rule, Tiles, useSpinner, useTick } from "./components"
+import { BOLD, Hints, Tiles, useSpinner, useTick } from "./components"
 import { type LiveColors, startFooter } from "./session"
 
 type Phase =
@@ -33,8 +33,11 @@ export interface DevState {
   readonly readySince: number | null
 }
 
-/** Rows the footer takes: rule, header, gap, three body rows, warnings, gap, hints. */
-const BASE_ROWS = 8
+/** Rows the footer takes: the titled rule, three body rows, warnings, the keys. */
+const FULL_ROWS = 5
+/** Below this many terminal rows, the footer keeps to its titled rule and one line. */
+const COMPACT_BELOW = 30
+const COMPACT_ROWS = 2
 const MAX_WARNINGS = 2
 
 /**
@@ -53,14 +56,18 @@ export async function startDevFooter(options: {
     readySince: null,
   }
   const listeners = new Set<() => void>()
-  const footer = await startFooter({ rows: BASE_ROWS })
+  const footer = await startFooter({ rows: FULL_ROWS })
   let bootStartedAt = Date.now()
 
   const set = (next: Partial<DevState>) => {
     state = { ...state, ...next }
-    footer.resize(BASE_ROWS + warningRows(state.view))
+    footer.resize(
+      isCompact(footer.renderer.terminalHeight) ? COMPACT_ROWS : FULL_ROWS + warningRows(state.view)
+    )
     for (const listener of listeners) listener()
   }
+  footer.renderer.on("resize", () => set({}))
+  set({})
   const store = {
     subscribe(listener: () => void) {
       listeners.add(listener)
@@ -78,7 +85,6 @@ export async function startDevFooter(options: {
     <DevFooter
       store={store}
       colors={footer.colors}
-      entry={relativePath(resolve(options.entry ?? "sixb.config.ts"))}
       projectName={basename(options.root)}
       controls={options.controls}
     />
@@ -156,6 +162,10 @@ export async function startDevFooter(options: {
   }
 }
 
+function isCompact(terminalRows: number): boolean {
+  return terminalRows < COMPACT_BELOW
+}
+
 function warningRows(view: DevReadyView | null): number {
   if (!view || view.warnings.length === 0) return 0
   return (
@@ -167,21 +177,30 @@ function warningRows(view: DevReadyView | null): number {
 export function DevFooter({
   store,
   colors,
-  entry,
   projectName,
   controls,
 }: {
   readonly store: { subscribe(listener: () => void): () => void; get(): DevState }
   readonly colors: LiveColors
-  readonly entry: string
   readonly projectName: string
   readonly controls: DevControls
 }) {
   const state = useSyncExternalStore(store.subscribe, store.get)
-  const { width } = useTerminalDimensions()
-  const inner = Math.max(20, width - 4)
+  // In split-footer mode the renderer's own size is the footer's; the terminal's is apart.
+  // Reading the dimensions hook re-renders this on a resize.
+  useTerminalDimensions()
+  const renderer = useRenderer()
+  const width = Math.min(renderer.terminalWidth, MAX_COLUMNS)
+  const compact = isCompact(renderer.terminalHeight)
+  const inner = Math.max(20, width - 6)
   const appUrl = state.view?.appUrl ?? null
   const docsUrl = state.view?.apiDocsUrl ?? null
+  const keys: (readonly [string, string])[] = [
+    ...(appUrl ? ([["o", compact ? "open" : "open app"]] as const) : []),
+    ...(docsUrl ? ([["d", compact ? "docs" : "api docs"]] as const) : []),
+    ["r", "restart"],
+    ["q", "quit"],
+  ]
 
   useKeyboard((key: KeyEvent) => {
     if ((key.ctrl && key.name === "c") || key.name === "q") controls.quit()
@@ -190,108 +209,183 @@ export function DevFooter({
     else if (key.name === "d" && docsUrl) void openUrl(docsUrl)
   })
 
+  const title = state.view?.name ?? projectName
+  if (compact) {
+    return (
+      <box flexDirection="column">
+        <TitleRule state={state} colors={colors} title={title} width={width} />
+        <box flexDirection="row" paddingLeft={3} width={width}>
+          <Summary state={state} colors={colors} width={Math.max(10, inner - 34)} />
+          <box flexGrow={1} />
+          <Hints colors={colors} items={keys} />
+        </box>
+      </box>
+    )
+  }
   return (
     <box flexDirection="column">
-      <Rule colors={colors} />
-      <box flexDirection="row" justifyContent="space-between" paddingLeft={2} paddingRight={2}>
-        <text>
-          <span fg={colors.blue}>{glyph.mark}</span>
-          <span fg={colors.text} attributes={BOLD}>
-            {" sixb dev"}
-          </span>
-          <span fg={colors.muted}>{`  ${state.view?.name ?? projectName}`}</span>
-        </text>
-        <Status state={state} colors={colors} />
+      <TitleRule state={state} colors={colors} title={title} width={width} />
+      <box flexDirection="column" paddingLeft={3} height={3}>
+        <Body state={state} colors={colors} width={inner} />
       </box>
-      <box height={1} />
-      <box flexDirection="column" paddingLeft={4} paddingRight={2} height={3}>
-        <Body state={state} colors={colors} entry={entry} width={inner - 2} />
-      </box>
-      <Warnings view={state.view} colors={colors} width={inner - 2} />
-      <box height={1} />
-      <box paddingLeft={2}>
-        <Hints
-          colors={colors}
-          items={[
-            ...(appUrl ? ([["o", "open app"]] as const) : []),
-            ...(docsUrl ? ([["d", "api docs"]] as const) : []),
-            ["r", "restart"],
-            ["q", "quit"],
-          ]}
-        />
+      <Warnings view={state.view} colors={colors} width={inner} />
+      <box paddingLeft={3}>
+        <Hints colors={colors} items={keys} />
       </box>
     </box>
   )
 }
 
-function Status({ state, colors }: { readonly state: DevState; readonly colors: LiveColors }) {
-  const spinner = useSpinner(state.phase.kind === "starting" || state.phase.kind === "stopping")
+interface Part {
+  readonly text: string
+  readonly fg: string
+  readonly bold?: boolean
+}
+
+/**
+ * The footer's top edge, which also names it and says how it stands:
+ *
+ *   ── ▰ sixb dev · northline ──────────────── ● ready · up 4m · 2 restarts ──
+ */
+function TitleRule({
+  state,
+  colors,
+  title,
+  width,
+}: {
+  readonly state: DevState
+  readonly colors: LiveColors
+  readonly title: string
+  readonly width: number
+}) {
+  const busy = state.phase.kind === "starting" || state.phase.kind === "stopping"
+  const spinner = useSpinner(busy)
   useTick(5000)
-  const now = Date.now()
+  const left: Part[] = [
+    { text: glyph.mark, fg: colors.blue },
+    { text: " sixb dev", fg: colors.text, bold: true },
+    { text: ` ${glyph.dot} ${title}`, fg: colors.muted },
+  ]
+  const right = statusParts(state, colors, spinner, Date.now())
+  const length = (parts: readonly Part[]) => parts.reduce((sum, part) => sum + part.text.length, 0)
+  const fill = Math.max(1, width - length(left) - length(right) - 8)
+  return (
+    <text>
+      <span fg={colors.faint}>{"── "}</span>
+      {left.map((part) => (
+        <span key={part.text} fg={part.fg} attributes={part.bold ? BOLD : 0}>
+          {part.text}
+        </span>
+      ))}
+      <span fg={colors.faint}>{` ${"─".repeat(fill)} `}</span>
+      {right.map((part, index) => (
+        <span key={`${index}:${part.text}`} fg={part.fg} attributes={part.bold ? BOLD : 0}>
+          {part.text}
+        </span>
+      ))}
+      <span fg={colors.faint}>{" ──"}</span>
+    </text>
+  )
+}
+
+function statusParts(state: DevState, colors: LiveColors, spinner: string, now: number): Part[] {
   const phase = state.phase
   switch (phase.kind) {
-    case "starting":
-      return (
-        <text>
-          <span fg={phase.restart ? colors.amber : colors.blue}>{spinner}</span>
-          <span fg={colors.text}>{phase.restart ? " restarting" : " starting"}</span>
-        </text>
-      )
-    case "ready": {
-      const up = state.readySince ? `up ${duration(now - state.readySince)}` : ""
-      const restarts =
-        state.restarts > 0
-          ? `  ${glyph.dot}  ${state.restarts} restart${state.restarts === 1 ? "" : "s"}`
-          : ""
-      return (
-        <text>
-          <span fg={colors.blue}>{glyph.live}</span>
-          <span fg={colors.text} attributes={BOLD}>
-            {" ready"}
-          </span>
-          <span fg={colors.muted}>{`  ${up}${restarts}`}</span>
-        </text>
-      )
+    case "starting": {
+      const step = Math.max(0, phase.step)
+      // A restart keeps the last URLs on screen, so its progress lives up here.
+      return phase.restart
+        ? [
+            { text: spinner, fg: colors.amber },
+            { text: " restarting", fg: colors.text },
+            { text: ` ${glyph.dot} ${DEV_STARTUP_STEPS[step] ?? ""}`, fg: colors.muted },
+          ]
+        : [
+            { text: spinner, fg: colors.blue },
+            { text: " starting", fg: colors.text },
+          ]
     }
+    case "ready":
+      return [
+        { text: glyph.live, fg: colors.blue },
+        { text: " ready", fg: colors.text, bold: true },
+        {
+          text: `${state.readySince ? ` ${glyph.dot} up ${duration(now - state.readySince)}` : ""}${
+            state.restarts > 0
+              ? ` ${glyph.dot} ${state.restarts} restart${state.restarts === 1 ? "" : "s"}`
+              : ""
+          }`,
+          fg: colors.muted,
+        },
+      ]
     case "failed":
     case "exited":
-      return (
-        <text>
-          <span fg={colors.red} attributes={BOLD}>
-            {`${glyph.fail} ${phase.kind === "failed" ? "failed" : "stopped"}`}
-          </span>
-          <span fg={colors.muted}>{"  waiting for a source change"}</span>
-        </text>
-      )
+      return [
+        {
+          text: `${glyph.fail} ${phase.kind === "failed" ? "failed" : "stopped"}`,
+          fg: colors.red,
+          bold: true,
+        },
+        { text: ` ${glyph.dot} waiting for a change`, fg: colors.muted },
+      ]
     case "stopping":
-      return (
-        <text>
-          <span fg={colors.muted}>{spinner}</span>
-          <span fg={colors.muted}>{" stopping"}</span>
-        </text>
-      )
+      return [
+        { text: spinner, fg: colors.muted },
+        { text: " stopping", fg: colors.muted },
+      ]
   }
+}
+
+/** The one line a compact footer has for its state. */
+function Summary({
+  state,
+  colors,
+  width,
+}: {
+  readonly state: DevState
+  readonly colors: LiveColors
+  readonly width: number
+}) {
+  const phase = state.phase
+  if (phase.kind === "failed") return <text fg={colors.red}>{fit(phase.error.message, width)}</text>
+  if (phase.kind === "starting" && !state.view) {
+    const step = Math.max(0, phase.step)
+    return (
+      <text>
+        <Tiles colors={colors} filled={step + 1} total={DEV_STARTUP_STEPS.length + 1} />
+        <span fg={colors.text}>{`  ${DEV_STARTUP_STEPS[step] ?? "Starting"}…`}</span>
+      </text>
+    )
+  }
+  return (
+    <text>
+      <span fg={colors.muted}>{"app "}</span>
+      <span fg={phase.kind === "ready" ? colors.blue : colors.muted}>
+        {fit(state.view?.appUrl ?? "not running", width - 4)}
+      </span>
+    </text>
+  )
 }
 
 function Body({
   state,
   colors,
-  entry,
   width,
 }: {
   readonly state: DevState
   readonly colors: LiveColors
-  readonly entry: string
   readonly width: number
 }) {
   const phase = state.phase
   if (phase.kind === "failed") {
-    const [first = "", second] = wrap(phase.error.message, width)
-    const more = wrap(phase.error.message, width).length > 2
+    const lines = wrap(phase.error.message, width)
+    const [first = "", second] = lines
     return (
       <>
         <text fg={colors.red}>{first}</text>
-        <text fg={colors.red}>{second ? (more ? fit(`${second} …`, width) : second) : " "}</text>
+        <text fg={colors.red}>
+          {second ? (lines.length > 2 ? fit(`${second} …`, width) : second) : " "}
+        </text>
         <text fg={colors.muted}>
           {fit(phase.error.remediation ?? "Save a source file to retry, or press r.", width)}
         </text>
@@ -309,8 +403,9 @@ function Body({
       </>
     )
   }
-  if (state.view && phase.kind !== "starting")
+  if (state.view) {
     return <Serving view={state.view} colors={colors} width={width} dim={phase.kind !== "ready"} />
+  }
 
   const step = phase.kind === "starting" ? Math.max(0, phase.step) : 0
   return (
@@ -319,7 +414,7 @@ function Body({
         <Tiles colors={colors} filled={step + 1} total={DEV_STARTUP_STEPS.length + 1} />
         <span fg={colors.text}>{`  ${DEV_STARTUP_STEPS[step] ?? "Starting"}…`}</span>
       </text>
-      <text fg={colors.faint}>{fit(entry, width)}</text>
+      <text> </text>
       <text> </text>
     </>
   )
@@ -378,7 +473,7 @@ function Warnings({
   const shown = view.warnings.slice(0, MAX_WARNINGS)
   const more = view.warnings.length - shown.length
   return (
-    <box flexDirection="column" paddingLeft={4}>
+    <box flexDirection="column" paddingLeft={3}>
       {shown.map((warning) => (
         <text key={warning}>
           <span fg={colors.amber}>{`${glyph.warn} `}</span>
