@@ -235,7 +235,8 @@ describe("model generation routes", () => {
     const size = await image({ size: "4096x4096" })
     expect(size.status).toBe(400)
     expect(await size.response.json()).toEqual({
-      error: "[SixbModels] Image size '4096x4096' is not supported by the selected model.",
+      error:
+        "[SixbModels] Image size '4096x4096' is not supported by the selected model. Use one of: 768x768.",
     })
     const failed = await image({ model: { provider: "test", modelId: "broken" } })
     expect(failed.status).toBe(502)

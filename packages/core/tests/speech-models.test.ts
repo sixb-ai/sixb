@@ -184,8 +184,8 @@ describe("speech generation", () => {
     for (const [input, message] of [
       [{ text: " " }, "nonblank text"],
       [{ text: "x".repeat(41) }, "40-character"],
-      [{ text: "Hi.", voice: "echo" }, "Voice 'echo'"],
-      [{ text: "Hi.", mediaType: "audio/ogg" }, "not supported"],
+      [{ text: "Hi.", voice: "echo" }, "Use one of: alloy, nova."],
+      [{ text: "Hi.", mediaType: "audio/ogg" }, "Use one of: audio/mpeg, audio/wav."],
       [{ text: "Hi.", mediaType: "text/plain" }, "audio media type"],
       [{ text: "Hi.", instructions: "whisper" }, "instructions"],
       [{ text: "Hi.", speed: 0 }, "positive number"],

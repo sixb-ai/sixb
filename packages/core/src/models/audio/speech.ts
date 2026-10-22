@@ -202,7 +202,7 @@ function assertRequestSupport(model: SpeechModel, request: PreparedRequest): voi
     !definition.voices.includes(request.voice)
   ) {
     throw new TypeError(
-      `[SixbModels] Voice '${request.voice}' is not supported by the selected model.`
+      `[SixbModels] Voice '${request.voice}' is not supported by the selected model. Use one of: ${definition.voices.join(", ")}.`
     )
   }
   if (
@@ -211,7 +211,7 @@ function assertRequestSupport(model: SpeechModel, request: PreparedRequest): voi
     !definition.outputMediaTypes.includes(request.mediaType)
   ) {
     throw new TypeError(
-      `[SixbModels] Speech media type '${request.mediaType}' is not supported by the selected model.`
+      `[SixbModels] Speech media type '${request.mediaType}' is not supported by the selected model. Use one of: ${definition.outputMediaTypes.join(", ")}.`
     )
   }
   if (request.instructions !== undefined && definition.instructions === false) {

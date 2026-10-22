@@ -240,7 +240,7 @@ function assertRequestSupport(model: ImageModel, request: PreparedRequest): void
     const value = request[field]
     if (value !== undefined && list && !list.includes(value)) {
       throw new TypeError(
-        `[SixbModels] Image ${field} '${value}' is not supported by the selected model.`
+        `[SixbModels] Image ${field} '${value}' is not supported by the selected model. Use one of: ${list.join(", ")}.`
       )
     }
   }
