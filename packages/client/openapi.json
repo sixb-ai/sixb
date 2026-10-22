@@ -11151,6 +11151,1830 @@
         ]
       }
     },
+    "/api/models/language/generations": {
+      "post": {
+        "summary": "Generate text with a language model",
+        "tags": ["Models"],
+        "operationId": "generateText",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "instructions": {
+                    "type": "string"
+                  },
+                  "maxOutputTokens": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "reasoning": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "provider-default",
+                          "none",
+                          "minimal",
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "budgetTokens": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": ["budgetTokens"],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "required": ["prompt"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "instructions": {
+                    "type": "string"
+                  },
+                  "maxOutputTokens": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "reasoning": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "provider-default",
+                          "none",
+                          "minimal",
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "budgetTokens": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": ["budgetTokens"],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "required": ["prompt"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "instructions": {
+                    "type": "string"
+                  },
+                  "maxOutputTokens": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "reasoning": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "provider-default",
+                          "none",
+                          "minimal",
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "budgetTokens": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": ["budgetTokens"],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "required": ["prompt"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "callId": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["provider", "modelId"],
+                      "additionalProperties": false
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "inputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "uncachedInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheReadInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheWriteInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "textOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "reasoningOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "imageOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "audioOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputImages": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "inputCharacters": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "audioDurationMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "cost": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": ["reported", "rated", "unpriceable"]
+                        },
+                        "money": {
+                          "type": "object",
+                          "properties": {
+                            "currency": {
+                              "type": "string",
+                              "enum": ["USD"]
+                            },
+                            "amountNanos": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["currency", "amountNanos"],
+                          "additionalProperties": false
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["status"],
+                      "additionalProperties": false
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "finishReason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["callId", "model", "usage", "cost", "text", "finishReason"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["ai.usage_limit_exceeded", "ai.usage_limit_unavailable"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    },
+                    "details": {
+                      "description": "Any JSON-compatible value.",
+                      "nullable": true,
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Response for status 502",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/image/generations": {
+      "post": {
+        "summary": "Generate images with an image model",
+        "tags": ["Models"],
+        "operationId": "generateImages",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "n": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "size": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "aspectRatio": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "quality": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "style": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "seed": {
+                    "type": "integer"
+                  },
+                  "images": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "blobId": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "sizeBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "mediaType": {
+                          "type": "string"
+                        },
+                        "logicalPath": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["blobId", "digest", "sizeBytes"],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": ["prompt"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "n": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "size": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "aspectRatio": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "quality": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "style": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "seed": {
+                    "type": "integer"
+                  },
+                  "images": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "blobId": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "sizeBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "mediaType": {
+                          "type": "string"
+                        },
+                        "logicalPath": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["blobId", "digest", "sizeBytes"],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": ["prompt"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "n": {
+                    "type": "integer",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "size": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "aspectRatio": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "quality": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "style": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "seed": {
+                    "type": "integer"
+                  },
+                  "images": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "blobId": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "sizeBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "mediaType": {
+                          "type": "string"
+                        },
+                        "logicalPath": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["blobId", "digest", "sizeBytes"],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": ["prompt"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "callId": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["provider", "modelId"],
+                      "additionalProperties": false
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "inputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "uncachedInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheReadInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheWriteInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "textOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "reasoningOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "imageOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "audioOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputImages": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "inputCharacters": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "audioDurationMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "cost": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": ["reported", "rated", "unpriceable"]
+                        },
+                        "money": {
+                          "type": "object",
+                          "properties": {
+                            "currency": {
+                              "type": "string",
+                              "enum": ["USD"]
+                            },
+                            "amountNanos": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["currency", "amountNanos"],
+                          "additionalProperties": false
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["status"],
+                      "additionalProperties": false
+                    },
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "blobId": {
+                            "type": "string"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          },
+                          "sizeBytes": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "fileName": {
+                            "type": "string"
+                          },
+                          "mediaType": {
+                            "type": "string"
+                          },
+                          "logicalPath": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["blobId", "digest", "sizeBytes"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["callId", "model", "usage", "cost", "files", "warnings"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["ai.usage_limit_exceeded", "ai.usage_limit_unavailable"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    },
+                    "details": {
+                      "description": "Any JSON-compatible value.",
+                      "nullable": true,
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Response for status 502",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/audio/speech": {
+      "post": {
+        "summary": "Generate speech with a speech model",
+        "tags": ["Models"],
+        "operationId": "generateSpeech",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "voice": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "instructions": {
+                    "type": "string"
+                  },
+                  "mediaType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "speed": {
+                    "type": "number",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "language": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "voice": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "instructions": {
+                    "type": "string"
+                  },
+                  "mediaType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "speed": {
+                    "type": "number",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "language": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "voice": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "instructions": {
+                    "type": "string"
+                  },
+                  "mediaType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "speed": {
+                    "type": "number",
+                    "exclusiveMinimum": true,
+                    "minimum": 0
+                  },
+                  "language": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["text"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "callId": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["provider", "modelId"],
+                      "additionalProperties": false
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "inputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "uncachedInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheReadInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheWriteInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "textOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "reasoningOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "imageOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "audioOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputImages": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "inputCharacters": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "audioDurationMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "cost": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": ["reported", "rated", "unpriceable"]
+                        },
+                        "money": {
+                          "type": "object",
+                          "properties": {
+                            "currency": {
+                              "type": "string",
+                              "enum": ["USD"]
+                            },
+                            "amountNanos": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["currency", "amountNanos"],
+                          "additionalProperties": false
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["status"],
+                      "additionalProperties": false
+                    },
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "blobId": {
+                            "type": "string"
+                          },
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          },
+                          "sizeBytes": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "fileName": {
+                            "type": "string"
+                          },
+                          "mediaType": {
+                            "type": "string"
+                          },
+                          "logicalPath": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["blobId", "digest", "sizeBytes"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["callId", "model", "usage", "cost", "files", "warnings"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["ai.usage_limit_exceeded", "ai.usage_limit_unavailable"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    },
+                    "details": {
+                      "description": "Any JSON-compatible value.",
+                      "nullable": true,
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Response for status 502",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/audio/transcriptions": {
+      "post": {
+        "summary": "Transcribe audio with a transcription model",
+        "tags": ["Models"],
+        "operationId": "transcribeAudio",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "audio": {
+                    "type": "object",
+                    "properties": {
+                      "blobId": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      },
+                      "sizeBytes": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "fileName": {
+                        "type": "string"
+                      },
+                      "mediaType": {
+                        "type": "string"
+                      },
+                      "logicalPath": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["blobId", "digest", "sizeBytes"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["audio"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "audio": {
+                    "type": "object",
+                    "properties": {
+                      "blobId": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      },
+                      "sizeBytes": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "fileName": {
+                        "type": "string"
+                      },
+                      "mediaType": {
+                        "type": "string"
+                      },
+                      "logicalPath": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["blobId", "digest", "sizeBytes"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["audio"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "audio": {
+                    "type": "object",
+                    "properties": {
+                      "blobId": {
+                        "type": "string"
+                      },
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      },
+                      "sizeBytes": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "fileName": {
+                        "type": "string"
+                      },
+                      "mediaType": {
+                        "type": "string"
+                      },
+                      "logicalPath": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["blobId", "digest", "sizeBytes"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["audio"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "callId": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["provider", "modelId"],
+                      "additionalProperties": false
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "inputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "uncachedInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheReadInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheWriteInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "textOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "reasoningOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "imageOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "audioOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputImages": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "inputCharacters": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "audioDurationMs": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "cost": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": ["reported", "rated", "unpriceable"]
+                        },
+                        "money": {
+                          "type": "object",
+                          "properties": {
+                            "currency": {
+                              "type": "string",
+                              "enum": ["USD"]
+                            },
+                            "amountNanos": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["currency", "amountNanos"],
+                          "additionalProperties": false
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["status"],
+                      "additionalProperties": false
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["callId", "model", "usage", "cost", "text"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["ai.usage_limit_exceeded", "ai.usage_limit_unavailable"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    },
+                    "details": {
+                      "description": "Any JSON-compatible value.",
+                      "nullable": true,
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Response for status 502",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/project": {
       "get": {
         "summary": "Get current project metadata",
