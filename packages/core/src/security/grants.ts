@@ -37,6 +37,7 @@ import type {
   ApplyGrant,
   EditGrant,
   ManageGrant,
+  ModelsRunGrant,
   ObserveGrant,
   ProjectReference,
   RunGrant,
@@ -258,16 +259,21 @@ function run(input: GrantInput<WorkflowDefinition, "workflow">): RunGrant<"workf
 function run(input: GrantInput<SyncDefinition, "sync">): RunGrant<"sync">
 function run(input: GrantInput<PipelineDefinition, "pipeline">): RunGrant<"pipeline">
 function run(input: AgentReference): AgentRunGrant
+function run(input: ProjectReference["models"]): ModelsRunGrant
 function run(
   input:
     | AgentReference
+    | ProjectReference["models"]
     | GrantInput<
         WorkflowDefinition | SyncDefinition | PipelineDefinition,
         "workflow" | "sync" | "pipeline"
       >
-): RunGrant | AgentRunGrant {
+): RunGrant | AgentRunGrant | ModelsRunGrant {
   if (isAgentReference(input)) {
     return { kind: "grant", capability: "run", target: "agent" }
+  }
+  if (isModelsReference(input)) {
+    return { kind: "grant", capability: "run", target: "models" }
   }
   const { target, selection } = resolveGrant(input, "can.run", RUN_TARGETS)
   return { kind: "grant", capability: "run", target, selection }
@@ -281,6 +287,17 @@ function isAgentReference(input: unknown): input is AgentReference {
     !isBreadthSelector(input) &&
     "kind" in input &&
     input.kind === "agent"
+  )
+}
+
+function isModelsReference(input: unknown): input is ProjectReference["models"] {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    !Array.isArray(input) &&
+    !isBreadthSelector(input) &&
+    "kind" in input &&
+    input.kind === "models"
   )
 }
 

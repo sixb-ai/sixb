@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { assertProviderAccess } from "../../authorization"
+import { assertModelAccess } from "../../authorization"
 import type { BlobStorage } from "../../blob-storage/types"
 import type { ExecutionContext } from "../../execution"
 import type { SixbRuntimeContext } from "../../runtime/types"
@@ -29,7 +29,7 @@ export function createAudioRuntime(
   return {
     speak: createSpeak(runtime, execution, catalog, session, blobs),
     async transcribe(input) {
-      assertProviderAccess(runtime, execution, "models.audio.transcribe")
+      assertModelAccess(runtime, execution, "models.audio.transcribe")
 
       const { file: audio, mediaType } = prepareModelInputFile(input.audio, "audio")
       if (!blobs) {

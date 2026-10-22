@@ -126,6 +126,13 @@ export interface AgentRunGrant {
   readonly target: "agent"
 }
 
+/** Call every model in the project's catalog directly, such as through `sixb models`. */
+export interface ModelsRunGrant {
+  readonly kind: "grant"
+  readonly capability: "run"
+  readonly target: "models"
+}
+
 export type ObserveGrantTarget = "logs" | "aiUsage" | "activity" | "agentThreads"
 
 /**
@@ -140,6 +147,8 @@ export interface ProjectReference {
   readonly activity: { readonly kind: "activity" }
   /** The project's member directory: names, emails, avatars and status. */
   readonly users: { readonly kind: "users" }
+  /** Every model in the project's catalog, for `can.run(project.models)`. */
+  readonly models: { readonly kind: "models" }
 }
 
 /**
@@ -181,6 +190,7 @@ export type GrantDefinition =
   | ShareGrant
   | RunGrant
   | AgentRunGrant
+  | ModelsRunGrant
   | ObserveGrant
   | ManageGrant
 

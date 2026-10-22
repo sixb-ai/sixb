@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { assertProviderAccess } from "../../authorization"
+import { assertModelAccess } from "../../authorization"
 import type { BlobStorage, FileRef } from "../../blob-storage/types"
 import type { ExecutionContext } from "../../execution"
 import type { SixbRuntimeContext } from "../../runtime/types"
@@ -42,7 +42,7 @@ export function createImageRuntime(
 ): ImageModelsRuntime {
   return {
     async generate(input) {
-      assertProviderAccess(runtime, execution, "models.image.generate")
+      assertModelAccess(runtime, execution, "models.image.generate")
 
       const request = prepareRequest(input)
       if (!blobs) {

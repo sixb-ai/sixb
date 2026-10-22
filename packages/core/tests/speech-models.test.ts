@@ -65,7 +65,7 @@ async function setup(model = createSpeechModel()) {
 }
 
 describe("speech generation", () => {
-  // Removal proof: remove assertProviderAccess from audio/speech.ts; the protected call succeeds.
+  // Removal proof: remove assertModelAccess from audio/speech.ts; the protected call succeeds.
   test("denies principal-scoped calls before invoking a provider", async () => {
     let calls = 0
     const { host } = await setup(
@@ -88,7 +88,7 @@ describe("speech generation", () => {
     })
 
     await expect(scoped.models.audio.speak({ text: "Hello there." })).rejects.toThrow(
-      "not covered by scoped authorization"
+      "not allowed to call the project's models"
     )
     expect(calls).toBe(0)
   })

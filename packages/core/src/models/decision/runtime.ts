@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { assertProviderAccess } from "../../authorization"
+import { assertModelAccess } from "../../authorization"
 import type { ExecutionContext } from "../../execution"
 import { cloneJsonValue } from "../../json"
 import type { SixbRuntimeContext } from "../../runtime/types"
@@ -33,7 +33,7 @@ export function createDecisionRuntime(
 ): DecisionModelsRuntime {
   return {
     async evaluate(input) {
-      assertProviderAccess(runtime, execution, "models.decision.evaluate")
+      assertModelAccess(runtime, execution, "models.decision.evaluate")
       assertDecisionContent(input.input, "input")
       assertDecisionQuestions(input.questions)
 
