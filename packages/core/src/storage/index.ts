@@ -257,6 +257,7 @@ export type {
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
   SetArtifactStateInput,
+  ShareArtifactInThreadInput,
 } from "./artifacts"
 export type {
   AccessTokenRecord,

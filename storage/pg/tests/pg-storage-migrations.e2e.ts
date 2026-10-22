@@ -110,6 +110,7 @@ const SHIPPED_MIGRATIONS = [
   "070-artifact-state",
   "071-agent-thread-participants",
   "072-forked-context-checkpoints",
+  "073-artifact-threads",
 ]
 
 const steps = postgresStorageMigrations.steps
@@ -630,6 +631,43 @@ describe("Postgres storage migrations", () => {
       await expect(
         insertRun("superseded-with-error", "superseded", "version-4", failure)
       ).rejects.toThrow("projection_runs_superseded_check")
+    })
+  })
+
+  test("shares each existing artifact in the threads its versions came from", async () => {
+    // Removal proof: drop the INSERT from 073; the artifact is then shared nowhere.
+    const index = indexOf("073-artifact-threads")
+    await withDatabase({ migrateThrough: index }, async ({ storage, sql, migrateThrough }) => {
+      await sql.unsafe(`
+        INSERT INTO artifacts (
+          project_id, id, kind, title, owner_principal_type, owner_principal_id,
+          latest_version, next_version, created_at, updated_at
+        ) VALUES (
+          'project-a', 'art_0000000001', 'document', 'Report', 'user', 'usr-1', 3, 4,
+          '2026-07-01T12:00:00.000Z', '2026-07-01T12:02:00.000Z'
+        )
+        `)
+      for (const [version, thread, run, at] of [
+        [1, "'thread-1'", "'run-1'", "2026-07-01T12:00:00.000Z"],
+        [2, "'thread-1'", "'run-2'", "2026-07-01T12:01:00.000Z"],
+        [3, "NULL", "NULL", "2026-07-01T12:02:00.000Z"],
+      ] as const) {
+        await sql.unsafe(`
+          INSERT INTO artifact_versions (
+            project_id, artifact_id, version, title, entry, files, outline, refs,
+            author_principal_type, author_principal_id, origin_thread_id, origin_run_id, created_at
+          ) VALUES (
+            'project-a', 'art_0000000001', ${version}, 'Report', 'document.md', '[]'::jsonb,
+            '{"kind":"document","headings":[]}'::jsonb, '[]'::jsonb, 'user', 'usr-1',
+            ${thread}, ${run}, '${at}'
+          )
+          `)
+      }
+
+      await migrateThrough(index + 1)
+      await expect(
+        storage.artifacts.listThreadIds({ projectId: "project-a", id: "art_0000000001" })
+      ).resolves.toEqual(["thread-1"])
     })
   })
 

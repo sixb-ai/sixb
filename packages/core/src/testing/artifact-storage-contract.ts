@@ -332,7 +332,7 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
       })
     })
 
-    test("lists by owner, by the thread a version came from, and only within the project", async () => {
+    test("lists by owner, by the thread it is shared in, and only within the project", async () => {
       await withStorage(async (artifacts) => {
         await artifacts.create(createInput({ id: "art_mine" }))
         await artifacts.create(
@@ -361,10 +361,73 @@ export function runArtifactStorageContractSuite<TStorage extends ArtifactStorage
 
         expect(await ids({ projectId, owner })).toEqual(["art_api", "art_mine"])
         expect(await ids({ projectId, owner: otherOwner })).toEqual(["art_theirs"])
-        expect(await ids({ projectId, originThreadId: "thr_1" })).toEqual(["art_mine"])
-        expect(await ids({ projectId, originThreadId: "thr_3" })).toEqual(["art_api"])
-        expect(await ids({ projectId, owner, originThreadId: "thr_2" })).toEqual([])
+        expect(await ids({ projectId, threadId: "thr_1" })).toEqual(["art_mine"])
+        expect(await ids({ projectId, threadId: "thr_3" })).toEqual(["art_api"])
+        expect(await ids({ projectId, owner, threadId: "thr_2" })).toEqual([])
         expect(await ids({ projectId: otherProjectId })).toEqual(["art_elsewhere"])
+      })
+    })
+
+    // Regression proof: drop `sharedIn` from the in-memory publish, or the link insert from a SQL
+    // provider's; the revised artifact is then not shared in thr_2.
+    test("shares an artifact in each thread a version came from, and in the ones named", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput({ id: "art_mine" }))
+        await artifacts.publish(
+          publishInput(
+            { origin: { threadId: "thr_2", runId: "run_2" }, createdAt: at(1) },
+            "art_mine"
+          )
+        )
+        await artifacts.publish(publishInput({ origin: undefined, createdAt: at(2) }, "art_mine"))
+        expect(await artifacts.listThreadIds({ projectId, id: "art_mine" })).toEqual([
+          "thr_1",
+          "thr_2",
+        ])
+
+        await artifacts.shareInThread({ projectId, artifactId: "art_mine", threadId: "thr_fork" })
+        await artifacts.shareInThread({ projectId, artifactId: "art_mine", threadId: "thr_fork" })
+        expect(await artifacts.listThreadIds({ projectId, id: "art_mine" })).toEqual([
+          "thr_1",
+          "thr_2",
+          "thr_fork",
+        ])
+        expect(
+          (await artifacts.list({ projectId, threadId: "thr_fork" })).artifacts.map(
+            (artifact) => artifact.id
+          )
+        ).toEqual(["art_mine"])
+
+        await expect(
+          artifacts.shareInThread({ projectId, artifactId: "art_nope", threadId: "thr_fork" })
+        ).rejects.toMatchObject({ code: "artifact_not_found" })
+        expect(await artifacts.listThreadIds({ projectId, id: "art_nope" })).toEqual([])
+      })
+    })
+
+    test("keeps an artifact's links while it lasts, and drops them with it", async () => {
+      await withStorage(async (artifacts) => {
+        await artifacts.create(createInput({ id: "art_mine" }))
+        await artifacts.publish(
+          publishInput(
+            { origin: { threadId: "thr_2", runId: "run_2" }, createdAt: at(1) },
+            "art_mine"
+          )
+        )
+
+        // A retried turn takes back what it published; the artifact stays shared where it was.
+        await artifacts.deleteVersionsByOrigin({ projectId, runId: "run_2" })
+        expect(await artifacts.listThreadIds({ projectId, id: "art_mine" })).toEqual([
+          "thr_1",
+          "thr_2",
+        ])
+
+        await artifacts.delete({ projectId, id: "art_mine" })
+        expect(await artifacts.listThreadIds({ projectId, id: "art_mine" })).toEqual([])
+        await artifacts.create(
+          createInput({ id: "art_mine", version: versionInput({ origin: undefined }) })
+        )
+        expect(await artifacts.listThreadIds({ projectId, id: "art_mine" })).toEqual([])
       })
     })
 

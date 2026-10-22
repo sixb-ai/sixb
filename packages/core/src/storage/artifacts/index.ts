@@ -31,4 +31,5 @@ export type {
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
   SetArtifactStateInput,
+  ShareArtifactInThreadInput,
 } from "./types"

@@ -282,6 +282,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("068-artifact-state", artifactStateSql),
     sqliteSql("069-agent-thread-participants", agentThreadParticipantsSql),
     sqliteSql("070-forked-context-checkpoints", forkedContextCheckpointsSql),
+    sqliteSql("071-artifact-threads", artifactThreadsSql),
   ],
 })
 
@@ -647,3 +648,4 @@ import agentThreadParticipantsSql from "./migrations/069-agent-thread-participan
 import forkedContextCheckpointsSql from "./migrations/070-forked-context-checkpoints.sql" with {
   type: "text",
 }
+import artifactThreadsSql from "./migrations/071-artifact-threads.sql" with { type: "text" }
