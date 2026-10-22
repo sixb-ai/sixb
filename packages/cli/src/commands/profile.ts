@@ -37,7 +37,6 @@ async function listProfiles(options: ProfileCommandOptions): Promise<void> {
 
   await renderStatic(
     tableResultView({
-      title: "Sixb profiles",
       headers: ["", "Profile", "Project", "API", "Token"],
       rows: profiles.map((profile) => [
         profile.current ? tone.blue(glyph.live) : " ",

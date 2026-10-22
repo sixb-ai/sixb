@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/react */
 import type { KeyEvent, PasteEvent } from "@opentui/core"
 import { useKeyboard, usePaste } from "@opentui/react"
-import { useRef, useState } from "react"
+import { type ReactNode, useRef, useState } from "react"
 import { glyph, tone } from "../theme"
 import { BOLD, Hints } from "./components"
 import { type LiveColors, startFooter } from "./session"
@@ -27,9 +27,11 @@ export async function promptText(options: {
   /** A message for an answer that will not do; `null` when it will. */
   readonly validate?: (value: string) => string | null
 }): Promise<string> {
-  return ask<string>(4, options.command, (colors, resolve, reject) => (
+  const value = await ask<string>(4, options.command, (colors, resolve, reject) => (
     <TextPrompt options={options} colors={colors} onSubmit={resolve} onCancel={reject} />
-  )).then((value) => answered(options.label, value))
+  ))
+  answered(options.label, value)
+  return value
 }
 
 export interface Choice<T> {
@@ -56,7 +58,7 @@ export async function promptSelect<T>(options: {
 async function ask<T>(
   rows: number,
   command: string,
-  build: (colors: LiveColors, resolve: (value: T) => void, reject: () => void) => React.ReactNode
+  build: (colors: LiveColors, resolve: (value: T) => void, reject: () => void) => ReactNode
 ): Promise<T> {
   const footer = await startFooter({ rows: rows + 1 })
   footer.print(`\n  ${tone.blue(glyph.mark)} ${tone.strong(`sixb ${command}`)}\n`)
@@ -69,9 +71,9 @@ async function ask<T>(
   }
 }
 
-function answered<T extends string>(label: string, value: T): T {
+/** The answer, left in the scrollback the way it was asked. */
+function answered(label: string, value: string): void {
   process.stdout.write(`  ${tone.ok(glyph.ok)} ${tone.muted(label)}  ${value}\n`)
-  return value
 }
 
 function TextPrompt({

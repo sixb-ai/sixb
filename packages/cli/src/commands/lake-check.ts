@@ -29,7 +29,7 @@ export async function runLakeCheck(options: LakeCheckOptions = {}) {
       ])
     })
 
-    await renderStatic(lakeCheckView({ projectId: sixb.id, status: "ok", warnings }))
+    await renderStatic(lakeCheckView({ projectId: sixb.id, warnings }))
   } finally {
     await stopSixbProviders(sixb)
   }

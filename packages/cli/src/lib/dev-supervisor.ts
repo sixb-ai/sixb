@@ -93,11 +93,7 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
     },
   }
   const reporter: DevReporter = canRunLive()
-    ? await (await import("../ui/live/dev")).startDevFooter({
-        root,
-        entry: options.entry,
-        controls,
-      })
+    ? await (await import("../ui/live/dev")).startDevFooter({ root, controls })
     : plainDevReporter(root)
   function terminate(current: NonNullable<typeof child>, signal: NodeJS.Signals) {
     try {
