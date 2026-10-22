@@ -11,7 +11,7 @@ import {
   parseFrameEvent,
 } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   type ReactNode,
   type Ref,
@@ -105,22 +105,11 @@ export function ArtifactFrame({
   const artifactId = useRef(version.artifactId)
   artifactId.current = version.artifactId
 
-  const frame = useQuery({
-    queryKey: ["artifact-frame", version.artifactId, version.version],
-    queryFn: async () => {
-      const { data } = await createArtifactFrame({
-        path: { artifactId: version.artifactId, version: String(version.version) },
-        throwOnError: true,
-      })
-      return data
-    },
-    staleTime: FRAME_REUSE_MS,
-    gcTime: FRAME_REUSE_MS,
-    retry: false,
-  })
+  const frame = useQuery(frameLink(version))
 
-  // Each frame keeps the link it first loaded: every frame of a version shares the query, and a
-  // link minted for a later mount would otherwise load every mounted frame again, at its start.
+  // Each frame keeps the link it loaded until it loads again: every frame of a version shares the
+  // query, and a link minted for a later mount would otherwise load every mounted frame again, at
+  // its start.
   const identity = `${version.artifactId}@${version.version}`
   const [kept, setKept] = useState<{ readonly identity: string; readonly path: string } | null>(
     null
@@ -130,6 +119,8 @@ export function ArtifactFrame({
   const source = path ? `${frameUrl(path, entry)}${frameStartHash(start ?? {})}` : undefined
   const sourceRef = useRef(source)
   sourceRef.current = source
+  const pathRef = useRef(path)
+  pathRef.current = path
 
   const send = useCallback<ArtifactFrameHandle["send"]>((method, params) => {
     const target = iframe.current?.contentWindow
@@ -217,13 +208,25 @@ export function ArtifactFrame({
     [sendTheme, queries]
   )
 
+  // A frame that loads again does it on a link that still works: the one it kept may have
+  // expired while it was open. A newer link is a new source, and the same one reloads in place.
+  const reload = useCallback(async () => {
+    const link = await queries.fetchQuery(frameLink(version))
+
+    if (link.path === pathRef.current) return send("reload", {})
+
+    setKept({ identity: `${version.artifactId}@${version.version}`, path: link.path })
+  }, [queries, send, version])
+
   // A page whose data was reset starts over, wherever it is open.
   useEffect(
     () =>
       onPageStateReset((reset) => {
-        if (reset === artifactId.current) send("reload", {}).catch(() => {})
+        if (reset !== artifactId.current) return
+
+        reload().catch(() => send("reload", {}).catch(() => {}))
       }),
-    [send]
+    [reload, send]
   )
 
   // A ready frame has the theme as it was then. The app's mode changes the class on <html>, and an
@@ -290,6 +293,23 @@ export function ArtifactFrame({
       ) : null}
     </div>
   )
+}
+
+/** A version's frame link, shared by its frames and reused while it has most of its hour left. */
+function frameLink(version: ArtifactVersion) {
+  return queryOptions({
+    queryKey: ["artifact-frame", version.artifactId, version.version],
+    queryFn: async () => {
+      const { data } = await createArtifactFrame({
+        path: { artifactId: version.artifactId, version: String(version.version) },
+        throwOnError: true,
+      })
+      return data
+    },
+    staleTime: FRAME_REUSE_MS,
+    gcTime: FRAME_REUSE_MS,
+    retry: false,
+  })
 }
 
 /** The frame's entry on the API, which may be another origin than the app's. */
