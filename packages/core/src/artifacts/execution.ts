@@ -1,4 +1,6 @@
-import { type Principal, principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
+import { createAgentThreadAccessRule } from "../agents/thread-access"
+import { type Principal, SYSTEM_PRINCIPAL } from "../auth"
+import { isRuntimeAllowed } from "../authorization"
 import type { BlobStorage } from "../blob-storage/types"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -11,6 +13,7 @@ import type {
   ListArtifactsResult,
   ListArtifactVersionsResult,
 } from "../storage/artifacts/types"
+import { type ArtifactAccess, type ArtifactAccessRule, createArtifactAccessRule } from "./access"
 import { ArtifactRequestError } from "./errors"
 import type { ArtifactKind } from "./kinds"
 import { ARTIFACT_STATE_LIMITS } from "./limits"
@@ -33,7 +36,10 @@ export interface PublishArtifactRuntimeInput extends ArtifactContentInput {
 }
 
 export interface ListArtifactsRuntimeInput {
-  /** Only artifacts with a version the Agent published in this thread. */
+  /**
+   * Only the artifacts a conversation shares: every one of them, whoever owns it, for whoever reads
+   * the conversation; otherwise the caller's own among them.
+   */
   readonly threadId?: string
   /** Only artifacts of this kind. */
   readonly kind?: ArtifactKind
@@ -42,30 +48,39 @@ export interface ListArtifactsRuntimeInput {
 }
 
 /**
- * Artifacts the caller owns: create one, publish its next version, read it back. A user or service
- * account reaches only its own artifacts; system code reaches every artifact in the project. What
- * the Agent published in other users' conversations is read on `sixb.agent.observed.artifacts`.
+ * The artifacts the caller reaches: its own, and those shared in a conversation it reads, as
+ * {@link ArtifactAccess} says. System code reaches every artifact in the project, and an access
+ * token only its own.
  */
 export interface ArtifactsRuntime {
   /** Creates an artifact owned by the caller, with its first version. */
   create(input: ArtifactContentInput): Promise<PublishedArtifact>
-  /** Publishes the next version. The kind must be the artifact's. */
+  /**
+   * Publishes the next version, authored by the caller; the artifact keeps its owner. The kind must
+   * be the artifact's. Throws `not_shared` or `read_only` when the caller may not update it.
+   */
   publish(artifactId: string, input: PublishArtifactRuntimeInput): Promise<PublishedArtifact>
+  /** What the caller may do with the artifact; `null` when there is no such artifact. */
+  access(artifactId: string): Promise<ArtifactAccess | null>
+  /** `null` when the caller cannot read it. */
   get(artifactId: string): Promise<ArtifactRecord | null>
   /** Most recently updated first. */
   list(input?: ListArtifactsRuntimeInput): Promise<ListArtifactsResult>
   getVersion(artifactId: string, version: number | "latest"): Promise<ArtifactVersionRecord | null>
-  /** Newest first; `null` when the artifact is not the caller's. */
+  /** Newest first; `null` when the caller cannot read the artifact. */
   listVersions(
     artifactId: string,
     input?: { readonly limit?: number; readonly offset?: number }
   ): Promise<ListArtifactVersionsResult | null>
-  /** Deletes the artifact with every version. `false` when it is not the caller's. */
+  /**
+   * Deletes the artifact with every version, from every conversation that shares it; only its
+   * owner can. `false` when the caller does not own it.
+   */
   delete(artifactId: string): Promise<boolean>
   /**
    * What the artifact keeps for the caller as its reader, as a page keeps it with `sixb.state`:
-   * JSON values by key, across its versions. Each call throws `artifact_not_found` when the
-   * artifact is not the caller's.
+   * JSON values by key, across its versions. Each reader who may update the artifact keeps their
+   * own. Each call throws `artifact_not_found`, `not_shared`, or `read_only` for an observer.
    */
   state(artifactId: string): ArtifactStateRuntime
 }
@@ -105,7 +120,7 @@ export function createArtifactsRuntime(
       : authority.type === "unrestricted"
         ? SYSTEM_PRINCIPAL
         : null
-  const ownerFilter = authority.type === "principal" ? caller : null
+  const threads = createAgentThreadAccessRule(runtime, authority)
 
   const requireStorage = (): ArtifactStorage => {
     const storage = runtime.storage.artifacts
@@ -123,36 +138,74 @@ export function createArtifactsRuntime(
     }
     return caller
   }
-  const visible = (artifact: ArtifactRecord | null): ArtifactRecord | null =>
-    artifact && caller && (!ownerFilter || principalsEqual(ownerFilter, artifact.owner))
-      ? artifact
-      : null
-  const getVisible = async (artifactId: string): Promise<ArtifactRecord | null> =>
-    caller
-      ? visible(await requireStorage().get({ projectId: runtime.projectId, id: artifactId }))
-      : null
+
+  const rule = (): ArtifactAccessRule =>
+    createArtifactAccessRule({
+      storage: requireStorage(),
+      projectId: runtime.projectId,
+      caller: authority.type === "unrestricted" ? "system" : caller,
+      sharing: authority.type === "principal" && authority.ref.credential?.type !== "accessToken",
+      conversation: async (threadId) => {
+        if (await threads.read(threadId)) return "update"
+        return isRuntimeAllowed(runtime, { kind: "agentThreads.observe" }) ? "read" : null
+      },
+    })
+
+  /** The artifact with what the caller may do with it; `null` when there is none. */
+  const reach = async (
+    artifactId: string
+  ): Promise<{ readonly artifact: ArtifactRecord; readonly access: ArtifactAccess } | null> => {
+    const artifact = await requireStorage().get({ projectId: runtime.projectId, id: artifactId })
+    return artifact ? { artifact, access: await rule().accessTo(artifact) } : null
+  }
+  const getReadable = async (artifactId: string): Promise<ArtifactRecord | null> => {
+    const reached = await reach(artifactId)
+    return reached && reached.access !== "none" ? reached.artifact : null
+  }
+  const readable = async (artifact: ArtifactRecord): Promise<boolean> =>
+    (await rule().accessTo(artifact)) !== "none"
+
+  /** The artifact, refused unless the caller may update it. */
+  const requireUpdatable = async (artifactId: string): Promise<ArtifactRecord> => {
+    const reached = await reach(artifactId)
+    if (!reached) throw notFound(artifactId)
+    if (reached.access === "none") throw notShared(artifactId)
+    if (reached.access === "read") throw readOnly(artifactId)
+    return reached.artifact
+  }
 
   return {
     async create(input) {
+      const author = requireCaller()
       return publishArtifact(
         { projectId: runtime.projectId, storage: requireStorage(), blobStorage },
-        { ...input, author: requireCaller() }
+        { ...input, author, readable }
       )
     },
 
     async publish(artifactId, input) {
       const author = requireCaller()
-      if (!(await getVisible(artifactId))) throw notFound(artifactId)
+      await requireUpdatable(artifactId)
       return publishArtifact(
         { projectId: runtime.projectId, storage: requireStorage(), blobStorage },
-        { ...input, artifactId, author }
+        { ...input, artifactId, author, readable }
       )
     },
 
-    get: getVisible,
+    async access(artifactId) {
+      return (await reach(artifactId))?.access ?? null
+    },
+
+    get: getReadable,
 
     async list(input = {}) {
       if (!caller) return { artifacts: [], hasMore: false, total: 0 }
+
+      // Whoever reads a conversation reads every artifact it shares; anyone else, their own in it.
+      const everyShared =
+        input.threadId !== undefined && (await rule().conversation(input.threadId)) !== null
+      const ownerFilter = authority.type === "principal" && !everyShared ? caller : null
+
       return requireStorage().list({
         projectId: runtime.projectId,
         ...(ownerFilter ? { owner: ownerFilter } : {}),
@@ -164,7 +217,7 @@ export function createArtifactsRuntime(
     },
 
     async getVersion(artifactId, version) {
-      const artifact = await getVisible(artifactId)
+      const artifact = await getReadable(artifactId)
       if (!artifact) return null
       return requireStorage().getVersion({
         projectId: runtime.projectId,
@@ -174,20 +227,20 @@ export function createArtifactsRuntime(
     },
 
     async listVersions(artifactId, input = {}) {
-      if (!(await getVisible(artifactId))) return null
+      if (!(await getReadable(artifactId))) return null
       return requireStorage().listVersions({ projectId: runtime.projectId, artifactId, ...input })
     },
 
     async delete(artifactId) {
-      if (!(await getVisible(artifactId))) return false
+      if ((await reach(artifactId))?.access !== "owner") return false
       return requireStorage().delete({ projectId: runtime.projectId, id: artifactId })
     },
 
     state(artifactId) {
-      // The reader is the caller; the artifact must be one they can open.
+      // The reader is the caller; an observer reads the page but keeps nothing in it.
       const scope = async () => {
         const principal = requireCaller()
-        if (!(await getVisible(artifactId))) throw notFound(artifactId)
+        await requireUpdatable(artifactId)
         return { projectId: runtime.projectId, artifactId, principal }
       }
       return {
@@ -271,5 +324,19 @@ function notFound(artifactId: string): ArtifactRequestError {
   return new ArtifactRequestError(
     "artifact_not_found",
     `[Sixb] Artifact '${artifactId}' was not found.`
+  )
+}
+
+function notShared(artifactId: string): ArtifactRequestError {
+  return new ArtifactRequestError(
+    "not_shared",
+    `[Sixb] Artifact '${artifactId}' is not shared in a conversation you read.`
+  )
+}
+
+function readOnly(artifactId: string): ArtifactRequestError {
+  return new ArtifactRequestError(
+    "read_only",
+    `[Sixb] You read artifact '${artifactId}' as an observer: you cannot change it or keep page data in it.`
   )
 }

@@ -1,7 +1,3 @@
-import {
-  createObservedAgentArtifactsRuntime,
-  type ObservedAgentArtifactsRuntime,
-} from "../artifacts/observed"
 import { principalsEqual, type UserPrincipal } from "../auth"
 import { assertAuthorized, isRuntimeAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
@@ -120,8 +116,6 @@ export interface ObservedAgentThreadsRuntime {
     threadId: string,
     input?: Omit<ListAgentRunsInput, "projectId" | "threadId">
   ): Promise<AgentRunListResult | null>
-  /** What the Agent published in conversations, whoever owns it. `sixb.artifacts` stays the caller's. */
-  readonly artifacts: ObservedAgentArtifactsRuntime
 }
 
 export interface AgentRunsRuntime {
@@ -430,8 +424,6 @@ function createObservedAgentThreadsRuntime(
       }
       return listConversationRuns(runtime, threadId, input)
     },
-
-    artifacts: createObservedAgentArtifactsRuntime(runtime),
   }
 }
 

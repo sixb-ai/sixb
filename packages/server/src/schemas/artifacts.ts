@@ -139,6 +139,11 @@ export const ArtifactListResponseSchema = z.object({
 export const ArtifactResponseSchema = z.object({
   artifact: ArtifactSchema,
   versions: z.array(ArtifactVersionSummarySchema).describe("Newest first"),
+  access: z
+    .enum(["owner", "update", "read"])
+    .describe(
+      "What the caller may do with it: everything as its owner, publish and keep page data as a participant of a conversation that shares it, or only read as an observer of one"
+    ),
 })
 
 export const PublishArtifactBodySchema = z
@@ -220,7 +225,7 @@ export const ArtifactErrorResponseSchema = ErrorResponseSchema.extend({
     .string()
     .optional()
     .describe(
-      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, or storage_unavailable."
+      "Stable machine-readable failure code: artifact_not_found, artifact_kind_mismatch, artifact_moved, invalid_artifact, invalid_state, state_full, not_allowed, not_shared (it exists but no conversation you read shares it), read_only (you observe the conversation that shares it), or storage_unavailable."
     ),
   latest: z
     .object({ version: z.number().int(), author: PrincipalSchema })

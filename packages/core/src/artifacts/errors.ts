@@ -8,6 +8,8 @@ export type ArtifactRequestErrorCode =
   | "invalid_state"
   | "state_full"
   | "not_allowed"
+  | "not_shared"
+  | "read_only"
   | "storage_unavailable"
 
 /**

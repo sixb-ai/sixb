@@ -277,7 +277,7 @@ describe("a deck's frame", () => {
     const fixture = await deck()
     const { app, storage, alice, published, frame } = fixture
     const bob = await session(storage, "bob")
-    expect((await mint(fixture, bob, published.artifact.id)).status).toBe(404)
+    expect((await mint(fixture, bob, published.artifact.id)).status).toBe(403)
 
     const artifacts = artifactStorage(storage)
     const version = await artifacts.getVersion({

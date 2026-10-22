@@ -233,8 +233,9 @@ describe("artifact ownership", () => {
     expect((await as("bob").artifacts.list()).total).toBe(0)
     await expectRequestError(
       as("bob").artifacts.publish(artifact.id, { kind: "document", title: "Mine now", files }),
-      "artifact_not_found"
+      "not_shared"
     )
+    expect(await as("bob").artifacts.access(artifact.id)).toBe("none")
     expect(await as("bob").artifacts.delete(artifact.id)).toBe(false)
     expect((await createTestSixb(host).artifacts.get(artifact.id))?.id).toBe(artifact.id)
 

@@ -22,7 +22,12 @@ import {
   invalidArtifact,
   readArtifactText,
 } from "./files"
-import { brokenDependents, type FoundReference, resolveReferences } from "./references"
+import {
+  brokenDependents,
+  type FoundReference,
+  ownArtifacts,
+  resolveReferences,
+} from "./references"
 import { validateCanvas } from "./validate/canvas"
 import { validateDocument } from "./validate/document"
 import { validateFileArtifact } from "./validate/file"
@@ -42,8 +47,15 @@ export interface PublishArtifactInput {
   readonly kind: ArtifactKind
   readonly title: string
   readonly files: readonly ArtifactFile[]
-  /** Publishes the version, and owns the artifact when this creates it. */
+  /** Publishes the version, and owns the artifact when this creates it unless `owner` says. */
   readonly author: Principal
+  /** Owns the artifact when this creates it: a conversation's owner, for an Agent turn in it. */
+  readonly owner?: Principal
+  /**
+   * Whether an address in the version may name this artifact: one the author can read. Defaults to
+   * the author's own artifacts.
+   */
+  readonly readable?: (artifact: ArtifactRecord) => Promise<boolean>
   readonly origin?: ArtifactOrigin
   /** The version this one was made from: publishing fails with `artifact_moved` past it. */
   readonly baseVersion?: number
@@ -62,7 +74,9 @@ export interface PreparedArtifactVersion {
   readonly artifactId?: string
   readonly baseVersion?: number
   readonly kind: ArtifactKind
-  readonly author: Principal
+  /** Owns the artifact when this version creates it. */
+  readonly owner: Principal
+  readonly readable: (artifact: ArtifactRecord) => Promise<boolean>
   readonly version: ArtifactVersionInput
   /** What its kind's check found worth fixing in a version it accepts. */
   readonly warnings: readonly ArtifactWarning[]
@@ -94,15 +108,17 @@ export async function prepareArtifactVersion(
   await checkArtifactFiles(context.blobStorage, input.files)
   if (input.kind !== "file") await checkTheme(context.blobStorage, input.files)
   const validated = await validateKind(context.blobStorage, input.kind, input.files)
+  const readable = input.readable ?? ownArtifacts(input.author)
   const references = await resolveReferences(
-    referenceContext(context, input),
+    referenceContext(context, { readable, artifactId: input.artifactId }),
     validated.references ?? []
   )
   return {
     ...(input.artifactId ? { artifactId: input.artifactId } : {}),
     ...(input.baseVersion === undefined ? {} : { baseVersion: input.baseVersion }),
     kind: input.kind,
-    author: input.author,
+    owner: input.owner ?? input.author,
+    readable,
     warnings: validated.warnings ?? [],
     version: {
       title,
@@ -124,7 +140,7 @@ export async function storeArtifactVersion(
 ): Promise<PublishedArtifactVersion> {
   return prepared.artifactId
     ? publishVersion(context, prepared.artifactId, prepared)
-    : createArtifact(context, prepared.kind, prepared.author, prepared.version)
+    : createArtifact(context, prepared.kind, prepared.owner, prepared.version)
 }
 
 /**
@@ -158,12 +174,15 @@ export async function artifactVersionWarnings(
 
 function referenceContext(
   context: PublishArtifactContext,
-  input: { readonly author: Principal; readonly artifactId?: string }
+  input: {
+    readonly readable: (artifact: ArtifactRecord) => Promise<boolean>
+    readonly artifactId?: string
+  }
 ) {
   return {
     projectId: context.projectId,
     storage: context.storage,
-    author: input.author,
+    readable: input.readable,
     ...(input.artifactId ? { artifactId: input.artifactId } : {}),
   }
 }
