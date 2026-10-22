@@ -409,7 +409,8 @@ function ClampedText({
 
   useLayoutEffect(() => {
     const node = element.current
-    if (!node || open) return
+    // Measured again whenever the text changes, since a new text may fit where the old did not.
+    if (!node || open || !text) return
     const measure = () => setClipped(node.scrollHeight > node.clientHeight + 1)
     measure()
     if (typeof ResizeObserver === "undefined") return
