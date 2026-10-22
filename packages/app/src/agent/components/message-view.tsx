@@ -15,6 +15,7 @@ import { type FileSource, messageFileSource } from "../../artifacts/file-source"
 import { useAgentMessages } from "../i18n"
 import type { AgentMessages } from "../i18n/en"
 import { isAwaitingFirstToken, type LiveRunState } from "../live-run"
+import { useMessageAuthors } from "../message-authors"
 import { useObservedThread } from "../observed-thread"
 import { normalizeDurableParts } from "../parts"
 import { useLivePublishes } from "../publish-artifact/use-live-publishes"
@@ -52,15 +53,15 @@ export const MessageView = memo(function MessageView({
 
 function UserMessage({ message }: { message: AgentMessage }) {
   const observed = useObservedThread()
+  const authors = useMessageAuthors()
   const text = textOf(message)
   const files = filePartsOf(message)
   const context = contextPartsOf(message)
   if (!text && files.length === 0 && context.length === 0) return null
 
-  const author = observed?.authorOf(message)
   return (
     <div className="flex flex-col items-end gap-1.5">
-      {author ? <p className="px-1 text-xs text-muted-foreground">{author}</p> : null}
+      <AuthorLine name={authors?.authorOf(message)} />
       <ContextChips entries={context} className="max-w-[min(90%,40rem)] justify-end" />
       {files.length > 0 ? (
         <div className="flex max-w-[min(80%,32rem)] flex-col items-end gap-1.5">
@@ -72,7 +73,7 @@ function UserMessage({ message }: { message: AgentMessage }) {
                 message,
                 part.fileRef,
                 `/parts/${index}/fileRef`,
-                observed !== null
+                observed
               )}
             />
           ))}
@@ -97,7 +98,7 @@ function AssistantMessage({
   continuing: boolean
 }) {
   const messages = useAgentMessages()
-  const observed = useObservedThread() !== null
+  const observed = useObservedThread()
   return (
     <div className="flex flex-col gap-2">
       {message.compaction ? <CompactionResult summary={message.compaction.summary} /> : null}
@@ -143,6 +144,13 @@ function AssistantMessage({
       ))}
     </div>
   )
+}
+
+/** Who wrote a user message, where messages name their author. */
+export function AuthorLine({ name }: { readonly name: string | undefined }) {
+  if (!name) return null
+
+  return <p className="px-1 text-xs text-muted-foreground">{name}</p>
 }
 
 function CompactionResult({ summary }: { summary: string }) {
