@@ -3225,7 +3225,10 @@ export const listModels = <ThrowOnError extends boolean = false>(
   options?: Options<ListModelsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListModelsResponses, unknown, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/models",
     ...options,
   })
