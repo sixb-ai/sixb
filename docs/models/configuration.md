@@ -359,6 +359,29 @@ the binding sets, so you can switch models without changing calls. You can also 
 `instructions` for style, `speed`, and `language`. Voices and formats depend on the model; Sixb
 never converts formats, so a model that cannot produce the requested `mediaType` fails the call.
 
+## Read a call's files later
+
+Every image and speech result carries a `callId`. The files a call produced stay readable through
+it, by whoever can see the run that made the call:
+
+```ts
+const call = await sixb.models.calls.get(callId) // { callId, files, recordedAt } or null
+```
+
+```text
+GET /api/ai/model-calls/:callId                              the call's files
+GET /api/ai/model-calls/:callId/files/content?path=/files/0  one file's bytes
+```
+
+| Where the call ran | Who can read its files |
+| --- | --- |
+| A request to the API | The user or service account that made it |
+| An agent thread, or a subagent of it | Whoever can read the thread |
+| An action or workflow run, or a workflow's agent step | Whoever can view the run |
+
+Anyone else gets `null`, or a 404 from the API. Seeing a call in
+[AI usage](./usage-and-limits.md) shows what it cost, not what it produced.
+
 ## List the catalog
 
 `GET /api/models` and `sixb models list` show every configured model by kind, with its default,

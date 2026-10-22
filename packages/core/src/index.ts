@@ -1231,6 +1231,7 @@ export type {
   RerankingModelResult,
   RerankingResult,
 } from "./models"
+export type { ModelCallFiles, ModelCallsRuntime } from "./models/calls"
 export type {
   InferLanguageModelOutput,
   LanguageModelGenerateInput,

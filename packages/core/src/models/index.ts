@@ -31,6 +31,7 @@ export type {
   TranscriptionModelResult,
   TranscriptionOutput,
 } from "./audio/types"
+export type { ModelCallFiles, ModelCallsRuntime } from "./calls"
 export type {
   EmbeddingModelCatalog,
   EmbeddingModelEntry,

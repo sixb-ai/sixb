@@ -142,6 +142,12 @@ import type {
   GetAiLimitSubjectOptionsData,
   GetAiLimitSubjectOptionsErrors,
   GetAiLimitSubjectOptionsResponses,
+  GetAiModelCallData,
+  GetAiModelCallErrors,
+  GetAiModelCallFileContentData,
+  GetAiModelCallFileContentErrors,
+  GetAiModelCallFileContentResponses,
+  GetAiModelCallResponses,
   GetArtifactData,
   GetArtifactErrors,
   GetArtifactFileContentData,
@@ -259,6 +265,9 @@ import type {
   HeadAgentMessageFileContentData,
   HeadAgentMessageFileContentErrors,
   HeadAgentMessageFileContentResponses,
+  HeadAiModelCallFileContentData,
+  HeadAiModelCallFileContentErrors,
+  HeadAiModelCallFileContentResponses,
   HeadArtifactFileContentData,
   HeadArtifactFileContentErrors,
   HeadArtifactFileContentResponses,
@@ -1238,6 +1247,59 @@ export const listAiModelCallGroups = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/ai/model-call-groups",
+    ...options,
+  })
+
+/**
+ * Get the files a model call produced
+ */
+export const getAiModelCall = <ThrowOnError extends boolean = false>(
+  options: Options<GetAiModelCallData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetAiModelCallResponses, GetAiModelCallErrors, ThrowOnError>({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/ai/model-calls/{callId}",
+    ...options,
+  })
+
+/**
+ * Get model call file content
+ */
+export const getAiModelCallFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<GetAiModelCallFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetAiModelCallFileContentResponses,
+    GetAiModelCallFileContentErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/ai/model-calls/{callId}/files/content",
+    ...options,
+  })
+
+/**
+ * Head model call file content
+ */
+export const headAiModelCallFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<HeadAiModelCallFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).head<
+    HeadAiModelCallFileContentResponses,
+    HeadAiModelCallFileContentErrors,
+    ThrowOnError
+  >({
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/ai/model-calls/{callId}/files/content",
     ...options,
   })
 

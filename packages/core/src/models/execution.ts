@@ -4,6 +4,7 @@ import type { BlobStorage } from "../blob-storage/types"
 import type { ExecutionContext } from "../execution"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { createAudioRuntime } from "./audio/runtime"
+import { createModelCallsRuntime, type ModelCallRunVisibility } from "./calls"
 import type { ModelCatalog } from "./catalog"
 import { createDecisionRuntime } from "./decision/runtime"
 import { ModelProviderError, ModelStreamError, UnsupportedModelFeatureError } from "./errors"
@@ -28,6 +29,7 @@ export function createModelsRuntime(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   catalog: ModelCatalog | undefined,
+  runs: ModelCallRunVisibility,
   blobs?: BlobStorage
 ): ModelsRuntime {
   const session = runtime.modelExecution ?? new ModelExecutionSession(runtime, execution)
@@ -136,6 +138,7 @@ export function createModelsRuntime(
     decision: createDecisionRuntime(runtime, execution, catalog, session),
     audio: createAudioRuntime(runtime, execution, catalog, session, blobs),
     image: createImageRuntime(runtime, execution, catalog, session, blobs),
+    calls: createModelCallsRuntime(runtime, runs),
   }
   registerModelExecutionBinding(models, (input) => {
     session.bind(input)
