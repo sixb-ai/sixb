@@ -16,7 +16,7 @@ class ProcessExit {
 }
 
 /**
- * Runs a CLI command handler in the test process. It collects what the command prints (Ink writes
+ * Runs a CLI command handler in the test process. It collects what the command prints (screens go
  * to `process.stdout`; Bun's `console` does not go through it), turns `process.exit()` into a
  * result instead of the end of the test run, and puts back the environment the command changed
  * (production roles set NODE_ENV) and the process exit code.

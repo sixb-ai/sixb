@@ -2,7 +2,13 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { CliUsageError, parseCliArgs, ROOT_HELP } from "../src/lib/command-line"
+import {
+  type CliHelp,
+  CliUsageError,
+  parseCliArgs,
+  ROOT_HELP,
+  ROOT_HELP_GROUPS,
+} from "../src/lib/command-line"
 import { runLocalInstanceCommand } from "../src/lib/instance-command"
 import { builtAppOutdir, hasBuiltApp, resolveProductionPaths } from "../src/lib/production"
 import { renderHelp } from "../src/ui"
@@ -24,6 +30,12 @@ function runCli(args: readonly string[]) {
   })
 }
 
+function helpFor(path: readonly string[]): CliHelp {
+  const parsed = parseCliArgs([...path, "--help"])
+  if (parsed.kind !== "help") throw new Error(`Expected help for 'sixb ${path.join(" ")}'.`)
+  return parsed.help
+}
+
 function usageError(args: readonly string[]): CliUsageError {
   try {
     parseCliArgs(args)
@@ -35,7 +47,7 @@ function usageError(args: readonly string[]): CliUsageError {
 }
 
 describe("sixb command line", () => {
-  test("lists the production roles and the worker options in help", async () => {
+  test("lists every command in root help, grouped, and leaves options to each command", async () => {
     const help = await runInProcess(() => renderHelp(ROOT_HELP))
     // One line: the help pads each label to a column and wraps long summaries.
     const output = help.output.replace(/\s+/g, " ")
@@ -43,14 +55,20 @@ describe("sixb command line", () => {
     for (const command of ["api", "app", "scheduler", "orchestrator", "rules", "worker <type>"]) {
       expect(output).toContain(command)
     }
-    expect(output).toContain("sixb worker pipeline")
     expect(output).toContain("action-runs")
     expect(output).toContain("workflow-runs")
     expect(output).toContain("sync, agent, pipeline, projection, workflow")
-    expect(output).toContain("--concurrency <value>")
-    expect(output).toContain("--agent-turn-timeout <duration>")
-    expect(output).not.toContain("--type <type>")
-    expect(output).not.toContain("--worker <type>")
+    expect(output).not.toContain("--concurrency <value>")
+    // A command added without a group would land in "More".
+    expect(ROOT_HELP_GROUPS.map((group) => group.title)).not.toContain("More")
+    expect(ROOT_HELP_GROUPS.flatMap((group) => group.items)).toHaveLength(ROOT_HELP.commands.length)
+
+    const worker = await runInProcess(() => renderHelp(helpFor(["worker"])))
+    const workerOutput = worker.output.replace(/\s+/g, " ")
+    expect(workerOutput).toContain("--concurrency <value>")
+    expect(workerOutput).toContain("--agent-turn-timeout <duration>")
+    expect(workerOutput).not.toContain("--type <type>")
+    expect(workerOutput).not.toContain("--worker <type>")
   })
 
   test("serves a command's own help without running it", () => {

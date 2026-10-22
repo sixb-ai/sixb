@@ -713,7 +713,7 @@ export default {
     const result = await deploy({}, () => runDeploy({ dryRun: true, cwd: fixtureProject }))
 
     expect(result.error).toBeUndefined()
-    expect(result.output).toContain("northline · dry run")
+    expect(result.output).toContain("sixb deploy --dry-run  northline")
     expect(result.output).toContain("ssh sixb@203.0.113.10 · sixb.deploy.ts")
     expect(result.output).toContain("sixb api --host 127.0.0.1 --port 3012 --no-migrate")
     expect(result.output).toContain("Nothing was deployed")

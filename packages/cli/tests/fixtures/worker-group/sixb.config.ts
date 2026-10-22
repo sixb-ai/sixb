@@ -91,7 +91,7 @@ class TrackingLakeStorage extends InMemoryLakeStorage {
 
 // Wraps a queue so the first `claim` poll logs which worker type came online.
 // Workers poll their queue immediately on start, so this reveals exactly which
-// workers a `worker-group` invocation booted — without relying on Ink output.
+// workers a `worker-group` invocation booted — without relying on its printed output.
 function claimLoggingQueue<T extends object>(queue: T, workerType: string): T {
   let logged = false
   return new Proxy(queue, {
