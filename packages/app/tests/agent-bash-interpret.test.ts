@@ -5,6 +5,7 @@ import {
   coerceBashOutput,
   commandPreview,
   describeBash,
+  modelMedia,
 } from "../src/agent/bash/interpret"
 
 function output(stdout: string, exitCode = 0) {
@@ -50,6 +51,13 @@ describe("classifyCommand", () => {
       "sixb workflows start renewCustomer": "workflows.start",
       "sixb workflow-runs list": "workflow-runs.list",
       "sixb workflow-runs get run-2": "workflow-runs.get",
+      "sixb models list --kind image": "models.list",
+      "sixb models get bfl/flux-3-image-klein": "models.get",
+      'sixb models text "Status?"': "models.text",
+      'sixb models image "a van" --output out/van.png': "models.image",
+      'sixb models speech "Hello." --output out/hello.mp3': "models.speech",
+      "sixb models transcribe call.m4a": "models.transcribe",
+      "sixb models calls get call_1": "models.calls",
       "sixb api get /api/project": "api.get",
       "sixb api post /api/custom --file body.json": "api.post",
     } as const
@@ -327,5 +335,61 @@ describe("helpers", () => {
     )
     expect(preview).toBe("cat > output.html <<'HTML'\n… 3 more lines")
     expect(preview).not.toContain("large")
+  })
+})
+
+describe("model calls", () => {
+  // Removal proof: drop the models group from CLI_COMMANDS; these read as an unknown Sixb command.
+  test.each([
+    ['sixb models image "a van" --output out/van.png', "Made an image", "Making an image"],
+    ['sixb models image "a van" --n 2 --output out/', "Made 2 images", "Making 2 images"],
+    [
+      'sixb models image "make it blue" --image photos/site.png --output out/blue.png',
+      "Edited an image",
+      "Editing an image",
+    ],
+    [
+      'sixb models speech "Hello." --output out/hello.mp3',
+      "Created a voice clip",
+      "Creating a voice clip",
+    ],
+    ["sixb models transcribe calls/dispatch.m4a", "Transcribed audio", "Transcribing audio"],
+    ['sixb models text "Status?"', "Asked another model", "Asking another model"],
+    ["sixb models list", "Checked the available models", "Checking the available models"],
+  ])("describes `%s` by what it makes", (command, title, runningTitle) => {
+    const description = describeBash(classifyCommand(command), null)
+    expect([description.title, description.runningTitle]).toEqual([title, runningTitle])
+  })
+
+  test("reads what a call takes and makes, not which model made it", () => {
+    const image = modelMedia(
+      classifyCommand(
+        'mkdir -p out && sixb models image "make it blue" --model google/gemini --image photos/site.png --aspect-ratio 16:9 --output out/blue.png'
+      ),
+      output(JSON.stringify({ callId: "call_1", model: "google/gemini", files: ["out/blue.jpg"] }))
+    )
+    expect(image).toEqual({
+      kind: "image",
+      prompt: "make it blue",
+      sources: ["site.png"],
+      count: 1,
+      aspect: 16 / 9,
+      callId: "call_1",
+    })
+    expect(
+      modelMedia(classifyCommand('sixb models image "tall" --size 1024x1536 --output a.png'), null)
+    ).toMatchObject({ aspect: 1024 / 1536 })
+    expect(
+      modelMedia(
+        classifyCommand("sixb models transcribe calls/dispatch.m4a"),
+        output(JSON.stringify({ callId: "call_2", text: "Running late." }))
+      )
+    ).toEqual({
+      kind: "transcript",
+      source: "dispatch.m4a",
+      text: "Running late.",
+      callId: "call_2",
+    })
+    expect(modelMedia(classifyCommand("sixb objects list --type Customer"), null)).toBeNull()
   })
 })

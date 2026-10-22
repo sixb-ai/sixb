@@ -5,7 +5,8 @@ import { memo, useState } from "react"
 import { ReferencingMarkdown } from "../../artifacts/references/references"
 import { latestWorkLabel } from "../activity-label"
 import { ArtifactCards } from "../artifact-card"
-import { BashToolView } from "../bash/bash-tool-view"
+import { BashToolView, generatedMedia } from "../bash/bash-tool-view"
+import { ModelMediaView } from "../bash/model-media-view"
 import { useAgentMessages } from "../i18n"
 import type { NormalizedPart, NormalizedTool } from "../parts"
 import { isPublishTool, turnArtifacts, unpublishedTitles } from "../publish-artifact/interpret"
@@ -141,6 +142,11 @@ function WorkGroup({
         tool.state === "output-available" && coerceWebSearchOutput(tool.output)?.length === 0
     )
 
+  const made = parts.flatMap((part) => {
+    if (part.kind !== "tool" || part.tool.toolName !== "bash") return []
+    const media = generatedMedia(part.tool)
+    return media ? [media] : []
+  })
   const toolCount = parts.reduce((count, part) => count + (part.kind === "tool" ? 1 : 0), 0)
   const hasTools = toolCount > 0
   const liveLabel = latestWorkLabel(parts, messages)
@@ -176,6 +182,17 @@ function WorkGroup({
           })}
         </div>
       </CollapsibleContent>
+      {made.length > 0 ? (
+        <div className="mt-3 flex flex-col gap-5">
+          {made.map(({ media, running }, index) => (
+            <ModelMediaView
+              key={media.callId ?? `making:${index}`}
+              media={media}
+              running={running}
+            />
+          ))}
+        </div>
+      ) : null}
       <WebSources sources={sources} />
       {searchFailed || emptySearch ? (
         <p className="mt-2 px-1 text-xs text-muted-foreground" role="status">
