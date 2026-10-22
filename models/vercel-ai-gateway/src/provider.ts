@@ -33,7 +33,6 @@ import {
   rateModelCall,
   type SpeechCostEstimator,
   type SpeechModel,
-  type TranscriptionCostEstimator,
   type TranscriptionModel,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
@@ -60,8 +59,11 @@ import {
   type VercelGatewaySpeechOptions,
 } from "./speech"
 import { isStrictGatewaySchema } from "./structured-output"
-import { createGatewayTranscription, type VercelGatewayTranscriptionOptions } from "./transcription"
-import { transcriptionDurationEstimator } from "./transcription-pricing"
+import {
+  createGatewayTranscription,
+  type GatewayTranscriptionPricing,
+  type VercelGatewayTranscriptionOptions,
+} from "./transcription"
 
 type ValueSource<T> = T | (() => T)
 
@@ -188,7 +190,7 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
         url,
         fetch: transport.fetch ?? fetch,
         headers: () => gatewayHeaders(transport, "application/json"),
-        estimator: () => catalog.transcriptionEstimator(modelId, snapshot.providerOptions),
+        pricing: () => catalog.transcriptionPricing(modelId, snapshot.providerOptions),
         metadata: (payload, requestId) => {
           const gateway = gatewayMetadata(payload)
 
@@ -494,6 +496,7 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
       ...(entry?.name ? { name: entry.name } : {}),
       ...(entry?.description ? { description: entry.description } : {}),
       estimator,
+      ...(card ? { rateCard: card } : {}),
     }
   }
 
@@ -530,25 +533,41 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
       ...(entry?.name ? { name: entry.name } : {}),
       ...(entry?.description ? { description: entry.description } : {}),
       estimator,
+      ...(card ? { rateCard: card } : {}),
     }
   }
 
-  async transcriptionEstimator(
+  async transcriptionPricing(
     modelId: string,
     providerOptions: JsonObject | undefined
-  ): Promise<TranscriptionCostEstimator> {
-    let dollarsPerSecond: string | undefined
+  ): Promise<GatewayTranscriptionPricing> {
+    let card: ModelRateCard | undefined
     try {
       await this.load()
-      if (hasFixedTokenPricing({ providerOptions })) {
-        dollarsPerSecond = this.transcriptionRates.get(modelId)
+      const rate = this.transcriptionRates.get(modelId)
+      if (rate && hasFixedTokenPricing({ providerOptions })) {
+        card = defineModelRateCard({ currency: "USD", audioInputSeconds: rate })
       }
     } catch {
       console.warn(
         "[SixbVercelGateway] Transcription pricing unavailable; preserving provider-reported costs."
       )
     }
-    return transcriptionDurationEstimator(modelId, dollarsPerSecond)
+    // Content duration gives an estimate, never a bill: the Gateway reports what it charged.
+    return {
+      estimator: {
+        estimate: ({ usage, responseModelId, route }) =>
+          rateModelCall({
+            usage,
+            rateCard:
+              (!responseModelId || responseModelId === modelId) &&
+              (!route?.modelId || route.modelId === modelId)
+                ? card
+                : undefined,
+          }),
+      },
+      ...(card ? { rateCard: card } : {}),
+    }
   }
 
   async decisionResolution(
@@ -593,6 +612,15 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
     tokens: { readonly inputTokens: number; readonly outputTokens: number }
   ) {
     return estimateModelReservation({ ...tokens, rateCard: this.rateCards.get(modelId) })
+  }
+
+  rateCard(modelId: string): ModelRateCard | undefined {
+    const card = this.rateCards.get(modelId)
+    try {
+      return card && defineModelRateCard(card)
+    } catch {
+      return undefined
+    }
   }
 
   estimate(modelId: string, usage: ModelUsage) {
@@ -973,6 +1001,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
   readonly modelId: string
   readonly definition: LanguageModelDefinition
   readonly costEstimator: ModelCostEstimator
+  readonly rateCard?: ModelRateCard
   readonly defaultReasoning?: ModelReasoningLevel
   readonly maxOutputTokens?: number
 
@@ -999,6 +1028,12 @@ class VercelGatewayLanguageModel implements LanguageModel {
           ? { status: "unpriceable", reason: "missing-rate-card" }
           : catalog.estimate(modelId, usage),
     }
+    // Known once the catalog has loaded, and only where the estimator would price the call.
+    const card =
+      metadataResolved && hasFixedTokenPricing(options) && !options.providerTools?.length
+        ? catalog.rateCard(modelId)
+        : undefined
+    if (card) this.rateCard = card
     if (options.request !== undefined) {
       assertJsonObject(options.request, "model request options")
     }

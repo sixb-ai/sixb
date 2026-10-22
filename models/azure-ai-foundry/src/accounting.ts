@@ -43,13 +43,16 @@ export function foundryUsage(
   }
 }
 
+/** An estimator, with the card it prices by when it prices this configuration at all. */
+export type PricedEstimator = ModelCostEstimator & { readonly rateCard?: ModelRateCard }
+
 export function foundryEstimator(
   card: ModelRateCard | undefined,
   request: JsonObject | undefined,
   modelName?: string,
   modelVersion?: string,
   aliases?: readonly string[]
-): ModelCostEstimator {
+): PricedEstimator {
   return tokenEstimator(
     card,
     request,
@@ -69,10 +72,11 @@ export function tokenEstimator(
   modelName?: string,
   modelVersion?: string,
   aliases?: readonly string[]
-): ModelCostEstimator {
+): PricedEstimator {
   const rateCard = card && defineModelRateCard(card)
   const fixed = Object.keys(request ?? {}).every((key) => requestKeys.includes(key))
   return {
+    ...(fixed && rateCard ? { rateCard } : {}),
     estimateReservation: (tokens) =>
       fixed ? estimateModelReservation({ ...tokens, rateCard }) : undefined,
     estimate: ({ usage, responseModelId, route }) => {

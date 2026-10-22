@@ -35,6 +35,9 @@ test("rates consistent Chat reasoning aliases once, including cache hits", () =>
     status: "rated",
     money: { amountNanos: "614000" },
   })
+  // The card shows only where the estimator prices: unknown request options price nothing.
+  expect(foundryChatEstimator(card, undefined).rateCard).toEqual(card)
+  expect(foundryChatEstimator(card, { seed: 7 }).rateCard).toBeUndefined()
   const invalidDetails: JsonObject[] = [
     { reasoning_tokens: 38 },
     { reasoning_tokens: 45 },

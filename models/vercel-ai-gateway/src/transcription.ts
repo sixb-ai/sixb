@@ -1,6 +1,7 @@
 import {
   assertJsonObject,
   type JsonObject,
+  type ModelRateCard,
   type TranscriptionCostEstimator,
   type TranscriptionModel,
   type TranscriptionModelDefinition,
@@ -30,14 +31,20 @@ interface TranscriptionTransport {
   readonly fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>
   headers(): Readonly<Record<string, string>>
   metadata(body: JsonObject, requestId?: string): TranscriptionModelResponseMetadata
-  estimator(): Promise<TranscriptionCostEstimator>
+  pricing(): Promise<GatewayTranscriptionPricing>
+}
+
+/** A resolved model's estimator, and the card it prices with when the price is known. */
+export interface GatewayTranscriptionPricing {
+  readonly estimator: TranscriptionCostEstimator
+  readonly rateCard?: ModelRateCard
 }
 
 export function createGatewayTranscription(
   modelId: string,
   options: VercelGatewayTranscriptionOptions,
   transport: TranscriptionTransport,
-  estimator?: TranscriptionCostEstimator
+  pricing?: GatewayTranscriptionPricing
 ): TranscriptionModel {
   if (typeof modelId !== "string" || !modelId.trim() || modelId.trim() !== modelId) {
     throw new TypeError(
@@ -83,15 +90,15 @@ export function createGatewayTranscription(
       modelId,
       { ...options, providerOptions, mediaTypes },
       transport,
-      await transport.estimator()
+      await transport.pricing()
     )
 
   return Object.freeze({
     providerId: PROVIDER_ID,
     modelId,
     definition,
-    costEstimator: estimator,
-    ...(estimator ? {} : { resolve }),
+    ...(pricing ? { costEstimator: pricing.estimator } : { resolve }),
+    ...(pricing?.rateCard ? { rateCard: pricing.rateCard } : {}),
 
     async transcribe(input: TranscriptionModelRequest) {
       assertTranscriptionInput(input, definition)

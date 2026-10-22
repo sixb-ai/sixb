@@ -2,7 +2,7 @@ import type { FileRef } from "../../blob-storage/types"
 import type { ModelDefinition } from "../definitions"
 import type { ModelProviderIds, ModelRoute, ModelUsage } from "../events"
 import type { ModelCallCost, ModelCostEstimator, ModelMoney, ModelReportedCost } from "../pricing"
-import type { ModelPricingDimensions } from "../rate-card"
+import type { ModelPricingDimensions, ModelRateCard } from "../rate-card"
 
 /** Serializable facts about one image model. Omitted lists mean the provider publishes none. */
 export interface ImageModelDefinition extends ModelDefinition {
@@ -73,6 +73,11 @@ export interface ImageModel {
   readonly modelId: string
   readonly definition: ImageModelDefinition
   readonly costEstimator?: ImageCostEstimator
+  /**
+   * The prices this binding bills by, for people and agents choosing a model. Pricing itself
+   * goes through costEstimator; absent when the price is unknown.
+   */
+  readonly rateCard?: ModelRateCard
   resolve?(): Promise<ImageModel>
   generate(request: ImageModelRequest): Promise<ImageModelResult>
 }

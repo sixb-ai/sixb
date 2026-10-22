@@ -297,6 +297,35 @@ describe("generated-media pricing", () => {
     })
   })
 
+  test("bills transcription per second of input audio, not the audio speech makes", () => {
+    const transcriber = defineModelRateCard({ currency: "USD", audioInputSeconds: "0.0001" })
+    expect(rateModelCall({ usage: { audioDurationMs: 1_250 }, rateCard: transcriber })).toEqual({
+      status: "rated",
+      money: { currency: "USD", amountNanos: "125000" },
+      components: [
+        {
+          meter: "audio.input.milliseconds",
+          quantity: "1250",
+          rateAmountNanosPerMillion: "100000000",
+          chargeAmountNanos: "125000",
+        },
+      ],
+    })
+    expect(rateModelCall({ usage: {}, rateCard: transcriber })).toMatchObject({
+      reason: "missing-usage",
+      missingMeters: ["audio.input.milliseconds"],
+    })
+    // Nothing measures an audio file's length before it is sent.
+    expect(estimateModelReservation({ rateCard: transcriber })).toBeUndefined()
+    // Speech reports how long its audio runs; the characters are the bill.
+    expect(
+      rateModelCall({
+        usage: { inputCharacters: 12, audioDurationMs: 1_160 },
+        rateCard: defineModelRateCard({ currency: "USD", characters: "15" }),
+      })
+    ).toMatchObject({ money: { amountNanos: "180000" } })
+  })
+
   test("never prices a count its card does not cover as free", () => {
     expect(
       rateModelCall({
@@ -354,7 +383,7 @@ describe("generated-media pricing", () => {
 
   test.each([
     { name: "input without output", card: { currency: "USD", input: "1" }, error: "together" },
-    { name: "no prices", card: { currency: "USD" }, error: "tokens, images or characters" },
+    { name: "no prices", card: { currency: "USD" }, error: "tokens, images, characters or audio" },
     {
       name: "cache prices without token prices",
       card: { currency: "USD", images: "0.04", cacheReadInput: "1" },

@@ -10,6 +10,7 @@ import {
   type ImageModelResult,
   isJsonObject,
   type JsonObject,
+  type ModelRateCard,
   type ModelUsage,
 } from "@sixb/core/models"
 import { readGatewayJson } from "./json-response"
@@ -42,6 +43,7 @@ export interface GatewayImageResolution {
   readonly name?: string
   readonly description?: string
   readonly estimator?: ImageCostEstimator
+  readonly rateCard?: ModelRateCard
 }
 
 interface ImageTransport {
@@ -105,6 +107,7 @@ export function createGatewayImage(
     modelId,
     definition,
     ...(resolution?.estimator ? { costEstimator: resolution.estimator } : {}),
+    ...(resolution?.rateCard ? { rateCard: resolution.rateCard } : {}),
     ...(resolution ? {} : { resolve }),
 
     async generate(request: ImageModelRequest): Promise<ImageModelResult> {
