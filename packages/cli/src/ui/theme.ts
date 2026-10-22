@@ -26,6 +26,7 @@ export const glyph = {
   idle: "○",
   dot: "·",
   arrow: "→",
+  prompt: "›",
   restart: "↻",
   rule: "│",
 } as const
@@ -111,8 +112,18 @@ export const tone = {
   ok: (text: string) => paint(text, { color: palette.green }),
   warn: (text: string) => paint(text, { color: palette.amber }),
   fail: (text: string) => paint(text, { color: palette.red }),
-  url: (text: string) => paint(text, { color: palette.blue, underline: true }),
+  url: (text: string) => link(text, paint(text, { color: palette.blue })),
 } as const
+
+/**
+ * Makes `text` open `url` on click (OSC 8). Terminals that know the sequence show only the text;
+ * Terminal.app and the Linux console do not, and get the text alone.
+ */
+export function link(url: string, text: string): string {
+  if (colorLevel() === 0) return text
+  if (process.env.TERM_PROGRAM === "Apple_Terminal" || process.env.TERM === "linux") return text
+  return `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`
+}
 
 /** The mark in its blue, or a row of tiles filled palest first: the mosaic, as a progress bar. */
 export function tiles(filled: number, total: number): string {

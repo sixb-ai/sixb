@@ -87,6 +87,9 @@ async function main(): Promise<void> {
     return
   }
 
+  // Plain strings, no renderer: cheap enough to load for every command.
+  const { setCommandPath } = await import("./ui/layout")
+  setCommandPath(parsed.path)
   const { options, positionals } = parsed
   const getFlag = (name: CliOptionName) => stringOption(options, name)
   const getFlags = (name: CliOptionName) => repeatedOption(options, name)

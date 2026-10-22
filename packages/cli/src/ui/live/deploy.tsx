@@ -20,6 +20,8 @@ interface ProgressState {
   readonly done: number
   readonly current: number | null
   readonly startedAt: number
+  /** When the deploy itself began, for its running total. */
+  readonly deployStartedAt: number
   readonly output: readonly string[]
 }
 
@@ -46,6 +48,7 @@ export async function startLiveDeploy(release: DeployProgressHeader): Promise<Li
     done: 0,
     current: null,
     startedAt: Date.now(),
+    deployStartedAt: Date.now(),
     output: [],
   }
   const listeners = new Set<() => void>()
@@ -83,9 +86,8 @@ export async function startLiveDeploy(release: DeployProgressHeader): Promise<Li
       set({ current: index, startedAt: Date.now(), output: [] })
     },
     done(index, seconds) {
-      footer.print(
-        `  ${tone.ok(glyph.ok)} ${state.labels[index] ?? ""}  ${tone.faint(`${seconds}s`)}`
-      )
+      // Steps line up, and so do their times, right-aligned in a column.
+      footer.print(`  ${tone.ok(glyph.ok)} ${stepLine(state.labels, index, seconds)}`)
       set({ done: index + 1 })
     },
     output(line) {
@@ -94,7 +96,7 @@ export async function startLiveDeploy(release: DeployProgressHeader): Promise<Li
     async failed(index, seconds, report) {
       if (index !== null) {
         footer.print(
-          `  ${tone.fail(glyph.fail)} ${tone.fail(state.labels[index] ?? "")}${seconds ? `  ${tone.faint(`${seconds}s`)}` : ""}`
+          `  ${tone.fail(glyph.fail)} ${stepLine(state.labels, index, seconds, tone.fail)}`
         )
       }
       footer.print(report)
@@ -105,6 +107,18 @@ export async function startLiveDeploy(release: DeployProgressHeader): Promise<Li
       await footer.stop()
     },
   }
+}
+
+/** A finished step: its label padded to the longest one, then its time, right-aligned. */
+function stepLine(
+  labels: readonly string[],
+  index: number,
+  seconds: string | null,
+  style: (text: string) => string = (text) => text
+): string {
+  const width = Math.max(0, ...labels.map((label) => label.length)) + 2
+  const label = labels[index] ?? ""
+  return `${style(label.padEnd(width))}${seconds ? tone.faint(`${seconds}s`.padStart(6)) : ""}`
 }
 
 function DeployFooter({
@@ -126,6 +140,7 @@ function DeployFooter({
 
   const label = state.current === null ? "Connecting" : (state.labels[state.current] ?? "")
   const elapsed = ((now - state.startedAt) / 1000).toFixed(1)
+  const total = ((now - state.deployStartedAt) / 1000).toFixed(1)
   const lineWidth = Math.max(10, width - 8)
   return (
     <box flexDirection="column" paddingLeft={2}>
@@ -135,6 +150,7 @@ function DeployFooter({
         <span fg={colors.blue}>{spinner}</span>
         <span fg={colors.text} attributes={BOLD}>{` ${label}`}</span>
         <span fg={colors.faint}>{`  ${elapsed}s`}</span>
+        <span fg={colors.faint}>{`   ${glyph.dot}   ${total}s total`}</span>
       </text>
       <box flexDirection="column" paddingLeft={2} paddingTop={1} height={OUTPUT_ROWS}>
         {state.output.map((line, index) => (

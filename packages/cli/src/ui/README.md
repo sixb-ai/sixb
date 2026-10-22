@@ -14,6 +14,16 @@ so they read on light and dark terminals. `colorLevel()` drops color for pipes, 
 dumb terminals, and steps 24-bit colors down to 256 or 16 where the terminal says it must.
 Piped output never wraps, so a log line stays one line.
 
+Every screen follows the same rules:
+
+- It opens with `▰ sixb <command>`, shows its details, and ends with the outcome. A command with
+  one thing to say (`build`, `typegen`, `db migrate`) says it on one line instead.
+- Bold is for the outcome and the command name. Section titles stay muted.
+- Blue means live, or something to open or run: a ready dot, a URL, a command. A fix written in
+  prose is led by a faint `→`, never blue.
+- URLs are terminal hyperlinks where the terminal takes them (`link` in `theme.ts`).
+- Content stops at about 100 columns, however wide the terminal.
+
 Live screens load only behind `canRunLive()` (`live/can-run-live.ts`, which imports nothing), and
 only through `await import(...)`. Nothing a role or a printed command imports may reach `live/`:
 a renderer holds tens of MB for the life of the process, and `prod-roles.e2e.ts` checks that
