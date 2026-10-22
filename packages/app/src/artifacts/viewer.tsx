@@ -209,7 +209,9 @@ function ArtifactView({
 const EDITABLE_KINDS: ReadonlySet<ArtifactKindName> = new Set(["sheet", "canvas"])
 
 type SaveState =
-  | { readonly state: "idle" | "saving" | "failed" }
+  | { readonly state: "idle" | "saving" }
+  /** `refused`: why publishing refused the draft, in its words, when it did. */
+  | { readonly state: "failed"; readonly refused?: string }
   | { readonly state: "moved"; readonly latest: ArtifactMoved }
 
 /** Editing the version shown: whether it can be, the draft, and saving it as the next version. */
@@ -287,10 +289,11 @@ function useArtifactEdit(
         stop()
         onTargetChange({ type: "artifact", artifactId: version.artifactId })
       } catch (error) {
+        const refused = publishRefusal(error)
         setSaving(
           error instanceof ArtifactMovedError
             ? { state: "moved", latest: error.latest }
-            : { state: "failed" }
+            : { state: "failed", ...(refused ? { refused } : {}) }
         )
       }
     },
@@ -349,11 +352,19 @@ function useArtifactEdit(
   }
 }
 
+/** Why publishing refused a save, in its words: a draft its rules don't take. */
+function publishRefusal(error: unknown): string | undefined {
+  if (!isSixbApiError(error) || error.code !== "invalid_artifact") return undefined
+  const said = (error.body as { error?: unknown } | null)?.error
+  return typeof said === "string" ? said.replace(/^\[Sixb\] /, "") : undefined
+}
+
 /** Under the header, when a save didn't go through: why, and what the reader can do. */
 function EditNotice({ edit }: { readonly edit: ArtifactEdit }) {
   const messages = useArtifactMessages().edit
   const user = useCurrentUser()
   const moved = edit.saving.state === "moved" ? edit.saving.latest : null
+  const refused = edit.saving.state === "failed" ? edit.saving.refused : undefined
   return (
     <div
       role="alert"
@@ -367,9 +378,12 @@ function EditNotice({ edit }: { readonly edit: ArtifactEdit }) {
                 moved.version,
                 moved.author.type === "user" && moved.author.id === user?.id
               )
-            : messages.saveFailed}
+            : refused
+              ? messages.saveRefused
+              : messages.saveFailed}
         </p>
         {moved ? <p className="text-muted-foreground">{messages.movedDescription}</p> : null}
+        {refused ? <p className="text-muted-foreground">{refused}</p> : null}
       </div>
       {moved ? (
         <div className="flex shrink-0 items-center gap-2">

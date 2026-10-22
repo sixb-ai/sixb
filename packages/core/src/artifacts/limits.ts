@@ -31,6 +31,10 @@ export const ARTIFACT_LIMITS = {
   minCanvasItemSize: 40,
   maxCanvasItemSize: 8000,
   maxCanvasPosition: 100_000,
+  /** A note's or a text's words, in characters. */
+  maxCanvasTextLength: 2000,
+  /** An item's title, a shape's words, or an arrow's label, in characters. */
+  maxCanvasLabelLength: 120,
   /** A board's HTML is parsed whole when it is published, as a page's is. */
   maxBoardBytes: 2 * 1024 * 1024,
   /** `artifact:` addresses one version may use. */

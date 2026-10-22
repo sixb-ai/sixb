@@ -1,3 +1,4 @@
+import { ARTIFACT_LIMITS } from "@sixb/core/artifacts"
 import { cn } from "@sixb/ui/lib/utils"
 import { Handle, NodeResizer, Position } from "@xyflow/react"
 import {
@@ -148,6 +149,10 @@ export function InPlaceText({
   }
   const shared = {
     value: text,
+    // A note's or a text's words take lines; a title or a shape's words are a label.
+    maxLength: multiline
+      ? ARTIFACT_LIMITS.maxCanvasTextLength
+      : ARTIFACT_LIMITS.maxCanvasLabelLength,
     placeholder,
     spellCheck: true,
     onBlur: commit,

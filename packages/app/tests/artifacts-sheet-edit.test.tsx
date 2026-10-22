@@ -854,6 +854,28 @@ describe("saving an edited sheet", () => {
     ui.unmount()
   })
 
+  test("says why publishing refused a save, in its words", async () => {
+    // Reproduce by reading every failure as one: the notice says to try again, and nothing else.
+    requests.length = 0
+    answer = () =>
+      Response.json(
+        {
+          error: "[Sixb] 'sheets/Regions.csv' has two columns named 'Visits'.",
+          code: "invalid_artifact",
+        },
+        { status: 400 }
+      )
+    const ui = await editNorth(cache())
+    await act(async () => {
+      fireEvent.click(ui.getByRole("button", { name: "Save as version 2" }))
+    })
+    await waitFor(() => expect(ui.getByRole("alert")).toBeTruthy())
+    expect(ui.getByRole("alert").textContent).toBe(
+      "This version can't be published as it is. Undo the change it names, then save.'sheets/Regions.csv' has two columns named 'Visits'."
+    )
+    ui.unmount()
+  })
+
   test("says when the artifact moved on, and saves over it only when asked", async () => {
     requests.length = 0
     answer = () =>

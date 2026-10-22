@@ -45,6 +45,7 @@ export const en = {
     save: (version: number) => `Save as version ${number(version)}`,
     saving: "Saving…",
     saveFailed: "Your changes could not be saved. Try again.",
+    saveRefused: "This version can't be published as it is. Undo the change it names, then save.",
     discardTitle: "Discard your changes?",
     discardDescription: "What you changed since you started editing will be lost.",
     keepEditing: "Keep editing",
@@ -434,6 +435,8 @@ export const fr: Translation<ArtifactMessages> = {
     save: (version) => `Enregistrer la version ${numberFr(version)}`,
     saving: "Enregistrement…",
     saveFailed: "Impossible d’enregistrer vos modifications. Réessayez.",
+    saveRefused:
+      "Cette version ne peut pas être publiée telle quelle. Annulez la modification indiquée, puis enregistrez.",
     discardTitle: "Abandonner vos modifications ?",
     discardDescription: "Ce que vous avez modifié depuis le début sera perdu.",
     keepEditing: "Continuer",
