@@ -1,6 +1,7 @@
 import {
   type CsvTable,
   checkFormula,
+  checkSheet,
   columnFormulaType,
   evaluateComputedColumns,
   FormulaCycleError,
@@ -45,7 +46,7 @@ export interface CellEdit {
 export type ColumnRefusal =
   | { readonly refused: "name-empty" }
   | { readonly refused: "name-taken"; readonly name: string }
-  /** A chart plots the column, so it can't go, or stop being a number. */
+  /** A chart plots the column, so it can't go. */
   | { readonly refused: "charted"; readonly by: string }
   /** Another column's formula reads it. */
   | { readonly refused: "computed-from"; readonly by: string }
@@ -57,6 +58,8 @@ export type ColumnRefusal =
   | { readonly refused: "formula-type"; readonly computes: FormulaType }
   /** Columns that would compute from each other. */
   | { readonly refused: "formula-cycle" }
+  /** A change that would leave the sheet one publishing refuses: the rule broken, in its words. */
+  | { readonly refused: "invalid"; readonly message: string }
 
 /** A column's name and form, as the column's settings set them. */
 export interface ColumnSettings {
@@ -223,7 +226,8 @@ export function deleteColumn(
  * total, and description, and every chart and formula that names it. A new type converts the
  * values that read as it, and is refused when any don't; a formula is checked against the sheet's
  * columns and computes the column's values from then on; taking a formula away keeps the values it
- * computed. `read` reads a value as the new type stores it.
+ * computed. A change the sheet's charts or other formulas can't take is refused, as publishing
+ * would refuse it. `read` reads a value as the new type stores it.
  */
 export function setColumn(
   draft: WorkbookDraft,
@@ -242,15 +246,6 @@ export function setColumn(
   if (name !== from && table.header.includes(name)) return { refused: "name-taken", name }
   const before = layout.columns[from] ?? { type: "text" as const }
   const format = settings.format
-
-  // A chart plots numbers: a column it plots stays one.
-  const numeric = NUMERIC_COLUMN_TYPES.includes(format.type)
-  if (!numeric && NUMERIC_COLUMN_TYPES.includes(before.type)) {
-    const chart = draft.workbook.charts.find(
-      (entry) => entry.sheet === sheet && [...entry.y, ...entry.line].includes(from)
-    )
-    if (chart) return { refused: "charted", by: chart.title ?? chart.name }
-  }
 
   let values: string[] = table.rows.map((row) => row[column] ?? "")
   if (format.formula) {
@@ -321,7 +316,23 @@ export function setColumn(
     rows.every((row, index) => row === table.rows[index]) &&
     JSON.stringify(workbook) === JSON.stringify(draft.workbook)
   if (unchanged) return draft
-  return withTable({ ...draft, workbook }, sheet, derivedTable(table, header, rows))
+
+  // The charts that plot the column, and the formulas that read it, must still hold.
+  const next = withTable({ ...draft, workbook }, sheet, derivedTable(table, header, rows))
+  return sheetRefusal(next, sheet, base) ?? next
+}
+
+/**
+ * Why a draft's sheet is one publishing would refuse, by the rules publishing checks it with: its
+ * columns, its formulas, and the charts on it. Null when it publishes.
+ */
+export function sheetRefusal(
+  draft: WorkbookDraft,
+  sheet: string,
+  base: CsvTable
+): ColumnRefusal | null {
+  const message = checkSheet(draft.workbook, new Map([[sheet, draftTable(draft, sheet, base)]]))
+  return message ? { refused: "invalid", message } : null
 }
 
 /** A sheet's column in use: by a chart that plots it, or a formula that reads it. */

@@ -2,26 +2,18 @@ import { posix } from "node:path"
 import type { ArtifactFile } from "../../../storage/artifacts/types"
 import { isArtifactAddress } from "../../address"
 import { CsvParseError, type CsvTable, parseCsv } from "../../csv"
-import {
-  checkFormula,
-  columnFormulaType,
-  evaluateComputedColumns,
-  FormulaCycleError,
-  formulaFitsColumn,
-  parseFormula,
-} from "../../formula"
+import { evaluateComputedColumns } from "../../formula"
 import { ARTIFACT_LIMITS } from "../../limits"
 import type { SheetOutline } from "../../outline"
+import { sheetChartsProblem, sheetColumnsProblem, sheetFormulasProblem } from "../../sheet-rules"
 import type { ArtifactWarning } from "../../warnings"
 import {
-  NUMERIC_COLUMN_TYPES,
   parseSheetDate,
   parseSheetNumber,
   parseWorkbook,
   type SheetColumnFormat,
   sheetFilePath,
   WORKBOOK_FILE,
-  type Workbook,
   type WorkbookSheet,
 } from "../../workbook"
 import { type ArtifactBlobStorage, invalidArtifact, readArtifactText } from "../files"
@@ -71,7 +63,8 @@ export async function validateSheet(
     tables.set(sheet.name, table)
     warnings.push(...computeSheet(sheet, table))
   }
-  checkCharts(workbook, tables)
+  const charts = sheetChartsProblem(workbook, tables)
+  if (charts) throw invalidArtifact(charts)
 
   return {
     entry: WORKBOOK_FILE,
@@ -115,47 +108,10 @@ async function readSheet(
     throw error
   }
 
-  const { header, rows } = table
-  if (header.length === 0)
-    throw invalidArtifact(`'${path}' is empty: its first line names the columns.`)
-  if (header.length > ARTIFACT_LIMITS.maxSheetColumns) {
-    throw invalidArtifact(
-      `'${path}' has ${header.length} columns; a sheet holds at most ${ARTIFACT_LIMITS.maxSheetColumns}.`
-    )
-  }
-  const seen = new Set<string>()
-  for (const [index, name] of header.entries()) {
-    if (!name.trim()) {
-      throw invalidArtifact(`'${path}' column ${index + 1} has no name in the header row.`)
-    }
-    if (seen.has(name)) throw invalidArtifact(`'${path}' has two columns named '${name}'.`)
-    seen.add(name)
-  }
-  if (rows.length > ARTIFACT_LIMITS.maxSheetRows) {
-    throw invalidArtifact(
-      `'${path}' has ${rows.length} rows; a sheet holds at most ${ARTIFACT_LIMITS.maxSheetRows}.`
-    )
-  }
-  for (const [index, row] of rows.entries()) {
-    if (row.length > header.length) {
-      throw invalidArtifact(
-        `'${path}' row ${index + 2} has ${row.length} fields; the header names ${header.length} columns.`
-      )
-    }
-  }
+  const columns = sheetColumnsProblem(sheet, table)
+  if (columns) throw invalidArtifact(columns)
 
-  for (const column of [
-    ...Object.keys(sheet.columns),
-    ...Object.keys(sheet.widths),
-    ...Object.keys(sheet.descriptions),
-    ...Object.keys(sheet.totals),
-  ]) {
-    if (!seen.has(column)) {
-      throw invalidArtifact(
-        `${WORKBOOK_FILE} sheet '${sheet.name}' names column '${column}', which '${path}' does not have.`
-      )
-    }
-  }
+  const { header } = table
   for (const [column, format] of Object.entries(sheet.columns)) {
     const index = header.indexOf(column)
     if (format.type === "link" || format.type === "image") {
@@ -197,31 +153,10 @@ function checkComputedValues(path: string, table: CsvTable, index: number, colum
  * warns.
  */
 function computeSheet(sheet: WorkbookSheet, table: CsvTable): ArtifactWarning[] {
-  const at = (column: string) => `${WORKBOOK_FILE} sheet '${sheet.name}' column '${column}'`
-  const types = new Map(
-    table.header.map((name) => [name, columnFormulaType(sheet.columns[name]?.type ?? "text")])
-  )
-  for (const [column, format] of Object.entries(sheet.columns)) {
-    if (!format.formula) continue
-    const checked = checkFormula(parseFormula(format.formula), types)
-    if ("error" in checked) throw invalidArtifact(`${at(column)} "formula": ${checked.error}.`)
-    if (!formulaFitsColumn(checked.type, format.type)) {
-      throw invalidArtifact(
-        `${at(column)} "formula" computes ${checked.type === "date" ? "a date" : checked.type === "boolean" ? "true or false" : checked.type === "text" ? "text" : "a number"}, which a ${format.type} column can't show: change its type, or the formula.`
-      )
-    }
-  }
-  let computed: ReturnType<typeof evaluateComputedColumns>
-  try {
-    computed = evaluateComputedColumns(sheet, table)
-  } catch (error) {
-    if (error instanceof FormulaCycleError) {
-      throw invalidArtifact(
-        `${WORKBOOK_FILE} sheet '${sheet.name}': ${error.message}, so none can be computed first.`
-      )
-    }
-    throw error
-  }
+  const formulas = sheetFormulasProblem(sheet, table)
+  if (formulas) throw invalidArtifact(formulas)
+
+  const computed = evaluateComputedColumns(sheet, table)
   return [...computed.errors].map(([column, errors]) => ({
     code: "sheet_formula_error",
     part: sheet.name,
@@ -285,53 +220,6 @@ function cellProblem(
     case "text":
     case "tag":
       return undefined
-  }
-}
-
-function checkCharts(workbook: Workbook, tables: ReadonlyMap<string, CsvTable>): void {
-  for (const chart of workbook.charts) {
-    const sheet = workbook.sheets.find((candidate) => candidate.name === chart.sheet)
-    const table = tables.get(chart.sheet)
-    if (!sheet || !table) continue
-    const plotted = [...chart.y, ...chart.line]
-    for (const column of [chart.x, ...plotted]) {
-      if (!table.header.includes(column)) {
-        throw invalidArtifact(
-          `${WORKBOOK_FILE} chart '${chart.name}' plots column '${column}', which sheet '${chart.sheet}' does not have.`
-        )
-      }
-    }
-    // A scatter places each row by its x, so x is a number too.
-    for (const column of chart.type === "scatter" ? [chart.x, ...plotted] : plotted) {
-      const type = sheet.columns[column]?.type ?? "text"
-      if (!NUMERIC_COLUMN_TYPES.includes(type)) {
-        throw invalidArtifact(
-          `${WORKBOOK_FILE} chart '${chart.name}' plots column '${column}', which is ${type}; give it a number, currency, or percent type in "columns".`
-        )
-      }
-    }
-    // Lines of another kind than the bars read on one right axis, which reads one kind.
-    const barType = sheet.columns[chart.y[0] ?? ""]?.type
-    const rightTypes = new Set(
-      chart.line.map((column) => sheet.columns[column]?.type).filter((type) => type !== barType)
-    )
-    if (rightTypes.size > 1) {
-      throw invalidArtifact(
-        `${WORKBOOK_FILE} chart '${chart.name}' draws lines of ${[...rightTypes].join(" and ")} over ${barType ?? "its"} bars; the right axis reads one kind. Chart the others separately.`
-      )
-    }
-    if (chart.type === "pie") {
-      // A pie's slices are its rows, or its x values when it summarizes them.
-      const index = table.header.indexOf(chart.x)
-      const slices = chart.aggregate
-        ? new Set(table.rows.map((row) => (row[index] ?? "").trim())).size
-        : table.rows.length
-      if (slices > ARTIFACT_LIMITS.maxPieSlices) {
-        throw invalidArtifact(
-          `${WORKBOOK_FILE} chart '${chart.name}' is a pie with ${slices} slices; a pie reads well with at most ${ARTIFACT_LIMITS.maxPieSlices}. Use a bar chart instead.`
-        )
-      }
-    }
   }
 }
 
