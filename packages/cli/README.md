@@ -24,12 +24,12 @@ bun add @sixb/cli
 | `sixb dev` | Start the local API, app, and workers |
 | `sixb api` | Start the production API/docs/WebSocket server |
 | `sixb app` | Start the production app server |
-| `sixb login <api-url>` | Validate an instance and save it as the current profile |
+| `sixb login <api-url>` | Validate an instance and save it as the current profile. In a terminal, asks for the URL when it is left out. |
 | `sixb logout` | Remove the current or named profile |
 | `sixb status` | Check the selected profile and API |
 | `sixb profile list` | List saved profiles |
 | `sixb profile show [name]` | Show a profile without exposing its token |
-| `sixb profile use <name>` | Select the current profile |
+| `sixb profile use <name>` | Select the current profile. In a terminal, offers the saved profiles when the name is left out. |
 | `sixb project show` | Show project metadata |
 | `sixb ontology list|get` | Inspect the visible ontology |
 | `sixb objects ...` | Inspect, list, search, and query objects |
@@ -58,7 +58,7 @@ bun add @sixb/cli
 | `sixb db migrate` | Run adapter-owned database migrations ahead of, or instead of, role startup |
 | `sixb lake check` | Check lake dataset definitions for drift against the lake catalog |
 | `sixb lake cleanup` | Run provider-supported lake maintenance cleanup |
-| `sixb init [dir]` | Initialize a new sixb project in a directory |
+| `sixb init [dir]` | Initialize a new sixb project in a directory. In a terminal, asks for the directory when it is left out. |
 | `sixb help` | Show help |
 | `sixb --version` | Show version |
 
@@ -80,6 +80,19 @@ check again when visible; disconnected tabs back off retries until the server re
 Backend restarts stop the old workers before starting replacements and reload connected
 browser pages when the new stack is ready. In-memory state resets; persisted state remains.
 Startup errors are displayed and the watcher stays alive so the next save can recover.
+
+In a terminal, `sixb dev` keeps a footer at the bottom of the screen while the dev process's
+output scrolls above it. The footer stays put across restarts and shows what is being served,
+startup progress, and why a start failed. It takes a few keys:
+
+| Key | Action |
+|---|---|
+| `o` | Open the app in the browser |
+| `d` | Open the API docs |
+| `r` | Restart now, as a source change would |
+| `q`, `ctrl+c` | Stop `sixb dev` |
+
+Piped output, CI, and non-interactive shells get plain `[SixbDev]` lines instead.
 Generated `.sixb/` files, dependencies, build output, and non-source storage files are ignored.
 Source outside the project root is not watched. Environment-file changes require restarting
 `sixb dev`, because Bun loads them into the supervisor's environment at launch.

@@ -285,7 +285,7 @@ const commandTree: readonly CommandNode[] = [
   command("login", "Save and select a local API profile", {
     usage: "sixb login <api-url> [--profile <name>] [--token-stdin]",
     options: ["profile", "token-stdin", "json"],
-    minimumPositionals: 1,
+    // Asked for in a terminal when it is missing.
     maximumPositionals: 1,
     rootHelpLabel: "login <api-url>",
   }),
@@ -313,7 +313,7 @@ const commandTree: readonly CommandNode[] = [
         path: ["profile", "use"],
         usage: "sixb profile use <name>",
         options: ["json"],
-        minimumPositionals: 1,
+        // Picked from the saved profiles in a terminal when it is missing.
         maximumPositionals: 1,
       }),
     ],
@@ -610,43 +610,61 @@ export const ROOT_HELP: CliHelp = {
   usage: "sixb <command> [options]",
   summary: "Real-time digital twin framework",
   commands: rootHelpItems(commandTree),
+  // Each command lists its own options; the root names the ones most commands share.
   options: [
-    ...Object.values(CLI_OPTION_DEFINITIONS).map(({ syntax, summary }) => ({
-      label: syntax,
-      value: summary,
+    ...(["entry", "profile", "json"] as const).map((name) => ({
+      label: CLI_OPTION_DEFINITIONS[name].syntax,
+      value: CLI_OPTION_DEFINITIONS[name].summary,
     })),
     { label: "--help", value: "Show contextual help" },
     { label: "--version", value: "Show version" },
   ],
 }
 
+/** The root help's commands, grouped by what they are for. Order is the reading order. */
+const ROOT_HELP_GROUP_COMMANDS: readonly {
+  readonly title: string
+  readonly names: readonly string[]
+}[] = [
+  { title: "Develop", names: ["init", "dev", "check", "typegen", "build"] },
+  { title: "Deploy", names: ["deploy", "desktop"] },
+  {
+    title: "Run in production",
+    names: ["api", "app", "scheduler", "orchestrator", "rules", "worker", "worker-group"],
+  },
+  { title: "Storage", names: ["db", "lake"] },
+  {
+    title: "Connect to an instance",
+    names: ["login", "logout", "status", "profile", "token", "service-account"],
+  },
+  { title: "Work with an instance", names: INSTANCE_COMMANDS },
+]
+
+export const ROOT_HELP_GROUPS: readonly {
+  readonly title: string
+  readonly items: readonly CliHelpItem[]
+}[] = (() => {
+  const grouped = new Set(ROOT_HELP_GROUP_COMMANDS.flatMap((group) => group.names))
+  const ungrouped = commandTree.filter((node) => !grouped.has(node.name))
+  const groups = ROOT_HELP_GROUP_COMMANDS.map((group) => ({
+    title: group.title,
+    items: rootHelpItems(
+      group.names.flatMap((name) => commandTree.filter((node) => node.name === name))
+    ),
+  }))
+  // A command added without a group still shows up.
+  return ungrouped.length > 0
+    ? [...groups, { title: "More", items: rootHelpItems(ungrouped) }]
+    : groups
+})()
+
 export const CLI_EXAMPLES = [
+  "sixb init my-project",
   "sixb dev",
-  "sixb build",
-  "sixb api",
-  "sixb login http://localhost:3001 --profile local",
-  "sixb ontology list",
+  "sixb login https://api.example.com",
   "sixb objects inspect Customer customer-123",
-  "sixb token create --name 'Local CLI' --expires-in 90d",
-  "sixb service-account create --id svc_sandbox --name 'Sandbox agent' --group agents",
-  "sixb service-account token create svc_sandbox --name 'Sandbox token' --expires-in 30d",
-  "sixb status",
-  "sixb app",
-  "sixb scheduler",
-  "sixb orchestrator",
-  "sixb rules",
-  "sixb worker pipeline",
-  "sixb worker agent --concurrency 8",
-  "sixb worker-group sync agent --concurrency sync=2 --concurrency agent=8",
-  "sixb dev --entry examples/mac-os/sixb.config.ts --port 8080",
-  "sixb check",
-  "sixb typegen",
-  "sixb db migrate",
-  "sixb lake check",
-  "sixb lake cleanup --dry-run",
-  "sixb deploy --dry-run",
+  "sixb worker-group sync agent --concurrency agent=8",
   "sixb deploy",
-  "sixb deploy logs api --follow",
 ] as const
 
 export function parseCliArgs(args: readonly string[]): ParsedCli {

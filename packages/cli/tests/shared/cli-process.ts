@@ -140,9 +140,8 @@ export interface StartRoleResult {
  * by `runUntilSignal` once the role has finished starting), then stops it and
  * returns the operations log.
  *
- * Readiness is detected through a file marker rather than the role's stdout: Ink
- * suppresses rendered output when stdout is not a TTY (as under CI), so the
- * started banner never appears there. The marker is written synchronously before
+ * Readiness is detected through a file marker rather than the role's stdout, whose
+ * wording is for people and changes with them. The marker is written synchronously before
  * the role idles, so it is observable even for roles that immediately exit when
  * the in-memory fixture providers leave nothing keeping the event loop alive.
  */

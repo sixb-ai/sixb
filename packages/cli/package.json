@@ -29,6 +29,8 @@
     "prepack": "bun run build"
   },
   "dependencies": {
+    "@opentui/core": "0.6.6",
+    "@opentui/react": "0.6.6",
     "@sixb/agent-worker": "workspace:*",
     "@sixb/app": "workspace:^",
     "@sixb/client": "workspace:^",
@@ -42,9 +44,7 @@
     "@sixb/sync-worker": "workspace:*",
     "@sixb/workflow-worker": "workspace:*",
     "create-sixb": "workspace:^",
-    "ink": "^6.0.0",
-    "react": "^19.0.0",
-    "react-devtools-core": "^4.19.1"
+    "react": "^19.2.0"
   },
   "devDependencies": {
     "@sixb/deploy-ssh": "workspace:*",
