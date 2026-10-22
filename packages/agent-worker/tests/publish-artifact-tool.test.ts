@@ -147,6 +147,36 @@ async function refusal(
   throw new Error("Expected the publish to be refused.")
 }
 
+/** A document version published outside this run: a person's save in the app has no origin. */
+async function publishElsewhere(
+  artifactId: string,
+  markdown: string,
+  origin?: { readonly threadId: string; readonly runId: string }
+): Promise<void> {
+  const latest = await storage.artifacts.get({ projectId, id: artifactId })
+  if (!latest) throw new Error(`Artifact '${artifactId}' was not stored.`)
+
+  const body = new TextEncoder().encode(markdown)
+  const file = await blobStorage.put({ body, expectedSizeBytes: body.byteLength })
+
+  await storage.artifacts.publish({
+    projectId,
+    artifactId,
+    kind: "document",
+    version: {
+      title: "Plan",
+      entry: "document.md",
+      files: [{ path: "document.md", file }],
+      outline: { kind: "document", headings: [] },
+      references: [],
+      author: owner,
+      ...(origin ? { origin } : {}),
+      createdAt: new Date(),
+    },
+    baseVersion: latest.latestVersion,
+  })
+}
+
 describe("publish_artifact", () => {
   test("publishes a directory as the thread's owner, from this run", async () => {
     write(
@@ -438,6 +468,49 @@ describe("publish_artifact", () => {
     )
   })
 
+  test("refuses to publish over a version saved during the run, and installs that one", async () => {
+    // Reproduce by publishing without the installed version as base: the Agent's version 3 lands
+    // on version 2 and the person's edit is gone from the latest version. Reproduce the install by
+    // skipping it on the refusal: the copy still holds version 1.
+    write("work/plan/document.md", "# Plan\n\nDraft.\n")
+    const { artifactId } = (await publish({
+      path: "work/plan",
+      kind: "document",
+      title: "Plan",
+    })) as {
+      artifactId: string
+    }
+    const installed = install()
+    await installed
+
+    await publishElsewhere(artifactId, "# Plan\n\nThe person's edit.\n")
+
+    write("work/plan/document.md", "# Plan\n\nThe Agent's edit.\n")
+    const { version } = tools({ installed })
+    const error = await version
+      .execute(version.parseInput({ id: artifactId, path: "work/plan", title: "Plan" }), context)
+      .catch((error: unknown) => error)
+
+    expect(error).toBeInstanceOf(AgentToolPublicError)
+    expect(version.errorText(error)).toBe(
+      `[SixbAgentWorker] publish_artifact_version refused: artifact '${artifactId}' moved on from version 1, which you started from: version 2 was published by its owner outside a conversation, such as in the app, so nothing was published. $SIXB_ARTIFACTS lists version 2, installed under $SIXB_ARTIFACTS_DIR/${artifactId}/: start again from it as it is, keep its changes, make yours again, and publish.`
+    )
+    expect((await storage.artifacts.get({ projectId, id: artifactId }))?.latestVersion).toBe(2)
+
+    // The copy and the manifest now hold the person's version, marked as edited.
+    const copy = `.sixb/agent/artifacts/${artifactId}`
+    expect(read(`${copy}/document.md`)).toBe("# Plan\n\nThe person's edit.\n")
+    expect(JSON.parse(read(".sixb/agent/context/artifacts.json")).artifacts).toEqual([
+      expect.objectContaining({ id: artifactId, version: 2, edited: true }),
+    ])
+
+    // Built on that version, the next publish goes through.
+    write("work/plan/document.md", "# Plan\n\nThe person's edit, then the Agent's.\n")
+    expect(
+      await publishVersion({ id: artifactId, path: "work/plan", title: "Plan" }, { installed })
+    ).toMatchObject({ artifactId, version: 3 })
+  })
+
   test("lays a deck out with the files it publishes, and only those", async () => {
     write(
       "work/q3/index.html",
@@ -634,6 +707,25 @@ describe("materializeThreadArtifacts", () => {
       baseVersion: 1,
     })
     // Reproduce by marking every entry: the Agent's own versions read as edited too.
+    expect(JSON.parse((await install()).manifestJson).artifacts[0]).toMatchObject({
+      version: 2,
+      edited: true,
+    })
+  })
+
+  test("marks an artifact another conversation published after this one as edited too", async () => {
+    // `edited` means "published outside this conversation", which is what the skill tells the
+    // Agent. Reproduce by marking only versions without an origin: this one reads as unchanged.
+    write("a/document.md", "# Plan\n\nDraft.\n")
+    const { artifactId } = (await publish({ path: "a", kind: "document", title: "Plan" })) as {
+      artifactId: string
+    }
+
+    await publishElsewhere(artifactId, "# Plan\n\nRevised elsewhere.\n", {
+      threadId: "thr_other",
+      runId: "run_other",
+    })
+
     expect(JSON.parse((await install()).manifestJson).artifacts[0]).toMatchObject({
       version: 2,
       edited: true,

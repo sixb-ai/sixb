@@ -48,8 +48,9 @@ interface ManifestEntry {
   readonly directory?: string
   readonly files: readonly string[]
   /**
-   * The latest version was published outside this conversation, as a person's edit in the app
-   * is: the next version starts from it and keeps their changes.
+   * The latest version was published outside this conversation: a person's edit in the app,
+   * another conversation, or the project's code. The next version starts from it and keeps its
+   * changes.
    */
   readonly edited?: true
 }
@@ -58,7 +59,8 @@ interface ManifestEntry {
  * The conversation's artifacts as the run's sandbox holds them: the latest version of each under
  * `<directory>/<id>/`, listed in the manifest, newest first. A publish replaces its artifact's copy
  * and entry, so both stay the latest version for the rest of the run: revising from the copy never
- * starts from the version before.
+ * starts from the version before. A publish refused because the artifact moved on installs the
+ * version it moved to.
  */
 export class InstalledArtifacts implements MaterializedArtifacts {
   #entries: readonly ManifestEntry[]
@@ -85,6 +87,11 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     return JSON.stringify({ artifacts: this.#entries }, null, 2)
   }
 
+  /** The version the manifest lists for an artifact: the one its copy holds. */
+  versionOf(artifactId: string): number | undefined {
+    return this.#entries.find((entry) => entry.id === artifactId)?.version
+  }
+
   /**
    * Install the version just published in place of the artifact's copy, and list it first. One
    * update runs at a time, so parallel publishes never write an older manifest over a newer one.
@@ -93,9 +100,12 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     sandbox: Sandbox,
     published: { readonly artifact: ArtifactRecord; readonly version: ArtifactVersionRecord },
     files: readonly PublishedArtifactFile[],
-    signal: AbortSignal
+    signal: AbortSignal,
+    options: { readonly edited?: boolean } = {}
   ): Promise<void> {
-    const update = this.#updates.then(() => this.#replace(sandbox, published, files, signal))
+    const update = this.#updates.then(() =>
+      this.#replace(sandbox, published, files, signal, options)
+    )
     this.#updates = update.catch(() => {})
     return update
   }
@@ -107,7 +117,8 @@ export class InstalledArtifacts implements MaterializedArtifacts {
       version,
     }: { readonly artifact: ArtifactRecord; readonly version: ArtifactVersionRecord },
     files: readonly PublishedArtifactFile[],
-    signal: AbortSignal
+    signal: AbortSignal,
+    options: { readonly edited?: boolean }
   ): Promise<void> {
     const { directory: root, manifestPath, maxBytes } = this.layout
     const directory = posix.join(root, artifact.id)
@@ -131,7 +142,7 @@ export class InstalledArtifacts implements MaterializedArtifacts {
     if (install) this.#installed.set(artifact.id, sizeBytes)
     else this.#installed.delete(artifact.id)
     this.#entries = [
-      manifestEntry(artifact, version, install ? directory : undefined),
+      manifestEntry(artifact, version, install ? directory : undefined, options),
       ...this.#entries.filter((entry) => entry.id !== artifact.id),
     ]
     await sandbox.writeFiles([
@@ -288,6 +299,21 @@ function partsOf(
               )
             : []
   return parts.length > 0 ? { parts } : {}
+}
+
+/** A version's files with the bytes each holds. Reading stops when the run is cancelled. */
+export async function readArtifactVersionFiles(
+  blobStorage: BlobStorage,
+  version: ArtifactVersionRecord,
+  signal: AbortSignal
+): Promise<PublishedArtifactFile[]> {
+  const files: PublishedArtifactFile[] = []
+
+  for (const file of version.files) {
+    files.push({ path: file.path, bytes: await readBlob(blobStorage, file.file.blobId, signal) })
+  }
+
+  return files
 }
 
 /** A blob's bytes. Reading stops when the run is cancelled. */

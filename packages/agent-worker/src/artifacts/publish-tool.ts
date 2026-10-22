@@ -33,7 +33,11 @@ import {
 import type { AgentSandboxHandle } from "../sandbox-handle"
 import type { AgentFileBudget } from "../tools/tool-files"
 import { checkLayout, type LayoutCheck } from "./layout-check/layout-check"
-import type { InstalledArtifacts, PublishedArtifactFile } from "./materialize"
+import {
+  type InstalledArtifacts,
+  type PublishedArtifactFile,
+  readArtifactVersionFiles,
+} from "./materialize"
 
 const CREATE_TOOL = "publish_artifact"
 const VERSION_TOOL = "publish_artifact_version"
@@ -185,6 +189,12 @@ async function publish(
   const handle = await input.resolveSandbox()
   const sources = await listSources(handle, request.path, kind, tool, signal)
 
+  // A version of an installed artifact is made from its copy: publishing past the version the copy
+  // holds would drop whatever was published since.
+  const installed = await input.installed
+  const baseVersion =
+    "artifactId" in request.target ? installed.versionOf(request.target.artifactId) : undefined
+
   const totalBytes = sources.reduce((sum, source) => sum + source.sizeBytes, 0)
   if (totalBytes > ARTIFACT_LIMITS.maxVersionBytes) {
     throw publishError(
@@ -234,6 +244,7 @@ async function publish(
       { projectId: input.projectId, storage: artifacts, blobStorage: input.blobStorage },
       {
         ...("artifactId" in request.target ? { artifactId: request.target.artifactId } : {}),
+        ...(baseVersion === undefined ? {} : { baseVersion }),
         kind,
         title: request.title,
         files,
@@ -257,6 +268,21 @@ async function publish(
   } catch (error) {
     // Nothing was published, so the bytes do not count against the run.
     reservation.release()
+
+    if (
+      error instanceof ArtifactRequestError &&
+      error.code === "artifact_moved" &&
+      "artifactId" in request.target &&
+      baseVersion !== undefined
+    ) {
+      throw await artifactMoved(
+        input,
+        { installed, handle },
+        { artifactId: request.target.artifactId, baseVersion },
+        signal
+      )
+    }
+
     throw toPublishError(error, tool)
   }
 
@@ -269,7 +295,7 @@ async function publish(
   )
   try {
     // Revising from $SIXB_ARTIFACTS_DIR must start from this version, not the one before.
-    await (await input.installed).replace(handle.sandbox, published, contents, signal)
+    await installed.replace(handle.sandbox, published, contents, signal)
   } catch (error) {
     if (signal.aborted) throw error
     console.warn(
@@ -353,6 +379,66 @@ async function ownedArtifact(
     )
   }
   return artifact
+}
+
+/**
+ * The refusal for a version made from a copy the artifact has moved past, such as a person saving
+ * in the app while the run works. The version it moved to replaces the copy, so the Agent starts
+ * again from it instead of publishing over it.
+ */
+async function artifactMoved(
+  input: PublishToolsInput,
+  {
+    installed,
+    handle,
+  }: { readonly installed: InstalledArtifacts; readonly handle: AgentSandboxHandle },
+  { artifactId, baseVersion }: { readonly artifactId: string; readonly baseVersion: number },
+  signal: AbortSignal
+): Promise<AgentToolPublicError> {
+  const artifact = await ownedArtifact(input, input.artifacts, artifactId, VERSION_TOOL)
+  const latest = await input.artifacts.getVersion({
+    projectId: input.projectId,
+    artifactId,
+    version: artifact.latestVersion,
+  })
+  if (!latest) {
+    throw new Error(
+      `[SixbAgentWorker] Version ${artifact.latestVersion} of '${artifactId}' is missing.`
+    )
+  }
+
+  const author = principalsEqual(latest.author, input.owner)
+    ? "its owner"
+    : `${latest.author.type} '${latest.author.id}'`
+  const where =
+    latest.origin === undefined
+      ? `by ${author} outside a conversation, such as in the app`
+      : latest.origin.threadId === input.run.threadId
+        ? "earlier in this conversation"
+        : `by ${author} in another conversation`
+  const moved = `artifact '${artifactId}' moved on from version ${baseVersion}, which you started from: version ${latest.version} was published ${where}, so nothing was published`
+
+  try {
+    const files = await readArtifactVersionFiles(input.blobStorage, latest, signal)
+    await installed.replace(handle.sandbox, { artifact, version: latest }, files, signal, {
+      edited: latest.origin?.threadId !== input.run.threadId,
+    })
+  } catch (error) {
+    if (signal.aborted) throw error
+    console.warn(
+      `[SixbAgentWorker] Could not install version ${latest.version} of artifact '${artifactId}':`,
+      error
+    )
+    return publishError(
+      VERSION_TOOL,
+      `${moved}. Version ${latest.version} could not be installed in the sandbox, so tell the user you could not build on it`
+    )
+  }
+
+  return publishError(
+    VERSION_TOOL,
+    `${moved}. $SIXB_ARTIFACTS lists version ${latest.version}, installed under $SIXB_ARTIFACTS_DIR/${artifactId}/: start again from it as it is, keep its changes, make yours again, and publish`
+  )
 }
 
 interface PublishSource {
