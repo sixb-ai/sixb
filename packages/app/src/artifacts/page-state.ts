@@ -17,6 +17,12 @@ const stateKey = (artifactId: string) => ["artifact-state", artifactId] as const
 const STATE_STALE_MS = 30_000
 
 /**
+ * The pages the reader only observes, through a conversation that shares them: the API keeps
+ * nothing for an observer, so the page runs on values kept in this tab, as one opened alone does.
+ */
+const readOnly = new Set<string>()
+
+/**
  * Each artifact's calls, one after another: a slider that writes as it moves writes its values in
  * the order it moved, and a read after a write reads what was written.
  */
@@ -86,6 +92,8 @@ async function runCall(
     })
   try {
     const kept = await keptValues(queries, artifactId)
+    if (readOnly.has(artifactId)) return answerInTab(kept, call, update)
+
     switch (call.method) {
       case "state.get":
         return kept.get(call.params.key)
@@ -116,14 +124,54 @@ async function runCall(
 }
 
 async function keptValues(queries: QueryClient, artifactId: string): Promise<KeptValues> {
+  // Read once: an observer's values live in this tab only, so a later read must not drop them.
+  if (readOnly.has(artifactId)) {
+    return queries.getQueryData<KeptValues>(stateKey(artifactId)) ?? new Map()
+  }
+
   return queries.fetchQuery({
     queryKey: stateKey(artifactId),
     queryFn: async () => {
-      const { data } = await getArtifactState({ path: { artifactId }, throwOnError: true })
-      return new Map(data.entries.map((entry) => [entry.key, entry.value])) as KeptValues
+      try {
+        const { data } = await getArtifactState({ path: { artifactId }, throwOnError: true })
+        return new Map(data.entries.map((entry) => [entry.key, entry.value])) as KeptValues
+      } catch (error) {
+        if (!isReadOnly(error)) throw error
+
+        readOnly.add(artifactId)
+        return new Map() as KeptValues
+      }
     },
     staleTime: STATE_STALE_MS,
   })
+}
+
+/** A call answered from this tab's values, which the API never sees. */
+function answerInTab(
+  kept: KeptValues,
+  call: FrameCall,
+  update: (change: (values: Map<string, unknown>) => void) => void
+): unknown {
+  switch (call.method) {
+    case "state.get":
+      return kept.get(call.params.key)
+    case "state.keys":
+      return [...kept.keys()].sort((left, right) => (left < right ? -1 : 1))
+    case "state.set":
+      update((values) => values.set(call.params.key, call.params.value))
+      return undefined
+    case "state.delete":
+      update((values) => values.delete(call.params.key))
+      return kept.has(call.params.key)
+  }
+}
+
+/** The API's refusal for an observer: they read the page but keep nothing in it. */
+function isReadOnly(error: unknown): boolean {
+  if (!isSixbApiError(error)) return false
+
+  const body = error.body as { code?: unknown } | null
+  return body?.code === "read_only"
 }
 
 /** What the page's promise rejects with: the API's own words when it gave any. */
