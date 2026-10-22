@@ -408,6 +408,8 @@ main().catch(async (error) => {
     // Loaded on demand, and never through JSX here: see `renderHelp` in `./ui`.
     const { renderCliError, renderHelp } = await import("./ui")
     if (error instanceof CliUsageError) await renderHelp(error.help, error.message)
+    // Backing out of a prompt is an answer, not a failure to explain.
+    else if (error instanceof Error && error.name === "PromptCancelledError") process.exit(130)
     else await renderCliError(error)
   }
   process.exit(exitCode)

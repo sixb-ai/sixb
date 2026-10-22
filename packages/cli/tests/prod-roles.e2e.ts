@@ -324,12 +324,12 @@ describe("role startup connection budget", () => {
   )
 
   test(
-    "sixb app serves outside a terminal without loading React or Ink",
+    "sixb app serves outside a terminal without loading React or a renderer",
     async () => {
       await writePrebuiltAssets(PREBUILT_APP)
       const [port, apiPort] = await getFreePorts(2)
-      // Ink's layout engine alone keeps about 45 MB resident. To see this fail, render the
-      // startup panel with Ink outside a terminal, or put JSX back in the CLI entrypoint.
+      // A renderer keeps tens of MB resident for the life of the process. To see this fail,
+      // import `ui/live/session` from `ui/index.ts`, or put JSX back in the CLI entrypoint.
       const { ready, logEntries } = await startRole(
         [
           "app",
@@ -354,8 +354,8 @@ describe("role startup connection budget", () => {
     async () => {
       await writePrebuiltAssets(PREBUILT_APP)
       const [port] = await getFreePorts(1)
-      // Outside a terminal the role prints the failure as plain lines. To see this fail, render
-      // it with Ink there: the panel can come out empty and the role exits 1 with no reason.
+      // Outside a terminal the role prints the failure as plain lines. To see this fail, render it
+      // with a live renderer there: no terminal answers it, and the role exits 1 with no reason.
       const result = await runCliToCompletion({
         cmd: ["bun", cliEntry, "app", "--entry", fixtureEntry, "--port", String(port)],
         cwd: repoRoot,

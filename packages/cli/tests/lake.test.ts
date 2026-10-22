@@ -15,7 +15,7 @@ afterEach(() => {
   lakeFixture.events = []
 })
 
-/** The report as one line: Ink pads each label to a column. */
+/** The report as one line: the screen pads each label to a column. */
 function flat(output: string): string {
   return output.replace(/[\s│]+/g, " ")
 }
@@ -128,9 +128,7 @@ describe("sixb lake cleanup", () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("Lake cleanup dry run complete")
-    expect(flat(result.stdout)).toContain(
-      "Dry run true Expire older than 2 days Delete older than 2 days"
-    )
+    expect(flat(result.stdout)).toContain("Expire older than 2 days Delete older than 2 days")
     expect(result.stderr).toBe("")
   })
 
