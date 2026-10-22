@@ -6,6 +6,56 @@ export const LanguageModelRefSchema = z.object({
   modelId: z.string().trim().min(1),
 })
 
+const DecimalSchema = z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/)
+
+const TokenPriceSchema = z.union([
+  DecimalSchema,
+  z.object({
+    default: DecimalSchema,
+    tiers: z.array(
+      z.object({
+        minTokens: z.number().int().nonnegative(),
+        maxTokens: z.number().int().positive().optional(),
+        price: DecimalSchema,
+      })
+    ),
+  }),
+])
+
+const VariantPriceSchema = z.union([
+  DecimalSchema,
+  z.object({
+    default: DecimalSchema.optional(),
+    variants: z.array(
+      z.object({
+        size: z.string().optional(),
+        quality: z.string().optional(),
+        style: z.string().optional(),
+        voiceTier: z.string().optional(),
+        price: DecimalSchema,
+      })
+    ),
+  }),
+])
+
+/** The prices a binding bills by. Absent when the price is unknown. */
+export const ModelRateCardSchema = z
+  .object({
+    currency: z.literal("USD"),
+    input: TokenPriceSchema.optional(),
+    output: TokenPriceSchema.optional(),
+    cacheReadInput: TokenPriceSchema.optional(),
+    cacheWriteInput: TokenPriceSchema.optional(),
+    cacheWriteInput5m: TokenPriceSchema.optional(),
+    cacheWriteInput1h: TokenPriceSchema.optional(),
+    imageOutput: TokenPriceSchema.optional(),
+    audioOutput: TokenPriceSchema.optional(),
+    images: VariantPriceSchema.optional(),
+    characters: VariantPriceSchema.optional(),
+    audioInputSeconds: VariantPriceSchema.optional(),
+  })
+  .describe("USD. Token and character prices are per million; images per image; audio per second.")
+
 export const LanguageModelSchema = LanguageModelRefSchema.extend({
   /**
    * The provider binding and model id the project configured. Together they identify the entry;
@@ -31,10 +81,55 @@ export const LanguageModelSchema = LanguageModelRefSchema.extend({
   reasoningLevels: z.array(z.enum(MODEL_REASONING_LEVELS)),
   /** Reasoning the project applies when a request selects this model without choosing one. */
   defaultReasoning: z.enum(MODEL_REASONING_LEVELS).optional(),
+  rateCard: ModelRateCardSchema.optional(),
+})
+
+const CatalogEntrySchema = LanguageModelRefSchema.extend({
+  isDefault: z.boolean(),
+  name: z.string().min(1),
+  description: z.string().min(1).optional(),
+  via: z.string().min(1).optional(),
+  rateCard: ModelRateCardSchema.optional(),
+})
+
+const ListSchema = z.array(z.string().min(1)).optional()
+
+export const ImageModelSchema = CatalogEntrySchema.extend({
+  maxImagesPerCall: z.number().int().positive().optional(),
+  sizes: ListSchema,
+  aspectRatios: ListSchema,
+  qualities: ListSchema,
+  styles: ListSchema,
+  inputImages: z
+    .object({
+      maxCount: z.number().int().positive(),
+      maxBytes: z.number().int().positive(),
+      mediaTypes: ListSchema,
+    })
+    .optional()
+    .describe("Reference images the model takes for edits; absent when it takes none."),
+})
+
+export const SpeechModelSchema = CatalogEntrySchema.extend({
+  defaultVoice: z.string().min(1).optional(),
+  voices: ListSchema,
+  outputMediaTypes: ListSchema,
+  maxInputCharacters: z.number().int().positive().optional(),
+  instructions: z.boolean().optional(),
+})
+
+export const TranscriptionModelSchema = CatalogEntrySchema.extend({
+  maxInputBytes: z.number().int().positive(),
+  mediaTypes: ListSchema,
 })
 
 export const ModelCatalogSchema = z.object({
   language: z.array(LanguageModelSchema),
+  image: z.array(ImageModelSchema),
+  audio: z.object({
+    speech: z.array(SpeechModelSchema),
+    transcription: z.array(TranscriptionModelSchema),
+  }),
 })
 
 export const ModelReasoningLevelSchema = z.enum(MODEL_REASONING_LEVELS)

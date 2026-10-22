@@ -5313,7 +5313,7 @@ export const listModelsQueryKey = (options?: Options<ListModelsData>) =>
   createQueryKey("listModels", options)
 
 /**
- * List the project model catalog
+ * List the project's models of every kind, with their options and prices
  */
 export const listModelsOptions = (options?: Options<ListModelsData>) =>
   queryOptions<

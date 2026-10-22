@@ -42939,7 +42939,7 @@
     },
     "/api/models": {
       "get": {
-        "summary": "List the project model catalog",
+        "summary": "List the project's models of every kind, with their options and prices",
         "tags": ["Models"],
         "operationId": "listModels",
         "responses": {
@@ -43059,6 +43059,489 @@
                               "xhigh",
                               "max"
                             ]
+                          },
+                          "rateCard": {
+                            "type": "object",
+                            "properties": {
+                              "currency": {
+                                "type": "string",
+                                "enum": ["USD"]
+                              },
+                              "input": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "output": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "cacheReadInput": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "cacheWriteInput": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "cacheWriteInput5m": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "cacheWriteInput1h": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "imageOutput": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "audioOutput": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "images": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "variants": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "size": {
+                                              "type": "string"
+                                            },
+                                            "quality": {
+                                              "type": "string"
+                                            },
+                                            "style": {
+                                              "type": "string"
+                                            },
+                                            "voiceTier": {
+                                              "type": "string"
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["variants"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "characters": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "variants": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "size": {
+                                              "type": "string"
+                                            },
+                                            "quality": {
+                                              "type": "string"
+                                            },
+                                            "style": {
+                                              "type": "string"
+                                            },
+                                            "voiceTier": {
+                                              "type": "string"
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["variants"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "audioInputSeconds": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "variants": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "size": {
+                                              "type": "string"
+                                            },
+                                            "quality": {
+                                              "type": "string"
+                                            },
+                                            "style": {
+                                              "type": "string"
+                                            },
+                                            "voiceTier": {
+                                              "type": "string"
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["variants"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              }
+                            },
+                            "required": ["currency"],
+                            "additionalProperties": false,
+                            "description": "USD. Token and character prices are per million; images per image; audio per second."
                           }
                         },
                         "required": [
@@ -43072,9 +43555,1666 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "image": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "modelId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "isDefault": {
+                            "type": "boolean"
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "via": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "rateCard": {
+                            "type": "object",
+                            "properties": {
+                              "currency": {
+                                "type": "string",
+                                "enum": ["USD"]
+                              },
+                              "input": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "output": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "cacheReadInput": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "cacheWriteInput": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "cacheWriteInput5m": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "cacheWriteInput1h": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "imageOutput": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "audioOutput": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "tiers": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "minTokens": {
+                                              "type": "integer",
+                                              "minimum": 0
+                                            },
+                                            "maxTokens": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": true,
+                                              "minimum": 0
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["minTokens", "price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["default", "tiers"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "images": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "variants": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "size": {
+                                              "type": "string"
+                                            },
+                                            "quality": {
+                                              "type": "string"
+                                            },
+                                            "style": {
+                                              "type": "string"
+                                            },
+                                            "voiceTier": {
+                                              "type": "string"
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["variants"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "characters": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "variants": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "size": {
+                                              "type": "string"
+                                            },
+                                            "quality": {
+                                              "type": "string"
+                                            },
+                                            "style": {
+                                              "type": "string"
+                                            },
+                                            "voiceTier": {
+                                              "type": "string"
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["variants"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "audioInputSeconds": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      "variants": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "size": {
+                                              "type": "string"
+                                            },
+                                            "quality": {
+                                              "type": "string"
+                                            },
+                                            "style": {
+                                              "type": "string"
+                                            },
+                                            "voiceTier": {
+                                              "type": "string"
+                                            },
+                                            "price": {
+                                              "type": "string",
+                                              "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                            }
+                                          },
+                                          "required": ["price"],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": ["variants"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              }
+                            },
+                            "required": ["currency"],
+                            "additionalProperties": false,
+                            "description": "USD. Token and character prices are per million; images per image; audio per second."
+                          },
+                          "maxImagesPerCall": {
+                            "type": "integer",
+                            "exclusiveMinimum": true,
+                            "minimum": 0
+                          },
+                          "sizes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "aspectRatios": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "qualities": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "styles": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "inputImages": {
+                            "type": "object",
+                            "properties": {
+                              "maxCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": true,
+                                "minimum": 0
+                              },
+                              "maxBytes": {
+                                "type": "integer",
+                                "exclusiveMinimum": true,
+                                "minimum": 0
+                              },
+                              "mediaTypes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": ["maxCount", "maxBytes"],
+                            "additionalProperties": false,
+                            "description": "Reference images the model takes for edits; absent when it takes none."
+                          }
+                        },
+                        "required": ["provider", "modelId", "isDefault", "name"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "audio": {
+                      "type": "object",
+                      "properties": {
+                        "speech": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "modelId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "isDefault": {
+                                "type": "boolean"
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "description": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "via": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "rateCard": {
+                                "type": "object",
+                                "properties": {
+                                  "currency": {
+                                    "type": "string",
+                                    "enum": ["USD"]
+                                  },
+                                  "input": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "output": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "cacheReadInput": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "cacheWriteInput": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "cacheWriteInput5m": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "cacheWriteInput1h": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "imageOutput": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "audioOutput": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "images": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "variants": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "size": {
+                                                  "type": "string"
+                                                },
+                                                "quality": {
+                                                  "type": "string"
+                                                },
+                                                "style": {
+                                                  "type": "string"
+                                                },
+                                                "voiceTier": {
+                                                  "type": "string"
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["variants"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "characters": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "variants": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "size": {
+                                                  "type": "string"
+                                                },
+                                                "quality": {
+                                                  "type": "string"
+                                                },
+                                                "style": {
+                                                  "type": "string"
+                                                },
+                                                "voiceTier": {
+                                                  "type": "string"
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["variants"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "audioInputSeconds": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "variants": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "size": {
+                                                  "type": "string"
+                                                },
+                                                "quality": {
+                                                  "type": "string"
+                                                },
+                                                "style": {
+                                                  "type": "string"
+                                                },
+                                                "voiceTier": {
+                                                  "type": "string"
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["variants"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": ["currency"],
+                                "additionalProperties": false,
+                                "description": "USD. Token and character prices are per million; images per image; audio per second."
+                              },
+                              "defaultVoice": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "voices": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "outputMediaTypes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "maxInputCharacters": {
+                                "type": "integer",
+                                "exclusiveMinimum": true,
+                                "minimum": 0
+                              },
+                              "instructions": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["provider", "modelId", "isDefault", "name"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "transcription": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "modelId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "isDefault": {
+                                "type": "boolean"
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "description": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "via": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "rateCard": {
+                                "type": "object",
+                                "properties": {
+                                  "currency": {
+                                    "type": "string",
+                                    "enum": ["USD"]
+                                  },
+                                  "input": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "output": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "cacheReadInput": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "cacheWriteInput": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "cacheWriteInput5m": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "cacheWriteInput1h": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "imageOutput": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "audioOutput": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "tiers": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "minTokens": {
+                                                  "type": "integer",
+                                                  "minimum": 0
+                                                },
+                                                "maxTokens": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": true,
+                                                  "minimum": 0
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["minTokens", "price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["default", "tiers"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "images": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "variants": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "size": {
+                                                  "type": "string"
+                                                },
+                                                "quality": {
+                                                  "type": "string"
+                                                },
+                                                "style": {
+                                                  "type": "string"
+                                                },
+                                                "voiceTier": {
+                                                  "type": "string"
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["variants"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "characters": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "variants": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "size": {
+                                                  "type": "string"
+                                                },
+                                                "quality": {
+                                                  "type": "string"
+                                                },
+                                                "style": {
+                                                  "type": "string"
+                                                },
+                                                "voiceTier": {
+                                                  "type": "string"
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["variants"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "audioInputSeconds": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "default": {
+                                            "type": "string",
+                                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                          },
+                                          "variants": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "size": {
+                                                  "type": "string"
+                                                },
+                                                "quality": {
+                                                  "type": "string"
+                                                },
+                                                "style": {
+                                                  "type": "string"
+                                                },
+                                                "voiceTier": {
+                                                  "type": "string"
+                                                },
+                                                "price": {
+                                                  "type": "string",
+                                                  "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$"
+                                                }
+                                              },
+                                              "required": ["price"],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["variants"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": ["currency"],
+                                "additionalProperties": false,
+                                "description": "USD. Token and character prices are per million; images per image; audio per second."
+                              },
+                              "maxInputBytes": {
+                                "type": "integer",
+                                "exclusiveMinimum": true,
+                                "minimum": 0
+                              },
+                              "mediaTypes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "modelId",
+                              "isDefault",
+                              "name",
+                              "maxInputBytes"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": ["speech", "transcription"],
+                      "additionalProperties": false
                     }
                   },
-                  "required": ["language"],
+                  "required": ["language", "image", "audio"],
                   "additionalProperties": false
                 }
               }
