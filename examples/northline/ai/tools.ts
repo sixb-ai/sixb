@@ -1,33 +1,4 @@
-import { type AgentToolResult, defineAgentTool, stringEnum } from "@sixb/core"
-import { gateway, generateImage } from "ai"
-
-const IMAGE_MODEL = "xai/grok-imagine-image-2.0"
-
-export const generateImageTool = defineAgentTool("generate_image")
-  .description("Generate an image from a text prompt and return it as an attachment.")
-  .input({ prompt: "string" })
-  .run(async ({ input, files, signal }) => {
-    // Temporary example integration: AI Gateway observes this image call, but Sixb's current usage
-    // ledger records only the worker-owned language-model calls that drive the agent loop.
-    const { image } = await generateImage({
-      model: gateway.image(IMAGE_MODEL),
-      prompt: input.prompt,
-      abortSignal: signal,
-    })
-    const { fileRef } = await files.put({
-      body: image.uint8Array,
-      fileName: `generated-image.${imageFileExtension(image.mediaType)}`,
-      mediaType: image.mediaType,
-    })
-    const result: AgentToolResult = {
-      kind: "agentToolResult",
-      content: [
-        { type: "text", text: "Generated an image." },
-        { type: "file", fileRef },
-      ],
-    }
-    return result
-  })
+import { defineAgentTool, stringEnum } from "@sixb/core"
 
 export const lookupResponsePolicy = defineAgentTool("lookup_response_policy")
   .description(
@@ -55,10 +26,3 @@ export const lookupResponsePolicy = defineAgentTool("lookup_response_policy")
       policyBasis: "Northline service response policy",
     }
   })
-
-function imageFileExtension(mediaType: string): string {
-  if (mediaType === "image/jpeg") return "jpg"
-  if (mediaType === "image/webp") return "webp"
-  if (mediaType === "image/gif") return "gif"
-  return "png"
-}
