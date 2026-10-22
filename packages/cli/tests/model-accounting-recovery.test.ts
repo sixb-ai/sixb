@@ -69,6 +69,8 @@ for (const mode of ["cohost", "worker-group"] as const) {
               getLatestForExecution: (input) => usage.getLatestForExecution(input),
               summarizeExecution: (input) => usage.summarizeExecution(input),
               summarizeExecutions: (input) => usage.summarizeExecutions(input),
+              recordModelCallFiles: (input) => usage.recordModelCallFiles(input),
+              getModelCallFiles: (input) => usage.getModelCallFiles(input),
               recordModelCall: (input) => {
                 if (!available) throw new Error("accounting temporarily unavailable")
                 return usage.recordModelCall(input)

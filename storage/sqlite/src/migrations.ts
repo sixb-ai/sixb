@@ -284,6 +284,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("070-forked-context-checkpoints", forkedContextCheckpointsSql),
     sqliteSql("071-unique-values", uniqueValuesSql),
     sqliteSql("072-generated-media-usage", generatedMediaUsageSql),
+    sqliteSql("073-model-call-files", modelCallFilesSql),
   ],
 })
 
@@ -653,3 +654,4 @@ import uniqueValuesSql from "./migrations/071-unique-values.sql" with { type: "t
 import generatedMediaUsageSql from "./migrations/072-generated-media-usage.sql" with {
   type: "text",
 }
+import modelCallFilesSql from "./migrations/073-model-call-files.sql" with { type: "text" }

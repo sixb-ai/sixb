@@ -112,6 +112,7 @@ const SHIPPED_MIGRATIONS = [
   "072-forked-context-checkpoints",
   "073-unique-values",
   "074-generated-media-usage",
+  "075-model-call-files",
 ]
 
 const steps = postgresStorageMigrations.steps

@@ -1,14 +1,23 @@
-import { assertAiUsageExecutionId, normalizeAiModelCallRecord } from "@sixb/core/internal/storage"
+import type { FileRef } from "@sixb/core/blob-storage/server"
+import {
+  assertAiUsageExecutionId,
+  assertSameCallExecution,
+  normalizeAiModelCallFilesRecord,
+  normalizeAiModelCallRecord,
+} from "@sixb/core/internal/storage"
 import { isModelReasoning, normalizeModelProviderIds } from "@sixb/core/models"
 import type { ReadonlyJsonObject } from "@sixb/core/storage"
 import {
+  type AiModelCallFilesRecord,
   type AiModelCallUsageInput,
   type AiModelCallUsageRecord,
   type AiUsageExecutionSummary,
   type AiUsageStorage,
   AiUsageStorageError,
   aggregateAiModelCallUsage,
+  type GetAiModelCallFilesInput,
   type GetLatestAiModelCallForExecutionInput,
+  type RecordAiModelCallFilesInput,
   type RecordAiModelCallInput,
   type RecordAiModelCallResult,
   type SummarizeAiUsageExecutionInput,
@@ -243,6 +252,48 @@ export class PgAiUsageStorage implements AiUsageStorage {
     `
   }
 
+  async recordModelCallFiles(input: RecordAiModelCallFilesInput): Promise<AiModelCallFilesRecord> {
+    const record = normalizeAiModelCallFilesRecord(input)
+    return runPgTransaction(this.sql, async (tx) => {
+      const existing = await this.findCallFiles(tx, record.projectId, record.callId)
+      if (existing) return assertSameCallExecution(existing, record)
+      await this.assertExecutionExists(tx, record.projectId, record.executionId)
+      const inserted = await tx<CallFilesRow[]>`
+        INSERT INTO ai_model_call_files (project_id, call_id, execution_id, files, recorded_at)
+        VALUES (
+          ${record.projectId},
+          ${record.callId},
+          ${record.executionId},
+          ${JSON.stringify(record.files)}::text::jsonb,
+          ${record.recordedAt}
+        )
+        ON CONFLICT (project_id, call_id) DO NOTHING
+        RETURNING *
+      `
+      if (inserted[0]) return callFilesFromRow(inserted[0])
+      // Another writer recorded this call between the read and the insert.
+      const concurrent = await this.findCallFiles(tx, record.projectId, record.callId)
+      if (!concurrent) throw new Error("[SixbPg] AI model-call files disappeared after a conflict.")
+      return assertSameCallExecution(concurrent, record)
+    })
+  }
+
+  async getModelCallFiles(input: GetAiModelCallFilesInput): Promise<AiModelCallFilesRecord | null> {
+    assertNonBlankProjectId(input.projectId)
+    return this.findCallFiles(this.sql, input.projectId, input.callId)
+  }
+
+  private async findCallFiles(
+    sql: PgStoreClient,
+    projectId: string,
+    callId: string
+  ): Promise<AiModelCallFilesRecord | null> {
+    const [row] = await sql<CallFilesRow[]>`
+      SELECT * FROM ai_model_call_files WHERE project_id = ${projectId} AND call_id = ${callId}
+    `
+    return row ? callFilesFromRow(row) : null
+  }
+
   private async assertExecutionExists(
     sql: PgStoreClient,
     projectId: string,
@@ -258,6 +309,24 @@ export class PgAiUsageStorage implements AiUsageStorage {
       "missing_execution",
       `[SixbPg] AI usage execution '${executionId}' does not exist in project '${projectId}'.`
     )
+  }
+}
+
+interface CallFilesRow {
+  readonly project_id: string
+  readonly call_id: string
+  readonly execution_id: string
+  readonly files: FileRef[] | string
+  readonly recorded_at: Date | string
+}
+
+function callFilesFromRow(row: CallFilesRow): AiModelCallFilesRecord {
+  return {
+    projectId: row.project_id,
+    executionId: row.execution_id,
+    callId: row.call_id,
+    files: typeof row.files === "string" ? (JSON.parse(row.files) as FileRef[]) : row.files,
+    recordedAt: new Date(row.recorded_at),
   }
 }
 

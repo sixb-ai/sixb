@@ -95,7 +95,9 @@ Admission reserves the binding's `estimateReservation`, keyed by the request's s
 style; without one, cost limits refuse the call. The call is recorded before its images are
 validated or written: `outputImages` is the number the provider actually returned, whatever its
 own usage says, and the same dimensions select the rate-card variant. Generated images are written
-to blob storage only after accounting, so a cancelled call is billed but stores nothing.
+to blob storage only after accounting, so a cancelled call is billed but stores nothing. Once
+written, they are recorded against the call ID (`aiUsage.recordModelCallFiles`), which is how a
+caller outside the process reads them back; the execution that made the call decides who may.
 
 ## Speech flow
 

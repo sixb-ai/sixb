@@ -94,6 +94,7 @@ describe("speech generation", () => {
   })
 
   // Removal proof: omit onModelCallEnd in audio/speech.ts; the durable-usage assertion fails.
+  // Removal proof: omit recordFiles in audio/speech.ts; the call's file is not found.
   test("stores the audio and records the call's characters, kind and cost", async () => {
     const { sixb, blobStorage, storage, identity } = await setup()
 
@@ -111,6 +112,12 @@ describe("speech generation", () => {
       callId: result.callId,
       usage: { inputCharacters: 12, reportingStatus: "partial" },
     })
+    expect(
+      await storage.aiUsage.getModelCallFiles({
+        projectId: identity.projectId,
+        callId: result.callId,
+      })
+    ).toMatchObject({ executionId: identity.executionId, files: [result.file] })
   })
 
   test("falls back to the binding's voice and passes the request through", async () => {

@@ -1,14 +1,23 @@
-import { assertAiUsageExecutionId, normalizeAiModelCallRecord } from "@sixb/core/internal/storage"
+import type { FileRef } from "@sixb/core/blob-storage/server"
+import {
+  assertAiUsageExecutionId,
+  assertSameCallExecution,
+  normalizeAiModelCallFilesRecord,
+  normalizeAiModelCallRecord,
+} from "@sixb/core/internal/storage"
 import { isModelReasoning, normalizeModelProviderIds } from "@sixb/core/models"
 import type { ReadonlyJsonObject } from "@sixb/core/storage"
 import {
+  type AiModelCallFilesRecord,
   type AiModelCallUsageInput,
   type AiModelCallUsageRecord,
   type AiUsageExecutionSummary,
   type AiUsageStorage,
   AiUsageStorageError,
   aggregateAiModelCallUsage,
+  type GetAiModelCallFilesInput,
   type GetLatestAiModelCallForExecutionInput,
+  type RecordAiModelCallFilesInput,
   type RecordAiModelCallInput,
   type RecordAiModelCallResult,
   type SummarizeAiUsageExecutionInput,
@@ -110,8 +119,52 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
     return aggregateExecutionRows(input.executionIds, rows)
   }
 
+  async recordModelCallFiles(input: RecordAiModelCallFilesInput): Promise<AiModelCallFilesRecord> {
+    const record = normalizeAiModelCallFilesRecord(input)
+    return runImmediateTransaction(this.connection.db, () => {
+      const existing = this.findCallFiles(record.projectId, record.callId)
+      if (existing) return assertSameCallExecution(existing, record)
+      this.assertExecutionExists(record.projectId, record.executionId)
+      this.connection.db
+        .query(
+          `
+            INSERT INTO ai_model_call_files (project_id, call_id, execution_id, files, recorded_at)
+            VALUES (?, ?, ?, ?, ?)
+          `
+        )
+        .run(
+          record.projectId,
+          record.callId,
+          record.executionId,
+          JSON.stringify(record.files),
+          record.recordedAt.toISOString()
+        )
+      return record
+    })
+  }
+
+  async getModelCallFiles(input: GetAiModelCallFilesInput): Promise<AiModelCallFilesRecord | null> {
+    assertNonBlankProjectId(input.projectId)
+    return this.findCallFiles(input.projectId, input.callId)
+  }
+
   close(): void {
     closeSqliteStoreConnection(this.connection)
+  }
+
+  private findCallFiles(projectId: string, callId: string): AiModelCallFilesRecord | null {
+    const row = this.connection.db
+      .query("SELECT * FROM ai_model_call_files WHERE project_id = ? AND call_id = ?")
+      .get(projectId, callId) as CallFilesRow | null
+    return row
+      ? {
+          projectId: row.project_id,
+          executionId: row.execution_id,
+          callId: row.call_id,
+          files: JSON.parse(row.files) as FileRef[],
+          recordedAt: new Date(row.recorded_at),
+        }
+      : null
   }
 
   private insertRecord(record: AiModelCallUsageRecord): void {
@@ -291,6 +344,14 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
       `[SixbSqlite] AI usage execution '${executionId}' does not exist in project '${projectId}'.`
     )
   }
+}
+
+interface CallFilesRow {
+  readonly project_id: string
+  readonly call_id: string
+  readonly execution_id: string
+  readonly files: string
+  readonly recorded_at: string
 }
 
 interface AiUsageRow {
