@@ -10,9 +10,11 @@ import {
 } from "@sixb/ui/components"
 import { memo, useMemo } from "react"
 import { hasLiveContent, type LiveRunState } from "../live-run"
+import { useMessageAuthors } from "../message-authors"
 import type { AgentContextEntryInput, AgentFileRef, AgentMessage } from "../types"
 import { ContextChips } from "./context-chips"
 import {
+  AuthorLine,
   LiveAssistant,
   MessageView,
   ReconnectingMarker,
@@ -72,6 +74,8 @@ export function Transcript({
   continuing,
   reconnecting,
 }: TranscriptProps) {
+  const authors = useMessageAuthors()
+
   // Keep the live row until the finalized assistant message is present in durable state, so the
   // handoff from streaming to stored content never flashes empty.
   const finalizedInDurable =
@@ -146,6 +150,7 @@ export function Transcript({
             pendingUserContext.length > 0 ? (
               <MessageScrollerItem messageId="pending-user" scrollAnchor>
                 <div className="flex flex-col items-end gap-1.5">
+                  <AuthorLine name={authors?.pending} />
                   <ContextChips entries={pendingUserContext} className="justify-end" />
                   {pendingUserAttachments.length > 0 ? (
                     <div className="flex max-w-[min(80%,32rem)] flex-col items-end gap-1.5">
