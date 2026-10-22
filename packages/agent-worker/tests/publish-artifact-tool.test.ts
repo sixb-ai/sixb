@@ -13,11 +13,16 @@ import { dirname, join } from "node:path"
 import {
   AgentToolPublicError,
   InMemoryBlobStorage,
+  InMemoryBroker,
+  InMemoryLakeStorage,
+  InMemoryQueues,
   InMemoryStorage,
   type JsonValue,
   type Principal,
+  SixbHost,
 } from "@sixb/core"
-import { createTestAgentExecution } from "@sixb/core/testing"
+import { emptyGrantIndex } from "@sixb/core/internal/authorization"
+import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
 import { type InstalledArtifacts, materializeThreadArtifacts } from "../src/artifacts/materialize"
 import { createPublishArtifactTools } from "../src/artifacts/publish-tool"
 import { AgentExecutionLostError } from "../src/errors"
@@ -33,12 +38,34 @@ const context = { signal: new AbortController().signal, callId: "call", toolCall
 let root: string
 let storage: InMemoryStorage
 let blobStorage: InMemoryBlobStorage
+let host: SixbHost
+
+/** What a turn asked for by this user reads of artifacts, by the project's one rule. */
+function readerFor(user: Principal) {
+  return createTestSixb(host, {
+    authorization: {
+      principal: user,
+      groupIds: [],
+      roleIds: [],
+      grants: { ...emptyGrantIndex(), "run:agent": true },
+    },
+  }).artifacts
+}
 
 beforeEach(async () => {
   // realpath: on macOS the temporary directory sits behind the /var → /private/var symlink.
   root = realpathSync(mkdtempSync(join(tmpdir(), "sixb-publish-")))
   storage = new InMemoryStorage()
   blobStorage = new InMemoryBlobStorage()
+  host = new SixbHost({
+    id: projectId,
+    ontology: [],
+    storage,
+    blobStorage,
+    broker: new InMemoryBroker(),
+    lakeStorage: new InMemoryLakeStorage(),
+    queues: new InMemoryQueues(),
+  })
   await storage.agents.threads.create({ id: run.threadId, projectId, ownerPrincipal: owner })
   const executionId = await createTestAgentExecution(storage, { projectId, runId: run.id })
   await storage.agents.runs.create({
@@ -68,19 +95,22 @@ type ToolOptions = {
   readonly executionToken?: string
   /** The run's install; each call is a run of its own without one. */
   readonly installed?: Promise<InstalledArtifacts>
+  /** Who asked for the turn; the thread's owner when omitted. */
+  readonly author?: Principal
 }
 
 /** What a run installs in its sandbox before it publishes. */
-function install(options: { readonly maxBytes?: number } = {}): Promise<InstalledArtifacts> {
+function install(
+  options: { readonly maxBytes?: number; readonly requester?: Principal } = {}
+): Promise<InstalledArtifacts> {
+  const { requester, ...rest } = options
   return materializeThreadArtifacts({
-    projectId,
     threadId: run.threadId,
-    owner,
-    storage: storage.artifacts,
+    artifacts: readerFor(requester ?? owner),
     blobStorage,
     directory: ".sixb/agent/artifacts",
     manifestPath: ".sixb/agent/context/artifacts.json",
-    ...options,
+    ...rest,
   })
 }
 
@@ -103,12 +133,14 @@ function tools(options: ToolOptions = {}) {
     projectId,
     storage,
     artifacts: storage.artifacts,
+    reader: readerFor(options.author ?? owner),
     blobStorage,
     run: { ...run, executionToken: options.executionToken ?? run.executionToken },
     owner,
+    author: options.author ?? owner,
     budget: options.budget ?? new AgentFileBudget(),
     resolveSandbox: async () => ({ sandbox: sandbox() }),
-    installed: options.installed ?? install(),
+    installed: options.installed ?? install({ requester: options.author ?? owner }),
   })
   return { create, version }
 }
@@ -409,9 +441,11 @@ describe("publish_artifact", () => {
       projectId,
       storage,
       artifacts: storage.artifacts,
+      reader: readerFor(owner),
       blobStorage,
       run,
       owner,
+      author: owner,
       budget: new AgentFileBudget(),
       installed: install(),
       resolveSandbox: async () => {
@@ -671,10 +705,8 @@ describe("materializeThreadArtifacts", () => {
     expect(bounded.files).toHaveLength(1)
 
     const elsewhere = await materializeThreadArtifacts({
-      projectId,
       threadId: "thr_other",
-      owner,
-      storage: storage.artifacts,
+      artifacts: readerFor(owner),
       blobStorage,
       directory: ".sixb/agent/artifacts",
       manifestPath: ".sixb/agent/context/artifacts.json",
@@ -827,10 +859,8 @@ describe("materializeThreadArtifacts", () => {
       return stalled
     }
     const installing = materializeThreadArtifacts({
-      projectId,
       threadId: run.threadId,
-      owner,
-      storage: storage.artifacts,
+      artifacts: readerFor(owner),
       blobStorage,
       directory: ".sixb/agent/artifacts",
       manifestPath: ".sixb/agent/context/artifacts.json",
