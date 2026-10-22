@@ -63,6 +63,8 @@ describe("what the agent's models made", () => {
 
     expect(html).toContain("/api/ai/model-calls/call_van/files/content?path=%2Ffiles%2F0")
     expect(html).toContain("A red delivery van")
+    // However long the request, its caption is held to two lines.
+    expect(html).toMatch(/line-clamp-2[^>]*>A red delivery van/)
     // The model and the command stay inside the closed work group.
     expect(html).not.toContain("bfl/flux")
     expect(html).not.toContain("sixb models image")

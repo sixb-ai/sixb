@@ -2,7 +2,7 @@ import { getAiModelCallOptions } from "@sixb/client/hooks"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import { ImagePlus, Maximize2, Pause, Play } from "lucide-react"
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react"
+import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { type FileSource, modelCallFileSource } from "../../artifacts/file-source"
 import { useArtifactPanel } from "../artifact-panel"
 import { useAgentMessages } from "../i18n"
@@ -182,7 +182,11 @@ function Caption({
   return (
     <figcaption className="max-w-[26rem] space-y-0.5 px-0.5">
       {text ? (
-        <p className="line-clamp-2 text-[12.5px] leading-snug text-muted-foreground">{text}</p>
+        <ClampedText
+          text={text}
+          lines={2}
+          className="text-[12.5px] leading-snug text-muted-foreground"
+        />
       ) : null}
       {sources?.length ? (
         <p className="flex items-center gap-1 text-[11.5px] text-muted-foreground/60">
@@ -215,9 +219,11 @@ function SpeechResult({
       )}
       {media.text ? (
         <figcaption className="max-w-[26rem] px-0.5">
-          <p className="line-clamp-3 text-[12.5px] leading-snug text-muted-foreground">
-            “{media.text}”
-          </p>
+          <ClampedText
+            text={`“${media.text}”`}
+            lines={2}
+            className="text-[12.5px] leading-snug text-muted-foreground"
+          />
         </figcaption>
       ) : null}
     </figure>
@@ -358,8 +364,6 @@ function TranscriptResult({
   readonly media: Extract<ModelMedia, { kind: "transcript" }>
   readonly running: boolean
 }) {
-  const messages = useAgentMessages().modelMedia
-  const [open, setOpen] = useState(false)
   if (running || media.text === undefined) {
     return (
       <div className="w-[min(26rem,100%)] space-y-2 rounded-xl bg-muted/60 px-3.5 py-3 dark:bg-white/[0.04]">
@@ -368,22 +372,63 @@ function TranscriptResult({
       </div>
     )
   }
-  const long = media.text.length > 420
   return (
-    <div className="max-w-[34rem] space-y-1">
-      <blockquote
-        className={cn(
-          "rounded-xl bg-muted/60 px-3.5 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap text-foreground/85 dark:bg-white/[0.04]",
-          long && !open && "line-clamp-5"
-        )}
-      >
-        {media.text}
-      </blockquote>
-      {long ? (
+    <div className="max-w-[34rem] rounded-xl bg-muted/60 px-3.5 py-2.5 dark:bg-white/[0.04]">
+      <ClampedText
+        text={media.text}
+        lines={5}
+        className="text-[13.5px] leading-relaxed whitespace-pre-line text-foreground/85"
+      />
+    </div>
+  )
+}
+
+const CLAMP: Readonly<Record<number, string>> = {
+  2: "line-clamp-2",
+  5: "line-clamp-5",
+  8: "line-clamp-8",
+}
+
+/**
+ * Text held to a few lines, however long the request or answer was. "Show more" appears only when
+ * lines are actually hidden, and opens the rest in place.
+ */
+function ClampedText({
+  text,
+  lines,
+  className,
+}: {
+  readonly text: string
+  readonly lines: 2 | 5 | 8
+  readonly className: string
+}) {
+  const messages = useAgentMessages().modelMedia
+  const element = useRef<HTMLParagraphElement>(null)
+  const [open, setOpen] = useState(false)
+  const [clipped, setClipped] = useState(false)
+
+  useLayoutEffect(() => {
+    const node = element.current
+    if (!node || open) return
+    const measure = () => setClipped(node.scrollHeight > node.clientHeight + 1)
+    measure()
+    if (typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [open, text])
+
+  return (
+    <div>
+      <p ref={element} className={cn(className, "break-words", !open && CLAMP[lines])}>
+        {text}
+      </p>
+      {clipped || open ? (
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}
-          className="px-3.5 text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+          aria-expanded={open}
+          className="mt-0.5 text-[11.5px] font-medium text-muted-foreground/70 transition-colors outline-none hover:text-foreground focus-visible:text-foreground"
         >
           {open ? messages.less : messages.more}
         </button>
@@ -401,12 +446,18 @@ export function ModelAnswerView({
   return (
     <div className="max-w-[34rem] space-y-1.5">
       {media.prompt ? (
-        <p className="line-clamp-2 text-[12.5px] text-muted-foreground">{media.prompt}</p>
+        <ClampedText
+          text={media.prompt}
+          lines={2}
+          className="text-[12.5px] text-muted-foreground"
+        />
       ) : null}
       {media.text ? (
-        <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap text-foreground/85">
-          {media.text}
-        </p>
+        <ClampedText
+          text={media.text}
+          lines={8}
+          className="text-[13.5px] leading-relaxed whitespace-pre-line text-foreground/85"
+        />
       ) : null}
     </div>
   )
