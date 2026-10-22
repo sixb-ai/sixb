@@ -14745,7 +14745,541 @@ export type ListModelsResponses = {
         | "high"
         | "xhigh"
         | "max"
+      /**
+       * USD. Token and character prices are per million; images per image; audio per second.
+       */
+      rateCard?: {
+        currency: "USD"
+        input?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        output?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheReadInput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheWriteInput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheWriteInput5m?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheWriteInput1h?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        imageOutput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        audioOutput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        images?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                price: string
+              }>
+            }
+        characters?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                price: string
+              }>
+            }
+        audioInputSeconds?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                price: string
+              }>
+            }
+      }
     }>
+    image: Array<{
+      provider: string
+      modelId: string
+      isDefault: boolean
+      name: string
+      description?: string
+      via?: string
+      /**
+       * USD. Token and character prices are per million; images per image; audio per second.
+       */
+      rateCard?: {
+        currency: "USD"
+        input?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        output?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheReadInput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheWriteInput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheWriteInput5m?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        cacheWriteInput1h?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        imageOutput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        audioOutput?:
+          | string
+          | {
+              default: string
+              tiers: Array<{
+                minTokens: number
+                maxTokens?: number
+                price: string
+              }>
+            }
+        images?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                price: string
+              }>
+            }
+        characters?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                price: string
+              }>
+            }
+        audioInputSeconds?:
+          | string
+          | {
+              default?: string
+              variants: Array<{
+                size?: string
+                quality?: string
+                style?: string
+                voiceTier?: string
+                price: string
+              }>
+            }
+      }
+      maxImagesPerCall?: number
+      sizes?: Array<string>
+      aspectRatios?: Array<string>
+      qualities?: Array<string>
+      styles?: Array<string>
+      /**
+       * Reference images the model takes for edits; absent when it takes none.
+       */
+      inputImages?: {
+        maxCount: number
+        maxBytes: number
+        mediaTypes?: Array<string>
+      }
+    }>
+    audio: {
+      speech: Array<{
+        provider: string
+        modelId: string
+        isDefault: boolean
+        name: string
+        description?: string
+        via?: string
+        /**
+         * USD. Token and character prices are per million; images per image; audio per second.
+         */
+        rateCard?: {
+          currency: "USD"
+          input?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          output?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheReadInput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheWriteInput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheWriteInput5m?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheWriteInput1h?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          imageOutput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          audioOutput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          images?:
+            | string
+            | {
+                default?: string
+                variants: Array<{
+                  size?: string
+                  quality?: string
+                  style?: string
+                  voiceTier?: string
+                  price: string
+                }>
+              }
+          characters?:
+            | string
+            | {
+                default?: string
+                variants: Array<{
+                  size?: string
+                  quality?: string
+                  style?: string
+                  voiceTier?: string
+                  price: string
+                }>
+              }
+          audioInputSeconds?:
+            | string
+            | {
+                default?: string
+                variants: Array<{
+                  size?: string
+                  quality?: string
+                  style?: string
+                  voiceTier?: string
+                  price: string
+                }>
+              }
+        }
+        defaultVoice?: string
+        voices?: Array<string>
+        outputMediaTypes?: Array<string>
+        maxInputCharacters?: number
+        instructions?: boolean
+      }>
+      transcription: Array<{
+        provider: string
+        modelId: string
+        isDefault: boolean
+        name: string
+        description?: string
+        via?: string
+        /**
+         * USD. Token and character prices are per million; images per image; audio per second.
+         */
+        rateCard?: {
+          currency: "USD"
+          input?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          output?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheReadInput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheWriteInput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheWriteInput5m?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          cacheWriteInput1h?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          imageOutput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          audioOutput?:
+            | string
+            | {
+                default: string
+                tiers: Array<{
+                  minTokens: number
+                  maxTokens?: number
+                  price: string
+                }>
+              }
+          images?:
+            | string
+            | {
+                default?: string
+                variants: Array<{
+                  size?: string
+                  quality?: string
+                  style?: string
+                  voiceTier?: string
+                  price: string
+                }>
+              }
+          characters?:
+            | string
+            | {
+                default?: string
+                variants: Array<{
+                  size?: string
+                  quality?: string
+                  style?: string
+                  voiceTier?: string
+                  price: string
+                }>
+              }
+          audioInputSeconds?:
+            | string
+            | {
+                default?: string
+                variants: Array<{
+                  size?: string
+                  quality?: string
+                  style?: string
+                  voiceTier?: string
+                  price: string
+                }>
+              }
+        }
+        maxInputBytes: number
+        mediaTypes?: Array<string>
+      }>
+    }
   }
 }
 

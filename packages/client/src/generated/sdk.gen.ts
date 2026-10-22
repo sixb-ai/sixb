@@ -3219,7 +3219,7 @@ export const headArtifactFileContent = <ThrowOnError extends boolean = false>(
   })
 
 /**
- * List the project model catalog
+ * List the project's models of every kind, with their options and prices
  */
 export const listModels = <ThrowOnError extends boolean = false>(
   options?: Options<ListModelsData, ThrowOnError>

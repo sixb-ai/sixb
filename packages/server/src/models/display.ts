@@ -1,29 +1,17 @@
 import type { LanguageModelEntry } from "@sixb/core"
 import {
   defineLanguageModel,
+  defineModelRateCard,
   type LanguageModelDefinition,
   ModelCatalogUnavailableError,
+  type ModelRateCard,
   type ModelReasoningLevel,
 } from "@sixb/core/models"
 
 /** Presentation only; the configured provider remains the source of model capabilities. */
 export async function languageModelDisplay(entry: LanguageModelEntry) {
-  let definition = entry.model.definition
-  try {
-    const resolved = await entry.model.resolve?.()
-    if (resolved) {
-      if (resolved.providerId !== entry.provider || resolved.modelId !== entry.modelId) {
-        throw new Error("[SixbServer] Resolved model identity does not match its catalog entry.")
-      }
-      definition = resolved.definition
-    }
-  } catch (error) {
-    if (!(error instanceof ModelCatalogUnavailableError)) throw error
-    console.warn(
-      `[SixbServer] Model metadata is unavailable for '${entry.provider}/${entry.modelId}'; using its configured definition.`
-    )
-  }
-  definition = defineLanguageModel(definition)
+  const model = await resolvedForDisplay(entry)
+  const definition = defineLanguageModel(model.definition)
   if (definition.providerId !== entry.provider || definition.modelId !== entry.modelId) {
     throw new Error("[SixbServer] Model definition identity does not match its catalog entry.")
   }
@@ -62,6 +50,51 @@ export async function languageModelDisplay(entry: LanguageModelEntry) {
         : { contextWindowTokens: definition.contextWindow }),
     },
     reasoningLevels: reasoningLevels(definition),
+    ...rateCardDisplay(model.rateCard),
+  }
+}
+
+interface DisplayedBinding<TModel> {
+  readonly provider: string
+  readonly modelId: string
+  readonly model: TModel & {
+    readonly providerId: string
+    readonly modelId: string
+    resolve?(): Promise<TModel>
+  }
+}
+
+/**
+ * A binding resolved for its metadata and prices, never for inference. An unavailable provider
+ * catalog leaves the configured binding, so the catalog still lists every model.
+ */
+export async function resolvedForDisplay<
+  TModel extends { readonly providerId: string; readonly modelId: string },
+>(entry: DisplayedBinding<TModel>): Promise<TModel> {
+  try {
+    const resolved = await entry.model.resolve?.()
+    if (!resolved) return entry.model
+    if (resolved.providerId !== entry.provider || resolved.modelId !== entry.modelId) {
+      throw new Error("[SixbServer] Resolved model identity does not match its catalog entry.")
+    }
+    return resolved
+  } catch (error) {
+    if (!(error instanceof ModelCatalogUnavailableError)) throw error
+    console.warn(
+      `[SixbServer] Model metadata is unavailable for '${entry.provider}/${entry.modelId}'; using its configured definition.`
+    )
+    return entry.model
+  }
+}
+
+/** A binding's prices, shown only when they form a valid card. */
+export function rateCardDisplay(card: ModelRateCard | undefined): { rateCard?: ModelRateCard } {
+  if (!card) return {}
+  try {
+    return { rateCard: defineModelRateCard(card) }
+  } catch {
+    console.warn("[SixbServer] A model binding's rate card is invalid; its price is not shown.")
+    return {}
   }
 }
 
