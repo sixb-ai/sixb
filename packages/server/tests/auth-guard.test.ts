@@ -331,6 +331,8 @@ describe("server auth guard", () => {
         headers,
       })
     )
+    // Removal proof: drop the listModels row from SIXB_API_ROUTES; `sixb models list` gets 403.
+    const acceptedModels = await app.fetch(new Request("http://localhost/api/models", { headers }))
     const rejectedAuthManagement = await app.fetch(
       new Request("http://localhost/api/auth/sessions", {
         headers,
@@ -352,6 +354,7 @@ describe("server auth guard", () => {
     expect(await accepted.json()).toEqual({ id: "test-project", locale: "en", timeZone: "UTC" })
     expect(acceptedTelemetryRead.status).toBe(404)
     expect(acceptedActionRunDetail.status).toBe(404)
+    expect(acceptedModels.status).toBe(200)
     expect(rejectedAuthManagement.status).toBe(403)
     // The token crosses the bearer-capable route boundary, then the authority-scoped ontology
     // deliberately makes an ObjectType without object.view indistinguishable from an unknown one.

@@ -7,6 +7,7 @@ import type {
   TranscriptionModelEntry,
 } from "@sixb/core/models"
 import type { Elysia } from "elysia"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { languageModelDisplay, rateCardDisplay, resolvedForDisplay } from "../models/display"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ModelCatalogSchema } from "../schemas/models"
@@ -137,6 +138,7 @@ export function registerModelRoutes(app: Elysia, host: SixbHostView) {
         summary: "List the project's models of every kind, with their options and prices",
         tags: [OPENAPI_TAGS.models.name],
         operationId: "listModels",
+        security: accessTokenSecurityRequirement("listModels"),
       },
     }
   )

@@ -629,6 +629,13 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: true,
   },
   {
+    operationId: "listModels",
+    method: "GET",
+    path: "/api/models",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
     operationId: "getAiAccountingOverview",
     method: "GET",
     path: "/api/ai/accounting/overview",

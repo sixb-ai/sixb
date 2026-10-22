@@ -42942,6 +42942,14 @@
         "summary": "List the project's models of every kind, with their options and prices",
         "tags": ["Models"],
         "operationId": "listModels",
+        "security": [
+          {
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Response for status 200",
