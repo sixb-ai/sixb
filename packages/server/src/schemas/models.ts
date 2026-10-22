@@ -1,5 +1,6 @@
 import { MODEL_REASONING_LEVELS } from "@sixb/core/models"
 import { z } from "zod"
+import { FileRefSchema } from "./files"
 
 export const LanguageModelRefSchema = z.object({
   provider: z.string().trim().min(1),
@@ -138,3 +139,13 @@ export const ModelReasoningSchema = z.union([
   ModelReasoningLevelSchema,
   z.object({ budgetTokens: z.number().int().nonnegative() }).strict(),
 ])
+
+export const ModelCallParamsSchema = z.object({
+  callId: z.string().min(1),
+})
+
+export const ModelCallSchema = z.object({
+  callId: z.string(),
+  files: z.array(FileRefSchema),
+  recordedAt: z.string(),
+})

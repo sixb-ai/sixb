@@ -3522,6 +3522,139 @@ export type ListAiModelCallGroupsResponses = {
 export type ListAiModelCallGroupsResponse =
   ListAiModelCallGroupsResponses[keyof ListAiModelCallGroupsResponses]
 
+export type GetAiModelCallData = {
+  body?: never
+  path: {
+    callId: string
+  }
+  query?: never
+  url: "/api/ai/model-calls/{callId}"
+}
+
+export type GetAiModelCallErrors = {
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetAiModelCallError = GetAiModelCallErrors[keyof GetAiModelCallErrors]
+
+export type GetAiModelCallResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    callId: string
+    files: Array<{
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }>
+    recordedAt: string
+  }
+}
+
+export type GetAiModelCallResponse = GetAiModelCallResponses[keyof GetAiModelCallResponses]
+
+export type GetAiModelCallFileContentData = {
+  body?: never
+  path: {
+    callId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
+  }
+  url: "/api/ai/model-calls/{callId}/files/content"
+}
+
+export type GetAiModelCallFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+}
+
+export type GetAiModelCallFileContentError =
+  GetAiModelCallFileContentErrors[keyof GetAiModelCallFileContentErrors]
+
+export type GetAiModelCallFileContentResponses = {
+  /**
+   * File content
+   */
+  200: Blob | File
+  /**
+   * Partial file content
+   */
+  206: Blob | File
+}
+
+export type GetAiModelCallFileContentResponse =
+  GetAiModelCallFileContentResponses[keyof GetAiModelCallFileContentResponses]
+
+export type HeadAiModelCallFileContentData = {
+  body?: never
+  path: {
+    callId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
+  }
+  url: "/api/ai/model-calls/{callId}/files/content"
+}
+
+export type HeadAiModelCallFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+}
+
+export type HeadAiModelCallFileContentError =
+  HeadAiModelCallFileContentErrors[keyof HeadAiModelCallFileContentErrors]
+
+export type HeadAiModelCallFileContentResponses = {
+  /**
+   * File content headers
+   */
+  200: unknown
+  /**
+   * Partial file content headers
+   */
+  206: unknown
+}
+
 export type GetProjectInfoData = {
   body?: never
   path?: never
