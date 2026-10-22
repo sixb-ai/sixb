@@ -102,6 +102,21 @@ export type {
   LanguageModelsRuntime,
   ModelsRuntime,
 } from "./generation-types"
+export type { ImageModelCatalog, ImageModelEntry } from "./image/catalog"
+export { ImageModelResponseError } from "./image/errors"
+export type {
+  ImageCostEstimator,
+  ImageData,
+  ImageGenerateInput,
+  ImageGenerateResult,
+  ImageModel,
+  ImageModelDefinition,
+  ImageModelRequest,
+  ImageModelResponseMetadata,
+  ImageModelResult,
+  ImageModelsRuntime,
+  ImageReservationInput,
+} from "./image/types"
 export type {
   LanguageModel,
   LanguageModelProvider,

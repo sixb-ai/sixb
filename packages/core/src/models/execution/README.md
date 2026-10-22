@@ -1,6 +1,6 @@
 # Model execution accounting
 
-Internal execution and accounting shared by language, embedding, decision and reranking calls. Application usage is
+Internal execution and accounting shared by language, embedding, decision, reranking and image calls. Application usage is
 documented in [Usage and limits](../../../../../docs/models/usage-and-limits.md).
 
 ## Execution boundary
@@ -83,3 +83,16 @@ must preserve their actual output-token meters even when their output price is z
 `DecisionModelResponseError` carries accounting metadata when protocol translation fails after
 a billable response. Other errors retain unknown usage. Recovery replays accounting, never
 inference. Decision-only projects use the existing recovery worker without an agent sandbox.
+
+## Image flow
+
+Image generation in `../image/runtime.ts` snapshots the request, resolves only a permitted catalog
+binding and checks it against the definition's sizes, counts and reference-image limits before
+reading any file. Reference images are read with the same size and digest checks as transcription
+audio (`../input-file.ts`).
+
+Admission reserves the binding's `estimateReservation`, keyed by the request's size, quality and
+style; without one, cost limits refuse the call. The call is recorded before its images are
+validated or written: `outputImages` is the number the provider actually returned, whatever its
+own usage says, and the same dimensions select the rate-card variant. Generated images are written
+to blob storage only after accounting, so a cancelled call is billed but stores nothing.

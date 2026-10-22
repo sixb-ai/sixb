@@ -7,10 +7,10 @@ import type { ModelCatalog } from "../catalog"
 import type { ModelCallEndEvent } from "../events"
 import type { AiModelCallRecorder } from "../execution/model-call-recorder"
 import type { ModelExecutionSession } from "../execution/session"
+import { prepareModelInputFile, readModelInputFile } from "../input-file"
 import { estimateModelCall, type ModelMoney } from "../pricing"
 import { assertTranscriptionModel } from "./catalog"
 import { TranscriptionModelResponseError } from "./errors"
-import { prepareTranscriptionFile, readTranscriptionFile } from "./file"
 import type {
   AudioModelsRuntime,
   TranscriptionModel,
@@ -29,7 +29,7 @@ export function createAudioRuntime(
     async transcribe(input) {
       assertProviderAccess(runtime, execution, "models.audio.transcribe")
 
-      const { audio, mediaType } = prepareTranscriptionFile(input.audio)
+      const { file: audio, mediaType } = prepareModelInputFile(input.audio, "audio")
       if (!blobs) {
         throw new Error("[SixbModels] Transcription requires blob storage.")
       }
@@ -54,7 +54,7 @@ export function createAudioRuntime(
       assertFileSupport(model, audio.sizeBytes, mediaType)
 
       signal.throwIfAborted()
-      const bytes = await readTranscriptionFile(blobs, audio, signal)
+      const bytes = await readModelInputFile(blobs, audio, signal)
       accounting.assertHealthy()
 
       const reservationCost = estimateReservationCost(model, bytes.byteLength, mediaType)

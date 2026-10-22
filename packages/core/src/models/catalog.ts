@@ -13,6 +13,8 @@ import {
   type ModelDefinition,
 } from "./definitions"
 import { assertEmbeddingModel, type EmbeddingModel } from "./embedding-model"
+import { createImageCatalog, type ImageModelCatalog } from "./image/catalog"
+import type { ImageModel } from "./image/types"
 import {
   type LanguageModel,
   MODEL_REASONING_LEVELS,
@@ -70,6 +72,7 @@ export interface ModelCatalog {
   readonly language?: LanguageModelCatalog
   readonly decision?: DecisionModelCatalog
   readonly embedding: EmbeddingModelCatalog
+  readonly image?: ImageModelCatalog
   readonly reranking?: RerankingModelCatalog
 }
 
@@ -80,6 +83,8 @@ export interface ModelCatalogInput {
   /** Ordered; the first entry is the project default decision model. */
   readonly decision?: readonly DecisionModel[]
   readonly embedding?: readonly EmbeddingModel[]
+  /** Ordered; the first entry is the default image model. */
+  readonly image?: readonly ImageModel[]
   /** Available rerankers; no default model and no automatic activation. */
   readonly reranking?: readonly RerankingModel[]
 }
@@ -112,21 +117,23 @@ export function createModelCatalog(input: ModelCatalogInput): ModelCatalog {
   const embedding = createEmbeddingCatalog(input.embedding)
   const decision = createDecisionCatalog(input.decision)
   const audio = createAudioCatalog(input.audio)
+  const image = createImageCatalog(input.image)
   const reranking = createRerankingCatalog(input.reranking)
 
   if (
     !language &&
     !decision &&
     !audio &&
+    !image &&
     embedding.list().length === 0 &&
     !reranking?.list().length
   ) {
     throw new RuntimeError(
-      "[Sixb] Configure at least one language, embedding, decision, audio or reranking model."
+      "[Sixb] Configure at least one language, embedding, decision, audio, image or reranking model."
     )
   }
 
-  return Object.freeze({ language, embedding, decision, audio, reranking })
+  return Object.freeze({ language, embedding, decision, audio, image, reranking })
 }
 
 function createRerankingCatalog(

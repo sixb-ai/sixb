@@ -1,24 +1,33 @@
 import { createHash } from "node:crypto"
-import type { BlobStorage, FileRef } from "../../blob-storage/types"
-import { isFileRef } from "../../blob-storage/validation"
+import type { BlobStorage, FileRef } from "../blob-storage/types"
+import { isFileRef } from "../blob-storage/validation"
 
 /** Snapshot caller-owned metadata before model resolution or storage introduces an await. */
-export function prepareTranscriptionFile(input: FileRef): { audio: FileRef; mediaType: string } {
+export function prepareModelInputFile(
+  input: FileRef,
+  type: "audio" | "image"
+): { file: FileRef; mediaType: string } {
   if (!isFileRef(input) || !Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0) {
-    throw new TypeError("[SixbModels] Transcription requires a nonempty FileRef.")
+    throw new TypeError(`[SixbModels] ${capitalize(type)} input must be a nonempty FileRef.`)
   }
 
-  const audio = { ...input }
-  const mediaType = audio.mediaType?.split(";", 1)[0]?.trim().toLowerCase()
-  if (!mediaType || !/^audio\/[a-z0-9.+-]+$/.test(mediaType)) {
-    throw new TypeError("[SixbModels] Audio FileRef must declare an audio mediaType.")
+  const file = { ...input }
+  const mediaType = file.mediaType?.split(";", 1)[0]?.trim().toLowerCase()
+  if (!mediaType || !new RegExp(`^${type}/[a-z0-9.+-]+$`).test(mediaType)) {
+    throw new TypeError(
+      `[SixbModels] ${capitalize(type)} FileRef must declare an ${type} mediaType.`
+    )
   }
 
-  return { audio, mediaType }
+  return { file, mediaType }
+}
+
+function capitalize(type: "audio" | "image"): string {
+  return type === "audio" ? "Audio" : "Image"
 }
 
 /** Read an already validated reference, bounded by its verified size and the model's limit. */
-export async function readTranscriptionFile(
+export async function readModelInputFile(
   storage: BlobStorage,
   file: FileRef,
   signal: AbortSignal
@@ -31,7 +40,7 @@ export async function readTranscriptionFile(
     info.digest !== file.digest ||
     info.sizeBytes !== file.sizeBytes
   ) {
-    throw new Error("[SixbModels] Audio reference does not match the stored file.")
+    throw new Error("[SixbModels] File reference does not match the stored file.")
   }
 
   const stream = await storage.open(file.blobId)
@@ -54,7 +63,7 @@ export async function readTranscriptionFile(
       signal.throwIfAborted()
       if (done) break
       if (!(value instanceof Uint8Array) || value.byteLength > bytes.byteLength - offset) {
-        throw new Error("[SixbModels] Audio stream exceeds its declared size.")
+        throw new Error("[SixbModels] File stream exceeds its declared size.")
       }
 
       bytes.set(value, offset)
@@ -63,7 +72,7 @@ export async function readTranscriptionFile(
     }
 
     if (offset !== file.sizeBytes || `sha256:${hash.digest("hex")}` !== file.digest) {
-      throw new Error("[SixbModels] Audio stream does not match its content-addressed reference.")
+      throw new Error("[SixbModels] File stream does not match its content-addressed reference.")
     }
 
     complete = true
