@@ -1,6 +1,7 @@
 import {
   participantsToAdd,
   planAgentThreadFork,
+  remapArtifactIds,
   snapshotAgentThreadSandboxParams,
   transitionAgentThreadSandbox,
 } from "@sixb/core/internal/agent-run-storage-provider"
@@ -233,6 +234,12 @@ export class PgAgentThreadStore implements AgentThreadStore {
             JOIN agent_messages AS message
               ON message.project_id = ${input.projectId} AND message.id = copy.source_id
           `
+          await remapCopiedParts(
+            tx,
+            input.projectId,
+            plan.messages.map((copy) => copy.id),
+            input.artifactCopies
+          )
         }
 
         if (plan.checkpoint) {
@@ -454,4 +461,28 @@ async function insertCopiedCheckpoint(
       ${checkpoint.createdAt}
     )
   `
+}
+
+/** The copied messages name the fork's copies of the source's artifacts. */
+async function remapCopiedParts(
+  sql: SQLClient,
+  projectId: string,
+  messageIds: readonly string[],
+  copies: Readonly<Record<string, string>> | undefined
+): Promise<void> {
+  if (!copies || Object.keys(copies).length === 0 || messageIds.length === 0) return
+
+  const rows = await sql<{ id: string; parts: string }[]>`
+    SELECT id, parts::text AS parts FROM agent_messages
+    WHERE project_id = ${projectId} AND id = ANY(${sql.array([...messageIds])}::text[])
+  `
+  for (const row of rows) {
+    const parts = remapArtifactIds(row.parts, copies)
+    if (parts === row.parts) continue
+
+    await sql`
+      UPDATE agent_messages SET parts = ${parts}::text::jsonb
+      WHERE project_id = ${projectId} AND id = ${row.id}
+    `
+  }
 }

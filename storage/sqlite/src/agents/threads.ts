@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite"
 import {
   participantsToAdd,
   planAgentThreadFork,
+  remapArtifactIds,
   snapshotAgentThreadSandboxParams,
   transitionAgentThreadSandbox,
 } from "@sixb/core/internal/agent-run-storage-provider"
@@ -205,6 +206,11 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
             JSON.stringify(plan.messages.map((copy) => [copy.sourceId, copy.id])),
             input.projectId
           )
+        this.remapCopiedParts(
+          input.projectId,
+          plan.messages.map((copy) => copy.id),
+          input.artifactCopies
+        )
 
         if (plan.checkpoint) {
           this.insertCopiedCheckpoint(plan.checkpoint)
@@ -473,6 +479,32 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
         checkpoint.summaryModelId,
         checkpoint.createdAt.toISOString()
       )
+  }
+
+  /** The copied messages name the fork's copies of the source's artifacts. */
+  private remapCopiedParts(
+    projectId: string,
+    messageIds: readonly string[],
+    copies: Readonly<Record<string, string>> | undefined
+  ): void {
+    if (!copies || Object.keys(copies).length === 0 || messageIds.length === 0) return
+
+    const rows = this.db
+      .query(
+        `SELECT id, parts FROM agent_messages
+         WHERE project_id = ? AND id IN (SELECT value FROM json_each(?))`
+      )
+      .all(projectId, JSON.stringify(messageIds)) as {
+      readonly id: string
+      readonly parts: string
+    }[]
+    const update = this.db.query(
+      "UPDATE agent_messages SET parts = ? WHERE project_id = ? AND id = ?"
+    )
+    for (const row of rows) {
+      const parts = remapArtifactIds(row.parts, copies)
+      if (parts !== row.parts) update.run(parts, projectId, row.id)
+    }
   }
 
   private requireThread(projectId: string, id: string): AgentThreadRecord {

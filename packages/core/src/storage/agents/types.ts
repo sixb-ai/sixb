@@ -106,6 +106,11 @@ export interface ForkAgentThreadInput {
   readonly sandboxParams?: AgentThreadSandboxParams
   /** Provider name of the fork's new sandbox; given exactly when `sandboxParams` is. */
   readonly sandboxName?: string
+  /**
+   * The source's shared artifacts, each id mapped to its copy's: the copied messages and summary
+   * name the copies instead.
+   */
+  readonly artifactCopies?: Readonly<Record<string, string>>
   readonly createdAt?: Date
 }
 
