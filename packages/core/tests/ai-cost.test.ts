@@ -195,6 +195,11 @@ describe("AI cost record validation", () => {
       rateCard: { currency: "USD", images: "0.008" },
     },
     {
+      name: "a transcription billed per second",
+      usage: { audioDurationMs: 1250 },
+      rateCard: { currency: "USD", audioInputSeconds: "0.0001" },
+    },
+    {
       name: "a character-priced speech call",
       usage: { inputCharacters: 12, audioDurationMs: 1160 },
       rateCard: { currency: "USD", characters: "15" },
@@ -228,6 +233,7 @@ describe("AI cost record validation", () => {
           ...recorded.usage,
           outputImages: (callUsage.outputImages ?? 0) + 1,
           inputCharacters: (callUsage.inputCharacters ?? 0) + 1,
+          audioDurationMs: (callUsage.audioDurationMs ?? 0) + 1,
           outputTokens: (callUsage.outputTokens ?? 0) + 1,
         },
       })

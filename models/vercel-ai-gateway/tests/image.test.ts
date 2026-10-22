@@ -225,6 +225,16 @@ test("catalog prices images by the variant a request matches, or not at all", as
       dimensions,
     })
 
+  expect((await provider.image("bfl/flux-3-image").resolve!()).rateCard).toEqual({
+    currency: "USD",
+    images: {
+      default: "0.048",
+      variants: [
+        { size: "768x768", price: "0.041" },
+        { size: "1024x1024", price: "0.048" },
+      ],
+    },
+  })
   expect(await estimate("bfl/flux-3-image", { size: "768x768" })).toMatchObject({
     money: { amountNanos: "82000000" },
     components: [{ meter: "images.output", variant: "768x768" }],

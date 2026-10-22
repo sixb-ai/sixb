@@ -155,6 +155,8 @@ export function estimateModelReservation(input: {
     if (input.outputImages === undefined) return undefined
     total += BigInt(input.outputImages) * reservationPrice(card.images, input.dimensions)
   }
+  // Nothing measures an audio file's duration before it is sent.
+  if (card.audioInputSeconds !== undefined) return undefined
   if (card.characters !== undefined) {
     if (input.inputCharacters === undefined) return undefined
     total += charge(input.inputCharacters, reservationPrice(card.characters, input.dimensions))
@@ -250,11 +252,15 @@ function rateUnits(
     }
   }
 
+  // Each card price, its meter, and the power of ten from its unit to nanos per million units.
+  // Audio duration is charged only where a card prices it: speech reports the duration of
+  // the audio it made, which nothing bills.
   const components: ModelCostComponent[] = []
   const missing: ModelCostMeter[] = []
-  for (const [meter, quantity, price, perUnit] of [
-    ["images.output", usage.outputImages, rateCard.images, true],
-    ["characters.input", usage.inputCharacters, rateCard.characters, false],
+  for (const [meter, quantity, price, exponent] of [
+    ["images.output", usage.outputImages, rateCard.images, 15],
+    ["characters.input", usage.inputCharacters, rateCard.characters, 9],
+    ["audio.input.milliseconds", usage.audioDurationMs, rateCard.audioInputSeconds, 12],
   ] as const) {
     if (price === undefined) continue
     if (quantity === undefined) {
@@ -265,8 +271,9 @@ function rateUnits(
     if (quantity === 0 && pricesTokens(rateCard)) continue
     const resolved = resolveModelVariantPrice(price, dimensions) ?? (quantity === 0 ? zero : null)
     if (!resolved) return { status: "unpriceable", reason: "unsupported-pricing-dimension" }
-    const rate = decimalDollarsToNanos(resolved.price) * (perUnit ? 1_000_000n : 1n)
-    components.push(componentAtRate(meter, quantity, rate, resolved.variant))
+    components.push(
+      componentAtRate(meter, quantity, scaledDecimal(resolved.price, exponent), resolved.variant)
+    )
   }
   if (missing.length > 0) {
     return { status: "unpriceable", reason: "missing-usage", missingMeters: missing }
@@ -584,6 +591,14 @@ function resolvePrice(price: ModelTokenPrice, tokens: number): string {
         tokens >= tier.minTokens && (tier.maxTokens === undefined || tokens < tier.maxTokens)
     )?.price ?? price.default
   )
+}
+
+/** A decimal price times 10^exponent, rounded half up at the first dropped digit. */
+function scaledDecimal(value: string, exponent: number): bigint {
+  const [whole = "0", fraction = ""] = value.split(".")
+  const kept = fraction.slice(0, exponent).padEnd(exponent, "0")
+  const roundUp = Number(fraction[exponent] ?? "0") >= 5
+  return BigInt(whole) * 10n ** BigInt(exponent) + BigInt(kept) + (roundUp ? 1n : 0n)
 }
 
 function decimalDollarsToNanos(value: string): bigint {

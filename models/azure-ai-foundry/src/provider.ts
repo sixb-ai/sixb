@@ -18,7 +18,7 @@ import {
 import { chatEvents } from "@sixb/model-protocols/chat"
 import { messagesEvents } from "@sixb/model-protocols/messages"
 import { responsesEvents } from "@sixb/model-protocols/responses"
-import { foundryEstimator, foundryUsage } from "./accounting"
+import { foundryEstimator, foundryUsage, type PricedEstimator } from "./accounting"
 import {
   type AzureAIFoundryCatalogOptions,
   type CatalogModel,
@@ -230,7 +230,7 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
 
 class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryModel<Protocol> {
   private readonly profile: ReturnType<typeof resolveModel>
-  private readonly estimator: ModelCostEstimator
+  private readonly estimator: PricedEstimator
   #execution?: FoundryModel<Protocol>
   #pendingExecution?: Promise<FoundryModel<Protocol>>
   get protocol(): Protocol {
@@ -244,6 +244,10 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
   }
   get costEstimator() {
     return this.#execution?.estimator ?? this.estimator
+  }
+  /** The card the estimator prices by; none with a custom costEstimator or unpriced options. */
+  get rateCard() {
+    return (this.#execution?.estimator ?? this.estimator).rateCard
   }
   private readonly options: AzureAIFoundryModelOptions & MessagesRequestOptions & ChatRequestOptions
   private readonly scope: string

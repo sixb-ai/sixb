@@ -1,5 +1,5 @@
 import type { JsonObject, ModelCostEstimator, ModelRateCard, ModelUsage } from "@sixb/core/models"
-import { tokenEstimator } from "./accounting"
+import { type PricedEstimator, tokenEstimator } from "./accounting"
 import { counter, object } from "./util"
 
 // Interpret Chat counters directly. Cache reads overlap prompt_tokens; reasoning overlaps
@@ -43,7 +43,7 @@ export function foundryChatEstimator(
   modelName?: string,
   modelVersion?: string,
   aliases?: readonly string[]
-): ModelCostEstimator {
+): PricedEstimator {
   const estimator = tokenEstimator(
     card,
     request,
@@ -54,6 +54,7 @@ export function foundryChatEstimator(
     aliases
   )
   return {
+    ...(estimator.rateCard ? { rateCard: estimator.rateCard } : {}),
     estimateReservation: estimator.estimateReservation,
     estimate: (input) =>
       estimator.estimate({

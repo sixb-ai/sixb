@@ -95,6 +95,7 @@ test("characters are counted the way the Gateway bills them", async () => {
     Response.json({ audio: base64(MP3), providerMetadata: { gateway: { cost: "0.000165" } } })
   )
   const model = await provider.speech("openai/tts-1").resolve!()
+  expect(model.rateCard).toEqual({ currency: "USD", characters: "15" })
   // Measured: the Gateway billed this text as 11 characters (UTF-16 units), not 10 or 18.
   const text = "héllo 👋 日本"
 
@@ -119,6 +120,7 @@ test("token-priced speech prices reported tokens but cannot reserve", async () =
     })
   )
   const model = await provider.speech("google/gemini-3.8-flash-lite-tts").resolve!()
+  expect(model.rateCard).toEqual({ currency: "USD", input: "0.5", output: "6", audioOutput: "6" })
 
   expect((await model.speak({ text: "Hello there." })).output.audio.mediaType).toBe("audio/wav")
   expect(model.costEstimator?.estimateReservation?.({ text: "Hello there." })).toBeUndefined()

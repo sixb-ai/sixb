@@ -2,7 +2,7 @@ import type { FileRef } from "../../blob-storage/types"
 import type { ModelDefinition } from "../definitions"
 import type { ModelProviderIds, ModelRoute, ModelUsage } from "../events"
 import type { ModelCallCost, ModelCostEstimator, ModelMoney, ModelReportedCost } from "../pricing"
-import type { ModelPricingDimensions } from "../rate-card"
+import type { ModelPricingDimensions, ModelRateCard } from "../rate-card"
 
 export interface TranscriptionModelDefinition extends ModelDefinition {
   readonly kind: "transcription"
@@ -48,6 +48,11 @@ export interface TranscriptionModel {
   readonly modelId: string
   readonly definition: TranscriptionModelDefinition
   readonly costEstimator?: TranscriptionCostEstimator
+  /**
+   * The prices this binding bills by, for people and agents choosing a model. Pricing itself
+   * goes through costEstimator; absent when the price is unknown.
+   */
+  readonly rateCard?: ModelRateCard
   resolve?(): Promise<TranscriptionModel>
   transcribe(request: TranscriptionModelRequest): Promise<TranscriptionModelResult>
 }
@@ -124,6 +129,11 @@ export interface SpeechModel {
   /** Used when a request names no voice, so switching models never requires one. */
   readonly defaultVoice?: string
   readonly costEstimator?: SpeechCostEstimator
+  /**
+   * The prices this binding bills by, for people and agents choosing a model. Pricing itself
+   * goes through costEstimator; absent when the price is unknown.
+   */
+  readonly rateCard?: ModelRateCard
   resolve?(): Promise<SpeechModel>
   speak(request: SpeechModelRequest): Promise<SpeechModelResult>
 }

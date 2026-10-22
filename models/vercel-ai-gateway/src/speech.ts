@@ -2,6 +2,7 @@ import {
   assertJsonObject,
   isJsonObject,
   type JsonObject,
+  type ModelRateCard,
   type SpeechCostEstimator,
   type SpeechModel,
   type SpeechModelDefinition,
@@ -48,6 +49,7 @@ export interface GatewaySpeechResolution {
   readonly name?: string
   readonly description?: string
   readonly estimator?: SpeechCostEstimator
+  readonly rateCard?: ModelRateCard
 }
 
 interface SpeechTransport {
@@ -118,6 +120,7 @@ export function createGatewaySpeech(
     definition,
     ...(options.voice === undefined ? {} : { defaultVoice: options.voice }),
     ...(resolution?.estimator ? { costEstimator: resolution.estimator } : {}),
+    ...(resolution?.rateCard ? { rateCard: resolution.rateCard } : {}),
     ...(resolution ? {} : { resolve }),
 
     async speak(request: SpeechModelRequest): Promise<SpeechModelResult> {
