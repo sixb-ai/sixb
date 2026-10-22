@@ -126,6 +126,7 @@ describe("AI usage", () => {
         totals,
         series: [{ ...totals, start: "2026-09-14T00:00:00.000Z", end: "2026-09-21T00:00:00.000Z" }],
         models: [],
+        kinds: [],
         agents: [],
         workflows: [],
       })
@@ -173,6 +174,7 @@ describe("AI usage", () => {
         },
         series: [],
         models: [],
+        kinds: [],
         agents: [],
         workflows: [],
       })
@@ -210,6 +212,7 @@ describe("AI usage", () => {
         },
         series: [],
         models: [],
+        kinds: [],
         agents: [],
         workflows: [],
       },

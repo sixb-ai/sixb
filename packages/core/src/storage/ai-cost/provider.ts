@@ -7,6 +7,7 @@ export type {
   NormalizedAiModelCallAccountingQuery,
 } from "./analytics"
 export {
+  aiAccountingModelKind,
   buildAiAccountingOverviewFromFragments,
   normalizeAiAccountingQuery,
   normalizeAiModelCallAccountingQuery,

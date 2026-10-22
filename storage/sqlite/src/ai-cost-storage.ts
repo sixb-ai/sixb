@@ -1,6 +1,7 @@
 import {
   type AiAccountingAggregateFragment,
   type AiAccountingRecordSetItem,
+  aiAccountingModelKind,
   aiModelCallCostDetails,
   aiModelCallCostMatchesUsage,
   buildAiAccountingOverviewFromFragments,
@@ -238,6 +239,7 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
   WITH classified AS (
     SELECT usage.provider_id,
       usage.requested_model_id,
+      usage.model_kind,
       usage.occurred_at,
       usage.input_tokens,
       usage.output_tokens,
@@ -303,6 +305,8 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
     FROM classified
     UNION ALL
     SELECT 'model', provider_id, requested_model_id, NULL, NULL, classified.* FROM classified
+    UNION ALL
+    SELECT 'kind', model_kind, NULL, NULL, NULL, classified.* FROM classified
     UNION ALL
     SELECT 'agent', attribution_agent_kind, attribution_workflow_id, attribution_agent_step_id, NULL, classified.*
     FROM classified WHERE attribution_agent_kind IS NOT NULL
@@ -501,18 +505,20 @@ function aggregateFragmentFromRow(row: AggregateRow): AiAccountingAggregateFragm
   const dimensionKeys =
     row.dimension === "model"
       ? { providerId: required(row.key_1), modelId: required(row.key_2) }
-      : row.dimension === "agent"
-        ? {
-            agentKind: required(row.key_1) as "agent" | "workflowAgent",
-            ...(row.key_1 === "workflowAgent"
-              ? { workflowId: required(row.key_2), agentStepId: required(row.key_3) }
-              : {}),
-          }
-        : row.dimension === "workflow"
-          ? { workflowId: required(row.key_1) }
-          : row.dimension === "series"
-            ? { start: new Date(required(row.bucket_start)) }
-            : {}
+      : row.dimension === "kind"
+        ? withModelKind(aiAccountingModelKind(row.key_1))
+        : row.dimension === "agent"
+          ? {
+              agentKind: required(row.key_1) as "agent" | "workflowAgent",
+              ...(row.key_1 === "workflowAgent"
+                ? { workflowId: required(row.key_2), agentStepId: required(row.key_3) }
+                : {}),
+            }
+          : row.dimension === "workflow"
+            ? { workflowId: required(row.key_1) }
+            : row.dimension === "series"
+              ? { start: new Date(required(row.bucket_start)) }
+              : {}
   return {
     dimension: row.dimension,
     ...dimensionKeys,
@@ -838,4 +844,8 @@ function required<T>(value: T | null | undefined): T {
     throw new Error("[SixbSqlite] AI valuation column is unexpectedly null.")
   }
   return value
+}
+
+function withModelKind(modelKind: AiAccountingAggregateFragment["modelKind"]) {
+  return modelKind === undefined ? {} : { modelKind }
 }

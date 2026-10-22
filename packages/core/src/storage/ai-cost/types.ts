@@ -195,12 +195,18 @@ export interface AiAccountingModelBreakdown extends AiAccountingAggregate {
   readonly modelId: string
 }
 
+export interface AiAccountingKindBreakdown extends AiAccountingAggregate {
+  /** Absent for calls recorded before their kind was captured. */
+  readonly modelKind?: import("../../models/definitions").ModelKind
+}
+
 export interface AiAccountingOverview {
   readonly range: AiAccountingRange
   readonly bucket: AiAccountingBucket
   readonly totals: AiAccountingAggregate
   readonly series: readonly AiAccountingTimeBucket[]
   readonly models: readonly AiAccountingModelBreakdown[]
+  readonly kinds: readonly AiAccountingKindBreakdown[]
   readonly agents: readonly AiAccountingAgentBreakdown[]
   readonly workflows: readonly AiAccountingWorkflowBreakdown[]
 }

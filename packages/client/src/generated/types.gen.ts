@@ -2159,6 +2159,84 @@ export type GetAiAccountingOverviewResponses = {
       providerId: string
       modelId: string
     }>
+    kinds: Array<{
+      modelCallCount: number
+      /**
+       * Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete.
+       */
+      usage: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        /**
+         * Audio content duration in milliseconds; not billed duration.
+         */
+        audioDurationMs?: number
+        /**
+         * Output tokens that encode generated images, within outputTokens.
+         */
+        imageOutputTokens?: number
+        /**
+         * Output tokens that encode generated audio, within outputTokens.
+         */
+        audioOutputTokens?: number
+        /**
+         * Images the call returned.
+         */
+        outputImages?: number
+        /**
+         * Input characters, counted by the provider's own billing rule.
+         */
+        inputCharacters?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      usageCoverage: {
+        /**
+         * Calls reporting both inputTokens and outputTokens.
+         */
+        completeCallCount: number
+        fieldCallCounts: {
+          inputTokens: number
+          outputTokens: number
+          uncachedInputTokens: number
+          cacheReadInputTokens: number
+          cacheWriteInputTokens: number
+          textOutputTokens: number
+          reasoningOutputTokens: number
+          audioDurationMs: number
+          imageOutputTokens: number
+          audioOutputTokens: number
+          outputImages: number
+          inputCharacters: number
+        }
+      }
+      costs: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      /**
+       * Absent for calls recorded before their kind was captured.
+       */
+      modelKind?:
+        | "language"
+        | "image"
+        | "video"
+        | "embedding"
+        | "decision"
+        | "transcription"
+        | "speech"
+        | "reranking"
+    }>
     agents: Array<
       | {
           modelCallCount: number

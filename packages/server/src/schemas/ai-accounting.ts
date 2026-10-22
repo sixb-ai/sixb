@@ -39,6 +39,17 @@ export const AiCostSummarySchema = z.object({
   unvaluedCallCount: z.number().int().nonnegative(),
 })
 
+const ModelKindSchema = z.enum([
+  "language",
+  "image",
+  "video",
+  "embedding",
+  "decision",
+  "transcription",
+  "speech",
+  "reranking",
+])
+
 const AiAccountingAggregateSchema = z.object({
   modelCallCount: z.number().int().nonnegative(),
   usage: AiUsageSummarySchema.describe(
@@ -82,6 +93,13 @@ export const AiAccountingOverviewResponseSchema = z.object({
     AiAccountingAggregateSchema.extend({
       providerId: z.string(),
       modelId: z.string(),
+    })
+  ),
+  kinds: z.array(
+    AiAccountingAggregateSchema.extend({
+      modelKind: ModelKindSchema.optional().describe(
+        "Absent for calls recorded before their kind was captured."
+      ),
     })
   ),
   agents: z.array(
@@ -206,18 +224,7 @@ const AiModelCallUsageRecordSchema = z.object({
   callId: z.string(),
   providerId: z.string(),
   requestedModelId: z.string(),
-  modelKind: z
-    .enum([
-      "language",
-      "image",
-      "video",
-      "embedding",
-      "decision",
-      "transcription",
-      "speech",
-      "reranking",
-    ])
-    .optional(),
+  modelKind: ModelKindSchema.optional(),
   requestedReasoning: ModelReasoningSchema.optional(),
   responseModelId: z.string().optional(),
   responseId: z.string(),
