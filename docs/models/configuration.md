@@ -2,7 +2,8 @@
 
 Configure the AI models available to your project. Language models power conversations and
 generation. Decision models classify inputs, score them against a rubric, and estimate probabilities.
-Embedding models power semantic search. Audio models transcribe stored files. [Browse providers](#providers) for installation and credentials.
+Embedding models power semantic search. Audio models transcribe stored files and turn text into
+speech, and image models generate images. [Browse providers](#providers) for installation and credentials.
 
 ## Language models
 
@@ -282,6 +283,81 @@ The result contains `output.text`, `usage`, `cost`, and `callId`. Audio-only pro
 neither a language model nor a sandbox. Calls use the same [accounting and limits](./usage-and-limits.md#audio-transcription)
 as other models. Authorize access to the owning object in the application before accepting
 a user-supplied file reference; a `FileRef` is an identifier, not an access grant.
+
+## Image generation
+
+Register image models in `models.image`. The first is the default:
+
+```ts
+import { createSixb } from "@sixb/core"
+import { vercelGateway } from "@sixb/vercel-ai-gateway"
+
+export const sixb = createSixb({
+  // ...your existing providers
+  models: {
+    image: [
+      vercelGateway.image("bfl/flux-3-image", { description: "Fast drafts and thumbnails" }),
+      vercelGateway.image("google/gemini-3.1-flash-lite-image", {
+        description: "Edits a reference image",
+      }),
+    ],
+  },
+})
+```
+
+A `description` says when to pick a model; without one, the provider's own description applies.
+
+Generate images in a workflow step or an action's writeback/effects handler:
+
+```ts
+const { files, cost } = await sixb.models.image.generate({
+  prompt: "Isometric warehouse floor plan, muted palette",
+  size: "1024x1024",
+})
+```
+
+`files` are the generated images as `FileRef`s, already saved to the project's blob storage. Store one on an object
+property or show it in a page like any other file.
+
+| Option | Meaning |
+| --- | --- |
+| `n` | How many images to generate. Defaults to 1; some models return one per call. |
+| `size`, `aspectRatio` | Such as `1024x1024` or `16:9`. Accepted values depend on the model. |
+| `quality`, `style` | Model-specific settings, such as `low` or `vector_illustration`. |
+| `seed` | Repeat a result, where the model supports it. |
+| `images` | Reference images, as `FileRef`s with an `image/*` media type, to edit or vary. |
+| `model`, `signal` | Override the default model, or cancel the call. |
+
+Settings a model ignores come back in `warnings`. Each call is priced by the size, quality and
+style it requested and the number of images returned, and uses the same
+[accounting and limits](./usage-and-limits.md#image-and-speech-generation) as other models.
+Authorize access to a reference image in the application before accepting a user-supplied
+`FileRef`.
+
+## Speech generation
+
+Register speech models in `models.audio.speech`, beside any transcribers. The first is the default:
+
+```ts
+export const sixb = createSixb({
+  // ...your existing providers
+  models: {
+    audio: { speech: [vercelGateway.speech("openai/tts-1-hd", { voice: "alloy" })] },
+  },
+})
+```
+
+```ts
+const { file, cost } = await sixb.models.audio.speak({
+  text: "Your order shipped this morning.",
+  mediaType: "audio/mpeg",
+})
+```
+
+`file` is the generated audio as a `FileRef` in the project's blob storage. A request without a `voice` uses the voice
+the binding sets, so you can switch models without changing calls. You can also pass
+`instructions` for style, `speed`, and `language`. Voices and formats depend on the model; Sixb
+never converts formats, so a model that cannot produce the requested `mediaType` fails the call.
 
 ## Embedding models
 
