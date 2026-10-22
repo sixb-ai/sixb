@@ -17,9 +17,9 @@ describe("sixb check", () => {
     const result = await check("valid-project")
 
     expect(result.exitCode).toBe(0)
-    expect(result.output).toContain("Sixb is healthy")
+    expect(result.output).toMatch(/✓ \S+ is healthy/)
     expect(result.output).toContain("Project")
-    expect(result.output).toMatch(/Markings\s+ok/)
+    expect(result.output).toMatch(/✓ Markings/)
     expect(result.output).not.toContain("validation error(s)")
     expect(result.stderr).toBe("")
   })
@@ -38,7 +38,7 @@ describe("sixb check", () => {
     const result = await check("unreachable-storage")
 
     expect(result.exitCode).toBe(1)
-    expect(result.output).toContain("Sixb has issues")
+    expect(result.output).toMatch(/✕ \S+ has issues/)
     expect(result.output).toContain("UnreachableStorage")
   })
 
@@ -47,7 +47,7 @@ describe("sixb check", () => {
     const result = await check("misdeclared-markings-project")
 
     expect(result.exitCode).toBe(1)
-    expect(result.output).toContain("Sixb has issues")
+    expect(result.output).toMatch(/✕ \S+ has issues/)
     expect(result.output).toContain("Markings")
     expect(result.output.replace(/[\s│]+/g, " ")).toContain(
       "property 'Invoice.title' is projected from column 'invoices.title', which carries [financial] from 'raw_invoices.amount' through step 'invoices/normalize-invoices'."

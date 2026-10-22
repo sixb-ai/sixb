@@ -51,7 +51,7 @@ describe("sixb db", () => {
 
     expect(result.error).toBeUndefined()
     expect(result.output).toContain("Database migrations complete")
-    expect(result.output.replace(/\s+/g, " ")).toContain("Storage migrated")
+    expect(result.output.replace(/\s+/g, " ")).toContain("storage migrated")
     expect(result.logEntries).toEqual(migratedThenPrepared)
   })
 

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { scaffoldProject } from "../src/scaffold"
@@ -44,10 +44,9 @@ beforeAll(async () => {
   await extractPackage(cliTarball, join(nodeModulesDir, "@sixb", "cli"))
   await extractPackage(cliCoreTarball, join(nodeModulesDir, "@sixb", "cli-core"))
 
-  // Link the packed CLI's eager third-party dependencies while keeping every Sixb package
-  // isolated from workspace symlinks.
-  await linkInstalledDependency("ink", nodeModulesDir)
-  await linkInstalledDependency("react", nodeModulesDir)
+  // Nothing else is linked: every Sixb package stays isolated from workspace symlinks, and the
+  // commands run here print plain screens, which load no third-party package. The live screens'
+  // renderer loads only in a terminal.
 
   createEntry = join(nodeModulesDir, "create-sixb", "dist", "index.js")
   cliEntry = join(nodeModulesDir, "@sixb", "cli", "src", "index.tsx")
@@ -96,9 +95,11 @@ describe("create-sixb packed artifacts", () => {
       const result = await runPacked([createEntry, "starter"], cwd)
 
       expect(result.exitCode).toBe(0)
-      expect(result.stdout).toContain("sixb\n\nSuccess! Created starter")
+      expect(result.stdout).toContain("✓ Created starter")
       expect(result.stdout).toContain(join(cwd, "starter"))
-      expect(result.stdout).toContain("Next steps\n  cd starter\n  bun install\n  bun run dev")
+      expect(result.stdout).toContain(
+        "Next steps\n  $ cd starter\n  $ bun install\n  $ bun run dev"
+      )
       expect(result.stdout).not.toContain("\u001b[")
       expect(result.stderr).toBe("")
       await assertScaffold(join(cwd, "starter"), "starter")
@@ -115,8 +116,10 @@ describe("create-sixb packed artifacts", () => {
       expect(result.exitCode).toBe(0)
       expect(result.stdout).toContain("Sixb initialized")
       expect(result.stdout).toContain("starter-cli")
-      expect(result.stdout).toContain("Next steps\n  cd starter-cli\n  bun install\n  bun run dev")
-      expect(result.stdout).toContain("Files")
+      expect(result.stdout).toContain(
+        "Next steps\n  $ cd starter-cli\n  $ bun install\n  $ bun run dev"
+      )
+      expect(result.stdout).toMatch(/starter-cli · \d+ files/)
       expect(result.stderr).toBe("")
       await assertScaffold(join(cwd, "starter-cli"), "starter-cli")
     },
@@ -137,8 +140,8 @@ describe("create-sixb packed artifacts", () => {
       expect(nestedResult.stdout).toContain("cd 'projects with spaces/starter'")
 
       expect(currentResult.exitCode).toBe(0)
-      expect(currentResult.stdout).not.toContain("\n  cd ")
-      expect(currentResult.stdout).toContain("Next steps\n  bun install\n  bun run dev")
+      expect(currentResult.stdout).not.toContain("$ cd ")
+      expect(currentResult.stdout).toContain("Next steps\n  $ bun install\n  $ bun run dev")
     },
     COMMAND_TEST_TIMEOUT_MS
   )
@@ -221,11 +224,6 @@ async function extractPackage(tarball: string, destination: string): Promise<voi
   if (exitCode !== 0) {
     throw new Error(`Failed to extract ${tarball}:\n${stderr}`)
   }
-}
-
-async function linkInstalledDependency(name: string, nodeModulesDir: string): Promise<void> {
-  const installed = await realpath(join(cliPackageDir, "node_modules", name))
-  await symlink(installed, join(nodeModulesDir, name))
 }
 
 async function createRunDirectory(name: string): Promise<string> {

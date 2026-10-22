@@ -87,6 +87,9 @@ async function main(): Promise<void> {
     return
   }
 
+  // Plain strings, no renderer: cheap enough to load for every command.
+  const { setCommandPath } = await import("./ui/layout")
+  setCommandPath(parsed.path)
   const { options, positionals } = parsed
   const getFlag = (name: CliOptionName) => stringOption(options, name)
   const getFlags = (name: CliOptionName) => repeatedOption(options, name)
@@ -405,9 +408,11 @@ main().catch(async (error) => {
   if (wantsManagementJson(args)) {
     process.stderr.write(`${JSON.stringify({ error: cliErrorBody(error) })}\n`)
   } else {
-    // Loaded on demand, and never through JSX here: see `renderHelp` in `./ui`.
+    // Loaded on demand: a command that succeeds never needs it.
     const { renderCliError, renderHelp } = await import("./ui")
     if (error instanceof CliUsageError) await renderHelp(error.help, error.message)
+    // Backing out of a prompt is an answer, not a failure to explain.
+    else if (error instanceof Error && error.name === "PromptCancelledError") process.exit(130)
     else await renderCliError(error)
   }
   process.exit(exitCode)

@@ -10,9 +10,8 @@ export async function stopQuietly(stopFn: (() => Promise<void>) | undefined | nu
 
 export async function runUntilSignal(onShutdown: () => Promise<void>): Promise<void> {
   // Test-only readiness hook: e2e tests detect that a long-running role finished
-  // starting by watching for this marker. It avoids depending on Ink's rendered
-  // output, which is suppressed when stdout is not a TTY (e.g. under CI). Unset in
-  // production, so this is a no-op there.
+  // starting by watching for this marker, rather than on the wording of what the
+  // role prints. Unset in production, so this is a no-op there.
   const readyLog = process.env.SIXB_CLI_TEST_READY_LOG
   if (readyLog) {
     appendFileSync(readyLog, `${JSON.stringify({ type: "role:ready" })}\n`, "utf-8")
