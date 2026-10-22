@@ -186,7 +186,7 @@ export async function materializeThreadArtifacts(input: {
   const { artifacts } = await input.storage.list({
     projectId: input.projectId,
     owner: input.owner,
-    originThreadId: input.threadId,
+    threadId: input.threadId,
     limit: MATERIALIZE_MAX_ARTIFACTS,
   })
   let installedBytes = 0

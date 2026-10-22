@@ -31,6 +31,7 @@ import type {
   PublishArtifactVersionInput,
   PublishedArtifactVersion,
   SetArtifactStateInput,
+  ShareArtifactInThreadInput,
 } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
@@ -147,15 +148,15 @@ export class PgArtifactStorage implements ArtifactStorage {
       where.push(`a.owner_principal_id = $${params.length + 1}`)
       params.push(input.owner.id)
     }
-    if (input.originThreadId !== undefined) {
+    if (input.threadId !== undefined) {
       where.push(
         `EXISTS (
-          SELECT 1 FROM artifact_versions v
-          WHERE v.project_id = a.project_id AND v.artifact_id = a.id
-            AND v.origin_thread_id = $${params.length + 1}
+          SELECT 1 FROM artifact_threads t
+          WHERE t.project_id = a.project_id AND t.artifact_id = a.id
+            AND t.thread_id = $${params.length + 1}
         )`
       )
-      params.push(input.originThreadId)
+      params.push(input.threadId)
     }
     if (input.kind !== undefined) {
       where.push(`a.kind = $${params.length + 1}`)
@@ -184,6 +185,26 @@ export class PgArtifactStorage implements ArtifactStorage {
         AND version = ${input.version}
     `
     return row ? parseArtifactVersionRow(row) : null
+  }
+
+  async listThreadIds(input: GetArtifactInput): Promise<string[]> {
+    const rows = await this.sql<{ thread_id: string }[]>`
+      SELECT thread_id FROM artifact_threads
+      WHERE project_id = ${input.projectId} AND artifact_id = ${input.id}
+      ORDER BY thread_id COLLATE "C"
+    `
+    return rows.map((row) => row.thread_id)
+  }
+
+  async shareInThread(input: ShareArtifactInThreadInput): Promise<void> {
+    await runPgTransaction(this.sql, async (tx) => {
+      const [artifact] = await tx<PgRow[]>`
+        SELECT id FROM artifacts WHERE project_id = ${input.projectId} AND id = ${input.artifactId}
+      `
+      if (!artifact) throw artifactStorageErrors.notFound(input.artifactId)
+
+      await linkThread(tx, input.projectId, input.artifactId, input.threadId, input.sharedAt)
+    })
   }
 
   async listVersions(input: ListArtifactVersionsInput): Promise<ListArtifactVersionsResult> {
@@ -433,5 +454,23 @@ async function insertVersion(
     )
     RETURNING ${sql.unsafe(VERSION_COLUMNS)}
   `
+  if (input.origin) {
+    await linkThread(sql, projectId, artifactId, input.origin.threadId, input.createdAt)
+  }
   return parseArtifactVersionRow(row)
+}
+
+/** Shares an artifact in a thread, keeping when it was first shared there. */
+async function linkThread(
+  sql: SQLClient,
+  projectId: string,
+  artifactId: string,
+  threadId: string,
+  sharedAt: Date = new Date()
+): Promise<void> {
+  await sql`
+    INSERT INTO artifact_threads (project_id, artifact_id, thread_id, shared_at)
+    VALUES (${projectId}, ${artifactId}, ${threadId}, ${sharedAt})
+    ON CONFLICT (project_id, artifact_id, thread_id) DO NOTHING
+  `
 }

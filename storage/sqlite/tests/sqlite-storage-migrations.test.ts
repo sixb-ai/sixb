@@ -193,6 +193,7 @@ const shippedMigrationIds = [
   "072-generated-media-usage",
   "073-model-call-files",
   "074-agent-memory",
+  "075-artifact-threads",
 ]
 
 afterEach(async () => {
@@ -2660,6 +2661,64 @@ describe("SQLite storage migrations", () => {
           )
           .get()
       ).toEqual({ node_run_id: "node-1", status: "succeeded", prompt: "Resolve it" })
+    } finally {
+      db.close()
+    }
+  })
+
+  test("shares each existing artifact in the threads its versions came from", () => {
+    // Removal proof: drop the INSERT from migration 075; the artifact is then shared nowhere.
+    const db = replayedDatabase("075-artifact-threads")
+    try {
+      db.run(`
+        INSERT INTO artifacts (
+          project_id, id, kind, title, owner_principal_type, owner_principal_id,
+          latest_version, next_version, created_at, updated_at
+        ) VALUES (
+          'project-a', 'art_0000000001', 'document', 'Report', 'user', 'usr-1', 3, 4,
+          '2026-07-01T12:00:00.000Z', '2026-07-01T12:02:00.000Z'
+        )
+      `)
+      db.run(`
+        INSERT INTO artifact_versions (
+          project_id, artifact_id, version, title, entry, files, outline, refs,
+          author_principal_type, author_principal_id, origin_thread_id, origin_run_id, created_at
+        ) VALUES (
+          'project-a', 'art_0000000001', 1, 'Report', 'document.md', '[]',
+          '{"kind":"document","headings":[]}', '[]', 'user', 'usr-1', 'thread-1', 'run-1', '2026-07-01T12:00:00.000Z'
+        )
+      `)
+      db.run(`
+        INSERT INTO artifact_versions (
+          project_id, artifact_id, version, title, entry, files, outline, refs,
+          author_principal_type, author_principal_id, origin_thread_id, origin_run_id, created_at
+        ) VALUES (
+          'project-a', 'art_0000000001', 2, 'Report', 'document.md', '[]',
+          '{"kind":"document","headings":[]}', '[]', 'user', 'usr-1', 'thread-1', 'run-2', '2026-07-01T12:01:00.000Z'
+        )
+      `)
+      db.run(`
+        INSERT INTO artifact_versions (
+          project_id, artifact_id, version, title, entry, files, outline, refs,
+          author_principal_type, author_principal_id, origin_thread_id, origin_run_id, created_at
+        ) VALUES (
+          'project-a', 'art_0000000001', 3, 'Report', 'document.md', '[]',
+          '{"kind":"document","headings":[]}', '[]', 'user', 'usr-1', NULL, NULL, '2026-07-01T12:02:00.000Z'
+        )
+      `)
+
+      const applied = migration("075-artifact-threads").up(db)
+      if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
+
+      expect(
+        db.query("SELECT artifact_id, thread_id, shared_at FROM artifact_threads").all()
+      ).toEqual([
+        {
+          artifact_id: "art_0000000001",
+          thread_id: "thread-1",
+          shared_at: "2026-07-01T12:00:00.000Z",
+        },
+      ])
     } finally {
       db.close()
     }
